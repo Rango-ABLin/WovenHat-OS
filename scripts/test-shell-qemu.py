@@ -20,6 +20,31 @@ def build_woven_shell(root):
     subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
     return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
 
+def normal_boot_serial_errors(log: str, system_apps: bool) -> list[str]:
+    """Reject fatal evidence even when all positive boot markers appeared."""
+    errors = []
+    normalized = log.lower()
+    for marker in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
+        if marker in normalized:
+            errors.append(f'Guest serial contains fatal evidence: {marker}')
+    for line in log.splitlines():
+        if line.startswith(('[BOOT]', '[SESSION]', '[APPS]', '[SMP]')) and ('FAILED' in line or ' FAIL' in line):
+            errors.append(f'Contradictory normal boot failure marker: {line}')
+    expected = ('[BOOT] desktop-first runtime ready' if system_apps
+                else '[BOOT] shell-first runtime ready')
+    if expected not in log:
+        errors.append(f'Missing normal boot marker: {expected}')
+    if system_apps:
+        for marker in ('[APPS] 10 signed applications installed',
+                       '[SESSION] WovenShell desktop started',
+                       '[SESSION] diagnostic console'):
+            if marker not in log:
+                errors.append(f'Missing system-apps marker: {marker}')
+    if '[SMP] acknowledged TLB shootdowns: PASSED' not in log:
+        errors.append('Missing keyboard-driven SMP shell acceptance marker')
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
@@ -96,8 +121,12 @@ def main():
     image = subprocess.check_output(
         cargo_command + ['run', '--quiet', '--release'] + feature_arguments + target_arguments + ['--', '--print-image'],
         cwd=root, env=build_env, text=True).strip()
-    out = root / 'target' / f'shell-regression-{args.cpus}cpu'
-    out.mkdir(parents=True, exist_ok=True)
+    # Keep evidence for each CPU/boot mode distinct; a later run must not
+    # silently overwrite the previous run's serial or QEMU logs.
+    out = root / 'target' / 'shell-regression' / (
+        f'{"system-apps" if args.system_apps else "diagnostic"}-{args.cpus}cpu-{time.time_ns()}'
+    )
+    out.mkdir(parents=True, exist_ok=False)
     serial = out / 'serial.log'
     serial.write_text('')
     vars_copy = None
@@ -119,7 +148,9 @@ def main():
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
             deadline = time.monotonic() + 180
-            while '[BOOT] shell-first runtime ready' not in serial.read_text(errors='replace'):
+            expected_boot = ('[BOOT] desktop-first runtime ready' if args.system_apps
+                             else '[BOOT] shell-first runtime ready')
+            while expected_boot not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Normal boot failed; inspect shell-regression logs')
                 time.sleep(0.1)
@@ -175,6 +206,14 @@ def main():
                             if process.poll() is not None or time.monotonic() > deadline:
                                 raise RuntimeError('The demo account did not sign in; inspect shell-regression logs')
                             time.sleep(0.1)
+                    time.sleep(2)
+                    # Retain the framebuffer *before* switching to diagnostics.
+                    # A serial startup marker alone cannot prove that a desktop
+                    # frame is visible; reviewers must inspect this image.
+                    screenshot = out / 'desktop-before-f12.ppm'
+                    execute('screendump', {'filename': str(screenshot)})
+                    if not screenshot.is_file() or screenshot.stat().st_size == 0:
+                        raise RuntimeError('No pre-diagnostic display screenshot was captured')
                     execute('send-key', {'keys': [{'type': 'qcode', 'data': 'f12'}], 'hold-time': 40})
                     deadline = time.monotonic() + 30
                     while '[SESSION] diagnostic console' not in serial.read_text(errors='replace'):
@@ -189,6 +228,12 @@ def main():
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Keyboard/SMP shell command failed; inspect shell-regression logs')
                     time.sleep(0.1)
+                # Check the complete serial trace, not just the positive marker
+                # that ended the polling loop. A panic after boot is a failure.
+                evidence = serial.read_text(errors='replace')
+                failures = normal_boot_serial_errors(evidence, args.system_apps)
+                if failures:
+                    raise RuntimeError('; '.join(failures))
                 execute('quit')
             process.wait(timeout=5)
         finally:

@@ -110,6 +110,9 @@ jobs:
           path: |
             target/release-validation/
             audit-artifacts/
+            target/shell-regression/**/desktop-before-f12.ppm
+            target/shell-regression/**/serial.log
+            target/shell-regression/**/qemu.log
             target/*regression-*/serial.log
             target/*regression-*/qemu.log
             target/hello-gui-*/serial.log
@@ -373,7 +376,7 @@ jobs:
             for mode in poweroff reboot; do
               python3 scripts/test-stage13-20-power.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
             done
-            python3 scripts/test-stage20-15-session.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-stage20-15-session.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
