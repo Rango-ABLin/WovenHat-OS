@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 28 immutable installer-plan validator - 2026-10-22
+
+Added `scripts/validate-installer-plan.py` as a dry-run, file-free planning
+boundary. It accepts an explicit target path/serial identity, a supplied disk
+inventory snapshot, bounded sector-aligned partition sizes, filesystem choice,
+and normalized user/timezone/keyboard/network settings. It rejects protected
+or ambiguous targets, overflow, insufficient capacity, and invalid fields,
+then emits deterministic canonical JSON with explicit no-I/O and
+not-implemented operation markers.
+
+The validator and its focused tests never open a device, invoke discovery,
+partition, format, install, or write a bootloader. This slice does not claim
+installation support or Stage 28 acceptance.
+
 ## Stage 28 read-only target-disk inventory and safety classification - 2026-10-22
 
 Added `scripts/inventory-target-disks.py` with fixture-driven parsing for

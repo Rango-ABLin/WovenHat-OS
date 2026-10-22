@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 immutable installer-plan validator (2026-10-22)
+
+Added the disjoint `scripts/validate-installer-plan.py` and
+`tests/test_installer_plan_validator.py`. The validator consumes an explicit
+target identity, caller-supplied inventory, bounded partition requests, and
+user/timezone/keyboard/network settings; it fails closed for protected or
+ambiguous targets and emits deterministic canonical JSON. It performs no
+device or host command I/O and does not claim installation. Existing package,
+ISO-probe, and disk-inventory files were not modified. The focused 16-test
+Stage 28 chain, Python compilation, and diff checks pass.
+
 ## Codex - Stage 28 read-only target-disk inventory slice (2026-10-22)
 
 Added the disjoint `scripts/inventory-target-disks.py` parser/classifier and

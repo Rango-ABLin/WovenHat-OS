@@ -1,5 +1,19 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - immutable installer-plan validator
+
+`scripts/validate-installer-plan.py` consumes only caller-supplied JSON. The
+target must match exactly one inventory record by path and serial; system,
+boot, removable, read-only, backup, external, and USB-labelled targets are
+protected. Partition requests are bounded, sector-aligned, counted, and kept
+below the target capacity with a fixed one-MiB reservation.
+
+The validator normalizes a small explicit filesystem, user, timezone,
+keyboard, and DHCP/static-network schema and renders sorted-key canonical JSON.
+Its operation markers explicitly state that disk I/O, formatting,
+partitioning, and installation are not requested or implemented. No device
+path is opened and no host command is called.
+
 ### Stage 28 - read-only target-disk inventory and safety classification
 
 `scripts/inventory-target-disks.py` is a pure parser/classifier for supplied
