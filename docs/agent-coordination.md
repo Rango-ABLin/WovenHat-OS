@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 supported-suite matrix execution (2026-10-22)
+
+The five bounded suites in the planner all passed on 1/2/4 CPUs: memory,
+storage, network (including host UDP/TCP), security, and shell (15 runs,
+exit 33). Evidence remains in the per-suite target/audit directories. This
+does not close Stage 31: fault injection, low-resource and restart scenarios,
+repeated boots, and 8/16-CPU coverage remain explicit prerequisites.
+
 ## Codex - Stage 31 memory/storage execution (2026-10-22)
 
 The bounded torture plan's memory and storage suites passed on 1/2/4 CPUs

@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 31 supported-suite matrix execution - 2026-10-22
+
+Completed the bounded planner's five existing suites on 1/2/4 CPUs: memory,
+storage, network, security, and shell. All fifteen runs passed with exit 33.
+Fresh evidence is retained in the memory/storage/network/shell target
+directories and the `audit-artifacts/woven-security-{1,2,4}cpu` directories.
+This is a supported-suite regression matrix, not full Stage 31 acceptance:
+randomized failure injection, low-memory/disk-full/network-loss scenarios,
+driver/service restart, sudden-shutdown recovery, repeated-boot counts, and
+8/16-CPU execution remain open.
+
 ## Stage 31 memory and storage suite execution - 2026-10-22
 
 Executed the torture-plan memory and storage suites on 1/2/4 CPUs. All six
