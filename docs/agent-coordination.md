@@ -4743,6 +4743,13 @@ same repeated runner now invokes the signed Stage 27.5 `woven-update
 service teardown evidence, not automatic crash restart, driver restart,
 sudden-shutdown recovery, or native qualification.
 
+**Codex physical readiness preflight (Codex, 2026-10-22):** The read-only
+`test-physical-tpm-readiness.ps1` run found no visible/ready physical TPM, no
+QEMU TPM backend, no signed provisioning record, and no USB target. It opened
+no raw disk and changed no disk, media, or TPM state. Native hardware and USB
+qualification remain unqualified; details are in
+`docs/audit-physical-readiness-2026-10-22.md`.
+
 **Extended 3D mode to every floating panel + lock screen; found a Stage
 24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
 Launcher panel, Notification Center, toast, and lock screen now tilt in 3D

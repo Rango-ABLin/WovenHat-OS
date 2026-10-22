@@ -26,6 +26,15 @@ rejection, and orderly teardown across the supported service SMP profiles. It
 does not prove automatic restart after a crash, driver restart, sudden power
 loss, or native hardware behavior.
 
+## Physical readiness preflight - 2026-10-22
+
+The read-only physical TPM/USB preflight completed without opening or changing
+any device. No physical TPM or ready TPM state was visible, no QEMU TPM backend
+was installed, no signed provisioning record was present, and no USB target was
+available. Native TPM, USB installation, and hardware qualification therefore
+remain unqualified; the detailed safety report is
+`docs/audit-physical-readiness-2026-10-22.md`.
+
 ## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
 
 Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification
