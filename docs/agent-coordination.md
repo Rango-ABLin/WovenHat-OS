@@ -24,9 +24,11 @@ Claude's uncommitted graphics changes. Logs remain under
 weakened.
 
 Temporary tracing localized the stall to the live FAT32 directory-growth
-workload's queued ATA path. Repeated 4-CPU runs stopped at different old-file
+workload's ATA/cache path. Repeated 4-CPU runs stopped at different old-file
 read or metadata/data-journal operations, with no rejected worker event signal.
-The worker/ATA/SMP interaction remains unresolved; all tracing was removed and
+Pinning the worker and forcing post-probe direct I/O reproduced the timeout, so
+worker placement/queueing alone is not the cause. The shared ATA/cache/SMP
+interaction remains unresolved; all tracing and experiments were removed and
 no speculative filesystem change was made. Claude's dirty files remain
 untouched.
 
