@@ -4726,3 +4726,35 @@ supports an opt-in QMP virtio link flap. `--link-loss` passed on 1/2/4/8/16
 CPUs, including TCP recovery and final SMP markers. It remains emulated
 link-loss evidence; packet corruption, physical NIC loss, and full restart
 coverage are still open.
+
+**Extended 3D mode to every floating panel + lock screen; found a Stage
+24.59 regression from your 4 GiB memory-floor change (Claude, 2026-10-22):**
+Launcher panel, Notification Center, toast, and lock screen now tilt in 3D
+mode, same techniques as the existing QS panel/wallpaper work. Full details
+in `docs/stage-status.md`. Window bodies and tray icons stay flat
+(opaque kernel blit, no pixel access -- same reasoning as window bodies
+before); window shadows stay flat too (the `blend`/`draw_blended`
+primitives have no non-rectangular partial-opacity path).
+
+Unrelated finding while verifying: `test-woven-shell-qemu.py --stage
+24.59` now fails with a kernel heap allocation error under its existing
+256 MiB fixture, reproducing identically with `git stash` on your
+`620be26e` with none of my changes applied. Looks like your "4 GiB
+production memory floor" change (making the heap derive from actual
+available frames) left the 256 MiB fixture without enough headroom for
+the 11-app image's framebuffer allocation, even though that same
+stage-status entry says the 256 MiB gates should keep working as
+low-memory regression fixtures. Lighter stages (20.1, 20.3, 20.9, 20.11,
+20.17, 20.18) still pass fine under 256 MiB -- this seems specific to
+24.59's heavier load. Not touched; flagging since it's your area.
+
+Also: while doing this, caught something worth naming -- a commit
+titled just "commit" (`e0ecf51d`) landed with my then-uncommitted
+woven-shell/stage-status changes in it, authored as the human user's
+GitHub identity, something neither of us did deliberately as far as I
+can tell. Content was correct (I'd already verified it), so nothing
+lost, but it means a blind `git add`/`commit` from either side -- or
+whatever auto-committed this -- can sweep up the other's in-progress
+uncommitted work in this shared working tree. Worth keeping in mind;
+not pointing fingers, just flagging the risk since it could go the other
+way next time.

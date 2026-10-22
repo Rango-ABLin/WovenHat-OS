@@ -1,5 +1,53 @@
 # Stage status
 
+## WovenShell desktop: 3D mode extended to every floating panel and the lock screen - 2026-10-22
+
+Continuing the wallpaper/taskbar 3D work: the launcher panel, Notification
+Center, toast, and lock screen now perspective-project in 3D mode, using the
+same techniques already proven for the Quick Settings panel/title bars
+(bounded panels: render once into an offscreen texture, then
+`textured_triangle_3d`) and the wallpaper (full-screen: sample procedurally
+via `procedural_triangle_3d`, no texture needed). `render_desktop_background`
+was generalized into `render_floor_3d(canvas, color)`, shared by the desktop
+wallpaper and the lock screen's dimmed wallpaper -- the two full-screen
+backgrounds, differing only in their per-pixel formula.
+
+Two surfaces are deliberately left flat, for the same reason noted when
+window bodies were scoped out: window bodies and tray icons are composited
+via `compositor_blit_region_shared`, an opaque kernel syscall blitting a
+client's shared-memory surface directly into the framebuffer. The shell
+never sees those pixels, so texturing them in 3D would need a new kernel
+syscall doing the projection/sampling in kernel space -- out of scope for
+this userspace-only pass, by explicit user decision. Window title bars
+already tilt (pre-existing, Stage 20.18); their shadows stay flat too, since
+the existing `blend`/`draw_blended` presentation primitives apply one
+uniform opacity to a whole rectangle and have no non-rectangular/partial-
+coverage blending path -- tilting a translucent, non-rectangular shadow
+would need new presentation-layer plumbing, not just a new triangle
+rasterizer.
+
+Verified: `lint-all-features.py --only stage20` reports every feature
+clean under warning-denying Clippy; QEMU self-tests pass for Stage 20.1,
+20.3, 20.9, 20.11, 20.17, and 20.18. The launcher panel, Notification
+Center, and toast have no dedicated 3D self-test yet (only Stage 20.17/18
+toggle 3D in an automated harness); they were checked interactively instead.
+3D mode itself remains off by default pending the separate, larger effort
+to flip that default (needs re-deriving the ~16 duplicated pixel-exact
+desktop self-tests for a 3D-default initial state, tracked separately).
+
+Also noticed, unrelated to this work: the Stage 24.59 Change-PIN QEMU gate
+(`test-woven-shell-qemu.py --stage 24.59`) now fails with
+`KERNEL ALLOC ERROR: layout size=4096000 align=4` after only
+`[HEAP] mapped=2473984 bytes`, under the harness's existing 256 MiB `-m`
+fixture. Confirmed via `git stash` that this reproduces identically without
+any of this session's changes, on `620be26e` ("Accept Stage 31 SMP
+scalability matrix") -- i.e. after the new 4 GiB production-memory-floor
+change made the heap derive from actual available frames rather than a
+fixed assumption. That stage-status entry says "the existing 256 MiB QEMU
+gates remain low-memory regression fixtures," but this one no longer fits
+in 256 MiB once the heap sizing changed, at least for the heavier 11-app
+24.59 image. Flagged in `docs/agent-coordination.md`; not touched here.
+
 ## 16-CPU SMP and bounded-capacity expansion - 2026-10-22
 
 Raised the static SMP control-plane limit from 4 to 16 CPUs and expanded the
