@@ -18,13 +18,27 @@ evidence isolation, fail-closed boot/WovenFS evidence tests). Merging it into
 - `scripts/test-shell-qemu.py`: master's unique per-run evidence directory
   and pre-F12 screenshot, after phase2's hardware-demo sign-in.
 
-**Open blocker, not caused by this merge:** `desktop-userspace` CI fails at
-`[S20.1] install into the filesystem FAIL`. The WovenShell image is 81,752
-bytes, over the 64 KiB `VFS_NODE_CAPACITY` (also the exec image limit). It
-was 65,368 bytes before `d946a28` (Stage 26.5 i18n, 73,560) and grew with
-Stages 20.17/20.18. Fixing it means either raising the per-file limit (it
-sizes on-disk journal regions in `storage.rs`) or shrinking the shell; that
-choice is pending with the user.
+**Stage 20.1 regression fixed in the same PR (user chose 128 KiB):**
+`desktop-userspace` failed at `[S20.1] install into the filesystem FAIL`
+because the WovenShell image is 81,752 bytes, over the 64 KiB
+`VFS_NODE_CAPACITY` (also the exec image limit). It was 65,368 bytes before
+`d946a28` (Stage 26.5 i18n, 73,560) and grew with Stages 20.17/20.18.
+
+- `VFS_NODE_CAPACITY` is now 128 KiB.
+- The four NODE_CAPACITY buffers that were kernel-stack locals
+  (`vfs::materialize_disk_node`, two journal-recovery paths and batch
+  persistence in `storage.rs`) are heap-allocated, like their neighbours.
+- Runtime node resets use in-place `Node::reset`/`reset_directory` instead
+  of building a NODE_CAPACITY temporary.
+- The three self-test scratch registries use unranked zero-initialized
+  `spin::Mutex` statics, so they live in `.bss` instead of `.data`.
+- Net effect on the debug `stage20-1-test` kernel: the ELF shrinks from
+  49.6 MB to 41.0 MB (well under the 64 MiB boot-measurement bound), but
+  `.data` + `.bss` grows from about 27.9 MB to 44.7 MB of RAM.
+- On-disk journals: WDJ1/WDJ2 readers accept records up to the new bound,
+  so existing smaller records still recover. A record written with a file
+  over 64 KiB cannot be recovered by an older kernel.
+- **Agents:** keep any new NODE_CAPACITY buffer on the heap.
 
 ## Codex - WovenUpdate service-process slice (2026-10-21)
 

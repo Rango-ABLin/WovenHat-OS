@@ -95,6 +95,34 @@ impl Node {
         node
     }
 
+    /// Clear a slot in place. `*node = Node::empty()` would build a full
+    /// NODE_CAPACITY temporary on the kernel stack in unoptimized builds.
+    fn reset(&mut self) {
+        self.path.fill(0);
+        self.path_length = 0;
+        self.data.fill(0);
+        self.backing = None;
+        self.length = 0;
+        self.writable = false;
+        self.uid = 0;
+        self.gid = 0;
+        self.mode = 0;
+        self.kind = NodeKind::File;
+        self.occupied = false;
+    }
+
+    /// In-place equivalent of `Node::directory`, for the same reason as
+    /// `reset`.
+    fn reset_directory(&mut self, path: &[u8]) {
+        self.reset();
+        self.path[..path.len()].copy_from_slice(path);
+        self.path_length = path.len();
+        self.kind = NodeKind::Directory;
+        self.writable = true;
+        self.mode = 0o755;
+        self.occupied = true;
+    }
+
     fn matches(&self, path: &str) -> bool {
         self.occupied && &self.path[..self.path_length] == path.as_bytes()
     }
@@ -236,10 +264,7 @@ impl Registry {
             .position(|node| !node.occupied)
             .ok_or(Error::Full)?;
         let node = &mut self.nodes[index];
-        *node = Node::directory(path.as_bytes());
-        // directory() copies from a slice; path may be longer than what const fn saw.
-        node.path[..path.len()].copy_from_slice(path.as_bytes());
-        node.path_length = path.len();
+        node.reset_directory(path.as_bytes());
         let credentials =
             crate::task::current_credentials_if_running().unwrap_or(crate::task::Credentials::ROOT);
         node.uid = credentials.uid;
@@ -991,7 +1016,7 @@ fn materialize_disk_node(index: usize, generation: u64) -> Result<(), Error> {
     // Preserve the old disk image for unlink/write without holding VFS locks
     // through ATA I/O. A conflicting rename or write retries from a fresh
     // snapshot; a reused node slot is rejected by its generation.
-    let mut bytes = [0u8; NODE_CAPACITY];
+    let mut bytes = alloc::vec![0u8; NODE_CAPACITY];
     for _ in 0..8 {
         let (backing, length, version) = {
             let registry = REGISTRY.lock();
@@ -1504,7 +1529,7 @@ pub fn unpublish_children(prefix: &str) -> Result<usize, Error> {
         registry.generations[index] = registry.generations[index]
             .checked_add(1)
             .ok_or(Error::Full)?;
-        registry.nodes[index] = Node::empty();
+        registry.nodes[index].reset();
         registry.versions[index] = registry.versions[index].wrapping_add(1);
         removed += 1;
     }
@@ -1522,14 +1547,20 @@ pub fn open_file_description_count() -> usize {
 pub fn self_test() -> bool {
     // The registry exceeds the 1 MiB boot stack. Reserve scratch storage
     // statically and reset one node at a time so repeated self-tests are safe.
-    static SCRATCH: Mutex<Registry> = Mutex::with_rank(Registry::empty(), 10);
+    // Self-test scratch registries are all-zero, so an unranked spin lock
+    // keeps them in .bss. A ranked IrqMutex stores its nonzero rank inline,
+    // which would place MAX_NODES * NODE_CAPACITY bytes in the kernel ELF's
+    // .data (and in the boot-measured image) for each scratch copy. These
+    // locks are private to boot-time self-tests; they are only ever taken
+    // before (outside) REGISTRY, never under it, so they add no lock cycle.
+    static SCRATCH: spin::Mutex<Registry> = spin::Mutex::new(Registry::empty());
     let mut scratch = SCRATCH.lock();
     for node in &mut scratch.nodes {
-        *node = Node::empty();
+        node.reset();
     }
     // Parent directories required before inserting files.
     let root_ok = scratch.mkdir("/").is_err(); // root cannot be created via mkdir on empty
-    scratch.nodes[0] = Node::directory(b"/");
+    scratch.nodes[0].reset_directory(b"/");
     let mnt_ok = scratch.mkdir("/mnt") == Ok(1);
     let inserted = scratch.insert("/mnt/test.txt", b"mounted", false).is_ok();
     let duplicate = scratch.insert("/mnt/test.txt", b"again", false) == Err(Error::AlreadyExists);
@@ -1684,12 +1715,12 @@ pub fn self_test() -> bool {
 }
 
 fn backing_rename_semantics_self_test() -> bool {
-    static SCRATCH: Mutex<Registry> = Mutex::with_rank(Registry::empty(), 10);
+    static SCRATCH: spin::Mutex<Registry> = spin::Mutex::new(Registry::empty());
     let mut fs = SCRATCH.lock();
     for node in &mut fs.nodes {
-        *node = Node::empty();
+        node.reset();
     }
-    fs.nodes[0] = Node::directory(b"/");
+    fs.nodes[0].reset_directory(b"/");
     if fs.mkdir("/mnt").is_err()
         || fs.mkdir("/mnt/docs").is_err()
         || fs.insert("/mnt/docs/a.txt", &[], true).is_err()
@@ -1712,12 +1743,12 @@ fn backing_rename_semantics_self_test() -> bool {
 }
 
 fn disk_write_semantics_self_test() -> bool {
-    static SCRATCH: Mutex<Registry> = Mutex::with_rank(Registry::empty(), 10);
+    static SCRATCH: spin::Mutex<Registry> = spin::Mutex::new(Registry::empty());
     let mut fs = SCRATCH.lock();
     for node in &mut fs.nodes {
-        *node = Node::empty();
+        node.reset();
     }
-    fs.nodes[0] = Node::directory(b"/");
+    fs.nodes[0].reset_directory(b"/");
     if fs.mkdir("/mnt").is_err() {
         return false;
     }
