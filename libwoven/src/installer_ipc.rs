@@ -11,6 +11,7 @@ pub const STATUS_BAD_REQUEST: u16 = 1;
 pub const STATUS_NOT_READY: u16 = 2;
 pub const STATUS_TARGET_UNAVAILABLE: u16 = 3;
 pub const STATUS_INVALID_PLAN: u16 = 4;
+pub const STATUS_INSTALL_FAILED: u16 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodecError {
@@ -71,6 +72,7 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
     let mut partition = None;
     let mut filesystem = None;
     let mut username = None;
+    let mut password = None;
     let mut timezone = None;
     let mut keyboard = None;
     let mut network = None;
@@ -90,6 +92,7 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
             b"filesystem" if value == b"fat32" => filesystem = Some(()),
             b"filesystem" => return Err(PlanError::Unsupported),
             b"user" => username = Some(valid_username(value)?),
+            b"password" => password = Some(valid_password(value)?),
             b"timezone" if matches!(value, b"UTC" | b"Africa/Blantyre" | b"America/New_York" | b"Asia/Tokyo" | b"Europe/London") => timezone = Some(()),
             b"timezone" => return Err(PlanError::Unsupported),
             b"keyboard" if matches!(value, b"us" | b"gb" | b"de" | b"es" | b"fr") => keyboard = Some(()),
@@ -102,7 +105,7 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
     }
     let Some(target) = target else { return Err(PlanError::MissingField) };
     let Some(partition) = partition else { return Err(PlanError::MissingField) };
-    if filesystem.is_none() || username.is_none() || timezone.is_none() || keyboard.is_none() || network.is_none() {
+    if filesystem.is_none() || username.is_none() || password.is_none() || timezone.is_none() || keyboard.is_none() || network.is_none() {
         return Err(PlanError::MissingField);
     }
     if target != target_sectors || partition < 32_768 || partition > target.saturating_sub(2_048) {
@@ -127,6 +130,14 @@ fn parse_positive(value: &[u8]) -> Result<u64, PlanError> {
 
 fn valid_username(value: &[u8]) -> Result<(), PlanError> {
     if value.is_empty() || value.len() > 32 || !value[0].is_ascii_lowercase() || value.iter().any(|byte| !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_' || *byte == b'-')) {
+        Err(PlanError::InvalidField)
+    } else {
+        Ok(())
+    }
+}
+
+fn valid_password(value: &[u8]) -> Result<(), PlanError> {
+    if !(4..=16).contains(&value.len()) || value.iter().any(|byte| !(0x21..=0x7e).contains(byte)) {
         Err(PlanError::InvalidField)
     } else {
         Ok(())
@@ -224,9 +235,9 @@ mod tests {
 
     #[test]
     fn validates_capacity_and_install_confirmation() {
-        let plan = b"target-sectors=100000;partition-sectors=50000;filesystem=fat32;user=banda;timezone=UTC;keyboard=us;network=disabled";
+        let plan = b"target-sectors=100000;partition-sectors=50000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled";
         assert!(validate_plan(plan, 100000, false).is_ok());
         assert_eq!(validate_plan(plan, 100000, true), Err(super::PlanError::Confirmation));
-        assert!(validate_plan(b"target-sectors=100000;partition-sectors=1000;filesystem=fat32;user=banda;timezone=UTC;keyboard=us;network=disabled", 100000, false).is_err());
+        assert!(validate_plan(b"target-sectors=100000;partition-sectors=1000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled", 100000, false).is_err());
     }
 }

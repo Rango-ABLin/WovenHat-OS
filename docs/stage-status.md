@@ -1,5 +1,25 @@
 # Stage status
 
+## Stage 28 kernel-backed physical installation transaction - 2026-10-22
+
+The supervised installer service now reaches syscall 242, whose kernel
+transaction validates the confirmed bounded plan, unmounts the active volume
+before destructive work, imports the exact running `EFI/BOOT/BOOTX64.EFI`
+artifact from the selected GPT device, writes protective MBR plus primary and
+backup GPT, formats aligned ESP and data partitions as FAT32, installs the EFI
+artifact, and provisions bounded account/settings files. FAT16 and FAT32 ESP
+artifact reads are validated and all target I/O passes the controller-backed
+StorageIo/WovenGuard boundary. A `stage28-installer-test` feature performs the
+same GPT/FAT32/EFI/provisioning transaction on a disposable kernel RamDisk and
+checks the installed files.
+
+Warning-denying kernel Clippy passes in production and the installer feature;
+the feature-lint matrix, host all-targets Clippy, 119 libwoven tests, and the
+disposable Stage 28 acceptance chain pass. The transaction currently targets
+the kernel-selected primary device and intentionally fails closed when no
+existing readable EFI artifact is available; native hardware qualification and
+multi-device selection remain Stage 29 work.
+
 ## Stage 28 kernel FAT32 formatter primitive - 2026-10-22
 
 Added `kernel::fat32::format`, which computes bounded FAT32 geometry and

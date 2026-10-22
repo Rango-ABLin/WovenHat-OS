@@ -339,6 +339,26 @@ pub fn with_root<R>(operation: impl FnOnce(&mut dyn BlockDevice) -> R) -> Option
     }
 }
 
+/// Run the one-shot installer transaction against the explicitly confirmed
+/// kernel-selected target. This bypasses the normal mounted-volume ownership
+/// guard only after the syscall has checked the installer's StorageIo
+/// capability and destructive confirmation; the underlying controller's own
+/// read-only result still cannot be bypassed.
+pub(crate) fn with_root_install_target<R>(
+    operation: impl FnOnce(&mut dyn BlockDevice) -> R,
+) -> Option<R> {
+    let guarded = move |disk: &mut dyn BlockDevice| {
+        operation(&mut Guarded { disk, writable: true })
+    };
+    match root_device() {
+        RootDevice::Ata => crate::ata::with_primary_master(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
+    }
+}
+
 pub fn start_worker() -> bool {
     if WORKER_TASK.lock().is_some() {
         return true;

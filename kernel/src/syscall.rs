@@ -408,6 +408,8 @@ pub enum Number {
     RecoveryQuery = 240,
     /// -> selected installation target sector count; StorageIo required
     InstallerInventory = 241,
+    /// plan pointer, plan length -> 100 on a completed kernel transaction
+    InstallerInstall = 242,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -727,6 +729,28 @@ fn sys_installer_inventory() -> u64 {
         return SYSCALL_ERROR;
     }
     crate::block_io::with_root(|disk| disk.sector_count()).unwrap_or(SYSCALL_ERROR)
+}
+
+fn sys_installer_install(user_plan: u64, length: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::StorageIo)
+        || !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Storage)
+    {
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > libwoven::installer_ipc::MAX_PLAN_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut plan = [0_u8; libwoven::installer_ipc::MAX_PLAN_BYTES];
+    if crate::paging::copy_from_current_user(user_plan, &mut plan[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    match crate::installer::install(&plan[..length]) {
+        Ok(progress) => u64::from(progress),
+        Err(_) => SYSCALL_ERROR,
+    }
 }
 
 #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
@@ -2802,6 +2826,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             sys_update_transaction(arg0, arg1, arg2)
         }
         value if value == Number::InstallerInventory as u64 => sys_installer_inventory(),
+        value if value == Number::InstallerInstall as u64 => sys_installer_install(arg0, arg1),
         #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
         value if value == Number::RecoveryQuery as u64 => {
             sys_recovery_query(arg0, arg1, arg2)

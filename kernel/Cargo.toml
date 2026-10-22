@@ -122,6 +122,7 @@ stage27-5-test = ["qemu-test", "stage15-2-test", "stage22-3-test"]
 # Bounded WovenRecovery status/check/log ABI and fail-closed admission test.
 # Keep this independent: the Stage 15.2 block exits QEMU on its own marker.
 stage27-5-recovery-test = ["qemu-test"]
+stage28-installer-test = ["qemu-test"]
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.

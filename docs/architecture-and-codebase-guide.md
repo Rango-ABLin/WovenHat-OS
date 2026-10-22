@@ -1,5 +1,19 @@
 # WovenHat OS Architecture & Codebase Guide
 
+### Stage 28 - kernel-backed installation transaction
+
+`kernel/src/installer.rs` is the privileged installation boundary reached by
+the supervised `woven-installer` service. It validates the fixed-capacity plan,
+unmounts the active volume before mutation, snapshots the running EFI artifact
+through the kernel GPT/FAT reader, writes both GPT copies, formats the aligned
+ESP and data partitions with the kernel FAT32 formatter, installs
+`EFI/BOOT/BOOTX64.EFI`, and writes bounded account/settings provisioning files.
+The syscall requires `StorageIo` plus the storage WovenGuard authorization;
+the GUI never receives that authority. The `stage28-installer-test` feature
+executes the complete transaction against a disposable RamDisk and verifies
+the resulting EFI and settings files. The production policy is deliberately
+single-target and fail-closed if no readable source EFI artifact exists.
+
 ### Stage 28 - WovenInstaller production system-app integration
 
 The production `system-apps` and Stage 19 catalog-test kernel images embed the

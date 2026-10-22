@@ -87,6 +87,7 @@ mod identity_runtime;
 #[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 mod identity_storage;
 mod interrupts;
+mod installer;
 mod ipc;
 mod irq_lock;
 mod journal;
@@ -2111,6 +2112,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("FAT32 CHAIN READS: OK");
     } else {
         console.println("FAT32 VALIDATION: FAILED");
+        halt();
+    }
+    #[cfg(feature = "stage28-installer-test")]
+    if installer::self_test() {
+        serial::write_line(format_args!("[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED"));
+    } else {
+        serial::write_line(format_args!("[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: FAILED"));
         halt();
     }
     if network::self_test() {

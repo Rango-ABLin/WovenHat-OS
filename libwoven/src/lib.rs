@@ -11491,6 +11491,7 @@ pub mod syscall {
     pub const UPDATE_TRANSACTION: u64 = 239;
     pub const RECOVERY_QUERY: u64 = 240;
     pub const INSTALLER_INVENTORY: u64 = 241;
+    pub const INSTALLER_INSTALL: u64 = 242;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -12599,6 +12600,24 @@ pub fn update_transaction(
 pub fn installer_inventory() -> Result<u64, Error> {
     // SAFETY: integer-only syscall; the kernel copies no userspace memory.
     check(unsafe { syscall::invoke(syscall::INSTALLER_INVENTORY, 0, 0, 0) })
+}
+
+/// Execute the confirmed installer plan through the supervised kernel
+/// transaction. The plan is copied synchronously; no caller pointer is kept.
+pub fn installer_install(plan: &[u8]) -> Result<u64, Error> {
+    if plan.len() > installer_ipc::MAX_PLAN_BYTES {
+        return Err(Error::Failed);
+    }
+    // SAFETY: the pointer and length describe immutable caller-owned plan
+    // bytes for the duration of this synchronous syscall.
+    check(unsafe {
+        syscall::invoke(
+            syscall::INSTALLER_INSTALL,
+            plan.as_ptr() as u64,
+            plan.len() as u64,
+            0,
+        )
+    })
 }
 
 /// Send a bounded WovenAI request. The kernel requires both `Ipc` and `Ai`
