@@ -66,6 +66,7 @@ mod font;
 mod gdt;
 mod gpt;
 mod graphics;
+pub mod graphics_abi;
 mod gui;
 mod hal;
 #[cfg(any(

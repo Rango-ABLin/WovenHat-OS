@@ -4877,6 +4877,15 @@ The 1-CPU gate passed with exit 33. This is explicit driver rebind/teardown
 qualification, not automatic crash supervision or native hardware evidence;
 Claude's uncommitted 3D files remain untouched.
 
+**Codex GFX-01 baseline (Codex, 2026-10-22):** Read the supplied Hybrid
+Graphics Architecture specification and added the nonbreaking versioned
+`kernel/src/graphics_abi.rs` contract over the existing display/compositor/
+virtio-gpu stack. Host tests and warning-denying Clippy pass. The Stage
+20.14b 1-CPU gate is currently red from the shared uncommitted 3D-default
+taskbar pixel path, so GFX-01 is explicitly not accepted and GFX-02 is not
+started. The new contract is isolated; Claude's uncommitted files remain
+untouched.
+
 **Codex signed service restart slice (Codex, 2026-10-22):** Extended the
 Stage 27.5 `woven-update` acceptance to terminate/reap the first signed daemon,
 verify service cleanup, reload and respawn the signed image, verify fresh

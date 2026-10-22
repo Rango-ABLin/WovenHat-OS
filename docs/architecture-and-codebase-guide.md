@@ -4062,6 +4062,16 @@ bootability, hardware qualification, or release certification.
 
 # SMP scalability and supported resource floor
 
+## Hybrid graphics GFX-01 boundary
+
+The versioned `graphics_abi` contract is intentionally an adapter seam over
+the established `display`, `compositor`, and `virtio_gpu` modules. It defines
+typed surface/fence/output identities, bounded damage presentation, renderer
+operations, display modes, and backend recovery errors without allocating a
+second surface registry or changing scanout ownership. The kernel compositor
+and capability boundary remain authoritative. GFX-02 renderer migration is
+blocked until the current Stage 20.14b graphics acceptance matrix is green.
+
 ## Driver restart qualification boundary
 
 The Stage 13.2 lifecycle gate proves that a discovered PCI function can be

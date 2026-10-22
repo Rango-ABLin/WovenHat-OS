@@ -1,5 +1,16 @@
 # Stage status
 
+## GFX-01 hybrid graphics baseline - 2026-10-22
+
+Applied the supplied Hybrid Graphics Architecture direction at GFX-01 only.
+Added `kernel/src/graphics_abi.rs` as a versioned, backend-neutral contract
+over the existing display surface, compositor lease, damage path, and
+virtio-gpu backend; no parallel graphics stack was created. Host tests and
+warning-denying Clippy pass. GFX-01 remains incomplete because the affected
+Stage 20.14b 1-CPU gate currently exits 35 on the shared uncommitted 3D
+desktop taskbar pixel check. GFX-02 is not started until the graphics gate is
+green. Full details are in `docs/audit-gfx01-baseline-2026-10-22.md`.
+
 ## Stage 31 PCI driver restart slice - 2026-10-22
 
 The Stage 13.2 QEMU lifecycle gate now binds a discovered PCI function,
