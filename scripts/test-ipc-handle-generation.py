@@ -143,7 +143,7 @@ def main():
         raise ValueError(f'source changed: expected {args.expected_source_sha256}, got {digest}')
     text = raw.decode('utf-8').replace('\r\n', '\n')
     config = (root / 'kernel/src/config.rs').read_text(encoding='utf-8')
-    declaration = 'pub const MAX_IPC_HANDLES_PER_PROCESS: usize = 16;'
+    declaration = 'pub const MAX_IPC_HANDLES_PER_PROCESS: usize = 64;'
     if config.count(declaration) != 1:
         raise ValueError('configured handle capacity changed; review the probe')
     extracted = '\n'.join([
@@ -158,7 +158,7 @@ def main():
     ])
     output = create_evidence_directory(root, time.time_ns())
     rust = output / 'ipc-allocator.rs'
-    rust.write_text('const MAX_HANDLES: usize = 16;\n' + PRELUDE + extracted + TESTS, encoding='utf-8')
+    rust.write_text('const MAX_HANDLES: usize = 64;\n' + PRELUDE + extracted + TESTS, encoding='utf-8')
     binary = output / 'ipc-allocator-tests.exe'
     commands = [
         ['rustc', '--version', '--verbose'],

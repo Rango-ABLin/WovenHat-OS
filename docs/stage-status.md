@@ -1,5 +1,13 @@
 # Stage status
 
+## Host regression repair - IPC capacity probe - 2026-10-22
+
+The full host suite caught a stale `scripts/test-ipc-handle-generation.py`
+fixture that still expected the former 16-handle process capacity after the
+accepted SMP expansion to 64 handles. The source-extraction probe now derives
+the current documented 64-slot contract; `cargo test -p wovenhat-os --test
+ipc_handles` passes.
+
 ## Stage 31 process-crash containment - 2026-10-22
 
 Added a feature-gated Ring-3 fault probe and QEMU harness. The probe writes to

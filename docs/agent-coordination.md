@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Repair stale IPC capacity regression probe (2026-10-22)
+
+The complete host test run found the source-extraction IPC allocator probe
+still hard-coded 16 process-local handles, while the accepted scalability
+configuration is 64. Updated the probe's declaration and generated fixture to
+the current contract; the focused `ipc_handles` test now passes. No allocator
+assertions were weakened.
+
 ## Codex - Stage 31 process-crash containment (2026-10-22)
 
 Added the feature-gated `stage31-process-crash-test` probe and
