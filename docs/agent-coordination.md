@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 bounded torture-plan boundary (2026-10-22)
+
+Added `scripts/stage31-torture-plan.py` and
+`tests/test_stage31_torture_plan.py`. The deterministic planner enumerates
+memory/storage/network/security/shell jobs across 1/2/4/8/16 CPUs, marks
+unsupported 8/16-CPU profiles blocked with no command, and fails closed on
+plan tampering. It does not execute QEMU or claim reliability acceptance;
+executor, fault injection, and repeated-boot evidence remain open.
+
 ## Codex - Stage 30 performance matrix rerun (2026-10-22)
 
 Re-ran Stage 30.1 through 30.5 on 1/2/4 CPUs. All fifteen QEMU benchmark

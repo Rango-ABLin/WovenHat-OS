@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 31 torture-plan boundary - 2026-10-22
+
+Added `scripts/stage31-torture-plan.py` and focused tests. The planner makes
+the five initial suites (memory, storage, network, security, and shell)
+explicit across the roadmap's 1/2/4/8/16 CPU matrix. It marks 8/16-CPU jobs
+blocked because the current acceptance harnesses support only 1/2/4, and it
+never launches QEMU, injects faults, or treats an omitted job as passed.
+
+This is the orchestration foundation only. Stage 31 still needs a reviewed
+executor, randomized failure-injection contracts, low-resource scenarios,
+service/driver restart coverage, and repeated-boot acceptance evidence.
+
 ## Stage 30 performance matrix rerun - 2026-10-22
 
 Re-ran the existing syscall, IPC, filesystem, compositor, and scheduler
