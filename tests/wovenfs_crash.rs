@@ -281,6 +281,68 @@ fn write_is_atomic_across_every_crash_point() {
 }
 
 #[test]
+fn randomized_crash_schedule_keeps_file_contents_atomic() {
+    let original = vec![0x11_u8; 1536];
+    let replacement = (0..1536_u32)
+        .map(|index| (index.wrapping_mul(37) % 251) as u8)
+        .collect::<Vec<_>>();
+
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let inode = volume.create(1, "random.bin", 0o644, 100).expect("create");
+        volume
+            .write_file(inode, &original, 100)
+            .expect("initial write");
+        inode
+    };
+    let writes = write_count(&base, |volume| {
+        volume
+            .write_file(inode, &replacement, 200)
+            .expect("replacement write");
+    });
+    assert!(writes > 3, "expected a multi-sector write, got {writes}");
+
+    // Deterministic xorshift scheduling keeps this reproducible while
+    // exercising a different cut order from the exhaustive neighboring test.
+    let mut seed = 0x9e37_79b9_u32;
+    for sample in 0..64 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let cut = (seed as usize) % (writes + 1);
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount before write");
+        let _ = volume.write_file(inode, &replacement, 200);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered =
+            mount_consistent(&settled, &format!("random sample {sample}, cut {cut}"));
+        let mut output = vec![0_u8; MAX_FILE_SIZE];
+        let read = recovered
+            .read_file(inode, &mut output)
+            .expect("recovered read");
+        assert_eq!(read, original.len(), "random sample {sample}: partial size");
+        let contents = &output[..read];
+        assert!(
+            contents == original.as_slice() || contents == replacement.as_slice(),
+            "random sample {sample}, cut {cut}: torn file contents"
+        );
+
+        let remounted = settled.fork(None);
+        let mut second = mount_consistent(&remounted, &format!("random replay {sample}"));
+        let mut replay = vec![0_u8; MAX_FILE_SIZE];
+        let replay_read = second.read_file(inode, &mut replay).expect("replay read");
+        assert_eq!(
+            &replay[..replay_read],
+            contents,
+            "random replay {sample}: changed data"
+        );
+    }
+}
+
+#[test]
 fn unlink_is_atomic_across_every_crash_point() {
     let payload = [7u8; 900];
     let base = formatted();

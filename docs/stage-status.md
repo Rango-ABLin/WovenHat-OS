@@ -25,6 +25,12 @@ runner and evidence contract only; Stage 31 still requires the planned
 large-count matrix, randomized fault injection, low-resource/loss scenarios,
 restart/crash recovery, and sudden-shutdown recovery.
 
+The WovenFS host crash-recovery gate now also samples 64 deterministic
+pseudo-random write cut points and remount/replay cycles, rejecting either
+partial sizes or torn payloads. Its exhaustive all-cut tests remain unchanged;
+this is additional host fault coverage, not proof of physical power-loss or
+driver restart behavior.
+
 ## 4 GiB production memory floor and scalable memory telemetry - 2026-10-22
 
 Defined the supported production minimum as 4 GiB through
