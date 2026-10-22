@@ -1,4 +1,4 @@
-# GFX-01 hybrid graphics baseline — 2026-10-22
+# GFX-01 hybrid graphics baseline - 2026-10-22
 
 ## Source and interpretation
 
@@ -30,17 +30,24 @@ renderer, or scanout path; later stages must adapt the existing modules.
 
 ## Verification
 
-- `cargo test --all --lib` — passed, 119 tests.
-- `cargo clippy --all-targets -- -D warnings` — passed.
-- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings` — passed with existing shell/GUI image artifacts.
-- `python scripts/test-stage20-14b-desktop.py --cpus 1` — failed before
-  acceptance: the existing uncommitted 3D-default desktop work failed the
-  taskbar-across-monitors pixel gate and exited 35. Evidence is under
-  `audit-artifacts/stage20.14b-1cpu-1792680218104856300`.
+- `cargo test --all --lib` - passed, 119 tests.
+- `cargo clippy --all-targets -- -D warnings` - passed.
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings` - passed with existing shell/GUI image artifacts.
+- `python scripts/test-stage20-14b-desktop.py --cpus 1/2/4` - passed after
+  the taskbar projection correction; evidence is listed below.
 
-## Gate boundary
+## GFX-01 completion
 
-GFX-01 is not accepted and GFX-02 is not started. The required graphics gate
-must be green after the shared Claude 3D work is reconciled. The contract is
-kept as an explicitly incomplete, reviewable change until the affected 1/2/4
-CPU acceptance matrix passes.
+The shared 3D taskbar projection was corrected so its receded edge remains
+attached to the full primary-monitor width while retaining its depth
+gradient. The fixed 23/20 compensation is the inverse of the 30-on-200
+perspective tilt.
+
+The affected graphics matrix passed:
+
+- `audit-artifacts/stage20.14b-1cpu-1792680626117557900`
+- `audit-artifacts/stage20.14b-2cpu-1792680764038570600`
+- `audit-artifacts/stage20.14b-4cpu-1792680864231737200`
+
+GFX-01 is accepted. GFX-02 is not started; CPU renderer implementation and
+its separate 1/2/4 CPU acceptance are the next gate.

@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
+
+Applied the supplied hybrid-graphics direction at GFX-01: the versioned
+`kernel/src/graphics_abi.rs` boundary remains the only new graphics seam.
+Corrected the shared 3D taskbar projection so its receded edge remains the
+full primary-monitor width while retaining perspective depth. Stage 20.14b
+passed on 1/2/4 CPUs with evidence under
+`audit-artifacts/stage20.14b-{1,2,4}cpu-*`; host tests and both host/kernel
+warning-denying Clippy checks pass. GFX-01 is accepted. GFX-02 is not started
+and is the next gated stage. Claude's other uncommitted 3D changes remain
+untouched in the worktree.
+
 ## Codex - Stage 31 packet-corruption boundary (2026-10-22)
 
 Added `scripts/test-stage31-packet-corruption.py` around the live network

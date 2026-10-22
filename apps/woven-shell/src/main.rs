@@ -1726,10 +1726,16 @@ impl Desktop {
         let half_height = ((TASKBAR_HEIGHT - 1) << 16) / 2;
         const DISTANCE: i32 = 200 << 16;
         const TILT_DEPTH: i32 = 30 << 16;
+        // Keep the taskbar's receded edge attached to the full primary
+        // monitor width. Perspective would otherwise pull the top corners
+        // inward, leaving the outer taskbar pixels uncovered. The 23/20
+        // compensation is the exact inverse of DISTANCE/(DISTANCE+depth)
+        // for this fixed 30-on-200 tilt, while retaining the depth gradient.
+        let top_half_width = half_width.saturating_mul(23) / 20;
         let camera = Camera::new(DISTANCE, DISTANCE, width / 2, top + TASKBAR_HEIGHT / 2);
         let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
-            camera.project(-half_width, -half_height, TILT_DEPTH),
-            camera.project(half_width, -half_height, TILT_DEPTH),
+            camera.project(-top_half_width, -half_height, TILT_DEPTH),
+            camera.project(top_half_width, -half_height, TILT_DEPTH),
             camera.project(-half_width, half_height, 0),
             camera.project(half_width, half_height, 0),
         ) else {
