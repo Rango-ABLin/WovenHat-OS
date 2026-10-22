@@ -4,12 +4,10 @@
 //! kernel-backed physical target transaction is integrated, every operation
 //! returns a deterministic not-ready response and performs no device I/O.
 
-use libwoven::installer_ipc::{self, Request, Response};
+use libwoven::installer_ipc::{self, Operation, Request, Response};
 use libwoven::process;
 
 const CLIENT_SEND: u8 = 1;
-const STATUS_BAD_REQUEST: u16 = 1;
-const STATUS_NOT_READY: u16 = 2;
 const REQUEST_CAPACITY: usize = installer_ipc::MAX_MESSAGE_BYTES;
 
 static mut REQUEST_BYTES: [u8; REQUEST_CAPACITY] = [0; REQUEST_CAPACITY];
@@ -51,17 +49,16 @@ pub fn run() -> ! {
 
 fn dispatch(bytes: &[u8]) -> Response {
     let Ok(request) = Request::decode(bytes) else {
-        return Response { request_id: 0, status: STATUS_BAD_REQUEST, progress: 0, value: 0 };
+        return Response { request_id: 0, status: installer_ipc::STATUS_BAD_REQUEST, progress: 0, value: 0 };
     };
-    // The service boundary is live, but no physical operation is reachable
-    // yet. Keeping this response explicit prevents the UI from treating
-    // publication as proof that a disk was inspected or modified.
-    let _operation = request.operation;
     let _plan = request.plan;
-    Response {
-        request_id: request.request_id,
-        status: STATUS_NOT_READY,
-        progress: 0,
-        value: 0,
-    }
+    let (status, progress, value) = match request.operation {
+        Operation::Inventory => match libwoven::installer_inventory() {
+            Ok(sectors) => (installer_ipc::STATUS_READY, 5, sectors),
+            Err(_) => (installer_ipc::STATUS_TARGET_UNAVAILABLE, 0, 0),
+        },
+        Operation::Validate | Operation::Install | Operation::Cancel =>
+            (installer_ipc::STATUS_NOT_READY, 0, 0),
+    };
+    Response { request_id: request.request_id, status, progress, value }
 }

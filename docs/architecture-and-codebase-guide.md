@@ -4006,10 +4006,12 @@ installer executor must be integrated through a separately reviewed authority
 boundary; this shell cannot be used to infer disk or bootloader support. The
 current authority boundary is `libwoven::installer_ipc` and the supervised
 `woven-installer --service` process, published as `sys.storage.installer`.
-The service has a bounded request/response ABI and currently fails closed with
-`not-ready` responses until kernel-backed target inventory and transactions
-are implemented. Publication is therefore not evidence of physical disk
-support.
+The service has a bounded request/response ABI and its `Inventory` operation
+uses a capability-gated read-only kernel syscall to report the selected
+target's sector count. Validation, partitioning, formatting, bootloader
+handoff, and installation remain fail-closed until their kernel-backed
+transactions are implemented. Publication is therefore not evidence of
+physical disk support.
 
 # Stage 28 disposable acceptance composition
 

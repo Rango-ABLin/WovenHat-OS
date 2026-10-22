@@ -406,6 +406,8 @@ pub enum Number {
     /// bounded Stage 27.5 recovery query/admission ABI
     #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
     RecoveryQuery = 240,
+    /// -> selected installation target sector count; StorageIo required
+    InstallerInventory = 241,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -718,6 +720,13 @@ fn sys_update_transaction(operation: u64, source_or_slot: u64, length: u64) -> u
         }
         _ => SYSCALL_ERROR,
     }
+}
+
+fn sys_installer_inventory() -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::StorageIo) {
+        return SYSCALL_ERROR;
+    }
+    crate::block_io::with_root(|disk| disk.sector_count()).unwrap_or(SYSCALL_ERROR)
 }
 
 #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
@@ -2792,6 +2801,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::UpdateTransaction as u64 => {
             sys_update_transaction(arg0, arg1, arg2)
         }
+        value if value == Number::InstallerInventory as u64 => sys_installer_inventory(),
         #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
         value if value == Number::RecoveryQuery as u64 => {
             sys_recovery_query(arg0, arg1, arg2)

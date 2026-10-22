@@ -11490,6 +11490,7 @@ pub mod syscall {
     pub const SUSPEND_RESUME_CAPABILITIES: u64 = 238;
     pub const UPDATE_TRANSACTION: u64 = 239;
     pub const RECOVERY_QUERY: u64 = 240;
+    pub const INSTALLER_INVENTORY: u64 = 241;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -12591,6 +12592,13 @@ pub fn update_transaction(
     };
     // SAFETY: the source pointer is borrowed only for this synchronous syscall.
     check(unsafe { syscall::invoke(syscall::UPDATE_TRANSACTION, operation as u64, arg1, arg2) })
+}
+
+/// Return the sector count of the kernel-selected installation target.
+/// Requires the installer's storage authority and performs no writes.
+pub fn installer_inventory() -> Result<u64, Error> {
+    // SAFETY: integer-only syscall; the kernel copies no userspace memory.
+    check(unsafe { syscall::invoke(syscall::INSTALLER_INVENTORY, 0, 0, 0) })
 }
 
 /// Send a bounded WovenAI request. The kernel requires both `Ipc` and `Ai`

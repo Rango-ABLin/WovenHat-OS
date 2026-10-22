@@ -6,6 +6,10 @@
 pub const MAX_MESSAGE_BYTES: usize = 256;
 pub const MAX_PLAN_BYTES: usize = 192;
 pub const SERVICE_NAME: &[u8] = b"sys.storage.installer";
+pub const STATUS_READY: u16 = 0;
+pub const STATUS_BAD_REQUEST: u16 = 1;
+pub const STATUS_NOT_READY: u16 = 2;
+pub const STATUS_TARGET_UNAVAILABLE: u16 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodecError {

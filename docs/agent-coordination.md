@@ -6,10 +6,12 @@ Added the fixed-capacity versioned `libwoven::installer_ipc` WIP/WOP ABI and
 the separate `woven-installer --service` daemon. Production system startup
 now launches it with IPC/file/storage authority and verifies publication as
 `sys.storage.installer`; the GUI remains non-privileged. The current daemon
-fails closed with explicit `not-ready` responses and does no device I/O. App
-tests, 118 libwoven tests, warning-denying Clippy, the signed eleven-app
-catalog gate, and normal system-apps boot passed on 1 CPU. Physical target
-inventory and execution remain open for the next slice.
+performs a capability-gated read-only selected-target sector-count query and
+returns explicit unavailable status when no target exists; it still performs
+no writes. App tests, 118 libwoven tests, warning-denying Clippy, the signed
+eleven-app catalog gate, and normal system-apps boot passed on 1 CPU. Physical
+transaction execution and service-client integration remain open for the next
+slice.
 
 ## Codex - Stage 28 graphical installer ISO gate (2026-10-22)
 

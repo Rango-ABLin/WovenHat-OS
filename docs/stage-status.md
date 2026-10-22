@@ -7,8 +7,9 @@ and response ABI, and a separate `woven-installer --service` daemon. The
 kernel starts it as a `SystemService` with IPC, file, and storage authority
 and verifies publication under `sys.storage.installer`. The graphical
 installer remains a separate non-privileged presentation process. The service
-currently returns explicit `not-ready` responses and performs no device I/O;
-target inventory, physical transaction execution, and service-client wiring
+now performs a capability-gated, read-only selected-target sector-count
+query; on this QEMU machine with no usable target it returns explicit
+unavailable status. Physical transaction execution and service-client wiring
 remain the next implementation increment. Normal system-apps boot passed on
 1 CPU with the new publication marker, and the signed eleven-app catalog
 gate remained green.
