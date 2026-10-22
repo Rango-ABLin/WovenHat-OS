@@ -11,10 +11,12 @@ Command:
 python scripts/test-stage31-repeated-boots.py --suite update-service --cpus 1 --count 2 --timeout 300
 ```
 
-Result: PASS. Both runs exited 0; the first took 87.9 seconds and the second
-56.3 seconds. Evidence is retained in
+Result: PASS. The repeated 1-CPU runs both exited 0; the first took 87.9
+seconds and the second 56.3 seconds. Additional one-run profiles passed at
+2 CPUs (43.4 seconds) and 4 CPUs (47.6 seconds). Evidence is retained in
 `audit-artifacts/stage31-repeated/update-service-1cpu/run-0001` and
-`run-0002`.
+`run-0002`, with the scalable profiles under
+`update-service-2cpu/run-0001` and `update-service-4cpu/run-0001`.
 
 This boundary is intended to prove repeatable signed service publication,
 request handling, malformed-request rejection, and orderly teardown. It does
