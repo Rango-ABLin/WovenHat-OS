@@ -2,21 +2,19 @@
 
 ## Stage 28 acceptance audit - 2026-10-22
 
-The installer feature and disposable transaction gates are green, but the
-current storage QEMU harness does not reach its normal acceptance marker: both
-the current tree and a clean pre-installer control worktree stop after
-`[S6.MEMORY] reclaimed overflow/double-free: PASSED` and exit 0. This is not
-an installer-specific regression, but it prevents a fresh 1/2/4-CPU QEMU
-acceptance claim until the shared QEMU/runtime failure is resolved. No native
-physical disk was accessed; the kernel RamDisk transaction remains the only
-destructive-install execution evidence.
+The first QEMU audit found a triple fault in the existing GPT self-test:
+multi-megabyte `RamDisk` values were constructed on the small kernel stack.
+The GPT and installer probes now use bounded heap/sparse media instead. Fresh
+storage gates pass at 1/2/4 CPUs with exit 33, and the dedicated
+`stage28-installer-test` image reports
+`[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED` plus full boot
+validation at all three CPU counts. No native physical disk was accessed; the
+kernel sparse/RamDisk transaction remains the destructive-install execution
+evidence.
 The read-only host preflight at
 `audit-artifacts/physical-host-20261022-131154-963/host.json` found one
 boot/system NVMe disk, no disposable target, and a non-elevated Windows
 session; it therefore correctly performed no native-disk test.
-The same control failure was reproduced at 2 and 4 CPUs: each QEMU run
-stopped after the identical S6.MEMORY marker and exited 0 without the normal
-exit-33 acceptance result.
 
 ## Stage 28 kernel-backed physical installation transaction - 2026-10-22
 

@@ -1,22 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
-## Codex - Stage 28 acceptance audit control result (2026-10-22)
+## Codex - Stage 28 acceptance audit and stack-fault repair (2026-10-22)
 
-The normal storage QEMU gate currently stops after
-`[S6.MEMORY] reclaimed overflow/double-free: PASSED`, exits 0, and emits no
-acceptance marker. Reproducing the same result in a clean worktree at the
-pre-installer control commit (`099780ca`) shows this is a shared QEMU/runtime
-failure rather than the installer transaction. The installer feature Clippy,
-RamDisk transaction, host tests, and disposable Stage 28 chain remain green;
-no native disk was accessed and no historical evidence was removed.
+The initial storage QEMU audit stopped after
+`[S6.MEMORY] reclaimed overflow/double-free: PASSED` because the GPT probe
+constructed a 4 MiB `RamDisk` on the kernel stack. The probe now allocates its
+disposable medium through the heap, while the installer feature uses a bounded
+sparse block device so its 150,000-sector geometry does not exceed the 8 MiB
+test heap. Fresh storage gates and the dedicated installer feature pass at
+1/2/4 CPUs with exit 33 and full validation markers.
 The read-only host preflight recorded one boot/system NVMe disk and a
 non-elevated Windows session in
 `audit-artifacts/physical-host-20261022-131154-963/host.json`; no safe
 disposable physical target was available, so no native-disk write was
 attempted.
-The current-tree 2-CPU and 4-CPU storage gates reproduce the same S6.MEMORY
-stop and exit-0/no-marker result as the 1-CPU control, so the missing QEMU
-acceptance is now evidenced across all required CPU counts.
 
 ## Codex - Stage 28 kernel-backed physical installation transaction (2026-10-22)
 
