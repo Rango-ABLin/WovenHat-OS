@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 28 confirmed GUI-to-service install request - 2026-10-23
+
+The graphical installer now submits a bounded `Operation::Install` request
+through `sys.storage.installer` when its validated snapshot is explicitly
+confirmed and on the progress screen. It renders accepted/completed and
+fail-closed target/install statuses; the GUI still has no storage capability,
+and the default unconfirmed snapshot never submits a destructive request.
+The Ring-3 installer builds and warning-denying Clippy pass for
+`x86_64-unknown-none`. The kernel transaction and disposable rollback gates
+remain the authoritative GPT/FAT32/EFI/provisioning evidence; this increment
+closes the missing GUI-to-service request path but does not qualify physical
+installation or native boot.
+
 ## Stage 31 seeded cross-subsystem fault orchestration - 2026-10-23
 
 Added `scripts/test-stage31-randomized-faults.py`, a fail-closed runner that

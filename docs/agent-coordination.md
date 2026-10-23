@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 GUI install request wiring (2026-10-23)
+
+Wired the graphical installer’s explicitly confirmed progress state to the
+existing bounded `Operation::Install` IPC request. The GUI submits no request
+for the default unconfirmed snapshot, retains all storage authority in the
+supervised service/kernel boundary, and renders accepted/completed or
+fail-closed target/install status. `cargo check --release` and warning-denying
+Clippy pass for the Ring-3 target. Physical media and native boot remain
+unqualified.
+
 ## Codex - seeded Stage 31 cross-subsystem orchestration (2026-10-23)
 
 Added `scripts/test-stage31-randomized-faults.py`. It uses a reproducible

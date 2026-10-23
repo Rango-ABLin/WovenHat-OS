@@ -4034,7 +4034,8 @@ progress and success screens are deliberately non-operative and print
 `install_action=unavailable (fail-closed)`. The authority boundary is
 `libwoven::installer_ipc` and the supervised `woven-installer --service`
 process, published as `sys.storage.installer`; the GUI never gains storage
-authority. The service validates bounded plans and, when a readable EFI
+authority but may submit the bounded `Install` request after explicit
+confirmation. The service validates bounded plans and, when a readable EFI
 artifact and an eligible kernel-selected target are available, invokes the
 kernel transaction for GPT layout, FAT32 formatting, EFI installation, and
 provisioning. It fails closed when those prerequisites are absent. The

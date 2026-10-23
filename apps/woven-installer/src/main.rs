@@ -44,6 +44,13 @@ enum InventoryStatus {
     Available,
 }
 
+#[derive(Clone, Copy)]
+enum InstallStatus {
+    NotRequested,
+    Completed(u8),
+    Failed(u16),
+}
+
 fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--service") {
         service::run();
@@ -82,7 +89,12 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
         Err(_) => libwoven::exit(3),
     };
     let inventory = request_inventory();
-    if !render_gui(&window, state, inventory, None, false) || window.share_with(shell).is_err() {
+    let install = if state.confirmed && state.screen == Screen::Progress {
+        request_install(state.plan)
+    } else {
+        InstallStatus::NotRequested
+    };
+    if !render_gui(&window, state, inventory, install, None, false) || window.share_with(shell).is_err() {
         libwoven::exit(4)
     }
     const TITLE: &[u8] = b"WovenInstaller";
@@ -117,7 +129,7 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
             let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_GUI_HEIGHT as u32);
             if let Ok(resized) = GraphicsSurface::create(width, height) {
                 if resized.share_with(shell).is_ok() && send_resize(&resized, shell)
-                    && render_gui(&resized, state, inventory, pointer, pressed)
+                    && render_gui(&resized, state, inventory, install, pointer, pressed)
                 {
                     let previous = core::mem::replace(&mut window, resized);
                     drop(previous);
@@ -130,7 +142,7 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
                 u16::from_le_bytes([message[4], message[5]]),
                 u16::from_le_bytes([message[6], message[7]]),
             ));
-            let _ = render_gui(&window, state, inventory, pointer, pressed);
+            let _ = render_gui(&window, state, inventory, install, pointer, pressed);
             continue;
         }
         if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
@@ -143,7 +155,7 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
                 let _ = libwoven::message_send(shell, b"WCLS");
                 break;
             }
-            let _ = render_gui(&window, state, inventory, pointer, pressed);
+            let _ = render_gui(&window, state, inventory, install, pointer, pressed);
         }
     }
     drop(window);
@@ -154,6 +166,7 @@ fn render_gui(
     window: &GraphicsSurface,
     state: State<'_>,
     inventory: InventoryStatus,
+    install: InstallStatus,
     pointer: Option<(u16, u16)>,
     pressed: bool,
 ) -> bool {
@@ -184,6 +197,17 @@ fn render_gui(
     draw_field(&mut canvas, 42, 192, "Settings", state.settings);
     if !state.message.is_empty() {
         draw_field(&mut canvas, 42, 218, "Message", state.message);
+    } else {
+        let status = match install {
+            InstallStatus::NotRequested => "Install action not requested",
+            InstallStatus::Completed(progress) if progress >= 100 => "Install completed",
+            InstallStatus::Completed(_) => "Install accepted",
+            InstallStatus::Failed(status) if status == installer_ipc::STATUS_TARGET_UNAVAILABLE => {
+                "Install unavailable: no target"
+            }
+            InstallStatus::Failed(_) => "Install failed closed",
+        };
+        canvas.draw_text(42, 218, status, MUTED);
     }
     canvas.fill_rect(
         BUTTON_X,
@@ -227,6 +251,36 @@ fn request_inventory() -> InventoryStatus {
         libwoven::yield_now();
     }
     InventoryStatus::Unavailable
+}
+
+fn request_install(plan: &[u8]) -> InstallStatus {
+    let Ok(service) = libwoven::ipc_service_discover(installer_ipc::SERVICE_NAME) else {
+        return InstallStatus::Failed(installer_ipc::STATUS_TARGET_UNAVAILABLE);
+    };
+    let request = Request { operation: Operation::Install, request_id: 2, plan };
+    let mut bytes = [0u8; installer_ipc::MAX_MESSAGE_BYTES];
+    let Ok(length) = request.encode(&mut bytes) else {
+        return InstallStatus::Failed(installer_ipc::STATUS_BAD_REQUEST);
+    };
+    if libwoven::ipc_message_send(service, &bytes[..length]).is_err() {
+        return InstallStatus::Failed(installer_ipc::STATUS_TARGET_UNAVAILABLE);
+    }
+    let mut response = [0u8; Response::ENCODED_LEN];
+    for _ in 0..64 {
+        if let Ok((length, _sender)) = libwoven::message_receive(&mut response) {
+            if let Ok(response) = Response::decode(&response[..length]) {
+                if response.request_id == request.request_id {
+                    return if response.status == installer_ipc::STATUS_READY {
+                        InstallStatus::Completed(response.progress)
+                    } else {
+                        InstallStatus::Failed(response.status)
+                    };
+                }
+            }
+        }
+        libwoven::yield_now();
+    }
+    InstallStatus::Failed(installer_ipc::STATUS_TARGET_UNAVAILABLE)
 }
 
 fn draw_field(canvas: &mut Canvas<'_>, x: i32, y: i32, label: &str, value: &[u8]) {
