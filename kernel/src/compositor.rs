@@ -415,6 +415,15 @@ pub fn single_output_self_test() -> bool {
         ok
     }
 
+    let already_attached = STATE.lock().as_ref().is_some_and(|state| state.gpu.is_some());
+    if !already_attached {
+        if let Err(error) = attach_gpu_outputs() {
+            crate::serial::write_line(format_args!(
+                "[S20.14S] explicit GPU attach failed: {:?}",
+                error
+            ));
+        }
+    }
     let Some((heads, width, height)) = STATE.lock().as_ref().and_then(|state| {
         state
             .gpu
@@ -468,6 +477,10 @@ pub fn single_output_self_test() -> bool {
         "[S20.14S] ready for capture width={} height={}",
         width, height
     ));
+    let started = crate::timer::ticks();
+    while crate::timer::ticks().wrapping_sub(started) <= 100 {
+        crate::task::yield_now();
+    }
     if !step("single-output frame presented", presented) {
         return false;
     }
