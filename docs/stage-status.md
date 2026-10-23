@@ -1,5 +1,15 @@
 # Stage status
 
+## CI maturity gates wired - 2026-10-23
+
+Added dedicated Linux workflow jobs for the current release blockers. CI now
+runs the Stage 28 disposable GPT/FAT32/EFI acceptance and installer-app
+warning-denying checks, the GFX-02 kernel/host contract checks, and the seeded
+Stage 31 randomized matrix on 1, 2, and 4 CPUs with explicit OVMF discovery.
+The matrix remains evidence for emulated recovery and randomized scenario
+ordering; it does not convert the documented physical/native qualifications
+or arbitrary in-guest fault injection into passing claims.
+
 ## Stage 31 runner firmware propagation and planner-test repair - 2026-10-23
 
 The seeded Stage 31 orchestrator now requires an explicit OVMF CODE path and

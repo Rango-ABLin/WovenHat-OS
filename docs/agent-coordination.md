@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - maturity CI gates (2026-10-23)
+
+Added Linux workflow jobs that enforce the Stage 28 disposable pipeline,
+installer application lint, GFX-02 lint/host contract, and the seeded Stage 31
+randomized matrix across 1/2/4 CPUs. Each job discovers OVMF explicitly and
+uploads audit/serial evidence. These CI gates preserve the documented limits:
+they do not certify physical disks, native graphics, TPM/Secure Boot hardware,
+or arbitrary in-guest fault injection.
+
 ## Codex - Stage 31 runner firmware propagation (2026-10-23)
 
 Repaired the seeded Stage 31 runner boundary so every QEMU child receives an
