@@ -1145,7 +1145,7 @@ impl Desktop {
         dnd: false,
         scale: 1,
         language: libwoven::i18n::Language::English,
-        three_d: false,
+        three_d: true,
         reduced_motion: false,
         locked: false,
         pin: None,
@@ -1324,6 +1324,15 @@ impl Desktop {
             return self.paint_panel_content(canvas, area);
         };
         self.paint_panel_content(&mut texture, Area::new(0, 0, area.width, area.height));
+        // The projected quad is narrower than the flat panel's footprint at
+        // its receded top edge, so the corners it no longer covers still
+        // need the real desktop background rather than whatever this
+        // tile's shared scratch buffer held. Painted before the depth
+        // buffer below is (re-)cleared: `render_desktop_background` clears
+        // and uses that same shared buffer for its own projection, so
+        // calling it after this function's own clear would corrupt the
+        // depth test this function's own triangles depend on.
+        self.render_desktop_background(canvas);
 
         let half_width = (area.width / 2) << 16;
         let half_height = ((area.height - 1) << 16) / 2;
@@ -1354,11 +1363,6 @@ impl Desktop {
             return self.paint_panel_content(canvas, area);
         };
         depth.clear(u16::MAX);
-        // As in `render_qs_3d`: the projected quad is narrower than the
-        // flat panel's footprint at its receded top edge, so the corners
-        // it no longer covers still need the real desktop background
-        // rather than whatever this tile's shared scratch buffer held.
-        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
@@ -1721,6 +1725,16 @@ impl Desktop {
             return self.paint_taskbar_content(canvas);
         };
         self.paint_taskbar_content(&mut texture);
+        // The projected quad is narrower than the flat taskbar's footprint
+        // at its receded top edge, so the sliver it no longer covers still
+        // needs the real desktop background (itself 3D-projected, since 3D
+        // mode is already on here) rather than stale tile content. Painted
+        // before the depth buffer below is (re-)cleared:
+        // `render_desktop_background` clears and uses that same shared
+        // buffer for its own projection, so calling it after this
+        // function's own clear would corrupt the depth test this
+        // function's own triangles depend on.
+        self.render_desktop_background(canvas);
 
         let half_width = (width / 2) << 16;
         let half_height = ((TASKBAR_HEIGHT - 1) << 16) / 2;
@@ -1752,11 +1766,6 @@ impl Desktop {
             return self.paint_taskbar_content(canvas);
         };
         depth.clear(u16::MAX);
-        // The projected quad is narrower than the flat taskbar's footprint
-        // at its receded top edge, so the sliver it no longer covers still
-        // needs the real desktop background (itself 3D-projected, since 3D
-        // mode is already on here) rather than stale tile content.
-        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
@@ -2220,6 +2229,17 @@ impl Desktop {
             return self.paint_qs_content(canvas, area);
         };
         self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height));
+        // The projected quad is narrower than the flat panel's footprint at
+        // its receded top edge, so the corners it no longer covers would
+        // otherwise still show whatever the previous frame drew there (the
+        // flat panel, if 3D mode was just switched on) rather than the real
+        // desktop background underneath -- itself 3D-projected, since 3D
+        // mode is already on here. Painted before the depth buffer below
+        // is (re-)cleared: `render_desktop_background` clears and uses
+        // that same shared buffer for its own projection, so calling it
+        // after this function's own clear would corrupt the depth test
+        // this function's own triangles depend on.
+        self.render_desktop_background(canvas);
 
         let half_width = (area.width / 2) << 16;
         // `area.height - 1`, not `area.height`: the bottom edge is meant to
@@ -2255,13 +2275,6 @@ impl Desktop {
             return self.paint_qs_content(canvas, area);
         };
         depth.clear(u16::MAX);
-        // The projected quad is narrower than the flat panel's footprint at
-        // its receded top edge, so the corners it no longer covers would
-        // otherwise still show whatever the previous frame drew there (the
-        // flat panel, if 3D mode was just switched on) rather than the real
-        // desktop background underneath -- itself 3D-projected, since 3D
-        // mode is already on here.
-        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
@@ -2420,6 +2433,12 @@ impl Desktop {
             return self.paint_center_content(canvas, area);
         };
         self.paint_center_content(&mut texture, Area::new(0, 0, area.width, area.height));
+        // As in `render_qs_3d`: paint the (3D-projected) desktop background
+        // before the depth buffer below is (re-)cleared, since
+        // `render_desktop_background` clears and uses that same shared
+        // buffer for its own projection and would otherwise corrupt the
+        // depth test this function's own triangles depend on.
+        self.render_desktop_background(canvas);
 
         let half_width = (area.width / 2) << 16;
         let half_height = ((area.height - 1) << 16) / 2;
@@ -2450,7 +2469,6 @@ impl Desktop {
             return self.paint_center_content(canvas, area);
         };
         depth.clear(u16::MAX);
-        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
@@ -2622,6 +2640,12 @@ impl Desktop {
             return self.paint_toast_content(toast, canvas, area);
         };
         self.paint_toast_content(toast, &mut texture, Area::new(0, 0, area.width, area.height));
+        // As in `render_qs_3d`: paint the (3D-projected) desktop background
+        // before the depth buffer below is (re-)cleared, since
+        // `render_desktop_background` clears and uses that same shared
+        // buffer for its own projection and would otherwise corrupt the
+        // depth test this function's own triangles depend on.
+        self.render_desktop_background(canvas);
 
         let half_width = (area.width / 2) << 16;
         let half_height = ((area.height - 1) << 16) / 2;
@@ -2652,7 +2676,6 @@ impl Desktop {
             return self.paint_toast_content(toast, canvas, area);
         };
         depth.clear(u16::MAX);
-        self.render_desktop_background(canvas);
         let mut renderer = Renderer::new(canvas);
         renderer.textured_triangle_3d(
             &mut depth,
