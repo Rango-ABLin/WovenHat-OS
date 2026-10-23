@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 31 low-RAM matrix harness - 2026-10-23
+
+Added `scripts/test-stage31-low-ram.py` and the corresponding `low-ram`
+planner suite. It runs the complete boot validation against the existing
+disposable 256 MiB regression profile for every requested 1/2/4/8/16-CPU
+configuration, preserves child command/result/serial evidence, and fails
+closed on a non-33 exit or failed child gate. `test-memory-qemu.py` now accepts
+an explicit RAM value while retaining 256 MiB as its regression default. The
+planner and focused host tests pass; the QEMU matrix is pending the next Linux
+CI run. This is low-RAM disposable-QEMU evidence only and does not lower the
+declared 4 GiB production guest floor or qualify native hardware.
+
 ## Current host audit - 2026-10-23
 
 The complete Python host test suite passed: 151 tests in 168.209 seconds.

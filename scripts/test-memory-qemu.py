@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=2)
+    parser.add_argument('--memory', default='256M',
+                        help='guest RAM size; the default preserves the low-memory regression fixture')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--legacy-irq', action='store_true')
@@ -45,7 +47,7 @@ def main():
     if firmware_vars is not None:
         vars_copy = out / 'OVMF_VARS.fd'
         shutil.copyfile(firmware_vars, vars_copy)
-    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
+    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', args.memory, '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
                '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',

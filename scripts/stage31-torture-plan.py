@@ -18,6 +18,7 @@ REQUESTED_CPUS = (1, 2, 4, 8, 16)
 SUPPORTED_CPUS = REQUESTED_CPUS
 SUITES = (
     ("memory", "scripts/test-memory-qemu.py"),
+    ("low-ram", "scripts/test-stage31-low-ram.py"),
     ("storage", "scripts/test-storage-qemu.py"),
     ("network", "scripts/test-network-qemu.py"),
     ("security", "scripts/test-security-qemu.py"),
@@ -30,6 +31,7 @@ SUITES = (
 )
 SUITE_CPU_SUPPORT = {
     "memory": REQUESTED_CPUS,
+    "low-ram": REQUESTED_CPUS,
     "storage": REQUESTED_CPUS,
     "network": REQUESTED_CPUS,
     "security": REQUESTED_CPUS,
@@ -50,7 +52,7 @@ FAULT_SCENARIOS = {
     "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "covered-qemu-abrupt-termination-and-reboot-1-2-4cpu",
     "randomized-cross-subsystem": "partial-seeded-scenario-orchestration-1cpu",
-    "whole-kernel-low-ram": "open",
+    "whole-kernel-low-ram": "covered-stage31-disposable-256m-boot-matrix",
 }
 
 
@@ -61,6 +63,8 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
             supported = cpu_count in SUITE_CPU_SUPPORT[suite]
             command = (['python', script, '--cpus', str(cpu_count)]
                        if supported else None)
+            if command is not None and suite == "low-ram":
+                command.extend(["--qemu", "<qemu>", "--firmware", "<ovmf-code>"])
             if command is not None and suite == "service-supervisor":
                 command.append("--supervisor-test")
             if command is not None and suite == "driver-restart":

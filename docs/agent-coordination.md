@@ -5387,3 +5387,12 @@ real xHCI cfg defect: restart-only shutdown helpers leaked into the
 The helpers are now gated only by `stage31-driver-restart-test`. Exact local
 verification passed Stage 13.5 Clippy and QEMU acceptance at 1/2/4 CPUs, plus
 the Stage 31 driver-restart Clippy feature gate.
+
+**Codex Stage 31 low-RAM matrix harness (Codex, 2026-10-23):** Added the
+bounded `test-stage31-low-ram.py` runner and planner `low-ram` suite. It
+executes the existing complete boot validation at the disposable 256 MiB
+profile across 1/2/4/8/16 CPUs, preserving child evidence and refusing to
+accept a non-33 or failed child result. Focused planner tests and Python syntax
+checks pass; the Linux QEMU matrix remains pending. This does not alter the
+4 GiB production floor, claim physical qualification, or imply arbitrary
+fault injection.
