@@ -21,7 +21,7 @@ GATES = (
     ("dual-monitor", "scripts/test-stage20-14b-desktop.py", ()),
     ("session", "scripts/test-stage20-15-session.py", ()),
 )
-FATAL = re.compile(r"(?im)^.*(?:kernel panic|panicked at|security violation|\\bFAILED\\b|\\bTIMEOUT\\b).*$")
+FATAL = re.compile(r"(?im)^.*(?:kernel panic|panicked at|security violation|\bFAILED\b|\bTIMEOUT\b).*$")
 
 
 def sha256(data: bytes) -> str:
