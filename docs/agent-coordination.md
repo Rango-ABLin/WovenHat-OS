@@ -5403,6 +5403,12 @@ The low-RAM gate is also now part of the seeded Stage 31 randomized schedule
 as a ninth bounded scenario. The runner still makes no arbitrary-fault or
 native-hardware claim.
 
+The expanded seeded nine-scenario campaign also passed locally at 1 CPU under
+seed `0x51A7E`, including low-RAM. Evidence is under
+`audit-artifacts/stage31-randomized-51a7e-1cpu-9scenarios/`; the runner now
+qualifies non-historical campaign directories by scenario count to preserve
+the prior eight-scenario path.
+
 **Codex current host regression after low-RAM test addition (Codex,
 2026-10-23):** The complete Python host suite passed on the current head:
 153 tests in 132.839 seconds. The low-RAM command-contract tests are included;

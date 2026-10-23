@@ -26,6 +26,12 @@ ninth bounded scenario, so its schedule cannot omit the resource-pressure
 case. This remains orchestration of bounded child gates, not arbitrary
 in-guest fault injection.
 
+The expanded seeded nine-scenario campaign passed locally at 1 CPU with seed
+`0x51A7E`, including the low-RAM gate. Evidence is retained under
+`audit-artifacts/stage31-randomized-51a7e-1cpu-9scenarios/`. The runner now
+uses a count-qualified directory for non-historical campaign sizes so an
+expanded campaign cannot overwrite the original eight-scenario report.
+
 ## Current host audit - 2026-10-23
 
 The complete Python host test suite passed: 151 tests in 168.209 seconds.

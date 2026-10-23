@@ -73,7 +73,8 @@ def run(args: argparse.Namespace) -> int:
     order = list(SCENARIOS)
     rng.shuffle(order)
     order = order[: args.count]
-    evidence = ROOT / "audit-artifacts" / f"stage31-randomized-{args.seed:x}-{args.cpus}cpu"
+    suffix = "" if args.count == 8 else f"-{args.count}scenarios"
+    evidence = ROOT / "audit-artifacts" / f"stage31-randomized-{args.seed:x}-{args.cpus}cpu{suffix}"
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / "plan.json").write_text(
         json.dumps(
