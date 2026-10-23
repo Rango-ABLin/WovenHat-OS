@@ -197,6 +197,7 @@ stage20-13-test = ["qemu-test"]
 stage20-14-test = ["qemu-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
+gfx02-test = ["qemu-test"]
 # Standalone proof of concept: hello-gui --3d-chrome-demo.
 stage20-16-test = ["qemu-test"]
 # Stage 20.17: the 3D desktop mode's Quick Settings panel.

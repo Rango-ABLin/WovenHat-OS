@@ -4217,6 +4217,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S20.14B] desktop across monitors: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "gfx02-test")]
+    {
+        if !graphics_abi::cpu_renderer_self_test() {
+            serial::write_line(format_args!("[GFX-02] CPU renderer: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[GFX-02] CPU renderer: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-14-test")]
     {
         if !virtio_gpu::self_test() {
