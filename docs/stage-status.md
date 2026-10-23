@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 31 current-head packet-corruption boundary - 2026-10-23
+
+The deterministic malformed ICMPv6 checksum/NDP ingress boundary passed on the
+current tree at 1/2/4 CPUs. Evidence is retained under
+`audit-artifacts/stage31-packet-corruption-{1,2,4}cpu/`. The result confirms
+bounded malformed-packet rejection and continued guest completion. It remains
+partial network-fault coverage, not randomized corruption of every receive
+protocol, native networking qualification, or production readiness.
+
 ## Stage 31 current-head process-crash containment - 2026-10-23
 
 The dedicated Ring-3 unmapped-write probe passed on the current tree at 1/2/4

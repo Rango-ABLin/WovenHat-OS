@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head Stage 31 packet-corruption boundary (2026-10-23)
+
+The deterministic malformed ICMPv6 checksum/NDP ingress boundary passed on the
+current tree at 1/2/4 CPUs. Evidence is retained under
+`audit-artifacts/stage31-packet-corruption-{1,2,4}cpu/`. This is bounded
+malformed-packet rejection coverage only; randomized all-protocol corruption,
+native networking, and independent Claude review remain unclaimed.
+
 ## Codex - current-head Stage 31 process-crash containment (2026-10-23)
 
 The dedicated Ring-3 unmapped-write probe passed on the current tree at 1/2/4
