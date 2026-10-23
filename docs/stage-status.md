@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 28 installer-plan capacity alignment - 2026-10-23
+
+Aligned the graphical installer's validated snapshot parser with the existing
+installer IPC contract: plans now accept the full bounded 192-byte request
+capacity instead of an accidental 128-byte frontend limit. Added boundary
+tests for the maximum accepted and first rejected plan sizes. Installer host
+tests pass (5 tests), and warning-denying release Clippy passes for
+`x86_64-unknown-none`. The parser remains bounded and does not grant the GUI
+storage authority.
+
 ## CI maturity gates wired - 2026-10-23
 
 Added dedicated Linux workflow jobs for the current release blockers. CI now

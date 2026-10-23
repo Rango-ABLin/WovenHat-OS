@@ -9,6 +9,8 @@
 
 pub const MAX_SNAPSHOT: usize = 256;
 pub const MAX_TEXT: usize = 128;
+/// Must match the bounded installer IPC request payload.
+pub const MAX_PLAN: usize = 192;
 pub const MAX_ERROR: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,7 +101,7 @@ impl<'a> State<'a> {
             match key {
                 b"screen" => state.screen = parse_screen(value)?,
                 b"target" => state.target = bounded(value, MAX_TEXT)?,
-                b"plan" => state.plan = bounded(value, MAX_TEXT)?,
+                b"plan" => state.plan = bounded(value, MAX_PLAN)?,
                 b"settings" => state.settings = bounded(value, MAX_TEXT)?,
                 b"progress" => state.progress = parse_progress(value)?,
                 b"confirmed" => state.confirmed = parse_bool(value)?,
@@ -227,5 +229,26 @@ mod tests {
             State::parse(b"screen=welcome;plan=validated;validated=1;progress=101"),
             Err(ParseError::InvalidProgress)
         );
+    }
+
+    #[test]
+    fn accepts_the_full_bounded_ipc_plan_capacity() {
+        let mut snapshot = [0_u8; 256];
+        let prefix = b"screen=welcome;validated=1;plan=";
+        snapshot[..prefix.len()].copy_from_slice(prefix);
+        snapshot[prefix.len()..prefix.len() + super::MAX_PLAN].fill(b'x');
+        let length = prefix.len() + super::MAX_PLAN;
+        let state = State::parse(&snapshot[..length]).expect("maximum plan is valid");
+        assert_eq!(state.plan.len(), super::MAX_PLAN);
+    }
+
+    #[test]
+    fn rejects_a_plan_above_the_ipc_capacity() {
+        let mut snapshot = [0_u8; 256];
+        let prefix = b"screen=welcome;validated=1;plan=";
+        snapshot[..prefix.len()].copy_from_slice(prefix);
+        snapshot[prefix.len()..prefix.len() + super::MAX_PLAN + 1].fill(b'x');
+        let length = prefix.len() + super::MAX_PLAN + 1;
+        assert_eq!(State::parse(&snapshot[..length]), Err(ParseError::InvalidText));
     }
 }

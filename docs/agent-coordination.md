@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 28 plan-capacity alignment (2026-10-23)
+
+Aligned `apps/woven-installer`'s validated snapshot parser with the existing
+installer IPC `MAX_PLAN_BYTES` contract: the frontend now accepts 192 bytes,
+with explicit maximum and over-capacity tests. Host tests (5) and
+warning-denying release Clippy for `x86_64-unknown-none` pass. The GUI remains
+bounded and non-privileged; no Claude-owned changes were overwritten.
+
 ## Codex - maturity CI gates (2026-10-23)
 
 Added Linux workflow jobs that enforce the Stage 28 disposable pipeline,
