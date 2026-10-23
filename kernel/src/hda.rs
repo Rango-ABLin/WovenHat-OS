@@ -1276,11 +1276,16 @@ pub fn init_at(device: pci::Device) -> Result<ControllerSummary, InitError> {
 /// Take the HDA controller only after its DMA engines and command rings have
 /// been stopped. The controller object then drops outside the global lock.
 pub fn shutdown() -> Result<(), InitError> {
-    let controller = CONTROLLER.lock().take();
-    let Some(mut controller) = controller else {
+    let Some(mut controller) = CONTROLLER.lock().take() else {
         return Ok(());
     };
-    controller.shutdown_hardware()
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
 }
 
 pub fn discover_codec() -> Result<CodecSummary, InitError> {

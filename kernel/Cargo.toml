@@ -129,6 +129,7 @@ stage31-process-crash-test = ["qemu-test"]
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
 stage31-service-supervisor-test = ["system-apps"]
+stage31-driver-restart-test = []
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.

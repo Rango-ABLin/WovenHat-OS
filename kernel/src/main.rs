@@ -1734,6 +1734,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // manager; a missing or failing device never stops the boot.
         let driver_report = drivers::bring_up();
 
+        #[cfg(feature = "stage31-driver-restart-test")]
+        {
+            if !drivers::restart_self_test() {
+                qemu_test_exit_failure();
+            }
+            qemu_test_exit_success();
+        }
+
         // Start live-log setup as soon as the USB controller and attached
         // storage have been brought up. Its I/O remains on a service task,
         // overlapping display, filesystem and session setup without blocking
@@ -5971,7 +5979,11 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     matches!(check, Some(0) | Some(4))
 }
 
-#[cfg(any(feature = "qemu-test", feature = "stage31-service-supervisor-test"))]
+#[cfg(any(
+    feature = "qemu-test",
+    feature = "stage31-service-supervisor-test",
+    feature = "stage31-driver-restart-test"
+))]
 fn qemu_test_exit_success() {
     unsafe {
         core::arch::asm!(
@@ -5986,7 +5998,11 @@ fn qemu_test_exit_success() {
     }
 }
 
-#[cfg(any(feature = "qemu-test", feature = "stage31-service-supervisor-test"))]
+#[cfg(any(
+    feature = "qemu-test",
+    feature = "stage31-service-supervisor-test",
+    feature = "stage31-driver-restart-test"
+))]
 fn qemu_test_exit_failure() -> ! {
     // QEMU isa-debug-exit maps value 0x11 to host exit status 35. This keeps
     // acceptance failures fail-fast instead of parking in halt() until the

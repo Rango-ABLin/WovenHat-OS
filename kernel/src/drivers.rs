@@ -15,10 +15,12 @@ use crate::{
     driver::{self, PciMatch},
     hal::pci,
 };
+#[cfg(feature = "stage31-driver-restart-test")]
 use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Owner token for boot-bound drivers ("WD" for WovenDriver, then 13.12).
 const OWNER: u32 = 0x5744_0d0c;
+#[cfg(feature = "stage31-driver-restart-test")]
 static NEXT_OWNER: AtomicU32 = AtomicU32::new(OWNER.wrapping_add(1));
 
 /// What happened to one driver.
@@ -41,6 +43,7 @@ pub enum Outcome {
 /// Why a controller restart did not complete. A failed restart never silently
 /// rebinds a device with an unquiesced DMA owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(feature = "stage31-driver-restart-test")]
 pub enum RestartError {
     UnknownDriver,
     NotBound,
@@ -71,6 +74,7 @@ struct Spec {
     kind: DeviceKind,
     matcher: PciMatch,
     init: fn(pci::Device) -> Result<u64, ()>,
+    #[cfg(feature = "stage31-driver-restart-test")]
     shutdown: fn() -> Result<(), ()>,
 }
 
@@ -90,6 +94,7 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x08, Some(0x02)),
         init: |device| crate::nvme::init_at(device).map_err(|error| init_error("nvme0", error)),
+        #[cfg(feature = "stage31-driver-restart-test")]
         shutdown: || crate::nvme::shutdown().map_err(|_| ()),
     },
     Spec {
@@ -97,6 +102,7 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x06, Some(0x01)),
         init: |device| crate::ahci::init_at(device).map_err(|error| init_error("ahci0", error)),
+        #[cfg(feature = "stage31-driver-restart-test")]
         shutdown: || crate::ahci::shutdown().map_err(|_| ()),
     },
     Spec {
@@ -131,6 +137,7 @@ const SPECS: [Spec; COUNT] = [
             }
             Ok(u64::from(ports))
         },
+        #[cfg(feature = "stage31-driver-restart-test")]
         shutdown: || Err(()),
     },
     Spec {
@@ -153,6 +160,7 @@ const SPECS: [Spec; COUNT] = [
             }
             Ok(u64::from(summary.output_streams))
         },
+        #[cfg(feature = "stage31-driver-restart-test")]
         shutdown: || crate::hda::shutdown().map_err(|_| ()),
     },
 ];
@@ -263,6 +271,7 @@ pub fn bring_up() -> Report {
     report
 }
 
+#[cfg(feature = "stage31-driver-restart-test")]
 fn next_owner() -> u32 {
     loop {
         let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
@@ -278,6 +287,7 @@ fn next_owner() -> u32 {
 /// a generation that has already been recycled. xHCI deliberately returns
 /// `Unsupported` until its HID worker, waiter, and rings have an equivalent
 /// teardown protocol.
+#[cfg(feature = "stage31-driver-restart-test")]
 pub fn restart(name: &'static str) -> Result<Outcome, RestartError> {
     let spec = SPECS
         .iter()
@@ -311,6 +321,28 @@ pub fn restart(name: &'static str) -> Result<Outcome, RestartError> {
             Err(RestartError::Init)
         }
     }
+}
+
+#[cfg(feature = "stage31-driver-restart-test")]
+pub fn restart_self_test() -> bool {
+    for name in ["nvme0", "ahci0", "hda0"] {
+        match restart(name) {
+            Ok(Outcome::Ready(value)) => crate::serial::write_line(format_args!(
+                "[S31 DRIVER] {} restart: PASSED value={}", name, value
+            )),
+            result => {
+                crate::serial::write_line(format_args!(
+                    "[S31 DRIVER] {} restart: FAILED result={:?}",
+                    name, result
+                ));
+                return false;
+            }
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[S31 DRIVER] controller-owned restart: PASSED"
+    ));
+    true
 }
 
 fn log(driver: &Driver) {

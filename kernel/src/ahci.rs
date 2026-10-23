@@ -382,11 +382,16 @@ pub fn with_controller<R>(operation: impl FnOnce(&mut AhciDisk) -> R) -> Option<
 /// Take the controller only after the AHCI engine has stopped. The owned DMA
 /// pages are dropped after the global controller lock is released.
 pub fn shutdown() -> Result<(), InitError> {
-    let disk = CONTROLLER.lock().take();
-    let Some(mut disk) = disk else {
+    let Some(mut disk) = CONTROLLER.lock().take() else {
         return Ok(());
     };
-    disk.shutdown_hardware()
+    match disk.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            CONTROLLER.lock().replace(disk);
+            Err(error)
+        }
+    }
 }
 
 fn find_controller() -> Option<pci::Device> {

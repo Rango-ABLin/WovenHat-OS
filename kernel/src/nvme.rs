@@ -425,11 +425,19 @@ pub fn with_controller<R>(operation: impl FnOnce(&mut NvmeController) -> R) -> O
 /// returned object is dropped outside the global controller lock so its DMA
 /// pages can safely return to the frame allocator.
 pub fn shutdown() -> Result<(), InitError> {
-    let controller = CONTROLLER.lock().take();
-    let Some(mut controller) = controller else {
+    let Some(mut controller) = CONTROLLER.lock().take() else {
         return Ok(());
     };
-    controller.shutdown_hardware()
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // Keep the binding and controller object together on a failed
+            // quiescence attempt; dropping DMA pages while hardware may still
+            // be active would be unsafe.
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
 }
 
 pub fn probe() -> bool {
