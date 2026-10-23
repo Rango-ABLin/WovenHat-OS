@@ -1761,8 +1761,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         // A virtio-gpu becomes the desktop display when available; multiple
         // heads are arranged side by side and a single head is also valid.
-        if let Ok(heads) = compositor::attach_gpu_outputs() {
-            serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
+        match compositor::attach_gpu_outputs() {
+            Ok(heads) => serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads)),
+            Err(error) => serial::write_line(format_args!("[DISPLAY] virtio-gpu unavailable: {:?}", error)),
         }
         boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
@@ -4249,13 +4250,25 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[GFX-02] CPU renderer: PASSED"));
         qemu_test_exit_success();
     }
-    #[cfg(feature = "stage20-14-test")]
+    #[cfg(all(
+        feature = "stage20-14-test",
+        not(feature = "stage20-14-single-test")
+    ))]
     {
         if !virtio_gpu::self_test() {
             serial::write_line(format_args!("[S20.14] two monitors: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S20.14] two monitors: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-14-single-test")]
+    {
+        if !compositor::single_output_self_test() {
+            serial::write_line(format_args!("[S20.14S] single-output GPU: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.14S] single-output GPU: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage24-59-test")]

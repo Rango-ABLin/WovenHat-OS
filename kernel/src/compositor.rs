@@ -399,6 +399,81 @@ pub fn attach_gpu_outputs() -> Result<usize, Error> {
     Ok(heads)
 }
 
+/// Stage 20.14S acceptance: exercise the production compositor through a
+/// single-output virtio-GPU. The host harness captures the resulting scanout
+/// and verifies the quadrant colours independently.
+#[cfg(feature = "stage20-14-single-test")]
+pub fn single_output_self_test() -> bool {
+    use crate::display::rgb;
+
+    fn step(name: &str, ok: bool) -> bool {
+        crate::serial::write_line(format_args!(
+            "[S20.14S] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    let Some((heads, width, height)) = STATE.lock().as_ref().and_then(|state| {
+        state
+            .gpu
+            .as_ref()
+            .map(|outputs| (outputs.heads, outputs.width, outputs.height))
+    }) else {
+        return step("single-output GPU attached", false);
+    };
+    if !step(
+        "single-output GPU attached",
+        heads == 1 && width > 0 && height > 0,
+    ) {
+        return false;
+    }
+
+    let mid_x = (width / 2) as i32;
+    let mid_y = (height / 2) as i32;
+    let half_width = width as usize / 2;
+    let half_height = height as usize / 2;
+    let right_width = width as usize - half_width;
+    let bottom_height = height as usize - half_height;
+    {
+        let mut guard = STATE.lock();
+        let Some(state) = guard.as_mut() else {
+            return step("compositor state available", false);
+        };
+        let bounds = state.surface.bounds();
+        state.surface.fill_rect(bounds, rgb(16, 20, 28));
+        state
+            .surface
+            .fill_rect(Rect::new(0, 0, half_width, half_height), rgb(208, 64, 64));
+        state.surface.fill_rect(
+            Rect::new(mid_x, 0, right_width, half_height),
+            rgb(64, 208, 112),
+        );
+        state.surface.fill_rect(
+            Rect::new(0, mid_y, half_width, bottom_height),
+            rgb(64, 112, 224),
+        );
+        state.surface.fill_rect(
+            Rect::new(mid_x, mid_y, right_width, bottom_height),
+            rgb(224, 208, 64),
+        );
+        state.damage.add(bounds);
+    }
+    if !step("display ownership acquired", activate_display().is_ok()) {
+        return false;
+    }
+    let presented = present().is_ok();
+    crate::serial::write_line(format_args!(
+        "[S20.14S] ready for capture width={} height={}",
+        width, height
+    ));
+    if !step("single-output frame presented", presented) {
+        return false;
+    }
+    true
+}
+
 /// Whether everything drawn has reached the display.
 #[cfg(any(feature = "stage20-14b-test", feature = "stage24-59-test"))]
 pub fn presented() -> bool {
