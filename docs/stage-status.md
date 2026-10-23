@@ -1,5 +1,28 @@
 # Stage status
 
+## Full release validation rerun - 2026-10-23
+
+The clean authoritative release validator completed successfully. Its report
+is `target/release-validation/results.json`. All recorded checks passed:
+warning-denying kernel and host Clippy, the host compile/test suite, debug
+QEMU acceptance for memory/storage/network on 1/2/4 CPUs plus legacy PIC,
+release memory/storage/network gates, release image construction, shell
+smoke, application linting, production application boot on 1/2/4 CPUs,
+system-app catalog boot, package transactions, AI provider/security/action
+gates, and system-app boot on 1/2/4 CPUs. The previously observed 4-CPU
+storage timeout did not reproduce in this clean run, but no source-level root
+cause fix has been established, so storage flakiness remains a release risk
+until repeated qualification demonstrates stability.
+
+The validator regenerated current serial evidence under `target/` and passed
+without changing the shared Claude files. An earlier recovery step used
+`cargo clean` after the first release build ran out of space; that removed
+ignored historical `target/` logs, so those older artifacts are not claimed
+as preserved. No physical disk, TPM, firmware variables, removable media, or
+native hardware qualification was attempted. Stage 29 physical qualification,
+Stage 31 randomized full-stack fault/recovery coverage, and the independent
+Claude review remain open; production readiness is not claimed.
+
 ## Full-system maturity Cycle 0 - 2026-10-22
 
 The full-system mandate was read and a protected audit branch was created at

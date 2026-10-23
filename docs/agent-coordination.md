@@ -1,5 +1,22 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Clean release validation rerun (2026-10-23)
+
+The authoritative `scripts/test-release.py` run completed with every recorded
+gate passing. This includes warning-denying kernel/host Clippy, host tests,
+debug memory/storage/network acceptance on 1/2/4 CPUs, release memory/storage/
+network gates, release build, shell smoke, application lint and boot checks,
+system-app catalog and boot checks, package transactions, and the AI gates.
+Report: `target/release-validation/results.json`.
+
+The earlier 4-CPU storage timeout did not reproduce, but because no source
+root-cause fix was identified it remains a flakiness risk requiring repeated
+qualification. A disk-space recovery `cargo clean` removed ignored historical
+`target/` evidence; current regenerated evidence is the only evidence claimed
+from this run. Claude's dirty files remain untouched. Physical hardware/TPM/
+secure-boot qualification, randomized full-stack recovery, and the independent
+Claude review are still pending; no production-readiness claim is made.
+
 ## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
 
 Read the seven-page full-system maturity mandate and created protected branch
