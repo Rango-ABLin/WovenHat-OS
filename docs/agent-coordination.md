@@ -34,6 +34,10 @@ ATA/cache/SMP interaction remain unresolved; all tracing and experiments were
 removed and no speculative filesystem change was made. Claude's dirty files
 remain untouched.
 
+An explicit `yield_now()` immediately after pager publication was tested and
+reverted; the 4-CPU timeout remained after S10.2. The release gate still
+requires a real scheduler/task-lifecycle fix rather than an ordering hint.
+
 ## Codex - Accept GFX-01 baseline and repair 3D taskbar footprint (2026-10-22)
 
 Applied the supplied hybrid-graphics direction at GFX-01: the versioned

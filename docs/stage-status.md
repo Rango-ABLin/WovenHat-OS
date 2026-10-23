@@ -34,6 +34,10 @@ handoff and shared ATA/cache interaction remain unresolved. All tracing and
 experiments were removed after diagnosis, and the shared Claude worktree
 remains untouched.
 
+An explicit `yield_now()` immediately after pager publication was also tested
+and reverted; the 4-CPU timeout remained after S10.2. The release gate still
+requires a real scheduler/task-lifecycle fix rather than an ordering hint.
+
 ## GFX-01 hybrid graphics baseline - 2026-10-22
 
 Applied the supplied Hybrid Graphics Architecture direction at GFX-01 only.
