@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 runner firmware propagation (2026-10-23)
+
+Repaired the seeded Stage 31 runner boundary so every QEMU child receives an
+explicit `--qemu` and OVMF `--firmware` path. Packet-corruption now forwards
+those paths to its network child, and the update-service wrapper accepts an
+explicit firmware path. This closes a hosted-runner reproducibility defect;
+the randomized suite remains partial coverage rather than arbitrary in-guest
+fault injection or native hardware qualification. Refreshed stale planner
+assertions to match the committed eight-suite plan.
+
 ## Codex - Stage 28 GUI install request wiring (2026-10-23)
 
 Wired the graphical installer’s explicitly confirmed progress state to the

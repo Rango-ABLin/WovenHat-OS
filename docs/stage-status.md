@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 31 runner firmware propagation and planner-test repair - 2026-10-23
+
+The seeded Stage 31 orchestrator now requires an explicit OVMF CODE path and
+forwards the selected QEMU and firmware paths through memory, process-crash,
+packet-corruption, sudden-shutdown, and service-restart children. This makes
+the matrix reproducible on hosted runners whose firmware is not beside the
+QEMU executable. The packet-corruption and update-service wrappers now accept
+the same explicit paths. Focused planner tests were refreshed to match the
+committed eight-suite, five-CPU-profile plan. A Stage 28 disposable acceptance
+run passed after reclaiming abandoned temporary output; the host still has
+limited free space, so no large rebuild was started.
+
 ## Stage 28 confirmed GUI-to-service install request - 2026-10-23
 
 The graphical installer now submits a bounded `Operation::Install` request
