@@ -14351,7 +14351,6 @@ fn stage20_2_self_test() -> bool {
     const TASKBAR: u32 = rgb(20, 24, 32);
     const ACCENT: u32 = rgb(90, 140, 220);
     const ACTIVE: u32 = rgb(70, 120, 210);
-    const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
     const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
     const TOAST_FILL: u32 = rgb(30, 34, 46);
     const RED: u32 = rgb(200, 60, 60);
@@ -14474,6 +14473,15 @@ fn stage20_2_self_test() -> bool {
         projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
     }
 
+    /// Text rendered with the kernel's font into a `width`×`height` mask at
+    /// offset `(dx, dy)`: white where a glyph pixel is set, UNSET elsewhere.
+    fn text_mask(width: usize, height: usize, dx: i32, dy: i32, text: &str) -> Surface {
+        let mut mask = Surface::new(width, height);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(dx, dy, text, WHITE);
+        mask
+    }
     fn region(
         x0: i32,
         y0: i32,
@@ -14483,28 +14491,6 @@ fn stage20_2_self_test() -> bool {
     ) -> bool {
         (y0..y0 + height)
             .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
-    }
-    /// A `width`×`height` box filled with `fill`, with `text` in white at
-    /// `(dx, dy)` inside it, as the kernel renders it, compared with the
-    /// screen at `(x, y)`.
-    fn labelled(
-        origin: (i32, i32),
-        size: (i32, i32),
-        offset: (i32, i32),
-        text: &str,
-        fill: u32,
-    ) -> bool {
-        let ((x, y), (width, height), (dx, dy)) = (origin, size, offset);
-        let mut mask = Surface::new(width as usize, height as usize);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(dx, dy, text, WHITE);
-        region(x, y, width, height, |px, py| {
-            match mask.pixel(px - x, py - y) {
-                Some(WHITE) => WHITE,
-                _ => fill,
-            }
-        })
     }
     /// A title bar: fill, title text, and the close control at its right
     /// (Stage 20.4).
@@ -14591,6 +14577,50 @@ fn stage20_2_self_test() -> bool {
     let (toast_x, toast_y) = (width - 188, 8);
     serial::write_line(format_args!("[S20.2] desktop {}x{}", width, height));
 
+    // Taskbar entries for open windows are part of `render_taskbar_3d`'s
+    // projected texture, same as the start button/workspace switcher/QS
+    // button, so verifying them (unlike the tray, which is blitted flat on
+    // top, and unlike a title bar's uniform fill, see `render_title_3d`)
+    // must go through the shared `expected_taskbar_3d`/`flat_taskbar_3d`.
+    let button_mask = text_mask(44, 16, 13, 5, "Woven");
+    let qs_mask = text_mask(16, 16, 5, 5, "Q");
+    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
+        let digit = [b'1' + index as u8];
+        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
+    });
+    let alpha_mask = text_mask(80, 16, 4, 5, "Alpha");
+    let beta_mask = text_mask(80, 16, 4, 5, "Beta");
+    let entry_sample = |entries: &[TaskbarEntryMask3D], x: i32, y: i32| -> bool {
+        compositor::pixel(x, y)
+            == Ok(expected_taskbar_3d(
+                x,
+                y,
+                width,
+                top,
+                24,
+                |x, y| {
+                    flat_taskbar_3d(
+                        x,
+                        y,
+                        width,
+                        top,
+                        &button_mask,
+                        &ws_digit_masks,
+                        0,
+                        &qs_mask,
+                        false,
+                        entries,
+                        None,
+                        |x, y| taskbar(x, y),
+                    )
+                },
+                |x, y| expected_wallpaper(x, y, width, height),
+            ))
+    };
+    let entry_region = |entries: &[TaskbarEntryMask3D], x0: i32, y0: i32, w: i32, h: i32| -> bool {
+        (y0..y0 + h).all(|y| (x0..x0 + w).all(|x| entry_sample(entries, x, y)))
+    };
+
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -14619,7 +14649,8 @@ fn stage20_2_self_test() -> bool {
             })
     });
     let entry_a = until(500, || {
-        labelled(entry(0), (80, 16), (4, 5), "Alpha", ACTIVE)
+        let alpha_active = [TaskbarEntryMask3D { mask: &alpha_mask, active: true }];
+        entry_region(&alpha_active, entry(0).0, entry(0).1, 80, 16)
     });
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
     let toast = until(500, || {
@@ -14667,8 +14698,14 @@ fn stage20_2_self_test() -> bool {
             compositor::pixel(45, 45) == Ok(RED)
                 && title_bar((64, 50), 100, "Beta", ACTIVE)
                 && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE)
-                && labelled(entry(0), (80, 16), (4, 5), "Alpha", ENTRY_INACTIVE)
-                && labelled(entry(1), (80, 16), (4, 5), "Beta", ACTIVE)
+                && {
+                    let both = [
+                        TaskbarEntryMask3D { mask: &alpha_mask, active: false },
+                        TaskbarEntryMask3D { mask: &beta_mask, active: true },
+                    ];
+                    entry_region(&both, entry(0).0, entry(0).1, 80, 16)
+                        && entry_region(&both, entry(1).0, entry(1).1, 80, 16)
+                }
         });
     if !step("window B opens on top and takes focus", stacked) {
         return false;
@@ -14676,7 +14713,7 @@ fn stage20_2_self_test() -> bool {
     if !step(
         "toast expires and the desktop shows through",
         until(1000, || {
-            region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))
+            region(toast_x, toast_y, 180, 22, |x, y| expected_wallpaper(x, y, width, height))
         }),
     ) {
         return false;
@@ -14714,11 +14751,12 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let gone = until(1000, || {
-        compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+        compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
     }) && until(500, || {
-        region(tray_x, tray_y, 16, 16, taskbar)
-            && labelled(entry(0), (80, 16), (4, 5), "Beta", ACTIVE)
-            && region(entry(1).0, entry(1).1, 80, 16, taskbar)
+        let beta_active = [TaskbarEntryMask3D { mask: &beta_mask, active: true }];
+        entry_region(&beta_active, tray_x, tray_y, 16, 16)
+            && entry_region(&beta_active, entry(0).0, entry(0).1, 80, 16)
+            && entry_region(&beta_active, entry(1).0, entry(1).1, 80, 16)
             && title_bar((64, 50), 100, "Beta", ACTIVE)
             && compositor::pixel(150, 100) == Ok(BLUE)
     });
@@ -14739,8 +14777,8 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let empty = until(1000, || {
-        compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
-            && region(entry(0).0, entry(0).1, 80, 16, taskbar)
+        compositor::pixel(150, 100) == Ok(expected_wallpaper(150, 100, width, height))
+            && entry_region(&[], entry(0).0, entry(0).1, 80, 16)
     });
     if !step("desktop empty again", empty) {
         return false;
