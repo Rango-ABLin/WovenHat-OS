@@ -36,7 +36,7 @@ SUITE_CPU_SUPPORT = {
     "shell": REQUESTED_CPUS,
     "recovery": (1, 2, 4),
     "sudden-shutdown": (1, 2, 4),
-    "update-service": (1, 2, 4),
+    "update-service": REQUESTED_CPUS,
     "service-supervisor": REQUESTED_CPUS,
     "driver-restart": REQUESTED_CPUS,
 }

@@ -5336,6 +5336,12 @@ guests and the complete 11-application catalog. The torture planner now
 supports service-supervisor jobs across 1/2/4/8/16 CPUs; separate recovery and
 update-service rows remain blocked at 8/16 until their harnesses are extended.
 
+**Codex Stage 31 high-SMP update-service qualification (Codex, 2026-10-23):**
+The signed update-service harness now accepts 1/2/4/8/16 CPUs and uses the
+declared 4 GiB guest floor. Fresh 8- and 16-CPU runs passed with exit 33, and
+the torture planner now exposes those profiles. The separate recovery and
+sudden-shutdown harnesses remain limited to 1/2/4 CPUs.
+
 **Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
 sequential repeated-boot harness completed ten successful memory boots at each
 requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,

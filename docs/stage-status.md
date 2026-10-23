@@ -73,6 +73,11 @@ catalog; the Stage 31 planner now exposes service-supervisor jobs across
 1/2/4/8/16 CPUs. Recovery and update-service rows remain blocked at 8/16
 because those separate harnesses have not been extended.
 
+The signed update-service restart slice has now been extended to the same
+1/2/4/8/16-CPU matrix and rerun at 8 and 16 CPUs. Both passed with 4 GiB
+guests and exit 33. The planner now exposes these profiles; the separate
+sudden-shutdown/recovery harness remains limited to 1/2/4 CPUs.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates

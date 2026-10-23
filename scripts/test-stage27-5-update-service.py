@@ -1,4 +1,4 @@
-"""Run the bounded privileged update-service acceptance on 1/2/4 CPUs."""
+"""Run the bounded privileged update-service acceptance on 1/2/4/8/16 CPUs."""
 import argparse
 import os
 import shutil
@@ -9,7 +9,7 @@ from pathlib import Path
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument(
@@ -65,7 +65,7 @@ def main() -> int:
     serial = out / "serial.log"
     serial.write_text("")
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "256M",
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "4G",
         "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
