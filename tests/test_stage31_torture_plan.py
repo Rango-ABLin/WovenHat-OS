@@ -13,31 +13,31 @@ SPEC.loader.exec_module(MODULE)
 class Stage31TorturePlanTests(unittest.TestCase):
     def test_default_plan_covers_all_suites_and_cpu_profiles(self):
         plan = MODULE.build_plan()
-        self.assertEqual(len(plan["jobs"]), 40)
+        self.assertEqual(len(plan["jobs"]), 45)
         self.assertEqual(MODULE.validate_plan(plan), [])
 
     def test_eight_and_sixteen_cpu_jobs_are_pending(self):
         plan = MODULE.build_plan()
         expanded = [job for job in plan["jobs"] if job["cpus"] in (8, 16)]
-        self.assertEqual(len(expanded), 16)
+        self.assertEqual(len(expanded), 18)
         self.assertEqual(sum(job["status"] == "pending" for job in expanded), 10)
-        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 6)
+        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 8)
         self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 10)
 
     def test_lifecycle_gates_are_blocked_at_8_and_16_cpus(self):
         plan = MODULE.build_plan()
         lifecycle = [
             job for job in plan["jobs"]
-            if job["suite"] in ("recovery", "update-service")
+            if job["suite"] in ("recovery", "update-service", "service-supervisor")
         ]
-        self.assertEqual(len(lifecycle), 10)
+        self.assertEqual(len(lifecycle), 15)
         self.assertTrue(all(job["status"] == "pending" for job in lifecycle if job["cpus"] <= 4))
         self.assertTrue(all(job["status"] == "blocked" for job in lifecycle if job["cpus"] >= 8))
 
     def test_supported_jobs_are_pending_with_commands(self):
         plan = MODULE.build_plan((1, 4))
         jobs = plan["jobs"]
-        self.assertEqual(len(jobs), 16)
+        self.assertEqual(len(jobs), 18)
         self.assertTrue(all(job["status"] == "pending" for job in jobs))
         self.assertTrue(all(isinstance(job["command"], list) for job in jobs))
 
@@ -59,7 +59,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
             "partial-wovenfs-host-stage14-checksum-and-seeded-scenario-orchestration",
         )
         self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
-        self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-restart-1-2-4cpu")
+        self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-and-supervisor-recovery-1-2-4cpu")
         self.assertEqual(scenarios["packet-corruption"], "partial-stage31-checksum-boundary")
         self.assertEqual(scenarios["driver-crash"], "partial-stage13-2-explicit-rebind")
         self.assertEqual(scenarios["process-crash"], "covered-stage31-qemu-process-crash")

@@ -25,6 +25,7 @@ SUITES = (
     ("recovery", "scripts/test-stage27-5-recovery.py"),
     ("sudden-shutdown", "scripts/test-sudden-shutdown-qemu.py"),
     ("update-service", "scripts/test-stage27-5-update-service.py"),
+    ("service-supervisor", "scripts/test-shell-qemu.py"),
 )
 SUITE_CPU_SUPPORT = {
     "memory": REQUESTED_CPUS,
@@ -35,12 +36,13 @@ SUITE_CPU_SUPPORT = {
     "recovery": (1, 2, 4),
     "sudden-shutdown": (1, 2, 4),
     "update-service": (1, 2, 4),
+    "service-supervisor": (1, 2, 4),
 }
 FAULT_SCENARIOS = {
     "network-loss": "covered-emulated-virtio-link-flap",
     "filesystem-disk-full": "covered-wovenfs-host",
     "filesystem-randomized-crash": "covered-wovenfs-host",
-    "service-lifecycle": "covered-signed-update-service-restart-1-2-4cpu",
+    "service-lifecycle": "covered-signed-update-service-and-supervisor-recovery-1-2-4cpu",
     "packet-corruption": "partial-stage31-checksum-boundary",
     "driver-crash": "partial-stage13-2-explicit-rebind",
     "process-crash": "covered-stage31-qemu-process-crash",
@@ -55,14 +57,17 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
     for cpu_count in cpus:
         for suite, script in SUITES:
             supported = cpu_count in SUITE_CPU_SUPPORT[suite]
+            command = (['python', script, '--cpus', str(cpu_count)]
+                       if supported else None)
+            if command is not None and suite == "service-supervisor":
+                command.append("--supervisor-test")
             jobs.append({
                 "id": f"{suite}-{cpu_count}cpu",
                 "suite": suite,
                 "cpus": cpu_count,
                 "status": "pending" if supported else "blocked",
                 "reason": None if supported else "CPU profile is not supported by this suite's harness",
-                "command": (["python", script, "--cpus", str(cpu_count)]
-                            if supported else None),
+                "command": command,
                 "evidence": None,
             })
     return {

@@ -16,6 +16,10 @@ addition to the existing signed update-service restart scenario. The runner
 still explicitly describes itself as bounded scenario orchestration rather
 than arbitrary in-guest fault injection.
 
+The auditable Stage 31 torture planner now exposes a separate
+`service-supervisor` suite for the supported 1/2/4-CPU profiles and marks the
+8/16-CPU rows pending/blocked according to the existing harness limits.
+
 ## Release gate covers production service supervisor - 2026-10-23
 
 Updated `scripts/test-release.py` so the authoritative release chain runs

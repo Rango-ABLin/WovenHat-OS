@@ -5262,3 +5262,6 @@ or native hardware qualification.
 The seeded Stage 31 orchestrator now schedules this supervisor acceptance as
 its own scenario alongside the older signed update-service restart slice; it
 still does not claim arbitrary in-guest fault injection.
+
+The formal Stage 31 torture planner now has a separate `service-supervisor`
+suite and contract tests for its 1/2/4-CPU support and 8/16-CPU blocked rows.
