@@ -127,6 +127,11 @@ def run_acceptance() -> dict[str, Any]:
             raise AssertionError("file-backed executor success was not verified")
         executor_manifest_digest = hashlib.sha256(_canonical(executor_success["manifest"])).hexdigest()
         executor_image_digest = _digest(executor_image)
+        # The executor creates same-directory backup and staging files during
+        # rollback probes.  Release the completed success fixture before
+        # creating the next 64 MiB image so the disposable gate remains
+        # runnable under its bounded-resource contract on a nearly-full host.
+        executor_image.unlink()
 
         executor_rollback_image = root / "executor-rollback.img"
         executor_rollback_image.write_bytes(image.read_bytes())

@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 28 bounded-resource acceptance repair - 2026-10-24
+
+The disposable Stage 28 harness now releases its completed success fixture
+before creating rollback fixtures. This preserves the existing success,
+rollback, digest, settings, and deterministic-output assertions while avoiding
+an unnecessary second 64 MiB image during the rollback phase. The focused
+Stage 28 tests pass, and the complete host suite passes 166/166 on the current
+working tree. This is a harness resource-discipline fix; it does not expand
+physical installation or bootability claims.
+
 ## P0-03/P0-07 current-head release validation with storage faults - 2026-10-24
 
 The authoritative release chain passed all 158 checks on commit `76a3b6f6`.

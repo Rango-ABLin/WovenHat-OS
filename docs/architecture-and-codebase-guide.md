@@ -4059,6 +4059,11 @@ digests. The harness verifies deterministic output and byte-for-byte rollback
 after injected failures. It does not establish physical installation,
 bootability, hardware qualification, or release certification.
 
+The disposable harness releases the completed executor-success fixture before
+creating the rollback fixture. This keeps the acceptance's same-directory
+backup/staging transaction within its bounded temporary-storage budget on a
+nearly-full development host without weakening any rollback or digest check.
+
 # SMP scalability and supported resource floor
 
 ## Hybrid graphics GFX-01 boundary
