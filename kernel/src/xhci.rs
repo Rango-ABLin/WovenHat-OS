@@ -2040,7 +2040,7 @@ fn deferred_input_worker() -> ! {
     crate::task::exit_current_task()
 }
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[cfg(feature = "stage31-driver-restart-test")]
 fn stop_task(raw: &core::sync::atomic::AtomicU64, stop: &AtomicU8) -> Result<(), InitError> {
     let id = raw.load(Ordering::Acquire);
     if id == 0 {
@@ -2062,6 +2062,7 @@ fn stop_task(raw: &core::sync::atomic::AtomicU64, stop: &AtomicU8) -> Result<(),
 /// Stop all xHCI-owned workers and remove the interrupt waiter only after the
 /// worker has exited. This closes the race between task teardown and DMA-ring
 /// release.
+#[cfg(feature = "stage31-driver-restart-test")]
 pub fn shutdown() -> Result<(), InitError> {
     crate::serial::write_line(format_args!("[XHCI] shutdown: stopping deferred worker"));
     stop_task(&DEFERRED_TASK, &DEFERRED_STOP)?;
