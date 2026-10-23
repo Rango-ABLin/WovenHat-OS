@@ -1257,3 +1257,54 @@ jobs:
           path: |
             target/stage28-installer-*/**
             target/gfx02-*/**
+
+  stage31-service-supervisor-matrix:
+    name: Stage 31 signed service supervisor (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Signed service supervisor QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-shell-qemu.py \
+            --supervisor-test \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}"
+      - name: Preserve service supervisor evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage31-service-supervisor-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: target/shell-regression/system-apps-*/**

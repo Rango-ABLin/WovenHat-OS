@@ -5249,3 +5249,12 @@ publication/discovery, service a query, and tear down the second daemon. The
 not yet a generic supervisor or driver-restart implementation. The change is
 isolated to `kernel/src/update_service.rs`; Claude's uncommitted 3D files
 remain untouched.
+
+**Codex service-supervisor recovery acceptance (Codex, 2026-10-23):** Added a
+dedicated `stage31-service-supervisor-test` image and `--supervisor-test`
+harness mode. It kills the currently published signed `woven.update` process
+and requires a different verified replacement owner to be republished through
+IPC. Kernel Clippy and harness syntax checks pass locally; live QEMU 1/2/4
+execution remains CI-only on this Windows host because OVMF/QEMU is absent.
+This does not claim arbitrary driver recovery, physical power-loss recovery,
+or native hardware qualification.

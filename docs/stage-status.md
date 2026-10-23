@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 31 service-supervisor recovery acceptance added - 2026-10-23
+
+Added the dedicated `stage31-service-supervisor-test` QEMU image and the
+`--supervisor-test` harness mode. The test boots the signed system-app
+catalog, kills the currently published `woven.update` process, and requires
+the bounded supervisor to reap it, spawn a verified replacement, and publish
+a different owner generation through IPC. Warning-denying kernel Clippy and
+Python harness syntax checks pass locally. The live 1/2/4-CPU QEMU acceptance
+is wired next to the existing Linux matrix but is not claimed from this
+Windows host because QEMU/OVMF is unavailable here.
+
 ## Release gate covers production service supervisor - 2026-10-23
 
 Updated `scripts/test-release.py` so the authoritative release chain runs

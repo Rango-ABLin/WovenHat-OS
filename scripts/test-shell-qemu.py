@@ -119,8 +119,10 @@ def main():
                         help='build the production system-app image and verify normal-boot installation')
     parser.add_argument('--hardware-demo', action='store_true',
                         help='build the disposable demo image and verify demo sign-in')
+    parser.add_argument('--supervisor-test', action='store_true',
+                        help='run the signed-service crash/restart acceptance image')
     args = parser.parse_args()
-    if args.hardware_demo:
+    if args.hardware_demo or args.supervisor_test:
         args.system_apps = True
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -171,7 +173,9 @@ def main():
         build_env['WOVENHAT_PACKAGE_IMAGE'] = package_service
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
-        feature_arguments = ['--features', 'hardware-demo' if args.hardware_demo else 'system-apps']
+        feature = ('stage31-service-supervisor-test' if args.supervisor_test
+                   else 'hardware-demo' if args.hardware_demo else 'system-apps')
+        feature_arguments = ['--features', feature]
     cargo_command = ['cargo']
     target_arguments = []
     for variable, setting, default in (
@@ -210,10 +214,37 @@ def main():
                *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy is not None else []),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
+    if args.supervisor_test:
+        command.insert(command.index('-drive'), '-device')
+        command.insert(command.index('-drive'), 'isa-debug-exit,iobase=0xf4,iosize=0x04')
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     with (out / 'qemu.log').open('w') as errors:
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
+            if args.supervisor_test:
+                marker = '[STAGE31 SUPERVISOR] update recovery: PASSED'
+                deadline = time.monotonic() + 240
+                while marker not in serial.read_text(errors='replace'):
+                    if process.poll() is not None or time.monotonic() > deadline:
+                        raise RuntimeError('Service supervisor recovery gate failed; inspect shell-regression logs')
+                    time.sleep(0.1)
+                exit_status = process.wait(timeout=5)
+                evidence = serial.read_text(errors='replace')
+                if exit_status != 33:
+                    raise RuntimeError(f'Service supervisor gate exited with status {exit_status}')
+                failures = []
+                lowered = evidence.lower()
+                for fatal in ('kernel panic', 'panicked at', 'security violation', 'security: failed'):
+                    if fatal in lowered:
+                        failures.append(f'Guest serial contains fatal evidence: {fatal}')
+                if '[STAGE31 SUPERVISOR] update recovery: timeout' in evidence:
+                    failures.append('Supervisor recovery timed out')
+                if failures:
+                    raise RuntimeError('; '.join(failures))
+                print('Signed service supervisor crash/restart: PASS', flush=True)
+                print('Serial log:', serial)
+                print('UEFI image:', image)
+                return 0
             deadline = time.monotonic() + 180
             expected_boot = ('[BOOT] desktop-first runtime ready' if args.system_apps
                              else '[BOOT] shell-first runtime ready')

@@ -1710,6 +1710,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 serial::write_line(format_args!("[SERVICES] production service startup failed"));
                 halt();
             }
+            #[cfg(feature = "stage31-service-supervisor-test")]
+            {
+                if !service_supervisor::test_update_recovery() {
+                    qemu_test_exit_failure();
+                }
+                qemu_test_exit_success();
+            }
         }
         boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
 
