@@ -12,4 +12,4 @@ class ReleasePackagerContractTests(unittest.TestCase):
 
         self.assertNotIn("required.add('system-apps-boot')", source)
         self.assertIn("required |= {f'system-apps-boot-{cpus}' for cpus in (1, 2, 4)}", source)
-        self.assertIn("shell_root = root / 'apps' / 'woven-shell'", source)
+        self.assertIn("apps + ('woven-package', 'woven-ai', 'woven-shell')", source)
