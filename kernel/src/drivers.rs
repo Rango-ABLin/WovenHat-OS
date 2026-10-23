@@ -138,7 +138,7 @@ const SPECS: [Spec; COUNT] = [
             Ok(u64::from(ports))
         },
         #[cfg(feature = "stage31-driver-restart-test")]
-        shutdown: || Err(()),
+        shutdown: || crate::xhci::shutdown().map_err(|_| ()),
     },
     Spec {
         name: "hda0",

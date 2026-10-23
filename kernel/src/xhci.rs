@@ -295,6 +295,8 @@ pub struct BluetoothUsbInterface {
 }
 
 pub struct XhciController {
+    address: Address,
+    original_command: u16,
     max_slots: u8,
     max_ports: u8,
     op_base: u64,
@@ -413,6 +415,8 @@ impl XhciController {
             connected_port
         ));
         let mut controller = Self {
+            address,
+            original_command: device.command,
             max_slots,
             max_ports,
             op_base,
@@ -456,6 +460,20 @@ impl XhciController {
         controller.slot_id = controller.enable_slot()?;
         crate::serial::write_line(format_args!("[XHCI] initial slot enabled"));
         Ok(controller)
+    }
+
+    /// Disable xHCI interrupt generation and halt the controller before any
+    /// PCI BAR or DMA-page ownership is released.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        let interrupter = self.runtime_base + 0x20;
+        mmio_write32(interrupter, 0)?;
+        let command = mmio_read32(self.op_base)?;
+        mmio_write32(self.op_base, command & !(1 | (1 << 2)))?;
+        wait_until(self.op_base + 0x04, 1, 1)?;
+        if !pci::restore_command(self.address, self.original_command) {
+            return Err(InitError::MissingController);
+        }
+        Ok(())
     }
 
     fn reset_port(&mut self, port: u8) -> Result<(), InitError> {
@@ -1890,6 +1908,13 @@ fn arm_input(doorbell_base: u64, device: &mut InputDevice) -> Result<(), InitErr
 
 /// The input interrupt vector (0 until input delivery starts).
 static INPUT_VECTOR: AtomicU8 = AtomicU8::new(0);
+/// Cooperative stop requested for the HID worker before controller teardown.
+static INPUT_STOP: AtomicU8 = AtomicU8::new(0);
+/// The worker task must be dead before its waiter, vector, and DMA rings are
+/// released. A raw ID avoids taking a scheduler lock from interrupt paths.
+static INPUT_TASK: AtomicU64 = AtomicU64::new(0);
+static DEFERRED_STOP: AtomicU8 = AtomicU8::new(0);
+static DEFERRED_TASK: AtomicU64 = AtomicU64::new(0);
 /// Reports copied out of the controller, and worker passes, for the gate.
 static INPUT_REPORTS: AtomicU64 = AtomicU64::new(0);
 static INPUT_PASSES: AtomicU64 = AtomicU64::new(0);
@@ -1941,7 +1966,12 @@ pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
     INPUT_VECTOR.store(vector, Ordering::Release);
     let worker = crate::task::spawn_io_service("usb-input", input_worker)
         .map_err(|_| InitError::InterruptUnavailable)?;
+    INPUT_STOP.store(0, Ordering::Release);
+    INPUT_TASK.store(worker.as_u64(), Ordering::Release);
     if !crate::interrupts::set_pci_vector_waiter(vector, worker) {
+        INPUT_TASK.store(0, Ordering::Release);
+        INPUT_STOP.store(1, Ordering::Release);
+        let _ = crate::task::signal_event(worker);
         return Err(InitError::InterruptUnavailable);
     }
     CONTROLLER
@@ -1965,7 +1995,10 @@ pub fn start_input(driver: &'static str) -> Result<InputSummary, InitError> {
 #[cfg(not(feature = "qemu-test"))]
 pub fn start_input_deferred(driver: &'static str) -> Result<(), crate::task::SpawnError> {
     let _ = driver;
-    crate::task::spawn_io_service("usb-enumerate", deferred_input_worker).map(|_| ())
+    DEFERRED_STOP.store(0, Ordering::Release);
+    let task = crate::task::spawn_io_service("usb-enumerate", deferred_input_worker)?;
+    DEFERRED_TASK.store(task.as_u64(), Ordering::Release);
+    Ok(())
 }
 
 #[cfg(not(feature = "qemu-test"))]
@@ -1973,6 +2006,10 @@ fn deferred_input_worker() -> ! {
     const RETRY_TICKS: u64 = 300;
     let mut attempt = 0u32;
     loop {
+        if DEFERRED_STOP.load(Ordering::Acquire) != 0 {
+            DEFERRED_TASK.store(0, Ordering::Release);
+            crate::task::exit_current_task();
+        }
         attempt = attempt.saturating_add(1);
         let result = start_input("xhci0");
         if usb_disk_info().is_some() {
@@ -2001,6 +2038,52 @@ fn deferred_input_worker() -> ! {
         crate::task::sleep_current(RETRY_TICKS);
     }
     crate::task::exit_current_task()
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn stop_task(raw: &core::sync::atomic::AtomicU64, stop: &AtomicU8) -> Result<(), InitError> {
+    let id = raw.load(Ordering::Acquire);
+    if id == 0 {
+        return Ok(());
+    }
+    stop.store(1, Ordering::Release);
+    let task = crate::task::TaskId::from_u64(id);
+    let _ = crate::task::signal_event(task);
+    for _ in 0..POLL_LIMIT {
+        if !crate::task::task_live(task) {
+            return Ok(());
+        }
+        crate::task::yield_now();
+    }
+    Err(InitError::ControllerTimeout)
+}
+
+/// Stop all xHCI-owned workers and remove the interrupt waiter only after the
+/// worker has exited. This closes the race between task teardown and DMA-ring
+/// release.
+pub fn shutdown() -> Result<(), InitError> {
+    stop_task(&DEFERRED_TASK, &DEFERRED_STOP)?;
+    let input_task_id = INPUT_TASK.load(Ordering::Acquire);
+    stop_task(&INPUT_TASK, &INPUT_STOP)?;
+    let vector = INPUT_VECTOR.load(Ordering::Acquire);
+    if vector != 0 {
+        let task = crate::task::TaskId::from_u64(input_task_id);
+        let _ = crate::interrupts::clear_pci_vector_waiter(vector, task);
+        INPUT_VECTOR.store(0, Ordering::Release);
+    }
+    INPUT_TASK.store(0, Ordering::Release);
+    DEFERRED_TASK.store(0, Ordering::Release);
+    let controller = CONTROLLER.lock().take();
+    let Some(mut controller) = controller else {
+        return Ok(());
+    };
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
 }
 
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -2062,6 +2145,10 @@ fn input_worker() -> ! {
         }
     }
     loop {
+        if INPUT_STOP.load(Ordering::Acquire) != 0 {
+            INPUT_TASK.store(0, Ordering::Release);
+            crate::task::exit_current_task();
+        }
         let _ = crate::interrupts::take_pci_device_work(INPUT_VECTOR.load(Ordering::Acquire));
         let mut reports = [(HidKind::Other, 0usize, [0u8; MAX_REPORT]); REPORTS_PER_PASS];
         let count = CONTROLLER
