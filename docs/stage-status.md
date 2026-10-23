@@ -240,18 +240,11 @@ toggle 3D in an automated harness); they were checked interactively instead.
 to flip that default (needs re-deriving the ~16 duplicated pixel-exact
 desktop self-tests for a 3D-default initial state, tracked separately).
 
-Also noticed, unrelated to this work: the Stage 24.59 Change-PIN QEMU gate
-(`test-woven-shell-qemu.py --stage 24.59`) now fails with
-`KERNEL ALLOC ERROR: layout size=4096000 align=4` after only
-`[HEAP] mapped=2473984 bytes`, under the harness's existing 256 MiB `-m`
-fixture. Confirmed via `git stash` that this reproduces identically without
-any of this session's changes, on `620be26e` ("Accept Stage 31 SMP
-scalability matrix") -- i.e. after the new 4 GiB production-memory-floor
-change made the heap derive from actual available frames rather than a
-fixed assumption. That stage-status entry says "the existing 256 MiB QEMU
-gates remain low-memory regression fixtures," but this one no longer fits
-in 256 MiB once the heap sizing changed, at least for the heavier 11-app
-24.59 image. Flagged in `docs/agent-coordination.md`; not touched here.
+The earlier note about a Stage 24.59 allocation failure under the 256 MiB
+fixture is stale. Re-running the unchanged current tree passed the complete
+Change-PIN flow with exit 33 on 1, 2, and 4 CPUs; fresh serial evidence is in
+`target/woven-shell-change-pin-{1,2,4}cpu`. No heap or test-budget change was
+needed.
 
 ## 16-CPU SMP and bounded-capacity expansion - 2026-10-22
 

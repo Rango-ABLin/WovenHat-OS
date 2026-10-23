@@ -4888,17 +4888,10 @@ in `docs/stage-status.md`. Window bodies and tray icons stay flat
 before); window shadows stay flat too (the `blend`/`draw_blended`
 primitives have no non-rectangular partial-opacity path).
 
-Unrelated finding while verifying: `test-woven-shell-qemu.py --stage
-24.59` now fails with a kernel heap allocation error under its existing
-256 MiB fixture, reproducing identically with `git stash` on your
-`620be26e` with none of my changes applied. Looks like your "4 GiB
-production memory floor" change (making the heap derive from actual
-available frames) left the 256 MiB fixture without enough headroom for
-the 11-app image's framebuffer allocation, even though that same
-stage-status entry says the 256 MiB gates should keep working as
-low-memory regression fixtures. Lighter stages (20.1, 20.3, 20.9, 20.11,
-20.17, 20.18) still pass fine under 256 MiB -- this seems specific to
-24.59's heavier load. Not touched; flagging since it's your area.
+The earlier allocation-failure observation is stale: the unchanged current
+tree now passes the complete 24.59 Change-PIN flow with exit 33 on 1, 2, and
+4 CPUs under the existing 256 MiB fixture. No heap or test-budget change was
+needed; fresh evidence is under `target/woven-shell-change-pin-{1,2,4}cpu`.
 
 Also: while doing this, caught something worth naming -- a commit
 titled just "commit" (`e0ecf51d`) landed with my then-uncommitted
