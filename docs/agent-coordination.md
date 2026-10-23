@@ -1,5 +1,20 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 sudden-shutdown recovery slice (2026-10-23)
+
+Added `scripts/test-sudden-shutdown-qemu.py` without touching Claude's
+uncommitted `kernel/src/main.rs`. The harness uses only a workspace-local
+disposable FAT32 image: it terminates QEMU after `[S10.2]` and before the live
+storage mutation marker, then reuses that image for a normal recovery boot.
+The recovery boot requires exit 33, the live FAT32 mutation marker, and
+`[BOOT] ALL VALIDATIONS PASSED`. The 1/2/4-CPU matrix passed; evidence is in
+the timestamped `audit-artifacts/stage31-sudden-shutdown-*` directories.
+
+This closes only the QEMU abrupt-termination/reboot slice. Physical power
+loss, torn-sector qualification, native hardware recovery, and randomized
+full-stack fault injection remain open. No physical disk, firmware, TPM, or
+removable media was accessed.
+
 ## Codex - Repair and accept Stage 7 SMP shell qualification (2026-10-23)
 
 The first post-Claude full release run failed reproducibly at `shell-smoke`:

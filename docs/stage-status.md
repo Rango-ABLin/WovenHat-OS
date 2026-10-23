@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 31 sudden-shutdown recovery slice - 2026-10-23
+
+Added `scripts/test-sudden-shutdown-qemu.py`. For each selected CPU count it
+creates a fresh disposable FAT32 image, boots the normal `qemu-test` image,
+terminates QEMU after the async-I/O foundation marker but before the live
+storage mutation marker, and then reboots the same image. The recovery boot
+must return exit 33 and produce both the complete storage-mutation and
+`[BOOT] ALL VALIDATIONS PASSED` markers. The 1/2/4-CPU matrix passed with
+evidence under `audit-artifacts/stage31-sudden-shutdown-{1,2,4}cpu-*`.
+
+This proves a bounded abrupt-QEMU-termination/reboot path over the disposable
+ATA/FAT32 device. It does not prove physical power-loss, torn-sector behavior,
+native controller recovery, or randomized full-stack fault injection; those
+remain explicit release gates. The interrupted logs and recovery logs are
+retained in each timestamped artifact directory.
+
 ## Release validation after SMP fixture repair - 2026-10-23
 
 The first post-Claude full release run reached `shell-smoke` but correctly
