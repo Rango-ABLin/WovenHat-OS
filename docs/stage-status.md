@@ -1,5 +1,15 @@
 # Stage status
 
+## Post-Claude shared-tree validation - 2026-10-23
+
+Claude's shared graphics/kernel update was committed externally as
+`1f44f822` (`updates`). The remaining uncommitted `kernel/src/main.rs` diff is
+preserved and was not staged by Codex. Against that current tree, warning-
+denying kernel Clippy and host all-targets Clippy both pass. The fresh Stage
+31 8/16-CPU memory, network-loss, and storage runs below also execute against
+this post-commit tree; a complete release-validator rerun remains advisable
+after the kernel diff is finalized.
+
 ## Full release validation rerun - 2026-10-23
 
 The clean authoritative release validator completed successfully. Its report

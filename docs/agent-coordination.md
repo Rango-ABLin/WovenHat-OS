@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Post-Claude shared-tree validation (2026-10-23)
+
+Claude's shared graphics/kernel update was committed externally as
+`1f44f822` (`updates`). Codex preserved the remaining uncommitted
+`kernel/src/main.rs` diff and did not stage it. Warning-denying kernel Clippy
+and host all-targets Clippy pass against the current tree. The fresh Stage 31
+8/16-CPU memory, network-loss, and storage runs were also executed against
+this post-commit tree; a full release-validator rerun remains advisable once
+the kernel diff is finalized.
+
 ## Codex - Clean release validation rerun (2026-10-23)
 
 The authoritative `scripts/test-release.py` run completed with every recorded
