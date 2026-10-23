@@ -5349,6 +5349,13 @@ Stage 31 planner suite now exposes the full requested CPU matrix. Evidence is
 retained under `audit-artifacts/stage27.5-recovery-{8,16}cpu/` and the
 timestamped `stage31-sudden-shutdown-{8,16}cpu-*` directories.
 
+**Codex Stage 31 full-SMP randomized matrix (Codex, 2026-10-23):** The
+eight-scenario seeded runner now accepts 1/2/4/8/16 CPUs. Fresh 8- and 16-CPU
+runs passed all scenarios, including packet corruption, process crash,
+service lifecycle, sudden shutdown, driver restart, network loss, and memory;
+the prior 1/2/4 runs remain green. This expands reproducible bounded evidence
+but does not claim arbitrary in-guest fault injection or native qualification.
+
 **Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
 sequential repeated-boot harness completed ten successful memory boots at each
 requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,

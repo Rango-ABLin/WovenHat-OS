@@ -81,6 +81,13 @@ The WovenRecovery and sudden-shutdown recovery gates have also been extended
 to 4 GiB guests and 8/16 CPUs. Fresh runs passed at both high-SMP profiles;
 all Stage 31 planner suites now expose the full 1/2/4/8/16 CPU matrix.
 
+The seeded eight-scenario randomized runner now accepts the full same CPU
+matrix. Fresh 8- and 16-CPU runs passed for packet corruption, process crash,
+service supervision/restart, sudden shutdown, driver restart, network loss,
+and memory recovery; the earlier 1/2/4 runs remain green. Evidence is under
+`audit-artifacts/stage31-randomized-51a7e-{1,2,4,8,16}cpu/`. This is
+reproducible bounded scenario orchestration, not arbitrary fault injection.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates
