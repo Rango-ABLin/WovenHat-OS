@@ -1,8 +1,8 @@
 # Stage status
 
-## P0-03/P0-07 current-head release validation rerun - 2026-10-23
+## P0-03/P0-07 release validation baseline - 2026-10-23
 
-The authoritative release chain passed all 152 checks on current commit
+The authoritative release chain passed all 152 checks on source commit
 `3b3980e1`. Warning-denying kernel/host Clippy, every host test, debug and
 release memory/storage/network QEMU gates at 1/2/4 CPUs, legacy PIC, shell,
 service supervision, driver restart, application linting, system-app catalog
@@ -10,10 +10,39 @@ and desktop boots, package transactions, AI/security/search/action suites, and
 final system-app Clippy all passed. The report is retained at
 `target/release-validation/results.json`.
 
-This is a current-head emulated/release-validation result. It does not close
+This is a source-commit emulated/release-validation result. It does not close
 the separate physical/native hardware, physical power-loss, TPM/Secure Boot,
 release-key custody, arbitrary fault-injection, or independent Claude-review
 gates.
+
+## Stage 31 seeded 11-scenario campaign with read/write device faults - 2026-10-24
+
+The seeded Stage 31 orchestrator passed all eleven scenarios at 1 CPU with
+seed `0x51A7E`: storage write-fault containment, service supervision, network
+loss, storage read-fault recovery, packet corruption, process crash, low RAM,
+service restart, driver restart, sudden shutdown, and memory boot. The
+authoritative result is
+`audit-artifacts/stage31-randomized-51a7e-1cpu-11scenarios-rerun-20261023T221235041205Z/result.json`
+with eleven zero child return codes. A separate mistyped-firmware attempt was
+recorded as an isolated failed plan and is not counted as acceptance evidence.
+
+The write-fault child injects one `write_aio` `ENOSPC` at the FAT32 journal
+sector and requires the kernel's explicit `FAILED at batch persist` boundary,
+with no panic or false success. This is fail-closed containment evidence, not
+physical durability or power-loss recovery.
+
+## Stage 31 QEMU block write-fault containment matrix - 2026-10-24
+
+The disposable QEMU write-fault gate passed at 1/2/4/8/16 CPUs. An
+unrestricted first-write injection initially stalled during firmware probing;
+the gate was corrected to target the FAT32 journal sector, and the bounded
+kernel failure marker was then observed at every CPU count. Accepted evidence
+is retained under timestamped
+`audit-artifacts/stage31-storage-write-fault-{1,2,4,8,16}cpu-*` directories.
+
+This qualifies device-error containment only. It does not claim write
+ordering, flush durability, torn-sector recovery, physical power loss, native
+media, or production readiness.
 
 ## Stage 31 seeded 10-scenario campaign with storage fault - 2026-10-23
 

@@ -1,8 +1,9 @@
 # Agent coordination (Claude Code and Codex)
 
-## Codex - current-head release validation rerun (2026-10-23)
+## Codex - release validation baseline (2026-10-23)
 
-The authoritative release chain passed all 152 checks on commit `3b3980e1`.
+The authoritative release chain passed all 152 checks on source commit
+`3b3980e1`.
 The report is `target/release-validation/results.json`; it includes
 warning-denying kernel/host Clippy, host tests, debug/release 1/2/4-CPU
 memory/storage/network gates, shell and service supervision, driver restart,
@@ -12,6 +13,33 @@ final system-app lint. No failure was suppressed.
 This does not claim physical/native hardware, physical power-loss, TPM/Secure
 Boot, release-key custody, arbitrary fault injection, or independent Claude
 review.
+
+## Codex - Stage 31 seeded 11-scenario campaign (2026-10-24)
+
+The seeded runner passed all eleven scenarios at 1 CPU with seed `0x51A7E`,
+including both storage read-fault recovery and storage write-fault
+containment. The authoritative result is
+`audit-artifacts/stage31-randomized-51a7e-1cpu-11scenarios-rerun-20261023T221235041205Z/result.json`
+with eleven zero child return codes. A separate mistyped-firmware attempt was
+isolated as a failed plan and is not counted as acceptance evidence.
+
+The write-fault scenario requires the kernel's explicit fail-closed `FAILED at
+batch persist` marker and rejects panic or false success. It is not a claim of
+physical durability, power-loss recovery, native qualification, or Claude
+review.
+
+## Codex - Stage 31 QEMU block write-fault containment matrix (2026-10-24)
+
+The disposable `blkdebug` `write_aio`/`ENOSPC` gate passed at 1/2/4/8/16
+CPUs after restricting injection to the FAT32 journal sector. The first
+unrestricted attempt stalled in firmware probing and was not accepted. The
+accepted gate now observes the kernel failure boundary without panic or false
+success; accepted evidence is retained under timestamped
+`stage31-storage-write-fault-{1,2,4,8,16}cpu-*` directories.
+
+This is bounded emulated device-error containment only; physical durability,
+power-loss/torn-sector recovery, native hardware, and independent Claude
+review remain open.
 
 ## Codex - Stage 31 seeded 10-scenario campaign (2026-10-23)
 
