@@ -1,5 +1,19 @@
 # Stage status
 
+## Current host audit - 2026-10-23
+
+The complete Python host test suite passed: 151 tests in 168.209 seconds.
+This validates host-side contracts and planners only. The GitHub Actions run
+for `f03ce5e8` is still queued, and the later local commits have not yet
+produced a remote run, so no QEMU or OVMF result is claimed here.
+
+The driver audit confirms that the current PCI layer has generation-safe
+resource teardown and explicit rebind coverage, but the NVMe/AHCI/xHCI/HDA
+controller modules do not yet expose controller-specific quiesce/reset/
+reinitialize protocols. Automatic driver-crash recovery therefore remains an
+open release blocker; generic rebinding would be unsafe in the presence of
+live DMA or interrupts.
+
 ## Stage 31 service-supervisor recovery acceptance added - 2026-10-23
 
 Added the dedicated `stage31-service-supervisor-test` QEMU image and the
