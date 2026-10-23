@@ -1,5 +1,24 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head release validation and signing boundary (2026-10-23)
+
+The authoritative release validator passed on commit `e4a8ba79`, including
+warning-denying kernel/host Clippy, host tests, debug and release QEMU
+memory/storage/network at 1/2/4 CPUs, shell/service supervision, driver
+restart, application linting, system-app catalog, package, AI/security, and
+signed system-app desktop boots. The report is retained at
+`target/release-validation/results.json`; the desktop gates captured 1280x800
+first-frame evidence for CPU profiles 1, 2, and 4.
+
+`scripts/package-release.py` correctly stopped at the production signing
+boundary because `WOVENHAT_APP_SIGNING_SEED_HEX` and the trusted public key are
+not provisioned in this environment. `scripts/test-release-key-provisioning.py`
+passed, confirming the guard rejects missing keys and accepts only matching
+test material. No production release artifact was claimed or emitted. The
+remaining external gates are physical/native qualification, TPM/Secure Boot,
+physical power-loss, arbitrary in-guest fault injection, and independent
+Claude review (`SECOND-REVIEW-PENDING`).
+
 ## Codex - single-output virtio-GPU compositor path (2026-10-23)
 
 Removed the production compositor's unnecessary two-scanout requirement. A

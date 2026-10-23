@@ -1,5 +1,24 @@
 # Stage status
 
+## P0-03/P0-07 current-head release validation - 2026-10-23
+
+The authoritative release validator completed successfully on commit
+`e4a8ba79`: warning-denying kernel/host Clippy, host tests, debug and release
+QEMU memory/storage/network at 1/2/4 CPUs, shell and service-supervisor
+qualification, driver restart, application linting, all system-app catalog,
+package, AI/security, and signed system-app desktop boot gates passed. The
+final report is `target/release-validation/results.json`; the desktop boots
+also captured 1280x800 first-frame evidence for each CPU profile.
+
+The production packager was then invoked and stopped fail-closed because this
+environment has no `WOVENHAT_APP_SIGNING_SEED_HEX` (and trusted public key).
+The release-key provisioning boundary test passed, but no production-signed
+image, ISO, or release archive was emitted. Supplying the release-owner key
+material is still required before release artifact packaging or a production
+release claim. This acceptance remains QEMU/OVMF-only and does not close
+physical media, native hardware, TPM/Secure Boot, physical power-loss, or
+independent Claude review gates.
+
 ## Graphics single-output virtio-GPU path - 2026-10-23
 
 The production compositor now accepts a single-output virtio-GPU instead of
