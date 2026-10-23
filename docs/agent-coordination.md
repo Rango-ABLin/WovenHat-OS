@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - seeded Stage 31 cross-subsystem orchestration (2026-10-23)
+
+Added `scripts/test-stage31-randomized-faults.py`. It uses a reproducible
+seed, executes memory, process-crash, packet-corruption, sudden-shutdown, and
+signed service-restart gates sequentially, fails closed on any child failure,
+and retains per-scenario command/result/output evidence. Seed `0x51A7E`
+passed the five-scenario 1-CPU run under
+`audit-artifacts/stage31-randomized-51a7e-1cpu`. The planner marks this as
+partial: it randomizes scenario order but is not arbitrary in-guest fault
+injection and does not qualify physical power loss or native hardware.
+
 ## Codex - GFX-02 bounded CPU renderer (2026-10-23)
 
 Added the first concrete backend behind `graphics_abi`: a bounded

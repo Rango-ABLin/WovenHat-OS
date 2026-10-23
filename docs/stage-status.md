@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 31 seeded cross-subsystem fault orchestration - 2026-10-23
+
+Added `scripts/test-stage31-randomized-faults.py`, a fail-closed runner that
+uses a reproducible seed to schedule the existing memory, process-crash,
+packet-corruption, sudden-shutdown, and signed service-restart gates in a
+different order, one at a time, preserving command/result/output evidence for
+each run. The seed `0x51A7E` completed all five scenarios on 1 CPU; evidence
+is under `audit-artifacts/stage31-randomized-51a7e-1cpu`.
+
+The torture planner records this as partial coverage. It proves randomized
+cross-subsystem scenario ordering and preserves independent fault evidence,
+but it does not yet inject arbitrary faults inside every driver/service or
+qualify physical power loss. Native hardware and full-stack in-guest fault
+injection remain open.
+
 ## GFX-02 bounded CPU renderer - 2026-10-23
 
 Implemented the first concrete backend behind the GFX-01 contract as
