@@ -24,7 +24,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
         self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 0)
         self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 22)
 
-    def test_lifecycle_gates_are_blocked_at_8_and_16_cpus(self):
+    def test_lifecycle_gates_are_pending_across_8_and_16_cpus(self):
         plan = MODULE.build_plan()
         lifecycle = [
             job for job in plan["jobs"]
@@ -63,9 +63,9 @@ class Stage31TorturePlanTests(unittest.TestCase):
             "covered-stage31-disposable-256m-boot-matrix-1-2-4-8-16cpu",
         )
         self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
-        self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-and-supervisor-recovery-1-2-4cpu")
+        self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-and-supervisor-recovery-1-2-4-8-16cpu")
         self.assertEqual(scenarios["packet-corruption"], "partial-stage31-checksum-boundary")
-        self.assertEqual(scenarios["driver-crash"], "covered-stage31-controller-owned-restart-1-2-4cpu")
+        self.assertEqual(scenarios["driver-crash"], "covered-stage31-controller-owned-restart-1-2-4-8-16cpu")
         self.assertEqual(scenarios["process-crash"], "covered-stage31-qemu-process-crash")
         self.assertEqual(
             scenarios["sudden-shutdown"],
