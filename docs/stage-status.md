@@ -55,11 +55,10 @@ native-media qualification, or the complete P0-02 durability gate.
 The release packager had required a nonexistent aggregate
 `system-apps-boot` result even though the authoritative validator emits
 `system-apps-boot-1/2/4`. It now requires the three exact CPU-qualified
-markers. A focused host contract test and Python syntax check pass; running
-the packager against the older retained manifest now advances to the expected
-source-inventory freshness check instead of failing on the wrong marker.
-The full current-head release chain still must be rerun before provenance or
-production release claims.
+markers. A focused host contract test and Python syntax check pass. The
+current-head validator subsequently passed all 152 checks, including the
+three exact system-app boot rows; production packaging still requires
+release-owner signing material and is documented separately above.
 
 ## Stage 31 repeated-boot qualification - 2026-10-23
 
@@ -307,13 +306,13 @@ execution rather than a locally claimed result.
 ## Maturity audit Cycle 1 - 2026-10-23
 
 Read the complete supplied full-system maturity mandate and captured a fresh
-machine-readable audit at `audit-artifacts/maturity/20261023-cycle1/` for
-current clean HEAD `583b06eb`. The report records the exact toolchain/QEMU
-environment, current findings, validation results, release blockers, Codex
-review, pending Claude review, and SHA-256 digests. It confirms the Stage 28
-frontend-capacity fix and CI wiring but deliberately leaves full current-head
-QEMU release reruns, native hardware, physical power-loss, arbitrary in-guest
-fault injection, and independent Claude review open.
+machine-readable audit at `audit-artifacts/maturity/20261023-cycle1/`. The
+report records the exact toolchain/QEMU environment, findings, validation
+results, release blockers, Codex review, pending Claude review, and SHA-256
+digests. The later current-head release validation passed all 152 checks on
+source commit `e4a8ba79`; production signing, native hardware, physical
+power-loss, arbitrary in-guest fault injection, and independent Claude review
+remain open.
 
 ## Stage 28 installer-plan capacity alignment - 2026-10-23
 
