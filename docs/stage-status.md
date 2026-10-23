@@ -9633,3 +9633,16 @@ This is not physical S3 qualification and does not claim that suspend is
 available to production users. The next prerequisite is a task-owned resume
 record and a verified return path before enabling the transition.
 
+## Stage 31 controller-owned driver restart slice (2026-10-23)
+
+NVMe, AHCI, and HDA now stop controller DMA/rings before releasing PCI
+ownership and rebind under a fresh generation owner. Failed quiescence restores
+the controller object instead of dropping potentially referenced DMA pages.
+The focused `stage31-driver-restart-test` QEMU gate passed at 1/2/4 CPUs with
+4 GiB guests; evidence is in `audit-artifacts/stage13.12-restart-*`.
+
+xHCI remains explicitly unsupported until HID waiter, transfer-ring, and
+worker teardown are implemented and qualified. This slice does not claim
+generic automatic driver crash supervision, physical hardware certification,
+or production readiness.
+

@@ -12,6 +12,8 @@ on one of four machines:
               every driver must be absent.
   production  a normal (no test feature) kernel on the `devices` machine: the
               boot must bind every driver and still reach the shell.
+  restart     a production kernel with the controller-owned restart gate; the
+              NVMe, AHCI, and HDA lifecycles must quiesce, detach, and rebind.
 
 Expectations are written here, not derived from the kernel under test.
 """
@@ -30,8 +32,10 @@ EXPECTED = {
     'nodisk': {'nvme0': 'absent', 'ahci0': 'InitFailed', 'xhci0': 'absent', 'hda0': 'absent'},
     'absent': {'nvme0': 'absent', 'ahci0': 'absent', 'xhci0': 'absent', 'hda0': 'absent'},
     'production': {'nvme0': 'Ready', 'ahci0': 'Ready', 'xhci0': 'Ready', 'hda0': 'Ready'},
+    'restart': {'nvme0': 'Ready', 'ahci0': 'Ready', 'xhci0': 'Ready', 'hda0': 'Ready'},
 }
 PASS_MARKER = '[S13.12] driver bring-up: PASSED'
+RESTART_MARKER = '[S31 DRIVER] controller-owned restart: PASSED'
 SHELL_MARKER = '[BOOT] shell-first runtime ready'
 LINE = re.compile(r'^\[DRIVERS\] (\w+)(?: at ([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.\d))?: (\w+)', re.M)
 
@@ -61,7 +65,9 @@ def main():
     out.mkdir(parents=True)
     production = args.mode == 'production'
     build_command = ['cargo', 'run', '--quiet']
-    if not production:
+    if args.mode == 'restart':
+        build_command += ['--features', 'stage31-driver-restart-test']
+    elif not production:
         build_command += ['--features', 'stage13-12-test']
     build = subprocess.run(build_command + ['--', '--print-image'], cwd=root, text=True, capture_output=True)
     (out / 'build.log').write_text(build.stdout + build.stderr, encoding='utf-8')
@@ -70,13 +76,13 @@ def main():
         return 1
     serial = out / 'serial.log'
     machine = 'pc' if args.mode == 'absent' else 'q35'
-    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', machine, '-m', '256M', '-smp', str(args.cpus),
+    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', machine, '-m', '4G', '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
-    if args.mode in ('devices', 'production'):
+    if args.mode in ('devices', 'production', 'restart'):
         for name in ('nvme', 'sata'):
             with (out / f'{name}.img').open('wb') as image:
                 image.truncate(16 * 1024 * 1024)
@@ -117,7 +123,9 @@ def main():
     else:
         if process.returncode != 33:
             errors.append(f'exit code {process.returncode}, expected 33')
-        if PASS_MARKER not in log:
+        if args.mode == 'restart' and RESTART_MARKER not in log:
+            errors.append(f'missing {RESTART_MARKER!r}')
+        elif args.mode != 'restart' and PASS_MARKER not in log:
             errors.append(f'missing {PASS_MARKER!r}')
     got = outcomes(log)
     for name, expected in EXPECTED[args.mode].items():

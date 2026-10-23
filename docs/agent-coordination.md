@@ -5263,6 +5263,14 @@ The seeded Stage 31 orchestrator now schedules this supervisor acceptance as
 its own scenario alongside the older signed update-service restart slice; it
 still does not claim arbitrary in-guest fault injection.
 
+**Codex controller-owned driver restart slice (Codex, 2026-10-23):** Added
+bounded NVMe, AHCI, and HDA quiesce-before-unbind lifecycle hooks and a fresh
+PCI owner transaction for restart. The focused QEMU gate passed at 1/2/4 CPUs
+with 4 GiB guests and real emulated NVMe/AHCI/xHCI/HDA enumeration. xHCI is
+explicitly unsupported in this gate because HID waiters, rings, and worker
+teardown do not yet have an equivalent ownership protocol. No native hardware
+or automatic crash-supervision claim is implied.
+
 The formal Stage 31 torture planner now has a separate `service-supervisor`
 suite and contract tests for its 1/2/4-CPU support and 8/16-CPU blocked rows.
 The release validator also invokes that image at 1/2/4 CPUs.
