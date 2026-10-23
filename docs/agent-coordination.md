@@ -7,7 +7,12 @@ single-output virtio-GPU can now become the display using its bounded primary
 mode; multi-head placement and framebuffer fallback remain unchanged. The
 affected warning-denying kernel Clippy gate and full host all-targets suite
 pass, and Stage 20.14's existing two-head pixel capture passes after the
-change. Single-output QEMU/native hardware qualification is still separate.
+change. A dedicated single-output capture harness now passes on 1/2/4 CPUs
+and verifies four quadrant colors from retained 1280x800 scanouts in
+`audit-artifacts/stage20.14s-{1,2,4}cpu-*`. This closes disposable-QEMU
+single-output qualification only; physical/native GPU qualification,
+device-loss recovery, arbitrary fault injection, and independent Claude
+review remain separate and unclaimed.
 
 ## Codex - Stage 31 1,000-boot qualification (2026-10-23)
 

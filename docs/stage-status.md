@@ -6,9 +6,16 @@ The production compositor now accepts a single-output virtio-GPU instead of
 requiring two scanouts. Multi-head output placement and the boot-framebuffer
 fallback are preserved. The affected kernel Clippy gate passed, the complete
 host all-targets suite passed, and the existing Stage 20.14 two-head
-pixel-accurate QEMU acceptance passed on 1 CPU after the change. This is a
-code-path expansion, not native GPU certification; single-output hardware
-qualification remains to be added.
+pixel-accurate QEMU acceptance passed on 1 CPU after the change. A dedicated
+single-output capture harness then passed on 1/2/4 CPUs, verifying four
+quadrant colors from retained 1280x800 scanouts. Evidence is retained at
+`audit-artifacts/stage20.14s-1cpu-1792779432617072300/`,
+`audit-artifacts/stage20.14s-2cpu-1792779460061232200/`, and
+`audit-artifacts/stage20.14s-4cpu-1792779510914301900/`.
+
+This closes the disposable-QEMU single-output compositor qualification, not
+native GPU certification. Physical hardware, device-loss recovery, arbitrary
+GPU fault injection, and production readiness remain separate gates.
 
 ## Stage 31 repeated-boot qualification - 2026-10-23
 
