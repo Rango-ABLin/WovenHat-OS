@@ -9657,3 +9657,6 @@ evidence is retained under `audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu`
 This remains bounded child-gate orchestration, not arbitrary in-guest fault
 injection or native hardware qualification.
 
+The release validator now invokes the same controller-restart gate at 1/2/4
+CPUs, keeping the release chain aligned with the accepted Stage 31 matrix.
+

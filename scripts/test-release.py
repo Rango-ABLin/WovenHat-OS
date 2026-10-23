@@ -84,6 +84,19 @@ def main():
             ]
             + options,
         )
+    for cpus in (1, 2, 4):
+        run(
+            f'driver-restart-{cpus}',
+            [
+                sys.executable,
+                'scripts/test-stage13-12-drivers.py',
+                '--mode',
+                'restart',
+                '--cpus',
+                str(cpus),
+            ]
+            + options,
+        )
     app_directories = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor', 'woven-settings', 'woven-security', 'woven-editor', 'woven-images', 'woven-update', 'woven-store', 'woven-installer', 'woven-package', 'woven-ai')
     for app in app_directories:
         run(
