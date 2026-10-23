@@ -17,6 +17,14 @@ from this run. Claude's dirty files remain untouched. Physical hardware/TPM/
 secure-boot qualification, randomized full-stack recovery, and the independent
 Claude review are still pending; no production-readiness claim is made.
 
+A fresh read-only preflight recorded 8.2 GB RAM on the HP Pavilion x360 host,
+which meets the 4 GiB floor, but the session is not elevated, the only disk
+is the boot/system NVMe, no safe USB target is present, and no TPM or QEMU TPM
+backend is visible. No physical test or disk/firmware/TPM/media mutation was
+performed. Evidence is under
+`audit-artifacts/physical-host-20261023-083045-801/` and
+`audit-artifacts/physical-tpm-readiness-20261023-083050/`.
+
 ## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
 
 Read the seven-page full-system maturity mandate and created protected branch

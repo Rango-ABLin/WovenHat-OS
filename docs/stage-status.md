@@ -23,6 +23,14 @@ native hardware qualification was attempted. Stage 29 physical qualification,
 Stage 31 randomized full-stack fault/recovery coverage, and the independent
 Claude review remain open; production readiness is not claimed.
 
+A fresh read-only physical preflight at
+`audit-artifacts/physical-host-20261023-083045-801/host.json` and
+`audit-artifacts/physical-tpm-readiness-20261023-083050/` confirms an 8.2 GB
+HP Pavilion x360 host meets the 4 GiB floor, but the session is not elevated,
+only the boot/system NVMe is visible, no safe USB target is available, and no
+TPM or QEMU TPM backend is visible. It performed no physical test and changed
+no disk, firmware, TPM, or media state.
+
 ## Full-system maturity Cycle 0 - 2026-10-22
 
 The full-system mandate was read and a protected audit branch was created at
