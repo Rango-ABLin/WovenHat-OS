@@ -5413,3 +5413,11 @@ the prior eight-scenario path.
 2026-10-23):** The complete Python host suite passed on the current head:
 153 tests in 132.839 seconds. The low-RAM command-contract tests are included;
 the Linux QEMU acceptance remains pending the serialized workflow.
+
+**Codex Stage 31 repeated-boot sample (Codex, 2026-10-23):** The
+count-qualified harness completed 100 sequential 1-CPU memory/boot
+validations. Every per-boot result record reports child exit 0 and no timeout;
+evidence is under
+`audit-artifacts/stage31-repeated/memory-1cpu-100boots/`. This remains a
+disposable-QEMU sample and does not claim the roadmap's thousands-of-boots
+requirement or native qualification.

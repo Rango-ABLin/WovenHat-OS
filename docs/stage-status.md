@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 31 repeated-boot sample - 2026-10-23
+
+The count-qualified repeated-boot harness completed 100 sequential 1-CPU
+memory/boot validations successfully. All 100 per-boot result records report
+exit 0 from the child harness, with no timed-out run; evidence is retained at
+`audit-artifacts/stage31-repeated/memory-1cpu-100boots/`. This is a stronger
+disposable-QEMU sample than the earlier ten-boot profiles, but it does not
+close the roadmap's explicit thousands-of-boots requirement or native
+hardware qualification.
+
 ## Current host regression after low-RAM harness tests - 2026-10-23
 
 The complete Python host suite passed on the current head: 153 tests in
