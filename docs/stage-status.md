@@ -48,6 +48,12 @@ successfully; evidence is retained under
 disposable QEMU/TCG reliability samples and do not replace native hardware,
 power-loss, or arbitrary in-guest fault qualification.
 
+The first CI run after the randomized-matrix update exposed an invalid GFX-02
+workflow command: the kernel package is binary-only, so `cargo test -p
+wovenhat-kernel --lib graphics_abi` could never run. The workflow now retains
+the warning-denying kernel Clippy gate and invokes the existing 37-test host
+`display_compositing` contract target instead. Both commands pass locally.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates

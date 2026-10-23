@@ -5329,3 +5329,10 @@ requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,
 and serial evidence is retained under
 `audit-artifacts/stage31-repeated/memory-{1,2,4,8,16}cpu/`. This remains
 disposable QEMU/TCG evidence and does not claim native qualification.
+
+**Codex CI GFX-02 command repair (Codex, 2026-10-23):** The release-blocker
+workflow was invoking a nonexistent library target in the binary-only
+`wovenhat-kernel` package, causing the maturity job to fail before dependent
+QEMU matrices. Replaced that invalid command with the existing host
+`display_compositing` contract test while keeping the `gfx02-test` kernel
+Clippy gate. Local verification passed all 37 display tests and Clippy.
