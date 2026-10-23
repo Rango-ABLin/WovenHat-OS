@@ -156,6 +156,7 @@ pub struct SpaceInfo {
     pub fs_info_free_count: Option<u32>,
     pub fs_info_next_free: Option<u32>,
     pub fs_info_matches: bool,
+    first_free_cluster: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1658,6 +1659,7 @@ pub fn space_info(device: &mut impl BlockDevice, volume: Volume) -> Result<Space
         .ok_or(Error::UnsupportedGeometry)?;
     let entries_per_sector = (SECTOR_SIZE / 4) as u32;
     let mut free_clusters = 0_u32;
+    let mut first_free_cluster = None;
     let mut cluster = 2_u32;
     let mut sector = [0_u8; SECTOR_SIZE];
 
@@ -1686,6 +1688,9 @@ pub fn space_info(device: &mut impl BlockDevice, volume: Volume) -> Result<Space
             let entry = read_u32(&sector, index * 4) & FAT32_ENTRY_MASK;
             if entry == 0 {
                 free_clusters = free_clusters.saturating_add(1);
+                if first_free_cluster.is_none() && current_cluster >= 2 {
+                    first_free_cluster = Some(current_cluster);
+                }
             }
         }
 
@@ -1720,7 +1725,34 @@ pub fn space_info(device: &mut impl BlockDevice, volume: Volume) -> Result<Space
         fs_info_free_count,
         fs_info_next_free,
         fs_info_matches,
+        first_free_cluster,
     })
+}
+
+/// Reconcile FAT32's advisory FSINFO hints with the authoritative FAT after
+/// an unclean stop.  FAT and directory updates are intentionally journaled in
+/// separate bounded transactions, so a power loss can leave the free-count
+/// hint older than the FAT even when the volume remains mountable.  Never
+/// trust that hint for allocation until a bounded FAT scan has repaired it.
+/// Returns whether either primary or backup FSINFO was rewritten.
+pub fn repair_fs_info(
+    device: &mut impl BlockDevice,
+    volume: Volume,
+) -> Result<bool, Error> {
+    let space = space_info(device, volume)?;
+    let Some(mut info) = read_fs_info(device, volume)? else {
+        return Ok(false);
+    };
+    let repaired_next = space
+        .first_free_cluster
+        .unwrap_or(FSINFO_UNKNOWN);
+    if info.free_count == space.free_clusters && info.next_free == repaired_next {
+        return Ok(false);
+    }
+    info.free_count = space.free_clusters;
+    info.next_free = repaired_next;
+    write_fs_info(device, volume, info)?;
+    Ok(true)
 }
 
 pub fn check_volume(device: &mut impl BlockDevice, volume: Volume) -> Result<CheckReport, Error> {

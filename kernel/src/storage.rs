@@ -321,6 +321,13 @@ fn mount_device(device: &mut impl crate::block::BlockDevice) -> MountStatus {
         return MountStatus::Failed;
     }
 
+    // FSINFO is advisory metadata.  A sudden stop can commit a FAT entry
+    // before its matching hint update; repair it from the FAT before any
+    // allocator or VFS import observes the stale count.
+    if writable_import && fat32::repair_fs_info(device, volume).is_err() {
+        return MountStatus::Failed;
+    }
+
     match import_directory(
         device,
         volume,
