@@ -51,6 +51,15 @@ SMP/TLB markers, and exit 33 all passed. Serial evidence is under
 virtio link-loss boundary only; packet corruption across the full receive
 stack and native NIC failure remain open.
 
+## Stage 31 high-SMP storage qualification - 2026-10-23
+
+The complete disposable FAT32/storage QEMU suite passed at 8 and 16 CPUs,
+both with exit 33. Serial evidence is under
+`target/storage-regression-8-debug/serial.log` and
+`target/storage-regression-16-debug/serial.log`. This is fresh high-SMP
+evidence against the earlier timing-sensitive storage concern; repeated
+qualification is still required before treating that risk as closed.
+
 ## Full-system maturity Cycle 0 - 2026-10-22
 
 The full-system mandate was read and a protected audit branch was created at

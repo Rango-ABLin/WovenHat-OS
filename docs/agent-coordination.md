@@ -43,6 +43,15 @@ markers, and exit 33 passed. Serial logs are under
 `target/network-regression-{8,16}-debug/`. This remains emulated link-loss
 coverage, not complete packet-corruption or native NIC qualification.
 
+## Codex - High-SMP storage qualification (2026-10-23)
+
+The complete disposable FAT32/storage QEMU suite passed at 8 and 16 CPUs
+with exit 33. Serial evidence is under
+`target/storage-regression-8-debug/serial.log` and
+`target/storage-regression-16-debug/serial.log`. This is fresh evidence
+against the timing-sensitive storage concern, but repeated qualification is
+still required before calling that risk closed.
+
 ## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
 
 Read the seven-page full-system maturity mandate and created protected branch
