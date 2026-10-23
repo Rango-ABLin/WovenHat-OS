@@ -17,6 +17,7 @@ fault injector.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
@@ -37,6 +38,35 @@ SCENARIOS = {
     "service-supervisor": ["scripts/test-shell-qemu.py"],
     "driver-restart": ["scripts/test-stage13-12-drivers.py"],
 }
+
+
+def allocate_evidence(root, seed, cpus, count):
+    suffix = "" if count == 8 else f"-{count}scenarios"
+    base = root / "audit-artifacts" / f"stage31-randomized-{seed:x}-{cpus}cpu{suffix}"
+    evidence = base
+    if base.exists() and any(base.iterdir()):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        evidence = base.with_name(f"{base.name}-rerun-{stamp}")
+    evidence.mkdir(parents=True, exist_ok=False)
+    return evidence
+
+
+def write_plan(evidence, seed, cpus, order, status):
+    (evidence / "plan.json").write_text(
+        json.dumps(
+            {
+                "schema": "wovenhat.stage31.randomized-faults/v1",
+                "seed": seed,
+                "cpus": cpus,
+                "order": order,
+                "physical_access": "none",
+                "status": status,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def scenario_command(scenario, args):
@@ -75,24 +105,8 @@ def run(args: argparse.Namespace) -> int:
     order = list(SCENARIOS)
     rng.shuffle(order)
     order = order[: args.count]
-    suffix = "" if args.count == 8 else f"-{args.count}scenarios"
-    evidence = ROOT / "audit-artifacts" / f"stage31-randomized-{args.seed:x}-{args.cpus}cpu{suffix}"
-    evidence.mkdir(parents=True, exist_ok=True)
-    (evidence / "plan.json").write_text(
-        json.dumps(
-            {
-                "schema": "wovenhat.stage31.randomized-faults/v1",
-                "seed": args.seed,
-                "cpus": args.cpus,
-                "order": order,
-                "physical_access": "none",
-                "status": "pending",
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    evidence = allocate_evidence(ROOT, args.seed, args.cpus, args.count)
+    write_plan(evidence, args.seed, args.cpus, order, "running")
     results = []
     for index, scenario in enumerate(order, 1):
         command = scenario_command(scenario, args)
@@ -130,6 +144,7 @@ def run(args: argparse.Namespace) -> int:
         results.append(result)
         print(f"[{index}/{len(order)}] {scenario}: exit={returncode}", flush=True)
         if returncode != 0:
+            write_plan(evidence, args.seed, args.cpus, order, "failed")
             (evidence / "result.json").write_text(
                 json.dumps({"valid": False, "seed": args.seed, "cpus": args.cpus, "order": order, "runs": results}, indent=2)
                 + "\n",
@@ -137,6 +152,7 @@ def run(args: argparse.Namespace) -> int:
             )
             print(f"randomized Stage 31 matrix failed; evidence: {evidence}", file=sys.stderr)
             return 1
+    write_plan(evidence, args.seed, args.cpus, order, "passed")
     report = {"valid": True, "seed": args.seed, "cpus": args.cpus, "order": order, "runs": results}
     (evidence / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"randomized Stage 31 scenario matrix: PASS ({args.cpus} CPU, seed={args.seed:#x})")
