@@ -5271,3 +5271,4 @@ The complete host test suite passed on this tree (151 tests, 168.209 seconds).
 The driver audit still finds no controller-specific quiesce/reset/reinitialize
 protocol for automatic NVMe/AHCI/xHCI/HDA crash recovery; generic rebinding is
 therefore intentionally not claimed.
+Repository-wide host Clippy with warnings denied also passed.

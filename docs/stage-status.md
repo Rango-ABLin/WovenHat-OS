@@ -7,6 +7,9 @@ This validates host-side contracts and planners only. The GitHub Actions run
 for `f03ce5e8` is still queued, and the later local commits have not yet
 produced a remote run, so no QEMU or OVMF result is claimed here.
 
+The repository-wide host Clippy gate also passed with warnings denied:
+`cargo clippy --all-targets -- -D warnings`.
+
 The driver audit confirms that the current PCI layer has generation-safe
 resource teardown and explicit rebind coverage, but the NVMe/AHCI/xHCI/HDA
 controller modules do not yet expose controller-specific quiesce/reset/
