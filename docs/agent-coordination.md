@@ -5342,6 +5342,13 @@ declared 4 GiB guest floor. Fresh 8- and 16-CPU runs passed with exit 33, and
 the torture planner now exposes those profiles. The separate recovery and
 sudden-shutdown harnesses remain limited to 1/2/4 CPUs.
 
+**Codex Stage 31 high-SMP recovery qualification (Codex, 2026-10-23):**
+WovenRecovery and sudden-shutdown recovery now accept 1/2/4/8/16 CPUs and
+use 4 GiB guests. Fresh 8- and 16-CPU runs passed for both gates, so every
+Stage 31 planner suite now exposes the full requested CPU matrix. Evidence is
+retained under `audit-artifacts/stage27.5-recovery-{8,16}cpu/` and the
+timestamped `stage31-sudden-shutdown-{8,16}cpu-*` directories.
+
 **Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
 sequential repeated-boot harness completed ten successful memory boots at each
 requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,

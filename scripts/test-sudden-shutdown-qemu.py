@@ -25,7 +25,7 @@ RECOVERY_MARKERS = [
 
 def command(qemu, firmware, image, disk, serial, cpus):
     return [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "256M",
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "4G",
         "-smp", str(cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
@@ -98,7 +98,7 @@ def run_recovery(root, qemu, firmware, image, disk, serial, cpus, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument(

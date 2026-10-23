@@ -70,13 +70,16 @@ qualification, not automatic crash supervision or native hardware evidence.
 The signed service-supervisor gate is now also qualified at 8 and 16 CPUs.
 Fresh runs passed with 4 GiB guests and the complete signed 11-application
 catalog; the Stage 31 planner now exposes service-supervisor jobs across
-1/2/4/8/16 CPUs. Recovery and update-service rows remain blocked at 8/16
-because those separate harnesses have not been extended.
+1/2/4/8/16 CPUs.
 
 The signed update-service restart slice has now been extended to the same
 1/2/4/8/16-CPU matrix and rerun at 8 and 16 CPUs. Both passed with 4 GiB
 guests and exit 33. The planner now exposes these profiles; the separate
-sudden-shutdown/recovery harness remains limited to 1/2/4 CPUs.
+guests and exit 33. The planner now exposes these profiles.
+
+The WovenRecovery and sudden-shutdown recovery gates have also been extended
+to 4 GiB guests and 8/16 CPUs. Fresh runs passed at both high-SMP profiles;
+all Stage 31 planner suites now expose the full 1/2/4/8/16 CPU matrix.
 
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
