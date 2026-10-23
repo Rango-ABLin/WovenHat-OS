@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head WovenFS crash/fault model (2026-10-23)
+
+The current tree passed all 16 `wovenfs_crash` host tests, including full-volume
+`NoSpace` atomicity, randomized write-failure cut points, remount consistency,
+format/create/write crash recovery, and corruption detection. This remains
+host-side filesystem-model evidence; QEMU block-device faults, physical
+power-loss/torn sectors, native media, and independent Claude review remain
+open.
+
 ## Codex - Stage 29 qualification-report hardening (2026-10-23)
 
 The read-only hardware report validator now rejects `tier1` labels unless the

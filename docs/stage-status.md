@@ -1,5 +1,14 @@
 # Stage status
 
+## P0-02 current-head WovenFS crash/fault model - 2026-10-23
+
+`cargo test --test wovenfs_crash --quiet` passed all 16 tests on the current
+tree. The suite includes full-volume `NoSpace` atomicity, format/create/write
+crash cuts, randomized write-failure cut points, remount consistency, and
+corruption detection. This is host-side WovenFS model evidence; it does not
+replace QEMU block-device errors, physical torn-sector/power-loss testing, or
+native media qualification.
+
 ## Stage 29 qualification-report fail-closed hardening - 2026-10-23
 
 Hardened the read-only hardware qualification report validator: `tier1` now
