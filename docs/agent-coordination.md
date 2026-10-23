@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 campaign evidence isolation (2026-10-23)
+
+The seeded 9-scenario Stage 31 campaign passed at 1 CPU with seed `0x51A7E`,
+including the new three-flap network fault. The authoritative result is
+`audit-artifacts/stage31-randomized-51a7e-1cpu-9scenarios/result.json` with
+nine zero return codes. A one-scenario follow-up passed with a `passed` plan
+status. The runner now allocates a fresh timestamped rerun directory whenever
+the canonical directory is non-empty and records `running/passed/failed`
+plan states. Existing historical mixed folders were preserved. Focused tests,
+syntax checks, and the QEMU campaign pass; this remains bounded emulated
+coverage, not arbitrary in-guest faults, native qualification, or Claude
+review.
+
 ## Codex - Stage 31 seeded multi-flap network fault injector (2026-10-23)
 
 Extended the QEMU network harness with a bounded seeded plan of 1-8 virtio-net

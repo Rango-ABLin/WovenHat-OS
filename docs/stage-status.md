@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 31 seeded 9-scenario campaign and evidence isolation - 2026-10-23
+
+The seeded Stage 31 campaign passed all nine scenarios at 1 CPU with seed
+`0x51A7E`: packet corruption, sudden shutdown, multi-flap network loss,
+process crash, low-RAM recovery, service restart, driver restart, service
+supervisor recovery, and memory boot. The authoritative result is
+`audit-artifacts/stage31-randomized-51a7e-1cpu-9scenarios/result.json`, with
+all nine return codes zero; the network child log records all three seeded
+flaps. A one-scenario follow-up also passed and recorded `status: "passed"`
+in its plan.
+
+The runner now refuses to reuse a non-empty evidence directory: reruns receive
+a timestamped directory, and plan status transitions through `running`,
+`passed`, or `failed`. Historical folders from the earlier reused directory
+were preserved and are not treated as new scenario results. This closes an
+evidence-integrity defect without claiming arbitrary in-guest fault injection
+or native hardware qualification.
+
 ## Stage 31 seeded multi-flap network fault injector - 2026-10-23
 
 Extended the QEMU network harness with a bounded seeded plan of 1-8 virtio-net
