@@ -22,6 +22,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("256M",)
 
 
+def build_command(cpus: int, memory: str, qemu: str, firmware: Path, timeout: int) -> list[str]:
+    return [
+        sys.executable,
+        str(ROOT / "scripts" / "test-memory-qemu.py"),
+        "--cpus", str(cpus),
+        "--memory", memory,
+        "--qemu", qemu,
+        "--firmware", str(firmware),
+        "--timeout", str(timeout),
+    ]
+
+
 def run(args: argparse.Namespace) -> int:
     evidence = ROOT / "audit-artifacts" / f"stage31-low-ram-{args.cpus}cpu"
     evidence.mkdir(parents=True, exist_ok=True)
@@ -35,15 +47,7 @@ def run(args: argparse.Namespace) -> int:
     (evidence / "plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     results = []
     for index, memory in enumerate(PROFILES, 1):
-        command = [
-            sys.executable,
-            str(ROOT / "scripts" / "test-memory-qemu.py"),
-            "--cpus", str(args.cpus),
-            "--memory", memory,
-            "--qemu", args.qemu,
-            "--firmware", str(args.firmware),
-            "--timeout", str(args.timeout),
-        ]
+        command = build_command(args.cpus, memory, args.qemu, args.firmware, args.timeout)
         started = time.monotonic()
         try:
             completed = subprocess.run(
