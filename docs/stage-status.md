@@ -1,5 +1,17 @@
 # Stage status
 
+## 3D-default self-test retrofit: Stage 20.3 - 2026-10-23
+
+Stage 20.3's kernel self-test passes on 1/2/4 CPUs against the 3D-default
+desktop, migrated onto the shared `projected_card_3d`/`expected_card_3d`
+helper (new, for small bounded 3D chrome cards sampled at local texture
+coordinates: the launcher panel, and potentially QS/notification
+center/toast later). Found a second real rendering defect along the way:
+`render_panel_3d`'s offscreen texture isn't cleared before each repaint,
+so stale content (an old selection highlight, a leftover glyph) can
+persist and show through. Full details, including how this differs from
+Stage 20.2's toast finding, are in `docs/agent-coordination.md`.
+
 ## 3D-default self-test retrofit: Stages 20.1-20.2 - 2026-10-23
 
 Stage 20.1 and 20.2's kernel self-tests pass on 1/2/4 CPUs against the

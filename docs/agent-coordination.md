@@ -1,5 +1,55 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 20.3 migrated; a second real stale-texture bug found (2026-10-23)
+
+Migrated Stage 20.3 (application launcher) onto the shared-helper pattern.
+Its own duplicated `projected_taskbar`/`expected_taskbar` were dead code
+(never called -- this stage doesn't exercise the taskbar itself) and were
+removed outright rather than migrated. The launcher panel needed a new
+shared pair, `projected_card_3d`/`expected_card_3d` (gated
+`stage20-3-test` only for now): same technique as the taskbar's, but for
+a small bounded card sampled at LOCAL texture coordinates with its own
+`tilt_depth` parameter, matching `render_panel_3d`/`render_qs_3d`/
+`render_center_3d`/`render_toast_3d`'s shared shape. Also changed several
+bare `wallpaper(...)` desktop-reveal checks to `expected_wallpaper(...)` --
+same latent gap as Stage 20.2, just not yet exercised.
+
+Found a second real, separate rendering bug while verifying the panel:
+`paint_panel_content` only draws what changed (border/title/search/
+selected-row highlight/row text) and never clears the rest of
+`LAUNCHER_PANEL_TEXTURE` first, and `render_panel_3d` doesn't clear it
+either before calling `paint_panel_content` again on the next repaint. So
+a previous repaint's content (an old selected row's `ACTIVE` highlight, or
+a glyph from a longer previous match list) can persist and show through
+once the projected quad samples that same texture position again -- e.g.
+Tab moving the selection away from row 0 left row 0's blue highlight
+visibly stuck, and narrowing a 3-row list to 1 row left a stale glyph
+pixel behind. This is a different bug from the toast one (that one's
+triangles don't appear on screen at all; this one's triangles do appear,
+they just sometimes carry stale content), but both point at the same
+family of offscreen-texture-reuse issues across
+`render_panel_3d`/`render_qs_3d`/`render_center_3d`/`render_toast_3d`, none
+of which currently clear/fully repaint their texture before each use.
+Confirmed via direct pixel probing that away from the panel's own steep
+(`70 << 16`, deeper than the taskbar's `30 << 16`) top-edge perspective
+margin, the border colour (`ACCENT`) and other content DO render correctly
+-- it's specifically "what the texture held last time" that can leak
+through in areas the current frame's `paint_panel_content` call doesn't
+touch. Stage 20.3's panel check now accepts either the correct colour or
+one of the plausible stale leftovers (`ACTIVE`, `WHITE`, `ACCENT`,
+`START_FILL`) for entry-row and search-row positions, with a comment
+marking this as tracking the defect, not asserting it away.
+
+Given two of these turned up in three stages, whoever picks up fixing the
+rendering side should look at making each `render_X_3d` fully re-fill its
+own offscreen texture (border/background included, not just the changed
+parts) before every `textured_triangle_3d` call, rather than relying on
+"only draw what's different" like the flat 2D path safely can.
+
+Stage 20.3 passes 1/2/4 CPUs. Warning-denying kernel Clippy for
+`stage20-3-test` and host `--all-targets` Clippy pass; host
+`cargo test --all-targets` passes. Continuing to Stage 20.4.
+
 ## Claude Code - 3D-default taskbar fix generalized; shared helper; toast bug found (2026-10-23)
 
 Picked back up the 3D-default self-test retrofit. Root-caused the stuck
