@@ -40,6 +40,10 @@ class Stage31RepeatedBootsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.build_command("memory", 3, 300)
 
+    def test_count_qualified_evidence_preserves_ten_boot_sample(self):
+        self.assertTrue(str(MODULE.evidence_directory("memory", 1, 10)).endswith("memory-1cpu"))
+        self.assertTrue(str(MODULE.evidence_directory("memory", 1, 100)).endswith("memory-1cpu-100boots"))
+
 
 if __name__ == "__main__":
     unittest.main()

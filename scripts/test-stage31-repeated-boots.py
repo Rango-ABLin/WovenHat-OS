@@ -68,6 +68,11 @@ def evidence_sources(suite: str, cpus: int) -> list[Path]:
     return [path] if path.exists() else []
 
 
+def evidence_directory(suite: str, cpus: int, count: int) -> Path:
+    suffix = "" if count == 10 else f"-{count}boots"
+    return ROOT / "audit-artifacts" / "stage31-repeated" / f"{suite}-{cpus}cpu{suffix}"
+
+
 def snapshot(run_dir: Path, suite: str, cpus: int, command: list[str], result: subprocess.CompletedProcess[str] | None, error: str | None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "command.json").write_text(
@@ -89,7 +94,7 @@ def snapshot(run_dir: Path, suite: str, cpus: int, command: list[str], result: s
 
 
 def run(args: argparse.Namespace) -> int:
-    evidence_root = ROOT / "audit-artifacts" / "stage31-repeated" / f"{args.suite}-{args.cpus}cpu"
+    evidence_root = evidence_directory(args.suite, args.cpus, args.count)
     evidence_root.mkdir(parents=True, exist_ok=True)
     for index in range(1, args.count + 1):
         command = build_command(args.suite, args.cpus, args.timeout)
