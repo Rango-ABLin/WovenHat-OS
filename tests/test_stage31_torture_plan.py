@@ -20,9 +20,9 @@ class Stage31TorturePlanTests(unittest.TestCase):
         plan = MODULE.build_plan()
         expanded = [job for job in plan["jobs"] if job["cpus"] in (8, 16)]
         self.assertEqual(len(expanded), 20)
-        self.assertEqual(sum(job["status"] == "pending" for job in expanded), 12)
-        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 8)
-        self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 12)
+        self.assertEqual(sum(job["status"] == "pending" for job in expanded), 14)
+        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 6)
+        self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 14)
 
     def test_lifecycle_gates_are_blocked_at_8_and_16_cpus(self):
         plan = MODULE.build_plan()
@@ -32,7 +32,16 @@ class Stage31TorturePlanTests(unittest.TestCase):
         ]
         self.assertEqual(len(lifecycle), 15)
         self.assertTrue(all(job["status"] == "pending" for job in lifecycle if job["cpus"] <= 4))
-        self.assertTrue(all(job["status"] == "blocked" for job in lifecycle if job["cpus"] >= 8))
+        self.assertTrue(all(
+            job["status"] == "blocked"
+            for job in lifecycle
+            if job["cpus"] >= 8 and job["suite"] in ("recovery", "update-service")
+        ))
+        self.assertTrue(all(
+            job["status"] == "pending"
+            for job in lifecycle
+            if job["cpus"] >= 8 and job["suite"] == "service-supervisor"
+        ))
 
     def test_supported_jobs_are_pending_with_commands(self):
         plan = MODULE.build_plan((1, 4))

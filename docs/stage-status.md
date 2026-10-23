@@ -67,6 +67,12 @@ guests and real emulated NVMe, AHCI, xHCI, and HDA devices; the planner and
 harness now expose those profiles. This remains explicit bounded restart
 qualification, not automatic crash supervision or native hardware evidence.
 
+The signed service-supervisor gate is now also qualified at 8 and 16 CPUs.
+Fresh runs passed with 4 GiB guests and the complete signed 11-application
+catalog; the Stage 31 planner now exposes service-supervisor jobs across
+1/2/4/8/16 CPUs. Recovery and update-service rows remain blocked at 8/16
+because those separate harnesses have not been extended.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates

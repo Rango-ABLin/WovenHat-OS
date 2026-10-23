@@ -5330,6 +5330,12 @@ profiles, and fresh controller-owned restart runs passed at 8 and 16 CPUs with
 `audit-artifacts/stage13.12-restart-{8,16}cpu-*`. This is bounded emulated
 restart evidence, not automatic driver-crash recovery or native qualification.
 
+**Codex Stage 31 high-SMP service-supervisor qualification (Codex, 2026-10-23):**
+The signed service-supervisor acceptance passed at 8 and 16 CPUs with 4 GiB
+guests and the complete 11-application catalog. The torture planner now
+supports service-supervisor jobs across 1/2/4/8/16 CPUs; separate recovery and
+update-service rows remain blocked at 8/16 until their harnesses are extended.
+
 **Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
 sequential repeated-boot harness completed ten successful memory boots at each
 requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,
