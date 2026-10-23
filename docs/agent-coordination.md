@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - production feature lint in release gate (2026-10-23)
+
+Updated `scripts/test-release.py` to lint the kernel with `system-apps` using
+the same packaged application paths and trusted key environment used for the
+release image. This protects the production-only supervisor from default-
+feature-only CI coverage. The script was Python syntax-checked; full release
+QEMU execution remains pending the Linux/OVMF runner.
+
 ## Codex - bounded production service supervisor (2026-10-23)
 
 Added `kernel/src/service_supervisor.rs` and registered the production package,

@@ -1,5 +1,16 @@
 # Stage status
 
+## Release gate covers production service supervisor - 2026-10-23
+
+Updated `scripts/test-release.py` so the authoritative release chain runs
+warning-denying kernel Clippy with `--features system-apps` after constructing
+the exact signed application environment and packaged image paths. This
+ensures production-only service supervision code is linted rather than being
+covered only by the default kernel configuration. The complete release chain
+was not rerun locally because this Windows host lacks OVMF and has limited
+free space; the script change is syntax-checked and the equivalent
+environment-aware Clippy command passed locally.
+
 ## Stage 31 bounded production service supervisor - 2026-10-23
 
 Added `kernel::service_supervisor` for the signed package, update, and

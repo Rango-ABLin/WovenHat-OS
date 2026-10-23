@@ -37,11 +37,11 @@ def main():
     acceptance_env = os.environ.copy()
     acceptance_env['CARGO_INCREMENTAL'] = '0'
 
-    def run(name, command, run_cwd=root):
+    def run(name, command, run_cwd=root, env=None):
         print(f'[{name}]', flush=True)
         start = time.monotonic()
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(command, cwd=run_cwd, env=acceptance_env, text=True,
+        result = subprocess.run(command, cwd=run_cwd, env=env or acceptance_env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 creationflags=flags)
         (out / f'{name}.log').write_text(result.stdout, encoding='utf-8')
@@ -234,6 +234,15 @@ def main():
         env=system_app_env,
         text=True,
     ).strip()))
+    run(
+        'lint-kernel-system-apps',
+        [
+            'cargo', 'clippy', '-p', 'wovenhat-kernel',
+            '--target', 'x86_64-unknown-none', '--features', 'system-apps',
+            '--', '-D', 'warnings',
+        ],
+        env=system_app_env,
+    )
     image = Path(subprocess.check_output(
         ['cargo', 'run', '--quiet', '--release', '--features', 'system-apps', '--', '--print-image'],
         cwd=root, env=system_app_env, text=True).strip())
