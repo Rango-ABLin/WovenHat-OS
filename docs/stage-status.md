@@ -9,6 +9,9 @@ recorded below; GitHub Actions remains the independent Linux qualification.
 The repository-wide host Clippy gate also passed with warnings denied:
 `cargo clippy --all-targets -- -D warnings`.
 
+After the current planner/release-validator updates, the complete host Python
+suite was rerun: 151 tests passed in 171.754 seconds.
+
 The kernel workflow now supersedes older queued runs per branch, retaining
 completed run artifacts while ensuring the latest audited commit reaches the
 runner instead of waiting behind stale push matrices.
