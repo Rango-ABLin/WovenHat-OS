@@ -2640,6 +2640,19 @@ impl Desktop {
             return self.paint_toast_content(toast, canvas, area);
         };
         self.paint_toast_content(toast, &mut texture, Area::new(0, 0, area.width, area.height));
+        {
+            fn hex8(value: u32) -> [u8; 8] {
+                let mut out = [0u8; 8];
+                for i in 0..8 {
+                    let nibble = (value >> ((7 - i) * 4)) & 0xf;
+                    out[i] = if nibble < 10 { b'0' + nibble as u8 } else { b'a' + (nibble - 10) as u8 };
+                }
+                out
+            }
+            let border = hex8(texture_pixels[0]);
+            let text_px = hex8(texture_pixels[6 + 8 * area.width as usize]);
+            log(&[b"woven-shell: DEBUG toast texture border=", &border, b" text=", &text_px]);
+        }
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
         // `render_desktop_background` clears and uses that same shared

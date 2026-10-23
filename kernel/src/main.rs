@@ -14638,6 +14638,12 @@ fn stage20_2_self_test() -> bool {
     ) {
         return false;
     }
+    serial::write_line(format_args!(
+        "[S20.2] DEBUG immediate toast border={:?} ACCENT={:#x} tick={}",
+        compositor::pixel(toast_x, toast_y),
+        ACCENT,
+        timer::ticks(),
+    ));
     let frame_a = until(500, || {
         title_bar((40, 26), 120, "Alpha", ACTIVE)
             && region(40, 40, 120, 80, |x, y| {
@@ -14669,6 +14675,21 @@ fn stage20_2_self_test() -> bool {
             }
         })
     });
+    if !toast {
+        serial::write_line(format_args!(
+            "[S20.2] DEBUG toast area ({},{}) 180x22 ACCENT={:#x} WHITE={:#x} flat_fill={:#x} wall0={:#x} wall1={:#x}",
+            toast_x, toast_y, ACCENT, WHITE,
+            blend_pixel(TOAST_FILL, wallpaper(toast_x + 90, toast_y + 15, height), 216),
+            expected_wallpaper(toast_x + 90, toast_y + 15, width, height),
+            expected_wallpaper(toast_x, toast_y, width, height),
+        ));
+        for (dx, dy) in [(0,0),(1,1),(6,8),(90,11),(170,0),(179,21),(90,15),(2,2),(177,19)] {
+            serial::write_line(format_args!(
+                "[S20.2] DEBUG toast ({},{}) => {:?}",
+                dx, dy, compositor::pixel(toast_x + dx, toast_y + dy),
+            ));
+        }
+    }
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
         || !step("tray icon shown", tray)
