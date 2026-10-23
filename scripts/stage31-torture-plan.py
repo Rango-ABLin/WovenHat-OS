@@ -52,7 +52,7 @@ FAULT_SCENARIOS = {
     "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "covered-qemu-abrupt-termination-and-reboot-1-2-4cpu",
     "randomized-cross-subsystem": "partial-seeded-scenario-orchestration-1cpu",
-    "whole-kernel-low-ram": "pending-stage31-disposable-256m-boot-matrix",
+    "whole-kernel-low-ram": "covered-stage31-disposable-256m-boot-matrix-1-2-4-8-16cpu",
 }
 
 

@@ -5393,7 +5393,9 @@ bounded `test-stage31-low-ram.py` runner and planner `low-ram` suite. It
 executes the existing complete boot validation at the disposable 256 MiB
 profile across 1/2/4/8/16 CPUs, preserving child evidence and refusing to
 accept a non-33 or failed child result. Focused planner tests and Python syntax
-checks pass; the Linux QEMU matrix remains pending. This does not alter the
+checks pass; fresh local QEMU/TCG runs passed at 1/2/4/8/16 CPUs with
+evidence under `audit-artifacts/stage31-low-ram-{1,2,4,8,16}cpu/`. The Linux
+QEMU matrix remains useful independent confirmation. This does not alter the
 4 GiB production floor, claim physical qualification, or imply arbitrary
 fault injection.
 

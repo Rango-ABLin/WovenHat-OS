@@ -14,9 +14,12 @@ disposable 256 MiB regression profile for every requested 1/2/4/8/16-CPU
 configuration, preserves child command/result/serial evidence, and fails
 closed on a non-33 exit or failed child gate. `test-memory-qemu.py` now accepts
 an explicit RAM value while retaining 256 MiB as its regression default. The
-planner and focused host tests pass; the QEMU matrix is pending the next Linux
-CI run. This is low-RAM disposable-QEMU evidence only and does not lower the
-declared 4 GiB production guest floor or qualify native hardware.
+planner and focused host tests pass. Local QEMU/TCG acceptance passed at
+1/2/4/8/16 CPUs; evidence is retained under
+`audit-artifacts/stage31-low-ram-{1,2,4,8,16}cpu/`. This is low-RAM
+disposable-QEMU evidence only and does not lower the declared 4 GiB production
+guest floor or qualify native hardware. The Linux CI rerun remains useful
+independent confirmation and is not substituted by this local result.
 
 The seeded Stage 31 randomized runner now includes this low-RAM gate as a
 ninth bounded scenario, so its schedule cannot omit the resource-pressure
