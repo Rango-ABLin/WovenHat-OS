@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head release validation with storage faults (2026-10-24)
+
+The authoritative release chain passed all 158 checks on commit `76a3b6f6`.
+The report is `target/release-validation/results.json`; it includes the full
+prior release chain and the new disposable QEMU storage-read-fault and
+storage-write-fault containment gates at 1/2/4 CPUs. No failure was suppressed
+and zero checks failed.
+
+This remains emulated/release-validation evidence. Physical/native hardware,
+physical power-loss, TPM/Secure Boot, release-key custody, arbitrary fault
+injection, and independent Claude review remain open.
+
 ## Codex - release validation baseline (2026-10-23)
 
 The authoritative release chain passed all 152 checks on source commit

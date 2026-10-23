@@ -1,5 +1,20 @@
 # Stage status
 
+## P0-03/P0-07 current-head release validation with storage faults - 2026-10-24
+
+The authoritative release chain passed all 158 checks on commit `76a3b6f6`.
+This includes the previous warning-denying kernel/host Clippy, host tests,
+debug/release 1/2/4-CPU boot/storage/network matrix, shell and service
+supervision, driver restart, application/system-app/package/AI gates, and
+desktop boots, plus new disposable QEMU storage-read-fault and
+storage-write-fault containment gates at 1/2/4 CPUs. The report is retained at
+`target/release-validation/results.json`; zero checks failed.
+
+The release result remains an emulated/release-validation result. Physical and
+native hardware, physical power-loss/torn-sector recovery, TPM/Secure Boot,
+release-key custody, arbitrary fault injection, and independent Claude review
+remain separate release prerequisites.
+
 ## P0-03/P0-07 release validation baseline - 2026-10-23
 
 The authoritative release chain passed all 152 checks on source commit
