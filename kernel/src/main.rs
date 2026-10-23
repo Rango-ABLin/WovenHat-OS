@@ -14013,15 +14013,19 @@ fn stage20_3_self_test() -> bool {
             }
             expected.draw_text(6, row_y + 4, name, WHITE);
         }
-        // Unset cells are drawn nowhere in `paint_panel_content` itself (the
-        // translucent wash over the wallpaper is a separate flat
-        // `painter.blend` call in front of it); under 3D projection, the
-        // `LAUNCHER_PANEL_TEXTURE` offscreen buffer `render_panel_3d` reads
-        // from never gets anything written there either, so this treats
-        // those cells as the texture's zero-initialized default.
+        const PANEL_FILL: u32 = rgb(28, 32, 44);
+        const PANEL_OPACITY: u8 = 216;
+        // The shell's 3D source texture is seeded with the translucent panel
+        // background at the corresponding flat screen coordinate before the
+        // sparse border/text painter runs. Reconstruct that seed here rather
+        // than treating transparent cells as black.
         let flat = |lx: i32, ly: i32| match expected.pixel(lx, ly) {
-            Some(UNSET) | None => BLACK,
-            Some(pixel) => pixel,
+            Some(UNSET) | None => Some(blend_pixel(
+                PANEL_FILL,
+                wallpaper(4 + lx, y + ly, height),
+                PANEL_OPACITY,
+            )),
+            Some(pixel) => Some(pixel),
         };
         let sample = |x: i32, py: i32| {
             expected_card_3d(x, py, 4, y, 160, h, 70 << 16, flat, |x, y| {
@@ -14040,27 +14044,9 @@ fn stage20_3_self_test() -> bool {
         // selection, launching), are checked exhaustively in a safe
         // horizontal band, plus the two edge columns once clear of the top.
         //
-        // KNOWN BUG (see docs/agent-coordination.md, not yet fixed):
-        // `paint_panel_content` never fills a previously-selected row's
-        // highlight back to the unset background when selection moves
-        // elsewhere, and `render_panel_3d`'s offscreen texture is not
-        // cleared before each repaint either, so a stale `ACTIVE` fill can
-        // visibly persist in an entry row that is no longer selected. Any
-        // row position accepts either the correct colour or that stale
-        // leftover; this is tracking the defect, not asserting it away.
-        // The same staleness also leaves old glyph pixels behind (not just
-        // an old highlight fill) once the match count, and so the panel's
-        // own height, shrinks between one `panel()` call and the next.
-        let stale = |py: i32, actual: Result<u32, compositor::Error>| {
-            py >= 14
-                && (actual == Ok(ACTIVE)
-                    || actual == Ok(WHITE)
-                    || actual == Ok(ACCENT)
-                    || actual == Ok(START_FILL))
-        };
         let matches = |actual: Result<u32, compositor::Error>, x: i32, py: i32| {
             let expected_px = sample(4 + x, y + py);
-            actual == Ok(expected_px) || stale(py, actual)
+            actual == Ok(expected_px)
         };
         until(500, || {
             (14..h).all(|py| (20..140).all(|x| matches(compositor::pixel(4 + x, y + py), x, py)))
@@ -14780,7 +14766,7 @@ fn expected_taskbar_3d(
     width: i32,
     top: i32,
     taskbar_height: i32,
-    flat: impl Fn(i32, i32) -> u32,
+    flat: impl Fn(i32, i32) -> Option<u32>,
     background: impl Fn(i32, i32) -> u32,
 ) -> u32 {
     match projected_taskbar_3d(x, y, width, top, taskbar_height, &flat) {
@@ -15015,13 +15001,13 @@ fn projected_card_3d(
         let total = wa + wb + wc;
         let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
         let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-        return Some(sample(u, v));
+        return sample(u, v);
     }
     if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
         let total = wa + wb + wc;
         let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
         let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-        return Some(sample(u, v));
+        return sample(u, v);
     }
     None
 }
@@ -15036,7 +15022,7 @@ fn expected_card_3d(
     area_width: i32,
     area_height: i32,
     tilt_depth: i64,
-    flat: impl Fn(i32, i32) -> u32,
+    flat: impl Fn(i32, i32) -> Option<u32>,
     background: impl Fn(i32, i32) -> u32,
 ) -> u32 {
     match projected_card_3d(x, y, area_x, area_y, area_width, area_height, tilt_depth, &flat) {

@@ -1326,9 +1326,16 @@ impl Desktop {
         // The content painter intentionally draws only the panel's visible
         // overlay pixels because the flat path starts from a transparent
         // keyed canvas.  The 3D source texture is persistent scratch storage,
-        // so clear its active footprint before every repaint or a prior
-        // selection/glyph can leak into the next projected frame.
-        texture.fill_rect(0, 0, area.width as usize, area.height as usize, TRANSPARENT);
+        // so seed its active footprint with the translucent panel background
+        // before every repaint or a prior selection/glyph can leak into the
+        // next projected frame.
+        texture.shade(|x, y| {
+            blend(
+                PANEL_FILL,
+                wallpaper(area.x + x, area.y + y, self.height),
+                PANEL_OPACITY,
+            )
+        });
         self.paint_panel_content(&mut texture, Area::new(0, 0, area.width, area.height));
         // The projected quad is narrower than the flat panel's footprint at
         // its receded top edge, so the corners it no longer covers still
@@ -2234,7 +2241,13 @@ impl Desktop {
         else {
             return self.paint_qs_content(canvas, area);
         };
-        texture.fill_rect(0, 0, area.width as usize, area.height as usize, TRANSPARENT);
+        texture.shade(|x, y| {
+            blend(
+                PANEL_FILL,
+                wallpaper(area.x + x, area.y + y, self.height),
+                PANEL_OPACITY,
+            )
+        });
         self.paint_qs_content(&mut texture, Area::new(0, 0, area.width, area.height));
         // The projected quad is narrower than the flat panel's footprint at
         // its receded top edge, so the corners it no longer covers would
@@ -2439,7 +2452,13 @@ impl Desktop {
         else {
             return self.paint_center_content(canvas, area);
         };
-        texture.fill_rect(0, 0, area.width as usize, area.height as usize, TRANSPARENT);
+        texture.shade(|x, y| {
+            blend(
+                PANEL_FILL,
+                wallpaper(area.x + x, area.y + y, self.height),
+                PANEL_OPACITY,
+            )
+        });
         self.paint_center_content(&mut texture, Area::new(0, 0, area.width, area.height));
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
@@ -2647,7 +2666,13 @@ impl Desktop {
         else {
             return self.paint_toast_content(toast, canvas, area);
         };
-        texture.fill_rect(0, 0, area.width as usize, area.height as usize, TRANSPARENT);
+        texture.shade(|x, y| {
+            blend(
+                TOAST_FILL,
+                wallpaper(area.x + x, area.y + y, self.height),
+                TOAST_OPACITY,
+            )
+        });
         self.paint_toast_content(toast, &mut texture, Area::new(0, 0, area.width, area.height));
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
