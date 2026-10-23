@@ -25,6 +25,18 @@ class Stage31RandomizedFaultTests(unittest.TestCase):
         self.assertEqual(command[command.index("--link-loss-count") + 1], "3")
         self.assertEqual(command[command.index("--fault-seed") + 1], "0x51a7e")
 
+    def test_storage_read_fault_scenario_uses_disposable_qemu_gate(self):
+        args = types.SimpleNamespace(
+            cpus=16,
+            qemu="qemu-system-x86_64",
+            firmware=Path("OVMF_CODE.fd"),
+            seed=0x51A7E,
+        )
+        command = MODULE.scenario_command("storage-read-fault", args)
+        self.assertIn("test-stage31-storage-read-fault.py", command[1])
+        self.assertEqual(command[command.index("--cpus") + 1], "16")
+        self.assertIn("--firmware", command)
+
     def test_existing_evidence_gets_a_fresh_rerun_directory(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

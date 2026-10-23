@@ -7,9 +7,9 @@ order, one process at a time, and preserves every command, result, and child
 output. Physical disks and firmware variables are never selected. The report
 therefore proves randomized scenario scheduling and cross-subsystem evidence;
 it does not claim arbitrary in-guest fault injection.
-The matrix includes network link loss, low-RAM boot recovery, the signed update-service restart slice,
-production service-supervisor recovery, and controller-owned driver restart
-acceptance.
+The matrix includes network link loss, low-RAM boot recovery, a disposable
+QEMU block read fault, the signed update-service restart slice, production
+service-supervisor recovery, and controller-owned driver restart acceptance.
 It remains an orchestrator of bounded child gates, not an arbitrary in-guest
 fault injector.
 """
@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = {
     "memory": ["scripts/test-memory-qemu.py"],
     "low-ram": ["scripts/test-stage31-low-ram.py"],
+    "storage-read-fault": ["scripts/test-stage31-storage-read-fault.py"],
     "process-crash": ["scripts/test-stage31-process-crash.py"],
     "packet-corruption": ["scripts/test-stage31-packet-corruption.py"],
     "network-loss": ["scripts/test-network-qemu.py"],
@@ -71,7 +72,7 @@ def write_plan(evidence, seed, cpus, order, status):
 
 def scenario_command(scenario, args):
     command = [sys.executable, str(ROOT / SCENARIOS[scenario][0]), "--cpus", str(args.cpus)]
-    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption", "low-ram"}:
+    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption", "low-ram", "storage-read-fault"}:
         command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
     elif scenario == "network-loss":
         command.extend([
