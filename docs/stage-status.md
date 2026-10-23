@@ -41,6 +41,16 @@ command, result, serial, and QEMU evidence under
 boot evidence beyond the 1/2/4-CPU release matrix; it does not close sudden
 shutdown, randomized full-stack fault injection, or native hardware gates.
 
+## Stage 31 high-SMP network-loss recovery - 2026-10-23
+
+The current QEMU network gate passed with a virtio link flap at both 8 and 16
+CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP, link down/up recovery, final
+SMP/TLB markers, and exit 33 all passed. Serial evidence is under
+`target/network-regression-8-debug/serial.log` and
+`target/network-regression-16-debug/serial.log`. This qualifies the emulated
+virtio link-loss boundary only; packet corruption across the full receive
+stack and native NIC failure remain open.
+
 ## Full-system maturity Cycle 0 - 2026-10-22
 
 The full-system mandate was read and a protected audit branch was created at

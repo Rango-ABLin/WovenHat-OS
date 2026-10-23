@@ -35,6 +35,14 @@ copied serial/QEMU evidence under
 evidence only; sudden shutdown, randomized full-stack fault injection, and
 native hardware qualification remain open.
 
+## Codex - High-SMP virtio link-loss recovery (2026-10-23)
+
+The current QEMU network gate passed at 8 and 16 CPUs with `--link-loss`.
+DHCP/DNS/ICMP, host UDP/TCP, QMP virtio link down/up recovery, final SMP/TLB
+markers, and exit 33 passed. Serial logs are under
+`target/network-regression-{8,16}-debug/`. This remains emulated link-loss
+coverage, not complete packet-corruption or native NIC qualification.
+
 ## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
 
 Read the seven-page full-system maturity mandate and created protected branch
