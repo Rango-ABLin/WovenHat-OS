@@ -26,9 +26,9 @@ ninth bounded scenario, so its schedule cannot omit the resource-pressure
 case. This remains orchestration of bounded child gates, not arbitrary
 in-guest fault injection.
 
-The expanded seeded nine-scenario campaign passed locally at 1/2/4 CPUs with
-seed `0x51A7E`, including the low-RAM gate. Evidence is retained under
-`audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu-9scenarios/`. The runner now
+The expanded seeded nine-scenario campaign passed locally at 1/2/4/8/16 CPUs
+with seed `0x51A7E`, including the low-RAM gate. Evidence is retained under
+`audit-artifacts/stage31-randomized-51a7e-{1,2,4,8,16}cpu-9scenarios/`. The runner now
 uses a count-qualified directory for non-historical campaign sizes so an
 expanded campaign cannot overwrite the original eight-scenario report.
 

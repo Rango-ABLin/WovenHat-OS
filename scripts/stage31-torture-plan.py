@@ -51,7 +51,7 @@ FAULT_SCENARIOS = {
     "driver-crash": "covered-stage31-controller-owned-restart-1-2-4cpu",
     "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "covered-qemu-abrupt-termination-and-reboot-1-2-4cpu",
-    "randomized-cross-subsystem": "partial-seeded-scenario-orchestration-1cpu",
+    "randomized-cross-subsystem": "partial-seeded-scenario-orchestration-1-2-4-8-16cpu",
     "whole-kernel-low-ram": "covered-stage31-disposable-256m-boot-matrix-1-2-4-8-16cpu",
 }
 
@@ -82,7 +82,7 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
     return {
         "schema": "wovenhat.stage31-torture-plan/v1",
         "fail_closed": True,
-        "randomized_fault_injection": "partial-wovenfs-host-stage14-checksum-and-seeded-scenario-orchestration",
+        "randomized_fault_injection": "partial-wovenfs-host-stage14-checksum-and-seeded-scenario-orchestration-1-2-4-8-16cpu",
         "fault_scenarios": FAULT_SCENARIOS,
         "requested_cpu_counts": list(cpus),
         "supported_cpu_counts": list(SUPPORTED_CPUS),

@@ -56,7 +56,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
         scenarios = plan["fault_scenarios"]
         self.assertEqual(
             plan["randomized_fault_injection"],
-            "partial-wovenfs-host-stage14-checksum-and-seeded-scenario-orchestration",
+            "partial-wovenfs-host-stage14-checksum-and-seeded-scenario-orchestration-1-2-4-8-16cpu",
         )
         self.assertEqual(
             scenarios["whole-kernel-low-ram"],
