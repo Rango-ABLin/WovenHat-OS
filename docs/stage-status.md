@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 31 bounded production service supervisor - 2026-10-23
+
+Added `kernel::service_supervisor` for the signed package, update, and
+installer services. Production startup registers each PID generation; the
+event loop detects exited services, reaps them through the owning kernel
+parent, waits with bounded exponential backoff, and respawns the verified
+image with the original least-privilege capability set. Restart attempts are
+capped at three per service and stale-generation results cannot overwrite a
+newer PID; exhausted services are disabled and logged fail closed.
+
+The `system-apps` kernel Clippy gate passes with the existing packaged
+artifacts and trusted test key. This closes a real service-supervision slice,
+but does not yet qualify arbitrary driver-crash recovery or the full
+in-guest randomized Stage 31 campaign.
+
 ## Stage 28/GFX-02 executable QEMU CI matrix - 2026-10-23
 
 Added `scripts/test-feature-qemu.py`, a shared fail-closed feature-image

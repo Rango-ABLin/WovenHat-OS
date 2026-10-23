@@ -121,6 +121,8 @@ mod secure_boot;
 mod serial;
 mod session;
 mod shell;
+#[cfg(feature = "system-apps")]
+mod service_supervisor;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
@@ -2052,6 +2054,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
 
             network::poll();
+            #[cfg(feature = "system-apps")]
+            service_supervisor::poll();
             syscall::service_pending();
             task::preemption_point();
             x86_64::instructions::hlt();
@@ -7041,6 +7045,10 @@ fn start_production_system_services() -> bool {
         serial::write_line(format_args!("[SERVICES] woven-package spawn failed"));
         return false;
     };
+    if !service_supervisor::register(service_supervisor::ServiceKind::Package, pid) {
+        serial::write_line(format_args!("[SERVICES] woven-package supervisor registration failed"));
+        return false;
+    }
     let deadline = timer::ticks().wrapping_add(500);
     loop {
         if let Ok(info) = ipc::service_info(b"woven.package") {
@@ -7072,6 +7080,10 @@ fn start_production_system_services() -> bool {
         serial::write_line(format_args!("[SERVICES] woven-update spawn failed"));
         return false;
     };
+    if !service_supervisor::register(service_supervisor::ServiceKind::Update, pid) {
+        serial::write_line(format_args!("[SERVICES] woven-update supervisor registration failed"));
+        return false;
+    }
     let deadline = timer::ticks().wrapping_add(500);
     loop {
         if let Ok(info) = ipc::service_info(b"woven.update") {
@@ -7103,6 +7115,10 @@ fn start_production_system_services() -> bool {
         serial::write_line(format_args!("[SERVICES] woven-installer spawn failed"));
         return false;
     };
+    if !service_supervisor::register(service_supervisor::ServiceKind::Installer, pid) {
+        serial::write_line(format_args!("[SERVICES] woven-installer supervisor registration failed"));
+        return false;
+    }
     let deadline = timer::ticks().wrapping_add(500);
     loop {
         if let Ok(info) = ipc::service_info(b"sys.storage.installer") {

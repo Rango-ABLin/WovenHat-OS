@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded production service supervisor (2026-10-23)
+
+Added `kernel/src/service_supervisor.rs` and registered the production package,
+update, and installer PIDs. The supervisor reaps exited child processes,
+restarts verified images outside its lock with a three-attempt budget and
+bounded backoff, and protects newer PID generations from stale restart
+results. `system-apps` warning-denying Clippy passes using the existing
+packaged artifacts and trusted test key. Driver-crash recovery and arbitrary
+in-guest fault injection remain open; no physical or firmware operation was
+performed.
+
 ## Codex - executable Stage 28/GFX-02 CI matrix (2026-10-23)
 
 Added the reusable `test-feature-qemu.py` fail-closed harness and wired the
