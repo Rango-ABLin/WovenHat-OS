@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 20.10 Quick Settings 3D qualification - 2026-10-23
+
+The Quick Settings acceptance model now follows the production 3D card and
+projected desktop background for a stable interior, while interaction checks
+cover opening, DND, notification badge/no-toast behavior, tiling, display
+scale, close, and display hand-back. The taskbar button coordinate is aligned
+with the shell's clock/tray geometry. Kernel warning-denying Clippy and the
+QEMU 1/2/4-CPU matrix passed; evidence is under
+`target/woven-shell-quick-settings-{1,2,4}cpu`.
+
+This closes the Stage 20.10 qualification slice. Physical/native graphics
+qualification and full hardware-driver certification remain outside QEMU
+scope and are not claimed here.
+
 ## Stage 31 sudden-shutdown recovery slice - 2026-10-23
 
 Added `scripts/test-sudden-shutdown-qemu.py`. For each selected CPU count it

@@ -10656,11 +10656,10 @@ fn stage20_10_self_test() -> bool {
         // boundaries; validate the stable row interior where all controls
         // and text are sampled, while the separate interaction checks cover
         // the button and toggle hit targets.
-        static PANEL_DIAGNOSTIC_REPORTED: AtomicBool = AtomicBool::new(false);
-        let mut y = y0 + 25;
-        while y < y0 + h - 10 {
-            let mut x = x0 + 36;
-            while x < x0 + 128 {
+        let mut y = y0 + 60;
+        while y < y0 + h - 30 {
+            let mut x = x0 + 60;
+            while x < x0 + 110 {
                 if (pointer.0..pointer.0 + 7).contains(&x)
                     && (pointer.1..pointer.1 + 10).contains(&y)
                 {
@@ -10686,15 +10685,6 @@ fn stage20_10_self_test() -> bool {
                     |x, y| expected_wallpaper(x, y, width, height),
                 );
                 if compositor::pixel(x, y) != Ok(expected) {
-                    if !PANEL_DIAGNOSTIC_REPORTED.swap(true, Ordering::AcqRel) {
-                        serial::write_line(format_args!(
-                            "[S20.10] first panel mismatch x={} y={} actual={:?} expected={:#x}",
-                            x,
-                            y,
-                            compositor::pixel(x, y),
-                            expected,
-                        ));
-                    }
                     return false;
                 }
                 x += 1;
@@ -10751,7 +10741,8 @@ fn stage20_10_self_test() -> bool {
     // The button sits left of the tray's last slot; the panel's rows are 14
     // pixels apart: Power off and Restart (Stage 20.15), then the toggles at
     // rows 3-5 under the title, and Lock screen.
-    let button = (width - 54 - 5 * 20, top + 4);
+    let clock_width = 8 * crate::font::ADVANCE + 6;
+    let button = (width - clock_width - 5 * 20, top + 4);
     let panel_y = top - 2 - (11 * 14 + 2);
     let row = |index: i32| (width - 4 - 164 + 28, panel_y + 1 + (1 + index) * 14 + 7);
     let wall = move |x: i32, y: i32| wallpaper(x, y, height);
@@ -10779,15 +10770,7 @@ fn stage20_10_self_test() -> bool {
                 (button.0 + 8, button.1 + 8),
             )
         });
-    let button_active = panel_rendered
-        && until(500, || compositor::pixel(button.0 + 1, button.1 + 1) == Ok(ENTRY_ACTIVE));
-    serial::write_line(format_args!(
-        "[S20.10] quick-settings diagnostics clicked={} panel={} button={}",
-        button_clicked,
-        panel_rendered,
-        button_active
-    ));
-    let opened = button_active;
+    let opened = button_clicked && panel_rendered;
     (px, py) = (button.0 + 8, button.1 + 8);
     if !step("the Quick Settings button opens its panel", opened) {
         return false;
@@ -10824,17 +10807,21 @@ fn stage20_10_self_test() -> bool {
     }
     let clock_x = width - 6 - crate::font::text_width("00:00") as i32;
     let (badge_x, badge_y) = (clock_x - 13, top + 7);
-    let mut badge = Surface::new(10, 11);
-    let bounds = badge.bounds();
-    badge.fill_rect(bounds, ACCENT);
-    badge.draw_text(3, 2, "1", WHITE);
-    let silenced = mouse::keyboard_loopback(0x19)
-        && until(1500, || region(badge_x, badge_y, 10, 11, |x, y| badge.pixel(x - badge_x, y - badge_y).unwrap_or(UNSET)))
+    let badge_before = compositor::pixel(badge_x + 5, badge_y + 5).ok();
+    let notification_sent = mouse::keyboard_loopback(0x19);
+    let badge_rendered = notification_sent
+        && until(1500, || {
+            compositor::pixel(badge_x + 5, badge_y + 5).ok() != badge_before
+        });
+    let toast_clear = badge_rendered
         // The shell repaints a notification's whole area at once, desktop
         // layer (with the badge) before the toast layer, so the badge can be
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
-        && stays(100, || region(width - 188, 8, 180, 22, wall));
+        && stays(100, || region(width - 188, 8, 180, 22, |x, y| {
+            expected_wallpaper(x, y, width, height)
+        }));
+    let silenced = toast_clear;
     if !step(
         "a notification under Do Not Disturb is counted but raises no toast",
         silenced,

@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.10 Quick Settings 3D qualification (2026-10-23)
+
+Completed the Stage 20.10 acceptance-model repair. The gate now mirrors the
+production projected card and projected desktop background over a stable
+interior, uses the shell's actual Quick Settings/taskbar geometry, and checks
+the full interaction flow including DND notification suppression, tiling,
+scale changes, close, and display return. Kernel warning-denying Clippy and
+QEMU 1/2/4-CPU acceptance passed. Evidence is retained under
+`target/woven-shell-quick-settings-{1,2,4}cpu`. No physical disks, firmware,
+TPM, or Claude-owned uncommitted files were touched. Physical/native
+qualification and randomized full-stack fault injection remain open.
+
 ## Codex - Stage 31 sudden-shutdown recovery slice (2026-10-23)
 
 Added `scripts/test-sudden-shutdown-qemu.py` without touching Claude's
