@@ -4031,17 +4031,15 @@ prerequisites.
 
 The binary's only output path is the existing bounded stdout/stderr API. The
 progress and success screens are deliberately non-operative and print
-`install_action=unavailable (fail-closed)`. A future graphical frontend or
-installer executor must be integrated through a separately reviewed authority
-boundary; this shell cannot be used to infer disk or bootloader support. The
-current authority boundary is `libwoven::installer_ipc` and the supervised
-`woven-installer --service` process, published as `sys.storage.installer`.
-The service has a bounded request/response ABI and its `Inventory` operation
-uses a capability-gated read-only kernel syscall to report the selected
-target's sector count. Validation, partitioning, formatting, bootloader
-handoff, and installation remain fail-closed until their kernel-backed
-transactions are implemented. Publication is therefore not evidence of
-physical disk support.
+`install_action=unavailable (fail-closed)`. The authority boundary is
+`libwoven::installer_ipc` and the supervised `woven-installer --service`
+process, published as `sys.storage.installer`; the GUI never gains storage
+authority. The service validates bounded plans and, when a readable EFI
+artifact and an eligible kernel-selected target are available, invokes the
+kernel transaction for GPT layout, FAT32 formatting, EFI installation, and
+provisioning. It fails closed when those prerequisites are absent. The
+disposable Stage 28 gate verifies the transaction and rollback; physical
+device selection and boot qualification remain separate Stage 29 gates.
 
 # Stage 28 disposable acceptance composition
 
