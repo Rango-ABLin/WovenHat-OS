@@ -5270,6 +5270,8 @@ with 4 GiB guests and real emulated NVMe/AHCI/xHCI/HDA enumeration. xHCI is
 explicitly unsupported in this gate because HID waiters, rings, and worker
 teardown do not yet have an equivalent ownership protocol. No native hardware
 or automatic crash-supervision claim is implied.
+The existing Stage 13.12 production boot qualification was also rerun at 2
+and 4 CPUs; both reached the shell with NVMe, AHCI, xHCI, and HDA ready.
 
 The formal Stage 31 torture planner now has a separate `service-supervisor`
 suite and contract tests for its 1/2/4-CPU support and 8/16-CPU blocked rows.

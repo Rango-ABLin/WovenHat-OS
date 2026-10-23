@@ -9646,3 +9646,8 @@ worker teardown are implemented and qualified. This slice does not claim
 generic automatic driver crash supervision, physical hardware certification,
 or production readiness.
 
+The production Stage 13.12 boot matrix additionally passed at 2 and 4 CPUs
+(`audit-artifacts/stage13.12-production-2cpu-*` and
+`audit-artifacts/stage13.12-production-4cpu-*`); the earlier 1-CPU evidence is
+retained separately.
+
