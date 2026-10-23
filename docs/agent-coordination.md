@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 disposable QEMU block read-fault recovery (2026-10-23)
+
+Added a disposable-only QEMU `blkdebug` gate that injects one ATA
+`read_aio` `EIO` against a workspace FAT32 image. The full boot validation
+passed at 1/2/4 CPUs; all three runs recovered by retry and completed the live
+storage mutation marker. Evidence is retained under
+`audit-artifacts/stage31-storage-read-fault-{1,2,4}cpu/`.
+
+This remains bounded emulated read-fault coverage. It does not claim flush or
+write-ordering durability, physical power-loss/torn-sector recovery, native
+media qualification, production readiness, or independent Claude review.
+
 ## Codex - current-head WovenFS crash/fault model (2026-10-23)
 
 The current tree passed all 16 `wovenfs_crash` host tests, including full-volume

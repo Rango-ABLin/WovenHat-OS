@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 31 disposable QEMU block read-fault recovery - 2026-10-23
+
+The new `scripts/test-stage31-storage-read-fault.py` gate attaches QEMU's
+`blkdebug` layer to a workspace-created FAT32 image and injects one disposable
+`read_aio` `EIO`. The full boot validation passed at 1/2/4 CPUs, with the
+storage mutation path recovering by retry in each run. Evidence is retained
+under `audit-artifacts/stage31-storage-read-fault-{1,2,4}cpu/`.
+
+This is bounded emulated read-error coverage only. It does not qualify write
+ordering, flush durability, torn sectors, physical power loss, native media,
+or production readiness.
+
 ## P0-02 current-head WovenFS crash/fault model - 2026-10-23
 
 `cargo test --test wovenfs_crash --quiet` passed all 16 tests on the current
