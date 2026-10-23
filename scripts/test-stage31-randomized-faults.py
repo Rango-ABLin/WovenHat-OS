@@ -143,7 +143,7 @@ def run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=lambda value: int(value, 0), default=0x51A7E)
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument("--count", type=int, default=len(SCENARIOS))
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--qemu", default="qemu-system-x86_64")

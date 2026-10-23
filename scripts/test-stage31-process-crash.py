@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--timeout", type=float, default=180)
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -35,7 +35,7 @@ def main() -> int:
     serial.write_text("")
     command = [
         str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35",
-        "-m", "256M", "-smp", str(args.cpus), "-display", "none",
+        "-m", "4G", "-smp", str(args.cpus), "-display", "none",
         "-serial", f"file:{serial}", "-no-reboot",
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
