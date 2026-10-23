@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head Stage 31 network link-loss recovery (2026-10-23)
+
+The live QEMU network gate passed with an emulated virtio-net link flap at
+1/2/4 CPUs. DHCP/DNS/ICMP, UDP, link down/up recovery, TCP echo, and final
+guest markers passed; serial evidence is retained under
+`target/network-regression-{1,2,4}-debug/`. This is bounded emulated link-loss
+coverage only and does not claim arbitrary network fault injection or native
+network qualification.
+
 ## Codex - current-head Stage 31 packet-corruption boundary (2026-10-23)
 
 The deterministic malformed ICMPv6 checksum/NDP ingress boundary passed on the

@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 31 current-head network link-loss recovery - 2026-10-23
+
+The live QEMU network gate passed with an emulated virtio-net link flap at
+1/2/4 CPUs. DHCP, DNS, ICMP, UDP, link down/up recovery, TCP echo, and final
+guest markers all passed; serial evidence is retained under
+`target/network-regression-{1,2,4}-debug/`. This qualifies the bounded
+emulated link-loss path only, not arbitrary network fault injection or native
+network hardware.
+
 ## Stage 31 current-head packet-corruption boundary - 2026-10-23
 
 The deterministic malformed ICMPv6 checksum/NDP ingress boundary passed on the
