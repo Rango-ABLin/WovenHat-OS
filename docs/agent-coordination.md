@@ -5322,3 +5322,10 @@ CPUs under seed `0x51A7E`, with child evidence retained in the corresponding
 `audit-artifacts/stage31-randomized-51a7e-*cpu` directories. This is still
 bounded emulated coverage and does not claim arbitrary fault injection or
 native qualification.
+
+**Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
+sequential repeated-boot harness completed ten successful memory boots at each
+requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,
+and serial evidence is retained under
+`audit-artifacts/stage31-repeated/memory-{1,2,4,8,16}cpu/`. This remains
+disposable QEMU/TCG evidence and does not claim native qualification.

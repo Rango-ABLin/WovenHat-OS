@@ -41,6 +41,13 @@ under `audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu/`. This closes the
 network-loss omission in the randomized schedule but remains bounded emulated
 coverage, not arbitrary in-guest fault injection or native hardware testing.
 
+The repeated Stage 31 memory suite now has a full ten-boot sample at every
+requested CPU profile: 1, 2, 4, 8, and 16 CPUs. All 50 boots exited
+successfully; evidence is retained under
+`audit-artifacts/stage31-repeated/memory-{1,2,4,8,16}cpu/`. These are
+disposable QEMU/TCG reliability samples and do not replace native hardware,
+power-loss, or arbitrary in-guest fault qualification.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates
