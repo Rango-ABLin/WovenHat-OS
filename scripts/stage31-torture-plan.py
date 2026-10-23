@@ -26,6 +26,7 @@ SUITES = (
     ("sudden-shutdown", "scripts/test-sudden-shutdown-qemu.py"),
     ("update-service", "scripts/test-stage27-5-update-service.py"),
     ("service-supervisor", "scripts/test-shell-qemu.py"),
+    ("driver-restart", "scripts/test-stage13-12-drivers.py"),
 )
 SUITE_CPU_SUPPORT = {
     "memory": REQUESTED_CPUS,
@@ -37,6 +38,7 @@ SUITE_CPU_SUPPORT = {
     "sudden-shutdown": (1, 2, 4),
     "update-service": (1, 2, 4),
     "service-supervisor": (1, 2, 4),
+    "driver-restart": (1, 2, 4),
 }
 FAULT_SCENARIOS = {
     "network-loss": "covered-emulated-virtio-link-flap",
@@ -44,7 +46,7 @@ FAULT_SCENARIOS = {
     "filesystem-randomized-crash": "covered-wovenfs-host",
     "service-lifecycle": "covered-signed-update-service-and-supervisor-recovery-1-2-4cpu",
     "packet-corruption": "partial-stage31-checksum-boundary",
-    "driver-crash": "partial-stage13-2-explicit-rebind",
+    "driver-crash": "covered-stage31-controller-owned-restart-1-2-4cpu",
     "process-crash": "covered-stage31-qemu-process-crash",
     "sudden-shutdown": "covered-qemu-abrupt-termination-and-reboot-1-2-4cpu",
     "randomized-cross-subsystem": "partial-seeded-scenario-orchestration-1cpu",
@@ -61,6 +63,9 @@ def build_plan(cpus: tuple[int, ...] = REQUESTED_CPUS) -> dict[str, Any]:
                        if supported else None)
             if command is not None and suite == "service-supervisor":
                 command.append("--supervisor-test")
+            if command is not None and suite == "driver-restart":
+                command.append("--mode")
+                command.append("restart")
             jobs.append({
                 "id": f"{suite}-{cpu_count}cpu",
                 "suite": suite,

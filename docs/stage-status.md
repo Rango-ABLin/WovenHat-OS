@@ -9651,3 +9651,9 @@ The production Stage 13.12 boot matrix additionally passed at 2 and 4 CPUs
 `audit-artifacts/stage13.12-production-4cpu-*`); the earlier 1-CPU evidence is
 retained separately.
 
+The seeded Stage 31 randomized matrix now schedules seven scenarios, including
+the controller-owned driver restart gate. Seed `0x51A7E` passed at 1/2/4 CPUs;
+evidence is retained under `audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu`.
+This remains bounded child-gate orchestration, not arbitrary in-guest fault
+injection or native hardware qualification.
+

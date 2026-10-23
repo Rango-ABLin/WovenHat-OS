@@ -5272,6 +5272,8 @@ task death, halts the controller, and only then releases PCI ownership. No
 native hardware or automatic crash-supervision claim is implied.
 The existing Stage 13.12 production boot qualification was also rerun at 2
 and 4 CPUs; both reached the shell with NVMe, AHCI, xHCI, and HDA ready.
+The seeded Stage 31 randomized matrix now includes this driver-restart child
+scenario and passed all seven scenarios at 1/2/4 CPUs under seed `0x51A7E`.
 
 The formal Stage 31 torture planner now has a separate `service-supervisor`
 suite and contract tests for its 1/2/4-CPU support and 8/16-CPU blocked rows.

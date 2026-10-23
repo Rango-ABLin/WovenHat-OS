@@ -4190,6 +4190,12 @@ stops its deferred enumerator and HID worker, removes the vector waiter only
 after task death, and then halts the controller. The
 `stage31-driver-restart-test` QEMU gate qualifies all four emulated controllers
 on 1/2/4 CPUs; it is not a claim of generic crash recovery.
+
+The seeded Stage 31 orchestrator includes `driver-restart` as a first-class
+scenario alongside process, packet, shutdown, memory, service-restart, and
+service-supervisor gates. Its successful result proves deterministic ordering
+and child-gate integration; it does not turn the bounded scenarios into an
+arbitrary fault injector.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the
