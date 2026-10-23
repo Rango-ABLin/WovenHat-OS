@@ -4189,7 +4189,7 @@ DMA pages are not dropped while hardware may still reference them. xHCI first
 stops its deferred enumerator and HID worker, removes the vector waiter only
 after task death, and then halts the controller. The
 `stage31-driver-restart-test` QEMU gate qualifies all four emulated controllers
-on 1/2/4 CPUs; it is not a claim of generic crash recovery.
+on 1/2/4/8/16 CPUs; it is not a claim of generic crash recovery.
 
 The seeded Stage 31 orchestrator includes `driver-restart` as a first-class
 scenario alongside process, packet, shutdown, memory, service-restart, and

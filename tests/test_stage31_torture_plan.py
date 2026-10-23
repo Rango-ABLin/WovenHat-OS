@@ -20,9 +20,9 @@ class Stage31TorturePlanTests(unittest.TestCase):
         plan = MODULE.build_plan()
         expanded = [job for job in plan["jobs"] if job["cpus"] in (8, 16)]
         self.assertEqual(len(expanded), 20)
-        self.assertEqual(sum(job["status"] == "pending" for job in expanded), 10)
-        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 10)
-        self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 10)
+        self.assertEqual(sum(job["status"] == "pending" for job in expanded), 12)
+        self.assertEqual(sum(job["status"] == "blocked" for job in expanded), 8)
+        self.assertEqual(sum(isinstance(job["command"], list) for job in expanded), 12)
 
     def test_lifecycle_gates_are_blocked_at_8_and_16_cpus(self):
         plan = MODULE.build_plan()

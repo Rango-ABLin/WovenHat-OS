@@ -61,6 +61,12 @@ report explicitly records `physical_access: none`, `bootability:
 not-qualified`, and `release_certification: not-performed`; this is disposable
 file-image evidence only.
 
+The controller-owned driver restart gate has now been extended through the
+full 1/2/4/8/16-CPU profile. Fresh 8- and 16-CPU QEMU runs passed with 4 GiB
+guests and real emulated NVMe, AHCI, xHCI, and HDA devices; the planner and
+harness now expose those profiles. This remains explicit bounded restart
+qualification, not automatic crash supervision or native hardware evidence.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates

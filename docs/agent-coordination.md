@@ -5323,6 +5323,13 @@ CPUs under seed `0x51A7E`, with child evidence retained in the corresponding
 bounded emulated coverage and does not claim arbitrary fault injection or
 native qualification.
 
+**Codex Stage 31 high-SMP driver restart qualification (Codex, 2026-10-23):**
+The driver restart harness and torture planner now support all requested
+profiles, and fresh controller-owned restart runs passed at 8 and 16 CPUs with
+4 GiB guests. NVMe, AHCI, xHCI, and HDA restart evidence is retained under
+`audit-artifacts/stage13.12-restart-{8,16}cpu-*`. This is bounded emulated
+restart evidence, not automatic driver-crash recovery or native qualification.
+
 **Codex Stage 31 repeated memory qualification (Codex, 2026-10-23):** The
 sequential repeated-boot harness completed ten successful memory boots at each
 requested profile: 1/2/4/8/16 CPUs, 50 boots total. Per-boot command, result,

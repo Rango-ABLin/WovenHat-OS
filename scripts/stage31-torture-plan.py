@@ -38,7 +38,7 @@ SUITE_CPU_SUPPORT = {
     "sudden-shutdown": (1, 2, 4),
     "update-service": (1, 2, 4),
     "service-supervisor": (1, 2, 4),
-    "driver-restart": (1, 2, 4),
+    "driver-restart": REQUESTED_CPUS,
 }
 FAULT_SCENARIOS = {
     "network-loss": "covered-emulated-virtio-link-flap",
