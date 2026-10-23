@@ -4193,7 +4193,9 @@ on 1/2/4 CPUs; it is not a claim of generic crash recovery.
 
 The seeded Stage 31 orchestrator includes `driver-restart` as a first-class
 scenario alongside process, packet, shutdown, memory, service-restart, and
-service-supervisor gates. Its successful result proves deterministic ordering
+service-supervisor gates. The driver self-test uses a deterministic in-guest
+Fisher-Yates shuffle (seed `0x51A7E`) over the four controller names and logs
+the selected order. Its successful result proves reproducible order coverage
 and child-gate integration; it does not turn the bounded scenarios into an
 arbitrary fault injector.
 ## Stage 29 hardware qualification report boundary

@@ -325,7 +325,19 @@ pub fn restart(name: &'static str) -> Result<Outcome, RestartError> {
 
 #[cfg(feature = "stage31-driver-restart-test")]
 pub fn restart_self_test() -> bool {
-    for name in ["nvme0", "ahci0", "xhci0", "hda0"] {
+    let mut order = ["nvme0", "ahci0", "xhci0", "hda0"];
+    let mut seed = 0x51a7e_u32;
+    for index in (1..order.len()).rev() {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        order.swap(index, (seed as usize) % (index + 1));
+    }
+    crate::serial::write_line(format_args!(
+        "[S31 DRIVER] randomized restart order seed=0x51a7e: {} {} {} {}",
+        order[0], order[1], order[2], order[3]
+    ));
+    for name in order {
         match restart(name) {
             Ok(Outcome::Ready(value)) => crate::serial::write_line(format_args!(
                 "[S31 DRIVER] {} restart: PASSED value={}",

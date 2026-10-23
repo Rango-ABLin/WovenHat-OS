@@ -5309,5 +5309,8 @@ xHCI now has cooperative deferred-enumerator and HID-worker cancellation,
 post-death waiter removal, controller halt, and fail-closed PCI teardown. The
 four-controller restart gate passed at 1/2/4 CPUs. The seeded randomized
 orchestrator and formal torture planner now include `driver-restart`; all seven
-scenarios passed at 1/2/4 CPUs under seed `0x51A7E`. This remains bounded
-emulated evidence, not arbitrary fault injection or native certification.
+scenarios passed at 1/2/4 CPUs under seed `0x51A7E`. The driver self-test now
+uses a deterministic in-guest Fisher-Yates order for the four controller
+restarts, and that order passed independently at 1/2/4 CPUs. This remains
+bounded emulated evidence, not arbitrary fault injection or native
+certification.

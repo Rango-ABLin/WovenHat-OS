@@ -29,8 +29,21 @@ helpers needed by its terminal marker.
 The current PCI layer has generation-safe resource teardown and explicit
 rebind coverage. NVMe, AHCI, xHCI, and HDA now expose controller-specific
 quiesce-before-unbind protocols, and the four-controller restart gate passes
-at 1/2/4 CPUs. This is bounded, explicitly invoked restart recovery; arbitrary
-driver fault supervision and native hardware certification remain open.
+at 1/2/4 CPUs. The Stage 31 driver self-test also randomizes the controller
+restart order deterministically in-guest (seed `0x51A7E`) and passes at 1/2/4
+CPUs. This is bounded, explicitly invoked restart recovery; arbitrary driver
+fault supervision and native hardware certification remain open.
+
+## Stage 31 randomized controller order qualification - 2026-10-23
+
+The controller restart self-test now applies a deterministic Fisher-Yates
+shuffle to NVMe, AHCI, xHCI, and HDA before exercising each controller. The
+serial logs record the seed and selected order, making the scenario reproducible
+while covering ordering-sensitive teardown interactions. Runs passed at 1, 2,
+and 4 CPUs; evidence is retained under the corresponding
+`audit-artifacts/stage13.12-restart-*` directories. This does not claim
+arbitrary full-stack fault injection, physical qualification, or native
+hardware certification.
 
 ## Current-head reconciliation - 2026-10-23
 
