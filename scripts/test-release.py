@@ -63,9 +63,21 @@ def main():
     for key in ('qemu', 'firmware', 'firmware_vars'):
         if getattr(args, key):
             options.extend([f'--{key.replace("_", "-")}', getattr(args, key)])
+    fault_options = []
+    for key in ('qemu', 'firmware'):
+        if getattr(args, key):
+            fault_options.extend([f'--{key}', getattr(args, key)])
     for cpus in (1, 2, 4):
         for suite in ('memory', 'storage'):
             run(f'{suite}-{cpus}-debug', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', str(cpus)] + options)
+        run(
+            f'storage-read-fault-{cpus}',
+            [sys.executable, 'scripts/test-stage31-storage-read-fault.py', '--cpus', str(cpus)] + fault_options,
+        )
+        run(
+            f'storage-write-fault-{cpus}',
+            [sys.executable, 'scripts/test-stage31-storage-write-fault.py', '--cpus', str(cpus)] + fault_options,
+        )
         run(f'network-{cpus}-debug', [sys.executable, 'scripts/test-network-qemu.py', '--cpus', str(cpus)] + options)
     run('legacy-pic', [sys.executable, 'scripts/test-memory-qemu.py', '--cpus', '1', '--legacy-irq'] + options)
     for suite in ('memory', 'storage', 'network'):
