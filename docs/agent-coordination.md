@@ -5258,3 +5258,7 @@ IPC. Kernel Clippy and harness syntax checks pass locally; live QEMU 1/2/4
 execution remains CI-only on this Windows host because OVMF/QEMU is absent.
 This does not claim arbitrary driver recovery, physical power-loss recovery,
 or native hardware qualification.
+
+The seeded Stage 31 orchestrator now schedules this supervisor acceptance as
+its own scenario alongside the older signed update-service restart slice; it
+still does not claim arbitrary in-guest fault injection.

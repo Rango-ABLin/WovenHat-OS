@@ -11,6 +11,11 @@ Python harness syntax checks pass locally. The live 1/2/4-CPU QEMU acceptance
 is wired next to the existing Linux matrix but is not claimed from this
 Windows host because QEMU/OVMF is unavailable here.
 
+The seeded Stage 31 orchestrator now includes this supervisor scenario in
+addition to the existing signed update-service restart scenario. The runner
+still explicitly describes itself as bounded scenario orchestration rather
+than arbitrary in-guest fault injection.
+
 ## Release gate covers production service supervisor - 2026-10-23
 
 Updated `scripts/test-release.py` so the authoritative release chain runs

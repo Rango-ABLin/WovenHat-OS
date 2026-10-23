@@ -7,6 +7,9 @@ order, one process at a time, and preserves every command, result, and child
 output. Physical disks and firmware variables are never selected. The report
 therefore proves randomized scenario scheduling and cross-subsystem evidence;
 it does not claim arbitrary in-guest fault injection.
+The matrix includes both the signed update-service restart slice and the
+production service-supervisor recovery acceptance. It remains an orchestrator
+of bounded child gates, not an arbitrary in-guest fault injector.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ SCENARIOS = {
     "packet-corruption": ["scripts/test-stage31-packet-corruption.py"],
     "sudden-shutdown": ["scripts/test-sudden-shutdown-qemu.py"],
     "service-restart": ["scripts/test-stage27-5-update-service.py"],
+    "service-supervisor": ["scripts/test-shell-qemu.py"],
 }
 
 
@@ -36,6 +40,12 @@ def scenario_command(scenario, args):
         command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
     elif scenario == "service-restart":
         command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
+    elif scenario == "service-supervisor":
+        command.extend([
+            "--supervisor-test",
+            "--qemu", args.qemu,
+            "--firmware", str(args.firmware),
+        ])
     return command
 
 
