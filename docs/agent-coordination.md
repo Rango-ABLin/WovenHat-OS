@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 29 qualification-report hardening (2026-10-23)
+
+The read-only hardware report validator now rejects `tier1` labels unless the
+observation is both passed and native, and rejects repository evidence paths
+containing parent traversal. The focused hardware-report suite passes all 7
+tests. No device probing, media mutation, or native certification was
+performed; this is only a fail-closed record-boundary improvement.
+
 ## Codex - Stage 31 campaign evidence isolation (2026-10-23)
 
 The seeded 9-scenario Stage 31 campaign passed at 1 CPU with seed `0x51A7E`,

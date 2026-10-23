@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 29 qualification-report fail-closed hardening - 2026-10-23
+
+Hardened the read-only hardware qualification report validator: `tier1` now
+requires a passed native observation, and evidence paths reject parent
+directory traversal as well as absolute paths. The focused hardware-report
+suite passes 7 tests and the validator is syntax-clean. This improves the
+qualification record boundary only; no native hardware was probed or
+certified.
+
 ## Stage 31 seeded 9-scenario campaign and evidence isolation - 2026-10-23
 
 The seeded Stage 31 campaign passed all nine scenarios at 1 CPU with seed
