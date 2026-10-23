@@ -5264,12 +5264,12 @@ its own scenario alongside the older signed update-service restart slice; it
 still does not claim arbitrary in-guest fault injection.
 
 **Codex controller-owned driver restart slice (Codex, 2026-10-23):** Added
-bounded NVMe, AHCI, and HDA quiesce-before-unbind lifecycle hooks and a fresh
-PCI owner transaction for restart. The focused QEMU gate passed at 1/2/4 CPUs
-with 4 GiB guests and real emulated NVMe/AHCI/xHCI/HDA enumeration. xHCI is
-explicitly unsupported in this gate because HID waiters, rings, and worker
-teardown do not yet have an equivalent ownership protocol. No native hardware
-or automatic crash-supervision claim is implied.
+bounded NVMe, AHCI, xHCI, and HDA quiesce-before-unbind lifecycle hooks and a
+fresh PCI owner transaction for restart. The focused QEMU gate passed at 1/2/4
+CPUs with 4 GiB guests and real emulated NVMe/AHCI/xHCI/HDA enumeration. xHCI
+now stops its deferred enumerator and HID worker, removes the PCI waiter after
+task death, halts the controller, and only then releases PCI ownership. No
+native hardware or automatic crash-supervision claim is implied.
 The existing Stage 13.12 production boot qualification was also rerun at 2
 and 4 CPUs; both reached the shell with NVMe, AHCI, xHCI, and HDA ready.
 

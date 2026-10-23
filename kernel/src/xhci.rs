@@ -2049,6 +2049,7 @@ fn stop_task(raw: &core::sync::atomic::AtomicU64, stop: &AtomicU8) -> Result<(),
     stop.store(1, Ordering::Release);
     let task = crate::task::TaskId::from_u64(id);
     let _ = crate::task::signal_event(task);
+    crate::serial::write_line(format_args!("[XHCI] shutdown: stop requested id={:#x}", id));
     for _ in 0..POLL_LIMIT {
         if !crate::task::task_live(task) {
             return Ok(());
@@ -2062,11 +2063,22 @@ fn stop_task(raw: &core::sync::atomic::AtomicU64, stop: &AtomicU8) -> Result<(),
 /// worker has exited. This closes the race between task teardown and DMA-ring
 /// release.
 pub fn shutdown() -> Result<(), InitError> {
+    crate::serial::write_line(format_args!("[XHCI] shutdown: stopping deferred worker"));
     stop_task(&DEFERRED_TASK, &DEFERRED_STOP)?;
+    crate::serial::write_line(format_args!("[XHCI] shutdown: deferred worker stopped"));
     let input_task_id = INPUT_TASK.load(Ordering::Acquire);
+    crate::serial::write_line(format_args!(
+        "[XHCI] shutdown: stopping input worker id={:#x}",
+        input_task_id
+    ));
     stop_task(&INPUT_TASK, &INPUT_STOP)?;
+    crate::serial::write_line(format_args!("[XHCI] shutdown: input worker stopped"));
     let vector = INPUT_VECTOR.load(Ordering::Acquire);
     if vector != 0 {
+        crate::serial::write_line(format_args!(
+            "[XHCI] shutdown: clearing waiter vector={:#x}",
+            vector
+        ));
         let task = crate::task::TaskId::from_u64(input_task_id);
         let _ = crate::interrupts::clear_pci_vector_waiter(vector, task);
         INPUT_VECTOR.store(0, Ordering::Release);
@@ -2077,8 +2089,12 @@ pub fn shutdown() -> Result<(), InitError> {
     let Some(mut controller) = controller else {
         return Ok(());
     };
+    crate::serial::write_line(format_args!("[XHCI] shutdown: halting controller"));
     match controller.shutdown_hardware() {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            crate::serial::write_line(format_args!("[XHCI] shutdown: controller halted"));
+            Ok(())
+        }
         Err(error) => {
             CONTROLLER.lock().replace(controller);
             Err(error)

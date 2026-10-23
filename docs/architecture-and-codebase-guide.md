@@ -4182,13 +4182,14 @@ actual mounted FAT32 volume, so service-only blank disks cannot be mistaken for
 storage qualification.
 
 Controller restart is a separate ownership boundary in `kernel/src/drivers.rs`.
-NVMe, AHCI, and HDA stop their DMA engines/rings before PCI BAR and function
-leases are released, then rebind under a fresh owner token. If quiescence fails,
-the concrete controller is restored to its global slot so its DMA pages are not
-dropped while hardware may still reference them. xHCI remains fail-closed until
-its HID waiter, transfer rings, and worker cancellation protocol is implemented.
-The `stage31-driver-restart-test` QEMU gate qualifies the supported three-driver
-slice on 1/2/4 CPUs; it is not a claim of generic crash recovery.
+NVMe, AHCI, xHCI, and HDA stop their DMA engines/rings before PCI BAR and
+function leases are released, then rebind under a fresh owner token. If
+quiescence fails, the concrete controller is restored to its global slot so its
+DMA pages are not dropped while hardware may still reference them. xHCI first
+stops its deferred enumerator and HID worker, removes the vector waiter only
+after task death, and then halts the controller. The
+`stage31-driver-restart-test` QEMU gate qualifies all four emulated controllers
+on 1/2/4 CPUs; it is not a claim of generic crash recovery.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the

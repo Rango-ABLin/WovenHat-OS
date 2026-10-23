@@ -325,10 +325,11 @@ pub fn restart(name: &'static str) -> Result<Outcome, RestartError> {
 
 #[cfg(feature = "stage31-driver-restart-test")]
 pub fn restart_self_test() -> bool {
-    for name in ["nvme0", "ahci0", "hda0"] {
+    for name in ["nvme0", "ahci0", "xhci0", "hda0"] {
         match restart(name) {
             Ok(Outcome::Ready(value)) => crate::serial::write_line(format_args!(
-                "[S31 DRIVER] {} restart: PASSED value={}", name, value
+                "[S31 DRIVER] {} restart: PASSED value={}",
+                name, value
             )),
             result => {
                 crate::serial::write_line(format_args!(
