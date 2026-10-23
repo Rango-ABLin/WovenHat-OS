@@ -1,5 +1,11 @@
 # Stage status
 
+## Current host regression after low-RAM harness tests - 2026-10-23
+
+The complete Python host suite passed on the current head: 153 tests in
+132.839 seconds. This includes the low-RAM runner command-contract tests; the
+Linux QEMU low-RAM acceptance remains pending its serialized CI run.
+
 ## Stage 31 low-RAM matrix harness - 2026-10-23
 
 Added `scripts/test-stage31-low-ram.py` and the corresponding `low-ram`

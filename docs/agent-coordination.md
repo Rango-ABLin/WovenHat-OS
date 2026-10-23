@@ -5396,3 +5396,8 @@ accept a non-33 or failed child result. Focused planner tests and Python syntax
 checks pass; the Linux QEMU matrix remains pending. This does not alter the
 4 GiB production floor, claim physical qualification, or imply arbitrary
 fault injection.
+
+**Codex current host regression after low-RAM test addition (Codex,
+2026-10-23):** The complete Python host suite passed on the current head:
+153 tests in 132.839 seconds. The low-RAM command-contract tests are included;
+the Linux QEMU acceptance remains pending the serialized workflow.
