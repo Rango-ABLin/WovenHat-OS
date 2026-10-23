@@ -23,6 +23,14 @@ the storage mutation and complete-boot markers. Evidence is retained under
 evidence; physical power loss, arbitrary torn-sector injection, native media,
 and complete durability acceptance remain open.
 
+## Codex - release packager CPU-marker contract (2026-10-23)
+
+Corrected `scripts/package-release.py` to require the three actual
+`system-apps-boot-{1,2,4}` validator results instead of an aggregate marker
+that is never emitted. The focused host contract test and syntax check pass.
+The full current-head release chain remains required before provenance or
+production release claims.
+
 ## Codex - Stage 31 1,000-boot qualification (2026-10-23)
 
 Completed the serialized 1-CPU memory/boot repeatability campaign: 1,000 of

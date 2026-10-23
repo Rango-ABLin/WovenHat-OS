@@ -31,6 +31,17 @@ This is a disposable-QEMU interrupted-transaction recovery slice. It does
 not close physical power-loss testing, arbitrary torn-sector injection,
 native-media qualification, or the complete P0-02 durability gate.
 
+## P0-07 release-packager marker contract - 2026-10-23
+
+The release packager had required a nonexistent aggregate
+`system-apps-boot` result even though the authoritative validator emits
+`system-apps-boot-1/2/4`. It now requires the three exact CPU-qualified
+markers. A focused host contract test and Python syntax check pass; running
+the packager against the older retained manifest now advances to the expected
+source-inventory freshness check instead of failing on the wrong marker.
+The full current-head release chain still must be rerun before provenance or
+production release claims.
+
 ## Stage 31 repeated-boot qualification - 2026-10-23
 
 The count-qualified repeated-boot harness completed 1,000 sequential 1-CPU

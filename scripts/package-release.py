@@ -25,7 +25,9 @@ required |= {f'{app.removeprefix("woven-")}-{cpus}'
              for app in apps if app not in ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-installer')
              for cpus in (1, 2, 4)}
 required |= {f'system-app-catalog-{cpus}' for cpus in (1, 2, 4)}
-required.add('system-apps-boot')
+# The release validator emits one signed system-app boot result per CPU
+# profile. Require those exact qualified rows; there is no aggregate marker.
+required |= {f'system-apps-boot-{cpus}' for cpus in (1, 2, 4)}
 if not required <= {item['check'] for item in checks} or not all(item['passed'] for item in checks):
     raise SystemExit('Release gates are incomplete or failed.')
 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
