@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from qemu_validation import validation_errors
 
 
-EARLY_MARKER = "[S10.2] generic async request/completion API: PASSED"
+EARLY_MARKER = "[STORAGE MUTATION] recovery injection armed"
 STORAGE_MARKER = "[STORAGE MUTATION] live FAT32 rename/delete/growth/lifecycle: PASSED"
 RECOVERY_MARKERS = [
     STORAGE_MARKER,
@@ -61,9 +61,9 @@ def run_interrupted(root, qemu, firmware, image, disk, serial, cpus, timeout):
             process.kill()
             process.wait(timeout=10)
         return False, "early marker was not reached"
-    # Leave the guest a short, deterministic window to enter the storage
-    # mutation path, then terminate QEMU without allowing guest shutdown.
-    time.sleep(0.01)
+    # The guest emits this marker immediately before entering the live
+    # mutation transaction. Kill at that boundary instead of using a wall
+    # clock delay, which races differently on different CPU counts.
     if process.poll() is None:
         process.kill()
     try:

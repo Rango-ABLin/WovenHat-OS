@@ -3004,6 +3004,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage27-5-recovery-test"),
         not(feature = "stage24-3-test")
     ))]
+    serial::write_line(format_args!(
+        "[STORAGE MUTATION] recovery injection armed"
+    ));
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
