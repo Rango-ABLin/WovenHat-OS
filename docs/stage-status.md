@@ -54,6 +54,13 @@ wovenhat-kernel --lib graphics_abi` could never run. The workflow now retains
 the warning-denying kernel Clippy gate and invokes the existing 37-test host
 `display_compositing` contract target instead. Both commands pass locally.
 
+The Stage 28 disposable acceptance was also rerun on the current head and
+passed. It verified the two-partition layout, FAT32-compatible data region,
+EFI artifact placement, settings readback, executor output, and rollback. The
+report explicitly records `physical_access: none`, `bootability:
+not-qualified`, and `release_certification: not-performed`; this is disposable
+file-image evidence only.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates

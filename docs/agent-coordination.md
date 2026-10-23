@@ -5336,3 +5336,10 @@ workflow was invoking a nonexistent library target in the binary-only
 QEMU matrices. Replaced that invalid command with the existing host
 `display_compositing` contract test while keeping the `gfx02-test` kernel
 Clippy gate. Local verification passed all 37 display tests and Clippy.
+
+**Codex current-head Stage 28 rerun (Codex, 2026-10-23):** The disposable
+acceptance passed on the current head, including layout, FAT32-compatible
+formatting, EFI artifact placement, settings readback, executor output, and
+rollback. The JSON report still correctly records no physical access,
+unqualified bootability, and no release certification; no physical disk was
+touched.
