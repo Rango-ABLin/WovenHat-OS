@@ -1,5 +1,20 @@
 # Stage status
 
+## P0-03/P0-07 current-head release validation rerun - 2026-10-23
+
+The authoritative release chain passed all 152 checks on current commit
+`3b3980e1`. Warning-denying kernel/host Clippy, every host test, debug and
+release memory/storage/network QEMU gates at 1/2/4 CPUs, legacy PIC, shell,
+service supervision, driver restart, application linting, system-app catalog
+and desktop boots, package transactions, AI/security/search/action suites, and
+final system-app Clippy all passed. The report is retained at
+`target/release-validation/results.json`.
+
+This is a current-head emulated/release-validation result. It does not close
+the separate physical/native hardware, physical power-loss, TPM/Secure Boot,
+release-key custody, arbitrary fault-injection, or independent Claude-review
+gates.
+
 ## Stage 31 disposable QEMU block read-fault recovery - 2026-10-23
 
 The new `scripts/test-stage31-storage-read-fault.py` gate attaches QEMU's

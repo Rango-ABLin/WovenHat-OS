@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head release validation rerun (2026-10-23)
+
+The authoritative release chain passed all 152 checks on commit `3b3980e1`.
+The report is `target/release-validation/results.json`; it includes
+warning-denying kernel/host Clippy, host tests, debug/release 1/2/4-CPU
+memory/storage/network gates, shell and service supervision, driver restart,
+all application/system-app/package/AI gates, desktop first-frame boots, and
+final system-app lint. No failure was suppressed.
+
+This does not claim physical/native hardware, physical power-loss, TPM/Secure
+Boot, release-key custody, arbitrary fault injection, or independent Claude
+review.
+
 ## Codex - Stage 31 disposable QEMU block read-fault recovery (2026-10-23)
 
 Added a disposable-only QEMU `blkdebug` gate that injects one ATA
