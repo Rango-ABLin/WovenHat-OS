@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Repair and accept Stage 7 SMP shell qualification (2026-10-23)
+
+The first post-Claude full release run failed reproducibly at `shell-smoke`:
+the automatic-rebalance fixture migrated all probes away from CPU 0 and then
+asserted that a probe had run on CPU 0 (`mask=14`, expected `15`). Commit
+`cebcea53` adds a CPU-0-pinned anchor probe, preserving the migratable probes,
+explicit migration assertion, migration counter assertion, and all-CPU mask
+assertion. No production scheduler assertion was weakened.
+
+The focused 4-CPU production shell gate then passed, and a complete rerun of
+`scripts/test-release.py` passed every recorded release gate. Report:
+`target/release-validation/results.json`. Claude's uncommitted
+`kernel/src/main.rs` work remains preserved and unstaged.
+
 ## Claude Code - Stage 20.3 migrated; a second real stale-texture bug found (2026-10-23)
 
 Migrated Stage 20.3 (application launcher) onto the shared-helper pattern.

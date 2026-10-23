@@ -1,5 +1,23 @@
 # Stage status
 
+## Release validation after SMP fixture repair - 2026-10-23
+
+The first post-Claude full release run reached `shell-smoke` but correctly
+failed on a reproducible Stage 7 automatic-rebalance assertion: the test had
+migrated every probe away from CPU 0 and then incorrectly required a CPU-0
+probe observation (`mask=14`, expected `15`). This was a qualification-fixture
+defect, not a weakened scheduler assertion. Commit `cebcea53` adds one
+CPU-0-pinned anchor probe while retaining the migratable workload and all
+migration/counter assertions.
+
+After the repair, the focused 4-CPU production shell gate passed, kernel and
+host warning-denying Clippy passed, and the complete authoritative release
+validator passed every recorded gate. The final report is
+`target/release-validation/results.json`; shell evidence is under
+`target/shell-regression/system-apps-4cpu-1792743581732896300/serial.log`.
+Claude's current `kernel/src/main.rs` changes remain uncommitted and
+untouched by Codex.
+
 ## 3D-default self-test retrofit: Stage 20.3 - 2026-10-23
 
 Stage 20.3's kernel self-test passes on 1/2/4 CPUs against the 3D-default
