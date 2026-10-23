@@ -48,6 +48,8 @@ def scenario_command(scenario, args):
             "--qemu", args.qemu,
             "--firmware", str(args.firmware),
             "--link-loss",
+            "--link-loss-count", "3",
+            "--fault-seed", hex(args.seed),
         ])
     elif scenario == "service-restart":
         command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])

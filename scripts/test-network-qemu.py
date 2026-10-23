@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import random
 import shutil
 import socket
 import subprocess
@@ -103,9 +104,16 @@ def _qmp_line(sock):
     return line.decode("utf-8")
 
 
-def flap_link(port):
+def build_link_fault_plan(seed, count):
+    if count < 1 or count > 8:
+        raise ValueError('link-loss count must be between 1 and 8')
+    rng = random.Random(seed)
+    return [rng.randint(100, 500) for _ in range(count)]
+
+
+def flap_link(port, downtime_ms):
     qmp_command(port, "set_link", {"name": "net0", "up": False})
-    time.sleep(0.5)
+    time.sleep(downtime_ms / 1000.0)
     qmp_command(port, "set_link", {"name": "net0", "up": True})
 
 
@@ -123,7 +131,23 @@ def main():
         action='store_true',
         help='flap the QEMU virtio-net link after UDP and require TCP recovery',
     )
+    parser.add_argument(
+        '--link-loss-count',
+        type=int,
+        default=1,
+        help='number of deterministic link flaps (1-8; requires --link-loss)',
+    )
+    parser.add_argument(
+        '--fault-seed',
+        type=lambda value: int(value, 0),
+        default=0x51A7E,
+        help='seed for bounded link-loss downtime selection',
+    )
     args = parser.parse_args()
+    if args.link_loss_count < 1 or args.link_loss_count > 8:
+        parser.error('--link-loss-count must be between 1 and 8')
+    if args.link_loss_count != 1 and not args.link_loss:
+        parser.error('--link-loss-count requires --link-loss')
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -152,6 +176,19 @@ def main():
     tcp_port = reserve_tcp_port()
     udp_port = reserve_udp_port()
     qmp_port = reserve_tcp_port() if args.link_loss else None
+    link_fault_plan = build_link_fault_plan(args.fault_seed, args.link_loss_count) if args.link_loss else []
+    (out / 'link-fault-plan.json').write_text(
+        json.dumps({
+            'schema': 'wovenhat.stage31.network-link-fault/v1',
+            'seed': args.fault_seed,
+            'flaps': [
+                {'index': index, 'downtime_ms': downtime_ms}
+                for index, downtime_ms in enumerate(link_fault_plan, 1)
+            ],
+            'physical_access': 'none',
+        }, indent=2) + '\n',
+        encoding='utf-8',
+    )
 
     netdev = (
         f'user,id=net0,'
@@ -215,8 +252,13 @@ def main():
             print('      UDP: PASS', flush=True)
 
             if args.link_loss:
-                print('      Injecting QEMU virtio-net link loss and recovery...', flush=True)
-                flap_link(qmp_port)
+                print(
+                    f'      Injecting {len(link_fault_plan)} seeded QEMU virtio-net link loss/recovery fault(s)...',
+                    flush=True,
+                )
+                for index, downtime_ms in enumerate(link_fault_plan, 1):
+                    flap_link(qmp_port, downtime_ms)
+                    print(f'      Link flap {index}: PASS ({downtime_ms} ms down)', flush=True)
                 print('      Link loss/recovery: PASS', flush=True)
 
             print('[5/6] Verifying host <-> WovenHat TCP round trip...', flush=True)
