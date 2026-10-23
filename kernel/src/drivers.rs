@@ -15,9 +15,11 @@ use crate::{
     driver::{self, PciMatch},
     hal::pci,
 };
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Owner token for boot-bound drivers ("WD" for WovenDriver, then 13.12).
 const OWNER: u32 = 0x5744_0d0c;
+static NEXT_OWNER: AtomicU32 = AtomicU32::new(OWNER.wrapping_add(1));
 
 /// What happened to one driver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +36,19 @@ pub enum Outcome {
     /// Bound, but the controller failed to initialize; the binding was
     /// rolled back.
     InitFailed,
+}
+
+/// Why a controller restart did not complete. A failed restart never silently
+/// rebinds a device with an unquiesced DMA owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestartError {
+    UnknownDriver,
+    NotBound,
+    Unsupported,
+    Shutdown,
+    Unbind,
+    Bind,
+    Init,
 }
 
 /// One driver's bring-up result and the function it matched.
@@ -56,6 +71,7 @@ struct Spec {
     kind: DeviceKind,
     matcher: PciMatch,
     init: fn(pci::Device) -> Result<u64, ()>,
+    shutdown: fn() -> Result<(), ()>,
 }
 
 const fn class(class: u8, subclass: u8, prog_if: Option<u8>) -> PciMatch {
@@ -74,12 +90,14 @@ const SPECS: [Spec; COUNT] = [
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x08, Some(0x02)),
         init: |device| crate::nvme::init_at(device).map_err(|error| init_error("nvme0", error)),
+        shutdown: || crate::nvme::shutdown().map_err(|_| ()),
     },
     Spec {
         name: "ahci0",
         kind: DeviceKind::Block,
         matcher: class(0x01, 0x06, Some(0x01)),
         init: |device| crate::ahci::init_at(device).map_err(|error| init_error("ahci0", error)),
+        shutdown: || crate::ahci::shutdown().map_err(|_| ()),
     },
     Spec {
         name: "xhci0",
@@ -113,6 +131,7 @@ const SPECS: [Spec; COUNT] = [
             }
             Ok(u64::from(ports))
         },
+        shutdown: || Err(()),
     },
     Spec {
         name: "hda0",
@@ -134,6 +153,7 @@ const SPECS: [Spec; COUNT] = [
             }
             Ok(u64::from(summary.output_streams))
         },
+        shutdown: || crate::hda::shutdown().map_err(|_| ()),
     },
 ];
 
@@ -241,6 +261,56 @@ pub fn bring_up() -> Report {
         log(slot);
     }
     report
+}
+
+fn next_owner() -> u32 {
+    loop {
+        let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
+        if owner != crate::hal::pci::topology::NO_OWNER {
+            return owner;
+        }
+    }
+}
+
+/// Quiesce, detach, and reinitialize one controller through its concrete
+/// driver lifecycle. The controller-specific shutdown runs before PCI BAR and
+/// function release; this ordering prevents a late DMA completion from using
+/// a generation that has already been recycled. xHCI deliberately returns
+/// `Unsupported` until its HID worker, waiter, and rings have an equivalent
+/// teardown protocol.
+pub fn restart(name: &'static str) -> Result<Outcome, RestartError> {
+    let spec = SPECS
+        .iter()
+        .find(|spec| spec.name == name)
+        .ok_or(RestartError::UnknownDriver)?;
+    let address = driver::pci_binding(name).ok_or(RestartError::NotBound)?;
+    if (spec.shutdown)().is_err() {
+        return Err(if name == "xhci0" {
+            RestartError::Unsupported
+        } else {
+            RestartError::Shutdown
+        });
+    }
+    driver::unbind_pci_resources(name).map_err(|_| RestartError::Unbind)?;
+    let device = device_at(address).ok_or(RestartError::Bind)?;
+    let owner = next_owner();
+    if driver::bind_pci(name, address, owner).is_err() {
+        return Err(RestartError::Bind);
+    }
+    match (spec.init)(device) {
+        Ok(value) => {
+            crate::serial::write_line(format_args!(
+                "[DRIVERS] {} restarted with owner={:#x}",
+                name, owner
+            ));
+            Ok(Outcome::Ready(value))
+        }
+        Err(()) => {
+            let _ = (spec.shutdown)();
+            let _ = driver::unbind_pci_resources(name);
+            Err(RestartError::Init)
+        }
+    }
 }
 
 fn log(driver: &Driver) {

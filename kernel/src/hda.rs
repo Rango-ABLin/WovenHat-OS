@@ -159,6 +159,7 @@ impl DmaPage {
 }
 pub struct HdaController {
     pci: pci::Device,
+    original_command: u16,
     mmio: u64,
     input_streams: u8,
     output_streams: u8,
@@ -222,6 +223,7 @@ impl HdaController {
         }
         let mut c = Self {
             pci: device,
+            original_command: device.command,
             mmio: bar.address,
             input_streams,
             output_streams,
@@ -236,6 +238,37 @@ impl HdaController {
         c.reset()?;
         c.setup_command_rings()?;
         Ok(c)
+    }
+
+    /// Stop stream and command-ring DMA before the PCI binding is released.
+    /// The controller is taken out of the global slot by [`shutdown`] so all
+    /// owned DMA pages are dropped only after this quiescence boundary.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        if self.output.is_some() {
+            let _ = self.end_playback();
+        }
+        mmio_write8(self.mmio + REG_CORBCTL, 0)?;
+        mmio_write8(self.mmio + REG_RIRBCTL, 0)?;
+        let gctl = self.mmio + REG_GCTL;
+        let current = mmio_read32(gctl)?;
+        mmio_write32(gctl, current & !1)?;
+        wait_for_bit(gctl, 1, false, InitError::ResetAssertTimeout)?;
+        let command = pci::restore_command(
+            pci::Address {
+                segment: self.pci.segment,
+                bus: self.pci.bus,
+                device: self.pci.device,
+                function: self.pci.function,
+            },
+            self.original_command,
+        );
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        {
+            AUDIO_VECTOR.store(0, Ordering::Release);
+            AUDIO_BUSY.store(false, Ordering::Release);
+        }
+        command.then_some(()).ok_or(InitError::PciEnableFailed)
     }
     fn reset(&mut self) -> Result<(), InitError> {
         let gctl = self.mmio + REG_GCTL;
@@ -1239,6 +1272,17 @@ pub fn init_at(device: pci::Device) -> Result<ControllerSummary, InitError> {
     *slot = Some(c);
     Ok(summary)
 }
+
+/// Take the HDA controller only after its DMA engines and command rings have
+/// been stopped. The controller object then drops outside the global lock.
+pub fn shutdown() -> Result<(), InitError> {
+    let controller = CONTROLLER.lock().take();
+    let Some(mut controller) = controller else {
+        return Ok(());
+    };
+    controller.shutdown_hardware()
+}
+
 pub fn discover_codec() -> Result<CodecSummary, InitError> {
     CONTROLLER
         .lock()

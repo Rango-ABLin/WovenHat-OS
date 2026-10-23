@@ -176,6 +176,9 @@ impl Queue {
 }
 
 pub struct NvmeController {
+    address: Address,
+    registers: u64,
+    original_command: u16,
     namespace_id: u32,
     sectors: u64,
     io: Queue,
@@ -288,6 +291,9 @@ impl NvmeController {
         let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         rollback.enabled = false;
         Ok(Self {
+            address,
+            registers,
+            original_command,
             namespace_id: 1,
             sectors: namespace_size,
             io,
@@ -321,6 +327,21 @@ impl NvmeController {
             sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
         }
         Ok(())
+    }
+
+    /// Stop controller DMA before the PCI owner is released.  The caller has
+    /// already quiesced the driver's external users and interrupt lease; this
+    /// method owns only the NVMe controller state and its DMA pages.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        let cc = mmio_read32(self.registers + 0x14)?;
+        mmio_write32(self.registers + 0x14, cc & !1)?;
+        let ready = wait_ready(self.registers, false).is_ok();
+        let command = pci::restore_command(self.address, self.original_command);
+        if ready && command {
+            Ok(())
+        } else {
+            Err(InitError::ControllerTimeout)
+        }
     }
 }
 
@@ -398,6 +419,17 @@ pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
 
 pub fn with_controller<R>(operation: impl FnOnce(&mut NvmeController) -> R) -> Option<R> {
     CONTROLLER.lock().as_mut().map(operation)
+}
+
+/// Remove the owned controller only after bounded hardware quiescence.  The
+/// returned object is dropped outside the global controller lock so its DMA
+/// pages can safely return to the frame allocator.
+pub fn shutdown() -> Result<(), InitError> {
+    let controller = CONTROLLER.lock().take();
+    let Some(mut controller) = controller else {
+        return Ok(());
+    };
+    controller.shutdown_hardware()
 }
 
 pub fn probe() -> bool {

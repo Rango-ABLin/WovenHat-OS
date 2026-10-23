@@ -117,6 +117,8 @@ impl DmaPage {
 }
 
 pub struct AhciDisk {
+    address: Address,
+    original_command: u16,
     port: u64,
     sectors: u64,
     command_list: DmaPage,
@@ -189,6 +191,8 @@ impl AhciDisk {
         start_engine(port)?;
 
         let mut disk = Self {
+            address,
+            original_command: device.command,
             port,
             sectors: 0,
             command_list,
@@ -198,6 +202,20 @@ impl AhciDisk {
         };
         disk.identify()?;
         Ok(disk)
+    }
+
+    /// Stop the selected port before PCI ownership and its DMA pages are
+    /// released. A late command completion must not target freed frames.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        let stopped = stop_engine(self.port).is_ok();
+        let _ = mmio_write32(self.port + PX_IE, 0);
+        let _ = mmio_write32(self.port + PX_IS, u32::MAX);
+        let command = pci::restore_command(self.address, self.original_command);
+        if stopped && command {
+            Ok(())
+        } else {
+            Err(InitError::PortTimeout)
+        }
     }
 
     fn prepare_command(&mut self, write: bool, byte_count: usize) {
@@ -359,6 +377,16 @@ pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
 
 pub fn with_controller<R>(operation: impl FnOnce(&mut AhciDisk) -> R) -> Option<R> {
     CONTROLLER.lock().as_mut().map(operation)
+}
+
+/// Take the controller only after the AHCI engine has stopped. The owned DMA
+/// pages are dropped after the global controller lock is released.
+pub fn shutdown() -> Result<(), InitError> {
+    let disk = CONTROLLER.lock().take();
+    let Some(mut disk) = disk else {
+        return Ok(());
+    };
+    disk.shutdown_hardware()
 }
 
 fn find_controller() -> Option<pci::Device> {
