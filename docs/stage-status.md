@@ -6,6 +6,9 @@ The complete Python host test suite passed: 151 tests in 168.209 seconds.
 This validates host-side contracts and planners. Local QEMU/OVMF evidence is
 recorded below; GitHub Actions remains the independent Linux qualification.
 
+After the full 1/2/4/8/16-CPU harness expansion, the complete host suite was
+rerun on the current head: 151 tests passed in 187.428 seconds.
+
 The repository-wide host Clippy gate also passed with warnings denied:
 `cargo clippy --all-targets -- -D warnings`.
 

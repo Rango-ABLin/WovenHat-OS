@@ -5323,6 +5323,10 @@ CPUs under seed `0x51A7E`, with child evidence retained in the corresponding
 bounded emulated coverage and does not claim arbitrary fault injection or
 native qualification.
 
+**Codex current-head host regression rerun (Codex, 2026-10-23):** After the
+full-SMP harness and planner expansion, `python -m unittest discover -s tests`
+passed all 151 tests in 187.428 seconds. No shared Claude files were changed.
+
 **Codex Stage 31 high-SMP driver restart qualification (Codex, 2026-10-23):**
 The driver restart harness and torture planner now support all requested
 profiles, and fresh controller-owned restart runs passed at 8 and 16 CPUs with
