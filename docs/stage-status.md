@@ -9,6 +9,13 @@ recorded below; GitHub Actions remains the independent Linux qualification.
 After the full 1/2/4/8/16-CPU harness expansion, the complete host suite was
 rerun on the current head: 151 tests passed in 187.428 seconds.
 
+The full CI run exposed and the local exact gate reproduced a Stage 13.5
+feature-composition defect: xHCI restart-only shutdown helpers were compiled
+for `stage13-5-test`, whose QEMU configuration intentionally omits the PCI
+waiter teardown API. Those helpers are now gated solely by
+`stage31-driver-restart-test`; Stage 13.5 build, warning-denying Clippy, and
+1/2/4-CPU acceptance all pass locally.
+
 The repository-wide host Clippy gate also passed with warnings denied:
 `cargo clippy --all-targets -- -D warnings`.
 

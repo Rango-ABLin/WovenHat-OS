@@ -5380,3 +5380,10 @@ formatting, EFI artifact placement, settings readback, executor output, and
 rollback. The JSON report still correctly records no physical access,
 unqualified bootability, and no release certification; no physical disk was
 touched.
+
+**Codex Stage 13.5 feature-gate repair (Codex, 2026-10-23):** CI caught a
+real xHCI cfg defect: restart-only shutdown helpers leaked into the
+`stage13-5-test` build and referenced an unavailable PCI waiter teardown API.
+The helpers are now gated only by `stage31-driver-restart-test`. Exact local
+verification passed Stage 13.5 Clippy and QEMU acceptance at 1/2/4 CPUs, plus
+the Stage 31 driver-restart Clippy feature gate.
