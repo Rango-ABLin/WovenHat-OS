@@ -5314,3 +5314,11 @@ uses a deterministic in-guest Fisher-Yates order for the four controller
 restarts, and that order passed independently at 1/2/4 CPUs. This remains
 bounded emulated evidence, not arbitrary fault injection or native
 certification.
+
+**Codex Stage 31 network-loss randomized coverage (Codex, 2026-10-23):** The
+seeded orchestrator now includes the existing fail-closed QEMU virtio link-loss
+gate as an eighth scenario. The full eight-scenario schedule passed at 1/2/4
+CPUs under seed `0x51A7E`, with child evidence retained in the corresponding
+`audit-artifacts/stage31-randomized-51a7e-*cpu` directories. This is still
+bounded emulated coverage and does not claim arbitrary fault injection or
+native qualification.

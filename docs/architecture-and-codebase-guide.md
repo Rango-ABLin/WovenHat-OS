@@ -4196,7 +4196,9 @@ scenario alongside process, packet, shutdown, memory, service-restart, and
 service-supervisor gates. The driver self-test uses a deterministic in-guest
 Fisher-Yates shuffle (seed `0x51A7E`) over the four controller names and logs
 the selected order. Its successful result proves reproducible order coverage
-and child-gate integration; it does not turn the bounded scenarios into an
+and child-gate integration. The same orchestrator also includes the existing
+QEMU virtio link-loss gate, so network loss is part of the reproducible
+eight-scenario schedule. These gates do not turn the bounded scenarios into an
 arbitrary fault injector.
 ## Stage 29 hardware qualification report boundary
 

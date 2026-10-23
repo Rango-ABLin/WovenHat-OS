@@ -34,6 +34,13 @@ restart order deterministically in-guest (seed `0x51A7E`) and passes at 1/2/4
 CPUs. This is bounded, explicitly invoked restart recovery; arbitrary driver
 fault supervision and native hardware certification remain open.
 
+The seeded Stage 31 cross-subsystem runner now includes the existing QEMU
+virtio link-loss gate as an eighth scenario. The complete eight-scenario
+matrix passed at 1, 2, and 4 CPUs under seed `0x51A7E`; evidence is retained
+under `audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu/`. This closes the
+network-loss omission in the randomized schedule but remains bounded emulated
+coverage, not arbitrary in-guest fault injection or native hardware testing.
+
 ## Stage 31 randomized controller order qualification - 2026-10-23
 
 The controller restart self-test now applies a deterministic Fisher-Yates
