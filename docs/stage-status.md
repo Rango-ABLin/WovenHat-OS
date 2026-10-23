@@ -3,9 +3,8 @@
 ## Current host audit - 2026-10-23
 
 The complete Python host test suite passed: 151 tests in 168.209 seconds.
-This validates host-side contracts and planners only. The GitHub Actions run
-for `f03ce5e8` is still queued, and the later local commits have not yet
-produced a remote run, so no QEMU or OVMF result is claimed here.
+This validates host-side contracts and planners. Local QEMU/OVMF evidence is
+recorded below; GitHub Actions remains the independent Linux qualification.
 
 The repository-wide host Clippy gate also passed with warnings denied:
 `cargo clippy --all-targets -- -D warnings`.
@@ -21,8 +20,8 @@ despite a passing renderer trace.
 
 The first local supervisor boot also found and fixed a feature-composition
 bug: the dedicated system-app recovery image now explicitly includes the
-normal production boot path even though it retains `qemu-test` for its
-terminal exit marker.
+normal production boot path while retaining only the dedicated QEMU exit
+helpers needed by its terminal marker.
 
 The driver audit confirms that the current PCI layer has generation-safe
 resource teardown and explicit rebind coverage, but the NVMe/AHCI/xHCI/HDA
@@ -38,9 +37,12 @@ Added the dedicated `stage31-service-supervisor-test` QEMU image and the
 catalog, kills the currently published `woven.update` process, and requires
 the bounded supervisor to reap it, spawn a verified replacement, and publish
 a different owner generation through IPC. Warning-denying kernel Clippy and
-Python harness syntax checks pass locally. The live 1/2/4-CPU QEMU acceptance
-is wired next to the existing Linux matrix but is not claimed from this
-Windows host because QEMU/OVMF is unavailable here.
+Python harness syntax checks pass locally. With local QEMU/OVMF and a 4 GiB
+guest, the live acceptance passed at 1, 2, and 4 CPUs; serial evidence is
+retained under `target/shell-regression/`.
+
+The shell harness now defaults to the declared 4 GiB minimum guest memory;
+callers can override it explicitly with `--memory` for diagnostic work.
 
 The seeded Stage 31 orchestrator now includes this supervisor scenario in
 addition to the existing signed update-service restart scenario. The runner

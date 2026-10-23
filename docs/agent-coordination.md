@@ -5280,3 +5280,6 @@ feature exits before the generic all-validations marker is emitted.
 The first local supervisor run found that the normal system-app boot path was
 excluded by its `qemu-test` guard; the dedicated feature now opts that path
 back in explicitly.
+The supervisor acceptance was then rerun with the harness's declared 4 GiB
+guest minimum and passed at 1, 2, and 4 CPUs. The harness now defaults to
+`--memory 4G`; each serial log remains under `target/shell-regression/`.
