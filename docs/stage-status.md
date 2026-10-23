@@ -14,6 +14,16 @@ The kernel workflow now supersedes older queued runs per branch, retaining
 completed run artifacts while ensuring the latest audited commit reaches the
 runner instead of waiting behind stale push matrices.
 
+The GFX-02 feature gate now requires its own terminal renderer marker only.
+That feature exits immediately after its acceptance, so requiring the later
+generic all-validations marker was contradictory and caused a false negative
+despite a passing renderer trace.
+
+The first local supervisor boot also found and fixed a feature-composition
+bug: the dedicated system-app recovery image now explicitly includes the
+normal production boot path even though it retains `qemu-test` for its
+terminal exit marker.
+
 The driver audit confirms that the current PCI layer has generation-safe
 resource teardown and explicit rebind coverage, but the NVMe/AHCI/xHCI/HDA
 controller modules do not yet expose controller-specific quiesce/reset/

@@ -5968,7 +5968,7 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     matches!(check, Some(0) | Some(4))
 }
 
-#[cfg(feature = "qemu-test")]
+#[cfg(any(feature = "qemu-test", feature = "stage31-service-supervisor-test"))]
 fn qemu_test_exit_success() {
     unsafe {
         core::arch::asm!(
@@ -5983,7 +5983,7 @@ fn qemu_test_exit_success() {
     }
 }
 
-#[cfg(feature = "qemu-test")]
+#[cfg(any(feature = "qemu-test", feature = "stage31-service-supervisor-test"))]
 fn qemu_test_exit_failure() -> ! {
     // QEMU isa-debug-exit maps value 0x11 to host exit status 35. This keeps
     // acceptance failures fail-fast instead of parking in halt() until the

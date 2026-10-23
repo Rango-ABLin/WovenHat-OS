@@ -115,6 +115,8 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=4)
+    parser.add_argument('--memory', default='4G',
+                        help='guest RAM passed to QEMU (minimum supported is 4G)')
     parser.add_argument('--system-apps', action='store_true',
                         help='build the production system-app image and verify normal-boot installation')
     parser.add_argument('--hardware-demo', action='store_true',
@@ -207,7 +209,7 @@ def main():
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
-    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', '256M', '-smp', str(args.cpus),
+    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', args.memory, '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-qmp', f'tcp:127.0.0.1:{port},server=on,wait=off',
                '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',

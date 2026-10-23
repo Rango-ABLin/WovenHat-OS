@@ -1253,8 +1253,7 @@ jobs:
             --cpus "${{ matrix.cpus }}" \
             --qemu /usr/bin/qemu-system-x86_64 \
             --firmware "${{ steps.ovmf.outputs.code }}" \
-            --require '[GFX-02] CPU renderer: PASSED' \
-            --require '[BOOT] ALL VALIDATIONS PASSED'
+            --require '[GFX-02] CPU renderer: PASSED'
       - name: Preserve Stage 28/GFX-02 evidence
         if: always()
         uses: actions/upload-artifact@v4

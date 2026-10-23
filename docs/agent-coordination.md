@@ -5275,3 +5275,8 @@ Repository-wide host Clippy with warnings denied also passed.
 The kernel workflow was given per-ref superseding concurrency so stale queued
 matrices do not starve the latest audited commit; completed evidence remains
 retained by GitHub Actions.
+The GFX-02 gate now requires its own terminal renderer marker only; the
+feature exits before the generic all-validations marker is emitted.
+The first local supervisor run found that the normal system-app boot path was
+excluded by its `qemu-test` guard; the dedicated feature now opts that path
+back in explicitly.
