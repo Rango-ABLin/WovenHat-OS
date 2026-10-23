@@ -22,3 +22,25 @@ This is signed userspace-service restart qualification, not a general
 supervisor, driver restart, automatic retry policy, sudden power-loss
 recovery, or native hardware certification. Those require separate owner,
 restart, and hardware evidence.
+
+## 2026-10-23 bounded production supervisor increment
+
+`kernel/src/service_supervisor.rs` now registers the production package,
+update, and installer service PID generations. The kernel event loop detects
+an exited child, reaps it through the owning parent, applies a bounded
+100/200/400-tick retry backoff, reloads the verified image, and publishes a
+replacement generation. Each service has at most three restart attempts;
+stale results cannot replace a newer PID and budget exhaustion disables the
+entry with a serial audit record.
+
+Evidence:
+
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features
+  system-apps -- -D warnings` passed using the existing packaged artifacts
+  and trusted test key.
+- The Windows host has no local OVMF image, so a live crash/restart QEMU
+  execution was not claimed in this increment; CI must execute the packaged
+  system-app acceptance before this slice is runtime-accepted.
+
+The explicit PCI driver rebind slice remains separate and still lacks an
+automatic driver-crash supervisor.
