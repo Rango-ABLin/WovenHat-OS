@@ -1693,6 +1693,15 @@ fn automatic_rebalance_test() {
     AUTO_BALANCE_DONE.store(0, Ordering::Release);
     AUTO_BALANCE_MASK.store(0, Ordering::Release);
     let jobs = online_count() * 3;
+    // Keep one probe pinned to CPU 0 so the execution-coverage assertion is
+    // not made impossible by the very rebalance under test moving every
+    // migratable probe away from the CPU running this harness. The remaining
+    // probes still exercise automatic migration and must cover every other
+    // online CPU.
+    // SAFETY: The probe uses only atomics plus yield/exit and retains no
+    // CPU-local state across scheduling points.
+    unsafe { task::spawn_on(0, "rebalance-cpu0-anchor", auto_balance_probe) }
+        .expect("automatic rebalance CPU0 anchor slot");
     x86_64::instructions::interrupts::without_interrupts(|| {
         for _ in 0..jobs {
             // SAFETY: Probe state is atomic-only and obeys the restricted
@@ -1731,7 +1740,7 @@ fn automatic_rebalance_test() {
 
     AUTO_BALANCE_RELEASE.store(true, Ordering::Release);
     let deadline = crate::timer::ticks() + 500;
-    while AUTO_BALANCE_DONE.load(Ordering::Acquire) < jobs {
+    while AUTO_BALANCE_DONE.load(Ordering::Acquire) < jobs + 1 {
         assert!(
             crate::timer::ticks() < deadline,
             "automatic rebalance completion timeout"
