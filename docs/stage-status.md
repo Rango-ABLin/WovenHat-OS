@@ -20,6 +20,9 @@ The auditable Stage 31 torture planner now exposes a separate
 `service-supervisor` suite for the supported 1/2/4-CPU profiles and marks the
 8/16-CPU rows pending/blocked according to the existing harness limits.
 
+The release validator now runs the signed supervisor recovery image at 1, 2,
+and 4 CPUs after the normal system-app smoke gate.
+
 ## Release gate covers production service supervisor - 2026-10-23
 
 Updated `scripts/test-release.py` so the authoritative release chain runs

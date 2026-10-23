@@ -5265,3 +5265,4 @@ still does not claim arbitrary in-guest fault injection.
 
 The formal Stage 31 torture planner now has a separate `service-supervisor`
 suite and contract tests for its 1/2/4-CPU support and 8/16-CPU blocked rows.
+The release validator also invokes that image at 1/2/4 CPUs.
