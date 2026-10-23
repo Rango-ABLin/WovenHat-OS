@@ -18,6 +18,11 @@ planner and focused host tests pass; the QEMU matrix is pending the next Linux
 CI run. This is low-RAM disposable-QEMU evidence only and does not lower the
 declared 4 GiB production guest floor or qualify native hardware.
 
+The seeded Stage 31 randomized runner now includes this low-RAM gate as a
+ninth bounded scenario, so its schedule cannot omit the resource-pressure
+case. This remains orchestration of bounded child gates, not arbitrary
+in-guest fault injection.
+
 ## Current host audit - 2026-10-23
 
 The complete Python host test suite passed: 151 tests in 168.209 seconds.
