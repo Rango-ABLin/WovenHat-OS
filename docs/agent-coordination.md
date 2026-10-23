@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 1,000-boot qualification (2026-10-23)
+
+Completed the serialized 1-CPU memory/boot repeatability campaign: 1,000 of
+1,000 child validations passed. An independent artifact audit confirmed 1,000
+run directories, zero missing or malformed `result.json` records, zero
+nonzero exits, and zero timeouts under
+`audit-artifacts/stage31-repeated/memory-1cpu-1000boots/`. This is disposable
+QEMU evidence only; native hardware, physical power-loss, arbitrary
+in-guest fault injection, GPU-backed scanout, and independent Claude review
+remain unclaimed.
+
 ## Codex - production feature lint in release gate (2026-10-23)
 
 Updated `scripts/test-release.py` to lint the kernel with `system-apps` using

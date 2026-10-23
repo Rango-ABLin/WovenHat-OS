@@ -1,14 +1,18 @@
 # Stage status
 
-## Stage 31 repeated-boot sample - 2026-10-23
+## Stage 31 repeated-boot qualification - 2026-10-23
 
-The count-qualified repeated-boot harness completed 100 sequential 1-CPU
-memory/boot validations successfully. All 100 per-boot result records report
-exit 0 from the child harness, with no timed-out run; evidence is retained at
-`audit-artifacts/stage31-repeated/memory-1cpu-100boots/`. This is a stronger
-disposable-QEMU sample than the earlier ten-boot profiles, but it does not
-close the roadmap's explicit thousands-of-boots requirement or native
-hardware qualification.
+The count-qualified repeated-boot harness completed 1,000 sequential 1-CPU
+memory/boot validations successfully. An independent post-run audit found
+exactly 1,000 run directories, each with valid JSON, exit code 0, and no
+timed-out run. Evidence is retained at
+`audit-artifacts/stage31-repeated/memory-1cpu-1000boots/`.
+
+This closes the repository's 1,000-boot disposable-QEMU repeatability sample,
+but does not by itself close any broader thousands-of-boots interpretation,
+native hardware qualification, physical power-loss testing, or production
+readiness. The earlier 100-boot evidence remains at
+`audit-artifacts/stage31-repeated/memory-1cpu-100boots/`.
 
 ## Current host regression after low-RAM harness tests - 2026-10-23
 
