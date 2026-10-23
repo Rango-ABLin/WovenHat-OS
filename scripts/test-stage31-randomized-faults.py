@@ -30,6 +30,15 @@ SCENARIOS = {
 }
 
 
+def scenario_command(scenario, args):
+    command = [sys.executable, str(ROOT / SCENARIOS[scenario][0]), "--cpus", str(args.cpus)]
+    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption"}:
+        command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
+    elif scenario == "service-restart":
+        command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
+    return command
+
+
 def run(args: argparse.Namespace) -> int:
     if not 1 <= args.count <= len(SCENARIOS):
         raise SystemExit(f"--count must be between 1 and {len(SCENARIOS)}")
@@ -56,7 +65,7 @@ def run(args: argparse.Namespace) -> int:
     )
     results = []
     for index, scenario in enumerate(order, 1):
-        command = [sys.executable, str(ROOT / SCENARIOS[scenario][0]), "--cpus", str(args.cpus)]
+        command = scenario_command(scenario, args)
         run_dir = evidence / f"run-{index:02d}-{scenario}"
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "command.json").write_text(
@@ -111,6 +120,8 @@ def main() -> int:
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--count", type=int, default=len(SCENARIOS))
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--qemu", default="qemu-system-x86_64")
+    parser.add_argument("--firmware", required=True, help="OVMF CODE file passed to every child gate")
     args = parser.parse_args()
     if args.timeout < 1:
         parser.error("--timeout must be positive")

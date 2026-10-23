@@ -15,6 +15,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
+    parser.add_argument("--firmware", type=Path, required=True)
     args = parser.parse_args()
     command = [
         sys.executable,
@@ -25,6 +27,10 @@ def main() -> int:
         str(args.cpus),
         "--timeout",
         str(args.timeout),
+        "--qemu",
+        args.qemu,
+        "--firmware",
+        str(args.firmware),
     ]
     result = subprocess.run(
         command,

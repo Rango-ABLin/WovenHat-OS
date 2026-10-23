@@ -17,10 +17,11 @@ def main() -> int:
         default=shutil.which("qemu-system-x86_64")
         or r"C:\Program Files\qemu\qemu-system-x86_64.exe",
     )
+    parser.add_argument("--firmware", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
-    firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
+    firmware = args.firmware or qemu.parent / "share" / "edk2-x86_64-code.fd"
     if not qemu.is_file() or not firmware.is_file():
         parser.error("Set --qemu or install QEMU with its OVMF firmware.")
     env = dict(os.environ)
