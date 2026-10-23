@@ -15,6 +15,19 @@ the separate physical/native hardware, physical power-loss, TPM/Secure Boot,
 release-key custody, arbitrary fault-injection, or independent Claude-review
 gates.
 
+## Stage 31 seeded 10-scenario campaign with storage fault - 2026-10-23
+
+The seeded Stage 31 orchestrator passed all ten scenarios at 1 CPU with seed
+`0x51A7E`: process crash, sudden shutdown, multi-flap network loss, QEMU
+storage read fault, packet corruption, low RAM, service supervisor recovery,
+driver restart, service restart, and memory boot. The result is retained at
+`audit-artifacts/stage31-randomized-51a7e-1cpu-10scenarios/result.json` with
+all ten child return codes zero. The randomized runner now includes the
+storage-read-fault child as a first-class bounded scenario.
+
+This proves deterministic orchestration of bounded gates, not arbitrary
+in-guest fault injection or native/physical qualification.
+
 ## Stage 31 QEMU block read-fault full CPU matrix - 2026-10-23
 
 The disposable QEMU `blkdebug` read-fault gate passed at 8 and 16 CPUs in

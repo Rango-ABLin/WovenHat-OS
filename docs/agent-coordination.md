@@ -13,6 +13,19 @@ This does not claim physical/native hardware, physical power-loss, TPM/Secure
 Boot, release-key custody, arbitrary fault injection, or independent Claude
 review.
 
+## Codex - Stage 31 seeded 10-scenario campaign (2026-10-23)
+
+The seeded Stage 31 runner passed all ten scenarios at 1 CPU with seed
+`0x51A7E`, adding the QEMU storage-read-fault child to the existing process,
+sudden-shutdown, network, packet, low-RAM, service, driver, and memory gates.
+The authoritative result is
+`audit-artifacts/stage31-randomized-51a7e-1cpu-10scenarios/result.json` with
+ten zero return codes. The runner and its contract test now treat storage
+read faults as a first-class bounded scenario.
+
+This remains deterministic orchestration of bounded emulated gates, not
+arbitrary in-guest fault injection, native qualification, or Claude review.
+
 ## Codex - Stage 31 QEMU block read-fault full CPU matrix (2026-10-23)
 
 The disposable `blkdebug` ATA read-fault gate passed at 8 and 16 CPUs after
