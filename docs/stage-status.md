@@ -15,6 +15,20 @@ the separate physical/native hardware, physical power-loss, TPM/Secure Boot,
 release-key custody, arbitrary fault-injection, or independent Claude-review
 gates.
 
+## Stage 31 QEMU block read-fault full CPU matrix - 2026-10-23
+
+The disposable QEMU `blkdebug` read-fault gate passed at 8 and 16 CPUs in
+addition to the earlier 1/2/4-CPU passes. Each run injected one ATA
+`read_aio` `EIO`, recovered by retry, completed the FAT32 mutation, and
+emitted the full boot marker. Evidence is retained under
+`audit-artifacts/stage31-storage-read-fault-{1,2,4,8,16}cpu/`.
+
+The Stage 31 torture planner now exposes this gate as a first-class
+`storage-read-fault` suite and records its 1/2/4/8/16-CPU coverage. This is
+still bounded emulated read-error recovery; write ordering, flush durability,
+torn sectors, physical power loss, native media, and arbitrary fault
+injection remain open.
+
 ## Stage 31 disposable QEMU block read-fault recovery - 2026-10-23
 
 The new `scripts/test-stage31-storage-read-fault.py` gate attaches QEMU's

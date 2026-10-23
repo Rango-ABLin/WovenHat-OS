@@ -13,6 +13,18 @@ This does not claim physical/native hardware, physical power-loss, TPM/Secure
 Boot, release-key custody, arbitrary fault injection, or independent Claude
 review.
 
+## Codex - Stage 31 QEMU block read-fault full CPU matrix (2026-10-23)
+
+The disposable `blkdebug` ATA read-fault gate passed at 8 and 16 CPUs after
+the earlier 1/2/4-CPU passes. All five profiles recovered by retry and
+completed the full boot/storage markers. Evidence is retained under
+`audit-artifacts/stage31-storage-read-fault-{1,2,4,8,16}cpu/`.
+
+The torture planner and contract tests now include `storage-read-fault` as a
+first-class suite. This remains bounded emulated read-error coverage only;
+physical durability, native media, arbitrary fault injection, and independent
+Claude review remain unclaimed.
+
 ## Codex - Stage 31 disposable QEMU block read-fault recovery (2026-10-23)
 
 Added a disposable-only QEMU `blkdebug` gate that injects one ATA
