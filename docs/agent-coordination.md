@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - GFX-02 bounded CPU renderer (2026-10-23)
+
+Added the first concrete backend behind `graphics_abi`: a bounded
+generation-checked `CpuRenderer` using the existing `display::Surface`.
+It validates surface generations and geometry, supports clear/fill,
+nearest-neighbor scaled compositing with opacity, and submission/wait fences.
+The independent GFX-02 probe passed on QEMU 1/2/4 CPUs; kernel feature and
+host all-targets warning-denying Clippy passed. No second compositor, scanout
+owner, physical disk, firmware, TPM, or Claude-owned files were touched.
+GPU acceleration, compositor migration, and native hardware qualification
+remain later gates.
+
 ## Codex - Stage 20.10 Quick Settings 3D qualification (2026-10-23)
 
 Completed the Stage 20.10 acceptance-model repair. The gate now mirrors the

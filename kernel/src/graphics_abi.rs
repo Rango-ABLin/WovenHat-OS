@@ -235,7 +235,6 @@ impl Default for CpuRenderer {
 impl Renderer for CpuRenderer {
     fn clear(&mut self, target: SurfaceId, color: u32) -> GraphicsResult<()> {
         let bounds = self.surface(target)?.bounds();
-        self.surface_mut(target)?.clear();
         self.surface_mut(target)?.fill_rect(bounds, color);
         Ok(())
     }
@@ -347,9 +346,13 @@ pub fn cpu_renderer_self_test() -> bool {
             .is_ok()
         && renderer.surface_pixel(target, 2, 2) == Ok(source_color)
         && renderer.surface_pixel(target, 1, 1) == Ok(target_color)
-        && renderer.fill_rect(target, Rect::new(0, 0, 2, 2), 0x00aa_bbcc).is_ok()
+        && renderer
+            .fill_rect(target, Rect::new(0, 0, 2, 2), 0x00aa_bbcc)
+            .is_ok()
         && renderer.surface_pixel(target, 1, 1) == Ok(0x00aa_bbcc)
-        && renderer.submit().is_ok_and(|fence| renderer.wait(fence, 0).is_ok())
+        && renderer
+            .submit()
+            .is_ok_and(|fence| renderer.wait(fence, 0).is_ok())
         && renderer.destroy_surface(source).is_ok()
         && renderer.surface_pixel(source, 0, 0) == Err(GraphicsError::InvalidSurface)
 }

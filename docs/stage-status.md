@@ -1,5 +1,25 @@
 # Stage status
 
+## GFX-02 bounded CPU renderer - 2026-10-23
+
+Implemented the first concrete backend behind the GFX-01 contract as
+`graphics_abi::CpuRenderer`. It owns eight bounded generation-checked surface
+slots, validates dimensions and rectangles, performs nearest-neighbor
+compositing with opacity, and provides monotonic submission fences with
+stale-surface and invalid-fence rejection. It uses the existing kernel
+`display::Surface` and does not create a second compositor or scanout owner.
+
+Kernel feature Clippy, host all-targets Clippy, and the independent GFX-02
+self-test passed on QEMU 1/2/4 CPUs. Evidence is retained under
+`target/gfx02-{1cpu,2cpu,4cpu}`. The host kernel-bin test remains unavailable
+on this Windows target because its existing x86 inline assembly uses GNU
+`.previous` directives rejected by the MSVC assembler; the QEMU target gate is
+the authoritative acceptance for this `no_std` kernel feature.
+
+This accepts only the CPU renderer contract. GPU acceleration, compositor
+migration, native display-driver qualification, and physical hardware
+certification remain open.
+
 ## Stage 20.10 Quick Settings 3D qualification - 2026-10-23
 
 The Quick Settings acceptance model now follows the production 3D card and

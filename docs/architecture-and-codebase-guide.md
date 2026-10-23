@@ -4067,11 +4067,14 @@ bootability, hardware qualification, or release certification.
 The versioned `graphics_abi` contract is intentionally an adapter seam over
 the established `display`, `compositor`, and `virtio_gpu` modules. It defines
 typed surface/fence/output identities, bounded damage presentation, renderer
-operations, display modes, and backend recovery errors without allocating a
-second surface registry or changing scanout ownership. The kernel compositor
-and capability boundary remain authoritative. The affected Stage 20.14b
-graphics acceptance matrix is now green on 1/2/4 CPUs; GFX-02 renderer
-migration is the next separately gated implementation stage.
+operations, display modes, and backend recovery errors. GFX-02 now provides a
+bounded `CpuRenderer` implementation using the existing `display::Surface`
+with generation-checked surface handles, geometry validation, compositing,
+and fences. It does not allocate a second compositor or change scanout
+ownership; the kernel compositor and capability boundary remain authoritative.
+The affected Stage 20.14b graphics acceptance matrix and the GFX-02 1/2/4-CPU
+probe are green. GPU backend migration and native display qualification remain
+separate gates.
 
 ## Driver restart qualification boundary
 
