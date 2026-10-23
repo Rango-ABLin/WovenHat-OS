@@ -31,6 +31,7 @@ SCENARIOS = {
     "memory": ["scripts/test-memory-qemu.py"],
     "low-ram": ["scripts/test-stage31-low-ram.py"],
     "storage-read-fault": ["scripts/test-stage31-storage-read-fault.py"],
+    "storage-write-fault": ["scripts/test-stage31-storage-write-fault.py"],
     "process-crash": ["scripts/test-stage31-process-crash.py"],
     "packet-corruption": ["scripts/test-stage31-packet-corruption.py"],
     "network-loss": ["scripts/test-network-qemu.py"],
@@ -72,7 +73,7 @@ def write_plan(evidence, seed, cpus, order, status):
 
 def scenario_command(scenario, args):
     command = [sys.executable, str(ROOT / SCENARIOS[scenario][0]), "--cpus", str(args.cpus)]
-    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption", "low-ram", "storage-read-fault"}:
+    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption", "low-ram", "storage-read-fault", "storage-write-fault"}:
         command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
     elif scenario == "network-loss":
         command.extend([

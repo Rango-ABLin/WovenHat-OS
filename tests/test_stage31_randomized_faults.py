@@ -37,6 +37,17 @@ class Stage31RandomizedFaultTests(unittest.TestCase):
         self.assertEqual(command[command.index("--cpus") + 1], "16")
         self.assertIn("--firmware", command)
 
+    def test_storage_write_fault_scenario_uses_disposable_qemu_gate(self):
+        args = types.SimpleNamespace(
+            cpus=1,
+            qemu="qemu-system-x86_64",
+            firmware=Path("OVMF_CODE.fd"),
+            seed=0x51A7E,
+        )
+        command = MODULE.scenario_command("storage-write-fault", args)
+        self.assertIn("test-stage31-storage-write-fault.py", command[1])
+        self.assertIn("--firmware", command)
+
     def test_existing_evidence_gets_a_fresh_rerun_directory(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
