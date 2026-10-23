@@ -60,7 +60,7 @@ class Stage31TorturePlanTests(unittest.TestCase):
         )
         self.assertEqual(
             scenarios["whole-kernel-low-ram"],
-            "covered-stage31-disposable-256m-boot-matrix",
+            "pending-stage31-disposable-256m-boot-matrix",
         )
         self.assertEqual(scenarios["filesystem-disk-full"], "covered-wovenfs-host")
         self.assertEqual(scenarios["service-lifecycle"], "covered-signed-update-service-and-supervisor-recovery-1-2-4cpu")
