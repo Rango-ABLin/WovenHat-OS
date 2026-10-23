@@ -23,12 +23,11 @@ bug: the dedicated system-app recovery image now explicitly includes the
 normal production boot path while retaining only the dedicated QEMU exit
 helpers needed by its terminal marker.
 
-The driver audit confirms that the current PCI layer has generation-safe
-resource teardown and explicit rebind coverage, but the NVMe/AHCI/xHCI/HDA
-controller modules do not yet expose controller-specific quiesce/reset/
-reinitialize protocols. Automatic driver-crash recovery therefore remains an
-open release blocker; generic rebinding would be unsafe in the presence of
-live DMA or interrupts.
+The current PCI layer has generation-safe resource teardown and explicit
+rebind coverage. NVMe, AHCI, xHCI, and HDA now expose controller-specific
+quiesce-before-unbind protocols, and the four-controller restart gate passes
+at 1/2/4 CPUs. This is bounded, explicitly invoked restart recovery; arbitrary
+driver fault supervision and native hardware certification remain open.
 
 ## Stage 31 service-supervisor recovery acceptance added - 2026-10-23
 

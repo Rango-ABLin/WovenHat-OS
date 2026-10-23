@@ -5303,3 +5303,11 @@ the advisory hints from the FAT after journal replay; the shutdown harness
 uses a kernel-emitted injection boundary; and live mutation requires an
 authoritative mounted volume. The six-scenario seeded matrix passed at 1, 2,
 and 4 CPUs. No physical power-loss or native hardware claim is implied.
+
+**Codex Stage 31 xHCI and randomized-matrix completion (Codex, 2026-10-23):**
+xHCI now has cooperative deferred-enumerator and HID-worker cancellation,
+post-death waiter removal, controller halt, and fail-closed PCI teardown. The
+four-controller restart gate passed at 1/2/4 CPUs. The seeded randomized
+orchestrator and formal torture planner now include `driver-restart`; all seven
+scenarios passed at 1/2/4 CPUs under seed `0x51A7E`. This remains bounded
+emulated evidence, not arbitrary fault injection or native certification.
