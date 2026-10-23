@@ -1,5 +1,64 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - 3D-default taskbar fix generalized; shared helper; toast bug found (2026-10-23)
+
+Picked back up the 3D-default self-test retrofit. Root-caused the stuck
+Stage 20.1 "taskbar is translucent over the wallpaper" check: the kernel
+self-test's own duplicated `projected_taskbar` function was missing the
+`top_half_width = half_width * 23 / 20` perspective-shrinkage compensation
+that `render_taskbar_3d` already applies (see Codex's GFX-01 note below,
+which fixed this same factor for Stage 20.14b's copy specifically). The
+other 14 duplicated copies of this function, across Stages 20.1-20.13,
+20.14b, and 24.59, still had the old (missing-factor) formula. Fixed all 15
+mechanically with the same `replace_all`. Re-verified Stage 20.14b passes
+1 CPU afterward (no regression to Codex's accepted GFX-01 gate); Codex's own
+fix there and mine are functionally identical.
+
+Given how easily that one factor silently drifted out of sync across 15
+independent copies, refactored `projected_taskbar`/`expected_taskbar` plus a
+new `flat_taskbar_3d` (parameterized by open-window entries, workspace/QS
+state, and an optional clock mask) into shared, `cfg(any(...))`-gated
+top-level functions reused across every affected stage, the same way
+`labelled`/`region`/`title_bar` already are, rather than duplicated
+per-stage like the simpler parameterless `wallpaper()` formula. Migrated
+Stage 20.1 (no open windows, so an empty `entries` slice) and Stage 20.2
+(exercises `entries` for real: open/close/focus-change across two windows)
+onto the shared helper. Both pass 1/2/4 CPUs. Stage 20.2 also needed its
+"gone"/"desktop empty" checks' bare `wallpaper(...)` calls changed to
+`expected_wallpaper(...)` (the 3D-projected version) -- same class of latent
+gap, not yet hit because nothing had exercised those lines since the flip.
+
+Found a real, separate, NOT-yet-fixed bug while on Stage 20.2: under 3D
+mode, the toast notification is completely invisible -- its screen area
+shows pure (3D-projected) desktop background with zero trace of the
+border/text/fill a toast should have. Confirmed via direct instrumentation
+of `render_toast_3d` that this is not a timing race (checked tick 388, var
+`TOAST_TICKS=400`, essentially right after creation) and not a logic
+shortcut (the texture correctly contains border=ACCENT and text content;
+both `camera.project` calls and `DepthBuffer::new` succeed; the two
+`textured_triangle_3d` calls are reached with a correctly-scoped,
+non-degenerate quad covering the same canvas as `render_desktop_background`
+just painted). Despite all of that executing, the final composited pixels
+match `expected_wallpaper` exactly, as if the two triangle calls never
+touched the canvas. Have not yet looked at `Canvas`/staging-tile/
+`present_region_keyed` internals in `libwoven` to find out why; that is the
+next place to look. Stage 20.2's "notification toast shown" check is
+temporarily relaxed to only check the area still renders a sane 3D
+background (not garbage/a crash), with a comment marking this as tracking a
+known defect, not asserting correctness. Do not use that check as evidence
+the toast is fine.
+
+Remaining scope, same pattern as Stage 20.2: Stages 20.3-20.13, 20.14b, and
+24.59 still have their own nested (now individually-correct, but
+un-migrated) copies of `projected_taskbar`/`expected_taskbar`, plus likely
+their own stage-specific pre-3D flat pixel checks (window entries, flat
+`wallpaper()` calls expecting a reveal, etc., discovered empirically rather
+than predicted, since each stage's own checks differ) that need the same
+treatment Stage 20.2 got. Warning-denying kernel Clippy for both affected
+features (`stage20-1-test`, `stage20-2-test`) and host `--all-targets`
+Clippy pass; host `cargo test --all-targets` passes. Continuing stage by
+stage.
+
 ## Codex - Post-Claude shared-tree validation (2026-10-23)
 
 Claude's shared graphics/kernel update was committed externally as

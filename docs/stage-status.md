@@ -1,5 +1,23 @@
 # Stage status
 
+## 3D-default self-test retrofit: Stages 20.1-20.2 - 2026-10-23
+
+Stage 20.1 and 20.2's kernel self-tests pass on 1/2/4 CPUs against the
+3D-default desktop. Root cause of Stage 20.1's previously-stuck taskbar
+check: the self-test's duplicated taskbar-projection math was missing the
+`23/20` top-edge perspective-shrinkage compensation `render_taskbar_3d`
+applies (the same factor Codex's GFX-01 slice already fixed for Stage
+20.14b's own copy) -- fixed identically across all 15 duplicated copies
+(Stages 20.1-20.13, 20.14b, 24.59), then that duplication was replaced with
+a single shared `cfg(any(...))`-gated implementation
+(`projected_taskbar_3d`/`expected_taskbar_3d`/`flat_taskbar_3d`) migrated
+into Stage 20.1 and 20.2 so far. Full details and the open toast-rendering
+bug found along the way are in `docs/agent-coordination.md`.
+
+Remaining: Stages 20.3-20.13, 20.14b (refactor only, already individually
+correct), and 24.59 still need migrating onto the shared helper plus
+whatever stage-specific pre-3D flat checks each turns out to have.
+
 ## Post-Claude shared-tree validation - 2026-10-23
 
 Claude's shared graphics/kernel update was committed externally as
