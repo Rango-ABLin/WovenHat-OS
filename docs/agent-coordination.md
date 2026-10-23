@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 fault-coverage metadata alignment (2026-10-23)
+
+Corrected the torture-plan map and contract test to report the accepted
+1/2/4/8/16 CPU service/update-supervisor and controller-restart coverage. The
+focused seven-test planner suite and Python syntax check pass. This changes
+only coverage reporting; it does not claim arbitrary in-guest fault
+injection, native qualification, or independent Claude review.
+
 ## Codex - current-head Stage 31 network link-loss recovery (2026-10-23)
 
 The live QEMU network gate passed with an emulated virtio-net link flap at

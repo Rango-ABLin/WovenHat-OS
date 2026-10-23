@@ -1,5 +1,13 @@
 # Stage status
 
+## Stage 31 fault-coverage metadata alignment - 2026-10-23
+
+Corrected the torture-plan coverage map to reflect the accepted 1/2/4/8/16
+CPU service-supervisor/update-service and controller-restart evidence. The
+planner contract tests and Python syntax check pass. This is an auditability
+correction; the underlying gates remain bounded emulated recovery tests and
+do not become arbitrary in-guest fault injection or native qualification.
+
 ## Stage 31 current-head network link-loss recovery - 2026-10-23
 
 The live QEMU network gate passed with an emulated virtio-net link flap at
