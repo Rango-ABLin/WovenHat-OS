@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - single-output virtio-GPU compositor path (2026-10-23)
+
+Removed the production compositor's unnecessary two-scanout requirement. A
+single-output virtio-GPU can now become the display using its bounded primary
+mode; multi-head placement and framebuffer fallback remain unchanged. The
+affected warning-denying kernel Clippy gate and full host all-targets suite
+pass, and Stage 20.14's existing two-head pixel capture passes after the
+change. Single-output QEMU/native hardware qualification is still separate.
+
 ## Codex - Stage 31 1,000-boot qualification (2026-10-23)
 
 Completed the serialized 1-CPU memory/boot repeatability campaign: 1,000 of

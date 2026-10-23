@@ -4075,6 +4075,13 @@ The affected Stage 20.14b graphics acceptance matrix and the GFX-02 1/2/4-CPU
 probe are green. GPU backend migration and native display qualification remain
 separate gates.
 
+The production compositor path now accepts a single-output virtio-gpu as well
+as the existing multi-head device. Multiple heads remain arranged side by
+side at a bounded mode; a single head uses the reported primary mode. If GPU
+probe or mode setup fails, the boot framebuffer remains the fallback. This
+does not claim native GPU hardware certification or replace the two-head
+Stage 20.14/20.14b acceptance.
+
 ## Driver restart qualification boundary
 
 The Stage 13.2 lifecycle gate proves that a discovered PCI function can be

@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics single-output virtio-GPU path - 2026-10-23
+
+The production compositor now accepts a single-output virtio-GPU instead of
+requiring two scanouts. Multi-head output placement and the boot-framebuffer
+fallback are preserved. The affected kernel Clippy gate passed, the complete
+host all-targets suite passed, and the existing Stage 20.14 two-head
+pixel-accurate QEMU acceptance passed on 1 CPU after the change. This is a
+code-path expansion, not native GPU certification; single-output hardware
+qualification remains to be added.
+
 ## Stage 31 repeated-boot qualification - 2026-10-23
 
 The count-qualified repeated-boot harness completed 1,000 sequential 1-CPU

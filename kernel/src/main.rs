@@ -1759,7 +1759,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             )),
         }
 
-        // A multi-head virtio-gpu becomes the desktop's monitors.
+        // A virtio-gpu becomes the desktop display when available; multiple
+        // heads are arranged side by side and a single head is also valid.
         if let Ok(heads) = compositor::attach_gpu_outputs() {
             serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads));
         }

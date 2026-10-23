@@ -356,9 +356,10 @@ fn present_gpu(state: &mut State) -> Result<usize, Error> {
     Ok(written)
 }
 
-/// Use a multi-head virtio-gpu as the display, its heads side by side at
-/// head 0's mode (at most 1280x800), and size the surface to them. A GPU
-/// with one head is left alone: the boot framebuffer serves.
+/// Use a virtio-gpu as the display, with multiple heads side by side at
+/// head 0's mode (at most 1280x800), or with one head at the GPU's native
+/// mode. A single-output GPU is a valid production display device; the boot
+/// framebuffer remains the fallback when probing or mode setup fails.
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage20-14-test",
@@ -366,7 +367,7 @@ fn present_gpu(state: &mut State) -> Result<usize, Error> {
 ))]
 pub fn attach_gpu_outputs() -> Result<usize, Error> {
     let mut gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
-    if gpu.scanouts < 2 {
+    if gpu.scanouts == 0 {
         return Err(Error::NoDisplay);
     }
     let modes = gpu.display_info().map_err(|_| Error::NoDisplay)?;
