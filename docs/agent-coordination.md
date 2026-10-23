@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 31 seeded multi-flap network fault injector (2026-10-23)
+
+Extended the QEMU network harness with a bounded seeded plan of 1-8 virtio-net
+link flaps, each held down for 100-500 ms, and retained the plan in
+`target/network-regression-{1,2,4}-debug/link-fault-plan.json`. The three-flap
+plan with seed `0x51A7E` passed at 1/2/4 CPUs. The randomized Stage 31 runner
+now forwards the seed and requests three link flaps. Focused planner/harness
+tests pass. This remains partial emulated network-fault coverage, not
+arbitrary in-guest fault injection, native qualification, or Claude review.
+
 ## Codex - Stage 31 fault-coverage metadata alignment (2026-10-23)
 
 Corrected the torture-plan map and contract test to report the accepted

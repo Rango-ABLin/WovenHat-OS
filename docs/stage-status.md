@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 31 seeded multi-flap network fault injector - 2026-10-23
+
+Extended the QEMU network harness with a bounded seeded plan of 1-8 virtio-net
+link flaps, each held down for 100-500 ms, and retained the plan as
+`target/network-regression-{1,2,4}-debug/link-fault-plan.json`. The three-flap
+plan with seed `0x51A7E` passed at 1/2/4 CPUs; DHCP/DNS/ICMP/UDP, every link
+recovery, TCP echo, and final guest markers passed. The randomized Stage 31
+orchestrator now requests this multi-flap mode. This improves deterministic
+emulated network-fault coverage, but remains partial and does not claim
+arbitrary in-guest fault injection or native hardware qualification.
+
 ## Stage 31 fault-coverage metadata alignment - 2026-10-23
 
 Corrected the torture-plan coverage map to reflect the accepted 1/2/4/8/16
