@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 28/GFX-02 executable QEMU CI matrix - 2026-10-23
+
+Added `scripts/test-feature-qemu.py`, a shared fail-closed feature-image
+harness that validates exit code 33, required serial markers, panic absence,
+and contradictory failure markers. CI now executes both the Stage 28 installer
+self-test and GFX-02 CPU renderer self-test on 1, 2, and 4 CPUs with explicit
+OVMF discovery and retained evidence. Local static validation passed; the
+Windows host has no local OVMF image, so this Linux QEMU matrix remains a CI
+execution rather than a locally claimed result.
+
 ## Maturity audit Cycle 1 - 2026-10-23
 
 Read the complete supplied full-system maturity mandate and captured a fresh

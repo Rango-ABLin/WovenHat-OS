@@ -1187,3 +1187,73 @@ jobs:
             audit-artifacts/stage31-packet-corruption-*/**
             target/**/*serial*.log
             target/**/*qemu*.log
+
+  stage28-gfx-qemu-matrix:
+    name: Stage 28 and GFX-02 QEMU matrix (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Stage 28 installer QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-feature-qemu.py \
+            --feature stage28-installer-test \
+            --name stage28-installer \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --require '[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED' \
+            --require '[BOOT] ALL VALIDATIONS PASSED'
+      - name: GFX-02 QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-feature-qemu.py \
+            --feature gfx02-test \
+            --name gfx02 \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --require '[GFX-02] CPU renderer: PASSED' \
+            --require '[BOOT] ALL VALIDATIONS PASSED'
+      - name: Preserve Stage 28/GFX-02 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage28-gfx-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: |
+            target/stage28-installer-*/**
+            target/gfx02-*/**

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - executable Stage 28/GFX-02 CI matrix (2026-10-23)
+
+Added the reusable `test-feature-qemu.py` fail-closed harness and wired the
+Stage 28 installer and GFX-02 feature self-tests into a Linux 1/2/4-CPU CI
+matrix. It requires explicit OVMF, validates exit 33 plus serial markers and
+panic/FAILED contradictions, and uploads evidence. Local Python/YAML static
+checks pass; no local OVMF or native qualification is inferred.
+
 ## Codex - maturity audit Cycle 1 (2026-10-23)
 
 Read the complete supplied full-system maturity mandate and captured the
