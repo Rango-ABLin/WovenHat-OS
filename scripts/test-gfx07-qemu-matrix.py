@@ -40,14 +40,16 @@ def main() -> int:
     for label, path in (("QEMU", args.qemu), ("OVMF", args.firmware)):
         if not path.is_file():
             parser.error(f"{label} not a file: {path}")
-    output = args.output.resolve()
-    if output.exists():
-        parser.error("output directory already exists; refusing to overwrite evidence")
-    output.mkdir(parents=True)
+    # Verify the source before creating any audit artifacts inside the checkout.
+    # Otherwise the runner can make its own source tree appear dirty.
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True)
     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
     if head.returncode or dirty.returncode or dirty.stdout.strip():
         parser.error("cannot qualify an unknown or dirty source tree")
+    output = args.output.resolve()
+    if output.exists():
+        parser.error("output directory already exists; refusing to overwrite evidence")
+    output.mkdir(parents=True)
     manifest = {
         "schema": 1,
         "classification": "QEMU graphics regression only; NOT GFX-08 production qualification",
