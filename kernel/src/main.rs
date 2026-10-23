@@ -13551,98 +13551,6 @@ fn stage20_4_self_test() -> bool {
         projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
     }
 
-    /// Independently recomputes the taskbar colour at a screen pixel once
-    /// the whole taskbar is 3D-projected (bottom edge anchored, top edge
-    /// receded and narrowed) as a tilted, textured card -- the same
-    /// transform `render_taskbar_3d` applies, reimplemented from scratch.
-    /// `flat` is the caller's own independent reconstruction of the flat
-    /// 2D taskbar content at an absolute screen pixel (what the texture
-    /// contains at that position); `None` means the point falls in the
-    /// gap neither projected triangle covers, where the flat content
-    /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate_uv(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            ((a * wa + b * wb + c * wc + total / 2) / total).clamp(0, 255)
-        }
-        const TILT_DEPTH: i64 = 30 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(taskbar_height - 1) << 16) / 2;
-        // Matches `render_taskbar_3d`'s `top_half_width`: the exact inverse
-        // of DISTANCE/(DISTANCE+depth) for this fixed 30-on-200 tilt, so the
-        // receded top edge still spans the full taskbar width on screen.
-        let top_half_width = half_width * 23 / 20;
-        let (cx, cy) = (width / 2, top + taskbar_height / 2);
-        let top_left = project(cx, cy, -top_half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
-            };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
-        let sample = |u: i64, v: i64| {
-            let sx = (u * i64::from(width - 1) / 255) as i32;
-            let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
-            flat(sx, sy)
-        };
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        None
-    }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
-        // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
-        // fallback paints the (also 3D-projected) desktop background, not
-        // the flat taskbar content -- the same gap-filling pattern as
-        // every other 3D surface.
-        match projected_taskbar(x, y, width, top, taskbar_height, &flat) {
-            Some(color) => color,
-            None => expected_wallpaper(x, y, width, height),
-        }
-    }
     fn region(
         x0: i32,
         y0: i32,
@@ -13807,7 +13715,7 @@ fn stage20_4_self_test() -> bool {
                         RED
                     }
                 })
-                && compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
+                && compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
                 && compositor::pixel(100, 100) == Ok(GREEN)
         });
     if !step(
@@ -13824,7 +13732,7 @@ fn stage20_4_self_test() -> bool {
         && packet(0, 0, false)
         && wait_hello_gui(wide).map(|(_, status)| status) == Some(Ok(0))
         && until(1000, || {
-            compositor::pixel(300, 200) == Ok(wallpaper(300, 200, height))
+            compositor::pixel(300, 200) == Ok(expected_wallpaper(300, 200, width, height))
         });
     if !step(
         "the close control asks the owner to close, and it does",
@@ -13835,7 +13743,7 @@ fn stage20_4_self_test() -> bool {
     let typed = mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
         && until(1000, || {
-            compositor::pixel(345, 295) == Ok(wallpaper(345, 295, height))
+            compositor::pixel(345, 295) == Ok(expected_wallpaper(345, 295, width, height))
         });
     if !step("A keeps the focus, takes its key and exits", typed) {
         return false;
