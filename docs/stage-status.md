@@ -31,6 +31,16 @@ only the boot/system NVMe is visible, no safe USB target is available, and no
 TPM or QEMU TPM backend is visible. It performed no physical test and changed
 no disk, firmware, TPM, or media state.
 
+## Stage 31 repeated high-SMP memory boots - 2026-10-23
+
+The current tree passed two consecutive Stage 31 memory boots at both 8 CPUs
+and 16 CPUs. Each run returned success and the runner preserved per-run
+command, result, serial, and QEMU evidence under
+`audit-artifacts/stage31-repeated/memory-8cpu/` and
+`audit-artifacts/stage31-repeated/memory-16cpu/`. This extends fresh repeated
+boot evidence beyond the 1/2/4-CPU release matrix; it does not close sudden
+shutdown, randomized full-stack fault injection, or native hardware gates.
+
 ## Full-system maturity Cycle 0 - 2026-10-22
 
 The full-system mandate was read and a protected audit branch was created at

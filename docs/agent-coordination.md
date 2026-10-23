@@ -25,6 +25,16 @@ performed. Evidence is under
 `audit-artifacts/physical-host-20261023-083045-801/` and
 `audit-artifacts/physical-tpm-readiness-20261023-083050/`.
 
+## Codex - Repeated high-SMP memory qualification (2026-10-23)
+
+Two consecutive Stage 31 memory boots passed at 8 CPUs and two consecutive
+boots passed at 16 CPUs. The runner preserved independent command/result and
+copied serial/QEMU evidence under
+`audit-artifacts/stage31-repeated/memory-8cpu/` and
+`audit-artifacts/stage31-repeated/memory-16cpu/`. This is fresh scalability
+evidence only; sudden shutdown, randomized full-stack fault injection, and
+native hardware qualification remain open.
+
 ## Codex - Full-system maturity Cycle 0 audit (2026-10-22)
 
 Read the seven-page full-system maturity mandate and created protected branch
