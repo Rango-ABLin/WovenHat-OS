@@ -41,6 +41,8 @@ current_sources += list((root / 'tools' / 'wapp-packager').rglob('*.rs'))
 for app in apps:
     app_root = root / 'apps' / app
     current_sources += [path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'}]
+shell_root = root / 'apps' / 'woven-shell'
+current_sources += [path for path in shell_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'}]
 current_sources += list((root / 'scripts').glob('*.py'))
 if {str(path.relative_to(root)) for path in current_sources} != set(manifest['sources']):
     raise SystemExit('Source file inventory changed; rerun the release gate.')
