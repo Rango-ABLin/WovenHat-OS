@@ -73,10 +73,12 @@ def validate(report: Any) -> list[str]:
         evidence = _text(item.get("evidence"))
         if not evidence:
             errors.append(f"{prefix}.evidence is required")
-        elif Path(evidence).is_absolute():
+        elif Path(evidence).is_absolute() or ".." in Path(evidence).parts:
             errors.append(f"{prefix}.evidence must be a repository-relative path")
-        if item.get("environment") != "native" and item.get("tier") == "tier1":
-            errors.append(f"{prefix}.tier1 requires native evidence")
+        if item.get("tier") == "tier1" and not (
+            item.get("environment") == "native" and item.get("result") == "passed"
+        ):
+            errors.append(f"{prefix}.tier1 requires passed native evidence")
         if item.get("tier") is not None and item.get("tier") not in TIERS:
             errors.append(f"{prefix}.tier is invalid")
     return errors

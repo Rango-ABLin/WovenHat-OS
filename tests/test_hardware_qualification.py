@@ -44,11 +44,23 @@ class HardwareQualificationTests(unittest.TestCase):
 
     def test_qemu_evidence_cannot_claim_tier1(self):
         errors = MODULE.validate(report([observation("nvme", environment="qemu", tier="tier1")]))
-        self.assertIn("observations[0].tier1 requires native evidence", errors)
+        self.assertIn("observations[0].tier1 requires passed native evidence", errors)
+
+    def test_failed_native_evidence_cannot_claim_tier1(self):
+        errors = MODULE.validate(report([observation("nvme", result="failed", tier="tier1")]))
+        self.assertIn("observations[0].tier1 requires passed native evidence", errors)
 
     def test_absolute_evidence_path_is_rejected(self):
         item = observation("usb")
         item["evidence"] = "C:/outside/report.json"
+        self.assertIn(
+            "observations[0].evidence must be a repository-relative path",
+            MODULE.validate(report([item])),
+        )
+
+    def test_evidence_path_traversal_is_rejected(self):
+        item = observation("usb")
+        item["evidence"] = "audit-artifacts/../outside/report.json"
         self.assertIn(
             "observations[0].evidence must be a repository-relative path",
             MODULE.validate(report([item])),
