@@ -10,6 +10,11 @@ and host all-targets Clippy pass against the current tree. The fresh Stage 31
 this post-commit tree; a full release-validator rerun remains advisable once
 the kernel diff is finalized.
 
+The subsequent `cargo test --workspace` passed, including the 119-test
+kernel/libwoven unit suite, all host integration suites, and the 16-test
+WovenFS crash/recovery suite. This is supplementary host evidence and does
+not replace QEMU or native-hardware qualification.
+
 ## Codex - Clean release validation rerun (2026-10-23)
 
 The authoritative `scripts/test-release.py` run completed with every recorded
