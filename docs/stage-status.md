@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 31 current-head process-crash containment - 2026-10-23
+
+The dedicated Ring-3 unmapped-write probe passed on the current tree at 1/2/4
+CPUs with QEMU exit 33. Evidence is retained in
+`target/stage31-process-crash-{1,2,4}cpu/`. The gate confirms that the
+faulting userspace process is reaped while the kernel remains alive and emits
+the success marker. It is a bounded process-lifecycle proof, not arbitrary
+in-guest fault injection, driver-crash recovery, native qualification, or
+production readiness.
+
 ## P0-03/P0-07 current-head release validation - 2026-10-23
 
 The authoritative release validator completed successfully on commit

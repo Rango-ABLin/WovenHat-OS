@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head Stage 31 process-crash containment (2026-10-23)
+
+The dedicated Ring-3 unmapped-write probe passed on the current tree at 1/2/4
+CPUs with QEMU exit 33. Evidence is retained under
+`target/stage31-process-crash-{1,2,4}cpu/`. This proves bounded userspace
+fault containment and reaping while the kernel remains alive. It does not
+claim arbitrary in-guest fault injection, driver/device crash recovery,
+native hardware qualification, or production readiness.
+
 ## Codex - current-head release validation and signing boundary (2026-10-23)
 
 The authoritative release validator passed on commit `e4a8ba79`, including
