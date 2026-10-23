@@ -5272,3 +5272,6 @@ The driver audit still finds no controller-specific quiesce/reset/reinitialize
 protocol for automatic NVMe/AHCI/xHCI/HDA crash recovery; generic rebinding is
 therefore intentionally not claimed.
 Repository-wide host Clippy with warnings denied also passed.
+The kernel workflow was given per-ref superseding concurrency so stale queued
+matrices do not starve the latest audited commit; completed evidence remains
+retained by GitHub Actions.

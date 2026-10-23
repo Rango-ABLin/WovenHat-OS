@@ -8,6 +8,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A push supersedes an older unstarted matrix on the same ref. Completed runs
+# and their uploaded evidence remain available; this prevents stale maturity
+# runs from starving the latest audited tree in the hosted runner queue.
+concurrency:
+  group: wovenhat-kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core-foundation:
     runs-on: ubuntu-latest
