@@ -16,6 +16,10 @@ native controller recovery, or randomized full-stack fault injection; those
 remain explicit release gates. The interrupted logs and recovery logs are
 retained in each timestamped artifact directory.
 
+The Stage 31 fail-closed torture planner now includes this as an executable
+`sudden-shutdown` suite for 1/2/4 CPUs rather than reporting the scenario as
+open.
+
 ## Release validation after SMP fixture repair - 2026-10-23
 
 The first post-Claude full release run reached `shell-smoke` but correctly

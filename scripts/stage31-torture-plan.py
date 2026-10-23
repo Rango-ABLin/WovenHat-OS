@@ -23,6 +23,7 @@ SUITES = (
     ("security", "scripts/test-security-qemu.py"),
     ("shell", "scripts/test-shell-qemu.py"),
     ("recovery", "scripts/test-stage27-5-recovery.py"),
+    ("sudden-shutdown", "scripts/test-sudden-shutdown-qemu.py"),
     ("update-service", "scripts/test-stage27-5-update-service.py"),
 )
 SUITE_CPU_SUPPORT = {
@@ -32,6 +33,7 @@ SUITE_CPU_SUPPORT = {
     "security": REQUESTED_CPUS,
     "shell": REQUESTED_CPUS,
     "recovery": (1, 2, 4),
+    "sudden-shutdown": (1, 2, 4),
     "update-service": (1, 2, 4),
 }
 FAULT_SCENARIOS = {
@@ -42,7 +44,7 @@ FAULT_SCENARIOS = {
     "packet-corruption": "partial-stage31-checksum-boundary",
     "driver-crash": "partial-stage13-2-explicit-rebind",
     "process-crash": "covered-stage31-qemu-process-crash",
-    "sudden-shutdown": "open",
+    "sudden-shutdown": "covered-qemu-abrupt-termination-and-reboot-1-2-4cpu",
     "whole-kernel-low-ram": "open",
 }
 
