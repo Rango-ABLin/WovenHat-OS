@@ -1,5 +1,16 @@
 # Stage status
 
+## Maturity audit Cycle 1 - 2026-10-23
+
+Read the complete supplied full-system maturity mandate and captured a fresh
+machine-readable audit at `audit-artifacts/maturity/20261023-cycle1/` for
+current clean HEAD `583b06eb`. The report records the exact toolchain/QEMU
+environment, current findings, validation results, release blockers, Codex
+review, pending Claude review, and SHA-256 digests. It confirms the Stage 28
+frontend-capacity fix and CI wiring but deliberately leaves full current-head
+QEMU release reruns, native hardware, physical power-loss, arbitrary in-guest
+fault injection, and independent Claude review open.
+
 ## Stage 28 installer-plan capacity alignment - 2026-10-23
 
 Aligned the graphical installer's validated snapshot parser with the existing

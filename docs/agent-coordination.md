@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - maturity audit Cycle 1 (2026-10-23)
+
+Read the complete supplied full-system maturity mandate and captured the
+current clean HEAD, environment, findings, validation, release blockers,
+review state, and SHA-256 manifest under
+`audit-artifacts/maturity/20261023-cycle1/`. The report explicitly records
+that no independent Claude review or native hardware qualification is claimed.
+
 ## Codex - Stage 28 plan-capacity alignment (2026-10-23)
 
 Aligned `apps/woven-installer`'s validated snapshot parser with the existing
