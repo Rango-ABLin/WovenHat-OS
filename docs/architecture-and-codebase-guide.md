@@ -4169,6 +4169,17 @@ adds a QMP control channel, issues `set_link` down/up for the named `net0`
 device after the UDP proof, and then requires the existing TCP echo and final
 guest markers. The QMP channel is opt-in and the normal network matrix is
 unchanged; a QMP error, guest exit, timeout, or missing marker fails closed.
+
+The FAT32 mount path repairs advisory FSINFO free-count and next-free hints
+from an authoritative bounded FAT scan after journal replay. This is required
+because an abrupt stop can persist a FAT allocation without its matching
+FSINFO update. `fat32::repair_fs_info` rewrites both valid primary and backup
+FSINFO sectors before VFS import; it never treats stale hints as authoritative.
+The sudden-shutdown harness emits a kernel-owned injection boundary immediately
+before the live mutation test and terminates QEMU at that marker, avoiding a
+wall-clock race. Live mutation is skipped unless the storage layer reports an
+actual mounted FAT32 volume, so service-only blank disks cannot be mistaken for
+storage qualification.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the

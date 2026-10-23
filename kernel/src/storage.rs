@@ -1629,7 +1629,7 @@ pub enum LiveMutationTestStatus {
 /// sequence for mkdir/write/persist/directory rename/delete and skips when the
 /// boot has no writable FAT32 ATA mount.
 pub fn live_mutation_self_test() -> LiveMutationTestStatus {
-    if !block_io::primary_ata_present() || vfs::stat("/mnt").is_err() {
+    if !block_io::primary_ata_present() || !mnt_mounted() || vfs::stat("/mnt").is_err() {
         return LiveMutationTestStatus::Skipped;
     }
 

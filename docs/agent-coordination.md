@@ -5283,3 +5283,11 @@ back in explicitly.
 The supervisor acceptance was then rerun with the harness's declared 4 GiB
 guest minimum and passed at 1, 2, and 4 CPUs. The harness now defaults to
 `--memory 4G`; each serial log remains under `target/shell-regression/`.
+
+**Codex Stage 31 shutdown recovery repair (Codex, 2026-10-23):** The seeded
+matrix exposed stale FAT32 FSINFO after abrupt termination and a false live
+mutation attempt on blank service disks. `fat32::repair_fs_info` now repairs
+the advisory hints from the FAT after journal replay; the shutdown harness
+uses a kernel-emitted injection boundary; and live mutation requires an
+authoritative mounted volume. The six-scenario seeded matrix passed at 1, 2,
+and 4 CPUs. No physical power-loss or native hardware claim is implied.

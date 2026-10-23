@@ -44,6 +44,22 @@ retained under `target/shell-regression/`.
 The shell harness now defaults to the declared 4 GiB minimum guest memory;
 callers can override it explicitly with `--memory` for diagnostic work.
 
+## Stage 31 shutdown recovery and mounted-volume guard - 2026-10-23
+
+The seeded randomized matrix first exposed stale FAT32 FSINFO after an
+abrupt stop. `fat32::repair_fs_info` now reconciles the advisory free-count
+and next-free hints from the FAT after journal replay, updating both valid
+FSINFO copies before VFS import. The shutdown harness now kills QEMU at a
+kernel-emitted mutation boundary instead of a timing delay, and the live
+mutation self-test requires `mnt_mounted()` so blank service disks are not
+qualified as FAT32 volumes.
+
+The full seeded six-scenario matrix passed locally at 1, 2, and 4 CPUs after
+the fixes. Evidence is retained under
+`audit-artifacts/stage31-randomized-51a7e-{1,2,4}cpu/`; focused sudden-shutdown
+evidence is retained under the timestamped `stage31-sudden-shutdown-*`
+directories.
+
 The seeded Stage 31 orchestrator now includes this supervisor scenario in
 addition to the existing signed update-service restart scenario. The runner
 still explicitly describes itself as bounded scenario orchestration rather
