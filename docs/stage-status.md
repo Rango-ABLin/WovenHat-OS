@@ -17,6 +17,20 @@ This closes the disposable-QEMU single-output compositor qualification, not
 native GPU certification. Physical hardware, device-loss recovery, arbitrary
 GPU fault injection, and production readiness remain separate gates.
 
+## P0-02 sudden-shutdown FAT32 recovery slice - 2026-10-23
+
+The abrupt-shutdown harness interrupted the live FAT32 mutation boundary and
+then recovered the same disposable image successfully at 1/2/4 CPUs. Each
+recovery reached the live mutation and complete-boot markers. Evidence is
+retained at
+`audit-artifacts/stage31-sudden-shutdown-1cpu-20261023T182410Z/`,
+`audit-artifacts/stage31-sudden-shutdown-2cpu-20261023T182509Z/`, and
+`audit-artifacts/stage31-sudden-shutdown-4cpu-20261023T182607Z/`.
+
+This is a disposable-QEMU interrupted-transaction recovery slice. It does
+not close physical power-loss testing, arbitrary torn-sector injection,
+native-media qualification, or the complete P0-02 durability gate.
+
 ## Stage 31 repeated-boot qualification - 2026-10-23
 
 The count-qualified repeated-boot harness completed 1,000 sequential 1-CPU

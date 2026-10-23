@@ -14,6 +14,15 @@ single-output qualification only; physical/native GPU qualification,
 device-loss recovery, arbitrary fault injection, and independent Claude
 review remain separate and unclaimed.
 
+## Codex - P0-02 sudden-shutdown FAT32 recovery slice (2026-10-23)
+
+Interrupted the live FAT32 mutation boundary and recovered the same
+disposable image successfully at 1/2/4 CPUs. The recovery boots reached both
+the storage mutation and complete-boot markers. Evidence is retained under
+`audit-artifacts/stage31-sudden-shutdown-{1,2,4}cpu-*`. This is QEMU-only
+evidence; physical power loss, arbitrary torn-sector injection, native media,
+and complete durability acceptance remain open.
+
 ## Codex - Stage 31 1,000-boot qualification (2026-10-23)
 
 Completed the serialized 1-CPU memory/boot repeatability campaign: 1,000 of
