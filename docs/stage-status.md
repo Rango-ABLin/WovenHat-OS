@@ -29,6 +29,16 @@ quiesce-before-unbind protocols, and the four-controller restart gate passes
 at 1/2/4 CPUs. This is bounded, explicitly invoked restart recovery; arbitrary
 driver fault supervision and native hardware certification remain open.
 
+## Current-head reconciliation - 2026-10-23
+
+The historical entries below retain their original findings and dates. On the
+current audited head, GFX-02's bounded CPU renderer is accepted on 1/2/4 CPUs,
+and all four PCI controller restart lifecycles are accepted on 1/2/4 CPUs.
+Older statements that describe either item as unstarted refer to the earlier
+tree and are not current-head status. The remaining graphics gap is GPU
+acceleration/native display qualification; the remaining hardware gap is
+physical/native qualification.
+
 ## Stage 31 service-supervisor recovery acceptance added - 2026-10-23
 
 Added the dedicated `stage31-service-supervisor-test` QEMU image and the
