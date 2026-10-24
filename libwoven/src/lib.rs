@@ -11636,6 +11636,7 @@ pub mod syscall {
     pub const RECOVERY_QUERY: u64 = 240;
     pub const INSTALLER_INVENTORY: u64 = 241;
     pub const INSTALLER_INSTALL: u64 = 242;
+    pub const ABI_NEGOTIATE: u64 = 243;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;

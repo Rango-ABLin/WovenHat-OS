@@ -410,6 +410,8 @@ pub enum Number {
     InstallerInventory = 241,
     /// plan pointer, plan length -> 100 on a completed kernel transaction
     InstallerInstall = 242,
+    /// request and response pointers to bounded native ABI descriptors
+    AbiNegotiate = 243,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -751,6 +753,39 @@ fn sys_installer_install(user_plan: u64, length: u64) -> u64 {
         Ok(progress) => u64::from(progress),
         Err(_) => SYSCALL_ERROR,
     }
+}
+
+fn sys_abi_negotiate(user_request: u64, user_response: u64, response_capacity: u64) -> u64 {
+    const BYTES: usize = libwoven::abi::DESCRIPTOR_BYTES;
+    let Ok(capacity) = usize::try_from(response_capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity < BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut request = [0_u8; BYTES];
+    if crate::paging::copy_from_current_user(user_request, &mut request).is_err() {
+        return SYSCALL_ERROR;
+    }
+    if request[6..8] != [0, 0] {
+        return SYSCALL_ERROR;
+    }
+    let requested = libwoven::abi::Contract::new(
+        u16::from_le_bytes([request[0], request[1]]),
+        u16::from_le_bytes([request[2], request[3]]),
+        u16::from_le_bytes([request[4], request[5]]),
+    );
+    let Ok(negotiated) = libwoven::abi::negotiate(requested) else {
+        return SYSCALL_ERROR;
+    };
+    let mut response = [0_u8; BYTES];
+    response[0..2].copy_from_slice(&negotiated.major.to_le_bytes());
+    response[2..4].copy_from_slice(&negotiated.minor.to_le_bytes());
+    response[4..6].copy_from_slice(&negotiated.descriptor.to_le_bytes());
+    if crate::paging::copy_to_current_user(user_response, &response).is_err() {
+        return SYSCALL_ERROR;
+    }
+    BYTES as u64
 }
 
 #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
@@ -2827,6 +2862,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::InstallerInventory as u64 => sys_installer_inventory(),
         value if value == Number::InstallerInstall as u64 => sys_installer_install(arg0, arg1),
+        value if value == Number::AbiNegotiate as u64 => sys_abi_negotiate(arg0, arg1, arg2),
         #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
         value if value == Number::RecoveryQuery as u64 => {
             sys_recovery_query(arg0, arg1, arg2)

@@ -10,6 +10,7 @@ pub const ABI_MAJOR: u16 = 1;
 pub const ABI_MINOR: u16 = 0;
 /// Wire encoding version for the descriptor exchanged by SDK tooling.
 pub const DESCRIPTOR_VERSION: u16 = 1;
+pub const DESCRIPTOR_BYTES: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Contract {
@@ -71,9 +72,50 @@ pub const fn negotiate(requested: Contract) -> Result<Contract, Error> {
     })
 }
 
+fn encode(contract: Contract, output: &mut [u8; DESCRIPTOR_BYTES]) {
+    output[0..2].copy_from_slice(&contract.major.to_le_bytes());
+    output[2..4].copy_from_slice(&contract.minor.to_le_bytes());
+    output[4..6].copy_from_slice(&contract.descriptor.to_le_bytes());
+    output[6..8].fill(0);
+}
+
+fn decode(bytes: &[u8; DESCRIPTOR_BYTES]) -> Result<Contract, crate::Error> {
+    if bytes[6..8] != [0, 0] {
+        return Err(crate::Error::Failed);
+    }
+    Ok(Contract::new(
+        u16::from_le_bytes([bytes[0], bytes[1]]),
+        u16::from_le_bytes([bytes[2], bytes[3]]),
+        u16::from_le_bytes([bytes[4], bytes[5]]),
+    ))
+}
+
+/// Negotiate the native contract through the kernel ABI.
+pub fn negotiate_kernel(requested: Contract) -> Result<Contract, crate::Error> {
+    let mut request = [0; DESCRIPTOR_BYTES];
+    let mut response = [0; DESCRIPTOR_BYTES];
+    encode(requested, &mut request);
+    let length = crate::check(unsafe {
+        crate::syscall::invoke(
+            crate::syscall::ABI_NEGOTIATE,
+            request.as_ptr() as u64,
+            response.as_mut_ptr() as u64,
+            response.len() as u64,
+        )
+    })?;
+    if length != DESCRIPTOR_BYTES as u64 {
+        return Err(crate::Error::Failed);
+    }
+    let negotiated = decode(&response)?;
+    negotiate(negotiated).map_err(|_| crate::Error::Failed)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{negotiate, Contract, Error, ABI_MAJOR, ABI_MINOR, DESCRIPTOR_VERSION};
+    use super::{
+        decode, encode, negotiate, Contract, Error, ABI_MAJOR, ABI_MINOR, DESCRIPTOR_BYTES,
+        DESCRIPTOR_VERSION,
+    };
 
     #[test]
     fn current_contract_negotiates() {
@@ -120,5 +162,15 @@ mod tests {
                 supported: DESCRIPTOR_VERSION
             })
         );
+    }
+
+    #[test]
+    fn descriptor_round_trip_and_reserved_bytes_are_bounded() {
+        let contract = Contract::CURRENT;
+        let mut bytes = [0; DESCRIPTOR_BYTES];
+        encode(contract, &mut bytes);
+        assert_eq!(decode(&bytes), Ok(contract));
+        bytes[6] = 1;
+        assert_eq!(decode(&bytes), Err(crate::Error::Failed));
     }
 }
