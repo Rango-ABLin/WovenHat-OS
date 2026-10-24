@@ -30,6 +30,13 @@ security, firmware/backend, Bluetooth LE, and transport contract markers on
 1/2/4. This is emulated/software evidence only; native RF and physical
 interoperability remain unqualified.
 
+## Codex - mandate M07 graphics qualification (2026-10-24)
+
+Stage 20.14b dual-head scanout, Stage 20.14S single-output pixels, and the
+GFX-02 CPU renderer feature gate passed on 1/2/4 CPUs. This is bounded
+software/QEMU evidence; native GPU drivers, acceleration, physical scanout,
+and device-loss recovery remain unqualified.
+
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 
 The strict desktop harness had a real ordering race: it waited for the

@@ -113,3 +113,10 @@ and Stage 27.5 recovery on 1/2/4 CPUs. Together with the M01 NVMe/AHCI FAT32
 persistence and bounded write-fault evidence, this closes the repository's
 software storage/installer path while leaving physical durability, power-loss
 media qualification, and trust-boundary prerequisites open.
+
+## M07 result
+
+M07 passed for bounded software/QEMU graphics scope. Dual-head scanout,
+single-output pixels, and GFX-02 CPU renderer feature tests passed on 1/2/4
+CPUs. Native GPU driver behavior, physical scanout, acceleration performance,
+and device-loss recovery remain unqualified.

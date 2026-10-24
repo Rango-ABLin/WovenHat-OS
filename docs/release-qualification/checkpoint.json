@@ -1,8 +1,8 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T14:18:00Z",
-  "milestone": "M06",
-  "milestone_title": "Network and radio software qualification",
+  "updated_utc": "2026-10-24T14:32:00Z",
+  "milestone": "M07",
+  "milestone_title": "Graphics and compositor qualification",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
   "accepted_commit": "d87ad4d7",
@@ -31,17 +31,19 @@
     "usable_memory": "isolated repeated shell reruns report meets_minimum=true on 1/2/4",
     "network_link_loss": "PASS on 1/2/4 CPUs",
     "wifi_bluetooth_contracts": "Stage 13.10 PASS on 1/2/4 CPUs",
+    "single_output_graphics": "Stage 20.14S PASS on 1/2/4 CPUs",
+    "gfx02_renderer": "PASS on 1/2/4 CPUs",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
-    "M04/M11 persistent storage, installer transaction, rollback, and recovery closure",
+    "M08/M09 UX, application, and service integration closure",
     "OVMF VARS and swtpm prerequisites",
     "development signing key and certificate",
     "supported installer transaction evidence",
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M07 qualify graphics backend/compositor functionality and device-loss boundaries",
+  "next_action": "M08 qualify desktop UX, accessibility, application, and service integration",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

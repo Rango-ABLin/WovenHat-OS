@@ -40,7 +40,7 @@ reduce the kernel-visible usable map.
 The normal shell repeated-boot suite passed two sequential boots at 1/2/4
 CPUs, and the guest reset gate passed at 1/2/4 CPUs. Evidence is retained in
 the timestamped `audit-artifacts/desktop-qualification-*`,
-`audit-artifacts/stage31-repeated/shell-{1,2,4}cpu-2boots/`, and
+`audit-artifacts/stage31-repeated/shell-{1,2,4}cpu-2boots-rerun-*/`, and
 `audit-artifacts/stage13.20-reboot-{1,2,4}cpu-*` directories. M02 is accepted
 for software/QEMU cold-boot, interaction, and guest-reset scope; physical
 power loss, native-device recovery, TPM/Secure Boot, and production signing
@@ -77,6 +77,14 @@ Wi-Fi protocol, security, firmware/backend, Bluetooth LE, and transport
 contract markers at 1/2/4. M06 is accepted for software and emulated-device
 scope; native Wi-Fi/Bluetooth hardware, RF behavior, physical interoperability,
 and certification remain open.
+
+## Release Completion Mandate M07 - 2026-10-24
+
+The graphics/compositor software slice passed on 1/2/4 CPUs. Stage 20.14b
+dual-head scanout, Stage 20.14S single-output pixel verification, and the
+GFX-02 CPU renderer feature gate all passed. M07 is accepted for the bounded
+software/QEMU graphics path; native Intel/AMD/NVIDIA GPU drivers, physical
+scanout, accelerated performance, and device-loss recovery remain open.
 
 ## Release Completion Mandate M04 - 2026-10-24
 
