@@ -1,5 +1,15 @@
 # Stage status
 
+## Read-only physical qualification preflight - 2026-10-24
+
+Added `scripts/physical-qualification-preflight.py` with a three-test
+stdlib contract. It records host identity/capacity using read-only standard
+library APIs, enumerates all 17 required qualification categories, rejects
+raw-device-looking output paths, and keeps every category at
+`PHYSICAL_NOT_TESTED` until a separate signed native evidence workflow exists.
+The live preflight smoke produced the expected schema and 17-category report;
+it did not open media, change firmware, reboot, or access credentials.
+
 ## Hardware-qualification matrix orchestrator - 2026-10-24
 
 Added `scripts/run-hardware-qualification-matrix.py` with four unit tests.

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - read-only physical qualification preflight (2026-10-24)
+
+A scoped implementation agent added `scripts/physical-qualification-
+preflight.py` and a three-test stdlib suite. Codex independently reran the
+tests and a live smoke: the report contains 17 categories, all
+`PHYSICAL_NOT_TESTED`, with native evidence rejected and no media/firmware or
+reboot access. This is preflight evidence only, not native certification.
+
 ## Codex - hardware-qualification matrix orchestrator (2026-10-24)
 
 A scoped implementation agent added `scripts/run-hardware-qualification-
