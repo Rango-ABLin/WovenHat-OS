@@ -1,0 +1,37 @@
+{
+  "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
+  "updated_utc": "2026-10-24T12:42:28Z",
+  "milestone": "M01",
+  "milestone_title": "Eliminate current red CI",
+  "status": "PASS",
+  "baseline_commit": "3eee80b8",
+  "branch": "master",
+  "working_tree_clean_before_documentation": true,
+  "tests": {
+    "focused_python": "previously recorded passing suites",
+    "release_validation": {
+      "checks": 158,
+      "failures": 0,
+      "classification": "QEMU/host software evidence"
+    },
+    "desktop_qualification": "strict harness remains separate; Stage 20.5/20.15 accepted on 1/2/4",
+    "virtual_trust": "NOT_QUALIFIED"
+  },
+  "blockers": [
+    "M02 boot/session reliability and repeated cold/warm restart evidence",
+    "strict desktop QEMU acceptance",
+    "OVMF VARS and swtpm prerequisites",
+    "development signing key and certificate",
+    "supported installer transaction evidence",
+    "physical/native hardware qualification",
+    "independent security review"
+  ],
+  "next_action": "M02 qualify repeated boot-to-desktop and restart/recovery behavior on 1/2/4 CPUs",
+  "safety": {
+    "host_reboot_requested": false,
+    "raw_device_opened": false,
+    "physical_media_written": false,
+    "host_firmware_changed": false,
+    "host_tpm_changed": false
+  }
+}

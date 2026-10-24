@@ -1,5 +1,27 @@
 # Stage status
 
+## Release Completion Mandate M00 baseline - 2026-10-24
+
+Completed the mandate's inventory/closure baseline at commit `3eee80b8`.
+Added the versioned ledger, subsystem dependency graph, and machine-readable
+resume checkpoint under `docs/release-qualification/`. The baseline records
+the current 158/158 bounded release chain, installed-image 1/2/4-CPU evidence,
+the unaccepted strict desktop gate, the fail-closed virtual trust preflight,
+and the separate physical/native qualification boundary. M00 is complete as a
+documentation and reproducibility gate; it is not a production-readiness
+claim. M01 is the next permitted milestone.
+
+## Release Completion Mandate M01 - 2026-10-24
+
+Closed the current-head Stage 20.5 focused-shadow regression by making the
+accepted 2D compositor path the default (`apps/woven-shell/src/main.rs`);
+3D remains opt-in pending its own pixel acceptance matrix. Stage 20.5 and
+Stage 20.15 passed on 1/2/4 CPUs. FAT32 persistence passed on NVMe and AHCI on
+1/2/4 CPUs. Stage 31 write-fault containment passed on 1/2/4 CPUs by observing
+the expected fail-closed batch-persist marker. M01 is accepted for software
+and QEMU scope; physical/native, Secure Boot/TPM and release-key gates remain
+open.
+
 ## Hardware qualification CI workflow - 2026-10-24
 
 Added `.github/workflows/hardware-qualification.yml`. Push and pull-request

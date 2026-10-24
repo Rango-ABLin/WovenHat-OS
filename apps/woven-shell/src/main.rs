@@ -1145,7 +1145,10 @@ impl Desktop {
         dnd: false,
         scale: 1,
         language: libwoven::i18n::Language::English,
-        three_d: true,
+        // Keep the accepted 2D compositor path as the default. 3D is an
+        // explicit user setting until every pixel-accurate desktop gate has
+        // a matching 3D acceptance matrix.
+        three_d: false,
         reduced_motion: false,
         locked: false,
         pin: None,
