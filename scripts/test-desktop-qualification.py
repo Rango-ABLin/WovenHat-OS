@@ -515,6 +515,8 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # Terminal GUI updates are intentionally silent on serial; the
             # framebuffer delta below is the acceptance signal for keyboard
             # delivery. Retain a bounded settle time for the guest IPC turn.
+            wait_marker(serial, "WovenTerminal: input updated", keyboard_started + args.input_timeout,
+                        process, "keyboard_input_delivery_ms", timings, keyboard_started)
             time.sleep(0.5)
             timings["keyboard_input_ms"] = (time.monotonic() - keyboard_started) * 1000.0
             time.sleep(1.0)

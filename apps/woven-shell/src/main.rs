@@ -2807,7 +2807,7 @@ impl Desktop {
                     libwoven::compositor_blend_region_shared(window.token, region, body.x, body.y, alpha)
                 };
                 if result.is_err() {
-                    log(&[b"woven-shell: shared surface compose failed"]);
+                    log(&[b"woven-shell: shared surface compose failed: ", &window.title[..window.title_length]]);
                 }
             }
         }
@@ -3258,6 +3258,7 @@ impl Desktop {
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
                     let _ = libwoven::message_send(window.owner, &[character as u8]);
+                    log(&[b"woven-shell: key forwarded"]);
                 }
                 empty
             }
@@ -3330,7 +3331,12 @@ impl Desktop {
                         i32::from(region.width),
                         i32::from(region.height),
                     );
-                    dirty = dirty.union(changed);
+                    // Recompose the complete client body after a client-side
+                    // update. The damage blit has already copied the changed
+                    // pixels into the compositor, but a full body repaint
+                    // restores stacking order and guarantees the next
+                    // present cannot retain a stale tile behind overlays.
+                    dirty = dirty.union(changed).union(window.body());
                 }
                 Ok(None) => {}
                 // While a resize is outstanding the owner may have released

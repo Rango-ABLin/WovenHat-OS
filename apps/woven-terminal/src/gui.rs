@@ -236,6 +236,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 if !render(&window, &line[..length], status, pointer, pointer_pressed) {
                     fail(11)
                 }
+                let _ = libwoven::print("WovenTerminal: input updated\n");
             }
         }
     }
