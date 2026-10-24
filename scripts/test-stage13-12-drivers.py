@@ -54,15 +54,20 @@ def main():
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
+    parser.add_argument('--firmware-vars', type=Path, help='matching OVMF VARS template (copied per run)')
     parser.add_argument('--timeout', type=float, default=240)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
-    if not qemu.is_file() or not firmware.is_file():
-        parser.error('QEMU and firmware files must exist')
+    if not qemu.is_file() or not firmware.is_file() or (args.firmware_vars is not None and not args.firmware_vars.is_file()):
+        parser.error('QEMU, firmware and optional firmware VARS files must exist')
     out = root / 'audit-artifacts' / f'stage13.12-{args.mode}-{args.cpus}cpu-{time.time_ns()}'
     out.mkdir(parents=True)
+    firmware_vars = None
+    if args.firmware_vars is not None:
+        firmware_vars = out / 'OVMF_VARS.fd'
+        shutil.copyfile(args.firmware_vars, firmware_vars)
     production = args.mode == 'production'
     build_command = ['cargo', 'run', '--quiet']
     if args.mode == 'restart':
@@ -82,6 +87,8 @@ def main():
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
+    if firmware_vars is not None:
+        command += ['-drive', f'if=pflash,format=raw,file={firmware_vars}']
     if args.mode in ('devices', 'production', 'restart'):
         for name in ('nvme', 'sata'):
             with (out / f'{name}.img').open('wb') as image:
