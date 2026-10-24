@@ -833,7 +833,9 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
             break;
         };
         index += 1;
-        if is_directory || !name[..length].ends_with(b".app") {
+        // A malformed directory entry must never index beyond the buffer.
+        // Skip it while preserving the enumeration cursor.
+        if length > name.len() || is_directory || !name[..length].ends_with(b".app") {
             continue;
         }
         let mut path = [0u8; 128];
