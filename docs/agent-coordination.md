@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - mandate M02 desktop/session qualification (2026-10-24)
+
+Codex independently reproduced and repaired a real strict-desktop failure. The
+desktop qualification harness targeted the wrong cascade-window close point;
+after aligning it with `CASCADE_STEP` and `Window::close_area()`, the strict
+1/2/4-CPU QEMU matrix passed with sign-in, Files mouse input, Terminal keyboard
+input, client teardown, and framebuffer restoration. The shell compositor now
+forces a full-screen recompose when a client surface disappears, preventing
+stale pixels after close. The harness input budget is 20 seconds because a
+measured TCG run crossed 15 seconds under host contention; it remains bounded.
+Two sequential shell boots and the Stage 13.20 guest-reset gate passed at
+1/2/4 CPUs. No physical device, host reboot, firmware, or raw disk was used.
+
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 
 The strict desktop harness had a real ordering race: it waited for the

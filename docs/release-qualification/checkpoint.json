@@ -1,8 +1,8 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
   "updated_utc": "2026-10-24T12:42:28Z",
-  "milestone": "M01",
-  "milestone_title": "Eliminate current red CI",
+  "milestone": "M02",
+  "milestone_title": "Boot-to-desktop and session reliability",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
   "branch": "master",
@@ -14,19 +14,20 @@
       "failures": 0,
       "classification": "QEMU/host software evidence"
     },
-    "desktop_qualification": "strict harness remains separate; Stage 20.5/20.15 accepted on 1/2/4",
+    "desktop_qualification": "strict QEMU desktop journey PASS on 1/2/4 CPUs with 4 GiB guests",
+    "repeated_shell_boots": "2 sequential boots PASS on 1/2/4 CPUs",
+    "guest_reset": "Stage 13.20 reboot PASS on 1/2/4 CPUs",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
-    "M02 boot/session reliability and repeated cold/warm restart evidence",
-    "strict desktop QEMU acceptance",
+    "M04/M11 persistent storage, installer transaction, rollback, and recovery closure",
     "OVMF VARS and swtpm prerequisites",
     "development signing key and certificate",
     "supported installer transaction evidence",
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M02 qualify repeated boot-to-desktop and restart/recovery behavior on 1/2/4 CPUs",
+  "next_action": "M03 qualify kernel safety, ownership teardown, cancellation, and concurrency invariants",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

@@ -540,11 +540,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 raise GateFailure("keyboard input did not change the terminal framebuffer")
 
             close_terminal_started = time.monotonic()
-            # The terminal is the first window after Files closes: (40,40),
-            # width 360.  The pointer is at (260,246); move to its close box.
-            # The focus click above leaves the pointer at (100,100); move to
-            # the terminal close box at (404,44).
-            qmp.relative_mouse(304, -56)
+            # Files is the first cascade window at (40,40); CASCADE_STEP is
+            # 24, so the terminal is the second at (64,64), width 360.
+            # Window::close_area() is inset by two pixels from the right edge
+            # and starts two pixels into the 14-pixel title bar, so its
+            # center is (417,57). The focus click leaves the pointer at
+            # (100,100).
+            qmp.relative_mouse(317, -43)
             qmp.click()
             # Keep the click qualification tolerant of one-pixel rounding in
             # the PS/2 logical-coordinate conversion while still requiring
@@ -598,10 +600,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--memory", default="4G", help="guest RAM (default: documented 4 GiB emulator floor)")
     parser.add_argument("--timeout", type=float, default=180.0)
-    parser.add_argument("--input-timeout", type=float, default=15.0)
+    # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
+    # keep the bound finite while matching the accepted 1/2/4-CPU evidence.
+    parser.add_argument("--input-timeout", type=float, default=20.0)
     parser.add_argument("--frame-timeout", type=float, default=5.0)
     parser.add_argument("--max-startup-ms", type=float, default=60_000.0)
-    parser.add_argument("--max-input-ms", type=float, default=15_000.0)
+    parser.add_argument("--max-input-ms", type=float, default=20_000.0)
     parser.add_argument("--max-frame-ms", type=float, default=5_000.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)

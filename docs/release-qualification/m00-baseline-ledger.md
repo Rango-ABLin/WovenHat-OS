@@ -31,15 +31,13 @@ Firmware: `C:\Program Files\qemu\share\edk2-x86_64-code.fd`
 
 ## Priority blockers
 
-1. M02/M07/M08/M09: obtain a stable boot-to-desktop interaction run, including
-   keyboard, mouse, window composition, application lifecycle, and recovery.
-2. M04/M11: qualify persistent storage mutation, remount, crash recovery,
+1. M04/M11: qualify persistent storage mutation, remount, crash recovery,
    installer transaction, rollback, and backup/restore paths.
-3. M10/M14: provide disposable OVMF VARS, swtpm, development signing material,
+2. M10/M14: provide disposable OVMF VARS, swtpm, development signing material,
    SBOM/provenance and clean-room build evidence where tools are available.
-4. M05/M06/M13: expand device matrices and obtain real-device evidence. These
+3. M05/M06/M13: expand device matrices and obtain real-device evidence. These
    cannot be closed by QEMU-only runs.
-5. M15: final 1/2/4-CPU matrix, soak, security review, and GO/NO-GO audit.
+4. M15: final 1/2/4-CPU matrix, soak, security review, and GO/NO-GO audit.
 
 ## M00 exit decision
 
@@ -67,3 +65,12 @@ Evidence:
 
 M01 is a software/QEMU acceptance result. It does not close physical-device,
 Secure Boot/TPM, signing-key, or external-review prerequisites.
+
+## M02 result
+
+M02 passed for software/QEMU scope. Strict desktop qualification passed on
+1/2/4 CPUs after correcting the harness's cascade-window close coordinates and
+fixing full-screen recomposition when a client surface is released. Two
+sequential shell boots and the guest reset gate also passed on each of 1/2/4
+CPUs. This demonstrates bounded cold-boot/session and guest-reset behavior;
+it is not physical power-loss or native hardware evidence.

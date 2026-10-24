@@ -3345,7 +3345,13 @@ impl Desktop {
                 // While a resize is outstanding the owner may have released
                 // the old surface before its new one arrives.
                 Err(_) if libwoven::ticks() < window.resizing_until => {}
-                Err(_) => dirty = dirty.union(self.close(slot)),
+                Err(_) => {
+                    // A released client surface can leave stale pixels in a
+                    // partially damaged scanout. Recompose the full screen
+                    // after removing the window so its wallpaper/taskbar
+                    // and all remaining layers are presented atomically.
+                    dirty = dirty.union(self.close(slot)).union(self.screen());
+                }
             }
         }
         for index in 0..MAX_TRAY {

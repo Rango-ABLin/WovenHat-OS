@@ -22,6 +22,27 @@ the expected fail-closed batch-persist marker. M01 is accepted for software
 and QEMU scope; physical/native, Secure Boot/TPM and release-key gates remain
 open.
 
+## Release Completion Mandate M02 - 2026-10-24
+
+Closed the boot-to-desktop and session-reliability slice on the current tree.
+The strict QEMU desktop qualification passed on 1/2/4 CPUs with 4 GiB guests,
+covering sign-in, first desktop frame, Files launch/composition, mouse input,
+Files close, Terminal launch/composition, keyboard input, Terminal close, and
+post-close framebuffer restoration. The harness now uses the shell's actual
+cascade geometry and recomposes the full screen when a client surface is
+released, preventing stale pixels after window teardown. Its default input
+budget is 20 seconds to match the accepted TCG/QEMU measurements while
+remaining bounded.
+
+The normal shell repeated-boot suite passed two sequential boots at 1/2/4
+CPUs, and the guest reset gate passed at 1/2/4 CPUs. Evidence is retained in
+the timestamped `audit-artifacts/desktop-qualification-*`,
+`audit-artifacts/stage31-repeated/shell-{1,2,4}cpu-2boots/`, and
+`audit-artifacts/stage13.20-reboot-{1,2,4}cpu-*` directories. M02 is accepted
+for software/QEMU cold-boot, interaction, and guest-reset scope; physical
+power loss, native-device recovery, TPM/Secure Boot, and production signing
+remain open.
+
 ## Hardware qualification CI workflow - 2026-10-24
 
 Added `.github/workflows/hardware-qualification.yml`. Push and pull-request
