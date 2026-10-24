@@ -85,3 +85,13 @@ concurrency, allocator and page validation, PCI resource transactions,
 filesystem crash atomicity, and input/graphics contracts. This does not close
 the mandate's physical, arbitrary-fault, TPM/Secure Boot, signing, or external
 security-review gates.
+
+## M04 result
+
+M04 passed for disposable file-image and QEMU scope. The current run passed
+Stage 28 GPT/FAT32/EFI/provisioning with rollback, installed-image boot and
+exact digest verification on 1/2/4 CPUs, 45 focused installer/storage tests,
+and Stage 27.5 recovery on 1/2/4 CPUs. Together with the M01 NVMe/AHCI FAT32
+persistence and bounded write-fault evidence, this closes the repository's
+software storage/installer path while leaving physical durability, power-loss
+media qualification, and trust-boundary prerequisites open.

@@ -1,8 +1,8 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T13:32:00Z",
-  "milestone": "M03",
-  "milestone_title": "Kernel safety and concurrency",
+  "updated_utc": "2026-10-24T13:46:00Z",
+  "milestone": "M04",
+  "milestone_title": "Persistent storage and installer recovery",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
   "accepted_commit": "d87ad4d7",
@@ -21,6 +21,10 @@
     "rust_all_targets": "PASS",
     "python_host_suite": "204 tests PASS",
     "clippy": "kernel target and host all-targets PASS with warnings denied",
+    "stage28_disposable": "PASS",
+    "installed_disk_qemu": "PASS on 1/2/4 CPUs",
+    "installer_storage_focused": "45 tests PASS",
+    "stage27_5_recovery": "PASS on 1/2/4 CPUs",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
@@ -31,7 +35,7 @@
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M04 qualify persistent storage, installer transaction, rollback, and recovery closure",
+  "next_action": "M05 qualify hardware-facing driver contracts, input, graphics, storage, networking, and recovery boundaries",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

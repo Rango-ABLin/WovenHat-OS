@@ -55,6 +55,17 @@ repository's software safety/concurrency scope; arbitrary in-guest faults,
 physical power-loss/torn-sector behavior, native devices, and independent
 security review remain outside this evidence.
 
+## Release Completion Mandate M04 - 2026-10-24
+
+The persistent-storage and installer slice passed in disposable scope. Stage 28
+GPT/FAT32/EFI/provisioning and rollback acceptance passed; installed-image
+boot with exact digest verification passed on 1/2/4 CPUs; the focused
+installer/storage suite passed 45 tests; Stage 27.5 recovery passed on 1/2/4;
+and the M01 NVMe/AHCI FAT32 persistence and Stage 31 write-fault evidence
+remain green. M04 is accepted for file-image and QEMU scope only. Physical
+disk durability, power-loss/torn-sector media evidence, Secure Boot/TPM,
+production keys, and native hardware remain open.
+
 ## Hardware qualification CI workflow - 2026-10-24
 
 Added `.github/workflows/hardware-qualification.yml`. Push and pull-request
