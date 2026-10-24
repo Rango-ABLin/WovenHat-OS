@@ -68,6 +68,16 @@ at least 4 GiB usable. M05 is accepted for deterministic QEMU/device-model
 scope. Native GPU, USB HID, storage, audio, network, Bluetooth, and physical
 hardware certification remain open.
 
+## Release Completion Mandate M06 - 2026-10-24
+
+The bounded network/radio software slice passed on 1/2/4 CPUs. The live
+network gate passed DHCP, DNS, ICMP, host-verified UDP/TCP, and a seeded QEMU
+virtio-net link loss/recovery cycle at every profile. Stage 13.10 passed the
+Wi-Fi protocol, security, firmware/backend, Bluetooth LE, and transport
+contract markers at 1/2/4. M06 is accepted for software and emulated-device
+scope; native Wi-Fi/Bluetooth hardware, RF behavior, physical interoperability,
+and certification remain open.
+
 ## Release Completion Mandate M04 - 2026-10-24
 
 The persistent-storage and installer slice passed in disposable scope. Stage 28

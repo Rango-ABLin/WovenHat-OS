@@ -22,6 +22,14 @@ isolated into timestamped roots; every new 5G-configured boot reported at
 least 4 GiB usable. These are QEMU/device-model results only and do not claim
 native driver crash recovery or physical hardware certification.
 
+## Codex - mandate M06 network/radio software qualification (2026-10-24)
+
+The 1/2/4-CPU QEMU network matrix passed DHCP/DNS/ICMP, host-verified UDP/TCP,
+and seeded virtio-net link-loss recovery. Stage 13.10 passed the Wi-Fi,
+security, firmware/backend, Bluetooth LE, and transport contract markers on
+1/2/4. This is emulated/software evidence only; native RF and physical
+interoperability remain unqualified.
+
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 
 The strict desktop harness had a real ordering race: it waited for the

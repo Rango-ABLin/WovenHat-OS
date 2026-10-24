@@ -96,6 +96,14 @@ passed on 1/2/4 CPUs. The isolated repeated-shell reruns also report at least
 recovery, physical graphics/input/storage/audio/network/Bluetooth behavior,
 or hardware certification.
 
+## M06 result
+
+M06 passed for software and QEMU scope. The network/link-loss matrix and the
+Stage 13.10 Wi-Fi/Bluetooth contract matrix passed on 1/2/4 CPUs. This covers
+bounded protocol, security, transport, firmware, and recovery contracts; it
+does not provide native radio, RF, physical interoperability, or certification
+evidence.
+
 ## M04 result
 
 M04 passed for disposable file-image and QEMU scope. The current run passed

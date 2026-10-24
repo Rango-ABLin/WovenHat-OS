@@ -1,8 +1,8 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T14:02:00Z",
-  "milestone": "M05",
-  "milestone_title": "Hardware-facing software boundaries",
+  "updated_utc": "2026-10-24T14:18:00Z",
+  "milestone": "M06",
+  "milestone_title": "Network and radio software qualification",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
   "accepted_commit": "d87ad4d7",
@@ -29,6 +29,8 @@
     "graphics_scanout": "Stage 20.14b PASS on 1/2/4 CPUs",
     "usb_input": "Stage 13.13 PASS on 1/2/4 CPUs",
     "usable_memory": "isolated repeated shell reruns report meets_minimum=true on 1/2/4",
+    "network_link_loss": "PASS on 1/2/4 CPUs",
+    "wifi_bluetooth_contracts": "Stage 13.10 PASS on 1/2/4 CPUs",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
@@ -39,7 +41,7 @@
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M06 qualify network/radio functionality and bounded link-loss recovery",
+  "next_action": "M07 qualify graphics backend/compositor functionality and device-loss boundaries",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,
