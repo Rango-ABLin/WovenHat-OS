@@ -28,8 +28,14 @@ def resolve_fault_gate_firmware(args):
     unrelated checks.  CI supplies both paths explicitly; local runs may use
     the conventional QEMU installation layout.
     """
-    qemu = args.qemu or shutil.which('qemu-system-x86_64')
-    firmware = args.firmware
+    explicit_qemu = getattr(args, 'qemu', None)
+    qemu = explicit_qemu or shutil.which('qemu-system-x86_64')
+    firmware = getattr(args, 'firmware', None)
+    firmware_vars = getattr(args, 'firmware_vars', None)
+    if explicit_qemu and not Path(explicit_qemu).is_file():
+        raise SystemExit(
+            f'Release acceptance requires the supplied QEMU executable: {explicit_qemu}'
+        )
     if not firmware and qemu:
         qemu_path = Path(qemu)
         candidate = qemu_path.parent / 'share' / 'edk2-x86_64-code.fd'
@@ -45,6 +51,10 @@ def resolve_fault_gate_firmware(args):
             'Release acceptance requires an OVMF CODE firmware file for the '
             'storage-fault gates. Supply --firmware (and a matching '
             '--firmware-vars for the full UEFI matrix).'
+        )
+    if firmware_vars and not Path(firmware_vars).is_file():
+        raise SystemExit(
+            f'Release acceptance requires the supplied OVMF variables file: {firmware_vars}'
         )
     return qemu, firmware
 

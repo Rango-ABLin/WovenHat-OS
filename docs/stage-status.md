@@ -66,7 +66,7 @@ by existing evidence.
 ## P0-03/P0-07 current-head release validation after Stage 28 repair - 2026-10-24
 
 The authoritative release chain passed all 158 checks with zero failures on
-current commit `c54b5dbc`. It includes warning-denying kernel/host Clippy,
+current commit `6cc1806a`. It includes warning-denying kernel/host Clippy,
 166 host tests, debug/release 1/2/4-CPU memory/storage/network gates,
 read/write storage-fault containment, shell, service supervision, orderly
 driver restart, application/system-app/package/AI gates, desktop boots, and

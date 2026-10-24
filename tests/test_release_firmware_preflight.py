@@ -21,14 +21,37 @@ class ReleaseFirmwarePreflightTests(unittest.TestCase):
             firmware = Path(directory) / "OVMF_CODE.fd"
             qemu.write_bytes(b"")
             firmware.write_bytes(b"")
-            args = SimpleNamespace(qemu=str(qemu), firmware=str(firmware))
+            args = SimpleNamespace(qemu=str(qemu), firmware=str(firmware), firmware_vars=None)
             self.assertEqual(MODULE.resolve_fault_gate_firmware(args), (str(qemu), str(firmware)))
 
     def test_missing_firmware_fails_before_acceptance_chain(self):
-        args = SimpleNamespace(qemu="C:/missing/qemu-system-x86_64.exe", firmware=None)
+        args = SimpleNamespace(qemu="C:/missing/qemu-system-x86_64.exe", firmware=None, firmware_vars=None)
         with self.assertRaises(SystemExit) as raised:
             MODULE.resolve_fault_gate_firmware(args)
-        self.assertIn("requires an OVMF CODE firmware file", str(raised.exception))
+        self.assertIn("supplied QEMU executable", str(raised.exception))
+
+    def test_missing_firmware_fails_after_valid_qemu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            qemu = Path(directory) / "qemu-system-x86_64.exe"
+            qemu.write_bytes(b"")
+            args = SimpleNamespace(qemu=str(qemu), firmware=None, firmware_vars=None)
+            with self.assertRaises(SystemExit) as raised:
+                MODULE.resolve_fault_gate_firmware(args)
+            self.assertIn("requires an OVMF CODE firmware file", str(raised.exception))
+
+    def test_missing_firmware_vars_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            qemu = Path(directory) / "qemu-system-x86_64.exe"
+            firmware = Path(directory) / "OVMF_CODE.fd"
+            qemu.write_bytes(b"")
+            firmware.write_bytes(b"")
+            args = SimpleNamespace(
+                qemu=str(qemu), firmware=str(firmware),
+                firmware_vars=str(Path(directory) / "missing-vars.fd"),
+            )
+            with self.assertRaises(SystemExit) as raised:
+                MODULE.resolve_fault_gate_firmware(args)
+            self.assertIn("OVMF variables file", str(raised.exception))
 
     def test_missing_qemu_fails_closed(self):
         args = SimpleNamespace(qemu=None, firmware=None)
