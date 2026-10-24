@@ -5,6 +5,7 @@
   "milestone_title": "Boot-to-desktop and session reliability",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
+  "accepted_commit": "d87ad4d7",
   "branch": "master",
   "working_tree_clean_before_documentation": true,
   "tests": {
