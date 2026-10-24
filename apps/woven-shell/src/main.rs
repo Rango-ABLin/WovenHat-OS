@@ -212,7 +212,7 @@ const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
 const MAX_TITLE: usize = 24;
 /// Shadow bands, outermost first, as (offset, opacity) of black over what
 /// lies beneath. The focused window's shadow is deeper: its elevation.
-const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 24), (4, 48)];
+const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 72), (4, 104)];
 const UNFOCUSED_SHADOW: [(i32, u8); 2] = [(4, 20), (2, 40)];
 /// The furthest any shadow band reaches beyond its window.
 const SHADOW_REACH: i32 = 8;
