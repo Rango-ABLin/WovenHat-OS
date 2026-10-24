@@ -10310,3 +10310,13 @@ disk write, firmware change, TPM provisioning, or Secure Boot qualification
 was performed. Physical power-loss/torn-sector testing, production signing
 key custody, live TPM/Secure Boot evidence, native device qualification, and
 independent Claude review remain outside this run's evidence boundary.
+
+## Software architecture mandate S01 native ABI (2026-10-24)
+
+S01 is closed for bounded software scope at commit `f9091b6a`. `libwoven::abi`
+and kernel syscall 243 negotiate fixed native ABI descriptors and reject
+unsupported major versions or malformed reserved bytes before IPC/syscall
+continuation. The independently built Ring-3 fixture passed at 1/2/4 CPUs;
+the inherited current-head release chain passed 158/158. This does not claim
+POSIX/foreign-OS compatibility, physical hardware support, production trust,
+or final release readiness. S02 is the next sequential prerequisite.

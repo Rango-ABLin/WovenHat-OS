@@ -15,8 +15,12 @@ The S01 ABI foundation lives in `libwoven/src/abi.rs`. `Contract::CURRENT`
 identifies the supported native major, minor and descriptor versions;
 `negotiate` accepts only the same major/descriptor and a client minor no newer
 than the SDK. Unsupported requests return typed errors before any syscall or
-IPC operation. This is a userspace contract foundation, not yet proof of an
-independently built external application or a kernel handshake.
+IPC operation. The kernel syscall 243 copies fixed-size descriptors into
+kernel-owned storage, negotiates through the same contract, and copies out
+only a validated response. The independently built exit-status fixture
+exercises current, unsupported-major and malformed-reserved-byte requests.
+This is bounded native software qualification; it is not foreign-OS
+compatibility or production trust evidence.
 
 ### Stage 28 - kernel-backed installation transaction
 

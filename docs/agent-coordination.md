@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - software architecture mandate S01 native ABI (2026-10-24)
+
+Added `libwoven::abi` contract negotiation and kernel syscall 243 with fixed
+8-byte descriptors, pointer-copy validation, unsupported-version rejection,
+and reserved-byte rejection. The independently built exit-status fixture
+exercised the real syscall and passed at 1/2/4 CPUs. Kernel-target and host
+warning-denying Clippy passed; the inherited current-head release chain passed
+158/158. Code commit: `f9091b6a`. Evidence is retained under
+`audit-artifacts/stage11.2-status-{1,2,4}cpu-*` and
+`target/release-validation/results.json`. S01 is closed for bounded software
+scope; S02 is next. Physical, foreign-OS, production trust, and independent
+review boundaries remain unchanged.
+
 ## Codex - software architecture mandate S00 inventory (2026-10-24)
 
 The attached `WovenHat_OS_Software_Architecture_Codex_Execution_Mandate.pdf`

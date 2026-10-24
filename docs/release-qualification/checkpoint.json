@@ -1,12 +1,12 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T16:55:00Z",
+  "updated_utc": "2026-10-24T18:20:00Z",
   "milestone": "S01",
   "milestone_title": "Stable native ABI and SDK",
-  "status": "IMPLEMENTING",
+  "status": "CLOSED",
   "release_decision": "NO-GO",
   "baseline_commit": "3eee80b8",
-  "accepted_commit": "869d293d",
+  "accepted_commit": "f9091b6a",
   "branch": "master",
   "working_tree_clean_before_documentation": true,
   "tests": {
@@ -35,6 +35,7 @@
     "single_output_graphics": "Stage 20.14S PASS on 1/2/4 CPUs",
     "gfx02_renderer": "PASS on 1/2/4 CPUs",
     "release_chain": "158/158 PASS on current head",
+    "s01_native_abi": "PASS: independent libwoven fixture, current/unsupported/malformed cases on 1/2/4 CPUs",
     "application_service_matrix": "PASS on 1/2/4 CPUs",
     "virtual_trust_status": "NOT_QUALIFIED: missing OVMF VARS, swtpm, OpenSSL, key, certificate",
     "physical_status": "PHYSICAL_NOT_TESTED",
@@ -50,7 +51,7 @@
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "Add an independently built native SDK sample and actual ABI/IPC boundary negotiation, then run the inherited 1/2/4 matrix before closing S01",
+  "next_action": "Begin S02 with a bounded libc/portable-runtime compatibility slice and actual C/Rust fixtures; preserve the separate M10-M15 NO-GO release boundary",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

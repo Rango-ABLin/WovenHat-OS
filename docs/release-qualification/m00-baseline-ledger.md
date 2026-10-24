@@ -138,6 +138,23 @@ provisioning, production signing, or native certification.
 
 ## M10-M15 final status
 
+## S01 result
+
+S01 closed for bounded software scope at code commit `f9091b6a`. The native
+SDK now exposes major/minor/descriptor negotiation through `libwoven::abi`,
+and kernel syscall 243 validates fixed-size request/response descriptors with
+kernel-owned copies. The independently built Ring-3 fixture passed the
+current-version request, unsupported-major rejection, and malformed reserved
+byte rejection at 1/2/4 CPUs. Kernel-target and host warning-denying Clippy
+passed, and the inherited release chain passed 158/158 on the same tree.
+
+Evidence: `audit-artifacts/stage11.2-status-{1,2,4}cpu-*`,
+`target/release-validation/results.json`.
+
+This closes only the native ABI/SDK increment. libc/POSIX portability,
+physical hardware, production trust/signing, independent review and final
+release remain open.
+
 M10 is **BLOCKED** by unavailable OVMF VARS, `swtpm`, OpenSSL, and supplied
 development signing material. M11 recovery is software/QEMU-qualified through
 the evidence already recorded. M12 has bounded benchmark, repeatability, and
