@@ -260,7 +260,7 @@ const CATALOG: &str = "/share/applications";
 // Production system-apps publishes ten bounded catalog entries. Keep the
 // launcher capacity aligned with that manifest so alphabetical loading does
 // not silently drop the last applications (notably Update and Terminal).
-const MAX_APPS: usize = 10;
+const MAX_APPS: usize = 16;
 const MAX_APP_NAME: usize = 20;
 const MAX_EXEC: usize = 96;
 const MAX_QUERY: usize = 16;
@@ -828,12 +828,12 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
     let mut count = 0;
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut index = 0;
-    while count < MAX_APPS {
+    while count < MAX_APPS && index < 256 {
         let Ok((length, is_directory)) = libwoven::read_dir(CATALOG, index, &mut name) else {
             break;
         };
         index += 1;
-        if is_directory || !name[..length].ends_with(b".app") {
+        if length > name.len() || is_directory || !name[..length].ends_with(b".app") {
             continue;
         }
         let mut path = [0u8; 128];
@@ -3492,6 +3492,9 @@ fn main(args: Args) -> ! {
     desktop.locked = desktop.accounts.iter().any(Option::is_some);
     desktop.pointer = (width / 2, height / 2);
     desktop.app_count = load_catalog(&mut desktop.apps);
+    let mut catalog_count = [0u8; 20];
+    let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_count);
+    log(&[b"woven-shell: catalog entries loaded=", catalog_count]);
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
