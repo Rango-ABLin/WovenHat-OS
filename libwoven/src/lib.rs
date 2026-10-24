@@ -23,6 +23,7 @@ pub mod process {
     pub struct Id(pub u64);
 }
 pub mod accessibility;
+pub mod abi;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;

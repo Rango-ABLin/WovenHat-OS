@@ -15,7 +15,7 @@ foreign-OS compatibility, production trust, or release approval.
 | Increment | Capability and source anchors | Current classification | Evidence / exact next prerequisite |
 |---|---|---|---|
 | S00 | Kernel, userspace, storage, security, drivers, graphics, network, SDK and services are represented by `kernel/src`, `libwoven`, `apps`, `tools`, `scripts`, and `tests`. | VERIFIED-SOFTWARE | This inventory, `checkpoint.json`, `m00-baseline-ledger.md`; refresh after every accepted increment. |
-| S01 | Native syscall/IPC/capability boundaries and `libwoven` wrappers; package metadata and application launch paths. | PARTIAL | Existing host/QEMU matrices verify bounded native paths. A separately built public-SDK sample, version negotiation, malformed-message and stale-handle contract remain to be packaged as one acceptance increment. |
+| S01 | Native syscall/IPC/capability boundaries and `libwoven` wrappers; package metadata and application launch paths. | IMPLEMENTING | `libwoven::abi` now provides fail-closed major/minor/descriptor negotiation; 122 libwoven tests pass and warning-denying libwoven Clippy passes. A separately built public-SDK sample, actual boundary handshake, malformed-message and stale-handle contract plus inherited 1/2/4 acceptance remain before closure. |
 | S02 | ELF loading, relocations, TLS and async VFS/network paths in `kernel/src`; Rust applications are the supported path. | PARTIAL | Existing loader/TLS audits and release checks pass. libc/pthread/locale/math coverage, C fixtures, destructor and shared-library compatibility manifest are not a closed public contract. |
 | S03 | Task/process lifecycle, IPC waits, terminal and input paths, shell/terminal applications. | PARTIAL | Desktop and terminal journeys pass. Full signal disposition, process groups, PTYs/termios, job control and exact zombie/wait semantics are not evidenced as a complete contract. |
 | S04 | Scheduler, CPU migration/hotplug, capability/resource bounds and SMP tests in `kernel/src`. | VERIFIED-SOFTWARE (bounded) | Warning-denying lint and 1/2/4-CPU acceptance pass. Quota/priority/affinity accounting and topology-aware policy remain incomplete for S04 closure. |
@@ -38,10 +38,11 @@ foreign-OS compatibility, production trust, or release approval.
 
 ## S00 decision
 
-S00 is `CLOSED` for the inventory increment only. It does not close S01 or
-any downstream capability. The earliest unclosed implementable prerequisite is
-S01: publish and qualify one independently built native SDK sample with
-versioned ABI/API negotiation and malformed/stale-handle negative coverage.
+S00 is `CLOSED` for the inventory increment only. S01 is `IMPLEMENTING`: the
+shared negotiation foundation is present, but it does not yet prove an
+independently built application or a kernel/IPC boundary handshake. S01 closes
+only after those contracts and the inherited matrix pass. It does not close
+any downstream capability.
 S10, S13, S15, S17 and S19 also have independent software slices, but they are
 not allowed to bypass the sequential prerequisite order.
 

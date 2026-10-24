@@ -1,12 +1,12 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T16:30:00Z",
-  "milestone": "S00",
-  "milestone_title": "Software architecture source inventory",
-  "status": "CLOSED",
+  "updated_utc": "2026-10-24T16:55:00Z",
+  "milestone": "S01",
+  "milestone_title": "Stable native ABI and SDK",
+  "status": "IMPLEMENTING",
   "release_decision": "NO-GO",
   "baseline_commit": "3eee80b8",
-  "accepted_commit": "f510ed54",
+  "accepted_commit": "869d293d",
   "branch": "master",
   "working_tree_clean_before_documentation": true,
   "tests": {
@@ -50,7 +50,7 @@
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "Implement S01 native SDK sample and ABI/API negotiation; preserve the separate M10-M15 NO-GO release boundary",
+  "next_action": "Add an independently built native SDK sample and actual ABI/IPC boundary negotiation, then run the inherited 1/2/4 matrix before closing S01",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

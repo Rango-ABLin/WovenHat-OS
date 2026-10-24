@@ -11,6 +11,13 @@ must be refreshed at each accepted increment, and the machine-readable
 checkpoint must continue to distinguish software qualification, native-device
 qualification, trust/review prerequisites, and final production release.
 
+The S01 ABI foundation lives in `libwoven/src/abi.rs`. `Contract::CURRENT`
+identifies the supported native major, minor and descriptor versions;
+`negotiate` accepts only the same major/descriptor and a client minor no newer
+than the SDK. Unsupported requests return typed errors before any syscall or
+IPC operation. This is a userspace contract foundation, not yet proof of an
+independently built external application or a kernel handshake.
+
 ### Stage 28 - kernel-backed installation transaction
 
 `kernel/src/installer.rs` is the privileged installation boundary reached by
