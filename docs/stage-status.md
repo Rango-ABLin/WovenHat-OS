@@ -1,5 +1,16 @@
 # Stage status
 
+## Hardware-qualification stimulator foundation - 2026-10-24
+
+Added `scripts/hardware-qualification-stimulator.py` and its four-test
+stdlib test suite. The runner consumes `tests/hardware-matrix.json`, produces
+deterministic seeded manifests/results/evidence, accepts the 1/2/4/8/16-CPU
+and 256 MiB/1 GiB/4 GiB software profiles, and rejects physical-device/raw
+disk/native/tier-1 arguments. A 16-CPU/4 GiB storage smoke generated
+`EMULATED_PASS` evidence; the result explicitly records
+`PHYSICAL_NOT_TESTED` and no physical access. This is a qualification
+stimulator and evidence contract, not native hardware certification.
+
 ## Stage 28 software tree merge and qualification contract - 2026-10-24
 
 The Stage 28 installer/provisioning tree and the subsequent application,
