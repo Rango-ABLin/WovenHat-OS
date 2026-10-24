@@ -2801,11 +2801,14 @@ impl Desktop {
             let body = window.body().intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
-                let _ = if alpha == u8::MAX {
+                let result = if alpha == u8::MAX {
                     libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y)
                 } else {
                     libwoven::compositor_blend_region_shared(window.token, region, body.x, body.y, alpha)
                 };
+                if result.is_err() {
+                    log(&[b"woven-shell: shared surface compose failed"]);
+                }
             }
         }
 
@@ -2871,6 +2874,7 @@ impl Desktop {
             || !(1..=self.width).contains(&width)
             || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
         {
+            log(&[b"woven-shell: window open rejected"]);
             return Dirty::new();
         }
         let Some(slot) = self.windows.iter().position(Option::is_none) else {
@@ -2909,11 +2913,14 @@ impl Desktop {
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
         // Apart: the new window, the one it unfocused, the taskbar and any
         // retiled windows, rather than one box over most of the screen.
-        let mut dirty = Dirty::new();
-        dirty.add(window.footprint());
+        let mut dirty = Dirty::of(window.footprint());
         dirty.add(previous.unwrap_or(Area::new(0, 0, 0, 0)));
         dirty.add(self.taskbar());
         dirty.add(self.retile());
+        // Opening a client changes the composition order across the newly
+        // focused surface. Keep the first frame conservative so an exposed
+        // tile cannot retain pixels from the pre-open desktop.
+        dirty.add(self.screen());
         dirty
     }
 
@@ -3479,7 +3486,9 @@ fn main(args: Args) -> ! {
     if libwoven::compositor_present().is_err() {
         fail(6);
     }
-    let _ = libwoven::print("woven-shell: desktop ready\n");
+    let mut pid = [0u8; 20];
+    let pid = libwoven::format_u64(libwoven::current_pid().0, &mut pid);
+    log(&[b"woven-shell: desktop ready pid=", pid]);
 
     let mut clock = libwoven::FrameClock::new(FRAME_PERIOD);
     // Applications reach the shell over IPC. Without the Ipc capability the
@@ -3512,6 +3521,7 @@ fn main(args: Args) -> ! {
             Err(_) => fail(8),
         }
         while let Ok((length, sender)) = libwoven::message_receive(&mut message) {
+            log(&[b"woven-shell: application message received"]);
             for &area in desktop.handle_message(sender, &message[..length]).areas() {
                 dirty.add(area);
             }
