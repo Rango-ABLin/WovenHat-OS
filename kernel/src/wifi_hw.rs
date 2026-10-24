@@ -104,6 +104,22 @@ pub fn discover_first() -> Option<WifiPciFunction> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WifiDriverFamily {
     IntelIwlwifi,
+    /// Intel 22000-family integrated transport used by AX201.
+    IntelIwlwifiAx201,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WifiSupportLevel {
+    DiscoveryOnly,
+    ActivationReady,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntelFirmwareProfile {
+    pub filename_prefix: &'static str,
+    pub api_min: u32,
+    pub api_max: u32,
+    pub integrated: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,20 +127,45 @@ pub struct SupportedWifiDevice {
     pub vendor_id: u16,
     pub device_id: u16,
     pub family: WifiDriverFamily,
+    pub support: WifiSupportLevel,
+    pub firmware: IntelFirmwareProfile,
     pub name: &'static str,
 }
 
-const SUPPORTED_WIFI_DEVICES: &[SupportedWifiDevice] = &[SupportedWifiDevice {
-    vendor_id: 0x8086,
-    device_id: 0x2723,
-    family: WifiDriverFamily::IntelIwlwifi,
-    name: "Intel Wi-Fi 6 AX200",
-}];
+const SUPPORTED_WIFI_DEVICES: &[SupportedWifiDevice] = &[
+    SupportedWifiDevice {
+        vendor_id: 0x8086,
+        device_id: 0x2723,
+        family: WifiDriverFamily::IntelIwlwifi,
+        support: WifiSupportLevel::ActivationReady,
+        firmware: IntelFirmwareProfile {
+            filename_prefix: "iwlwifi-cc-a0",
+            api_min: 77,
+            api_max: 77,
+            integrated: false,
+        },
+        name: "Intel Wi-Fi 6 AX200",
+    },
+    SupportedWifiDevice {
+        vendor_id: 0x8086,
+        device_id: 0xa0f0,
+        family: WifiDriverFamily::IntelIwlwifiAx201,
+        support: WifiSupportLevel::ActivationReady,
+        firmware: IntelFirmwareProfile {
+            filename_prefix: "iwlwifi-QuZ-a0-hr-b0",
+            api_min: 77,
+            api_max: 77,
+            integrated: true,
+        },
+        name: "Intel Wi-Fi 6 AX201",
+    },
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SupportedBindError {
     NotWireless,
     UnsupportedDevice,
+    ActivationDeferred,
     NoMmioBar,
     ConfigWriteFailed,
 }
@@ -133,6 +174,8 @@ pub enum SupportedBindError {
 pub struct SupportedWifiFunction {
     pub pci: WifiPciFunction,
     pub family: WifiDriverFamily,
+    pub support: WifiSupportLevel,
+    pub firmware: IntelFirmwareProfile,
     pub name: &'static str,
 }
 
@@ -159,12 +202,17 @@ pub fn classify_supported(
     Ok(SupportedWifiFunction {
         pci,
         family: supported.family,
+        support: supported.support,
+        firmware: supported.firmware,
         name: supported.name,
     })
 }
 
 pub fn bind_supported(device: pci::Device) -> Result<SupportedWifiFunction, SupportedBindError> {
     let function = classify_supported(device)?;
+    if function.support != WifiSupportLevel::ActivationReady {
+        return Err(SupportedBindError::ActivationDeferred);
+    }
     if !pci::enable_memory_bus_master(function.pci.address) {
         return Err(SupportedBindError::ConfigWriteFailed);
     }
@@ -188,6 +236,12 @@ pub struct Ax200MsiBinding {
     pub capability_offset: u16,
     pub is_64_bit: bool,
 }
+
+/// The AX201 uses the same PCI MSI programming contract as the discrete
+/// AX200, but its integrated transport and firmware profile are distinct.
+/// Keeping this type separate prevents callers from accidentally treating an
+/// AX201 binding as an AX200 device when selecting firmware or teardown code.
+pub type Ax201MsiBinding = Ax200MsiBinding;
 
 /// Validate the exact physical-device authority boundary for AX200 MSI.
 ///
@@ -219,6 +273,36 @@ pub fn ax200_msi_binding_contract(
     })
 }
 
+pub fn ax201_msi_binding_contract(
+    device: pci::Device,
+    destination_apic_id: u32,
+) -> Result<Ax201MsiBinding, Ax200MsiBindError> {
+    if device.vendor_id != 0x8086 || device.device_id != 0xa0f0 || !is_wireless_candidate(&device) {
+        return Err(Ax200MsiBindError::UnsupportedDevice);
+    }
+    if supported_device(device.vendor_id, device.device_id)
+        .is_none_or(|entry| entry.family != WifiDriverFamily::IntelIwlwifiAx201)
+    {
+        return Err(Ax200MsiBindError::UnsupportedDevice);
+    }
+    if !device.capabilities.msi || device.capabilities.msi_offset == 0 {
+        return Err(Ax200MsiBindError::MissingMsi);
+    }
+
+    let message =
+        pci::MsiMessage::fixed(destination_apic_id, crate::interrupts::WIFI_DEVICE_VECTOR)
+            .map_err(Ax200MsiBindError::Msi)?;
+
+    Ok(Ax201MsiBinding {
+        vendor_id: 0x8086,
+        device_id: 0xa0f0,
+        destination_apic_id,
+        vector: u8::try_from(message.data).unwrap_or(crate::interrupts::WIFI_DEVICE_VECTOR),
+        capability_offset: device.capabilities.msi_offset,
+        is_64_bit: false,
+    })
+}
+
 /// Program MSI only for the exact supported AX200 function.
 ///
 /// This is the first physical binding step: PCI writes occur only after the
@@ -228,6 +312,22 @@ pub fn bind_ax200_msi(device: pci::Device) -> Result<Ax200MsiBinding, Ax200MsiBi
     let destination =
         crate::smp::device_irq_destination().ok_or(Ax200MsiBindError::MissingApicDestination)?;
     let mut binding = ax200_msi_binding_contract(device, destination)?;
+    let programmed = pci::program_msi(device, destination, crate::interrupts::WIFI_DEVICE_VECTOR)
+        .map_err(Ax200MsiBindError::Msi)?;
+    binding.capability_offset = programmed.offset;
+    binding.is_64_bit = programmed.is_64_bit;
+    Ok(binding)
+}
+
+/// Program MSI for AX201 only after the caller has established the integrated
+/// device's DMA ownership and deferred-service owner. This function is the
+/// physical activation boundary; it does not fabricate support when the
+/// firmware/transport owner is absent.
+pub fn bind_ax201_msi(device: pci::Device) -> Result<Ax201MsiBinding, Ax200MsiBindError> {
+    let _ = classify_supported(device).map_err(|_| Ax200MsiBindError::UnsupportedDevice)?;
+    let destination =
+        crate::smp::device_irq_destination().ok_or(Ax200MsiBindError::MissingApicDestination)?;
+    let mut binding = ax201_msi_binding_contract(device, destination)?;
     let programmed = pci::program_msi(device, destination, crate::interrupts::WIFI_DEVICE_VECTOR)
         .map_err(Ax200MsiBindError::Msi)?;
     binding.capability_offset = programmed.offset;
@@ -416,7 +516,11 @@ pub fn stage13_10ac_deferred_self_test() -> bool {
         return false;
     };
 
-    if !empty.work_was_pending || empty.rx_pending || empty.acknowledged != 0 || empty.raw_status != 0 {
+    if !empty.work_was_pending
+        || empty.rx_pending
+        || empty.acknowledged != 0
+        || empty.raw_status != 0
+    {
         return false;
     }
 
@@ -451,8 +555,14 @@ pub fn stage13_10ac_deferred_self_test() -> bool {
     // CSR delivery masked, and consume the claimed publication. A separately
     // published event must still be observed by a subsequent claim.
     for (cause, error) in [
-        (INTEL_CSR_INT_BIT_HW_ERR, IntelRxInterruptError::FatalHardware),
-        (INTEL_CSR_INT_BIT_SW_ERR, IntelRxInterruptError::FatalFirmware),
+        (
+            INTEL_CSR_INT_BIT_HW_ERR,
+            IntelRxInterruptError::FatalHardware,
+        ),
+        (
+            INTEL_CSR_INT_BIT_SW_ERR,
+            IntelRxInterruptError::FatalFirmware,
+        ),
     ] {
         if page.write_u32(IntelCsr::Int.offset(), cause).is_err() {
             return false;
@@ -473,7 +583,8 @@ pub fn discover_first_supported() -> Option<SupportedWifiFunction> {
         let Some(device) = pci::device(index) else {
             continue;
         };
-        if supported_device(device.vendor_id, device.device_id).is_some()
+        if supported_device(device.vendor_id, device.device_id)
+            .is_some_and(|supported| supported.support == WifiSupportLevel::ActivationReady)
             && is_wireless_candidate(&device)
         {
             if let Ok(bound) = classify_supported(device) {
@@ -492,8 +603,13 @@ pub enum IntelCsr {
     Int = 0x0008,
     IntMask = 0x000c,
     Reset = 0x0020,
+    /// Hardware revision consumed by 22000 context-info as `version.mac_id`.
+    /// This is distinct from the PCI class-code revision byte.
+    HwRev = 0x0028,
     GpControl = 0x0024,
     GpDriver = 0x0050,
+    MacAddress0 = 0x0380,
+    MacAddress1 = 0x0384,
 }
 
 impl IntelCsr {
@@ -508,13 +624,160 @@ pub enum IntelCsrError {
     Mmio(MmioError),
 }
 
-/// Minimal Intel AX200-family CSR accessor.
+/// Minimal Intel AX200-family CSR accessor used by the AX201 activation path.
 ///
-/// Stage 13.10H intentionally provides only typed 32-bit CSR access. It does
-/// not yet perform reset sequencing, firmware loading, interrupt setup, or
-/// queue programming. Those steps will build on this narrow audited boundary.
+/// The accessor remains intentionally narrow: reset sequencing, firmware
+/// loading, interrupt setup and queue programming are composed by the driver
+/// above this audited MMIO boundary.
 pub struct IntelCsrBank {
     registers: VolatileMmio32,
+}
+
+pub const INTEL_HBUS_BASE: usize = 0x400;
+pub const INTEL_HBUS_TARG_WRPTR: usize = INTEL_HBUS_BASE + 0x20;
+pub const INTEL_HBUS_PRPH_WADDR: usize = INTEL_HBUS_BASE + 0x44;
+pub const INTEL_HBUS_PRPH_WDAT: usize = INTEL_HBUS_BASE + 0x4c;
+pub const INTEL_RFH_Q0_FRBDCB_WIDX_TRG: u32 = 0x0000_1c80;
+pub const INTEL_RFH_Q0_FRBDCB_BA_LSB: u32 = 0x00a0_8000;
+pub const INTEL_RFH_Q0_FRBDCB_WIDX: u32 = 0x00a0_8080;
+pub const INTEL_RFH_Q0_FRBDCB_RIDX: u32 = 0x00a0_80c0;
+pub const INTEL_RFH_Q0_URBDCB_BA_LSB: u32 = 0x00a0_8100;
+pub const INTEL_RFH_Q0_URBDCB_WIDX: u32 = 0x00a0_8180;
+pub const INTEL_RFH_Q0_URBDCB_VAID: u32 = 0x00a0_81c0;
+pub const INTEL_RFH_Q0_URBD_STTS_WPTR_LSB: u32 = 0x00a0_8200;
+/// Bits 24..25 of the indirect address select a 4-byte transfer.
+pub const INTEL_PRPH_DWORD_ACCESS: u32 = 3 << 24;
+/// 22000-family PRPH registers use the 24-bit address field in HBUS WADDR.
+/// AX201's CPU_INIT_RUN register is 0x00a05c44, so an older 20-bit bound
+/// would reject a valid register before any MMIO is issued.
+pub const INTEL_PRPH_ADDRESS_MASK_22000: u32 = 0x00ff_ffff;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntelMmioIoError {
+    UnsupportedFamily,
+    InvalidContextOffset,
+    InvalidAddress,
+    InvalidPrphRegister,
+    InvalidQueueDoorbell,
+    Mmio(MmioError),
+}
+
+/// Concrete 22000-family MMIO adapter used by the firmware startup protocol.
+/// The caller supplies an already-authorized MMIO mapping; this type performs
+/// only volatile CSR and indirect-PRPH accesses and owns no asynchronous work.
+pub struct Intel22000MmioIo {
+    registers: VolatileMmio32,
+}
+
+impl Intel22000MmioIo {
+    pub fn from_supported(
+        function: SupportedWifiFunction,
+        registers: VolatileMmio32,
+    ) -> Result<Self, IntelMmioIoError> {
+        if !matches!(
+            function.family,
+            WifiDriverFamily::IntelIwlwifi | WifiDriverFamily::IntelIwlwifiAx201
+        ) {
+            return Err(IntelMmioIoError::UnsupportedFamily);
+        }
+        Ok(Self { registers })
+    }
+
+    pub fn write_context_info_base(
+        &mut self,
+        offset: u32,
+        address: u64,
+    ) -> Result<(), IntelMmioIoError> {
+        if offset != crate::wifi_firmware::INTEL_CSR_CONTEXT_INFO_BASE {
+            return Err(IntelMmioIoError::InvalidContextOffset);
+        }
+        if address == 0 {
+            return Err(IntelMmioIoError::InvalidAddress);
+        }
+        self.registers
+            .write(offset as usize, address as u32)
+            .map_err(IntelMmioIoError::Mmio)?;
+        self.registers
+            .write(offset as usize + 4, (address >> 32) as u32)
+            .map_err(IntelMmioIoError::Mmio)
+    }
+
+    pub fn write_prph(&mut self, register: u32, value: u32) -> Result<(), IntelMmioIoError> {
+        if register > INTEL_PRPH_ADDRESS_MASK_22000 || register & 3 != 0 {
+            return Err(IntelMmioIoError::InvalidPrphRegister);
+        }
+        self.registers
+            .write(
+                INTEL_HBUS_PRPH_WADDR,
+                INTEL_PRPH_DWORD_ACCESS | (register & INTEL_PRPH_ADDRESS_MASK_22000),
+            )
+            .map_err(IntelMmioIoError::Mmio)?;
+        self.registers
+            .write(INTEL_HBUS_PRPH_WDAT, value)
+            .map_err(IntelMmioIoError::Mmio)
+    }
+
+    fn write_prph64(&mut self, register: u32, value: u64) -> Result<(), IntelMmioIoError> {
+        self.write_prph(register, value as u32)?;
+        self.write_prph(register + 4, (value >> 32) as u32)
+    }
+
+    /// Program the 22000 RFH queue tables before the firmware starts using
+    /// the context-info RX addresses.  The firmware still owns RX DMA
+    /// enablement; this only supplies the host queue bases and resets the
+    /// device cursors to the freshly initialized ring state.
+    pub fn program_rx_queue(
+        &mut self,
+        free_rbd: u64,
+        used_rbd: u64,
+        status: u64,
+    ) -> Result<(), IntelMmioIoError> {
+        if free_rbd == 0
+            || used_rbd == 0
+            || status == 0
+            || free_rbd & 0xff != 0
+            || used_rbd & 0xff != 0
+            || status & 0xf != 0
+        {
+            return Err(IntelMmioIoError::InvalidAddress);
+        }
+        self.write_prph(INTEL_RFH_Q0_FRBDCB_WIDX, 0)?;
+        self.write_prph(INTEL_RFH_Q0_FRBDCB_RIDX, 0)?;
+        self.write_prph(INTEL_RFH_Q0_URBDCB_WIDX, 0)?;
+        self.write_prph(INTEL_RFH_Q0_URBDCB_VAID, 0)?;
+        self.write_prph64(INTEL_RFH_Q0_FRBDCB_BA_LSB, free_rbd)?;
+        self.write_prph64(INTEL_RFH_Q0_URBDCB_BA_LSB, used_rbd)?;
+        self.write_prph64(INTEL_RFH_Q0_URBD_STTS_WPTR_LSB, status)
+    }
+
+    /// Publish a new command/TX queue write pointer. Intel's 22000 transport
+    /// encodes the queue identifier in bits 16.. and the wrapped pointer in
+    /// the low 16 bits; the device consumes this only after the descriptor DMA
+    /// has been published.
+    pub fn ring_command_queue(
+        &mut self,
+        queue_id: u8,
+        write_pointer: u16,
+    ) -> Result<(), IntelMmioIoError> {
+        if queue_id >= AX201_COMMAND_QUEUE_ENTRIES
+            || write_pointer >= u16::from(AX201_COMMAND_QUEUE_ENTRIES)
+        {
+            return Err(IntelMmioIoError::InvalidQueueDoorbell);
+        }
+        self.registers
+            .write(
+                INTEL_HBUS_TARG_WRPTR,
+                u32::from(write_pointer) | (u32::from(queue_id) << 16),
+            )
+            .map_err(IntelMmioIoError::Mmio)
+    }
+
+    pub fn ring_rx_queue(&mut self, write_index: u16) -> Result<(), IntelMmioIoError> {
+        if write_index > AX201_RX_RING_ENTRIES as u16 || write_index & 7 != 0 {
+            return Err(IntelMmioIoError::InvalidQueueDoorbell);
+        }
+        self.write_prph(INTEL_RFH_Q0_FRBDCB_WIDX_TRG, u32::from(write_index))
+    }
 }
 
 impl IntelCsrBank {
@@ -525,7 +788,10 @@ impl IntelCsrBank {
         function: SupportedWifiFunction,
         registers: VolatileMmio32,
     ) -> Result<Self, IntelCsrError> {
-        if function.family != WifiDriverFamily::IntelIwlwifi {
+        if !matches!(
+            function.family,
+            WifiDriverFamily::IntelIwlwifi | WifiDriverFamily::IntelIwlwifiAx201
+        ) {
             return Err(IntelCsrError::UnsupportedFamily);
         }
         Ok(Self { registers })
@@ -541,6 +807,23 @@ impl IntelCsrBank {
         self.registers
             .write(csr.offset(), value)
             .map_err(IntelCsrError::Mmio)
+    }
+
+    /// Read the six-byte hardware address exposed by the 22000 CSR window.
+    /// The caller decides whether an all-zero/all-FF value is acceptable for
+    /// a pre-firmware diagnostic; this accessor only preserves the register
+    /// byte order and bounds the read to the reviewed CSR pair.
+    pub fn read_mac_address(&self) -> Result<[u8; 6], IntelCsrError> {
+        let low = self.read(IntelCsr::MacAddress0)?;
+        let high = self.read(IntelCsr::MacAddress1)?;
+        Ok([
+            low as u8,
+            (low >> 8) as u8,
+            (low >> 16) as u8,
+            (low >> 24) as u8,
+            high as u8,
+            (high >> 8) as u8,
+        ])
     }
 }
 
@@ -854,6 +1137,28 @@ pub(crate) fn stage13_10i_supported_function() -> Option<SupportedWifiFunction> 
         prefetchable: false,
     };
     classify_supported(ax200).ok()
+}
+
+pub(crate) fn stage13_10i_ax201_supported_function() -> Option<SupportedWifiFunction> {
+    let mut ax201 = pci::Device {
+        segment: 0,
+        bus: 2,
+        device: 3,
+        function: 0,
+        vendor_id: 0x8086,
+        device_id: 0xa0f0,
+        revision: 1,
+        class: 0x02,
+        subclass: 0x80,
+        ..pci::Device::default()
+    };
+    ax201.bars[0] = pci::Bar {
+        valid: true,
+        kind: pci::BarKind::Memory64,
+        address: 0xfebc_0000,
+        prefetchable: false,
+    };
+    classify_supported(ax201).ok()
 }
 
 pub const INTEL_CSR_GP_CNTRL_INIT_DONE: u32 = 0x0000_0004;
@@ -1309,7 +1614,69 @@ pub fn stage13_10e_self_test() -> bool {
 
     let mut no_bar = ax200;
     no_bar.bars = [pci::Bar::default(); 6];
-    classify_supported(no_bar) == Err(SupportedBindError::NoMmioBar)
+    if classify_supported(no_bar) != Err(SupportedBindError::NoMmioBar) {
+        return false;
+    }
+
+    // AX201 shares the 22000-family CSR/DMA/interrupt contracts, but selects
+    // its own integrated firmware profile and binding entry point.
+    let mut ax201 = ax200;
+    ax201.device_id = 0xa0f0;
+    let Ok(classified_ax201) = classify_supported(ax201) else {
+        return false;
+    };
+    classified_ax201.family == WifiDriverFamily::IntelIwlwifiAx201
+        && classified_ax201.support == WifiSupportLevel::ActivationReady
+        && classified_ax201.name == "Intel Wi-Fi 6 AX201"
+        && classified_ax201.firmware.filename_prefix == "iwlwifi-QuZ-a0-hr-b0"
+        && classified_ax201.firmware.api_min == 77
+        && classified_ax201.firmware.api_max == 77
+        && classified_ax201.firmware.integrated
+        && bind_supported(ax201).is_ok()
+}
+
+pub fn stage13_10ad_ax201_activation_self_test() -> bool {
+    let mut ax201 = pci::Device {
+        vendor_id: 0x8086,
+        device_id: 0xa0f0,
+        class: 0x02,
+        subclass: 0x80,
+        ..pci::Device::default()
+    };
+    ax201.bars[0] = pci::Bar {
+        valid: true,
+        kind: pci::BarKind::Memory64,
+        address: 0xfebc_0000,
+        prefetchable: false,
+    };
+    ax201.capabilities.msi = true;
+    ax201.capabilities.msi_offset = 0x50;
+    let Ok(function) = classify_supported(ax201) else {
+        return false;
+    };
+    if function.family != WifiDriverFamily::IntelIwlwifiAx201
+        || function.support != WifiSupportLevel::ActivationReady
+        || !function.firmware.integrated
+        || function.firmware.filename_prefix != "iwlwifi-QuZ-a0-hr-b0"
+    {
+        return false;
+    }
+    let Ok(binding) = ax201_msi_binding_contract(ax201, 0x2a) else {
+        return false;
+    };
+    binding.vendor_id == 0x8086
+        && binding.device_id == 0xa0f0
+        && binding.destination_apic_id == 0x2a
+        && binding.capability_offset == 0x50
+        && binding.vector == crate::interrupts::WIFI_DEVICE_VECTOR
+        && ax201_msi_binding_contract(
+            {
+                let mut wrong = ax201;
+                wrong.device_id = 0x2723;
+                wrong
+            },
+            0x2a,
+        ) == Err(Ax200MsiBindError::UnsupportedDevice)
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MmioError {
@@ -1927,6 +2294,493 @@ impl Drop for OwnedDmaBuffer {
         }
     }
 }
+
+pub const AX201_RX_RING_ENTRIES: usize = 512;
+pub const AX201_RX_BUFFER_COUNT: usize = AX201_RX_RING_ENTRIES;
+pub const AX201_RX_BUFFER_BYTES: u16 = DMA_PAGE_SIZE as u16;
+pub const AX201_COMMAND_QUEUE_ENTRIES: u8 = 32;
+/// The non-DQA 22000 command queue is queue 9; queue 0 is the default RX
+/// queue and is not a transmit/command queue.
+pub const AX201_COMMAND_QUEUE_ID: u8 = 9;
+/// Intel's 22000 DQA map reserves 5..=8 for management/non-QoS frames and
+/// 10..=30 for data frames. Queue 9 is the AP probe-response queue; queues 0
+/// and 1 are command/auxiliary and 2..=4 are special-purpose queues. The
+/// driver does not guess a firmware queue mapping: callers select a queue
+/// after the firmware's queue configuration has been accepted.
+pub const AX201_MANAGEMENT_TX_QUEUE_MIN: u8 = 5;
+pub const AX201_MANAGEMENT_TX_QUEUE_MAX: u8 = 8;
+pub const AX201_DATA_TX_QUEUE_MIN: u8 = 10;
+pub const AX201_DATA_TX_QUEUE_MAX: u8 = 30;
+pub const AX201_DATA_TX_QUEUE_ENTRIES: u8 = 32;
+pub const AX201_TX_BYTE_COUNT_BYTES: u16 =
+    (AX201_DATA_TX_QUEUE_ENTRIES as u16) * core::mem::size_of::<u16>() as u16;
+pub const AX201_MAX_IN_FLIGHT_TX: usize = 4;
+pub const AX201_TX_PAYLOAD_BYTES: u16 = 4096;
+pub const AX201_COMMAND_PAYLOAD_BYTES: u16 = 4096;
+/// Bound command DMA retention without making the firmware path depend on an
+/// unbounded completion queue. The queue ring itself remains 32 entries.
+pub const AX201_MAX_IN_FLIGHT_COMMANDS: usize = 4;
+/// 22000-family `iwl_tfh_tfd`: 2-byte TB count, 25 eight-byte-address/length
+/// entries, and a 4-byte pad, rounded to the hardware's 256-byte stride.
+pub const AX201_COMMAND_DESCRIPTOR_BYTES: u16 = 256;
+/// AX210/AX201 MQ free transfer descriptor:
+/// `__le16 rbid; __le16 reserved[3]; __le64 addr`.
+pub const AX201_RX_FREE_DESCRIPTOR_BYTES: u16 = 16;
+/// AX210/AX201 MQ used completion descriptor. The completion contains only
+/// the buffer tag/flags; the buffer address is not returned by hardware.
+pub const AX201_RX_USED_DESCRIPTOR_BYTES: u16 = 32;
+pub const AX201_RX_QUEUE_ID: u8 = 0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ax201QueueError {
+    Dma(DmaMemoryError),
+    RingSize,
+    InvalidRbid,
+    InvalidTfd,
+    TooManyTbs,
+    CommandBusy,
+    CommandTooLarge,
+    CommandMalformed,
+    CommandSequence,
+    TxQueue,
+    TxBusy,
+    TxTooLarge,
+    TxSequence,
+}
+
+pub const AX201_TFH_MAX_TBS: usize = 25;
+pub const AX201_TFH_TB_BYTES: usize = 10;
+
+/// Encode one 22000 `iwl_tfh_tfd` into its exact 256-byte wire layout.
+///
+/// A TB is a packed little-endian 16-bit length followed by a 64-bit DMA
+/// address. Intel's 22000 transport accepts at most 25 TBs and a 36-bit host
+/// DMA address; callers retain ownership of every referenced buffer until the
+/// device completion has been reclaimed.
+pub fn encode_ax201_tfd(
+    output: &mut [u8; AX201_COMMAND_DESCRIPTOR_BYTES as usize],
+    buffers: &[(u64, u16)],
+) -> Result<(), Ax201QueueError> {
+    if buffers.is_empty() {
+        return Err(Ax201QueueError::InvalidTfd);
+    }
+    if buffers.len() > AX201_TFH_MAX_TBS {
+        return Err(Ax201QueueError::TooManyTbs);
+    }
+    output.fill(0);
+    output[..2].copy_from_slice(&(buffers.len() as u16).to_le_bytes());
+    for (index, &(address, length)) in buffers.iter().enumerate() {
+        if length == 0 || address >> 36 != 0 {
+            return Err(Ax201QueueError::InvalidTfd);
+        }
+        let offset = 2 + index * AX201_TFH_TB_BYTES;
+        output[offset..offset + 2].copy_from_slice(&length.to_le_bytes());
+        output[offset + 2..offset + 10].copy_from_slice(&address.to_le_bytes());
+    }
+    Ok(())
+}
+
+/// Physical 22000-family queue storage owned by the AX201 driver.
+///
+/// The RX free ring uses the 16-byte MQ transfer descriptor shape, while the
+/// used ring contains 32-byte completion records. The status page and command
+/// ring are separate coherent allocations, matching the context-info pointers
+/// consumed by the firmware. Every RX buffer remains in this owner
+/// until the device is quiesced, so dropping the queue cannot free a page that
+/// an active bus master may still reference.
+pub struct Ax201QueueOwner {
+    rx_free_rbd: OwnedDmaBuffer,
+    rx_used_rbd: OwnedDmaBuffer,
+    rx_status: OwnedDmaBuffer,
+    command_queue: OwnedDmaBuffer,
+    tx_queue: OwnedDmaBuffer,
+    tx_byte_counts: OwnedDmaBuffer,
+    rx_buffers: [Option<OwnedDmaBuffer>; AX201_RX_BUFFER_COUNT],
+    command_payloads: [Option<OwnedDmaBuffer>; AX201_MAX_IN_FLIGHT_COMMANDS],
+    tx_payloads: [Option<OwnedDmaBuffer>; AX201_MAX_IN_FLIGHT_TX],
+    command_write_index: u8,
+    command_sequences: [Option<u16>; AX201_MAX_IN_FLIGHT_COMMANDS],
+    tx_sequences: [Option<u16>; AX201_MAX_IN_FLIGHT_TX],
+    tx_write_index: u8,
+    rx_free_write_index: u16,
+    rx_next_completion: u16,
+    hardware_quiesced: bool,
+}
+
+impl Ax201QueueOwner {
+    pub fn allocate() -> Result<Self, Ax201QueueError> {
+        let rx_free_ring_bytes =
+            u16::try_from(AX201_RX_RING_ENTRIES * usize::from(AX201_RX_FREE_DESCRIPTOR_BYTES))
+                .map_err(|_| Ax201QueueError::RingSize)?;
+        let rx_used_ring_bytes =
+            u16::try_from(AX201_RX_RING_ENTRIES * usize::from(AX201_RX_USED_DESCRIPTOR_BYTES))
+                .map_err(|_| Ax201QueueError::RingSize)?;
+        let command_bytes = usize::from(AX201_COMMAND_QUEUE_ENTRIES)
+            .checked_mul(usize::from(AX201_COMMAND_DESCRIPTOR_BYTES))
+            .and_then(|bytes| u16::try_from(bytes).ok())
+            .ok_or(Ax201QueueError::RingSize)?;
+        let tx_bytes = usize::from(AX201_DATA_TX_QUEUE_ENTRIES)
+            .checked_mul(usize::from(AX201_COMMAND_DESCRIPTOR_BYTES))
+            .and_then(|bytes| u16::try_from(bytes).ok())
+            .ok_or(Ax201QueueError::RingSize)?;
+        let mut owner = Self {
+            rx_free_rbd: OwnedDmaBuffer::allocate(rx_free_ring_bytes, 0)
+                .map_err(Ax201QueueError::Dma)?,
+            rx_used_rbd: OwnedDmaBuffer::allocate(rx_used_ring_bytes, 0)
+                .map_err(Ax201QueueError::Dma)?,
+            rx_status: OwnedDmaBuffer::allocate(DMA_PAGE_SIZE as u16, 0)
+                .map_err(Ax201QueueError::Dma)?,
+            command_queue: OwnedDmaBuffer::allocate(command_bytes, 0)
+                .map_err(Ax201QueueError::Dma)?,
+            tx_queue: OwnedDmaBuffer::allocate(tx_bytes, 0).map_err(Ax201QueueError::Dma)?,
+            tx_byte_counts: OwnedDmaBuffer::allocate(AX201_TX_BYTE_COUNT_BYTES, 0)
+                .map_err(Ax201QueueError::Dma)?,
+            rx_buffers: [const { None }; AX201_RX_BUFFER_COUNT],
+            command_payloads: [const { None }; AX201_MAX_IN_FLIGHT_COMMANDS],
+            tx_payloads: [const { None }; AX201_MAX_IN_FLIGHT_TX],
+            command_write_index: 0,
+            command_sequences: [None; AX201_MAX_IN_FLIGHT_COMMANDS],
+            tx_sequences: [None; AX201_MAX_IN_FLIGHT_TX],
+            tx_write_index: 0,
+            rx_free_write_index: 0,
+            rx_next_completion: 0,
+            hardware_quiesced: false,
+        };
+        for index in 0..AX201_RX_BUFFER_COUNT {
+            let buffer =
+                OwnedDmaBuffer::allocate(AX201_RX_BUFFER_BYTES, 0).map_err(Ax201QueueError::Dma)?;
+            let offset = index * usize::from(AX201_RX_FREE_DESCRIPTOR_BYTES);
+            owner
+                .rx_free_rbd
+                .write_bytes(offset, &(index as u16).to_le_bytes())
+                .map_err(Ax201QueueError::Dma)?;
+            owner
+                .rx_free_rbd
+                .write_u32(offset + 8, buffer.physical_address() as u32)
+                .map_err(Ax201QueueError::Dma)?;
+            owner
+                .rx_free_rbd
+                .write_u32(offset + 12, (buffer.physical_address() >> 32) as u32)
+                .map_err(Ax201QueueError::Dma)?;
+            owner.rx_buffers[index] = Some(buffer);
+        }
+        dma_publish();
+        Ok(owner)
+    }
+
+    pub const fn free_rbd_address(&self) -> u64 {
+        self.rx_free_rbd.physical_address()
+    }
+    pub const fn used_rbd_address(&self) -> u64 {
+        self.rx_used_rbd.physical_address()
+    }
+    pub const fn status_address(&self) -> u64 {
+        self.rx_status.physical_address()
+    }
+    pub const fn command_queue_address(&self) -> u64 {
+        self.command_queue.physical_address()
+    }
+    pub const fn tx_queue_address(&self) -> u64 {
+        self.tx_queue.physical_address()
+    }
+    pub const fn tx_byte_count_address(&self) -> u64 {
+        self.tx_byte_counts.physical_address()
+    }
+    pub const fn tx_queue_entries(&self) -> u8 {
+        AX201_DATA_TX_QUEUE_ENTRIES
+    }
+    pub const fn tx_queue_context_size(&self) -> u8 {
+        2
+    }
+    pub const fn command_queue_entries(&self) -> u8 {
+        AX201_COMMAND_QUEUE_ENTRIES
+    }
+    /// The 22000 context-info ABI stores the command queue control-block
+    /// size as TFD_QUEUE_CB_SIZE(entry count), while ring indexing uses the
+    /// entry count.
+    pub const fn command_queue_context_size(&self) -> u8 {
+        2
+    }
+    pub const fn command_in_flight(&self) -> bool {
+        let mut index = 0;
+        while index < AX201_MAX_IN_FLIGHT_COMMANDS {
+            if self.command_sequences[index].is_some() {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+    pub const fn tx_in_flight(&self) -> bool {
+        let mut index = 0;
+        while index < AX201_MAX_IN_FLIGHT_TX {
+            if self.tx_sequences[index].is_some() {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub fn set_tx_write_index(&mut self, write_pointer: u16) -> Result<(), Ax201QueueError> {
+        if write_pointer >= u16::from(AX201_DATA_TX_QUEUE_ENTRIES) || self.tx_in_flight() {
+            return Err(Ax201QueueError::InvalidTfd);
+        }
+        self.tx_write_index = write_pointer as u8;
+        Ok(())
+    }
+    pub const fn rx_buffer_count(&self) -> usize {
+        AX201_RX_BUFFER_COUNT
+    }
+    pub const fn hardware_quiesced(&self) -> bool {
+        self.hardware_quiesced
+    }
+
+    /// Read the device's closed-RBD cursor. Intel writes the cursor as the
+    /// first little-endian 16-bit field in the RX status structure.
+    pub fn closed_rbd_index(&self) -> Result<u16, DmaMemoryError> {
+        self.rx_status.read_u32(0).map(|value| value as u16)
+    }
+
+    pub fn used_descriptor(&self, index: usize) -> Result<u16, DmaMemoryError> {
+        if index >= AX201_RX_RING_ENTRIES {
+            return Err(DmaMemoryError::AddressOverflow);
+        }
+        let offset = index * usize::from(AX201_RX_USED_DESCRIPTOR_BYTES);
+        let low = self.rx_used_rbd.read_byte(offset + 4)?;
+        let high = self.rx_used_rbd.read_byte(offset + 5)?;
+        Ok(u16::from_le_bytes([low, high]))
+    }
+
+    /// Claim the next completion in device order. The status cursor is an
+    /// exclusive producer boundary; the owner cursor advances only after the
+    /// completion's rbid has been validated against the owned buffer table.
+    pub fn take_next_completion(&mut self) -> Result<Option<(u16, u16)>, DmaMemoryError> {
+        dma_consume();
+        let closed = self.closed_rbd_index()? % AX201_RX_RING_ENTRIES as u16;
+        if self.rx_next_completion == closed {
+            return Ok(None);
+        }
+        let ring_index = self.rx_next_completion;
+        let rbid = self.validated_used_rbid(usize::from(ring_index))?;
+        self.rx_next_completion = (self.rx_next_completion + 1) % AX201_RX_RING_ENTRIES as u16;
+        Ok(Some((ring_index, rbid)))
+    }
+
+    /// Return a completed RX buffer to the free ring. The buffer remains in
+    /// the owner table for the entire device lifetime; only its descriptor
+    /// changes from used/completed back to device-available.
+    pub fn recycle_rx_buffer(&mut self, rbid: u16) -> Result<u16, Ax201QueueError> {
+        let Some(buffer) = self
+            .rx_buffers
+            .get(usize::from(rbid))
+            .and_then(Option::as_ref)
+        else {
+            return Err(Ax201QueueError::InvalidRbid);
+        };
+        let offset = usize::from(self.rx_free_write_index)
+            .checked_mul(usize::from(AX201_RX_FREE_DESCRIPTOR_BYTES))
+            .ok_or(Ax201QueueError::RingSize)?;
+        self.rx_free_rbd
+            .write_bytes(offset, &rbid.to_le_bytes())
+            .map_err(Ax201QueueError::Dma)?;
+        self.rx_free_rbd
+            .write_u32(offset + 8, buffer.physical_address() as u32)
+            .map_err(Ax201QueueError::Dma)?;
+        self.rx_free_rbd
+            .write_u32(offset + 12, (buffer.physical_address() >> 32) as u32)
+            .map_err(Ax201QueueError::Dma)?;
+        self.rx_free_write_index = (self.rx_free_write_index + 1) % AX201_RX_RING_ENTRIES as u16;
+        dma_publish();
+        Ok(self.rx_free_write_index)
+    }
+
+    /// Build one bounded host command in the 22000 command queue. The queue
+    /// owns the copied payload until `complete_command` observes the matching
+    /// sequence, so no caller memory remains reachable by the device.
+    ///
+    /// `version == None` selects the 4-byte short header. `Some(version)`
+    /// selects the 8-byte wide header with the command length and version.
+    /// The returned pointer is the next command-queue write index to ring.
+    pub fn post_command(
+        &mut self,
+        opcode: u8,
+        group: u8,
+        version: Option<u8>,
+        payload: &[u8],
+    ) -> Result<(u16, u16), Ax201QueueError> {
+        let Some(slot) = self.command_sequences.iter().position(Option::is_none) else {
+            return Err(Ax201QueueError::CommandBusy);
+        };
+        let header_bytes = if version.is_some() { 8usize } else { 4usize };
+        let total_bytes = header_bytes
+            .checked_add(payload.len())
+            .ok_or(Ax201QueueError::CommandTooLarge)?;
+        if total_bytes == 0 || total_bytes > usize::from(AX201_COMMAND_PAYLOAD_BYTES) {
+            return Err(Ax201QueueError::CommandTooLarge);
+        }
+        let sequence =
+            (u16::from(AX201_COMMAND_QUEUE_ID) << 8) | u16::from(self.command_write_index);
+        let mut command_payload = OwnedDmaBuffer::allocate(AX201_COMMAND_PAYLOAD_BYTES, 0)
+            .map_err(Ax201QueueError::Dma)?;
+        command_payload
+            .write_bytes(0, &[opcode, group])
+            .map_err(Ax201QueueError::Dma)?;
+        command_payload
+            .write_bytes(2, &sequence.to_le_bytes())
+            .map_err(Ax201QueueError::Dma)?;
+        if let Some(version) = version {
+            let length =
+                u16::try_from(total_bytes).map_err(|_| Ax201QueueError::CommandTooLarge)?;
+            command_payload
+                .write_bytes(4, &length.to_le_bytes())
+                .map_err(Ax201QueueError::Dma)?;
+            command_payload
+                .write_bytes(7, &[version])
+                .map_err(Ax201QueueError::Dma)?;
+        }
+        command_payload
+            .write_bytes(header_bytes, payload)
+            .map_err(Ax201QueueError::Dma)?;
+
+        let descriptor_offset = usize::from(self.command_write_index)
+            .checked_mul(usize::from(AX201_COMMAND_DESCRIPTOR_BYTES))
+            .ok_or(Ax201QueueError::RingSize)?;
+        let mut descriptor = [0u8; AX201_COMMAND_DESCRIPTOR_BYTES as usize];
+        encode_ax201_tfd(
+            &mut descriptor,
+            &[(
+                command_payload.physical_address(),
+                u16::try_from(total_bytes).map_err(|_| Ax201QueueError::CommandTooLarge)?,
+            )],
+        )?;
+        self.command_queue
+            .write_bytes(descriptor_offset, &descriptor)
+            .map_err(Ax201QueueError::Dma)?;
+        dma_publish();
+        self.command_payloads[slot] = Some(command_payload);
+        self.command_sequences[slot] = Some(sequence);
+        self.command_write_index = (self.command_write_index + 1) % AX201_COMMAND_QUEUE_ENTRIES;
+        Ok((sequence, u16::from(self.command_write_index)))
+    }
+
+    /// Release the retained command payload only for the exact command that
+    /// the RX path matched. A stale or unsolicited sequence cannot free a
+    /// live DMA buffer.
+    pub fn complete_command(&mut self, sequence: u16) -> Result<(), Ax201QueueError> {
+        let Some(slot) = self
+            .command_sequences
+            .iter()
+            .position(|candidate| *candidate == Some(sequence))
+        else {
+            return Err(Ax201QueueError::CommandSequence);
+        };
+        dma_consume();
+        self.command_sequences[slot] = None;
+        self.command_payloads[slot] = None;
+        Ok(())
+    }
+
+    /// Publish one already-encoded Intel TX command through a dedicated data
+    /// queue.  This path never uses the host-command queue: the payload is
+    /// retained until the matching TX completion is observed.
+    pub fn post_tx_payload(
+        &mut self,
+        queue_id: u8,
+        payload: &[u8],
+    ) -> Result<(u16, u16), Ax201QueueError> {
+        let is_management_queue =
+            (AX201_MANAGEMENT_TX_QUEUE_MIN..=AX201_MANAGEMENT_TX_QUEUE_MAX).contains(&queue_id);
+        let is_data_queue = (AX201_DATA_TX_QUEUE_MIN..=AX201_DATA_TX_QUEUE_MAX).contains(&queue_id);
+        if !(is_management_queue || is_data_queue)
+            || queue_id == AX201_COMMAND_QUEUE_ID
+            || queue_id == AX201_RX_QUEUE_ID
+        {
+            return Err(Ax201QueueError::TxQueue);
+        }
+        let Some(slot) = self.tx_sequences.iter().position(Option::is_none) else {
+            return Err(Ax201QueueError::TxBusy);
+        };
+        if payload.is_empty() || payload.len() > usize::from(AX201_TX_PAYLOAD_BYTES) {
+            return Err(Ax201QueueError::TxTooLarge);
+        }
+        let sequence = (u16::from(queue_id) << 8) | u16::from(self.tx_write_index);
+        let mut tx_payload =
+            OwnedDmaBuffer::allocate(AX201_TX_PAYLOAD_BYTES, 0).map_err(Ax201QueueError::Dma)?;
+        tx_payload
+            .write_bytes(0, payload)
+            .map_err(Ax201QueueError::Dma)?;
+        let descriptor_offset = usize::from(self.tx_write_index)
+            .checked_mul(usize::from(AX201_COMMAND_DESCRIPTOR_BYTES))
+            .ok_or(Ax201QueueError::RingSize)?;
+        let mut descriptor = [0u8; AX201_COMMAND_DESCRIPTOR_BYTES as usize];
+        encode_ax201_tfd(
+            &mut descriptor,
+            &[(
+                tx_payload.physical_address(),
+                u16::try_from(payload.len()).map_err(|_| Ax201QueueError::TxTooLarge)?,
+            )],
+        )?;
+        self.tx_queue
+            .write_bytes(descriptor_offset, &descriptor)
+            .map_err(Ax201QueueError::Dma)?;
+        dma_publish();
+        self.tx_payloads[slot] = Some(tx_payload);
+        self.tx_sequences[slot] = Some(sequence);
+        self.tx_write_index = (self.tx_write_index + 1) % AX201_DATA_TX_QUEUE_ENTRIES;
+        Ok((sequence, u16::from(self.tx_write_index)))
+    }
+
+    /// Reclaim only the exact queue/index completion that was posted.  A
+    /// stale completion cannot release a newer DMA payload after ring reuse.
+    pub fn complete_tx(&mut self, sequence: u16) -> Result<(), Ax201QueueError> {
+        let Some(slot) = self
+            .tx_sequences
+            .iter()
+            .position(|candidate| *candidate == Some(sequence))
+        else {
+            return Err(Ax201QueueError::TxSequence);
+        };
+        dma_consume();
+        self.tx_sequences[slot] = None;
+        self.tx_payloads[slot] = None;
+        Ok(())
+    }
+
+    /// Validate the device-produced completion before the CPU follows its
+    /// buffer identity. AX201 completions carry an rbid, not an address; the
+    /// tag is bounded to the owner table before any asynchronous RX copy.
+    pub fn validated_used_rbid(&self, index: usize) -> Result<u16, DmaMemoryError> {
+        let rbid = self.used_descriptor(index)?;
+        let Some(_buffer) = self
+            .rx_buffers
+            .get(usize::from(rbid))
+            .and_then(Option::as_ref)
+        else {
+            return Err(DmaMemoryError::AddressOverflow);
+        };
+        Ok(rbid)
+    }
+
+    pub fn read_rx_buffer(&self, rbid: u16, out: &mut [u8]) -> Result<(), DmaMemoryError> {
+        let Some(buffer) = self
+            .rx_buffers
+            .get(usize::from(rbid))
+            .and_then(Option::as_ref)
+        else {
+            return Err(DmaMemoryError::AddressOverflow);
+        };
+        buffer.read_bytes(0, out)
+    }
+
+    /// The caller may invoke this only after disabling MSI, stopping firmware
+    /// and proving that no device-owned descriptor remains in hardware.
+    pub fn mark_hardware_quiesced(&mut self) {
+        self.hardware_quiesced = true;
+        dma_consume();
+    }
+}
+
 pub fn stage13_10u_dma_self_test() -> bool {
     let before = memory::stats().allocated_frames;
     {
@@ -1953,6 +2807,97 @@ pub fn stage13_10u_dma_self_test() -> bool {
         }
     }
     memory::stats().allocated_frames == before
+}
+
+pub fn stage13_10ai_ax201_queue_owner_self_test() -> bool {
+    let before = memory::stats().allocated_frames;
+    let Ok(mut queues) = Ax201QueueOwner::allocate() else {
+        return false;
+    };
+    let valid = queues.free_rbd_address() != 0
+        && queues.used_rbd_address() != 0
+        && queues.status_address() != 0
+        && queues.command_queue_address() != 0
+        && queues.tx_queue_address() != 0
+        && queues.tx_byte_count_address() != 0
+        && queues.command_queue_entries() == AX201_COMMAND_QUEUE_ENTRIES
+        && queues.command_queue_context_size() == 2
+        && queues.tx_queue_entries() == AX201_DATA_TX_QUEUE_ENTRIES
+        && queues.tx_queue_context_size() == 2
+        && AX201_TX_BYTE_COUNT_BYTES == 64
+        && AX201_COMMAND_DESCRIPTOR_BYTES == 256
+        && queues.rx_buffer_count() == AX201_RX_BUFFER_COUNT;
+    let descriptor_guard = queues
+        .rx_used_rbd
+        .write_bytes(4, &(AX201_RX_BUFFER_COUNT as u16).to_le_bytes())
+        .is_ok()
+        && queues.validated_used_rbid(0).is_err();
+    let recycle_guard = queues.recycle_rx_buffer(0).is_ok()
+        && queues.rx_free_write_index == 1
+        && queues.rx_free_rbd.read_byte(0) == Ok(0)
+        && queues.rx_free_rbd.read_byte(1) == Ok(0);
+    let mut tfd = [0u8; AX201_COMMAND_DESCRIPTOR_BYTES as usize];
+    let tfd_guard = encode_ax201_tfd(&mut tfd, &[(0x1234_5000, 32), (0x2345_6000, 64)]).is_ok()
+        && tfd[0..2] == [2, 0]
+        && tfd[2..4] == [32, 0]
+        && tfd[4..12] == 0x1234_5000u64.to_le_bytes()
+        && tfd[12..14] == [64, 0]
+        && tfd[14..22] == 0x2345_6000u64.to_le_bytes()
+        && encode_ax201_tfd(&mut tfd, &[]).is_err();
+    let command = [0xa5u8, 0x5a, 0x11, 0x22];
+    let Ok((sequence, write_index)) = queues.post_command(0x42, 0x03, None, &command) else {
+        return false;
+    };
+    let first_command_guard = sequence == (u16::from(AX201_COMMAND_QUEUE_ID) << 8)
+        && write_index == 1
+        && queues.command_in_flight()
+        && queues.command_queue.read_byte(0) == Ok(1)
+        && queues.command_queue.read_byte(2) == Ok(8)
+        && queues.command_queue.read_byte(3) == Ok(0)
+        && queues.complete_command(sequence).is_ok()
+        && !queues.command_in_flight();
+    let mut sequences = [0u16; AX201_MAX_IN_FLIGHT_COMMANDS];
+    let mut multi_command_guard = first_command_guard;
+    for (index, sequence_slot) in sequences.iter_mut().enumerate() {
+        let Ok((posted, _)) = queues.post_command(0x50 + index as u8, 0x03, None, &[]) else {
+            multi_command_guard = false;
+            break;
+        };
+        *sequence_slot = posted;
+    }
+    multi_command_guard = multi_command_guard
+        && queues.command_in_flight()
+        && queues.post_command(0x60, 0x03, None, &[]) == Err(Ax201QueueError::CommandBusy)
+        && queues.complete_command(sequences[2]).is_ok()
+        && queues.complete_command(sequences[0]).is_ok()
+        && queues.complete_command(sequences[3]).is_ok()
+        && queues.complete_command(sequences[1]).is_ok()
+        && !queues.command_in_flight()
+        && queues.complete_command(sequence) == Err(Ax201QueueError::CommandSequence);
+    let tx_payload = [0xa5u8; 48];
+    let tx_posted = queues
+        .post_tx_payload(AX201_MANAGEMENT_TX_QUEUE_MIN, &tx_payload)
+        .ok();
+    let tx_guard = tx_posted.is_some()
+        && queues.tx_in_flight()
+        && queues
+            .complete_tx(tx_posted.map(|(sequence, _)| sequence).unwrap_or(0))
+            .is_ok()
+        && !queues.tx_in_flight()
+        && queues.set_tx_write_index(3).is_ok()
+        && queues.post_tx_payload(AX201_COMMAND_QUEUE_ID, &tx_payload)
+            == Err(Ax201QueueError::TxQueue)
+        && queues.post_tx_payload(9, &tx_payload) == Err(Ax201QueueError::TxQueue)
+        && queues.post_tx_payload(AX201_DATA_TX_QUEUE_MIN, &[]) == Err(Ax201QueueError::TxTooLarge);
+    queues.mark_hardware_quiesced();
+    drop(queues);
+    valid
+        && descriptor_guard
+        && recycle_guard
+        && tfd_guard
+        && multi_command_guard
+        && tx_guard
+        && memory::stats().allocated_frames == before
 }
 
 struct BufferSlot {

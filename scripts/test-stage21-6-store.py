@@ -1,0 +1,87 @@
+"""Run the durable WovenStore catalog acceptance on a disposable ATA image."""
+import argparse
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--stage", type=int, choices=(6, 7, 8, 9, 10, 11, 22), default=6)
+    parser.add_argument("--substage", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--size-mib", type=int, default=16)
+    parser.add_argument("--timeout", type=float, default=240)
+    parser.add_argument(
+        "--qemu",
+        default=shutil.which("qemu-system-x86_64")
+        or r"C:\Program Files\qemu\qemu-system-x86_64.exe",
+    )
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
+    qemu = Path(args.qemu)
+    firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
+    if not qemu.is_file() or not firmware.is_file():
+        parser.error("Set --qemu or install QEMU with its OVMF firmware.")
+    feature = (
+        f"stage22-{args.substage}-test"
+        if args.stage == 22
+        else f"stage21-{args.stage}-test"
+    )
+    image = subprocess.check_output(
+        ["cargo", "run", "--quiet", "--features", feature, "--", "--print-image"],
+        cwd=root,
+        text=True,
+    ).strip()
+    out = root / "audit-artifacts" / f"stage21.{args.stage}-{args.cpus}cpu-{time.time_ns()}"
+    out.mkdir(parents=True, exist_ok=True)
+    disk = out / "woven-store.img"
+    with disk.open("wb") as handle:
+        handle.truncate(args.size_mib * 1024 * 1024)
+    serial = out / "serial.log"
+    serial.write_text("")
+    command = [
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "256M",
+        "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
+        "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+        "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
+        "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}",
+        "-device", "virtio-blk-pci,drive=boot,bootindex=1",
+        "-drive", f"if=ide,index=0,format=raw,file={disk}",
+    ]
+    stage_label = f"22.{args.substage}" if args.stage == 22 else f"21.{args.stage}"
+    try:
+        with (out / "qemu.log").open("w") as output:
+            result = subprocess.run(
+                command, cwd=root, stdout=output, stderr=subprocess.STDOUT,
+                timeout=args.timeout,
+            ).returncode
+    except subprocess.TimeoutExpired:
+        print(f"Stage {stage_label} timed out. Evidence: {out}", file=sys.stderr)
+        return 1
+    log = serial.read_text(errors="replace") if serial.exists() else ""
+    markers = {
+        6: "[S21.6] WovenStore persistence: PASSED",
+        7: "[S21.7] WovenPackage install: PASSED",
+        8: "[S21.8] WovenPackage recovery: PASSED",
+        9: "[S21.9] WovenPackage update/remove: PASSED",
+        10: "[S21.10] WovenPackage rollback: PASSED",
+        11: "[S21.11] WovenPackage sandbox: PASSED",
+        22: "[S22.1] service IPC ABI: PASSED",
+    }
+    if args.stage == 22 and args.substage == 2:
+        marker = "[S22.2] handle IPC ABI: PASSED"
+    else:
+        marker = markers[args.stage]
+    if result != 33 or marker not in log:
+        print(f"Stage {stage_label} failed (exit {result}). Evidence: {out}", file=sys.stderr)
+        print(log[-4000:], file=sys.stderr)
+        return 1
+    print(f"Stage {stage_label} PASS ({args.cpus} CPU, exit 33). Evidence: {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

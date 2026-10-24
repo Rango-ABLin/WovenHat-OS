@@ -185,13 +185,11 @@ impl<T> Drop for IrqMutexGuard<'_, T> {
 /// Ranked spin mutex for long CPU-only sections that must keep IRQs live.
 /// Local timer preemption is deferred while held. Never use from an IRQ
 /// handler, and never block or voluntarily switch while holding this guard.
-#[cfg(not(test))]
 pub struct PreemptMutex<T> {
     inner: spin::Mutex<T>,
     rank: u8,
 }
 
-#[cfg(not(test))]
 impl<T> PreemptMutex<T> {
     pub const fn with_rank(value: T, rank: u8) -> Self {
         Self {
@@ -202,30 +200,38 @@ impl<T> PreemptMutex<T> {
 
     #[track_caller]
     pub fn lock(&self) -> PreemptMutexGuard<'_, T> {
+        #[cfg(not(test))]
         let preemption = crate::task::local_preemption_guard();
         // The rank stack is per-CPU and can also be used by an IRQ handler.
         // Keep each tracker update atomic with respect to local IRQ entry.
+        #[cfg(not(test))]
         let token = interrupts::without_interrupts(|| {
             lock_order::enter(self as *const Self as usize, self.rank)
         });
+        #[cfg(test)]
+        let token = lock_order::enter(self as *const Self as usize, self.rank);
         PreemptMutexGuard {
             guard: Some(self.inner.lock()),
             token: Some(token),
+            #[cfg(not(test))]
             preemption: Some(preemption),
             _not_send: PhantomData,
+            #[cfg(test)]
+            _test_marker: PhantomData,
         }
     }
 }
 
-#[cfg(not(test))]
 pub struct PreemptMutexGuard<'a, T> {
     guard: Option<spin::MutexGuard<'a, T>>,
     token: Option<lock_order::Token>,
+    #[cfg(not(test))]
     preemption: Option<crate::task::LocalPreemptGuard>,
     _not_send: PhantomData<*mut ()>,
+    #[cfg(test)]
+    _test_marker: PhantomData<&'a ()>,
 }
 
-#[cfg(not(test))]
 impl<T> Deref for PreemptMutexGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
@@ -233,18 +239,20 @@ impl<T> Deref for PreemptMutexGuard<'_, T> {
     }
 }
 
-#[cfg(not(test))]
 impl<T> DerefMut for PreemptMutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         self.guard.as_mut().unwrap()
     }
 }
 
-#[cfg(not(test))]
 impl<T> Drop for PreemptMutexGuard<'_, T> {
     fn drop(&mut self) {
         drop(self.guard.take());
+        #[cfg(not(test))]
         interrupts::without_interrupts(|| lock_order::exit(self.token.take().unwrap()));
+        #[cfg(test)]
+        lock_order::exit(self.token.take().unwrap());
+        #[cfg(not(test))]
         drop(self.preemption.take());
     }
 }

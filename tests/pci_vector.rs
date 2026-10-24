@@ -16,10 +16,16 @@ fn release_invalidates_stale_generation_before_reuse() {
     let mut allocator = vector::Allocator::new();
     let old = allocator.allocate(11).unwrap();
     allocator.release(old, 11).unwrap();
-    assert_eq!(allocator.validate(old, 11), Err(vector::Error::InvalidLease));
+    assert_eq!(
+        allocator.validate(old, 11),
+        Err(vector::Error::InvalidLease)
+    );
     let replacement = allocator.allocate(22).unwrap();
     assert_eq!(replacement.vector, old.vector);
-    assert_eq!(allocator.validate(old, 11), Err(vector::Error::InvalidLease));
+    assert_eq!(
+        allocator.validate(old, 11),
+        Err(vector::Error::InvalidLease)
+    );
     assert_eq!(allocator.validate(replacement, 22), Ok(()));
 }
 

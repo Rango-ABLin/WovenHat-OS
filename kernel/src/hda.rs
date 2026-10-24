@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); codec, stream and mixer paths are exercised by the Stage 13.8 gate until the Stage 13 audio step gives them production callers"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{compiler_fence, Ordering},
@@ -34,12 +41,19 @@ static CONTROLLER: Mutex<Option<HdaController>> = Mutex::with_rank(None, 10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InitError {
+    InterruptUnavailable,
+    Busy,
+    InvalidLength,
+    PlaybackTimeout,
+    NotReady,
     MissingController,
     MissingMemoryBar,
     MmioUnavailable,
     PciEnableFailed,
     InvalidCapabilities,
     ResetTimeout,
+    ResetAssertTimeout,
+    ResetEnableTimeout,
     DmaUnavailable,
     UnsupportedRingSize,
     CorbResetTimeout,
@@ -126,6 +140,7 @@ pub struct CaptureSummary {
     pub position_after: u32,
     pub changed_bytes: u32,
 }
+#[derive(Clone, Copy)]
 struct DmaPage {
     physical: u64,
     virtual_address: u64,
@@ -144,6 +159,7 @@ impl DmaPage {
 }
 pub struct HdaController {
     pci: pci::Device,
+    original_command: u16,
     mmio: u64,
     input_streams: u8,
     output_streams: u8,
@@ -152,6 +168,34 @@ pub struct HdaController {
     corb: Option<DmaPage>,
     rirb: Option<DmaPage>,
     rirb_read: u16,
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    output: Option<Output>,
+}
+
+/// Pages behind the playback stream: up to 64 KiB, a third of a second of
+/// 48 kHz 16-bit stereo.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const PLAY_PAGES: usize = 16;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub const MAX_PLAY_BYTES: usize = PLAY_PAGES * 4096;
+/// 48 kHz, 16-bit, two channels.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const PLAY_FORMAT: u16 = 0x0011;
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+const PLAY_STREAM_TAG: u8 = 1;
+
+/// The output path and the playback stream's DMA memory, set up once.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+struct Output {
+    codec: u8,
+    converter: u8,
+    /// Amplifier node and its gain steps, if the path has one.
+    amp: Option<(u8, u8)>,
+    /// Stream descriptor index (outputs follow the inputs) and its base.
+    index: u8,
+    stream: u64,
+    bdl: DmaPage,
+    pages: [DmaPage; PLAY_PAGES],
 }
 impl HdaController {
     fn initialize(device: pci::Device) -> Result<Self, InitError> {
@@ -179,6 +223,7 @@ impl HdaController {
         }
         let mut c = Self {
             pci: device,
+            original_command: device.command,
             mmio: bar.address,
             input_streams,
             output_streams,
@@ -187,18 +232,51 @@ impl HdaController {
             corb: None,
             rirb: None,
             rirb_read: 0,
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            output: None,
         };
         c.reset()?;
         c.setup_command_rings()?;
         Ok(c)
     }
+
+    /// Stop stream and command-ring DMA before the PCI binding is released.
+    /// The controller is taken out of the global slot by [`shutdown`] so all
+    /// owned DMA pages are dropped only after this quiescence boundary.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        if self.output.is_some() {
+            let _ = self.end_playback();
+        }
+        mmio_write8(self.mmio + REG_CORBCTL, 0)?;
+        mmio_write8(self.mmio + REG_RIRBCTL, 0)?;
+        let gctl = self.mmio + REG_GCTL;
+        let current = mmio_read32(gctl)?;
+        mmio_write32(gctl, current & !1)?;
+        wait_for_bit(gctl, 1, false, InitError::ResetAssertTimeout)?;
+        let command = pci::restore_command(
+            pci::Address {
+                segment: self.pci.segment,
+                bus: self.pci.bus,
+                device: self.pci.device,
+                function: self.pci.function,
+            },
+            self.original_command,
+        );
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        {
+            AUDIO_VECTOR.store(0, Ordering::Release);
+            AUDIO_BUSY.store(false, Ordering::Release);
+        }
+        command.then_some(()).ok_or(InitError::PciEnableFailed)
+    }
     fn reset(&mut self) -> Result<(), InitError> {
         let gctl = self.mmio + REG_GCTL;
         let current = mmio_read32(gctl)?;
         mmio_write32(gctl, current & !1)?;
-        wait_for_bit(gctl, 1, false)?;
+        wait_for_bit(gctl, 1, false, InitError::ResetAssertTimeout)?;
         mmio_write32(gctl, current | 1)?;
-        wait_for_bit(gctl, 1, true)
+        wait_for_bit(gctl, 1, true, InitError::ResetEnableTimeout)
     }
     fn setup_command_rings(&mut self) -> Result<(), InitError> {
         mmio_write8(self.mmio + REG_CORBCTL, 0)?;
@@ -543,6 +621,167 @@ impl HdaController {
             test_gain,
         })
     }
+    /// Route, amplifier and stream memory for playback (once).
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn prepare_output(&mut self) -> Result<(), InitError> {
+        if self.output.is_some() {
+            return Ok(());
+        }
+        if self.output_streams == 0 {
+            return Err(InitError::MissingOutputConverter);
+        }
+        let (codec, converter, pin) = self.output_route()?;
+        let converter_caps = self.command(codec, converter, 0x0f00, 0x09)?;
+        let pin_caps = self.command(codec, pin, 0x0f00, 0x09)?;
+        let amp_node = if converter_caps & (1 << 2) != 0 {
+            Some(converter)
+        } else if pin_caps & (1 << 2) != 0 {
+            Some(pin)
+        } else {
+            None
+        };
+        let amp = match amp_node {
+            Some(node) => {
+                let steps = ((self.command(codec, node, 0x0f00, 0x12)? >> 8) & 0x7f) as u8;
+                Some((node, steps))
+            }
+            None => None,
+        };
+        // Pin output enabled.
+        let _ = self.command(codec, pin, 0x0707, 0x40)?;
+        let bdl = DmaPage::allocate()?;
+        let mut pages = [bdl; PLAY_PAGES];
+        for page in pages.iter_mut() {
+            *page = DmaPage::allocate()?;
+        }
+        let index = self.input_streams;
+        self.output = Some(Output {
+            codec,
+            converter,
+            amp,
+            index,
+            stream: self.mmio + 0x80 + u64::from(index) * 0x20,
+            bdl,
+            pages,
+        });
+        // Three quarters of full gain, unmuted.
+        self.set_output_volume(75)?;
+        Ok(())
+    }
+
+    /// Set the output amplifier to `percent` of its range; 0 mutes.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn set_output_volume(&mut self, percent: u8) -> Result<u8, InitError> {
+        let output = self.output.as_ref().ok_or(InitError::NotReady)?;
+        let Some((node, steps)) = output.amp else {
+            return Ok(0);
+        };
+        let codec = output.codec;
+        let gain = (u16::from(steps) * u16::from(percent.min(100)) / 100) as u8;
+        let mute = if percent == 0 { 0x80 } else { 0 };
+        // Set Amplifier Gain/Mute: output amp, both channels.
+        let _ = self.command16(codec, node, 0x03, 0xb000 | u16::from(gain) | mute)?;
+        Ok(gain)
+    }
+
+    /// Copy `pcm` into the stream pages and start the stream; the controller
+    /// interrupts when the last buffer completes.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn begin_playback(&mut self, pcm: &[u8]) -> Result<(), InitError> {
+        let output = self.output.as_ref().ok_or(InitError::NotReady)?;
+        let (codec, converter, index, stream, bdl) = (
+            output.codec,
+            output.converter,
+            output.index,
+            output.stream,
+            output.bdl,
+        );
+        let entries = pcm.len().div_ceil(4096);
+        for (entry, chunk) in pcm.chunks(4096).enumerate() {
+            let page = output.pages[entry];
+            // SAFETY: each page is owned by this stream, mapped, 4 KiB.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    chunk.as_ptr(),
+                    page.virtual_address as *mut u8,
+                    chunk.len(),
+                );
+                let descriptor = bdl.virtual_address + entry as u64 * 16;
+                ptr::write_volatile(descriptor as *mut u64, page.physical);
+                ptr::write_volatile((descriptor + 8) as *mut u32, chunk.len() as u32);
+                // Interrupt on completion of the last buffer only.
+                ptr::write_volatile(
+                    (descriptor + 12) as *mut u32,
+                    u32::from(entry + 1 == entries),
+                );
+            }
+        }
+        compiler_fence(Ordering::Release);
+        self.reset_stream(stream)?;
+        mmio_write8(stream + 0x03, 0x1c)?;
+        mmio_write32(stream + 0x08, pcm.len() as u32)?;
+        mmio_write16(stream + 0x0c, (entries - 1) as u16)?;
+        mmio_write16(stream + 0x12, PLAY_FORMAT)?;
+        mmio_write32(stream + 0x18, bdl.physical as u32)?;
+        mmio_write32(stream + 0x1c, (bdl.physical >> 32) as u32)?;
+        let _ = self.command16(codec, converter, 0x02, PLAY_FORMAT)?;
+        let _ = self.command(codec, converter, 0x0706, PLAY_STREAM_TAG << 4)?;
+        // INTCTL: global enable and this stream's interrupt.
+        let intctl = mmio_read32(self.mmio + 0x20)?;
+        mmio_write32(self.mmio + 0x20, intctl | (1 << 31) | (1 << index))?;
+        // Run, with interrupt on completion.
+        mmio_write32(
+            stream,
+            (u32::from(PLAY_STREAM_TAG) << 20) | (1 << 2) | (1 << 1),
+        )?;
+        if mmio_read32(stream)? & (1 << 1) == 0 {
+            return Err(InitError::StreamStartFailed);
+        }
+        Ok(())
+    }
+
+    /// Whether the stream's last buffer has completed.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn playback_done(&mut self) -> Result<bool, InitError> {
+        let stream = self.output.as_ref().ok_or(InitError::NotReady)?.stream;
+        Ok(mmio_read8(stream + 0x03)? & (1 << 2) != 0)
+    }
+
+    /// Stop the stream and clear its status and interrupt enable.
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn end_playback(&mut self) -> Result<(), InitError> {
+        let output = self.output.as_ref().ok_or(InitError::NotReady)?;
+        let (stream, index) = (output.stream, output.index);
+        let ctl = mmio_read32(stream)?;
+        mmio_write32(stream, ctl & !((1 << 1) | (1 << 2)))?;
+        mmio_write8(stream + 0x03, 0x1c)?;
+        let intctl = mmio_read32(self.mmio + 0x20)?;
+        mmio_write32(self.mmio + 0x20, intctl & !(1 << index))
+    }
+
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    fn reset_stream(&mut self, stream: u64) -> Result<(), InitError> {
+        let ctl = mmio_read32(stream)?;
+        mmio_write32(stream, (ctl & !(1 << 1)) | 1)?;
+        for _ in 0..POLL_LIMIT {
+            if mmio_read32(stream)? & 1 != 0 {
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        if mmio_read32(stream)? & 1 == 0 {
+            return Err(InitError::StreamResetTimeout);
+        }
+        mmio_write32(stream, ctl & !((1 << 1) | 1))?;
+        for _ in 0..POLL_LIMIT {
+            if mmio_read32(stream)? & 1 == 0 {
+                return Ok(());
+            }
+            core::hint::spin_loop();
+        }
+        Err(InitError::StreamResetTimeout)
+    }
+
     fn playback_smoke_test(&mut self) -> Result<PlaybackSummary, InitError> {
         const SD_BASE: u64 = 0x80;
         const SD_STRIDE: u64 = 0x20;
@@ -863,20 +1102,192 @@ impl HdaController {
         }
     }
 }
+/// The playback interrupt vector (0 until output starts), and the plays and
+/// interrupts completed, for the gate.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+static AUDIO_VECTOR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+static AUDIO_BUSY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+static AUDIO_PLAYS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// Plays whose completion was seen before the deadline: the caller was woken
+/// by the interrupt rather than by its timeout.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+static AUDIO_ON_TIME: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// What WovenAudio can play.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioInfo {
+    pub playback_streams: u8,
+    pub capture_streams: u8,
+    pub sample_rate: u32,
+    pub channels: u8,
+    pub bits: u8,
+    pub max_bytes: u32,
+    pub vector: u8,
+}
+
+/// Stage 13.15: make the bound controller's output path usable and bind its
+/// interrupt through the driver manager for `driver`.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn start_output(driver: &'static str) -> Result<AudioInfo, InitError> {
+    {
+        let mut slot = CONTROLLER.lock();
+        slot.as_mut()
+            .ok_or(InitError::MissingController)?
+            .prepare_output()?;
+    }
+    if AUDIO_VECTOR.load(Ordering::Acquire) == 0 {
+        let vector = match crate::driver::enable_pci_interrupt(driver, crate::smp::bsp_apic_id(), 0)
+        {
+            Ok(crate::driver::PciInterruptLease::Msi(lease)) => lease.vector.vector,
+            Ok(crate::driver::PciInterruptLease::Msix(lease)) => lease.vector.vector,
+            Err(_) => return Err(InitError::InterruptUnavailable),
+        };
+        AUDIO_VECTOR.store(vector, Ordering::Release);
+    }
+    audio_info().ok_or(InitError::NotReady)
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn audio_info() -> Option<AudioInfo> {
+    let vector = AUDIO_VECTOR.load(Ordering::Acquire);
+    if vector == 0 {
+        return None;
+    }
+    let slot = CONTROLLER.lock();
+    let controller = slot.as_ref()?;
+    controller.output.as_ref()?;
+    Some(AudioInfo {
+        playback_streams: controller.output_streams,
+        capture_streams: controller.input_streams,
+        sample_rate: 48_000,
+        channels: 2,
+        bits: 16,
+        max_bytes: MAX_PLAY_BYTES as u32,
+        vector,
+    })
+}
+
+/// Play `pcm` (48 kHz 16-bit stereo, whole frames, at most MAX_PLAY_BYTES)
+/// and return once it has finished. The caller sleeps until the stream's
+/// completion interrupt; one playback at a time.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn play(pcm: &[u8]) -> Result<usize, InitError> {
+    let vector = AUDIO_VECTOR.load(Ordering::Acquire);
+    if vector == 0 {
+        return Err(InitError::NotReady);
+    }
+    if pcm.is_empty() || pcm.len() > MAX_PLAY_BYTES || !pcm.len().is_multiple_of(4) {
+        return Err(InitError::InvalidLength);
+    }
+    if AUDIO_BUSY
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(InitError::Busy);
+    }
+    let me = crate::task::current_task_id();
+    if !crate::interrupts::set_pci_vector_waiter(vector, me) {
+        AUDIO_BUSY.store(false, Ordering::Release);
+        return Err(InitError::Busy);
+    }
+    let result = (|| {
+        CONTROLLER
+            .lock()
+            .as_mut()
+            .ok_or(InitError::MissingController)?
+            .begin_playback(pcm)?;
+        // Twice the playing time, plus half a second.
+        let frames = (pcm.len() / 4) as u64;
+        let deadline = crate::timer::ticks() + frames * 200 / 48_000 + 50;
+        loop {
+            let done = CONTROLLER
+                .lock()
+                .as_mut()
+                .ok_or(InitError::MissingController)?
+                .playback_done()?;
+            if done {
+                if crate::timer::ticks() < deadline {
+                    AUDIO_ON_TIME.fetch_add(1, Ordering::Relaxed);
+                }
+                return Ok(pcm.len());
+            }
+            if crate::timer::ticks() >= deadline {
+                return Err(InitError::PlaybackTimeout);
+            }
+            crate::task::wait_for_event_until(deadline);
+        }
+    })();
+    if let Some(controller) = CONTROLLER.lock().as_mut() {
+        let _ = controller.end_playback();
+    }
+    let _ = crate::interrupts::clear_pci_vector_waiter(vector, me);
+    AUDIO_BUSY.store(false, Ordering::Release);
+    if result.is_ok() {
+        AUDIO_PLAYS.fetch_add(1, Ordering::Relaxed);
+    }
+    result
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn set_volume(percent: u8) -> Result<u8, InitError> {
+    CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)?
+        .set_output_volume(percent)
+}
+
+#[cfg(feature = "stage13-15-test")]
+pub fn audio_plays() -> u64 {
+    AUDIO_PLAYS.load(Ordering::Acquire)
+}
+
+#[cfg(feature = "stage13-15-test")]
+pub fn audio_on_time() -> u64 {
+    AUDIO_ON_TIME.load(Ordering::Acquire)
+}
+
 pub fn probe() -> bool {
     find_controller().is_some()
 }
 pub fn init() -> Result<ControllerSummary, InitError> {
+    if let Some(summary) = CONTROLLER.lock().as_ref().map(HdaController::summary) {
+        return Ok(summary);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<ControllerSummary, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(c) = slot.as_ref() {
         return Ok(c.summary());
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let c = HdaController::initialize(device)?;
     let summary = c.summary();
     *slot = Some(c);
     Ok(summary)
 }
+
+/// Take the HDA controller only after its DMA engines and command rings have
+/// been stopped. The controller object then drops outside the global lock.
+pub fn shutdown() -> Result<(), InitError> {
+    let Some(mut controller) = CONTROLLER.lock().take() else {
+        return Ok(());
+    };
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
+}
+
 pub fn discover_codec() -> Result<CodecSummary, InitError> {
     CONTROLLER
         .lock()
@@ -924,7 +1335,7 @@ fn find_controller() -> Option<pci::Device> {
     }
     None
 }
-fn wait_for_bit(a: u64, m: u32, s: bool) -> Result<(), InitError> {
+fn wait_for_bit(a: u64, m: u32, s: bool, timeout: InitError) -> Result<(), InitError> {
     for _ in 0..POLL_LIMIT {
         let v = mmio_read32(a)?;
         if (v & m != 0) == s {
@@ -932,33 +1343,45 @@ fn wait_for_bit(a: u64, m: u32, s: bool) -> Result<(), InitError> {
         }
         core::hint::spin_loop();
     }
-    Err(InitError::ResetTimeout)
+    Err(timeout)
 }
 fn mmio_read8(p: u64) -> Result<u8, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u8) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u8) })
 }
 fn mmio_read16(p: u64) -> Result<u16, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u16) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u16) })
 }
 fn mmio_read32(p: u64) -> Result<u32, InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    Ok(unsafe { ptr::read_volatile(v as *const u32) })
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    Ok(unsafe { ptr::read_volatile((v + offset) as *const u32) })
 }
 fn mmio_write8(p: u64, x: u8) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u8, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u8, x) };
     Ok(())
 }
 fn mmio_write16(p: u64, x: u16) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u16, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u16, x) };
     Ok(())
 }
 fn mmio_write32(p: u64, x: u32) -> Result<(), InitError> {
-    let v = paging::map_mmio(p).map_err(|_| InitError::MmioUnavailable)?;
-    unsafe { ptr::write_volatile(v as *mut u32, x) };
+    let page = p & !0xfff;
+    let offset = p & 0xfff;
+    let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    unsafe { ptr::write_volatile((v + offset) as *mut u32, x) };
     Ok(())
 }
 pub fn self_test() -> bool {

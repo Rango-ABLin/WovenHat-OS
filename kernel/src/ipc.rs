@@ -14,6 +14,10 @@ use crate::paging;
 use crate::task::{self, TaskId};
 use crate::wovenguard::{self, LineageId, ServiceClass};
 
+#[cfg(feature = "qemu-test")]
+#[path = "ipc_generation_tests.rs"]
+mod generation_tests;
+
 pub use crate::config::MAX_MESSAGE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,10 @@ pub struct Handle(u32);
 impl Handle {
     pub const fn as_u32(self) -> u32 {
         self.0
+    }
+
+    pub const fn from_u32(raw: u32) -> Self {
+        Self(raw)
     }
 
     const fn from_parts(slot: usize, generation: u32) -> Self {
@@ -170,6 +178,14 @@ struct LegacyEndpoint {
     owner: u64,
     messages: [Message; QUEUE_DEPTH],
     length: usize,
+    /// One task of the owner sleeping until a message arrives. `send` takes
+    /// it and wakes it after STATE is released; teardown just drops it.
+    waiter: Option<TaskId>,
+    /// Messages dequeued so far (wrapping). A receiver peeks, copies the
+    /// payload out with no lock held, then dequeues only if this is
+    /// unchanged, so two threads of one process never take the same message
+    /// or drop the next one.
+    dequeued: u64,
 }
 
 impl LegacyEndpoint {
@@ -177,6 +193,8 @@ impl LegacyEndpoint {
         owner: 0,
         messages: [Message::EMPTY; QUEUE_DEPTH],
         length: 0,
+        waiter: None,
+        dequeued: 0,
     };
 
     fn enqueue(&mut self, message: Message) -> Result<(), Error> {
@@ -196,6 +214,7 @@ impl LegacyEndpoint {
         self.messages.copy_within(1..self.length, 0);
         self.length -= 1;
         self.messages[self.length] = Message::EMPTY;
+        self.dequeued = self.dequeued.wrapping_add(1);
         Ok(message)
     }
 }
@@ -364,6 +383,10 @@ struct HandleSpace {
 }
 
 impl HandleSpace {
+    // All 24 generation bits are valid in a live handle. Once that last
+    // handle is closed, its slot must never reissue an earlier authority.
+    const MAX_GENERATION: u32 = 0x00ff_ffff;
+
     const EMPTY: Self = Self {
         owner: 0,
         entries: [None; MAX_HANDLES],
@@ -389,12 +412,14 @@ impl HandleSpace {
         let slot = self
             .entries
             .iter()
-            .position(Option::is_none)
+            .enumerate()
+            .find_map(|(slot, entry)| {
+                (entry.is_none() && self.generations[slot] < Self::MAX_GENERATION).then_some(slot)
+            })
             .ok_or(Error::HandleTableFull)?;
-        let mut generation = self.generations[slot].wrapping_add(1) & 0x00ff_ffff;
-        if generation == 0 {
-            generation = 1;
-        }
+        // Selection above proves this addition fits the ABI generation field.
+        // Preserve exhausted counters on remove and retire them permanently.
+        let generation = self.generations[slot] + 1;
         self.generations[slot] = generation;
         self.entries[slot] = Some(HandleEntry {
             object,
@@ -604,14 +629,27 @@ impl State {
             .dequeue()
     }
 
-    fn peek(&self, receiver: u64) -> Result<Message, Error> {
+    fn peek(&self, receiver: u64) -> Result<(Message, u64), Error> {
         let endpoint = self.legacy_endpoint(receiver).ok_or(Error::NoEndpoint)?;
         endpoint
             .messages
             .first()
             .copied()
             .filter(|_| endpoint.length != 0)
+            .map(|message| (message, endpoint.dequeued))
             .ok_or(Error::QueueEmpty)
+    }
+
+    /// Dequeue the head only if it is still the message `peek` returned
+    /// with `serial`; otherwise another receiver took it (`QueueEmpty`).
+    fn receive_if(&mut self, receiver: u64, serial: u64) -> Result<Message, Error> {
+        let endpoint = self
+            .legacy_endpoint_mut(receiver)
+            .ok_or(Error::NoEndpoint)?;
+        if endpoint.dequeued != serial {
+            return Err(Error::QueueEmpty);
+        }
+        endpoint.dequeue()
     }
 
     fn create_endpoint_object(&mut self, owner: u64) -> Result<Handle, Error> {
@@ -1598,15 +1636,61 @@ pub fn unregister(owner: u64) -> Result<(), Error> {
 }
 
 pub fn send(sender: u64, receiver: u64, payload: &[u8]) -> Result<(), Error> {
-    STATE.lock().send(sender, receiver, payload)
+    let wake = {
+        let mut state = STATE.lock();
+        state.send(sender, receiver, payload)?;
+        state
+            .legacy_endpoint_mut(receiver)
+            .and_then(|endpoint| endpoint.waiter.take())
+    };
+    // Woken with STATE released, so the scheduler lock is never taken under
+    // the IPC lock.
+    if let Some(task_id) = wake {
+        let _ = task::signal_event(task_id);
+    }
+    Ok(())
 }
 
-pub fn receive(receiver: u64) -> Result<Message, Error> {
-    STATE.lock().receive(receiver)
+/// Register `task` to be woken by the next message to `owner`'s pid mailbox.
+/// Returns the other task already registered, if there is one, without
+/// replacing it.
+pub fn register_message_waiter(owner: u64, task_id: TaskId) -> Result<Option<TaskId>, Error> {
+    let mut state = STATE.lock();
+    let endpoint = state.legacy_endpoint_mut(owner).ok_or(Error::NoEndpoint)?;
+    match endpoint.waiter {
+        Some(other) if other != task_id => Ok(Some(other)),
+        _ => {
+            endpoint.waiter = Some(task_id);
+            Ok(None)
+        }
+    }
 }
 
-pub fn peek(receiver: u64) -> Result<Message, Error> {
+/// Drop the registration of `task` on `owner`'s mailbox, if it is the one
+/// registered.
+pub fn clear_message_waiter(owner: u64, task_id: TaskId) {
+    let mut state = STATE.lock();
+    if let Some(endpoint) = state.legacy_endpoint_mut(owner) {
+        if endpoint.waiter == Some(task_id) {
+            endpoint.waiter = None;
+        }
+    }
+}
+
+/// Whether `owner`'s pid mailbox holds a message.
+pub fn message_pending(owner: u64) -> bool {
+    STATE.lock().peek(owner).is_ok()
+}
+
+/// The head message and the endpoint's dequeue serial, for [`receive_if`].
+pub fn peek(receiver: u64) -> Result<(Message, u64), Error> {
     STATE.lock().peek(receiver)
+}
+
+/// Dequeue the message [`peek`] returned with `serial`, if no other
+/// receiver has dequeued since.
+pub fn receive_if(receiver: u64, serial: u64) -> Result<Message, Error> {
+    STATE.lock().receive_if(receiver, serial)
 }
 
 /// Stage 8.1: create a kernel-owned IPC endpoint object and install an opaque
@@ -2100,6 +2184,26 @@ pub fn self_test() -> bool {
             || message.payload() != payload
             || state.receive(RECEIVER) != Err(Error::QueueEmpty)
             || state.send(99, RECEIVER, payload) != Err(Error::NoEndpoint)
+        {
+            return None;
+        }
+        // Two receivers peek the same head; the first dequeues it. The
+        // second's stale serial must neither take a message nor drop the
+        // next one, and a fresh peek must see that next message.
+        state.send(SENDER, RECEIVER, b"first").ok()?;
+        state.send(SENDER, RECEIVER, b"second").ok()?;
+        let (peeked, serial) = state.peek(RECEIVER).ok()?;
+        let taken = state.receive_if(RECEIVER, serial).ok()?;
+        if peeked.payload() != b"first"
+            || taken.payload() != b"first"
+            || state.receive_if(RECEIVER, serial) != Err(Error::QueueEmpty)
+        {
+            return None;
+        }
+        let (next, serial) = state.peek(RECEIVER).ok()?;
+        if next.payload() != b"second"
+            || state.receive_if(RECEIVER, serial).ok()?.payload() != b"second"
+            || state.peek(RECEIVER).err() != Some(Error::QueueEmpty)
             || state.unregister(SENDER).is_err()
             || state.unregister(SENDER) != Err(Error::NoEndpoint)
         {
@@ -2204,6 +2308,11 @@ pub fn handle_object_self_test() -> bool {
 /// endpoint/object/handle behind. This proves the production lock/state path,
 /// not only the local pure-State self-test.
 pub fn stage8_1_runtime_probe() -> bool {
+    #[cfg(feature = "qemu-test")]
+    if !generation_tests::run() {
+        return false;
+    }
+
     const PROBE_OWNER: u64 = u64::MAX - 8;
 
     // Exercise the production public API rather than reaching into State

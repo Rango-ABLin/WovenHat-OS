@@ -20,7 +20,7 @@ mod block;
 mod wfs;
 
 use block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
-use wfs::{Error, Volume, MAX_FILE_SIZE};
+use wfs::{Error, MAX_FILE_SIZE, Volume};
 
 const SECTORS: usize = 192;
 const INODES: u32 = 32;
@@ -43,8 +43,12 @@ struct CrashDisk {
 
 impl CrashDisk {
     fn blank() -> Self {
+        Self::with_sectors(SECTORS)
+    }
+
+    fn with_sectors(sectors: usize) -> Self {
         Self {
-            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; SECTORS])),
+            image: Rc::new(RefCell::new(vec![[0; SECTOR_SIZE]; sectors])),
             budget: Rc::new(Cell::new(None)),
             accepted: Rc::new(Cell::new(0)),
         }
@@ -119,6 +123,12 @@ fn formatted() -> CrashDisk {
     disk
 }
 
+fn formatted_small() -> CrashDisk {
+    let disk = CrashDisk::with_sectors(48);
+    Volume::format(disk.clone(), 8).expect("small format");
+    disk
+}
+
 /// Writes performed by `op` when nothing fails.
 fn write_count<F>(base: &CrashDisk, op: F) -> usize
 where
@@ -148,6 +158,65 @@ fn format_produces_a_consistent_mountable_volume() {
     assert_eq!(sb.root_inode, 1);
     assert!(sb.data_start < sb.total_blocks);
     assert_eq!(volume.read_dir(1).expect("root").count(), 0);
+}
+
+#[test]
+fn full_data_region_rejects_write_without_partial_commit() {
+    let disk = formatted_small();
+    let mut volume = mount_consistent(&disk, "small-volume setup");
+    let first = volume
+        .create(1, "first.bin", 0o644, 1)
+        .expect("first file");
+    let first_payload = vec![0x31_u8; SECTOR_SIZE * 7];
+    volume
+        .write_file(first, &first_payload, 2)
+        .expect("fill first file");
+
+    let second = volume
+        .create(1, "second.bin", 0o644, 3)
+        .expect("second file");
+    volume
+        .write_file(second, &[0x42_u8; SECTOR_SIZE], 4)
+        .expect("consume final data block");
+
+    let third = volume
+        .create(1, "third.bin", 0o644, 5)
+        .expect("third file metadata still fits");
+    assert_eq!(
+        volume.write_file(third, &[0x53_u8; SECTOR_SIZE * 2], 6),
+        Err(Error::NoSpace)
+    );
+    drop(volume);
+
+    let mut recovered = mount_consistent(&disk, "full-volume remount");
+    let first_entry = recovered.lookup(1, "first.bin").expect("first entry");
+    let mut output = vec![0_u8; MAX_FILE_SIZE];
+    let read = recovered
+        .read_file(first_entry.inode, &mut output)
+        .expect("first file remains readable");
+    assert_eq!(&output[..read], first_payload.as_slice());
+    let third_entry = recovered.lookup(1, "third.bin").expect("third entry");
+    let third_node = recovered.inode(third_entry.inode).expect("third inode");
+    assert_eq!(third_node.size, 0, "failed write published partial size");
+    recovered.check().expect("full volume remains consistent");
+}
+
+#[test]
+fn directory_rename_rejects_descendant_cycles_and_allows_same_path() {
+    let disk = formatted();
+    let mut volume = mount_consistent(&disk, "cycle setup");
+    volume.mkdir_path("/parent", 0o755, 1).expect("parent");
+    volume.mkdir_path("/parent/child", 0o755, 2).expect("child");
+
+    assert_eq!(
+        volume.rename_path("/parent", "/parent/child/moved", 3),
+        Err(Error::InvalidName)
+    );
+    volume
+        .rename_path("/parent", "/parent", 4)
+        .expect("same-path rename");
+    assert!(volume.resolve_path("/parent/child").is_ok());
+    mount_consistent(&disk, "cycle rejection");
 }
 
 #[test]
@@ -183,7 +252,10 @@ fn create_is_atomic_across_every_crash_point() {
     let writes = write_count(&base, |volume| {
         volume.create(1, "report.txt", 0o644, 100).expect("create");
     });
-    assert!(writes > 2, "expected a multi-sector operation, got {writes}");
+    assert!(
+        writes > 2,
+        "expected a multi-sector operation, got {writes}"
+    );
 
     for cut in 0..=writes {
         let crashing = base.fork(Some(cut));
@@ -260,6 +332,68 @@ fn write_is_atomic_across_every_crash_point() {
 }
 
 #[test]
+fn randomized_crash_schedule_keeps_file_contents_atomic() {
+    let original = vec![0x11_u8; 1536];
+    let replacement = (0..1536_u32)
+        .map(|index| (index.wrapping_mul(37) % 251) as u8)
+        .collect::<Vec<_>>();
+
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let inode = volume.create(1, "random.bin", 0o644, 100).expect("create");
+        volume
+            .write_file(inode, &original, 100)
+            .expect("initial write");
+        inode
+    };
+    let writes = write_count(&base, |volume| {
+        volume
+            .write_file(inode, &replacement, 200)
+            .expect("replacement write");
+    });
+    assert!(writes > 3, "expected a multi-sector write, got {writes}");
+
+    // Deterministic xorshift scheduling keeps this reproducible while
+    // exercising a different cut order from the exhaustive neighboring test.
+    let mut seed = 0x9e37_79b9_u32;
+    for sample in 0..64 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let cut = (seed as usize) % (writes + 1);
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount before write");
+        let _ = volume.write_file(inode, &replacement, 200);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered =
+            mount_consistent(&settled, &format!("random sample {sample}, cut {cut}"));
+        let mut output = vec![0_u8; MAX_FILE_SIZE];
+        let read = recovered
+            .read_file(inode, &mut output)
+            .expect("recovered read");
+        assert_eq!(read, original.len(), "random sample {sample}: partial size");
+        let contents = &output[..read];
+        assert!(
+            contents == original.as_slice() || contents == replacement.as_slice(),
+            "random sample {sample}, cut {cut}: torn file contents"
+        );
+
+        let remounted = settled.fork(None);
+        let mut second = mount_consistent(&remounted, &format!("random replay {sample}"));
+        let mut replay = vec![0_u8; MAX_FILE_SIZE];
+        let replay_read = second.read_file(inode, &mut replay).expect("replay read");
+        assert_eq!(
+            &replay[..replay_read],
+            contents,
+            "random replay {sample}: changed data"
+        );
+    }
+}
+
+#[test]
 fn unlink_is_atomic_across_every_crash_point() {
     let payload = [7u8; 900];
     let base = formatted();
@@ -287,9 +421,9 @@ fn unlink_is_atomic_across_every_crash_point() {
             Ok(entry) => {
                 // Still linked, so its contents must still be intact.
                 let mut out = vec![0u8; MAX_FILE_SIZE];
-                let read = recovered.read_file(entry.inode, &mut out).unwrap_or_else(|e| {
-                    panic!("crash at {cut}: surviving file unreadable: {e:?}")
-                });
+                let read = recovered
+                    .read_file(entry.inode, &mut out)
+                    .unwrap_or_else(|e| panic!("crash at {cut}: surviving file unreadable: {e:?}"));
                 assert_eq!(&out[..read], &payload[..], "crash at {cut}: torn survivor");
             }
             Err(Error::NotFound) => {}
@@ -331,6 +465,130 @@ fn replay_is_idempotent() {
             "crash at {cut}: mounting again changed the image, so replay is not idempotent"
         );
     }
+}
+
+#[test]
+fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
+    // The existing crash tests cut power during a transaction. This second
+    // dimension cuts power AGAIN during mount-time journal replay, including
+    // after some home-location sectors were restored but before retirement.
+    let payload: Vec<u8> = (0..1500u32).map(|index| (index % 241) as u8).collect();
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount baseline");
+        volume.create(1, "recover.bin", 0o644, 1).expect("create");
+        volume.lookup(1, "recover.bin").expect("lookup").inode
+    };
+    let full_writes = write_count(&base, |volume| {
+        volume.write_file(inode, &payload, 2).expect("write");
+    });
+    assert!(full_writes > 3, "expected a journaled multi-sector write");
+
+    // Refuse the final journal-retirement write: commit, home writes and
+    // checkpoint are on disk, but replay still sees the committed descriptor.
+    let pending = base.fork(Some(full_writes - 1));
+    let mut volume = Volume::mount(pending.clone()).expect("mount before write");
+    assert_eq!(
+        volume.write_file(inode, &payload, 2),
+        Err(Error::Device),
+        "the simulated final write must fail"
+    );
+    drop(volume);
+
+    let replay_probe = pending.fork(None);
+    Volume::mount(replay_probe.clone()).expect("uninterrupted recovery");
+    let replay_writes = replay_probe.writes();
+    assert!(replay_writes > 1, "expected home writes and journal retirement");
+
+    for cut in 0..=replay_writes {
+        let interrupted = pending.fork(Some(cut));
+        let first = Volume::mount(interrupted.clone());
+        if cut < replay_writes {
+            assert!(
+                matches!(&first, Err(Error::Device)),
+                "replay cut at {cut} unexpectedly succeeded"
+            );
+        } else {
+            assert!(first.is_ok(), "replay with all writes allowed failed");
+        }
+        drop(first);
+
+        // The second recovery gets a fresh power-on write budget.
+        let settled = interrupted.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("replay cut at {cut}"));
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let count = recovered.read_file(inode, &mut output).expect("recovered read");
+        assert_eq!(
+            &output[..count],
+            &payload[..],
+            "replay cut at {cut} lost committed data"
+        );
+        drop(recovered);
+
+        let after_recovery = settled.sectors();
+        Volume::mount(settled.clone()).expect("idempotent third mount");
+        assert_eq!(
+            settled.sectors(),
+            after_recovery,
+            "replay cut at {cut} changed disk on a subsequent mount"
+        );
+    }
+}
+
+#[test]
+fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
+    // Exercise the real native directory tree and on-disk data, not a VFS
+    // cache. Every step is followed by a fresh mount and a full tree check.
+    let disk = formatted();
+    let payload: Vec<u8> = (0..1536u32).map(|n| (n % 239) as u8).collect();
+    {
+        let mut volume = Volume::mount(disk.clone()).expect("initial mount");
+        volume.mkdir_path("/docs", 0o755, 1).expect("create directory");
+        volume.mkdir_path("/docs/archive", 0o755, 2).expect("create nested directory");
+        let inode = volume
+            .create_path("/docs/archive/record.bin", 0o644, 3)
+            .expect("create nested file");
+        volume.write_file(inode, &payload, 4).expect("write contents");
+    }
+
+    for cycle in 0..5 {
+        let mut volume = mount_consistent(&disk, &format!("remount cycle {cycle}"));
+        let inode = volume
+            .resolve_path("/docs/archive/record.bin")
+            .expect("persistent nested path");
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let len = volume.read_file(inode, &mut output).expect("persistent contents");
+        assert_eq!(&output[..len], &payload[..], "remount cycle {cycle}");
+    }
+
+    {
+        let mut volume = mount_consistent(&disk, "before rename");
+        volume
+            .rename_path("/docs/archive/record.bin", "/docs/archive/renamed.bin", 5)
+            .expect("rename file");
+    }
+    {
+        let mut volume = mount_consistent(&disk, "after rename");
+        assert_eq!(
+            volume.resolve_path("/docs/archive/record.bin"),
+            Err(Error::NotFound)
+        );
+        let inode = volume.resolve_path("/docs/archive/renamed.bin").expect("renamed file");
+        let mut output = vec![0u8; MAX_FILE_SIZE];
+        let len = volume.read_file(inode, &mut output).expect("renamed contents");
+        assert_eq!(&output[..len], &payload[..]);
+        volume.unlink_path("/docs/archive/renamed.bin", 6).expect("unlink");
+    }
+    {
+        let mut volume = mount_consistent(&disk, "after unlink");
+        assert_eq!(
+            volume.resolve_path("/docs/archive/renamed.bin"),
+            Err(Error::NotFound)
+        );
+        volume.unlink_path("/docs/archive", 7).expect("remove empty directory");
+    }
+    let mut volume = mount_consistent(&disk, "final remount");
+    assert_eq!(volume.resolve_path("/docs/archive"), Err(Error::NotFound));
 }
 
 #[test]

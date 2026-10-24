@@ -6,5 +6,14 @@ edition = "2024"
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+# The same audited, freestanding SHA-256 the kernel uses for boot
+# measurement; software-only so it needs no CPU feature detection.
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+# Same versions as kernel/Cargo.toml's WPA2 PBKDF2-HMAC-SHA1 use, here for
+# PBKDF2-HMAC-SHA256 account PIN hashing (see the `accounts` module).
+hmac = { version = "0.12", default-features = false }
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+
 [lints.rust]
 warnings = "deny"

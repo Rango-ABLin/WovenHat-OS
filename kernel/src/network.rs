@@ -70,7 +70,6 @@ pub fn stage14_2_runtime_ipv6_self_test() -> bool {
         ])
 }
 
-
 #[cfg(feature = "stage14-2-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ipv6Prefix {
@@ -84,7 +83,10 @@ impl Ipv6Prefix {
         if prefix_len > 128 {
             return None;
         }
-        Some(Self { address, prefix_len })
+        Some(Self {
+            address,
+            prefix_len,
+        })
     }
 
     pub const fn is_unspecified(&self) -> bool {
@@ -152,8 +154,7 @@ impl Ipv6Address {
     /// RFC 4291 solicited-node multicast address for Neighbor Discovery.
     pub const fn solicited_node_multicast(self) -> Self {
         Self([
-            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, self.0[13], self.0[14],
-            self.0[15],
+            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, self.0[13], self.0[14], self.0[15],
         ])
     }
 }
@@ -201,9 +202,7 @@ fn valid_neighbor_options(mut bytes: &[u8]) -> bool {
 /// parser only accepts types 133–136, code zero, fixed-body lengths, and
 /// complete non-zero-length options.
 #[cfg(feature = "stage14-2-test")]
-pub fn parse_icmpv6_neighbor_discovery(
-    packet: &[u8],
-) -> Option<NeighborDiscoveryMessage<'_>> {
+pub fn parse_icmpv6_neighbor_discovery(packet: &[u8]) -> Option<NeighborDiscoveryMessage<'_>> {
     if packet.len() > 1024 || packet.len() < 2 {
         return None;
     }
@@ -276,12 +275,7 @@ impl RouterAdvertisementState {
         }
     }
 
-    pub fn apply(
-        &mut self,
-        router: Ipv6Address,
-        packet: &[u8],
-        now: u64,
-    ) -> bool {
+    pub fn apply(&mut self, router: Ipv6Address, packet: &[u8], now: u64) -> bool {
         let Some(message) = parse_icmpv6_neighbor_discovery(packet) else {
             return false;
         };
@@ -305,7 +299,8 @@ impl RouterAdvertisementState {
             let option_len = options[1] as usize * 8;
             if options[0] == 3 && option_len == 32 {
                 let prefix_len = options[2];
-                let valid = u32::from_be_bytes([options[4], options[5], options[6], options[7]]) as u64;
+                let valid =
+                    u32::from_be_bytes([options[4], options[5], options[6], options[7]]) as u64;
                 let preferred =
                     u32::from_be_bytes([options[8], options[9], options[10], options[11]]) as u64;
                 if preferred > valid {
@@ -346,9 +341,7 @@ pub fn stage14_2_router_advertisement_state_self_test() -> bool {
     packet[19] = 0xc0;
     packet[20..24].copy_from_slice(&120u32.to_be_bytes());
     packet[24..28].copy_from_slice(&60u32.to_be_bytes());
-    packet[32..48].copy_from_slice(&[
-        0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ]);
+    packet[32..48].copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
     let mut state = RouterAdvertisementState::new();
     if !state.apply(router, &packet, 100)
@@ -380,8 +373,7 @@ pub fn stage14_2_router_advertisement_state_self_test() -> bool {
         return false;
     }
 
-    let global_router =
-        Ipv6Address([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    let global_router = Ipv6Address([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     if state.apply(global_router, &packet, 300) {
         return false;
     }
@@ -399,14 +391,13 @@ pub fn stage14_2_router_advertisement_state_self_test() -> bool {
 #[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_ipv6_foundation_self_test() -> bool {
     let link_local = Ipv6Prefix::new(
-        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1],
+        [
+            0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1,
+        ],
         64,
     );
     let unspecified = Ipv6Prefix::new([0; 16], 128);
-    let multicast = Ipv6Prefix::new(
-        [0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        128,
-    );
+    let multicast = Ipv6Prefix::new([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 128);
 
     matches!(link_local, Some(prefix) if prefix.is_link_local() && !prefix.is_multicast())
         && matches!(unspecified, Some(prefix) if prefix.is_unspecified() && !prefix.is_link_local())
@@ -419,16 +410,12 @@ pub fn stage14_2_ipv6_neighbor_foundation_self_test() -> bool {
     let address = Ipv6Address([
         0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0, 0, 0xff, 0xfe, 0, 0, 1,
     ]);
-    let link_local = Ipv6Prefix::new(
-        [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        64,
-    );
+    let link_local = Ipv6Prefix::new([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 64);
     let solicited = address.solicited_node_multicast();
     address.is_link_local()
         && !address.is_multicast()
         && link_local.is_some_and(|prefix| prefix.contains(address.0))
-        && solicited
-            == Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0, 1])
+        && solicited == Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0, 1])
         && solicited.is_multicast()
 }
 
@@ -519,7 +506,8 @@ pub fn verify_icmpv6_checksum(
 ) -> bool {
     packet.len() >= 4
         && packet.len() <= 1024
-        && u16::from_be_bytes([packet[2], packet[3]]) == icmpv6_checksum(source, destination, packet)
+        && u16::from_be_bytes([packet[2], packet[3]])
+            == icmpv6_checksum(source, destination, packet)
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -556,7 +544,8 @@ fn parse_validated_icmpv6_neighbor_discovery(
             None
         }
         NeighborDiscoveryKind::NeighborSolicitation
-            if source.is_unspecified() && destination != message.target?.solicited_node_multicast() =>
+            if source.is_unspecified()
+                && destination != message.target?.solicited_node_multicast() =>
         {
             None
         }
@@ -575,7 +564,8 @@ pub fn stage14_2_ndp_ingress_hardening_self_test() -> bool {
     advertisement[8..24].copy_from_slice(&peer.0);
     finish_icmpv6_checksum(peer, destination, &mut advertisement);
     if parse_validated_icmpv6_neighbor_discovery(peer, destination, 255, &advertisement).is_none()
-        || parse_validated_icmpv6_neighbor_discovery(peer, destination, 64, &advertisement).is_some()
+        || parse_validated_icmpv6_neighbor_discovery(peer, destination, 64, &advertisement)
+            .is_some()
     {
         return false;
     }
@@ -585,13 +575,8 @@ pub fn stage14_2_ndp_ingress_hardening_self_test() -> bool {
     solicitation[0] = 135;
     solicitation[8..24].copy_from_slice(&peer.0);
     finish_icmpv6_checksum(unspecified, destination, &mut solicitation);
-    if parse_validated_icmpv6_neighbor_discovery(
-        unspecified,
-        destination,
-        255,
-        &solicitation,
-    )
-    .is_none()
+    if parse_validated_icmpv6_neighbor_discovery(unspecified, destination, 255, &solicitation)
+        .is_none()
     {
         return false;
     }
@@ -670,16 +655,17 @@ impl DuplicateAddressDetection {
         destination: Ipv6Address,
         packet: &[u8],
     ) -> bool {
-        let Some(message) =
-            parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
+        let Some(message) = parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
         else {
             return false;
         };
-        if self.active && matches!(
-            message.kind,
-            NeighborDiscoveryKind::NeighborSolicitation
-                | NeighborDiscoveryKind::NeighborAdvertisement
-        ) && message.target == Some(self.tentative)
+        if self.active
+            && matches!(
+                message.kind,
+                NeighborDiscoveryKind::NeighborSolicitation
+                    | NeighborDiscoveryKind::NeighborAdvertisement
+            )
+            && message.target == Some(self.tentative)
         {
             self.conflict = true;
             self.active = false;
@@ -706,8 +692,7 @@ impl Ipv6NeighborEntry {
         now: u64,
         reachable_lifetime: u64,
     ) -> bool {
-        let Some(message) =
-            parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
+        let Some(message) = parse_checked_icmpv6_neighbor_discovery(source, destination, packet)
         else {
             return false;
         };
@@ -736,11 +721,7 @@ impl Ipv6NeighborEntry {
 }
 
 #[cfg(feature = "stage14-2-test")]
-fn finish_icmpv6_checksum(
-    source: Ipv6Address,
-    destination: Ipv6Address,
-    packet: &mut [u8],
-) {
+fn finish_icmpv6_checksum(source: Ipv6Address, destination: Ipv6Address, packet: &mut [u8]) {
     packet[2] = 0;
     packet[3] = 0;
     let checksum = icmpv6_checksum(source, destination, packet);
@@ -862,9 +843,7 @@ impl SlaacAddress {
         }
         if now >= self.valid_until {
             self.state = SlaacAddressState::Expired;
-        } else if now >= self.preferred_until
-            && self.state != SlaacAddressState::Tentative
-        {
+        } else if now >= self.preferred_until && self.state != SlaacAddressState::Tentative {
             self.state = SlaacAddressState::Deprecated;
         }
     }
@@ -882,16 +861,16 @@ pub fn stage14_2_slaac_self_test() -> bool {
         return false;
     };
     if address.address.0
-        != [0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1]
+        != [
+            0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 1,
+        ]
         || address.state != SlaacAddressState::Tentative
     {
         return false;
     }
 
     let clean_dad = DuplicateAddressDetection::new(address.address);
-    if !address.complete_dad(clean_dad, 120)
-        || address.state != SlaacAddressState::Preferred
-    {
+    if !address.complete_dad(clean_dad, 120) || address.state != SlaacAddressState::Preferred {
         return false;
     }
     address.expire(160);
@@ -908,9 +887,7 @@ pub fn stage14_2_slaac_self_test() -> bool {
     };
     let mut conflict = DuplicateAddressDetection::new(duplicate.address);
     conflict.conflict = true;
-    if !duplicate.complete_dad(conflict, 320)
-        || duplicate.state != SlaacAddressState::Duplicate
-    {
+    if !duplicate.complete_dad(conflict, 320) || duplicate.state != SlaacAddressState::Duplicate {
         return false;
     }
 
@@ -1013,7 +990,10 @@ pub fn parse_dhcpv6_message(packet: &[u8]) -> Option<Dhcpv6Message<'_>> {
 }
 
 #[cfg(feature = "stage14-2-test")]
-pub fn dhcpv6_find_option<'a>(message: &'a Dhcpv6Message<'a>, code: u16) -> Option<Dhcpv6Option<'a>> {
+pub fn dhcpv6_find_option<'a>(
+    message: &'a Dhcpv6Message<'a>,
+    code: u16,
+) -> Option<Dhcpv6Option<'a>> {
     let mut bytes = message.options;
     while !bytes.is_empty() {
         let option_code = u16::from_be_bytes([bytes[0], bytes[1]]);
@@ -1055,8 +1035,7 @@ pub fn write_dhcpv6_message(
 #[cfg(feature = "stage14-2-test")]
 pub fn stage14_2_dhcpv6_protocol_self_test() -> bool {
     let options = [
-        0x00, 0x01, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef,
-        0x00, 0x06, 0x00, 0x02, 0x00, 0x17,
+        0x00, 0x01, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef, 0x00, 0x06, 0x00, 0x02, 0x00, 0x17,
     ];
     let mut packet = [0u8; 32];
     let Some(length) = write_dhcpv6_message(
@@ -1072,7 +1051,8 @@ pub fn stage14_2_dhcpv6_protocol_self_test() -> bool {
     };
     if message.message_type != Dhcpv6MessageType::Solicit
         || message.transaction_id != 0x00a1_b2c3
-        || dhcpv6_find_option(&message, 1).map(|option| option.value) != Some(&[0xde, 0xad, 0xbe, 0xef][..])
+        || dhcpv6_find_option(&message, 1).map(|option| option.value)
+            != Some(&[0xde, 0xad, 0xbe, 0xef][..])
         || dhcpv6_find_option(&message, 6).map(|option| option.value) != Some(&[0x00, 0x17][..])
         || DHCPV6_CLIENT_PORT != 546
         || DHCPV6_SERVER_PORT != 547
@@ -1084,13 +1064,7 @@ pub fn stage14_2_dhcpv6_protocol_self_test() -> bool {
     let unsupported = [12, 0, 0, 1];
     parse_dhcpv6_message(&truncated).is_none()
         && parse_dhcpv6_message(&unsupported).is_none()
-        && write_dhcpv6_message(
-            &mut packet,
-            Dhcpv6MessageType::Request,
-            0x0100_0000,
-            &[],
-        )
-        .is_none()
+        && write_dhcpv6_message(&mut packet, Dhcpv6MessageType::Request, 0x0100_0000, &[]).is_none()
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -1215,7 +1189,10 @@ impl Dhcpv6Client {
                 let Some(server) = dhcpv6_find_option(&message, DHCPV6_OPTION_SERVER_ID) else {
                     return false;
                 };
-                if self.server_id.is_none_or(|expected| expected.as_slice() != server.value) {
+                if self
+                    .server_id
+                    .is_none_or(|expected| expected.as_slice() != server.value)
+                {
                     return false;
                 }
                 self.state = Dhcpv6ClientState::Bound;
@@ -1258,7 +1235,8 @@ pub fn stage14_2_dhcpv6_client_self_test() -> bool {
     }
 
     let mut options = [0u8; 64];
-    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id) else {
+    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id)
+    else {
         return false;
     };
     let Some(server_len) = write_dhcpv6_option(
@@ -1389,11 +1367,16 @@ impl Ipv6InterfaceState {
                 }
             }
             NeighborDiscoveryKind::NeighborAdvertisement => {
-                if !self.neighbor.observe_checked(source, destination, packet, now, 30) {
+                if !self
+                    .neighbor
+                    .observe_checked(source, destination, packet, now, 30)
+                {
                     return Ipv6IngressEvent::Ignored;
                 }
                 let _ = self.dad.observe_checked(source, destination, packet);
-                if self.dad.conflict { Ipv6IngressEvent::DuplicateAddress } else {
+                if self.dad.conflict {
+                    Ipv6IngressEvent::DuplicateAddress
+                } else {
                     Ipv6IngressEvent::NeighborAdvertisement
                 }
             }
@@ -1401,7 +1384,9 @@ impl Ipv6InterfaceState {
                 if !self.dad.observe_checked(source, destination, packet) {
                     return Ipv6IngressEvent::Ignored;
                 }
-                if self.dad.conflict { Ipv6IngressEvent::DuplicateAddress } else {
+                if self.dad.conflict {
+                    Ipv6IngressEvent::DuplicateAddress
+                } else {
                     Ipv6IngressEvent::NeighborSolicitation
                 }
             }
@@ -1424,7 +1409,9 @@ pub fn stage14_2_ipv6_interface_ingress_self_test() -> bool {
     if state.receive_icmpv6(peer, destination, &advertisement, 100)
         != Ipv6IngressEvent::NeighborAdvertisement
         || state.neighbor.state != Ipv6NeighborState::Reachable
-    { return false; }
+    {
+        return false;
+    }
     let mut tampered = advertisement;
     tampered[7] ^= 1;
     if state.receive_icmpv6(peer, destination, &tampered, 101) != Ipv6IngressEvent::Ignored {
@@ -1436,7 +1423,10 @@ pub fn stage14_2_ipv6_interface_ingress_self_test() -> bool {
     solicitation[8..24].copy_from_slice(&peer.0);
     finish_icmpv6_checksum(unspecified, destination, &mut solicitation);
     if state.receive_icmpv6(unspecified, destination, &solicitation, 102)
-        != Ipv6IngressEvent::NeighborSolicitation { return false; }
+        != Ipv6IngressEvent::NeighborSolicitation
+    {
+        return false;
+    }
     state.dad.arm();
     state.receive_icmpv6(unspecified, destination, &solicitation, 103)
         == Ipv6IngressEvent::DuplicateAddress
@@ -1546,11 +1536,7 @@ fn parse_dhcpv6_lease(message: &Dhcpv6Message<'_>, now: u64) -> Option<Dhcpv6Lea
 
 #[cfg(feature = "stage14-2-test")]
 impl Dhcpv6Client {
-    pub fn accept_reply_lease(
-        &mut self,
-        packet: &[u8],
-        now: u64,
-    ) -> Option<Dhcpv6LeaseBinding> {
+    pub fn accept_reply_lease(&mut self, packet: &[u8], now: u64) -> Option<Dhcpv6LeaseBinding> {
         if self.state != Dhcpv6ClientState::Requesting {
             return None;
         }
@@ -1562,7 +1548,10 @@ impl Dhcpv6Client {
             return None;
         }
         let server = dhcpv6_find_option(&message, DHCPV6_OPTION_SERVER_ID)?;
-        if self.server_id.is_none_or(|expected| expected.as_slice() != server.value) {
+        if self
+            .server_id
+            .is_none_or(|expected| expected.as_slice() != server.value)
+        {
             return None;
         }
         let lease = parse_dhcpv6_lease(&message, now)?;
@@ -1580,7 +1569,9 @@ impl Dhcpv6Client {
 pub fn stage14_2_dhcpv6_lease_self_test() -> bool {
     let client_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 1];
     let server_id = [0, 3, 0, 1, 0x02, 0, 0, 0, 0, 2];
-    let address = [0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 9];
+    let address = [
+        0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0x02, 0, 0xff, 0xfe, 0, 0, 0, 9,
+    ];
     let transaction_id = 0x0065_4321;
 
     let mut iaaddr = [0u8; 28];
@@ -1597,7 +1588,8 @@ pub fn stage14_2_dhcpv6_lease_self_test() -> bool {
     ia_na_value[12..40].copy_from_slice(&iaaddr);
 
     let mut options = [0u8; 96];
-    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id) else {
+    let Some(client_len) = write_dhcpv6_option(&mut options, DHCPV6_OPTION_CLIENT_ID, &client_id)
+    else {
         return false;
     };
     let Some(server_len) = write_dhcpv6_option(
@@ -1676,7 +1668,9 @@ pub fn stage14_2_dhcpv6_lease_self_test() -> bool {
     };
     invalid_client.state = Dhcpv6ClientState::Requesting;
     invalid_client.server_id = Dhcpv6Duid::new(&server_id);
-    invalid_client.accept_reply_lease(&packet[..invalid_len], 100).is_none()
+    invalid_client
+        .accept_reply_lease(&packet[..invalid_len], 100)
+        .is_none()
 }
 
 pub struct VirtioSmolDevice {
@@ -1713,7 +1707,8 @@ impl TxToken for WovenTxToken {
         if crate::firewall_policy::evaluate_ethernet_frame(
             &frame[..usable],
             crate::firewall_policy::FirewallDirection::Outbound,
-        ) == crate::firewall_policy::FrameDecision::Deny {
+        ) == crate::firewall_policy::FrameDecision::Deny
+        {
             return result;
         }
         let _ = virtio_net::transmit(&frame[..usable]);
@@ -1737,7 +1732,8 @@ impl Device for VirtioSmolDevice {
         if crate::firewall_policy::evaluate_ethernet_frame(
             &self.rx[..len],
             crate::firewall_policy::FirewallDirection::Inbound,
-        ) == crate::firewall_policy::FrameDecision::Deny {
+        ) == crate::firewall_policy::FrameDecision::Deny
+        {
             return None;
         }
         Some((
@@ -1865,7 +1861,8 @@ mod wifi_transport {
                     if crate::firewall_policy::evaluate_ethernet_frame(
                         &d.rx[..len],
                         crate::firewall_policy::FirewallDirection::Inbound,
-                    ) == crate::firewall_policy::FrameDecision::Deny {
+                    ) == crate::firewall_policy::FrameDecision::Deny
+                    {
                         return None;
                     }
                     Some((
@@ -3015,7 +3012,9 @@ pub fn endpoint_from_packed(value: u64) -> Result<IpEndpoint, SocketError> {
         IpAddress::Ipv4(Ipv4Address::from_octets(ip.to_be_bytes())),
         port,
     );
-    valid_socket_endpoint(endpoint).then_some(endpoint).ok_or(SocketError::Address)
+    valid_socket_endpoint(endpoint)
+        .then_some(endpoint)
+        .ok_or(SocketError::Address)
 }
 
 fn valid_socket_endpoint(endpoint: IpEndpoint) -> bool {
@@ -3094,10 +3093,7 @@ impl SocketEndpointV1 {
 
 #[cfg(feature = "stage14-3-test")]
 pub fn stage14_3_socket_api_self_test() -> bool {
-    let valid = IpEndpoint::new(
-        IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 2)),
-        443,
-    );
+    let valid = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 2)), 443);
     let packed = u64::from(u32::from_be_bytes([10, 0, 2, 2])) | (443u64 << 32);
     let unspecified = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)), 443);
     let multicast = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(224, 0, 0, 1)), 443);
@@ -3127,7 +3123,6 @@ pub fn stage14_3_socket_api_self_test() -> bool {
         && multicast_ipv6.to_endpoint() == Err(SocketError::Address)
         && valid_socket_endpoint(ipv6)
 }
-
 
 #[cfg(feature = "stage14-3-test")]
 pub fn stage14_3_socket_authority_self_test() -> bool {
@@ -3298,7 +3293,9 @@ fn normalize_route_network(
                 return Err(RouteTableError::InvalidPrefix);
             }
             let value = u32::from_be_bytes(address.octets()) & prefix_mask_v4(prefix_len);
-            Ok(IpAddress::Ipv4(Ipv4Address::from_octets(value.to_be_bytes())))
+            Ok(IpAddress::Ipv4(Ipv4Address::from_octets(
+                value.to_be_bytes(),
+            )))
         }
         IpAddress::Ipv6(address) => {
             if prefix_len > 128 {
@@ -3319,7 +3316,11 @@ fn normalize_route_network(
 
 #[cfg(feature = "stage14-4-test")]
 fn prefix_mask_v4(prefix_len: u8) -> u32 {
-    if prefix_len == 0 { 0 } else { u32::MAX << (32 - prefix_len) }
+    if prefix_len == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix_len)
+    }
 }
 
 #[cfg(feature = "stage14-4-test")]
@@ -3348,25 +3349,60 @@ pub fn stage14_4_routing_table_self_test() -> bool {
     const OWNER_B: u64 = 0x144B;
     let mut table = WovenRouteTable::new();
     let gateway4 = IpAddress::Ipv4(DEFAULT_GATEWAY);
-    let default = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0, gateway4, 100).ok();
-    let broad = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 16, gateway4, 100).ok();
-    let specific = table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)), 24, gateway4, 50).ok();
+    let default = table
+        .add(
+            OWNER_A,
+            IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
+            0,
+            gateway4,
+            100,
+        )
+        .ok();
+    let broad = table
+        .add(
+            OWNER_A,
+            IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)),
+            16,
+            gateway4,
+            100,
+        )
+        .ok();
+    let specific = table
+        .add(
+            OWNER_A,
+            IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 99)),
+            24,
+            gateway4,
+            50,
+        )
+        .ok();
     let gateway6 = IpAddress::Ipv6(SmolIpv6Address::from_octets([
         0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x50, 0x54, 0, 0xff, 0xfe, 0x12, 0x34, 0x56,
     ]));
-    let ipv6 = table.add(OWNER_A, 
-        IpAddress::Ipv6(SmolIpv6Address::from_octets([
-            0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
-        ])),
-        64,
-        gateway6,
-        25,
-    ).ok();
+    let ipv6 = table
+        .add(
+            OWNER_A,
+            IpAddress::Ipv6(SmolIpv6Address::from_octets([
+                0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0, 1,
+            ])),
+            64,
+            gateway6,
+            25,
+        )
+        .ok();
 
-    let Some(default) = default else { return false; };
-    let Some(broad) = broad else { return false; };
-    let Some(specific) = specific else { return false; };
-    let Some(ipv6) = ipv6 else { return false; };
+    let Some(default) = default else {
+        return false;
+    };
+    let Some(broad) = broad else {
+        return false;
+    };
+    let Some(specific) = specific else {
+        return false;
+    };
+    let Some(ipv6) = ipv6 else {
+        return false;
+    };
     let ipv6_destination = IpAddress::Ipv6(SmolIpv6Address::from_octets([
         0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0x42,
     ]));
@@ -3376,18 +3412,35 @@ pub fn stage14_4_routing_table_self_test() -> bool {
         && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))) == Some(default)
         && table.lookup(ipv6_destination) == Some(ipv6)
         && ipv6.network == normalize_route_network(ipv6_destination, 64).ok().unwrap()
-        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 33, gateway4, 1)
-            == Err(RouteTableError::InvalidPrefix)
-        && table.add(OWNER_A, IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED), 129, gateway6, 1)
-            == Err(RouteTableError::InvalidPrefix)
-        && table.add(OWNER_A, IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)), 8, gateway6, 1)
-            == Err(RouteTableError::AddressFamily)
+        && table.add(
+            OWNER_A,
+            IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)),
+            33,
+            gateway4,
+            1,
+        ) == Err(RouteTableError::InvalidPrefix)
+        && table.add(
+            OWNER_A,
+            IpAddress::Ipv6(SmolIpv6Address::UNSPECIFIED),
+            129,
+            gateway6,
+            1,
+        ) == Err(RouteTableError::InvalidPrefix)
+        && table.add(
+            OWNER_A,
+            IpAddress::Ipv4(Ipv4Address::new(10, 0, 0, 0)),
+            8,
+            gateway6,
+            1,
+        ) == Err(RouteTableError::AddressFamily)
         && table.remove(OWNER_B, specific) == Err(RouteTableError::WrongOwner)
         && table.remove(OWNER_A, specific).is_ok()
         && table.lookup(IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))) == Some(broad)
         && table.remove(OWNER_A, specific) == Err(RouteTableError::InvalidHandle)
         && table.remove_owner_routes(OWNER_A) == 3
-        && table.lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1))).is_none()
+        && table
+            .lookup(IpAddress::Ipv4(Ipv4Address::new(192, 0, 2, 1)))
+            .is_none()
         && table.lookup(ipv6_destination).is_none()
 }
 
@@ -3402,9 +3455,10 @@ fn install_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), R
     };
     let mut installed = false;
     iface.routes_mut().update(|routes| {
-        if routes.iter().any(|existing| {
-            existing.cidr == live.cidr && existing.via_router == live.via_router
-        }) {
+        if routes
+            .iter()
+            .any(|existing| existing.cidr == live.cidr && existing.via_router == live.via_router)
+        {
             installed = true;
             return;
         }
@@ -3418,9 +3472,10 @@ fn remove_woven_route(iface: &mut Interface, route: WovenRoute) -> Result<(), Ro
     let cidr = IpCidr::new(route.network, route.prefix_len);
     let mut removed = false;
     iface.routes_mut().update(|routes| {
-        if let Some(index) = routes.iter().position(|existing| {
-            existing.cidr == cidr && existing.via_router == route.gateway
-        }) {
+        if let Some(index) = routes
+            .iter()
+            .position(|existing| existing.cidr == cidr && existing.via_router == route.gateway)
+        {
             routes.remove(index);
             removed = true;
         }
@@ -3579,9 +3634,7 @@ pub fn stage14_1_dhcp_transition_self_test() -> bool {
 pub fn stage14_1_socket_stress_self_test() -> bool {
     const OWNER: u64 = 0x0001_401C;
     let fail = |checkpoint: &str| {
-        crate::serial::write_line(format_args!(
-            "[S14.1S-DIAG] FAILED checkpoint={checkpoint}"
-        ));
+        crate::serial::write_line(format_args!("[S14.1S-DIAG] FAILED checkpoint={checkpoint}"));
         false
     };
     let mut ids = [0u64; MAX_USER_SOCKETS];

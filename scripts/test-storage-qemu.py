@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from qemu_validation import validation_errors
 
 
 def main():
@@ -12,7 +13,7 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
-    parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=2)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
     args = parser.parse_args()
@@ -58,7 +59,9 @@ def main():
                 '[BOOT] ALL VALIDATIONS PASSED', f'[SMP] online={args.cpus} expected={args.cpus}',
                 '[SMP] scheduler/barrier: PASSED', '[SMP] acknowledged TLB shootdowns: PASSED',
                 '[SMP] remote stale-translation/refree: PASSED', '[SMP] per-CPU timer preemption: PASSED', '[SMP] automatic rebalancing: PASSED', '[SMP] reschedule IPI: PASSED', '[SMP] migration stress: PASSED']
-    if result.returncode != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result.returncode, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return 1

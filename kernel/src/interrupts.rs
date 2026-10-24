@@ -25,14 +25,69 @@ static PCI_DEVICE_IRQS: [core::sync::atomic::AtomicU64; PCI_VECTOR_COUNT] =
 static PCI_DEVICE_WORK: [AtomicBool; PCI_VECTOR_COUNT] =
     [const { AtomicBool::new(false) }; PCI_VECTOR_COUNT];
 
+/// The task, if any, woken through the scheduler event latch when a vector
+/// fires (0 = none). Raw task IDs: the handler must not take locks beyond the
+/// scheduler's own.
+static PCI_DEVICE_WAITER: [core::sync::atomic::AtomicU64; PCI_VECTOR_COUNT] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; PCI_VECTOR_COUNT];
+
 fn dispatch_pci_device_vector(vector: u8) {
     let index = usize::from(vector - PCI_VECTOR_FIRST);
     PCI_DEVICE_IRQS[index].fetch_add(1, Ordering::Relaxed);
     PCI_DEVICE_WORK[index].store(true, Ordering::Release);
     crate::smp::eoi();
+    // After publishing the work flag: a worker that drained and is about to
+    // wait either sees the flag or receives this latched signal.
+    let waiter = PCI_DEVICE_WAITER[index].load(Ordering::Acquire);
+    if waiter != 0 {
+        let _ = task::signal_event(task::TaskId::from_u64(waiter));
+    }
 }
 
-#[expect(dead_code, reason = "consumed by Stage 13.2 driver binding/unbinding integration")]
+/// Wake `task` whenever `vector` fires. One waiter per vector; a vector
+/// outside the PCI range, or one that already has a waiter, is refused.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn set_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WAITER[usize::from(vector - PCI_VECTOR_FIRST)]
+        .compare_exchange(0, task.as_u64(), Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// Remove `task` as the waiter of `vector`; another task's registration is
+/// left alone.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn clear_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WAITER[usize::from(vector - PCI_VECTOR_FIRST)]
+        .compare_exchange(task.as_u64(), 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// How many times `vector` has fired.
+#[cfg(any(
+    feature = "stage13-13-test",
+    feature = "stage13-15-test",
+    feature = "stage13-16-test"
+))]
+pub fn pci_device_irq_count(vector: u8) -> u64 {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return 0;
+    }
+    PCI_DEVICE_IRQS[usize::from(vector - PCI_VECTOR_FIRST)].load(Ordering::Acquire)
+}
+
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "consumed by Stage 13.2 driver binding/unbinding integration"
+    )
+)]
 pub fn take_pci_device_work(vector: u8) -> bool {
     if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
         return false;
@@ -52,24 +107,71 @@ macro_rules! pci_irq_handlers {
 }
 
 pci_irq_handlers!(
-    (pci_irq_90,0x90),(pci_irq_91,0x91),(pci_irq_92,0x92),(pci_irq_93,0x93),
-    (pci_irq_94,0x94),(pci_irq_95,0x95),(pci_irq_96,0x96),(pci_irq_97,0x97),
-    (pci_irq_98,0x98),(pci_irq_99,0x99),(pci_irq_9a,0x9a),(pci_irq_9b,0x9b),
-    (pci_irq_9c,0x9c),(pci_irq_9d,0x9d),(pci_irq_9e,0x9e),(pci_irq_9f,0x9f),
-    (pci_irq_a0,0xa0),(pci_irq_a1,0xa1),(pci_irq_a2,0xa2),(pci_irq_a3,0xa3),
-    (pci_irq_a4,0xa4),(pci_irq_a5,0xa5),(pci_irq_a6,0xa6),(pci_irq_a7,0xa7),
-    (pci_irq_a8,0xa8),(pci_irq_a9,0xa9),(pci_irq_aa,0xaa),(pci_irq_ab,0xab),
-    (pci_irq_ac,0xac),(pci_irq_ad,0xad),(pci_irq_ae,0xae),(pci_irq_af,0xaf),
-    (pci_irq_b0,0xb0),(pci_irq_b1,0xb1),(pci_irq_b2,0xb2),(pci_irq_b3,0xb3),
-    (pci_irq_b4,0xb4),(pci_irq_b5,0xb5),(pci_irq_b6,0xb6),(pci_irq_b7,0xb7),
-    (pci_irq_b8,0xb8),(pci_irq_b9,0xb9),(pci_irq_ba,0xba),(pci_irq_bb,0xbb),
-    (pci_irq_bc,0xbc),(pci_irq_bd,0xbd),(pci_irq_be,0xbe),(pci_irq_bf,0xbf),
-    (pci_irq_c0,0xc0),(pci_irq_c1,0xc1),(pci_irq_c2,0xc2),(pci_irq_c3,0xc3),
-    (pci_irq_c4,0xc4),(pci_irq_c5,0xc5),(pci_irq_c6,0xc6),(pci_irq_c7,0xc7),
-    (pci_irq_c8,0xc8),(pci_irq_c9,0xc9),(pci_irq_ca,0xca),(pci_irq_cb,0xcb),
-    (pci_irq_cc,0xcc),(pci_irq_cd,0xcd),(pci_irq_ce,0xce),(pci_irq_cf,0xcf),
+    (pci_irq_90, 0x90),
+    (pci_irq_91, 0x91),
+    (pci_irq_92, 0x92),
+    (pci_irq_93, 0x93),
+    (pci_irq_94, 0x94),
+    (pci_irq_95, 0x95),
+    (pci_irq_96, 0x96),
+    (pci_irq_97, 0x97),
+    (pci_irq_98, 0x98),
+    (pci_irq_99, 0x99),
+    (pci_irq_9a, 0x9a),
+    (pci_irq_9b, 0x9b),
+    (pci_irq_9c, 0x9c),
+    (pci_irq_9d, 0x9d),
+    (pci_irq_9e, 0x9e),
+    (pci_irq_9f, 0x9f),
+    (pci_irq_a0, 0xa0),
+    (pci_irq_a1, 0xa1),
+    (pci_irq_a2, 0xa2),
+    (pci_irq_a3, 0xa3),
+    (pci_irq_a4, 0xa4),
+    (pci_irq_a5, 0xa5),
+    (pci_irq_a6, 0xa6),
+    (pci_irq_a7, 0xa7),
+    (pci_irq_a8, 0xa8),
+    (pci_irq_a9, 0xa9),
+    (pci_irq_aa, 0xaa),
+    (pci_irq_ab, 0xab),
+    (pci_irq_ac, 0xac),
+    (pci_irq_ad, 0xad),
+    (pci_irq_ae, 0xae),
+    (pci_irq_af, 0xaf),
+    (pci_irq_b0, 0xb0),
+    (pci_irq_b1, 0xb1),
+    (pci_irq_b2, 0xb2),
+    (pci_irq_b3, 0xb3),
+    (pci_irq_b4, 0xb4),
+    (pci_irq_b5, 0xb5),
+    (pci_irq_b6, 0xb6),
+    (pci_irq_b7, 0xb7),
+    (pci_irq_b8, 0xb8),
+    (pci_irq_b9, 0xb9),
+    (pci_irq_ba, 0xba),
+    (pci_irq_bb, 0xbb),
+    (pci_irq_bc, 0xbc),
+    (pci_irq_bd, 0xbd),
+    (pci_irq_be, 0xbe),
+    (pci_irq_bf, 0xbf),
+    (pci_irq_c0, 0xc0),
+    (pci_irq_c1, 0xc1),
+    (pci_irq_c2, 0xc2),
+    (pci_irq_c3, 0xc3),
+    (pci_irq_c4, 0xc4),
+    (pci_irq_c5, 0xc5),
+    (pci_irq_c6, 0xc6),
+    (pci_irq_c7, 0xc7),
+    (pci_irq_c8, 0xc8),
+    (pci_irq_c9, 0xc9),
+    (pci_irq_ca, 0xca),
+    (pci_irq_cb, 0xcb),
+    (pci_irq_cc, 0xcc),
+    (pci_irq_cd, 0xcd),
+    (pci_irq_ce, 0xce),
+    (pci_irq_cf, 0xcf),
 );
-
 
 /// First WovenHat-owned PCI device vector reserved for WovenWiFi.
 /// Kept below the LAPIC timer/IPI range (0xe0+) and away from syscall 0x80.
@@ -77,17 +179,17 @@ pub const WIFI_DEVICE_VECTOR: u8 = 0xd0;
 static WIFI_DEVICE_IRQS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 static WIFI_DEVICE_WORK: AtomicBool = AtomicBool::new(false);
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn wifi_device_irq_count() -> u64 {
     WIFI_DEVICE_IRQS.load(Ordering::Acquire)
 }
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn take_wifi_device_work() -> bool {
     WIFI_DEVICE_WORK.swap(false, Ordering::AcqRel)
 }
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn publish_wifi_device_work_for_test() {
     WIFI_DEVICE_WORK.store(true, Ordering::Release);
 }
@@ -133,6 +235,7 @@ pub fn init() {
         }
         idt[pic::MASTER_OFFSET + timer::IRQ].set_handler_fn(timer_interrupt_handler);
         idt[pic::MASTER_OFFSET + keyboard::IRQ].set_handler_fn(keyboard_interrupt_handler);
+        idt[pic::MASTER_OFFSET + crate::mouse::IRQ].set_handler_fn(mouse_interrupt_handler);
 
         idt
     });
@@ -319,6 +422,15 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     task::tick();
     pic::notify_end_of_interrupt(timer::IRQ);
     task::preempt_from_interrupt();
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::mouse::handle_interrupt();
+    if crate::smp::routed_irq() {
+        crate::smp::eoi();
+    } else {
+        pic::notify_end_of_interrupt(crate::mouse::IRQ);
+    }
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {

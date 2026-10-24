@@ -4,6 +4,8 @@ The user-authorized development sequence and requirements are in
 `docs/master-development-roadmap.md`. Follow stages in order; do not start a
 later stage until the current acceptance gate passes. Use `docs/stage-status.md`
 for current status and `docs/architecture-and-codebase-guide.md` for architecture.
+Two agents (Claude Code and Codex) share this repository: read and update
+`docs/agent-coordination.md` before starting work so you do not collide.
 
 - Inspect repository instructions, source relationships and relevant previous
   acceptance before editing. Preserve established ABI and accepted behavior.

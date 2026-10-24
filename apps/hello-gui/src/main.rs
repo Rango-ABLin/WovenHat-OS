@@ -1,0 +1,1880 @@
+//! A graphical WovenHat application.
+//!
+//! In its normal mode it allocates a client surface, draws a small window,
+//! verifies it by reading pixels back, takes the compositor lease, places the
+//! window on the compositor, verifies the screen and presents it to the
+//! framebuffer. That needs the `DisplayIo` capability.
+//!
+//! With `--input` it then waits for the keys `o`, `k`, Enter, which the gate
+//! publishes once this process holds input focus, and checks it received
+//! exactly those, in order.
+//!
+//! With `--wait` it does the same through the blocking `input_wait`, sleeping
+//! between keys, then checks that a timed wait with no input returns on
+//! schedule.
+//!
+//! With `--compositor` it acts as a separate compositor process: it takes the
+//! lease, receives two surface tokens from a client over IPC, draws the one
+//! the client shared, and must be refused the one it did not. With
+//! `--client <pid>` it is that client: it shares one surface with `<pid>`,
+//! sends both tokens, and waits for the compositor's reply.
+//!
+//! With `--multiplex <peer>` it holds focus and sleeps in one `wait_any` over
+//! input and IPC: it must be woken by a message from `<peer>`, then by a key,
+//! then time out.
+//!
+//! With `--timer-event` it waits on a one-shot timer and a manual-reset event
+//! through the unified object wait ABI, then verifies both source masks.
+//!
+//! With `--damage-compositor` and `--damage-client <pid> <peer>` the pair
+//! check damage-only compositing: the compositor sleeps on damage and must
+//! copy exactly the region the client declared, and nothing it changed
+//! without declaring.
+//!
+//! With `--wm` it is a small window manager: it stacks two clients' shared
+//! windows, raises and focuses the next one on Tab or on a left click inside
+//! it (it tracks the pointer from relative motion), and forwards each typed
+//! character to the focused client only. `--wm-client <wm> <x> <y> <a|b>
+//! <key>` is one such client: it places a window and expects exactly `<key>`.
+//!
+//! With `--alpha-compositor` it draws an opaque backdrop, a translucent
+//! shadow from its own surface, and a `--client`'s shared window
+//! translucently over both, then checks every region against the blend
+//! formula.
+//!
+//! With `--scaled-compositor` it switches the display to scale 2, checks the
+//! geometry the kernel reports, and animates a square paced by a
+//! `FrameClock`, checking that no frame came early.
+//!
+//! With `--desktop-client <shell> <a|b|c>` it is an application on the
+//! WovenShell desktop: it opens a window through the shell's protocol (and,
+//! as `a`, a tray icon and a notification, then redraws part of its window),
+//! and exits once the shell forwards it its key, or asks it to close. `c`
+//! opens a window larger than the old 320×240 surface cap.
+//!
+//! With `--3d-chrome-demo` it is a standalone proof of concept for a
+//! textured 3D desktop: it renders a small title-bar-like strip into an
+//! offscreen Canvas exactly as WovenShell's own chrome does today, then
+//! projects it through a perspective `Camera` as a tilted, texture-mapped
+//! quad (two `textured_triangle_3d` calls) instead of blitting it flat,
+//! before presenting the result normally. It does not touch WovenShell or
+//! any already-accepted compositor path; it exists to validate the
+//! rendering pipeline end to end before that wiring is attempted.
+//!
+//! With `--syscall-benchmark` it is a standalone performance-engineering
+//! micro-benchmark (Stage 30): 1000 round trips of the cheapest syscall
+//! (`current_pid`, no pointers, no capability check) timed with the CPU's
+//! own cycle counter (`RDTSC`, not the 100 Hz tick clock, which cannot
+//! resolve a single syscall). Reports min/average/max cycles; needs no
+//! capability beyond an ordinary process's own, so it runs unprivileged.
+//!
+//! With `--ipc-benchmark` it is the same kind of micro-benchmark for IPC: it
+//! sends and receives a one-byte message to and from itself
+//! `IPC_BENCHMARK_ITERATIONS` times, timing each round trip the same way.
+//!
+//! With `--fs-benchmark` it times `FS_BENCHMARK_ITERATIONS` seek+write and
+//! seek+read round trips of a 256-byte payload against a scratch file the
+//! kernel self-test pre-creates, reporting write and read timings
+//! separately.
+//!
+//! With `--compositor-benchmark` it times `COMPOSITOR_BENCHMARK_ITERATIONS`
+//! round trips of toggling one pixel of a placed window and flushing it to
+//! the framebuffer (`surface.write` + `compositor_present`), needing
+//! `DisplayIo`.
+//!
+//! With `--scheduler-benchmark` it times `SCHEDULER_BENCHMARK_ITERATIONS`
+//! round trips of `yield_now`, measuring the voluntary-yield path's own
+//! overhead when no other process contends for the CPU.
+//!
+//! With `--probe <handle>` it runs as an ordinary process and checks that the
+//! kernel refuses it everything it has no authority for: every compositor
+//! operation, and every operation on the surface `<handle>`, which belongs to
+//! another process, including through a token forged to name this process.
+//! Each failed check exits with its own status so the gate can tell which one.
+#![no_std]
+#![no_main]
+
+use core::panic::PanicInfo;
+
+use libwoven::{
+    graphics::{Camera, Color, DepthBuffer, Path, Point, Rect, Renderer, Transform, Vertex3, Vertex3Tex},
+    rgb, syscall, Args, GraphicsSurface,
+};
+
+libwoven::entry!(main);
+
+const BACKGROUND: u32 = rgb(4, 12, 28);
+const TITLE_BAR: u32 = rgb(40, 220, 230);
+const CONTENT: u32 = rgb(230, 230, 240);
+const BORDER: u32 = rgb(0, 0, 0);
+
+const WOVEN_ICON: [u32; 16] = [
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::BLACK.packed(),
+    Color::BLACK.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+    Color::TITLE.packed(),
+    Color::TITLE.packed(),
+    Color::WHITE.packed(),
+];
+
+const WIDTH: u32 = 200;
+const HEIGHT: u32 = 120;
+
+/// Fail the process with a numeric reason so the gate can tell which step
+/// failed from the exit status.
+/// A quarter second of a 500 Hz square wave: 96-frame periods of +/-0x2000,
+/// 48 kHz 16-bit stereo. In .bss and filled at run time: neither on the
+/// 8 KiB stack nor in the image (the RAM file system holds at most 64 KiB).
+const AUDIO_FRAMES: usize = 12_000;
+
+struct AudioBuffer(core::cell::UnsafeCell<[u8; AUDIO_FRAMES * 4]>);
+
+// SAFETY: hello-gui is single-threaded and audio() takes the only reference.
+unsafe impl Sync for AudioBuffer {}
+
+static AUDIO_PCM: AudioBuffer = AudioBuffer(core::cell::UnsafeCell::new([0; AUDIO_FRAMES * 4]));
+
+fn square_wave(pcm: &mut [u8; AUDIO_FRAMES * 4]) {
+    for (frame, bytes) in pcm.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let sample: i16 = if (frame / 48) % 2 == 0 { 0x2000 } else { -0x2000 };
+        let [low, high] = sample.to_le_bytes();
+        *bytes = [low, high, low, high];
+    }
+}
+
+/// Stage 13.15: play the square wave through WovenAudio. Exit 0 once it has
+/// played, 2 with no audio output, 3 if playback was refused or failed, 4 if
+/// the volume could not be set, 5 for an unexpected format.
+fn audio() -> ! {
+    // SAFETY: the only reference to the buffer, taken once.
+    let pcm = unsafe { &mut *AUDIO_PCM.0.get() };
+    square_wave(pcm);
+    let Ok(info) = libwoven::audio_info() else { fail(2) };
+    if info.sample_rate != 48_000 || info.channels != 2 || info.bits != 16 || info.max_bytes < pcm.len() as u32 {
+        fail(5);
+    }
+    match libwoven::audio_play(pcm) {
+        Ok(played) if played == pcm.len() => {}
+        _ => fail(3),
+    }
+    if libwoven::audio_set_volume(80).is_err() {
+        fail(4);
+    }
+    libwoven::exit(0)
+}
+
+fn timer_event() -> ! {
+    let Ok(timer) = libwoven::timer_create(10, 0) else {
+        fail(31)
+    };
+    let Ok(event) = libwoven::event_create(false) else {
+        let _ = libwoven::timer_close(timer);
+        fail(32)
+    };
+    let timer_source = libwoven::WaitObject {
+        handle: timer,
+        timer: true,
+        mask: 1 << 3,
+    };
+    let event_source = libwoven::WaitObject {
+        handle: event,
+        timer: false,
+        mask: 1 << 4,
+    };
+    let deadline = libwoven::ticks().saturating_add(100);
+    let timer_ready = libwoven::wait_any_objects(&[timer_source, event_source], Some(deadline));
+    if timer_ready != Ok(1 << 3) {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(33);
+    }
+    if libwoven::event_set(event, true).is_err() {
+        let _ = libwoven::event_close(event);
+        let _ = libwoven::timer_close(timer);
+        fail(34);
+    }
+    let event_ready = libwoven::wait_any_objects(
+        &[event_source],
+        Some(libwoven::ticks().saturating_add(20)),
+    );
+    let _ = libwoven::event_close(event);
+    let _ = libwoven::timer_close(timer);
+    if event_ready != Ok(1 << 4) {
+        fail(35);
+    }
+    let _ = libwoven::print("hello-gui timer/event wait: PASS\n");
+    libwoven::exit(0)
+}
+
+fn fail(code: u64) -> ! {
+    let _ = libwoven::print("hello-gui: failure at step ");
+    let mut digits = [0u8; 20];
+    let text = libwoven::format_u64(code, &mut digits);
+    let _ = libwoven::write(libwoven::syscall::STDOUT, text);
+    let _ = libwoven::print("\n");
+    libwoven::exit(code)
+}
+
+const SYSCALL_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone syscall-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SYSCALL_BENCHMARK_ITERATIONS` round trips of
+/// `current_pid` (the cheapest syscall this ABI has: no pointers, no
+/// capability check, just the caller's own id) with the CPU's free-running
+/// cycle counter. Reports min/average/max cycles and exits PASSED as long
+/// as the counter advanced at all -- a benchmark reports numbers, it does
+/// not enforce a would-be-brittle latency threshold across unlike machines.
+fn syscall_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SYSCALL_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        let _ = libwoven::current_pid();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SYSCALL_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: syscall benchmark (current_pid) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    // The only sanity check a benchmark can make without being a brittle
+    // threshold: the counter genuinely advanced. A reading of exactly zero
+    // across 1000 samples would mean RDTSC (or the syscall path itself) is
+    // not doing anything, not that this machine is merely fast.
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: syscall benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const IPC_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone IPC-latency micro-benchmark (Stage 30 performance engineering):
+/// time `IPC_BENCHMARK_ITERATIONS` round trips of a one-byte message this
+/// process sends to and receives from itself (permitted: `may_ipc_with`
+/// allows same-uid IPC, and a process shares its own uid). This isolates the
+/// enqueue/copy/dequeue cost of `message_send`+`message_receive` without the
+/// scheduling noise a second process would add. Reports min/average/max
+/// cycles; needs no capability beyond an ordinary process's own `Ipc`.
+fn ipc_benchmark() -> ! {
+    let self_pid = libwoven::current_pid();
+    let payload = [0x5au8];
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..IPC_BENCHMARK_ITERATIONS {
+        let mut buffer = [0u8; 1];
+        let start = libwoven::cycles();
+        if libwoven::message_send(self_pid, &payload).is_err() {
+            fail(321);
+        }
+        let Ok((length, sender)) = libwoven::message_receive(&mut buffer) else {
+            fail(322);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != 1 || buffer[0] != payload[0] || sender != self_pid {
+            fail(323);
+        }
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(IPC_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: ipc benchmark (self send+receive) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: ipc benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const FS_BENCHMARK_ITERATIONS: u64 = 500;
+const FS_BENCHMARK_PAYLOAD: [u8; 256] = [0xa5u8; 256];
+
+/// Standalone filesystem-latency micro-benchmark (Stage 30 performance
+/// engineering): time `FS_BENCHMARK_ITERATIONS` round trips of a 256-byte
+/// `write_file`+`read` against an already-open descriptor on a scratch file
+/// the kernel self-test pre-creates. Reports write and read timings
+/// separately, since they are distinct syscalls with distinct costs; needs
+/// `FileRead`+`FileWrite` beyond an ordinary process's own.
+fn fs_benchmark() -> ! {
+    let Ok(descriptor) = libwoven::open("/tmp/fsbench") else {
+        fail(330);
+    };
+    let (mut write_min, mut write_max, mut write_total) = (u64::MAX, 0u64, 0u128);
+    let (mut read_min, mut read_max, mut read_total) = (u64::MAX, 0u64, 0u128);
+    for _ in 0..FS_BENCHMARK_ITERATIONS {
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(334);
+        }
+        let start = libwoven::cycles();
+        if libwoven::write_file(descriptor, &FS_BENCHMARK_PAYLOAD) != Ok(FS_BENCHMARK_PAYLOAD.len())
+        {
+            fail(331);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        write_min = write_min.min(elapsed);
+        write_max = write_max.max(elapsed);
+        write_total += u128::from(elapsed);
+
+        if libwoven::seek(descriptor, 0).is_err() {
+            fail(335);
+        }
+        let mut buffer = [0u8; FS_BENCHMARK_PAYLOAD.len()];
+        let start = libwoven::cycles();
+        let Ok(length) = libwoven::read(descriptor, &mut buffer) else {
+            fail(332);
+        };
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        if length != FS_BENCHMARK_PAYLOAD.len() || buffer != FS_BENCHMARK_PAYLOAD {
+            fail(333);
+        }
+        read_min = read_min.min(elapsed);
+        read_max = read_max.max(elapsed);
+        read_total += u128::from(elapsed);
+    }
+    let write_average = (write_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let read_average = (read_total / u128::from(FS_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let mut report = |label: &str, min: u64, average: u64, max: u64| {
+        let _ = libwoven::print(label);
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+        let _ = libwoven::print(" avg=");
+        let _ =
+            libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(average, &mut digits));
+        let _ = libwoven::print(" max=");
+        let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+        let _ = libwoven::print(" cycles\n");
+    };
+    report("hello-gui: fs benchmark write min=", write_min, write_average, write_max);
+    report("hello-gui: fs benchmark read min=", read_min, read_average, read_max);
+    if write_average == 0 || read_average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: fs benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const COMPOSITOR_BENCHMARK_ITERATIONS: u64 = 500;
+
+/// Standalone compositor-present-latency micro-benchmark (Stage 30
+/// performance engineering): time `COMPOSITOR_BENCHMARK_ITERATIONS` round
+/// trips of changing one pixel of a placed window's surface and flushing
+/// it to the framebuffer (`surface.write` + `compositor_present`), timed
+/// with the cycle counter. A single unchanging frame would let the
+/// compositor skip undamaged work, understating real cost, so each
+/// iteration toggles a pixel to mark genuine damage. Needs `DisplayIo`.
+fn compositor_benchmark() -> ! {
+    let surface = match GraphicsSurface::create(32, 32) {
+        Ok(surface) => surface,
+        Err(_) => fail(340),
+    };
+    if surface.fill_rect(0, 0, 32, 32, BACKGROUND).is_err() {
+        fail(341);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(342);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(343);
+    }
+    if libwoven::compositor_present().is_err() {
+        fail(344);
+    }
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for iteration in 0..COMPOSITOR_BENCHMARK_ITERATIONS {
+        let toggled = if iteration % 2 == 0 { TITLE_BAR } else { BACKGROUND };
+        let start = libwoven::cycles();
+        if surface.write(0, 0, 1, 1, &[toggled]).is_err() {
+            fail(345);
+        }
+        if libwoven::compositor_present().is_err() {
+            fail(346);
+        }
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(COMPOSITOR_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: compositor benchmark (write+present) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: compositor benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+const SCHEDULER_BENCHMARK_ITERATIONS: u64 = 1000;
+
+/// Standalone scheduler-latency micro-benchmark (Stage 30 performance
+/// engineering): time `SCHEDULER_BENCHMARK_ITERATIONS` round trips of
+/// `yield_now` with the cycle counter. With no other runnable process
+/// contending for this CPU, the scheduler always re-selects this task
+/// immediately, so this measures the voluntary-yield path's own overhead
+/// (syscall entry, run-queue bookkeeping, syscall exit) rather than a
+/// context switch to different process state; needs no capability beyond
+/// an ordinary process's own.
+fn scheduler_benchmark() -> ! {
+    let mut min = u64::MAX;
+    let mut max = 0u64;
+    let mut total: u128 = 0;
+    for _ in 0..SCHEDULER_BENCHMARK_ITERATIONS {
+        let start = libwoven::cycles();
+        libwoven::yield_now();
+        let elapsed = libwoven::cycles().wrapping_sub(start);
+        min = min.min(elapsed);
+        max = max.max(elapsed);
+        total += u128::from(elapsed);
+    }
+    let average = (total / u128::from(SCHEDULER_BENCHMARK_ITERATIONS)) as u64;
+    let mut digits = [0u8; 20];
+    let _ = libwoven::print("hello-gui: scheduler benchmark (yield_now) min=");
+    let _ =
+        libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(min, &mut digits));
+    let _ = libwoven::print(" avg=");
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(average, &mut digits),
+    );
+    let _ = libwoven::print(" max=");
+    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(max, &mut digits));
+    let _ = libwoven::print(" cycles\n");
+    if average == 0 {
+        fail(320);
+    }
+    let _ = libwoven::print("hello-gui: scheduler benchmark: PASSED\n");
+    libwoven::exit(0)
+}
+
+fn main(args: Args) -> ! {
+    match args.get(1) {
+        Some(b"--audio") => audio(),
+        Some(b"--timer-event") => timer_event(),
+        Some(b"--probe") => probe(args.get(2)),
+        Some(b"--input") => run(Input::Poll),
+        Some(b"--wait") => run(Input::Wait),
+        Some(b"--compositor") => compositor(),
+        Some(b"--client") => client(args.get(2)),
+        Some(b"--multiplex") => multiplex(args.get(2)),
+        Some(b"--damage-compositor") => damage_compositor(),
+        Some(b"--damage-client") => damage_client(args.get(2), args.get(3)),
+        Some(b"--wm") => window_manager(),
+        Some(b"--alpha-compositor") => alpha_compositor(),
+        Some(b"--scaled-compositor") => scaled_compositor(),
+        Some(b"--desktop-client") => desktop_client(&args),
+        Some(b"--wm-client") => wm_client(&args),
+        Some(b"--3d-chrome-demo") => three_d_chrome_demo(),
+        Some(b"--syscall-benchmark") => syscall_benchmark(),
+        Some(b"--ipc-benchmark") => ipc_benchmark(),
+        Some(b"--fs-benchmark") => fs_benchmark(),
+        Some(b"--compositor-benchmark") => compositor_benchmark(),
+        Some(b"--scheduler-benchmark") => scheduler_benchmark(),
+        Some(_) => fail(250),
+        None => run(Input::None),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Input {
+    None,
+    Poll,
+    Wait,
+}
+
+fn run(input: Input) -> ! {
+    // 1. Allocate the surface.
+    let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(surface) => surface,
+        Err(_) => fail(1),
+    };
+    let _ = libwoven::print("hello-gui: surface created\n");
+
+    // 2. Paint the background.
+    if surface
+        .fill_rect(0, 0, WIDTH as u16, HEIGHT as u16, BACKGROUND)
+        .is_err()
+    {
+        fail(2);
+    }
+
+    // 3. A window: title bar, content area, border.
+    if surface.fill_rect(10, 10, 180, 16, TITLE_BAR).is_err() {
+        fail(3);
+    }
+    if surface.fill_rect(10, 26, 180, 80, CONTENT).is_err() {
+        fail(4);
+    }
+
+    // Stage 16.1: route a real visible frame through WovenGraphics' typed
+    // software renderer before uploading it to the kernel-owned surface.
+    let mut pixels = [0u32; 32 * 24];
+    let mut depth_values = [u16::MAX; 32 * 24];
+    let mut canvas = libwoven::Canvas::new(&mut pixels, 10, 10, 32, 24).unwrap();
+    let mut depth = DepthBuffer::new(&mut depth_values, 10, 10, 32, 24).unwrap();
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        depth.clear(u16::MAX);
+        renderer.vertical_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::TITLE,
+            Color::rgb(0, 80, 160),
+        );
+        renderer.horizontal_gradient(
+            Rect::new(10, 10, 32, 16),
+            Color::rgb(0, 80, 160),
+            Color::TITLE,
+        );
+        renderer.rounded_rect_blended(
+            Rect::new(12, 11, 28, 12),
+            3,
+            Color::WHITE,
+            48,
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(255, 90, 70)),
+            Vertex3::new(34, 12, 120, Color::rgb(255, 220, 70)),
+            Vertex3::new(30, 28, 120, Color::rgb(255, 70, 210)),
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            Vertex3::new(18, 16, 80, Color::rgb(70, 180, 255)),
+            Vertex3::new(30, 28, 120, Color::rgb(70, 255, 170)),
+            Vertex3::new(14, 27, 120, Color::rgb(70, 100, 255)),
+        );
+        renderer.stroke(Rect::new(10, 10, 32, 16), Color::WHITE);
+        renderer.transformed_rect(
+            Rect::new(20, 13, 8, 7),
+            Transform::new(1 << 16, 1 << 15, 0, 1 << 16, 0, 0),
+            Color::rgb(255, 150, 40),
+        );
+        if !renderer.image_blended(12, 14, 4, 4, &WOVEN_ICON, 224) {
+            fail(40);
+        }
+        let _ = renderer.text_box(Rect::new(11, 11, 12, 14), "WH", Color::BLACK, 1);
+        renderer.blend(Rect::new(10, 26, 32, 8), Color::WHITE, 64);
+        let mut badge = Path::new();
+        let _ = badge.move_to(Point::new(12, 21));
+        let _ = badge.line_to(Point::new(22, 17));
+        let _ = badge.line_to(Point::new(32, 21));
+        let _ = badge.close();
+        let _ = renderer.fill_path_antialiased_blended(&badge, Color::rgb(20, 120, 180), 220);
+        let mut path = Path::new();
+        let _ = path.move_to(Point::new(15, 29));
+        if !path.quadratic_to(Point::new(22, 18), Point::new(29, 29)) {
+            fail(42);
+        }
+        renderer.stroke_path(&path, Color::TITLE);
+    }
+    if surface.write(10, 10, 32, 24, canvas.pixels()).is_err() {
+        fail(41);
+    }
+    // One stroke rather than four fills. Besides being clearer, this
+    // exercises the stroke syscall path.
+    if surface.stroke_rect(10, 10, 180, 96, BORDER).is_err() {
+        fail(5);
+    }
+
+    // 4. Verify by reading back representative pixels. These coordinates fall
+    //    in each distinct region, so a wrong fill or an off-by-one would show.
+    //    Reading from userspace is what makes this a kernel contract test
+    //    rather than a userspace self-check.
+    let samples = [
+        (5u32, 5u32, BACKGROUND),      // outside window
+        (100, 15, TITLE_BAR),          // inside title bar
+        (100, 60, CONTENT),            // content area
+        (10, 10, BORDER),              // top-left corner
+        (189, 105, BORDER),            // bottom-right corner
+        (10, 50, BORDER),              // left edge
+        (189, 50, BORDER),             // right edge
+    ];
+    for (x, y, expected) in samples.iter().copied() {
+        match surface.pixel(x, y) {
+            Ok(actual) if actual == expected => {}
+            Ok(_) => fail(10 + y as u64),
+            Err(_) => fail(100 + y as u64),
+        }
+    }
+    let _ = libwoven::print("hello-gui: window rendered and verified\n");
+
+    // 5. Take the compositor lease, place the window on the screen, and
+    //    verify by reading the compositor surface back. If the screen pixel
+    //    at a known offset is the content colour, every step from syscall
+    //    dispatch through client surface through compositor blit worked.
+    if libwoven::compositor_claim().is_err() {
+        fail(11);
+    }
+    const SCREEN_X: i32 = 60;
+    const SCREEN_Y: i32 = 40;
+    if surface.present(SCREEN_X, SCREEN_Y).is_err() {
+        fail(6);
+    }
+    let _ = libwoven::print("hello-gui: window presented\n");
+
+    // Pick a point inside the content area in screen coordinates.
+    let content_x = SCREEN_X + 100;
+    let content_y = SCREEN_Y + 60;
+    match libwoven::screen_pixel(content_x, content_y) {
+        Ok(color) if color == CONTENT => {}
+        Ok(_) => fail(7),
+        Err(_) => fail(8),
+    }
+    // A point outside the window should still carry the compositor background
+    // (0), proving nothing wrote where it was not asked to.
+    match libwoven::screen_pixel(SCREEN_X - 5, SCREEN_Y - 5) {
+        Ok(0) => {}
+        Ok(_) => fail(9),
+        Err(_) => fail(10),
+    }
+    let _ = libwoven::print("hello-gui: screen verified\n");
+
+    // 6. Show it: copy the compositor's damage to the framebuffer.
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        Ok(_) => fail(12),
+        Err(_) => fail(13),
+    }
+    let _ = libwoven::print("[S16G] WovenGraphics visual frame: PASSED\n");
+    let _ = libwoven::print("[S16G2] WovenGraphics 2D frame: PASSED\n");
+    let _ = libwoven::print("[S16G3D] WovenGraphics software 3D frame: PASSED\n");
+    let _ = libwoven::print("hello-gui: framebuffer presented\n");
+
+    match input {
+        Input::None => {}
+        Input::Poll => await_keys(),
+        Input::Wait => await_keys_blocking(),
+    }
+
+    // 7. Dropping the surface releases the client slot. The compositor keeps
+    //    the pixels it was handed, which is the correct semantics for a
+    //    once-presented window; the lease is released when the process exits.
+    drop(surface);
+    let _ = libwoven::print("hello-gui: surface released\n");
+
+    libwoven::exit(0)
+}
+
+const CHROME_WIDTH: usize = 64;
+const CHROME_HEIGHT: usize = 16;
+const CHROME_FILL: u32 = rgb(40, 220, 230);
+
+/// The 3D chrome demo's buffers: a 200x120 u32 canvas plus a matching u16
+/// depth buffer is ~67 KiB, far over the 8 KiB user stack, so (like
+/// `AUDIO_PCM` above) these live in .bss instead.
+struct ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell<[u32; CHROME_WIDTH * CHROME_HEIGHT]>,
+    pixels: core::cell::UnsafeCell<[u32; WIDTH as usize * HEIGHT as usize]>,
+    depth: core::cell::UnsafeCell<[u16; WIDTH as usize * HEIGHT as usize]>,
+}
+
+// SAFETY: hello-gui is single-threaded and three_d_chrome_demo takes the
+// only reference to each field.
+unsafe impl Sync for ChromeDemoBuffers {}
+
+// All-zero initializers: a non-zero one (`[u16::MAX; _]` for the depth
+// buffer) cannot go in .bss and is instead stored as real data in the
+// image, which is exactly what bloated the installed file past the VFS's
+// 64 KiB node cap the first time this was written. `three_d_chrome_demo`
+// already calls `depth.clear(u16::MAX)` at runtime, so the static itself
+// only ever needs to be zero.
+static CHROME_DEMO: ChromeDemoBuffers = ChromeDemoBuffers {
+    chrome: core::cell::UnsafeCell::new([0; CHROME_WIDTH * CHROME_HEIGHT]),
+    pixels: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
+    depth: core::cell::UnsafeCell::new([0; WIDTH as usize * HEIGHT as usize]),
+};
+
+/// Standalone proof of concept for textured 3D chrome: render a small
+/// title-bar-like strip offscreen, project it through a perspective
+/// `Camera` as a tilted, texture-mapped quad, and present the result. Does
+/// not touch WovenShell or any already-accepted compositor path.
+fn three_d_chrome_demo() -> ! {
+    // 1. The "chrome": exactly what a flat 2D title bar would be -- a fill
+    //    and a label -- drawn into its own offscreen Canvas, unconnected to
+    //    any compositor surface. This is the thing the 3D stage below
+    //    projects; it never changes based on how it will be displayed.
+    // SAFETY: single-threaded; this is the only live reference.
+    let chrome_pixels = unsafe { &mut *CHROME_DEMO.chrome.get() };
+    let mut chrome = match libwoven::Canvas::new(chrome_pixels, 0, 0, CHROME_WIDTH, CHROME_HEIGHT) {
+        Some(canvas) => canvas,
+        None => fail(300),
+    };
+    {
+        let mut renderer = Renderer::new(&mut chrome);
+        renderer.fill(Rect::new(0, 0, CHROME_WIDTH, CHROME_HEIGHT), Color::rgb(40, 220, 230));
+        renderer.text(4, 4, "3D", Color::BLACK);
+    }
+
+    // 2. Project the chrome's four corners through a perspective camera: the
+    //    left edge stays at z=0 while the right edge recedes to z=40<<16, so
+    //    the quad visibly narrows toward the right -- real perspective, not
+    //    a flat blit scaled down.
+    let camera = Camera::new(90 << 16, 70 << 16, 100, 30);
+    let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
+        camera.project(-30 << 16, -8 << 16, 0),
+        camera.project(30 << 16, -8 << 16, 40 << 16),
+        camera.project(-30 << 16, 8 << 16, 0),
+        camera.project(30 << 16, 8 << 16, 40 << 16),
+    ) else {
+        fail(301)
+    };
+    let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+
+    // SAFETY: single-threaded; this is the only live reference.
+    let pixels = unsafe { &mut *CHROME_DEMO.pixels.get() };
+    let mut canvas = match libwoven::Canvas::new(pixels, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(canvas) => canvas,
+        None => fail(302),
+    };
+    canvas.fill_rect(0, 0, WIDTH as usize, HEIGHT as usize, BACKGROUND);
+    // SAFETY: single-threaded; this is the only live reference.
+    let depth_values = unsafe { &mut *CHROME_DEMO.depth.get() };
+    let mut depth = match DepthBuffer::new(depth_values, 0, 0, WIDTH as usize, HEIGHT as usize) {
+        Some(depth) => depth,
+        None => fail(303),
+    };
+    depth.clear(u16::MAX);
+    {
+        let mut renderer = Renderer::new(&mut canvas);
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_left, 0, 0),
+            vertex(top_right, 255, 0),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+        renderer.textured_triangle_3d(
+            &mut depth,
+            vertex(top_right, 255, 0),
+            vertex(bottom_right, 255, 255),
+            vertex(bottom_left, 0, 255),
+            &chrome,
+        );
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome projected\n");
+
+    // 3. Verify by reading back pixels, the same kernel-contract-test
+    //    reasoning as `run`'s step 4: well outside the projected quad, the
+    //    background must be untouched; well inside its near (left) edge,
+    //    away from where the label is drawn, the chrome's own fill colour
+    //    must have been sampled, proving the texture (not a flat colour)
+    //    reached the screen.
+    match canvas.get(10, 10) {
+        Some(color) if color == BACKGROUND => {}
+        _ => fail(304),
+    }
+    match canvas.get(65, 22) {
+        Some(color) if color == CHROME_FILL => {}
+        _ => fail(305),
+    }
+
+    // 4. Upload and present normally: everything from here on is the same
+    //    ordinary 2D path every other mode uses.
+    let surface = match GraphicsSurface::create(WIDTH, HEIGHT) {
+        Ok(surface) => surface,
+        Err(_) => fail(306),
+    };
+    if surface.write(0, 0, WIDTH as u16, HEIGHT as u16, canvas.pixels()).is_err() {
+        fail(307);
+    }
+    if libwoven::compositor_claim().is_err() {
+        fail(308);
+    }
+    if surface.present(0, 0).is_err() {
+        fail(309);
+    }
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        Ok(_) => fail(310),
+        Err(_) => fail(311),
+    }
+    let _ = libwoven::print("hello-gui: 3d chrome demo: PASSED\n");
+    drop(surface);
+    libwoven::exit(0)
+}
+
+/// Wait for exactly `o`, `k`, Enter. The kernel publishes them once this
+/// process holds focus, so a wrong, missing or extra key is a routing defect.
+fn await_keys() {
+    use libwoven::Key;
+    const EXPECTED: [Key; 3] = [Key::Char('o'), Key::Char('k'), Key::Enter];
+    const DEADLINE_TICKS: u64 = 2000;
+
+    let start = libwoven::ticks();
+    let mut received = 0;
+    while received < EXPECTED.len() {
+        match libwoven::input_poll() {
+            Ok(Some(key)) if key == EXPECTED[received] => received += 1,
+            Ok(Some(_)) => fail(30 + received as u64),
+            Ok(None) => {
+                if libwoven::ticks().wrapping_sub(start) > DEADLINE_TICKS {
+                    fail(34);
+                }
+                libwoven::yield_now();
+            }
+            Err(_) => fail(29),
+        }
+    }
+    if !matches!(libwoven::input_poll(), Ok(None)) {
+        fail(33);
+    }
+    let _ = libwoven::print("hello-gui: input received\n");
+}
+
+/// The `await_keys` contract through the blocking call: no polling loop, the
+/// process sleeps in the kernel between keys. Then a timed wait with nothing
+/// pending must time out, and not before its deadline.
+fn await_keys_blocking() {
+    use libwoven::Key;
+    const EXPECTED: [Key; 3] = [Key::Char('o'), Key::Char('k'), Key::Enter];
+    const TIMEOUT_TICKS: u64 = 20;
+
+    for (index, expected) in EXPECTED.iter().enumerate() {
+        match libwoven::input_wait(None) {
+            Ok(Some(key)) if key == *expected => {}
+            Ok(Some(_)) => fail(40 + index as u64),
+            Ok(None) => fail(44),
+            Err(_) => fail(45),
+        }
+    }
+    let _ = libwoven::print("hello-gui: blocking input received\n");
+
+    let start = libwoven::ticks();
+    match libwoven::input_wait(Some(start + TIMEOUT_TICKS)) {
+        Ok(None) => {}
+        Ok(Some(_)) => fail(46),
+        Err(_) => fail(47),
+    }
+    if libwoven::ticks().wrapping_sub(start) < TIMEOUT_TICKS {
+        fail(48);
+    }
+    let _ = libwoven::print("hello-gui: wait timed out on schedule\n");
+}
+
+const CLIENT_COLOR: u32 = rgb(180, 40, 90);
+const PRIVATE_COLOR: u32 = rgb(9, 9, 9);
+const CLIENT_X: i32 = 300;
+const CLIENT_Y: i32 = 200;
+const IPC_DEADLINE_TICKS: u64 = 2000;
+
+/// Wait for a message, bounded so a missing peer fails the gate instead of
+/// hanging it.
+fn receive_bounded(buffer: &mut [u8], code: u64) -> (usize, libwoven::process::Id) {
+    let start = libwoven::ticks();
+    loop {
+        if let Ok(received) = libwoven::message_receive(buffer) {
+            return received;
+        }
+        if libwoven::ticks().wrapping_sub(start) > IPC_DEADLINE_TICKS {
+            fail(code);
+        }
+        libwoven::yield_now();
+    }
+}
+
+/// A compositor process: draws a client's window from a shared surface.
+fn compositor() -> ! {
+    if libwoven::compositor_claim().is_err() {
+        fail(60);
+    }
+    let _ = libwoven::print("hello-gui compositor: lease held\n");
+
+    let mut message = [0u8; 16];
+    let (length, client) = receive_bounded(&mut message, 61);
+    if length != 16 {
+        fail(62);
+    }
+    let shared = u64::from_le_bytes(message[..8].try_into().unwrap_or([0; 8]));
+    let private = u64::from_le_bytes(message[8..].try_into().unwrap_or([0; 8]));
+
+    // The shared surface is drawable, and lands with the client's pixels.
+    if libwoven::compositor_blit_shared(shared, CLIENT_X, CLIENT_Y).is_err() {
+        fail(63);
+    }
+    match libwoven::screen_pixel(CLIENT_X, CLIENT_Y) {
+        Ok(color) if color == CLIENT_COLOR => {}
+        _ => fail(64),
+    }
+    // The surface the client kept private is refused, even with its genuine
+    // token, and so is the shared one through the owner-only blit path.
+    if libwoven::compositor_blit_shared(private, 0, 0).is_ok() {
+        fail(65);
+    }
+    // SAFETY: integer-only call; the kernel validates the token.
+    if unsafe { syscall::graphics_compositor_blit(shared, 0, 0) } != libwoven::syscall::ERROR {
+        fail(66);
+    }
+    let _ = libwoven::print("hello-gui compositor: client window composited\n");
+
+    match libwoven::compositor_present() {
+        Ok(written) if written > 0 => {}
+        _ => fail(67),
+    }
+    if libwoven::message_send(client, b"done").is_err() {
+        fail(68);
+    }
+    libwoven::exit(0)
+}
+
+/// A client of a compositor process.
+fn client(compositor: Option<&[u8]>) -> ! {
+    let Some(compositor) = compositor.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(70)
+    };
+    let window = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(71),
+    };
+    let private = match GraphicsSurface::create(8, 8) {
+        Ok(surface) => surface,
+        Err(_) => fail(72),
+    };
+    if window.fill_rect(0, 0, 40, 30, CLIENT_COLOR).is_err()
+        || private.fill_rect(0, 0, 8, 8, PRIVATE_COLOR).is_err()
+    {
+        fail(73);
+    }
+    if window.share_with(compositor).is_err() {
+        fail(74);
+    }
+    // A client has no display authority of its own.
+    if libwoven::compositor_blit_shared(window.handle(), 0, 0).is_ok() {
+        fail(75);
+    }
+    let mut message = [0u8; 16];
+    message[..8].copy_from_slice(&window.handle().to_le_bytes());
+    message[8..].copy_from_slice(&private.handle().to_le_bytes());
+    if libwoven::message_send(compositor, &message).is_err() {
+        fail(76);
+    }
+    let _ = libwoven::print("hello-gui client: window shared\n");
+
+    // Keep the surfaces alive until the compositor has drawn them.
+    let mut reply = [0u8; 8];
+    let (length, sender) = receive_bounded(&mut reply, 77);
+    if sender != compositor || &reply[..length] != b"done" {
+        fail(78);
+    }
+    let _ = libwoven::print("hello-gui client: compositor confirmed\n");
+    libwoven::exit(0)
+}
+
+/// One sleep over input and messages.
+fn multiplex(peer: Option<&[u8]>) -> ! {
+    use libwoven::{wait, Key};
+    let Some(peer) = peer.and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(80)
+    };
+    // Take the display, and with it focus.
+    let surface = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(81),
+    };
+    if surface.fill_rect(0, 0, 16, 16, CONTENT).is_err()
+        || libwoven::compositor_claim().is_err()
+        || surface.present(0, 0).is_err()
+        || libwoven::compositor_present().is_err()
+    {
+        fail(82);
+    }
+    let _ = libwoven::print("hello-gui multiplex: focus held\n");
+
+    let both = wait::INPUT | wait::MESSAGE;
+    // The gate sends a message first: only the message source is ready.
+    match libwoven::wait_any(both, None) {
+        Ok(ready) if ready == wait::MESSAGE => {}
+        Ok(_) => fail(83),
+        Err(_) => fail(84),
+    }
+    let mut message = [0u8; 8];
+    match libwoven::message_receive(&mut message) {
+        Ok((4, sender)) if sender == peer && &message[..4] == b"ping" => {}
+        _ => fail(85),
+    }
+    // Then a key: only input is ready.
+    match libwoven::wait_any(both, None) {
+        Ok(ready) if ready == wait::INPUT => {}
+        Ok(_) => fail(86),
+        Err(_) => fail(87),
+    }
+    if libwoven::input_poll() != Ok(Some(Key::Char('z'))) {
+        fail(88);
+    }
+    let _ = libwoven::print("hello-gui multiplex: woken by message, then by key\n");
+
+    // Nothing else is coming: a timed wait returns 0, not before its deadline.
+    const TIMEOUT_TICKS: u64 = 20;
+    let start = libwoven::ticks();
+    if libwoven::wait_any(both, Some(start + TIMEOUT_TICKS)) != Ok(0) {
+        fail(89);
+    }
+    if libwoven::ticks().wrapping_sub(start) < TIMEOUT_TICKS {
+        fail(90);
+    }
+    let _ = libwoven::print("hello-gui multiplex: timed out on schedule\n");
+    drop(surface);
+    libwoven::exit(0)
+}
+
+const DAMAGED_COLOR: u32 = rgb(20, 200, 60);
+const UNDECLARED_COLOR: u32 = rgb(250, 250, 0);
+
+/// Composites a client from its declared damage only.
+fn damage_compositor() -> ! {
+    use libwoven::{wait, Region};
+    if libwoven::compositor_claim().is_err() {
+        fail(100);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: lease held\n");
+    let mut message = [0u8; 8];
+    let (length, client) = receive_bounded(&mut message, 101);
+    if length != 8 {
+        fail(102);
+    }
+    let token = u64::from_le_bytes(message);
+
+    // The client declared the whole window before sending its token.
+    match libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) {
+        Ok(Some(Region { x: 0, y: 0, width: 40, height: 30 })) => {}
+        _ => fail(103),
+    }
+    if libwoven::screen_pixel(CLIENT_X + 10, CLIENT_Y + 5) != Ok(CLIENT_COLOR) {
+        fail(104);
+    }
+    // Nothing more is pending.
+    if libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) != Ok(None) {
+        fail(105);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: window composited\n");
+
+    // Sleep until the client damages its window. The gate lets the client
+    // act only once this process is blocked here. The wait is level-checked,
+    // so at its deadline it would still report damage that arrived without a
+    // wakeup; timing it is what proves the damage itself woke this process.
+    const WAKE_DEADLINE_TICKS: u64 = 500;
+    let slept_at = libwoven::ticks();
+    match libwoven::wait_any(wait::DAMAGE, Some(slept_at + WAKE_DEADLINE_TICKS)) {
+        Ok(ready) if ready == wait::DAMAGE => {}
+        Ok(_) => fail(106),
+        Err(_) => fail(107),
+    }
+    if libwoven::ticks().wrapping_sub(slept_at) >= WAKE_DEADLINE_TICKS {
+        fail(111);
+    }
+    match libwoven::compositor_blit_damage(token, CLIENT_X, CLIENT_Y) {
+        Ok(Some(Region { x: 10, y: 5, width: 4, height: 3 })) => {}
+        _ => fail(108),
+    }
+    // The declared region shows the new colour; the region the client
+    // changed without declaring still shows the old one.
+    if libwoven::screen_pixel(CLIENT_X + 10, CLIENT_Y + 5) != Ok(DAMAGED_COLOR)
+        || libwoven::screen_pixel(CLIENT_X + 13, CLIENT_Y + 7) != Ok(DAMAGED_COLOR)
+        || libwoven::screen_pixel(CLIENT_X + 30, CLIENT_Y + 20) != Ok(CLIENT_COLOR)
+    {
+        fail(109);
+    }
+    let _ = libwoven::print("hello-gui damage compositor: only the damage was copied\n");
+    if libwoven::message_send(client, b"done").is_err() {
+        fail(110);
+    }
+    libwoven::exit(0)
+}
+
+/// Declares the damage it makes, except for one deliberate omission.
+fn damage_client(compositor: Option<&[u8]>, peer: Option<&[u8]>) -> ! {
+    let (Some(compositor), Some(peer)) = (
+        compositor.and_then(parse_u64).map(libwoven::process::Id),
+        peer.and_then(parse_u64).map(libwoven::process::Id),
+    ) else {
+        fail(120)
+    };
+    let window = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(121),
+    };
+    if window.fill_rect(0, 0, 40, 30, CLIENT_COLOR).is_err()
+        || window.share_with(compositor).is_err()
+        || window.damage(0, 0, 40, 30).is_err()
+    {
+        fail(122);
+    }
+    if libwoven::message_send(compositor, &window.handle().to_le_bytes()).is_err() {
+        fail(123);
+    }
+    // Wait for the gate's go-ahead, sent once the compositor is asleep.
+    let mut go = [0u8; 4];
+    let (length, sender) = receive_bounded(&mut go, 124);
+    if sender != peer || &go[..length] != b"go" {
+        fail(125);
+    }
+    if window.fill_rect(10, 5, 4, 3, DAMAGED_COLOR).is_err()
+        || window.fill_rect(30, 20, 2, 2, UNDECLARED_COLOR).is_err()
+        || window.damage(10, 5, 4, 3).is_err()
+    {
+        fail(126);
+    }
+    let _ = libwoven::print("hello-gui damage client: damage declared\n");
+    let mut reply = [0u8; 8];
+    let (length, sender) = receive_bounded(&mut reply, 127);
+    if sender != compositor || &reply[..length] != b"done" {
+        fail(128);
+    }
+    libwoven::exit(0)
+}
+
+const WM_WIDTH: u16 = 120;
+const WM_HEIGHT: u16 = 80;
+
+#[derive(Clone, Copy)]
+struct Window {
+    client: libwoven::process::Id,
+    token: u64,
+    x: i32,
+    y: i32,
+    color: u32,
+}
+
+impl Window {
+    fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.x
+            && y >= self.y
+            && x < self.x + i32::from(WM_WIDTH)
+            && y < self.y + i32::from(WM_HEIGHT)
+    }
+}
+
+/// Draw the windows bottom to top, present, and check that every window's
+/// visible pixels show its own colour: the stacking order is what the screen
+/// shows. Topmost is last.
+fn composite(stack: &[Window; 2]) {
+    for window in stack {
+        if libwoven::compositor_blit_shared(window.token, window.x, window.y).is_err() {
+            fail(140);
+        }
+    }
+    if libwoven::compositor_present().is_err() {
+        fail(141);
+    }
+    // A pixel inside both windows must belong to the top one; a pixel inside
+    // only the bottom one must still show the bottom one.
+    let (bottom, top) = (stack[0], stack[1]);
+    let (shared_x, shared_y) = (top.x.max(bottom.x) + 2, top.y.max(bottom.y) + 2);
+    if !(top.contains(shared_x, shared_y) && bottom.contains(shared_x, shared_y)) {
+        fail(142);
+    }
+    if libwoven::screen_pixel(shared_x, shared_y) != Ok(top.color) {
+        fail(143);
+    }
+    // Any corner of the bottom window that the top one does not cover.
+    let (right, lower) = (
+        bottom.x + i32::from(WM_WIDTH) - 2,
+        bottom.y + i32::from(WM_HEIGHT) - 2,
+    );
+    let corners = [
+        (bottom.x + 1, bottom.y + 1),
+        (right, bottom.y + 1),
+        (bottom.x + 1, lower),
+        (right, lower),
+    ];
+    let Some(&(only_x, only_y)) = corners.iter().find(|&&(x, y)| !top.contains(x, y)) else {
+        fail(145)
+    };
+    if libwoven::screen_pixel(only_x, only_y) != Ok(bottom.color) {
+        fail(144);
+    }
+}
+
+/// A window manager over two clients.
+fn window_manager() -> ! {
+    use libwoven::{wait, InputEvent, Key};
+    if libwoven::compositor_claim().is_err() {
+        fail(130);
+    }
+    // Taking the display also takes input focus.
+    if libwoven::compositor_present().is_err() {
+        fail(131);
+    }
+    let _ = libwoven::print("hello-gui wm: display and focus held\n");
+
+    let mut windows = [None::<Window>; 2];
+    for slot in windows.iter_mut() {
+        let mut message = [0u8; 24];
+        let (length, client) = receive_bounded(&mut message, 132);
+        if length != 24 {
+            fail(133);
+        }
+        let field = |index: usize| {
+            u64::from_le_bytes(message[index * 8..index * 8 + 8].try_into().unwrap_or([0; 8]))
+        };
+        let origin = field(1);
+        *slot = Some(Window {
+            client,
+            token: field(0),
+            x: origin as u32 as i32,
+            y: (origin >> 32) as u32 as i32,
+            color: field(2) as u32,
+        });
+    }
+    let (Some(first), Some(second)) = (windows[0], windows[1]) else {
+        fail(134)
+    };
+    // Deterministic initial stack: the older client (lower pid) at the bottom.
+    let mut stack = if first.client.0 < second.client.0 {
+        [first, second]
+    } else {
+        [second, first]
+    };
+    composite(&stack);
+    let _ = libwoven::print("hello-gui wm: windows stacked\n");
+
+    // Tab, or a left click on the bottom window, raises and focuses it;
+    // characters go to the focused (topmost) window's client and to no one
+    // else. The pointer starts at the screen origin and follows relative
+    // motion, clamped at zero.
+    let (mut pointer_x, mut pointer_y) = (0i32, 0i32);
+    let mut forwarded = 0;
+    while forwarded < 2 {
+        match libwoven::wait_any(wait::INPUT, Some(libwoven::ticks() + IPC_DEADLINE_TICKS)) {
+            Ok(ready) if ready == wait::INPUT => {}
+            _ => fail(135),
+        }
+        match libwoven::input_poll_event() {
+            Ok(Some(InputEvent::Key(Key::Tab))) => {
+                stack.swap(0, 1);
+                composite(&stack);
+                let _ = libwoven::print("hello-gui wm: raised and focused the other window\n");
+            }
+            Ok(Some(InputEvent::Key(Key::Char(character)))) => {
+                let focused = stack[1].client;
+                if libwoven::message_send(focused, &[character as u8]).is_err() {
+                    fail(136);
+                }
+                forwarded += 1;
+            }
+            Ok(Some(InputEvent::PointerMove { dx, dy })) => {
+                pointer_x = (pointer_x + i32::from(dx)).max(0);
+                pointer_y = (pointer_y + i32::from(dy)).max(0);
+            }
+            Ok(Some(InputEvent::PointerButton { button: 0, pressed: true })) => {
+                // Raise the topmost window under the pointer, if it is not
+                // already on top. A click on empty desktop changes nothing.
+                if !stack[1].contains(pointer_x, pointer_y) && stack[0].contains(pointer_x, pointer_y) {
+                    stack.swap(0, 1);
+                }
+                composite(&stack);
+                let _ = libwoven::print("hello-gui wm: click focused the window under the pointer\n");
+            }
+            Ok(Some(InputEvent::PointerButton { .. })) => {}
+            _ => fail(137),
+        }
+    }
+    let _ = libwoven::print("hello-gui wm: keys routed to the focused windows\n");
+    libwoven::exit(0)
+}
+
+/// One window under the window manager; expects exactly one key.
+fn wm_client(args: &Args) -> ! {
+    let number = |index| args.get(index).and_then(parse_u64);
+    let (Some(wm), Some(x), Some(y), Some(tag), Some(expected)) = (
+        number(2).map(libwoven::process::Id),
+        number(3),
+        number(4),
+        args.get(5),
+        args.get(6),
+    ) else {
+        fail(150)
+    };
+    let color = match tag {
+        b"a" => rgb(200, 60, 60),
+        b"b" => rgb(60, 60, 200),
+        _ => fail(151),
+    };
+    let window = match GraphicsSurface::create(u32::from(WM_WIDTH), u32::from(WM_HEIGHT)) {
+        Ok(surface) => surface,
+        Err(_) => fail(152),
+    };
+    if window.fill_rect(0, 0, WM_WIDTH, WM_HEIGHT, color).is_err()
+        || window.share_with(wm).is_err()
+    {
+        fail(153);
+    }
+    let mut message = [0u8; 24];
+    message[..8].copy_from_slice(&window.handle().to_le_bytes());
+    message[8..16].copy_from_slice(&(x | (y << 32)).to_le_bytes());
+    message[16..].copy_from_slice(&u64::from(color).to_le_bytes());
+    if libwoven::message_send(wm, &message).is_err() {
+        fail(154);
+    }
+
+    // Exactly one message from the window manager, carrying exactly our key.
+    let mut key = [0u8; 4];
+    let (length, sender) = receive_bounded(&mut key, 155);
+    if sender != wm || length != 1 || key[0] != expected.first().copied().unwrap_or(0) {
+        fail(156);
+    }
+    // And nothing more for a short quiet period. A misrouted key that comes
+    // later still fails the gate: the window manager's send to this exited
+    // client fails, and the client the key was meant for never receives it.
+    let start = libwoven::ticks();
+    while libwoven::ticks().wrapping_sub(start) < 50 {
+        if libwoven::message_receive(&mut key).is_ok() {
+            fail(157);
+        }
+        libwoven::yield_now();
+    }
+    let _ = libwoven::print("hello-gui wm client: received exactly its key\n");
+    drop(window);
+    libwoven::exit(0)
+}
+
+/// The kernel's blend formula, restated independently: per channel,
+/// `(over * a + under * (255 - a) + 127) / 255`.
+const fn blend(over: u32, under: u32, opacity: u8) -> u32 {
+    let a = opacity as u32;
+    let mut result = 0;
+    let mut shift = 0;
+    while shift <= 16 {
+        let top = (over >> shift) & 0xff;
+        let bottom = (under >> shift) & 0xff;
+        result |= ((top * a + bottom * (255 - a) + 127) / 255) << shift;
+        shift += 8;
+    }
+    result
+}
+
+const BACKDROP: u32 = rgb(200, 200, 200);
+const SHADOW_OPACITY: u8 = 96;
+const WINDOW_OPACITY: u8 = 160;
+
+/// Translucent window with a shadow, over an opaque backdrop.
+fn alpha_compositor() -> ! {
+    if libwoven::compositor_claim().is_err() {
+        fail(160);
+    }
+    let backdrop = match GraphicsSurface::create(200, 150) {
+        Ok(surface) => surface,
+        Err(_) => fail(161),
+    };
+    let shadow = match GraphicsSurface::create(40, 30) {
+        Ok(surface) => surface,
+        Err(_) => fail(162),
+    };
+    if backdrop.fill_rect(0, 0, 200, 150, BACKDROP).is_err()
+        || shadow.fill_rect(0, 0, 40, 30, rgb(0, 0, 0)).is_err()
+        || backdrop.present(100, 100).is_err()
+    {
+        fail(163);
+    }
+    let _ = libwoven::print("hello-gui alpha: backdrop drawn\n");
+
+    let mut message = [0u8; 16];
+    let (length, client) = receive_bounded(&mut message, 164);
+    if length != 16 {
+        fail(165);
+    }
+    let window = u64::from_le_bytes(message[..8].try_into().unwrap_or([0; 8]));
+    let private = u64::from_le_bytes(message[8..].try_into().unwrap_or([0; 8]));
+
+    // Shadow offset down-right of the window, then the window over it.
+    if shadow.present_blended(136, 136, SHADOW_OPACITY).is_err()
+        || libwoven::compositor_blend_shared(window, 130, 130, WINDOW_OPACITY).is_err()
+    {
+        fail(166);
+    }
+    let shaded = blend(rgb(0, 0, 0), BACKDROP, SHADOW_OPACITY);
+    let expected = [
+        ((105, 105), BACKDROP),                                   // backdrop only
+        ((172, 163), shaded),                                     // shadow only
+        ((131, 131), blend(CLIENT_COLOR, BACKDROP, WINDOW_OPACITY)), // window on backdrop
+        ((150, 150), blend(CLIENT_COLOR, shaded, WINDOW_OPACITY)),   // window on shadow
+    ];
+    for ((x, y), color) in expected {
+        if libwoven::screen_pixel(x, y) != Ok(color) {
+            fail(167);
+        }
+    }
+    let _ = libwoven::print("hello-gui alpha: shadow and translucent window blended\n");
+
+    // Opacity 0 changes nothing; the private surface is refused even
+    // translucently; an opacity above 255 is refused rather than truncated.
+    if libwoven::compositor_blend_shared(window, 400, 300, 0).is_err()
+        || libwoven::screen_pixel(400, 300) != Ok(0)
+        || libwoven::compositor_blend_shared(private, 0, 0, 128).is_ok()
+    {
+        fail(168);
+    }
+    // SAFETY: integer-only call; the kernel validates the opacity.
+    if unsafe { syscall::graphics_compositor_blend_shared(window, 0, 0, 256) }
+        != libwoven::syscall::ERROR
+    {
+        fail(169);
+    }
+    if libwoven::compositor_present().is_err() || libwoven::message_send(client, b"done").is_err() {
+        fail(170);
+    }
+    drop(backdrop);
+    drop(shadow);
+    libwoven::exit(0)
+}
+
+/// An application on the WovenShell desktop.
+fn desktop_client(args: &Args) -> ! {
+    let Some(shell) = args.get(2).and_then(parse_u64).map(libwoven::process::Id) else {
+        fail(180)
+    };
+    let (title, width, height, color, expected, extras): (&[u8], u16, u16, u32, u8, bool) =
+        match args.get(3) {
+            Some(b"a") => (b"Alpha", 120, 80, rgb(200, 60, 60), b'x', true),
+            Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
+            Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
+            Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
+            Some(b"q") => (b"Quiet", 100, 60, rgb(90, 170, 170), b'q', false),
+            _ => fail(181),
+        };
+    let mut window = match GraphicsSurface::create(u32::from(width), u32::from(height)) {
+        Ok(surface) => surface,
+        Err(_) => fail(182),
+    };
+    if window.fill_rect(0, 0, width, height, color).is_err() || window.share_with(shell).is_err() {
+        fail(183);
+    }
+    let mut open = [0u8; 40];
+    open[..4].copy_from_slice(b"WOPN");
+    open[4..12].copy_from_slice(&window.handle().to_le_bytes());
+    open[12..14].copy_from_slice(&width.to_le_bytes());
+    open[14..16].copy_from_slice(&height.to_le_bytes());
+    open[16..16 + title.len()].copy_from_slice(title);
+    if libwoven::message_send(shell, &open[..16 + title.len()]).is_err() {
+        fail(184);
+    }
+
+    // Client A also shows a tray icon and a notification, then redraws part
+    // of its window, which reaches the screen only through damage.
+    let icon = if extras {
+        let icon = match GraphicsSurface::create(16, 16) {
+            Ok(surface) => surface,
+            Err(_) => fail(185),
+        };
+        let mut tray = [0u8; 12];
+        tray[..4].copy_from_slice(b"TRAY");
+        tray[4..].copy_from_slice(&icon.handle().to_le_bytes());
+        if icon.fill_rect(0, 0, 16, 16, rgb(40, 200, 90)).is_err()
+            || icon.share_with(shell).is_err()
+            || libwoven::message_send(shell, &tray).is_err()
+            || libwoven::message_send(shell, b"NOTEAlpha ready").is_err()
+        {
+            fail(185);
+        }
+        let start = libwoven::ticks();
+        while libwoven::ticks().wrapping_sub(start) < 100 {
+            libwoven::yield_now();
+        }
+        if window.fill_rect(10, 10, 20, 10, rgb(255, 255, 255)).is_err()
+            || window.damage(10, 10, 20, 10).is_err()
+        {
+            fail(186);
+        }
+        Some(icon)
+    } else {
+        None
+    };
+
+    // Client N posts three notifications, a little apart so the shell sees
+    // them in order.
+    if args.get(3) == Some(b"n") {
+        for note in [&b"NOTEBuild done"[..], b"NOTEMail: 3 new", b"NOTEBattery 80%"] {
+            if libwoven::message_send(shell, note).is_err() {
+                fail(189);
+            }
+            let start = libwoven::ticks();
+            while libwoven::ticks().wrapping_sub(start) < 10 {
+                libwoven::yield_now();
+            }
+        }
+    }
+
+    // Exactly our key, from the shell.
+    let deadline = libwoven::ticks() + 6000;
+    // Room for the largest shell message this client must skip (WPBT is 10
+    // bytes). A message larger than the buffer is refused and stays queued,
+    // so an undersized buffer would spin on it and never see the key.
+    let mut key = [0u8; 16];
+    loop {
+        match libwoven::wait_any(libwoven::wait::MESSAGE, Some(deadline)) {
+            Ok(0) | Err(_) => fail(188),
+            Ok(_) => {}
+        }
+        if let Ok((length, sender)) = libwoven::message_receive(&mut key) {
+            // A resize request: answer with a new surface of that size,
+            // then release the old one.
+            if sender == shell && length == 8 && &key[..4] == b"WSIZ" {
+                let w = u16::from_le_bytes([key[4], key[5]]);
+                let h = u16::from_le_bytes([key[6], key[7]]);
+                if let Ok(resized) = GraphicsSurface::create(u32::from(w), u32::from(h)) {
+                    let mut reply = [0u8; 16];
+                    reply[..4].copy_from_slice(b"WRSZ");
+                    reply[4..12].copy_from_slice(&resized.handle().to_le_bytes());
+                    reply[12..14].copy_from_slice(&w.to_le_bytes());
+                    reply[14..].copy_from_slice(&h.to_le_bytes());
+                    if resized.fill_rect(0, 0, w, h, color).is_ok()
+                        && resized.share_with(shell).is_ok()
+                        && libwoven::message_send(shell, &reply).is_ok()
+                    {
+                        window = resized;
+                        let _ = libwoven::print("hello-gui desktop client: resized\n");
+                    }
+                }
+                continue;
+            }
+            if sender == shell && &key[..length] == b"WCLS" {
+                let _ = libwoven::print("hello-gui desktop client: closed by the shell\n");
+                drop(icon);
+                drop(window);
+                libwoven::exit(0);
+            }
+            // Client Q posts a notification each time it is sent 'p'.
+            if sender == shell && length == 1 && key[0] == b'p' && args.get(3) == Some(b"q") {
+                if libwoven::message_send(shell, b"NOTEPing").is_err() {
+                    fail(189);
+                }
+                continue;
+            }
+            // A pointer move over this window's body: the shell forwards
+            // these to whatever client is under the pointer regardless of
+            // whether it asked for them (see `forward_pointer_move`), and a
+            // desktop client that only wants its one key has nothing to do
+            // with its own pointer coordinates.
+            if sender == shell && length == 8 && &key[..4] == b"WPMV" {
+                continue;
+            }
+            // Likewise a primary-button edge: a click in the body captures
+            // the pointer and the shell forwards the press and release
+            // (`forward_pointer_button`). Focus is the shell's job; this
+            // client still waits for its key.
+            if sender == shell && length == 10 && &key[..4] == b"WPBT" {
+                continue;
+            }
+            if sender != shell || length != 1 || key[0] != expected {
+                fail(187);
+            }
+            break;
+        }
+    }
+    let _ = libwoven::print("hello-gui desktop client: received its key\n");
+    drop(icon);
+    drop(window);
+    libwoven::exit(0)
+}
+
+const SQUARE: u32 = rgb(250, 210, 40);
+const ANIMATION_FRAMES: u64 = 12;
+const FRAME_PERIOD: u64 = 2;
+const FRAME_STEP: i32 = 8;
+const SQUARE_Y: i32 = 60;
+const SQUARE_START: i32 = 10;
+
+/// Display scale 2 and a paced animation.
+fn scaled_compositor() -> ! {
+    // The geometry belongs to the lease holder.
+    if libwoven::compositor_info().is_ok() || libwoven::compositor_claim().is_err() {
+        fail(171);
+    }
+    let full = match libwoven::compositor_info() {
+        Ok(info) if info.scale == 1 => info,
+        _ => fail(172),
+    };
+    // Out-of-range scales are refused and leave the geometry alone.
+    if libwoven::compositor_set_scale(0).is_ok()
+        || libwoven::compositor_set_scale(libwoven::MAX_DISPLAY_SCALE + 1).is_ok()
+        || libwoven::compositor_info() != Ok(full)
+    {
+        fail(173);
+    }
+    let half = match libwoven::compositor_set_scale(2) {
+        Ok(info) => info,
+        Err(_) => fail(174),
+    };
+    // Unclamped, the surface is exactly half the framebuffer each way; the
+    // kernel checks the exact geometry against the framebuffer itself.
+    let exact = full.width < 1920 && full.height < 1200;
+    if half.scale != 2
+        || libwoven::compositor_info() != Ok(half)
+        || (exact && (half.width != full.width / 2 || half.height != full.height / 2))
+        || libwoven::screen_pixel(half.width as i32 - 1, half.height as i32 - 1) != Ok(0)
+        || libwoven::screen_pixel(half.width as i32, 0).is_ok()
+    {
+        fail(174);
+    }
+    let _ = libwoven::print("hello-gui scaled: display at scale 2\n");
+
+    let backdrop = match GraphicsSurface::create(200, 150) {
+        Ok(surface) => surface,
+        Err(_) => fail(175),
+    };
+    let square = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(175),
+    };
+    if backdrop.fill_rect(0, 0, 200, 150, BACKDROP).is_err()
+        || square.fill_rect(0, 0, 16, 16, SQUARE).is_err()
+        || backdrop.present(0, 0).is_err()
+        || square.present(SQUARE_START, SQUARE_Y).is_err()
+    {
+        fail(175);
+    }
+    // The first present repaints the whole surface, each logical pixel as a
+    // 2x2 block.
+    let whole = u64::from(half.width * 2) * u64::from(half.height * 2);
+    if libwoven::compositor_present() != Ok(whole) {
+        fail(175);
+    }
+
+    // Animate: redraw the backdrop over the old square, draw the square at
+    // its new position, present. Frames are paced by the clock; frames the
+    // app is late for are skipped rather than delaying the rest.
+    let mut clock = libwoven::FrameClock::new(FRAME_PERIOD);
+    let start = clock.deadline() - FRAME_PERIOD;
+    let mut frame = 0u64;
+    let mut presented = 0u64;
+    while frame < ANIMATION_FRAMES {
+        let skipped = match clock.wait(0) {
+            Ok(libwoven::FrameEvent::Frame { skipped }) => skipped,
+            _ => fail(176),
+        };
+        frame = (frame + skipped + 1).min(ANIMATION_FRAMES);
+        // No frame may be early: frame n is due at start + n * period.
+        if libwoven::ticks() < start + frame * FRAME_PERIOD {
+            fail(176);
+        }
+        let x = SQUARE_START + FRAME_STEP * frame as i32;
+        if backdrop.present(0, 0).is_err() || square.present(x, SQUARE_Y).is_err() {
+            fail(177);
+        }
+        // Only the backdrop's region is damaged: 200x150 at scale 2.
+        if libwoven::compositor_present() != Ok(200 * 150 * 4) {
+            fail(177);
+        }
+        presented += 1;
+    }
+    let elapsed = libwoven::ticks() - start;
+    if elapsed < ANIMATION_FRAMES * FRAME_PERIOD || presented == 0 {
+        fail(178);
+    }
+    let end = SQUARE_START + FRAME_STEP * ANIMATION_FRAMES as i32;
+    if libwoven::screen_pixel(end + 8, SQUARE_Y + 8) != Ok(SQUARE)
+        || libwoven::screen_pixel(SQUARE_START + 8, SQUARE_Y + 8) != Ok(BACKDROP)
+        || libwoven::screen_pixel(300, 200) != Ok(0)
+    {
+        fail(179);
+    }
+    let mut line = [0u8; 80];
+    let mut length = 0;
+    let mut presented_digits = [0u8; 20];
+    let mut elapsed_digits = [0u8; 20];
+    for part in [
+        &b"hello-gui scaled: "[..],
+        format_u64(presented, &mut presented_digits),
+        b" frames presented over ",
+        format_u64(elapsed, &mut elapsed_digits),
+        b" ticks\n",
+    ] {
+        line[length..length + part.len()].copy_from_slice(part);
+        length += part.len();
+    }
+    let _ = libwoven::write(libwoven::syscall::STDOUT, &line[..length]);
+    drop(backdrop);
+    drop(square);
+    libwoven::exit(0)
+}
+
+/// Decimal digits of `value`, written into the end of `buffer`.
+fn format_u64(mut value: u64, buffer: &mut [u8; 20]) -> &[u8] {
+    let mut index = buffer.len();
+    loop {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    &buffer[index..]
+}
+
+fn parse_u64(text: &[u8]) -> Option<u64> {
+    if text.is_empty() {
+        return None;
+    }
+    let mut value = 0u64;
+    for digit in text {
+        if !digit.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+    }
+    Some(value)
+}
+
+/// Every call here must be refused. Exit 0 means the kernel refused them all.
+fn probe(victim: Option<&[u8]>) -> ! {
+    let Some(victim) = victim.and_then(parse_u64) else {
+        fail(200)
+    };
+
+    // Client surfaces need no authority: the probe can still draw for itself.
+    let own = match GraphicsSurface::create(16, 16) {
+        Ok(surface) => surface,
+        Err(_) => fail(201),
+    };
+    if own.fill_rect(0, 0, 16, 16, CONTENT).is_err() {
+        fail(202);
+    }
+
+    // Without DisplayIo, the compositor is off limits.
+    if libwoven::compositor_claim().is_ok() {
+        fail(203);
+    }
+    if own.present(0, 0).is_ok() {
+        fail(204);
+    }
+    if libwoven::screen_pixel(0, 0).is_ok() {
+        fail(205);
+    }
+    if libwoven::compositor_present().is_ok() {
+        fail(206);
+    }
+    // Without InputIo and focus, input is off limits too.
+    if libwoven::input_poll().is_ok() {
+        fail(215);
+    }
+    // Bounded deadline, so a broken check cannot hang the gate.
+    if libwoven::input_wait(Some(libwoven::ticks() + 1)).is_ok() {
+        fail(216);
+    }
+    // The combined wait: input needs InputIo, and malformed masks are refused.
+    let soon = Some(libwoven::ticks() + 1);
+    if libwoven::wait_any(libwoven::wait::INPUT, soon).is_ok() {
+        fail(217);
+    }
+    if libwoven::wait_any(0, soon).is_ok() || libwoven::wait_any(1 << 7, soon).is_ok() {
+        fail(218);
+    }
+    // Damage waits need DisplayIo; damage on a foreign surface is refused, as
+    // is damage-only compositing without the lease.
+    if libwoven::wait_any(libwoven::wait::DAMAGE, soon).is_ok() {
+        fail(219);
+    }
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_damage(victim, 0, 0, 1, 1) != libwoven::syscall::ERROR {
+            fail(220);
+        }
+    }
+    if libwoven::compositor_blit_damage(victim, 0, 0).is_ok() {
+        fail(221);
+    }
+    // Blending carries the same authority as blitting.
+    if own.present_blended(0, 0, 128).is_ok()
+        || libwoven::compositor_blend_shared(victim, 0, 0, 128).is_ok()
+    {
+        fail(222);
+    }
+    // So does the display geometry, read or changed.
+    if libwoven::compositor_info().is_ok() || libwoven::compositor_set_scale(2).is_ok() {
+        fail(223);
+    }
+    let _ = libwoven::print("hello-gui probe: compositor refused\n");
+
+    // Another process's surface, through its genuine token...
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_pixel(victim, 0, 0) != libwoven::syscall::ERROR {
+            fail(207);
+        }
+        if syscall::graphics_surface_fill(victim, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR {
+            fail(208);
+        }
+        if syscall::graphics_surface_stroke(victim, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR
+        {
+            fail(209);
+        }
+        if syscall::graphics_compositor_blit(victim, 0, 0) != libwoven::syscall::ERROR {
+            fail(210);
+        }
+        if syscall::graphics_surface_destroy(victim) != libwoven::syscall::ERROR {
+            fail(211);
+        }
+    }
+
+    // ...and through a token forged to name this process as the owner, with
+    // the victim's slot and generation. The registry must still refuse it.
+    let forged = (victim & 0xffff_ffff) | (libwoven::current_pid().0 << 32);
+    // SAFETY: integer-only calls; the kernel validates every token.
+    unsafe {
+        if syscall::graphics_surface_pixel(forged, 0, 0) != libwoven::syscall::ERROR {
+            fail(212);
+        }
+        if syscall::graphics_surface_fill(forged, 0, 0, 8, 8, BORDER) != libwoven::syscall::ERROR {
+            fail(213);
+        }
+        if syscall::graphics_surface_destroy(forged) != libwoven::syscall::ERROR {
+            fail(214);
+        }
+    }
+    let _ = libwoven::print("hello-gui probe: foreign surface refused\n");
+
+    drop(own);
+    libwoven::exit(0)
+}
+
+#[panic_handler]
+fn panic(_: &PanicInfo) -> ! {
+    libwoven::exit(101)
+}

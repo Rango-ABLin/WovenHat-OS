@@ -38,6 +38,9 @@ impl Timer {
     pub fn take(&mut self) -> u64 {
         core::mem::take(&mut self.pending)
     }
+    pub fn pending(&self) -> u64 {
+        self.pending
+    }
     pub fn exhausted(&self) -> bool {
         self.next.is_none() && self.pending == 0
     }

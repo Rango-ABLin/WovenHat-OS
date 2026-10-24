@@ -80,9 +80,13 @@ pub fn wrap_volume_key(
     }
     let mut ciphertext = volume_key;
     let aad = wrapped_key_aad(identity);
-    let tag = seal(kek, nonce, &aad, &mut ciphertext)
-        .ok_or(WrappedKeyError::Authentication)?;
-    Ok(WrappedKeyRecord { identity, nonce, ciphertext, tag })
+    let tag = seal(kek, nonce, &aad, &mut ciphertext).ok_or(WrappedKeyError::Authentication)?;
+    Ok(WrappedKeyRecord {
+        identity,
+        nonce,
+        ciphertext,
+        tag,
+    })
 }
 
 /// Authenticate and unwrap a persisted volume-key generation directly into
@@ -530,17 +534,26 @@ pub fn structural_self_test() -> bool {
 
     // Persistent wrapping must authenticate identity as well as ciphertext.
     let kek = [0x24u8; KEY_SIZE];
-    let identity = KeyGeneration { volume_id: 7, generation: 1 };
+    let identity = KeyGeneration {
+        volume_id: 7,
+        generation: 1,
+    };
     let Ok(record) = wrap_volume_key(&kek, identity, 77, [0x51; KEY_SIZE]) else {
         return false;
     };
-    let untrusted = ProvisioningEvidence { measurement: [0; 32], authenticated: true };
+    let untrusted = ProvisioningEvidence {
+        measurement: [0; 32],
+        authenticated: true,
+    };
     if provision_measured_wrapped_for(2000, &kek, untrusted, &record)
         != Err(WrappedKeyError::UntrustedProvisioning)
     {
         return false;
     }
-    let trusted = ProvisioningEvidence { measurement: [0xa5; 32], authenticated: true };
+    let trusted = ProvisioningEvidence {
+        measurement: [0xa5; 32],
+        authenticated: true,
+    };
     let Ok(persisted) = provision_measured_wrapped_for(2000, &kek, trusted, &record) else {
         return false;
     };

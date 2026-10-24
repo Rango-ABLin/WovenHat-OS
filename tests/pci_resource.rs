@@ -1,3 +1,4 @@
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 
@@ -24,7 +25,10 @@ fn explicit_release_recovers_partial_reservations_after_failure() {
     allocator.release(second).unwrap();
     allocator.release(first).unwrap();
     assert_eq!(allocator.active(), 0);
-    assert_eq!(allocator.reserve(0x4000, 0x4000).unwrap().range.base, 0x8000_0000);
+    assert_eq!(
+        allocator.reserve(0x4000, 0x4000).unwrap().range.base,
+        0x8000_0000
+    );
 }
 
 #[test]

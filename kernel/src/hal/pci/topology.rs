@@ -90,7 +90,12 @@ impl Node {
         Self {
             generation: 1,
             occupied: false,
-            address: FunctionAddress { segment: 0, bus: 0, device: 0, function: 0 },
+            address: FunctionAddress {
+                segment: 0,
+                bus: 0,
+                device: 0,
+                function: 0,
+            },
             parent: None,
             bridge: None,
             owner: NO_OWNER,
@@ -113,7 +118,10 @@ impl LeaseSlot {
         Self {
             generation: 1,
             occupied: false,
-            function: FunctionHandle { slot: 0, generation: 0 },
+            function: FunctionHandle {
+                slot: 0,
+                generation: 0,
+            },
             bar: 0,
             base: 0,
             size: 0,
@@ -137,11 +145,16 @@ impl Topology {
         }
     }
 
-    pub fn count(&self) -> usize { self.count }
+    pub fn count(&self) -> usize {
+        self.count
+    }
 
     pub fn handle_at(&self, slot: usize) -> Option<FunctionHandle> {
         let node = self.nodes.get(slot)?;
-        node.occupied.then_some(FunctionHandle { slot: slot as u8, generation: node.generation })
+        node.occupied.then_some(FunctionHandle {
+            slot: slot as u8,
+            generation: node.generation,
+        })
     }
 
     pub fn insert(&mut self, descriptor: FunctionDescriptor) -> Result<FunctionHandle, Error> {
@@ -151,10 +164,18 @@ impl Topology {
         if !valid_bridge(descriptor.bridge) {
             return Err(Error::InvalidBridge);
         }
-        if self.nodes.iter().any(|node| node.occupied && node.address == descriptor.address) {
+        if self
+            .nodes
+            .iter()
+            .any(|node| node.occupied && node.address == descriptor.address)
+        {
             return Err(Error::Duplicate);
         }
-        let slot = self.nodes.iter().position(|node| !node.occupied).ok_or(Error::Capacity)?;
+        let slot = self
+            .nodes
+            .iter()
+            .position(|node| !node.occupied)
+            .ok_or(Error::Capacity)?;
         let generation = self.nodes[slot].generation;
         self.nodes[slot] = Node {
             generation,
@@ -165,7 +186,10 @@ impl Topology {
             owner: NO_OWNER,
         };
         self.count += 1;
-        let handle = FunctionHandle { slot: slot as u8, generation };
+        let handle = FunctionHandle {
+            slot: slot as u8,
+            generation,
+        };
         self.nodes[slot].parent = self.find_parent(descriptor.address, Some(handle));
         self.reparent_children(handle);
         Ok(handle)
@@ -174,11 +198,16 @@ impl Topology {
     /// Reconcile one discovered function without invalidating an unchanged
     /// generation-safe handle, owner, or MMIO lease. Bridge routing metadata may
     /// change across rescans, so parent relationships are recomputed in place.
-    #[expect(dead_code, reason = "used by feature-gated Stage 13 PCI hotplug reconciliation")]
+    #[expect(
+        dead_code,
+        reason = "used by feature-gated Stage 13 PCI hotplug reconciliation"
+    )]
     pub fn reconcile(&mut self, descriptor: FunctionDescriptor) -> Result<FunctionHandle, Error> {
-        if let Some(index) = self.nodes.iter().position(|node| {
-            node.occupied && node.address == descriptor.address
-        }) {
+        if let Some(index) = self
+            .nodes
+            .iter()
+            .position(|node| node.occupied && node.address == descriptor.address)
+        {
             if !valid_bridge(descriptor.bridge) {
                 return Err(Error::InvalidBridge);
             }
@@ -214,9 +243,13 @@ impl Topology {
     }
 
     pub fn claim(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
-        if owner == NO_OWNER { return Err(Error::InvalidOwner); }
+        if owner == NO_OWNER {
+            return Err(Error::InvalidOwner);
+        }
         let node = self.node_mut(handle)?;
-        if node.owner != NO_OWNER { return Err(Error::AlreadyOwned); }
+        if node.owner != NO_OWNER {
+            return Err(Error::AlreadyOwned);
+        }
         node.owner = owner;
         Ok(())
     }
@@ -224,13 +257,19 @@ impl Topology {
     pub fn release(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
         {
             let node = self.node(handle)?;
-            if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
+            if owner == NO_OWNER || node.owner != owner {
+                return Err(Error::NotOwner);
+            }
         }
         // Function ownership is the outer capability. It may not disappear
         // while any generation-safe BAR lease still depends on it; otherwise
         // an untracked/failed-cleanup lease could be stranded after admission
         // or teardown and later confuse slot reuse.
-        if self.leases.iter().any(|lease| lease.occupied && lease.function == handle) {
+        if self
+            .leases
+            .iter()
+            .any(|lease| lease.occupied && lease.function == handle)
+        {
             return Err(Error::AlreadyOwned);
         }
         self.node_mut(handle)?.owner = NO_OWNER;
@@ -245,19 +284,48 @@ impl Topology {
         base: u64,
         size: u64,
     ) -> Result<MmioLease, Error> {
-        if bar >= 6 || base == 0 || size == 0 { return Err(Error::InvalidBar); }
+        if bar >= 6 || base == 0 || size == 0 {
+            return Err(Error::InvalidBar);
+        }
         let node = self.node(handle)?;
-        if owner == NO_OWNER || node.owner != owner { return Err(Error::NotOwner); }
-        let slot = self.leases.iter().position(|lease| !lease.occupied).ok_or(Error::Capacity)?;
+        if owner == NO_OWNER || node.owner != owner {
+            return Err(Error::NotOwner);
+        }
+        let slot = self
+            .leases
+            .iter()
+            .position(|lease| !lease.occupied)
+            .ok_or(Error::Capacity)?;
         let generation = self.leases[slot].generation;
-        self.leases[slot] = LeaseSlot { generation, occupied: true, function: handle, bar, base, size };
-        Ok(MmioLease { slot: slot as u8, generation, function: handle, bar, base, size })
+        self.leases[slot] = LeaseSlot {
+            generation,
+            occupied: true,
+            function: handle,
+            bar,
+            base,
+            size,
+        };
+        Ok(MmioLease {
+            slot: slot as u8,
+            generation,
+            function: handle,
+            bar,
+            base,
+            size,
+        })
     }
 
     pub fn validate_mmio(&self, lease: MmioLease, owner: u32) -> bool {
-        let Some(slot) = self.leases.get(lease.slot as usize) else { return false; };
-        if !slot.occupied || slot.generation != lease.generation || slot.function != lease.function
-            || slot.bar != lease.bar || slot.base != lease.base || slot.size != lease.size {
+        let Some(slot) = self.leases.get(lease.slot as usize) else {
+            return false;
+        };
+        if !slot.occupied
+            || slot.generation != lease.generation
+            || slot.function != lease.function
+            || slot.bar != lease.bar
+            || slot.base != lease.base
+            || slot.size != lease.size
+        {
             return false;
         }
         self.node(lease.function)
@@ -280,7 +348,9 @@ impl Topology {
 
     pub fn teardown(&mut self, handle: FunctionHandle, owner: u32) -> Result<(), Error> {
         let node = self.node(handle)?;
-        if node.owner != NO_OWNER && node.owner != owner { return Err(Error::NotOwner); }
+        if node.owner != NO_OWNER && node.owner != owner {
+            return Err(Error::NotOwner);
+        }
 
         // Invalidate all logical MMIO authority before the function slot can
         // advance generation or be reused.
@@ -302,7 +372,9 @@ impl Topology {
         self.count -= 1;
 
         for child in &mut self.nodes {
-            if child.occupied && child.parent == Some(handle) { child.parent = None; }
+            if child.occupied && child.parent == Some(handle) {
+                child.parent = None;
+            }
         }
         for index in 0..MAX_FUNCTIONS {
             if self.nodes[index].occupied {
@@ -318,14 +390,24 @@ impl Topology {
     }
 
     fn node(&self, handle: FunctionHandle) -> Result<&Node, Error> {
-        let node = self.nodes.get(handle.slot as usize).ok_or(Error::InvalidHandle)?;
-        if !node.occupied || node.generation != handle.generation { return Err(Error::InvalidHandle); }
+        let node = self
+            .nodes
+            .get(handle.slot as usize)
+            .ok_or(Error::InvalidHandle)?;
+        if !node.occupied || node.generation != handle.generation {
+            return Err(Error::InvalidHandle);
+        }
         Ok(node)
     }
 
     fn node_mut(&mut self, handle: FunctionHandle) -> Result<&mut Node, Error> {
-        let node = self.nodes.get_mut(handle.slot as usize).ok_or(Error::InvalidHandle)?;
-        if !node.occupied || node.generation != handle.generation { return Err(Error::InvalidHandle); }
+        let node = self
+            .nodes
+            .get_mut(handle.slot as usize)
+            .ok_or(Error::InvalidHandle)?;
+        if !node.occupied || node.generation != handle.generation {
+            return Err(Error::InvalidHandle);
+        }
         Ok(node)
     }
 
@@ -336,11 +418,22 @@ impl Topology {
     ) -> Option<FunctionHandle> {
         let mut best: Option<(u8, FunctionHandle)> = None;
         for (index, node) in self.nodes.iter().enumerate() {
-            if !node.occupied || node.address.segment != address.segment { continue; }
-            let handle = FunctionHandle { slot: index as u8, generation: node.generation };
-            if exclude == Some(handle) { continue; }
-            let Some(route) = node.bridge else { continue; };
-            if address.bus < route.secondary || address.bus > route.subordinate { continue; }
+            if !node.occupied || node.address.segment != address.segment {
+                continue;
+            }
+            let handle = FunctionHandle {
+                slot: index as u8,
+                generation: node.generation,
+            };
+            if exclude == Some(handle) {
+                continue;
+            }
+            let Some(route) = node.bridge else {
+                continue;
+            };
+            if address.bus < route.secondary || address.bus > route.subordinate {
+                continue;
+            }
             let span = route.subordinate - route.secondary;
             if best.is_none_or(|(best_span, _)| span < best_span) {
                 best = Some((span, handle));
@@ -350,15 +443,22 @@ impl Topology {
     }
 
     fn reparent_children(&mut self, bridge: FunctionHandle) {
-        let Ok(node) = self.node(bridge) else { return; };
-        let Some(route) = node.bridge else { return; };
+        let Ok(node) = self.node(bridge) else {
+            return;
+        };
+        let Some(route) = node.bridge else {
+            return;
+        };
         let segment = node.address.segment;
         for index in 0..MAX_FUNCTIONS {
-            if !self.nodes[index].occupied || index == bridge.slot as usize { continue; }
+            if !self.nodes[index].occupied || index == bridge.slot as usize {
+                continue;
+            }
             let address = self.nodes[index].address;
             if address.segment != segment
                 || address.bus < route.secondary
-                || address.bus > route.subordinate {
+                || address.bus > route.subordinate
+            {
                 continue;
             }
             let current = FunctionHandle {
@@ -372,5 +472,9 @@ impl Topology {
 
 const fn next_generation(generation: u32) -> u32 {
     let next = generation.wrapping_add(1);
-    if next == 0 { 1 } else { next }
+    if next == 0 {
+        1
+    } else {
+        next
+    }
 }

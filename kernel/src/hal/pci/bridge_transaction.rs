@@ -28,19 +28,31 @@ pub struct Chain {
 }
 
 impl Default for Chain {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Chain {
     pub const fn new() -> Self {
-        Self { entries: [None; MAX_BRIDGES], count: 0 }
+        Self {
+            entries: [None; MAX_BRIDGES],
+            count: 0,
+        }
     }
 
     pub fn push(&mut self, entry: Entry) -> Result<(), Error> {
-        if self.entries.iter().flatten().any(|current| current.address == entry.address) {
+        if self
+            .entries
+            .iter()
+            .flatten()
+            .any(|current| current.address == entry.address)
+        {
             return Err(Error::Duplicate);
         }
-        if self.count == MAX_BRIDGES { return Err(Error::Capacity); }
+        if self.count == MAX_BRIDGES {
+            return Err(Error::Capacity);
+        }
         self.entries[self.count] = Some(entry);
         self.count += 1;
         Ok(())
@@ -64,7 +76,9 @@ impl Chain {
         }
     }
 
-    pub fn len(&self) -> usize { self.count }
+    pub fn len(&self) -> usize {
+        self.count
+    }
 
     pub fn get(&self, index: usize) -> Option<Entry> {
         (index < self.count).then(|| self.entries[index]).flatten()

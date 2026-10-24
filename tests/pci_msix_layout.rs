@@ -3,10 +3,14 @@
 // Stage 13.2 self-test.
 const ENTRY_BYTES: u64 = 16;
 fn entry_offset(base: u32, table_size: u16, index: u16) -> Option<u64> {
-    if index >= table_size { return None; }
+    if index >= table_size {
+        return None;
+    }
     u64::from(base).checked_add(u64::from(index).checked_mul(ENTRY_BYTES)?)
 }
-fn pba_bytes(table_size: u16) -> u64 { u64::from(table_size).div_ceil(64) * 8 }
+fn pba_bytes(table_size: u16) -> u64 {
+    u64::from(table_size).div_ceil(64) * 8
+}
 
 #[test]
 fn table_entries_are_sixteen_byte_bounded_records() {

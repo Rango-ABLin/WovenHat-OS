@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 use crate::irq_lock::IrqMutex as Mutex;
 
@@ -223,7 +223,140 @@ pub fn primary_ata() -> PrimaryAta {
 }
 
 pub fn primary_ata_present() -> bool {
-    crate::ata::with_primary_master(|_| ()).is_some()
+    with_root(|_| ()).is_some()
+}
+
+/// The block device behind the primary storage path. ATA by default; a boot
+/// without an ATA disk selects the NVMe or AHCI disk bring-up bound
+/// (Stage 13.14). Every primary read, write and flush, and the FAT32 mount,
+/// go to the selected device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RootDevice {
+    Ata,
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    Nvme,
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    Ahci,
+}
+
+static ROOT: AtomicU8 = AtomicU8::new(0);
+
+/// Select the primary storage device. Call before mounting; the selection
+/// holds for the rest of the boot.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn select_root(device: RootDevice) {
+    let code = match device {
+        RootDevice::Ata => 0,
+        RootDevice::Nvme => 1,
+        RootDevice::Ahci => 2,
+    };
+    ROOT.store(code, Ordering::Release);
+}
+
+pub fn root_device() -> RootDevice {
+    match ROOT.load(Ordering::Acquire) {
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        1 => RootDevice::Nvme,
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        2 => RootDevice::Ahci,
+        _ => RootDevice::Ata,
+    }
+}
+
+/// FAT volume labels of the volumes WovenHat creates, and so may write: its
+/// own data disks and the live-test log partition on its USB stick.
+pub const OWNED_LABELS: [&[u8; 11]; 2] = [b"WOVENHAT   ", b"WOVENLOG   "];
+
+/// Whether the selected root device holds a WovenHat volume (Stage 13.17).
+static ROOT_OWNED: AtomicBool = AtomicBool::new(false);
+
+/// Record whether the selected root device holds a volume WovenHat owns.
+/// The mount decides this before it mounts.
+pub fn set_root_owned(owned: bool) {
+    ROOT_OWNED.store(owned, Ordering::Release);
+}
+
+/// Whether anything may write the selected root device (Stage 13.17).
+///
+/// Only a disk holding a WovenHat volume is writable. Any other disk, such
+/// as another operating system's disk or its EFI system partition on a
+/// machine booted from WovenHat live media, is read-only to every writer:
+/// file write-back, journals, swap and raw block requests alike. Test boots
+/// keep the ATA primary master writable, because several gates write raw
+/// sectors on scratch disks that hold no file system.
+pub fn root_writable() -> bool {
+    ROOT_OWNED.load(Ordering::Acquire)
+        || (cfg!(feature = "qemu-test") && root_device() == RootDevice::Ata)
+}
+
+/// A root device as every writer sees it: writes are refused, and the
+/// device reports itself read-only, unless [`root_writable`].
+struct Guarded<'a> {
+    disk: &'a mut dyn BlockDevice,
+    writable: bool,
+}
+
+impl BlockDevice for Guarded<'_> {
+    fn sector_count(&self) -> u64 {
+        self.disk.sector_count()
+    }
+
+    fn is_read_only(&self) -> bool {
+        !self.writable || self.disk.is_read_only()
+    }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        if self.writable {
+            self.disk.flush()
+        } else {
+            Ok(())
+        }
+    }
+
+    fn read_sector(&mut self, lba: u64, sector: &mut [u8]) -> Result<(), Error> {
+        self.disk.read_sector(lba, sector)
+    }
+
+    fn write_sector(&mut self, lba: u64, sector: &[u8]) -> Result<(), Error> {
+        if !self.writable {
+            return Err(Error::ReadOnly);
+        }
+        self.disk.write_sector(lba, sector)
+    }
+}
+
+/// Run `operation` on the selected primary device, if it is present, with
+/// writes allowed only when [`root_writable`].
+pub fn with_root<R>(operation: impl FnOnce(&mut dyn BlockDevice) -> R) -> Option<R> {
+    let writable = root_writable();
+    let guarded = move |disk: &mut dyn BlockDevice| operation(&mut Guarded { disk, writable });
+    match root_device() {
+        RootDevice::Ata => crate::ata::with_primary_master(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
+    }
+}
+
+/// Run the one-shot installer transaction against the explicitly confirmed
+/// kernel-selected target. This bypasses the normal mounted-volume ownership
+/// guard only after the syscall has checked the installer's StorageIo
+/// capability and destructive confirmation; the underlying controller's own
+/// read-only result still cannot be bypassed.
+pub(crate) fn with_root_install_target<R>(
+    operation: impl FnOnce(&mut dyn BlockDevice) -> R,
+) -> Option<R> {
+    let guarded = move |disk: &mut dyn BlockDevice| {
+        operation(&mut Guarded { disk, writable: true })
+    };
+    match root_device() {
+        RootDevice::Ata => crate::ata::with_primary_master(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
+    }
 }
 
 pub fn start_worker() -> bool {
@@ -421,11 +554,11 @@ pub fn stats() -> Stats {
 
 impl BlockDevice for PrimaryAta {
     fn sector_count(&self) -> u64 {
-        crate::ata::with_primary_master(|disk| disk.sector_count()).unwrap_or(0)
+        with_root(|disk| disk.sector_count()).unwrap_or(0)
     }
 
     fn is_read_only(&self) -> bool {
-        crate::ata::with_primary_master(|disk| disk.is_read_only()).unwrap_or(true)
+        with_root(|disk| disk.is_read_only()).unwrap_or(true)
     }
 
     fn flush(&mut self) -> Result<(), Error> {
@@ -551,7 +684,7 @@ fn direct_primary(
     input: Option<&[u8]>,
     output: Option<&mut [u8]>,
 ) -> Result<(), Error> {
-    crate::ata::with_primary_master(|disk| match operation {
+    with_root(|disk| match operation {
         Operation::Read => {
             let Some(output) = output else {
                 return Err(Error::InvalidBuffer);

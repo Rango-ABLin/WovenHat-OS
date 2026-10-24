@@ -1,39 +1,16 @@
 use alloc::vec::Vec;
 
-use crate::graphics::{Color, Graphics};
+use crate::display::{Damage, Surface};
+use crate::graphics::Color;
+
+/// Geometry comes from the display stack, which sits below the widget layer.
+///
+/// `gui` previously defined its own `Rect` with the same fields. Two copies of
+/// the same concept drift: the display version gained clipping, union and
+/// saturating edges that the widget version never had.
+pub use crate::display::Rect;
 
 #[derive(Clone, Copy)]
-pub struct Rect {
-    pub x: i32,
-    pub y: i32,
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Rect {
-    pub const fn new(x: i32, y: i32, width: usize, height: usize) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    pub fn contains(self, x: i32, y: i32) -> bool {
-        let Ok(width) = i32::try_from(self.width) else {
-            return false;
-        };
-        let Ok(height) = i32::try_from(self.height) else {
-            return false;
-        };
-        x >= self.x
-            && y >= self.y
-            && x < self.x.saturating_add(width)
-            && y < self.y.saturating_add(height)
-    }
-}
-
 pub enum InputEvent {
     PointerDown { x: i32, y: i32 },
     Key(char),
@@ -58,34 +35,38 @@ impl Button {
         }
     }
 
-    fn render(&self, graphics: &mut Graphics<'_>) {
+    /// Draw into `surface`, returning the region touched.
+    fn render(&self, surface: &mut Surface) -> Rect {
         let color = if self.pressed || self.focused {
             Color::WHITE
         } else {
             self.color
         };
-        graphics.fill_rect(
-            self.bounds.x,
-            self.bounds.y,
-            self.bounds.width,
-            self.bounds.height,
-            color,
-        );
-        graphics.draw_text(
-            self.bounds.x + 12,
-            self.bounds.y + 18,
+        let mut touched = surface.fill_rect(self.bounds, color.packed());
+        // Centre the label by measuring it rather than assuming a width. A
+        // fixed offset left long labels overflowing the button and short ones
+        // hugging its left edge.
+        let label_width = crate::font::text_width(self.label) as i32;
+        let label_height = (crate::font::line_count(self.label) as i32 * crate::font::LINE_HEIGHT)
+            - (crate::font::LINE_HEIGHT - crate::font::HEIGHT as i32);
+        touched = touched.union(surface.draw_text(
+            self.bounds.x + (self.bounds.width as i32 - label_width).max(0) / 2,
+            self.bounds.y + (self.bounds.height as i32 - label_height).max(0) / 2,
             self.label,
-            Color::DARK_BLUE,
-        );
+            Color::DARK_BLUE.packed(),
+        ));
         if self.focused {
-            graphics.stroke_rect(
-                self.bounds.x - 2,
-                self.bounds.y - 2,
-                self.bounds.width + 4,
-                self.bounds.height + 4,
-                Color::DARK_BLUE,
-            );
+            touched = touched.union(surface.stroke_rect(
+                Rect::new(
+                    self.bounds.x - 2,
+                    self.bounds.y - 2,
+                    self.bounds.width + 4,
+                    self.bounds.height + 4,
+                ),
+                Color::WHITE.packed(),
+            ));
         }
+        touched
     }
 
     fn handle(&mut self, event: &InputEvent) -> bool {
@@ -134,37 +115,40 @@ impl Window {
         }
     }
 
-    fn render(&self, graphics: &mut Graphics<'_>) {
-        graphics.fill_rect(
-            self.bounds.x,
-            self.bounds.y,
-            self.bounds.width,
-            self.title_bar_height,
-            self.title_color,
+    /// Draw into `surface`, returning the region touched.
+    fn render(&self, surface: &mut Surface) -> Rect {
+        let mut touched = surface.fill_rect(
+            Rect::new(
+                self.bounds.x,
+                self.bounds.y,
+                self.bounds.width,
+                self.title_bar_height,
+            ),
+            self.title_color.packed(),
         );
-        graphics.draw_text(
-            self.bounds.x + 10,
-            self.bounds.y + 8,
+        // Centre the title in its bar, vertically by glyph height so it does
+        // not drift when the bar height changes.
+        let title_width = crate::font::text_width(self.title) as i32;
+        touched = touched.union(surface.draw_text(
+            self.bounds.x + (self.bounds.width as i32 - title_width).max(0) / 2,
+            self.bounds.y + (self.title_bar_height as i32 - crate::font::HEIGHT as i32).max(0) / 2,
             self.title,
-            Color::DARK_BLUE,
-        );
-        graphics.fill_rect(
-            self.bounds.x,
-            self.bounds.y + self.title_bar_height as i32,
-            self.bounds.width,
-            self.bounds.height.saturating_sub(self.title_bar_height),
-            self.body_color,
-        );
-        graphics.stroke_rect(
-            self.bounds.x,
-            self.bounds.y,
-            self.bounds.width,
-            self.bounds.height,
-            Color::BLACK,
-        );
+            Color::DARK_BLUE.packed(),
+        ));
+        touched = touched.union(surface.fill_rect(
+            Rect::new(
+                self.bounds.x,
+                self.bounds.y + self.title_bar_height as i32,
+                self.bounds.width,
+                self.bounds.height.saturating_sub(self.title_bar_height),
+            ),
+            self.body_color.packed(),
+        ));
+        touched = touched.union(surface.stroke_rect(self.bounds, Color::BLACK.packed()));
         for button in &self.buttons {
-            button.render(graphics);
+            touched = touched.union(button.render(surface));
         }
+        touched
     }
 
     fn handle(&mut self, event: &InputEvent) -> bool {
@@ -217,10 +201,14 @@ impl Desktop {
         self.windows.push(window);
     }
 
-    pub fn render(&self, graphics: &mut Graphics<'_>) {
-        graphics.clear(self.background);
+    /// Draw the whole desktop into `surface`, reporting every region touched.
+    ///
+    /// The caller feeds these regions to a `Damage` list so presentation copies
+    /// only what changed instead of the whole screen.
+    pub fn render(&self, surface: &mut Surface, damage: &mut Damage) {
+        damage.add(surface.fill_rect(surface.bounds(), self.background.packed()));
         for window in &self.windows {
-            window.render(graphics);
+            damage.add(window.render(surface));
         }
     }
 

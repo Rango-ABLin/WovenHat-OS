@@ -33,8 +33,9 @@ capability delegation test produced ordered audit evidence.
 
 Credentials currently contain one UID and one primary GID; supplementary groups,
 credential-changing syscalls, executable ownership metadata, and persistent audit
-storage are not implemented. Audit records remain kernel-resident and are not yet
-exposed to unprivileged processes.
+storage are not implemented. The bounded newest-relative audit-read ABI is
+available only to callers with `TaskInspect`; it does not make the ledger an
+unprivileged data source.
 
 ## W^X (write XOR execute)
 
@@ -65,6 +66,29 @@ Production ELF loads now apply page-aligned randomization to the ELF load
 base, user stack base and anonymous-mmap arena. The `qemu-test` feature keeps
 these offsets at zero so acceptance boots remain reproducible; kernel addresses
 are unaffected.
+
+Signed execution and boot handoff use separate trust roots. Production WAPP
+packaging now fails closed unless both `WOVENHAT_APP_SIGNING_SEED_HEX` and the
+matching `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are provisioned; the
+deterministic development seed is limited to test packaging. Release builds
+must also provision `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` for WAPP application
+packages and both `WOVENHAT_BOOT_SIGNING_SEED_HEX` and the matching
+`WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX` for the signed kernel handoff. The
+builders fail closed on missing or mismatched release values; test features
+use deterministic development roots only. Firmware UEFI Secure Boot variables,
+TPM PCR/event logs, key revocation, and rollback metadata remain platform
+integration work.
+
+User-triggered `exec` and `spawn` now require a valid WAPP envelope for every
+path outside the finite kernel-owned system-image allowlist. Raw ELF remains
+available only through explicit in-kernel launch calls or those trusted system
+paths; an unsigned external image is rejected before ELF parsing.
+
+Static kernel task stacks now carry a low-end canary that is checked before
+scheduler hand-off and on a reserved boot self-test path. This detects bounded
+stack corruption but is not an unmapped virtual guard page. Kernel privilege and
+double-fault stacks remain static until a per-stack virtual mapping design is
+implemented.
 
 ## Known gaps
 

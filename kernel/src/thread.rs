@@ -1,5 +1,6 @@
 //! Bounded process-thread registry used by the Stage 11.2 runtime boundary.
 use crate::irq_lock::IrqMutex as Mutex;
+use crate::userspace::AnonymousMapping;
 
 pub const MAX_THREADS: usize = 64;
 
@@ -7,12 +8,22 @@ pub const MAX_THREADS: usize = 64;
 pub struct ThreadId(u64);
 
 impl ThreadId {
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
     pub const fn raw(self) -> u64 {
         self.0
     }
     const fn new(slot: usize, generation: u32) -> Self {
         Self(((generation as u64) << 32) | slot as u64)
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct Resources {
+    pub stack: AnonymousMapping,
+    pub tls: Option<AnonymousMapping>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,6 +41,8 @@ struct Record {
     exit: i32,
     errno: i32,
     tls: u64,
+    resources: Option<Resources>,
+    waiter: Option<u64>,
 }
 
 impl Record {
@@ -40,7 +53,15 @@ impl Record {
         exit: 0,
         errno: 0,
         tls: 0,
+        resources: None,
+        waiter: None,
     };
+
+    fn reusable(&self) -> bool {
+        // MAX is a permanent retirement sentinel. Saturating release paths
+        // must never make an exhausted slot allocatable under the same tag.
+        self.state == State::Free && self.generation != u32::MAX
+    }
 }
 
 struct Table {
@@ -68,12 +89,14 @@ pub fn create(owner: u64) -> Option<ThreadId> {
         .records
         .iter_mut()
         .enumerate()
-        .find(|(_, r)| r.state == State::Free)?;
+        .find(|(_, r)| r.reusable())?;
     record.state = State::Running;
     record.owner = owner;
     record.exit = 0;
     record.errno = 0;
     record.tls = 0;
+    record.resources = None;
+    record.waiter = None;
     Some(ThreadId::new(slot, record.generation))
 }
 
@@ -90,7 +113,42 @@ pub fn terminate(id: ThreadId, exit: i32) -> bool {
     true
 }
 
+/// Register the current task as the sole join waiter. The boolean is true
+/// when termination won the race before registration, so the caller can retry
+/// the join without blocking.
+pub fn register_waiter(owner: u64, id: ThreadId, waiter: u64) -> Result<bool, JoinError> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
+    if record.owner != owner {
+        return Err(JoinError::NotOwner);
+    }
+    if record.state == State::Exited {
+        return Ok(true);
+    }
+    if record.waiter.is_some() {
+        return Err(JoinError::Invalid);
+    }
+    record.waiter = Some(waiter);
+    Ok(false)
+}
+
+/// Consume a waiter after the exiting task is no longer physically running.
+pub fn take_waiter(id: ThreadId) -> Option<u64> {
+    let mut table = TABLE.lock();
+    lookup(&mut table, id)?.waiter.take()
+}
+
 pub fn join(owner: u64, id: ThreadId) -> Result<i32, JoinError> {
+    join_with_resources(owner, id).map(|(exit, _)| exit)
+}
+
+/// Join a terminated thread and return the mappings owned by that thread.
+/// The caller must unmap them from the shared process address space before it
+/// exposes the slots to a subsequent thread.
+pub fn join_with_resources(
+    owner: u64,
+    id: ThreadId,
+) -> Result<(i32, Option<Resources>), JoinError> {
     let mut table = TABLE.lock();
     let Some(record) = lookup(&mut table, id) else {
         return Err(JoinError::Invalid);
@@ -102,13 +160,60 @@ pub fn join(owner: u64, id: ThreadId) -> Result<i32, JoinError> {
         return Err(JoinError::Running);
     }
     let exit = record.exit;
+    let resources = record.resources.take();
     record.state = State::Free;
     record.generation = record
         .generation
         .checked_add(1)
         .filter(|g| *g != 0)
         .unwrap_or(u32::MAX);
-    Ok(exit)
+    Ok((exit, resources))
+}
+
+pub fn attach_resources(id: ThreadId, resources: Resources) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else {
+        return false;
+    };
+    if record.resources.is_some() {
+        return false;
+    }
+    record.resources = Some(resources);
+    true
+}
+
+pub fn resources(owner: u64, id: ThreadId) -> Option<Resources> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id)?;
+    if record.owner != owner {
+        return None;
+    }
+    record.resources
+}
+
+pub fn joinable(owner: u64, id: ThreadId) -> Result<bool, JoinError> {
+    let mut table = TABLE.lock();
+    let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
+    if record.owner != owner {
+        return Err(JoinError::NotOwner);
+    }
+    Ok(record.state == State::Exited)
+}
+
+pub fn abort(id: ThreadId) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else {
+        return false;
+    };
+    record.state = State::Free;
+    record.owner = 0;
+    record.resources = None;
+    record.generation = record
+        .generation
+        .checked_add(1)
+        .filter(|generation| *generation != 0)
+        .unwrap_or(u32::MAX);
+    true
 }
 
 /// Reclaim every thread record owned by a process that is terminating.
@@ -125,6 +230,8 @@ pub fn reap_owner(owner: u64) -> usize {
             record.exit = 0;
             record.errno = 0;
             record.tls = 0;
+            record.resources = None;
+            record.waiter = None;
             record.generation = record
                 .generation
                 .checked_add(1)
@@ -160,8 +267,128 @@ pub fn errno(id: ThreadId) -> Option<i32> {
     lookup(&mut t, id).map(|r| r.errno)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn isolated(test: impl FnOnce()) {
+        // A failed regression must not prevent independent cases from running.
+        // Each case starts with a fresh host-only table; assertions still fail.
+        let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+        *TABLE.lock() = Table::new();
+        test();
+        *TABLE.lock() = Table::new();
+    }
+
+    fn exhaust(retire: fn(ThreadId)) {
+        isolated(|| {
+            for record in &mut TABLE.lock().records {
+                record.generation = u32::MAX - 1;
+            }
+            let mut retired = [0_u64; MAX_THREADS];
+            for index in 0..MAX_THREADS {
+                let id = create(77).expect("one final generation per available slot");
+                assert!(
+                    !retired[..index].contains(&id.raw()),
+                    "retired handle reissued: {}",
+                    id.raw()
+                );
+                assert_eq!(id.raw() >> 32, u64::from(u32::MAX - 1));
+                assert!(set_tls(id, 123));
+                assert!(set_errno(id, 9));
+                retire(id);
+                assert!(tls(id).is_none());
+                assert!(errno(id).is_none());
+                assert!(!set_tls(id, 456));
+                assert!(!terminate(id, 0));
+                assert!(join(77, id) == Err(JoinError::Invalid));
+                retired[index] = id.raw();
+            }
+            assert!(create(77).is_none(), "exhausted slots must remain retired");
+        });
+    }
+
+    #[test]
+    fn join_permanently_retires_exhausted_generations() {
+        exhaust(|id| {
+            assert!(terminate(id, 42));
+            assert!(join(77, id) == Ok(42));
+        });
+    }
+
+    #[test]
+    fn abort_permanently_retires_exhausted_generations() {
+        exhaust(|id| assert!(abort(id)));
+    }
+
+    #[test]
+    fn owner_reaping_permanently_retires_exhausted_generations() {
+        exhaust(|_| assert_eq!(reap_owner(77), 1));
+    }
+
+    #[test]
+    fn ordinary_reuse_preserves_owner_and_waiter_boundaries() {
+        isolated(|| {
+            let id = create(7).unwrap();
+            assert!(set_tls(id, 123));
+            assert!(set_errno(id, 9));
+            assert!(join(8, id) == Err(JoinError::NotOwner));
+            assert!(register_waiter(8, id, 99) == Err(JoinError::NotOwner));
+            assert!(register_waiter(7, id, 99) == Ok(false));
+            assert!(register_waiter(7, id, 100) == Err(JoinError::Invalid));
+            assert!(terminate(id, 42));
+            assert!(register_waiter(7, id, 99) == Ok(true));
+            assert_eq!(take_waiter(id), Some(99));
+            assert_eq!(take_waiter(id), None);
+            assert!(join(7, id) == Ok(42));
+            assert!(tls(id).is_none());
+            let fresh = create(8).unwrap();
+            assert_eq!(fresh.raw() & 0xffff_ffff, id.raw() & 0xffff_ffff);
+            assert_ne!(fresh.raw(), id.raw());
+            assert_eq!(tls(fresh), Some(0));
+            assert_eq!(errno(fresh), Some(0));
+            assert_eq!(reap_owner(7), 0);
+            assert!(joinable(8, fresh) == Ok(false));
+            assert!(abort(fresh));
+            assert!(tls(fresh).is_none());
+        });
+    }
+
+    #[test]
+    fn ordinary_capacity_is_preserved_across_full_reuse() {
+        isolated(|| {
+            let first: Vec<_> = (0..MAX_THREADS).map(|_| create(7).unwrap()).collect();
+            assert!(create(7).is_none());
+            for id in &first {
+                assert!(abort(*id));
+            }
+            let second: Vec<_> = (0..MAX_THREADS).map(|_| create(8).unwrap()).collect();
+            assert!(create(8).is_none());
+            for (old, fresh) in first.iter().zip(&second) {
+                assert_eq!(old.raw() & 0xffff_ffff, fresh.raw() & 0xffff_ffff);
+                assert_ne!(old.raw(), fresh.raw());
+                assert!(tls(*old).is_none());
+            }
+            assert_eq!(reap_owner(8), MAX_THREADS);
+        });
+    }
+}
+
 #[cfg(feature = "stage11-2-test")]
 pub fn structural_self_test() -> bool {
+    let exhausted = Record {
+        generation: u32::MAX,
+        ..Record::EMPTY
+    };
+    let final_generation = Record {
+        generation: u32::MAX - 1,
+        ..Record::EMPTY
+    };
+    if exhausted.reusable() || !final_generation.reusable() {
+        return false;
+    }
     let Some(id) = create(1) else { return false };
     set_tls(id, 0xfeed_beef)
         && set_errno(id, 37)
@@ -172,10 +399,23 @@ pub fn structural_self_test() -> bool {
         && join(1, id) == Ok(23)
         && tls(id).is_none()
         && {
+            let Some(waited) = create(1) else {
+                return false;
+            };
+            register_waiter(1, waited, 99) == Ok(false)
+                && terminate(waited, 41)
+                && take_waiter(waited) == Some(99)
+                && join(1, waited) == Ok(41)
+        }
+        && {
             let Some(stale) = create(9) else { return false };
             set_tls(stale, 0x1234)
                 && reap_owner(9) == 1
                 && tls(stale).is_none()
-                && create(9).is_some_and(|fresh| fresh != stale)
+                && create(9).is_some_and(|fresh| {
+                    let distinct = fresh != stale;
+                    let cleaned = terminate(fresh, 0) && join(9, fresh) == Ok(0);
+                    distinct && cleaned
+                })
         }
 }

@@ -18,21 +18,59 @@ struct ModeSlot {
     mode: InterruptMode,
 }
 
-static INTERRUPT_MODES: IrqMutex<[ModeSlot; INTERRUPT_MODE_SLOTS]> =
-    IrqMutex::with_rank([ModeSlot { function: topology::FunctionHandle { slot: 0, generation: 0 }, owner: 0, mode: InterruptMode::None }; INTERRUPT_MODE_SLOTS], 22);
+static INTERRUPT_MODES: IrqMutex<[ModeSlot; INTERRUPT_MODE_SLOTS]> = IrqMutex::with_rank(
+    [ModeSlot {
+        function: topology::FunctionHandle {
+            slot: 0,
+            generation: 0,
+        },
+        owner: 0,
+        mode: InterruptMode::None,
+    }; INTERRUPT_MODE_SLOTS],
+    22,
+);
 
-pub(super) fn claim_interrupt_mode(function: topology::FunctionHandle, owner: u32, mode: InterruptMode) -> bool {
-    if owner == 0 || mode == InterruptMode::None { return false; }
+pub(super) fn claim_interrupt_mode(
+    function: topology::FunctionHandle,
+    owner: u32,
+    mode: InterruptMode,
+) -> bool {
+    if owner == 0 || mode == InterruptMode::None {
+        return false;
+    }
     let mut slots = INTERRUPT_MODES.lock();
-    if slots.iter().any(|slot| slot.mode != InterruptMode::None && slot.function == function) { return false; }
-    let Some(slot) = slots.iter_mut().find(|slot| slot.mode == InterruptMode::None) else { return false; };
-    *slot = ModeSlot { function, owner, mode };
+    if slots
+        .iter()
+        .any(|slot| slot.mode != InterruptMode::None && slot.function == function)
+    {
+        return false;
+    }
+    let Some(slot) = slots
+        .iter_mut()
+        .find(|slot| slot.mode == InterruptMode::None)
+    else {
+        return false;
+    };
+    *slot = ModeSlot {
+        function,
+        owner,
+        mode,
+    };
     true
 }
 
-pub(super) fn release_interrupt_mode(function: topology::FunctionHandle, owner: u32, mode: InterruptMode) -> bool {
+pub(super) fn release_interrupt_mode(
+    function: topology::FunctionHandle,
+    owner: u32,
+    mode: InterruptMode,
+) -> bool {
     let mut slots = INTERRUPT_MODES.lock();
-    let Some(slot) = slots.iter_mut().find(|slot| slot.function == function && slot.owner == owner && slot.mode == mode) else { return false; };
+    let Some(slot) = slots
+        .iter_mut()
+        .find(|slot| slot.function == function && slot.owner == owner && slot.mode == mode)
+    else {
+        return false;
+    };
     *slot = ModeSlot::default();
     true
 }
@@ -74,11 +112,15 @@ pub enum MsiLifecycleError {
 }
 
 impl From<vector::Error> for MsiLifecycleError {
-    fn from(error: vector::Error) -> Self { Self::Vector(error) }
+    fn from(error: vector::Error) -> Self {
+        Self::Vector(error)
+    }
 }
 
 impl From<MsiError> for MsiLifecycleError {
-    fn from(error: MsiError) -> Self { Self::Msi(error) }
+    fn from(error: MsiError) -> Self {
+        Self::Msi(error)
+    }
 }
 
 pub const PCI_CAP_ID_MSI: u8 = 0x05;
@@ -97,6 +139,8 @@ pub enum MsiError {
     UnsupportedDestination,
     ConfigRead,
     ConfigWrite,
+    VerifyFailed,
+    RestoreFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,40 +218,83 @@ pub fn program_msi(
     let Some(header) = read_config_unlocked(address, base) else {
         return Err(MsiError::ConfigRead);
     };
+    let Some(original_low) = read_config_unlocked(address, base + 4) else {
+        return Err(MsiError::ConfigRead);
+    };
+    let original_high = if capability.is_64_bit {
+        Some(read_config_unlocked(address, base + 8).ok_or(MsiError::ConfigRead)?)
+    } else {
+        None
+    };
+    let data_dword_offset = if capability.is_64_bit {
+        base + 12
+    } else {
+        base + 8
+    };
+    let original_data =
+        read_config_unlocked(address, data_dword_offset).ok_or(MsiError::ConfigRead)?;
+    let write_and_verify = |offset: u16, value: u32| {
+        write_config_unlocked(address, offset, value)
+            && read_config_unlocked(address, offset) == Some(value)
+    };
     let mut control = (header >> 16) as u16;
     control &= !PCI_MSI_ENABLE;
     // Multiple-message enable bits [6:4] stay zero: one vector only.
     control &= !(0b111 << 4);
     let disabled_header = (header & 0x0000_ffff) | (u32::from(control) << 16);
-    if !write_config_unlocked(address, base, disabled_header) {
-        return Err(MsiError::ConfigWrite);
-    }
 
-    if !write_config_unlocked(address, base + 4, message.address_low) {
-        return Err(MsiError::ConfigWrite);
-    }
-
-    let data_dword_offset = if capability.is_64_bit {
-        if !write_config_unlocked(address, base + 8, message.address_high) {
-            return Err(MsiError::ConfigWrite);
-        }
-        base + 12
-    } else {
-        base + 8
+    let restore = || -> bool {
+        let original_control = (header >> 16) as u16;
+        let disabled_original =
+            (header & 0x0000_ffff) | (u32::from(original_control & !PCI_MSI_ENABLE) << 16);
+        write_and_verify(base, disabled_original)
+            && write_and_verify(base + 4, original_low)
+            && original_high.is_none_or(|value| write_and_verify(base + 8, value))
+            && write_and_verify(data_dword_offset, original_data)
+            && write_and_verify(base, header)
     };
 
-    let Some(old_data_dword) = read_config_unlocked(address, data_dword_offset) else {
-        return Err(MsiError::ConfigRead);
-    };
-    let new_data_dword = (old_data_dword & 0xffff_0000) | u32::from(message.data);
-    if !write_config_unlocked(address, data_dword_offset, new_data_dword) {
-        return Err(MsiError::ConfigWrite);
+    if !write_and_verify(base, disabled_header) {
+        return if restore() {
+            Err(MsiError::ConfigWrite)
+        } else {
+            Err(MsiError::RestoreFailed)
+        };
+    }
+
+    if !write_and_verify(base + 4, message.address_low) {
+        return if restore() {
+            Err(MsiError::ConfigWrite)
+        } else {
+            Err(MsiError::RestoreFailed)
+        };
+    }
+
+    if capability.is_64_bit && !write_and_verify(base + 8, message.address_high) {
+        return if restore() {
+            Err(MsiError::ConfigWrite)
+        } else {
+            Err(MsiError::RestoreFailed)
+        };
+    }
+
+    let new_data_dword = (original_data & 0xffff_0000) | u32::from(message.data);
+    if !write_and_verify(data_dword_offset, new_data_dword) {
+        return if restore() {
+            Err(MsiError::ConfigWrite)
+        } else {
+            Err(MsiError::RestoreFailed)
+        };
     }
 
     control |= PCI_MSI_ENABLE;
     let enabled_header = (header & 0x0000_ffff) | (u32::from(control) << 16);
-    if !write_config_unlocked(address, base, enabled_header) {
-        return Err(MsiError::ConfigWrite);
+    if !write_and_verify(base, enabled_header) {
+        return if restore() {
+            Err(MsiError::ConfigWrite)
+        } else {
+            Err(MsiError::RestoreFailed)
+        };
     }
 
     Ok(MsiCapability {
@@ -233,6 +320,9 @@ pub fn disable_msi(device: Device) -> Result<(), MsiError> {
     if !write_config_unlocked(address, capability.offset, new_header) {
         return Err(MsiError::ConfigWrite);
     }
+    if read_config_unlocked(address, capability.offset) != Some(new_header) {
+        return Err(MsiError::VerifyFailed);
+    }
     Ok(())
 }
 
@@ -250,17 +340,19 @@ pub fn stage13_10aa_msi_self_test() -> bool {
             == Err(MsiError::UnsupportedDestination)
 }
 
-
 /// Allocate and program one owner-bound MSI vector. If configuration-space
 /// programming fails, the vector reservation is rolled back before returning.
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn enable_owned_msi(
     function: topology::FunctionHandle,
     owner: u32,
     destination_apic_id: u32,
 ) -> Result<MsiLease, MsiLifecycleError> {
-    let (snapshot, device) = super::function_device(function)
-        .ok_or(MsiLifecycleError::InvalidFunction)?;
+    let (snapshot, device) =
+        super::function_device(function).ok_or(MsiLifecycleError::InvalidFunction)?;
     if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }
@@ -276,21 +368,38 @@ pub fn enable_owned_msi(
         }
     };
     if let Err(error) = program_msi(device, destination_apic_id, lease.vector) {
+        if error == MsiError::RestoreFailed {
+            return Err(MsiLifecycleError::ActivationRetained {
+                error,
+                lease: MsiLease {
+                    function,
+                    vector: lease,
+                    destination_apic_id,
+                },
+            });
+        }
         let _ = VECTOR_ALLOCATOR.lock().release(lease, owner);
         let _ = release_interrupt_mode(function, owner, InterruptMode::Msi);
         return Err(MsiLifecycleError::Msi(error));
     }
-    Ok(MsiLease { function, vector: lease, destination_apic_id })
+    Ok(MsiLease {
+        function,
+        vector: lease,
+        destination_apic_id,
+    })
 }
 
 /// Disable MSI before releasing its vector. A failed disable deliberately
 /// retains the vector lease so a still-live device can never target a reused
 /// interrupt vector.
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn disable_owned_msi(lease: MsiLease, owner: u32) -> Result<(), MsiLifecycleError> {
     VECTOR_ALLOCATOR.lock().validate(lease.vector, owner)?;
-    let (snapshot, device) = super::function_device(lease.function)
-        .ok_or(MsiLifecycleError::InvalidFunction)?;
+    let (snapshot, device) =
+        super::function_device(lease.function).ok_or(MsiLifecycleError::InvalidFunction)?;
     if snapshot.owner != Some(owner) || owner == 0 {
         return Err(MsiLifecycleError::InvalidFunction);
     }

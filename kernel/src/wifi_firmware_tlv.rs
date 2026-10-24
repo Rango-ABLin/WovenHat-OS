@@ -243,6 +243,14 @@ impl<'a> IntelTlvFirmware<'a> {
         self.version
     }
 
+    /// Intel stores the firmware API in bits 8..15 of the container version
+    /// field (`IWL_UCODE_API(ver)` in the reference driver). Keep extraction
+    /// here so device-specific policy never has to reinterpret raw bytes.
+    #[allow(dead_code)]
+    pub const fn api_version(&self) -> u32 {
+        (self.version >> 8) & 0xff
+    }
+
     pub const fn build(&self) -> u32 {
         self.build
     }

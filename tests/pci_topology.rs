@@ -1,14 +1,18 @@
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../kernel/src/hal/pci/topology.rs"]
 mod topology;
 
-use topology::{
-    BridgeRoute, Error, FunctionAddress, FunctionDescriptor, Topology, MAX_FUNCTIONS,
-};
+use topology::{BridgeRoute, Error, FunctionAddress, FunctionDescriptor, MAX_FUNCTIONS, Topology};
 
 fn endpoint(bus: u8, device: u8) -> FunctionDescriptor {
     FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus, device, function: 0 },
+        address: FunctionAddress {
+            segment: 0,
+            bus,
+            device,
+            function: 0,
+        },
         bridge: None,
     }
 }
@@ -16,14 +20,36 @@ fn endpoint(bus: u8, device: u8) -> FunctionDescriptor {
 #[test]
 fn nested_bridge_chooses_narrowest_parent() {
     let mut t = Topology::new();
-    let root = t.insert(FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus: 0, device: 1, function: 0 },
-        bridge: Some(BridgeRoute { primary: 0, secondary: 1, subordinate: 20 }),
-    }).unwrap();
-    let nested = t.insert(FunctionDescriptor {
-        address: FunctionAddress { segment: 0, bus: 1, device: 0, function: 0 },
-        bridge: Some(BridgeRoute { primary: 1, secondary: 4, subordinate: 8 }),
-    }).unwrap();
+    let root = t
+        .insert(FunctionDescriptor {
+            address: FunctionAddress {
+                segment: 0,
+                bus: 0,
+                device: 1,
+                function: 0,
+            },
+            bridge: Some(BridgeRoute {
+                primary: 0,
+                secondary: 1,
+                subordinate: 20,
+            }),
+        })
+        .unwrap();
+    let nested = t
+        .insert(FunctionDescriptor {
+            address: FunctionAddress {
+                segment: 0,
+                bus: 1,
+                device: 0,
+                function: 0,
+            },
+            bridge: Some(BridgeRoute {
+                primary: 1,
+                secondary: 4,
+                subordinate: 8,
+            }),
+        })
+        .unwrap();
     let child = t.insert(endpoint(5, 0)).unwrap();
     assert_eq!(t.snapshot(nested).unwrap().parent, Some(root));
     assert_eq!(t.snapshot(child).unwrap().parent, Some(nested));
@@ -72,7 +98,6 @@ fn capacity_and_duplicate_rejection_preserve_count() {
     assert_eq!(t.insert(endpoint(10, 1)), Err(Error::Capacity));
     assert_eq!(t.count(), MAX_FUNCTIONS);
 }
-
 
 #[test]
 fn explicit_mmio_release_invalidates_stale_lease_before_slot_reuse() {

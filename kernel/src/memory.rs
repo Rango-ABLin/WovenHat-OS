@@ -43,6 +43,7 @@ impl FrameRange {
 
 pub struct Stats {
     pub usable_regions: usize,
+    pub usable_bytes: u64,
     pub total_frames: u64,
     pub allocated_frames: u64,
     pub remaining_frames: u64,
@@ -166,6 +167,7 @@ impl PhysicalFrameAllocator {
     fn stats(&self) -> Stats {
         Stats {
             usable_regions: self.range_count,
+            usable_bytes: self.total_frames.saturating_mul(FRAME_SIZE),
             total_frames: self.total_frames,
             allocated_frames: self.allocated_frames,
             remaining_frames: self.total_frames.saturating_sub(self.allocated_frames),

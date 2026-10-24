@@ -20,6 +20,20 @@ const PAGE_SIZE: usize = 4096;
 const GROW_CHUNK: usize = 256 * 1024;
 const LOW_WATER: usize = 1024 * 1024;
 
+fn initial_boot_size(remaining_frames: usize) -> usize {
+    let proportional = remaining_frames.saturating_mul(PAGE_SIZE) / 16;
+    let size = if remaining_frames >= MAX_BOOT_SIZE / PAGE_SIZE {
+        // The boot compositor can own a multi-megabyte framebuffer surface.
+        // Reserve the complete bounded bootstrap heap whenever the physical
+        // map can afford it; otherwise a proportional heap can fail before
+        // runtime growth is available to the earliest boot allocations.
+        MAX_BOOT_SIZE
+    } else {
+        proportional.clamp(MIN_SIZE, MAX_BOOT_SIZE)
+    };
+    size & !(PAGE_SIZE - 1)
+}
+
 #[cfg(not(test))]
 static GROW_OWNER: AtomicUsize = AtomicUsize::new(0);
 #[cfg(not(test))]
@@ -371,8 +385,7 @@ pub fn init() -> Result<(), InitError> {
     // Eager mapping keeps allocation independent of paging's lower-ranked lock,
     // including allocations made from within other kernel critical sections.
     let frames = usize::try_from(memory::stats().remaining_frames).unwrap_or(usize::MAX);
-    let budget = frames.saturating_mul(PAGE_SIZE) / 16;
-    let size = budget.clamp(MIN_SIZE, MAX_BOOT_SIZE) & !(PAGE_SIZE - 1);
+    let size = initial_boot_size(frames);
     // Map pages before taking the rank-50 heap guard. Paging is rank 10.
     paging::map_range(START, size).map_err(|_| InitError::Paging)?;
     HEAP.lock().init(size)
@@ -528,6 +541,22 @@ pub fn maintain_capacity() {
     }
 }
 
+#[cfg(test)]
+pub fn maintain_capacity() {}
+
+/// A `Vec` of `len` copies of `value`, or `None` if memory runs out.
+///
+/// Infallible allocation (`vec![...]`) halts the kernel through the
+/// allocation-error handler when physical memory is exhausted. Paths that
+/// size a buffer from a syscall argument use this instead, so the caller
+/// gets an error rather than stopping the machine.
+pub fn try_filled<T: Copy>(value: T, len: usize) -> Option<Vec<T>> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(len).ok()?;
+    buffer.resize(len, value);
+    Some(buffer)
+}
+
 pub fn self_test() -> bool {
     let boxed = Box::new(0x574F_5645_4E48_4154_u64);
     let value = *boxed;
@@ -638,6 +667,29 @@ fn align_up(value: usize, alignment: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bootstrap_heap_reserves_full_bound_when_frames_can_afford_it() {
+        assert_eq!(
+            super::initial_boot_size(super::MAX_BOOT_SIZE / super::PAGE_SIZE),
+            super::MAX_BOOT_SIZE
+        );
+        assert!(
+            super::initial_boot_size(super::MAX_BOOT_SIZE / super::PAGE_SIZE - 1)
+                < super::MAX_BOOT_SIZE
+        );
+    }
+
+    #[test]
+    fn try_filled_returns_buffer_or_none() {
+        let filled = super::try_filled(7u8, 4096).expect("small allocation");
+        assert_eq!(filled.len(), 4096);
+        assert!(filled.iter().all(|&byte| byte == 7));
+        assert!(super::try_filled(0u8, 0).is_some_and(|buffer| buffer.is_empty()));
+        // A size no allocator can satisfy fails instead of aborting.
+        assert!(super::try_filled(0u32, usize::MAX).is_none());
+        assert!(super::try_filled(0u8, isize::MAX as usize).is_none());
+    }
+
     use super::*;
     use core::{
         ops::{Deref, DerefMut},

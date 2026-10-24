@@ -5,23 +5,37 @@ mistaken for full production completion.
 
 | Area | Foundation present | Production gaps still open |
 | --- | --- | --- |
-| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import, durable file-intent recovery, and bounded four-file WDJ2 data rollback/replay | Non-QEMU hardware qualification/drivers, DMA storage completion, metadata transactions beyond the bounded sidecars, arbitrary-size/full-volume rollback, and unclean-shutdown hardware qualification |
+| Stages 1–5 | Boot, memory, paging, scheduler, VFS, userspace, storage; 1/2/4-CPU acceptance; bounded Unicode long-filename create/lookup/delete/rename, NFC name normalization, named listing, mounted import listing, directory growth, bounded VFS uid/gid/mode enforcement, WMD1/WMD2 ownership metadata persistence/import, durable file-intent recovery, and bounded 255-entry WDJ2 data-plus-metadata rollback/replay | Non-QEMU hardware qualification/drivers, DMA storage completion, arbitrary-size/full-volume rollback, and unclean-shutdown hardware qualification |
 | Stage 6 | Bounded SMP, TLB shootdowns, 1–4 CPU tests, ACPI SRAT CPU/memory-domain discovery, domain-local placement/rebalancing/allocation, x2APIC MSR path, migratable audited I/O workers, QEMU-qualified non-contiguous AP offline/re-online control, ranked interrupt-safe locks for scheduler/process/paging/COW/frame-allocation/file-frame cache/VFS/heap/swap/FAT32 clean-page cache, async/completion/worker, pipe, IPC, WovenGuard lineage, device/keyboard, journal, mount-record and key-vault domains, generation-tagged VFS/pipe handles, unlocked/revalidated disk-backed VFS reads and materialization, allocator-reserved contiguous VirtIO DMA arena, in-place heap metadata and runtime chunk growth | General multicore userspace, unrestricted concurrent I/O/DMA throughput, multi-node NUMA qualification, non-contiguous hotplug hardware qualification, APIC-ID-above-255 hardware coverage, cross-layer FAT32 mutation transactions and stress qualification, guarded-allocation headroom/low-memory and multicore heap stress, broader cross-layer lock stress/priority inheritance |
 | Stages 7–9 | Isolation, IPC, capability delegation/revocation, WovenGuard, ELF W^X, formal threat model | Dynamic libc/linking, complete signals, scheduler-backed threads |
 | Stage 10 | TCP, completion ports, timer/event foundations, Ring-3 timer/event gate, unified completion path | Broader production driver and hardware qualification |
-| Stage 11 | Process/thread state, notifications, `libwoven`, loader checks, production ASLR | Real scheduler-backed user threads, dynamic relocations, shared libraries, loader TLS, RELRO |
+| Stage 11 | Process/thread state, notifications, `libwoven`, ASLR, W^X, RELRO, static initial-exec TLS, scheduler-backed user threads, and bounded signed `/lib` graph mapping with cross-image relocation and transactional teardown | General shared-library/toolchain interoperability, REL/PLT tables, constructors/destructors, versioned/weak symbols, library TLS, dynamic TLS, and hardware qualification |
 | Stage 12 | Typed VFS, metadata, checksums, snapshot/mount boundaries, xattrs and restore records, ChaCha20-Poly1305 envelope and bounded revocable key vault | Native WovenFS, journaling/COW disk replay, full data rollback, measured/persistent key provisioning and encrypted-volume mount integration |
 
 For every open item we will add implementation, focused host tests, 1/2/4 CPU
 QEMU tests, and an audit entry. A stage is production-complete only when every
 roadmap requirement has passing evidence or an explicitly accepted design.
 
+WDJ2 now uses the full 255-entry range available in its compatible record
+header and has a maximum-capacity round-trip self-test; see the [WDJ2 capacity
+audit](audit-stage1-5-wdj2-capacity-2026-10-14.md). This is a larger bounded
+transaction window, not arbitrary-size/full-volume rollback.
+
 Stage 1–5 metadata capacity has since been extended with the compatible WMD3
 eight-sector region; the former fixed four-sector ABI ceiling is closed as a
-bounded software increment. WDJ2 now covers bounded four-file data rollback
+bounded software increment. WDJ2 now covers bounded 255-entry data-plus-
+metadata rollback
 and replay with 1/2/4-CPU recovery evidence. The remaining Stage 1–5 gaps are
-hardware/DMA qualification, metadata transactions beyond the bounded sidecars,
-arbitrary-size/full-volume rollback, and unclean-shutdown qualification.
+hardware/DMA qualification,
+arbitrary-size/full-volume rollback, and unclean-shutdown qualification. A
+software sector-write fault-injection gate now covers bounded file-creation
+error returns; it does not substitute for physical power-loss, torn-sector,
+or reboot evidence.
+
+The bounded WDJ2 metadata transaction gap is closed by the v2 entry extension;
+see [the metadata transaction audit](audit-stage1-5-metadata-transactions-2026-10-14.md).
+Arbitrary-size/full-volume rollback, hardware/DMA qualification, and
+unclean-shutdown qualification remain open.
 
 Stage 6 lock follow-up: terminal rendering now uses a ranked, IRQ-live local
 preemption guard; shell cwd state uses a short ranked IRQ mutex. The remaining
@@ -55,9 +69,13 @@ Deterministic AP rejection and unclaimed-timeout recovery now pass the 2/4-CPU
 QEMU hotplug gate; claimed-transition hardware-fault and concurrent workload
 stress remain open.
 
-Stage 11 loader boundary follow-up: ELF program headers that require loader
-semantics not yet implemented (`PT_INTERP`, `PT_DYNAMIC`, `PT_TLS`, and
-`PT_GNU_RELRO`) now fail closed instead of being ignored. This is a production
-safety boundary for dynamic linking/TLS/RELRO work, not completion of those
-features; dynamic relocations, shared libraries, TLS image allocation, and RELRO
-permission transitions remain open.
+Stage 11 loader follow-up: the original fail-closed boundary has been extended
+with relative/local/global RELA relocation, static main-image initial-exec TLS,
+RELRO, and bounded signed shared-object graphs. `PT_INTERP`, legacy REL/PLT
+tables, library/dynamic TLS, versioned/weak binding and constructors remain
+unsupported. The graph and transactional rollback contract is documented in
+the shared-library audit; this is not a claim of a complete dynamic linker.
+The real Rust/LLD probe additionally finds an incompatible main-image TLS/TCB
+layout and live-state copying during thread initialization. Static TLS metadata
+acceptance does not prove compiler TLS execution; this correctness gate remains
+open alongside the shared-library TLS work.

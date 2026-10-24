@@ -11,6 +11,13 @@
 //! capacity, eight direct blocks per inode, and no heap allocation.
 
 use crate::block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
+#[cfg(not(test))]
+use core::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(not(test))]
+use alloc::string::String;
+#[cfg(test)]
+use std::string::String;
 
 pub const SUPER_MAGIC: &[u8; 8] = b"WOVENFS1";
 pub const JOURNAL_DESC_MAGIC: &[u8; 8] = b"WFSJDESC";
@@ -21,6 +28,13 @@ pub const FORMAT_VERSION: u16 = 1;
 /// LBA per block and must fit in a single sector alongside its header.
 pub const MAX_TXN_BLOCKS: usize = 32;
 /// Descriptor sector + staged data sectors + commit sector.
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
+))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
 pub const INODE_SIZE: usize = 128;
@@ -113,8 +127,7 @@ impl SuperBlock {
         sector[64..72].copy_from_slice(&self.data_start.to_le_bytes());
         sector[72..80].copy_from_slice(&self.root_inode.to_le_bytes());
         let checksum = fnv1a(&sector[..SUPER_CHECKSUM_AT]);
-        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8]
-            .copy_from_slice(&checksum.to_le_bytes());
+        sector[SUPER_CHECKSUM_AT..SUPER_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
 
     fn decode(sector: &[u8; SECTOR_SIZE]) -> Option<Self> {
@@ -243,6 +256,12 @@ impl DirEntry {
             && &self.name[..name.len()] == name.as_bytes()
     }
 
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test"
+    ))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
         core::str::from_utf8(&self.name[..len]).unwrap_or("")
@@ -303,6 +322,12 @@ impl Transaction {
         }
     }
 
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test"
+    ))]
     pub const fn len(&self) -> usize {
         self.len
     }
@@ -362,6 +387,13 @@ pub struct Volume<D: BlockDevice> {
 }
 
 /// Derive geometry from a device size.
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
+))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
     let journal_blocks = JOURNAL_BLOCKS;
@@ -403,6 +435,12 @@ fn inode_location(sb: &SuperBlock, inode: u64) -> (u64, usize) {
 
 /// Direct, unjournalled metadata write. Only `format` may use this, before any
 /// superblock exists to make the volume mountable.
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage24-3-test"
+))]
 fn write_inode_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -417,6 +455,12 @@ fn write_inode_raw<D: BlockDevice>(
     Ok(())
 }
 
+#[cfg(any(
+    test,
+    feature = "stage15-1-test",
+    feature = "stage15-2-test",
+    feature = "stage24-3-test"
+))]
 fn set_bitmap_raw<D: BlockDevice>(
     device: &mut D,
     sb: &SuperBlock,
@@ -442,6 +486,13 @@ impl<D: BlockDevice> Volume<D> {
     /// written last, so a crash part-way through leaves no valid superblock and
     /// the volume reads as unformatted rather than as a filesystem with garbage
     /// metadata.
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage21-6-test",
+        feature = "stage24-3-test"
+    ))]
     pub fn format(mut device: D, inode_count: u32) -> Result<Self, Error> {
         let total = device.sector_count();
         if total < 16 || inode_count == 0 {
@@ -457,7 +508,7 @@ impl<D: BlockDevice> Volume<D> {
             match result {
                 Ok(()) => Ok(()),
                 Err(_) => {
-                    #[cfg(feature = "stage15-2-test")]
+                    #[cfg(any(feature = "stage15-2-test", feature = "stage24-3-test"))]
                     crate::serial::write_line(format_args!(
                         "[S15.2] format io error: phase {} lba {}",
                         phase, lba
@@ -505,7 +556,11 @@ impl<D: BlockDevice> Volume<D> {
         for lba in sb.inode_start..sb.data_start {
             at(lba, "inodes", device.write_sector(lba, &zero))?;
         }
-        at(root_block, "root-dir", device.write_sector(root_block, &zero))?;
+        at(
+            root_block,
+            "root-dir",
+            device.write_sector(root_block, &zero),
+        )?;
 
         let mut root = Inode::empty();
         root.mode = 0o040_755;
@@ -566,10 +621,22 @@ impl<D: BlockDevice> Volume<D> {
         Ok(volume)
     }
 
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage24-3-test"
+    ))]
     pub const fn super_block(&self) -> &SuperBlock {
         &self.super_block
     }
 
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage24-3-test"
+    ))]
     pub fn into_device(self) -> D {
         self.device
     }
@@ -781,6 +848,49 @@ impl<D: BlockDevice> Volume<D> {
         Err(Error::NoSpace)
     }
 
+    fn valid_component(name: &str) -> Result<(), Error> {
+        if name.is_empty()
+            || name.len() > MAX_NAME
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+            || name.as_bytes().contains(&0)
+        {
+            return Err(Error::InvalidName);
+        }
+        Ok(())
+    }
+
+    fn parent_and_name(&mut self, path: &str) -> Result<(u64, String), Error> {
+        if !path.starts_with('/') || path == "/" || path.ends_with('/') {
+            return Err(Error::InvalidName);
+        }
+        let split = path.rfind('/').ok_or(Error::InvalidName)?;
+        let parent = if split == 0 { "/" } else { &path[..split] };
+        let name = &path[split + 1..];
+        Self::valid_component(name)?;
+        Ok((self.resolve_path(parent)?, String::from(name)))
+    }
+
+    /// Resolve an absolute native path without allocating. The bounded
+    /// directory walk also rejects traversal rather than normalising it.
+    pub fn resolve_path(&mut self, path: &str) -> Result<u64, Error> {
+        if path == "/" {
+            return Ok(self.super_block.root_inode);
+        }
+        if !path.starts_with('/') || path.ends_with('/') {
+            return Err(Error::InvalidName);
+        }
+        let mut current = self.super_block.root_inode;
+        for component in path.split('/').skip(1) {
+            Self::valid_component(component)?;
+            let entry = self.lookup(current, component)?;
+            current = entry.inode;
+        }
+        Ok(current)
+    }
+
     // -------------------------------------------------------- directories
 
     fn dir_entries(&mut self, txn: &Transaction, dir: &Inode) -> Result<DirectoryView, Error> {
@@ -799,6 +909,55 @@ impl<D: BlockDevice> Volume<D> {
         Ok(view)
     }
 
+    /// Return whether `target` is reachable below the directory `root`.
+    ///
+    /// Directory entries are untrusted persistent data, so this walk is
+    /// iterative, tracks visited inodes, and has a fixed bound.  Running out
+    /// of tracking space fails closed instead of permitting a rename that
+    /// could create a namespace cycle.
+    fn directory_contains(&mut self, root: u64, target: u64) -> Result<bool, Error> {
+        const WALK_CAPACITY: usize = 128;
+        let txn = Transaction::new();
+        let mut stack = [0u64; WALK_CAPACITY];
+        let mut stack_len = 1usize;
+        stack[0] = root;
+        let mut visited = [0u64; WALK_CAPACITY];
+        let mut visited_len = 0usize;
+
+        while let Some(inode_number) = stack_len.checked_sub(1) {
+            stack_len = inode_number;
+            let current = stack[stack_len];
+            if current == target {
+                return Ok(true);
+            }
+            if visited[..visited_len].contains(&current) {
+                continue;
+            }
+            if visited_len == visited.len() {
+                return Err(Error::NoSpace);
+            }
+            visited[visited_len] = current;
+            visited_len += 1;
+
+            let node = self.inode_staged(&txn, current)?;
+            if node.kind != KIND_DIR {
+                continue;
+            }
+            let view = self.dir_entries(&txn, &node)?;
+            for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+                if visited[..visited_len].contains(&entry.inode) {
+                    continue;
+                }
+                if stack_len == stack.len() {
+                    return Err(Error::NoSpace);
+                }
+                stack[stack_len] = entry.inode;
+                stack_len += 1;
+            }
+        }
+        Ok(false)
+    }
+
     /// Look up `name` in a directory inode.
     pub fn lookup(&mut self, dir_inode: u64, name: &str) -> Result<DirEntry, Error> {
         let txn = Transaction::new();
@@ -815,6 +974,7 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn read_dir(&mut self, dir_inode: u64) -> Result<DirectoryView, Error> {
         let txn = Transaction::new();
         let dir = self.inode(dir_inode)?;
@@ -846,10 +1006,14 @@ impl<D: BlockDevice> Volume<D> {
     // ------------------------------------------------------------ mutation
 
     /// Create an empty file in `dir_inode`, as one transaction.
-    pub fn create(&mut self, dir_inode: u64, name: &str, mode: u32, now: u64) -> Result<u64, Error> {
-        if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
-            return Err(Error::InvalidName);
-        }
+    pub fn create(
+        &mut self,
+        dir_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
+        Self::valid_component(name)?;
         let mut txn = Transaction::new();
         let mut dir = self.inode(dir_inode)?;
         if dir.kind != KIND_DIR {
@@ -891,6 +1055,70 @@ impl<D: BlockDevice> Volume<D> {
 
         self.commit(&txn)?;
         Ok(number)
+    }
+
+    /// Create a directory and its first data block in one journal transaction.
+    pub fn mkdir(
+        &mut self,
+        parent_inode: u64,
+        name: &str,
+        mode: u32,
+        now: u64,
+    ) -> Result<u64, Error> {
+        Self::valid_component(name)?;
+        let mut txn = Transaction::new();
+        let mut parent = self.inode(parent_inode)?;
+        if parent.kind != KIND_DIR {
+            return Err(Error::NotADirectory);
+        }
+        let view = self.dir_entries(&txn, &parent)?;
+        if view.entries.iter().any(|entry| entry.matches(name)) {
+            return Err(Error::Exists);
+        }
+        let Some(position) = view
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(position, _)| parent.direct[position / DIR_ENTRIES_PER_BLOCK] != 0)
+            .find(|(_, entry)| entry.inode == 0)
+            .map(|(position, _)| position)
+        else {
+            return Err(Error::NoSpace);
+        };
+
+        let number = self.allocate_inode(&mut txn)?;
+        let block = self.allocate_block(&mut txn)?;
+        txn.stage(block, &[0; SECTOR_SIZE])?;
+        let mut node = Inode::empty();
+        node.mode = mode.max(1);
+        node.links = 2;
+        node.kind = KIND_DIR;
+        node.created = now;
+        node.modified = now;
+        node.direct[0] = block;
+        node.size = SECTOR_SIZE as u64;
+        self.stage_inode(&mut txn, number, &node)?;
+
+        let mut entry = DirEntry::empty();
+        entry.inode = number;
+        entry.kind = KIND_DIR;
+        entry.name_len = name.len() as u16;
+        entry.name[..name.len()].copy_from_slice(name.as_bytes());
+        self.stage_dir_entry(&mut txn, &parent, position, &entry)?;
+        parent.modified = now;
+        self.stage_inode(&mut txn, parent_inode, &parent)?;
+        self.commit(&txn)?;
+        Ok(number)
+    }
+
+    pub fn create_path(&mut self, path: &str, mode: u32, now: u64) -> Result<u64, Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.create(parent, &name, mode, now)
+    }
+
+    pub fn mkdir_path(&mut self, path: &str, mode: u32, now: u64) -> Result<u64, Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.mkdir(parent, &name, mode, now)
     }
 
     /// Replace a file's contents, as one transaction.
@@ -985,6 +1213,12 @@ impl<D: BlockDevice> Volume<D> {
         };
 
         let mut node = self.inode_staged(&txn, entry.inode)?;
+        if node.kind == KIND_DIR {
+            let children = self.dir_entries(&txn, &node)?;
+            if children.entries.iter().any(|child| child.inode != 0) {
+                return Err(Error::NotEmpty);
+            }
+        }
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];
@@ -999,9 +1233,84 @@ impl<D: BlockDevice> Volume<D> {
         self.commit(&txn)
     }
 
+    pub fn unlink_path(&mut self, path: &str, now: u64) -> Result<(), Error> {
+        let (parent, name) = self.parent_and_name(path)?;
+        self.unlink(parent, &name, now)
+    }
+
+    /// Rename a file or empty directory by moving its directory entry in one
+    /// transaction. Existing destinations are refused; replacement semantics
+    /// would require a larger bounded transaction and explicit policy.
+    pub fn rename_path(&mut self, old: &str, new: &str, now: u64) -> Result<(), Error> {
+        if old == new {
+            self.resolve_path(old)?;
+            return Ok(());
+        }
+        let (old_parent, old_name) = self.parent_and_name(old)?;
+        let (new_parent, new_name) = self.parent_and_name(new)?;
+        Self::valid_component(&new_name)?;
+        let mut txn = Transaction::new();
+        let mut source_dir = self.inode(old_parent)?;
+        let mut target_dir = self.inode(new_parent)?;
+        if source_dir.kind != KIND_DIR || target_dir.kind != KIND_DIR {
+            return Err(Error::NotADirectory);
+        }
+        let source_view = self.dir_entries(&txn, &source_dir)?;
+        let Some((source_pos, source)) = source_view
+            .entries
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.matches(&old_name))
+            .map(|(position, entry)| (position, *entry))
+        else {
+            return Err(Error::NotFound);
+        };
+        if source.kind == KIND_DIR && self.directory_contains(source.inode, new_parent)? {
+            return Err(Error::InvalidName);
+        }
+        let target_view = self.dir_entries(&txn, &target_dir)?;
+        if target_view
+            .entries
+            .iter()
+            .any(|entry| entry.matches(&new_name))
+        {
+            return Err(Error::Exists);
+        }
+        let target_pos = if old_parent == new_parent {
+            source_pos
+        } else {
+            target_view
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| target_dir.direct[position / DIR_ENTRIES_PER_BLOCK] != 0)
+                .find(|(_, entry)| entry.inode == 0)
+                .map(|(position, _)| position)
+                .ok_or(Error::NoSpace)?
+        };
+        let mut moved = source;
+        moved.name_len = new_name.len() as u16;
+        moved.name.fill(0);
+        moved.name[..new_name.len()].copy_from_slice(new_name.as_bytes());
+        if old_parent == new_parent {
+            self.stage_dir_entry(&mut txn, &source_dir, source_pos, &moved)?;
+            source_dir.modified = now;
+            self.stage_inode(&mut txn, old_parent, &source_dir)?;
+        } else {
+            self.stage_dir_entry(&mut txn, &source_dir, source_pos, &DirEntry::empty())?;
+            self.stage_dir_entry(&mut txn, &target_dir, target_pos, &moved)?;
+            source_dir.modified = now;
+            target_dir.modified = now;
+            self.stage_inode(&mut txn, old_parent, &source_dir)?;
+            self.stage_inode(&mut txn, new_parent, &target_dir)?;
+        }
+        self.commit(&txn)
+    }
+
     /// Verify internal consistency: every block referenced by a live inode is
     /// marked allocated, every directory entry names a live inode, and no two
     /// inodes claim the same block.
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
@@ -1038,12 +1347,47 @@ impl<D: BlockDevice> Volume<D> {
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
         }
-        let view = self.dir_entries(&txn, &root)?;
-        for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
-            if entry.inode > u64::from(sb.inode_count) {
+
+        // Validate the complete reachable namespace, not only the root
+        // directory. The on-disk format has no hard links, so every live inode
+        // must be reached exactly once; this also rejects directory cycles and
+        // duplicate references before path resolution or mount publication.
+        const MAX_REACHABLE_INODES: usize = 256;
+        let mut reachable = [0u64; MAX_REACHABLE_INODES];
+        let mut reachable_len = 1usize;
+        reachable[0] = sb.root_inode;
+        let mut stack = [0u64; MAX_REACHABLE_INODES];
+        let mut stack_len = 1usize;
+        stack[0] = sb.root_inode;
+        while let Some(index) = stack_len.checked_sub(1) {
+            stack_len = index;
+            let directory_inode = stack[index];
+            let directory = self.inode(directory_inode)?;
+            if directory.kind != KIND_DIR {
                 return Err(Error::Corrupt);
             }
-            if !self.inode(entry.inode)?.is_used() {
+            let view = self.dir_entries(&txn, &directory)?;
+            for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+                if entry.inode > u64::from(sb.inode_count)
+                    || !self.inode(entry.inode)?.is_used()
+                    || Self::valid_component(entry.name_str()).is_err()
+                    || reachable[..reachable_len].contains(&entry.inode)
+                {
+                    return Err(Error::Corrupt);
+                }
+                if reachable_len == reachable.len() || stack_len == stack.len() {
+                    return Err(Error::Corrupt);
+                }
+                reachable[reachable_len] = entry.inode;
+                reachable_len += 1;
+                if self.inode(entry.inode)?.kind == KIND_DIR {
+                    stack[stack_len] = entry.inode;
+                    stack_len += 1;
+                }
+            }
+        }
+        for number in 1..=u64::from(sb.inode_count) {
+            if self.inode(number)?.is_used() && !reachable[..reachable_len].contains(&number) {
                 return Err(Error::Corrupt);
             }
         }
@@ -1064,10 +1408,12 @@ impl DirectoryView {
         }
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn live(&self) -> impl Iterator<Item = &DirEntry> {
         self.entries.iter().filter(|entry| entry.inode != 0)
     }
 
+    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn count(&self) -> usize {
         self.live().count()
     }
@@ -1215,6 +1561,27 @@ pub fn stage15_1_self_test() -> bool {
         return false;
     }
 
+    // Nested directory lifecycle: parent creation, path resolution, rename,
+    // and empty-directory removal all remain journaled operations.
+    let Ok(docs) = remounted.mkdir(1, "docs", 0o755, 13) else {
+        return false;
+    };
+    let Ok(note) = remounted.create(docs, "note.txt", 0o644, 14) else {
+        return false;
+    };
+    if remounted.write_file(note, b"nested", 15).is_err()
+        || remounted.resolve_path("/docs/note.txt") != Ok(note)
+        || remounted
+            .rename_path("/docs/note.txt", "/docs/final.txt", 16)
+            .is_err()
+        || remounted.resolve_path("/docs/final.txt") != Ok(note)
+        || remounted.unlink_path("/docs/final.txt", 17).is_err()
+        || remounted.unlink_path("/docs", 18).is_err()
+        || remounted.check().is_err()
+    {
+        return false;
+    }
+
     // Crash recovery. Count the writes one create performs, then replay the
     // operation once per write boundary, cutting power at that exact write, and
     // require the result to be consistent and all-or-nothing every time.
@@ -1268,6 +1635,80 @@ pub fn stage15_1_self_test() -> bool {
         }
     }
 
+    // Verify overwrite persistence through a fresh mount, with checksum checks.
+    let Ok(mut before_overwrite) = Volume::mount(base.fork(None)) else {
+        return false;
+    };
+    let Ok(file_id) = before_overwrite.create(1, "overwrite.bin", 0o600, 50) else {
+        return false;
+    };
+    if before_overwrite
+        .write_file(file_id, b"old version", 51)
+        .is_err()
+    {
+        return false;
+    }
+    let disk_before = before_overwrite.into_device();
+    let Ok(mut overwriter) = Volume::mount(disk_before.fork(None)) else {
+        return false;
+    };
+    if overwriter.write_file(file_id, b"new version", 52).is_err() {
+        return false;
+    }
+    let disk_after = overwriter.into_device();
+    let Ok(mut recovered_overwrite) = Volume::mount(disk_after.fork(None)) else {
+        return false;
+    };
+    let mut overwritten = [0u8; 32];
+    if recovered_overwrite.read_file(file_id, &mut overwritten) != Ok(11)
+        || &overwritten[..11] != b"new version"
+        || recovered_overwrite.check().is_err()
+    {
+        return false;
+    }
+
+    // Exercise every interrupted sector write of an overwrite transaction.
+    // After journal replay, a file must contain either the entire old payload
+    // or the entire new payload, never a partially overwritten mixture.
+    let Ok(mut prepared) = Volume::mount(base.fork(None)) else {
+        return false;
+    };
+    let Ok(target) = prepared.create(1, "atomic-write.bin", 0o600, 60) else {
+        return false;
+    };
+    let old_bytes = [0x11u8; 700];
+    let new_bytes = [0x22u8; 700];
+    if prepared.write_file(target, &old_bytes, 61).is_err() {
+        return false;
+    }
+    let old_disk = prepared.into_device();
+    let writes = {
+        let Ok(mut measured) = Volume::mount(old_disk.fork(None)) else {
+            return false;
+        };
+        if measured.write_file(target, &new_bytes, 62).is_err() {
+            return false;
+        }
+        measured.into_device().accepted()
+    };
+    for boundary in 0..=writes {
+        let Ok(mut interrupted) = Volume::mount(old_disk.fork(Some(boundary))) else {
+            return false;
+        };
+        let _ = interrupted.write_file(target, &new_bytes, 62);
+        let interrupted_disk = interrupted.into_device();
+        let Ok(mut recovered) = Volume::mount(interrupted_disk.fork(None)) else {
+            return false;
+        };
+        let mut bytes = [0u8; 700];
+        if recovered.check().is_err()
+            || recovered.read_file(target, &mut bytes) != Ok(bytes.len())
+            || (bytes != old_bytes && bytes != new_bytes)
+        {
+            return false;
+        }
+    }
+
     // A destroyed checkpoint slot must fall back to the other one.
     let Ok(mut volume) = Volume::mount(base.fork(None)) else {
         return false;
@@ -1303,13 +1744,26 @@ pub enum MountOutcome {
     Failed,
 }
 
+// WovenFS mutations are read-modify-write transactions. Serialize the whole
+// mounted operation so concurrent tasks cannot commit lost updates. Rank 5
+// remains below the ATA device lock (rank 10).
+#[cfg(not(test))]
+static MUTATION: crate::irq_lock::PreemptMutex<()> =
+    crate::irq_lock::PreemptMutex::with_rank((), 5);
+
+/// True only while the native volume is published in the `/wfs` namespace.
+/// Native adapter calls may probe a volume before publication, but generic VFS
+/// operations must fail closed after unmount and during a failed remount.
+#[cfg(not(test))]
+static VFS_MOUNTED: AtomicBool = AtomicBool::new(false);
+
 /// Run `operation` against the ATA primary master mounted as WovenFS.
 ///
 /// The volume is mounted for the duration of the call and dropped afterwards,
 /// so no stale in-memory filesystem state outlives the operation. Mounting
 /// replays any committed journal transaction, which is why every entry point
 /// goes through here rather than caching a volume.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
 pub fn with_ata_volume<R>(
     operation: impl FnOnce(&mut Volume<&mut crate::ata::BufferedAta>) -> R,
 ) -> Option<R> {
@@ -1320,11 +1774,447 @@ pub fn with_ata_volume<R>(
     .flatten()
 }
 
+/// Translate the mounted VFS namespace into an absolute native WovenFS path.
+/// Traversal, empty components and prefix-confusion paths are rejected before
+/// the path reaches the on-disk resolver.
+#[cfg(not(test))]
+fn checked_vfs_path(path: &str) -> Result<alloc::string::String, Error> {
+    let relative = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
+    if relative.is_empty() || relative.len() + 1 > crate::config::MAX_PATH_SIZE {
+        return Err(Error::InvalidName);
+    }
+    let mut native = alloc::string::String::with_capacity(relative.len() + 1);
+    native.push('/');
+    native.push_str(relative);
+    let mut components = native.split('/');
+    let _ = components.next();
+    for component in components {
+        Volume::<&mut crate::ata::BufferedAta>::valid_component(component)?;
+    }
+    Ok(native)
+}
+
+#[cfg(all(not(test), feature = "stage15-2-test"))]
+fn checked_vfs_name(path: &str) -> Result<&str, Error> {
+    let name = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
+    checked_native_name(name)
+}
+
+/// Ensure a VFS-visible file exists durably before publishing its VFS node.
+#[cfg(not(test))]
+pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| match volume.resolve_path(&native) {
+        Ok(inode) => volume.inode(inode).and_then(|node| {
+            (node.kind == KIND_FILE)
+                .then_some(())
+                .ok_or(Error::NotADirectory)
+        }),
+        Err(Error::NotFound) => volume.create_path(&native, 0o600, now).map(|_| ()),
+        Err(error) => Err(error),
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Commit a native write and publish its VFS cache image while the native
+/// mutation lock is still held. This prevents a later native writer from
+/// committing and publishing before an earlier writer publishes its cache.
+/// A publication error still follows a durable commit: callers must reconcile
+/// the cache on failure rather than assume the native write was rolled back.
+#[cfg(not(test))]
+pub fn write_vfs_path_at_with_publish<T, E>(
+    path: &str,
+    offset: usize,
+    bytes: &[u8],
+    out: &mut [u8; MAX_FILE_SIZE],
+    now: u64,
+    publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
+) -> Result<Result<T, E>, Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    // Reject impossible offsets before creating a new inode on disk.
+    // Otherwise an invalid write could leave an empty file behind.
+    if offset > MAX_FILE_SIZE || bytes.len() > MAX_FILE_SIZE.saturating_sub(offset) {
+        return Err(Error::TooLarge);
+    }
+    let (written, length) = with_ata_volume(|volume| {
+        let inode = match volume.resolve_path(&native) {
+            Ok(inode) => inode,
+            // WovenFS does not support sparse writes. Do not create a file
+            // for an offset that cannot be valid for a new empty inode.
+            Err(Error::NotFound) if offset == 0 => volume.create_path(&native, 0o600, now)?,
+            Err(Error::NotFound) => return Err(Error::TooLarge),
+            Err(error) => return Err(error),
+        };
+        let mut length = volume.read_file(inode, out)?;
+        if offset > length || bytes.len() > MAX_FILE_SIZE.saturating_sub(offset) {
+            return Err(Error::TooLarge);
+        }
+        let end = offset + bytes.len();
+        out[offset..end].copy_from_slice(bytes);
+        length = length.max(end);
+        volume.write_file(inode, &out[..length], now)?;
+        Ok((bytes.len(), length))
+    })
+    .unwrap_or(Err(Error::Device))?;
+    Ok(publish(&out[..length], length, written))
+}
+
+/// Remove a single native root file. The VFS entry is removed by the caller
+/// only after this durable transaction succeeds.
+#[cfg(not(test))]
+pub fn unlink_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| volume.unlink_path(&native, now)).unwrap_or(Err(Error::Device))
+}
+
+/// Commit an exact-length internal service file to native WovenFS. This path
+/// deliberately bypasses the user VFS cache: update records are selected by
+/// re-reading the checksum-verified native volume after every commit.
+#[cfg(all(
+    not(test),
+    any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage21-6-test",
+        feature = "stage24-3-test",
+        feature = "stage22-5-test",
+        feature = "system-apps"
+    )
+))]
+pub fn write_vfs_path_durable(
+    _authority: &AuthorizedWfsWriter,
+    path: &str,
+    bytes: &[u8],
+    now: u64,
+) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    if bytes.len() > MAX_FILE_SIZE {
+        return Err(Error::TooLarge);
+    }
+    with_ata_volume(|volume| {
+        let inode = match volume.resolve_path(&native) {
+            Ok(inode) => inode,
+            Err(Error::NotFound) => volume.create_path(&native, 0o600, now)?,
+            Err(error) => return Err(error),
+        };
+        volume.write_file(inode, bytes, now)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Read an internal service file directly from native WovenFS, with the
+/// filesystem checksum and inode bounds checked by the mount path.
+#[cfg(all(
+    not(test),
+    any(
+        feature = "stage15-2-test",
+        feature = "stage27-2-test",
+        feature = "stage21-6-test",
+        feature = "stage24-3-test",
+        feature = "stage22-5-test",
+        feature = "system-apps"
+    )
+))]
+pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| {
+        let inode = volume.resolve_path(&native)?;
+        volume.read_file(inode, out)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(not(test))]
+pub fn mkdir_vfs_path(path: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let native = checked_vfs_path(path)?;
+    with_ata_volume(|volume| volume.mkdir_path(&native, 0o755, now).map(|_| ()))
+        .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(not(test))]
+pub fn rename_vfs_path(old: &str, new: &str, now: u64) -> Result<(), Error> {
+    let _mutation = MUTATION.lock();
+    let old_native = checked_vfs_path(old)?;
+    let new_native = checked_vfs_path(new)?;
+    with_ata_volume(|volume| volume.rename_path(&old_native, &new_native, now))
+        .unwrap_or(Err(Error::Device))
+}
+
+#[cfg(test)]
+pub fn write_vfs_path_at_with_publish<T, E>(
+    _path: &str,
+    _offset: usize,
+    _bytes: &[u8],
+    _out: &mut [u8; MAX_FILE_SIZE],
+    _now: u64,
+    _publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
+) -> Result<Result<T, E>, Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn ensure_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn unlink_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn mkdir_vfs_path(_path: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(test)]
+pub fn rename_vfs_path(_old: &str, _new: &str, _now: u64) -> Result<(), Error> {
+    Err(Error::Device)
+}
+
+#[cfg(feature = "stage15-2-test")]
+const MAX_WFS_IMPORT_DEPTH: usize = 16;
+
+#[cfg(feature = "stage15-2-test")]
+const MAX_WFS_IMPORT_INODES: usize = 256;
+
+#[cfg(feature = "stage15-2-test")]
+fn append_import_path<'a>(
+    parent: &str,
+    name: &str,
+    output: &'a mut [u8; crate::config::MAX_PATH_SIZE],
+) -> Result<&'a str, ()> {
+    let needed = parent
+        .len()
+        .checked_add(1)
+        .and_then(|length| length.checked_add(name.len()))
+        .ok_or(())?;
+    if needed > output.len() {
+        return Err(());
+    }
+    output[..parent.len()].copy_from_slice(parent.as_bytes());
+    output[parent.len()] = b'/';
+    output[parent.len() + 1..needed].copy_from_slice(name.as_bytes());
+    core::str::from_utf8(&output[..needed]).map_err(|_| ())
+}
+
+#[cfg(feature = "stage15-2-test")]
+fn import_wfs_directory<D: crate::block::BlockDevice>(
+    volume: &mut Volume<D>,
+    inode: u64,
+    mount_path: &str,
+    depth: usize,
+    visited: &mut [u64; MAX_WFS_IMPORT_INODES],
+    visited_len: &mut usize,
+    buffer: &mut [u8; MAX_FILE_SIZE],
+) -> Result<usize, ()> {
+    if depth > MAX_WFS_IMPORT_DEPTH
+        || visited[..*visited_len].contains(&inode)
+        || *visited_len == visited.len()
+    {
+        return Err(());
+    }
+    visited[*visited_len] = inode;
+    *visited_len += 1;
+    let node = volume.inode(inode).map_err(|_| ())?;
+    if node.kind != KIND_DIR {
+        return Err(());
+    }
+    let view = volume.read_dir(inode).map_err(|_| ())?;
+    let mut imported = 0usize;
+    for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
+        let name = entry.name_str();
+        if name.is_empty()
+            || name.len() > MAX_NAME
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+        {
+            return Err(());
+        }
+        let mut path = [0u8; crate::config::MAX_PATH_SIZE];
+        let path = append_import_path(mount_path, name, &mut path)?;
+        let child = volume.inode(entry.inode).map_err(|_| ())?;
+        match child.kind {
+            KIND_DIR => {
+                match crate::vfs::mkdir(path) {
+                    Ok(()) | Err(crate::vfs::Error::AlreadyExists) => {
+                        if crate::vfs::stat(path).map(|stat| stat.kind)
+                            != Ok(crate::vfs::NodeKind::Directory)
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(_) => return Err(()),
+                }
+                imported += import_wfs_directory(
+                    volume,
+                    entry.inode,
+                    path,
+                    depth + 1,
+                    visited,
+                    visited_len,
+                    buffer,
+                )?;
+            }
+            KIND_FILE => {
+                let length = volume.read_file(entry.inode, buffer).map_err(|_| ())?;
+                if length > crate::vfs::NODE_CAPACITY {
+                    continue;
+                }
+                match crate::vfs::create_read_only(path, &buffer[..length]) {
+                    Ok(()) => imported += 1,
+                    // A pre-existing VFS node may contain stale bytes from an
+                    // earlier mount. Do not count it as freshly imported: the
+                    // namespace needs explicit invalidation before remount.
+                    Err(crate::vfs::Error::AlreadyExists) => {}
+                    Err(_) => return Err(()),
+                }
+            }
+            _ => return Err(()),
+        }
+    }
+    Ok(imported)
+}
+
+/// Explicit authority for native WovenFS mutations. Must be issued only after
+/// a WovenGuard capability check by the kernel-side caller.
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test",
+    feature = "stage24-3-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
+pub struct AuthorizedWfsWriter {
+    _private: (),
+}
+
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test",
+    feature = "stage24-3-test",
+    feature = "stage22-5-test",
+    feature = "system-apps"
+))]
+impl AuthorizedWfsWriter {
+    pub(crate) const fn after_capability_check() -> Self {
+        Self { _private: () }
+    }
+}
+
+/// Validate the native root-directory filename before any ATA I/O, for the
+/// Stage 15.2 authorized adapters. Its rules match `Volume::valid_component`,
+/// which the nested-path VFS adapter uses.
+#[cfg(all(not(test), feature = "stage15-2-test"))]
+fn checked_native_name(name: &str) -> Result<&str, Error> {
+    if name.is_empty()
+        || name.len() > MAX_NAME
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.as_bytes().contains(&0)
+    {
+        return Err(Error::InvalidName);
+    }
+    Ok(name)
+}
+
+/// Native write-through adapter. It remounts and replays the journal for each
+/// operation; VFS namespace invalidation remains a separate integration gate.
+#[cfg(feature = "stage15-2-test")]
+pub fn write_ata_file(
+    _authority: &AuthorizedWfsWriter,
+    name: &str,
+    bytes: &[u8],
+    now: u64,
+) -> Result<(), Error> {
+    checked_native_name(name)?;
+    if bytes.len() > MAX_FILE_SIZE {
+        return Err(Error::TooLarge);
+    }
+    with_ata_volume(|volume| {
+        let inode = match volume.lookup(1, name) {
+            Ok(entry) => entry.inode,
+            Err(Error::NotFound) => volume.create(1, name, 0o600, now)?,
+            Err(error) => return Err(error),
+        };
+        volume.write_file(inode, bytes, now)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Reads newly mounted, checksum-verified disk content, not cached VFS bytes.
+#[cfg(feature = "stage15-2-test")]
+pub fn read_ata_file(name: &str, out: &mut [u8]) -> Result<usize, Error> {
+    checked_native_name(name)?;
+    with_ata_volume(|volume| {
+        let inode = volume.lookup(1, name)?.inode;
+        volume.read_file(inode, out)
+    })
+    .unwrap_or(Err(Error::Device))
+}
+
+/// Authorized native unlink. Callers must invalidate VFS cached entries.
+#[cfg(feature = "stage15-2-test")]
+pub fn unlink_ata_file(
+    _authority: &AuthorizedWfsWriter,
+    name: &str,
+    now: u64,
+) -> Result<(), Error> {
+    checked_native_name(name)?;
+    with_ata_volume(|volume| volume.unlink(1, name, now)).unwrap_or(Err(Error::Device))
+}
+
+/// Explicit VFS-path adapter: commits to the native journal before reporting
+/// success. No VFS RAM copy is modified, avoiding false durability claims.
+/// This is NOT yet hooked into generic VFS descriptor/syscall dispatch.
+#[cfg(feature = "stage15-2-test")]
+pub fn vfs_write_through(
+    authority: &AuthorizedWfsWriter,
+    path: &str,
+    bytes: &[u8],
+    now: u64,
+) -> Result<(), Error> {
+    write_ata_file(authority, checked_vfs_name(path)?, bytes, now)
+}
+
+/// Read directly from the mounted volume with checksum verification.
+#[cfg(feature = "stage15-2-test")]
+pub fn vfs_read_through(path: &str, out: &mut [u8]) -> Result<usize, Error> {
+    read_ata_file(checked_vfs_name(path)?, out)
+}
+
+/// Delete a file using the same bounded namespace and explicit authority.
+#[cfg(feature = "stage15-2-test")]
+pub fn vfs_unlink_through(
+    authority: &AuthorizedWfsWriter,
+    path: &str,
+    now: u64,
+) -> Result<(), Error> {
+    unlink_ata_file(authority, checked_vfs_name(path)?, now)
+}
+
 /// Format the ATA primary master as WovenFS.
 ///
 /// Destructive, and gated behind the Stage 15.2 acceptance feature so it can
 /// only run in a test boot against a scratch disk.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(any(
+    feature = "stage15-2-test",
+    feature = "stage27-2-test",
+    feature = "stage21-6-test",
+    feature = "stage24-3-test"
+))]
 pub fn format_ata(inode_count: u32) -> bool {
     crate::ata::with_primary_master(|disk| match Volume::format(disk, inode_count) {
         Ok(_) => true,
@@ -1346,6 +2236,14 @@ pub fn format_ata(inode_count: u32) -> bool {
 /// durability path that is not there.
 #[cfg(feature = "stage15-2-test")]
 pub fn mount_ata_into_vfs() -> MountOutcome {
+    let _mutation = MUTATION.lock();
+    VFS_MOUNTED.store(false, Ordering::Release);
+    // Invalidate every cached child before importing the new volume.  This is
+    // essential when the same mount point is reused after a failed or stale
+    // remount; an existing VFS name must never mask current disk contents.
+    if crate::vfs::unpublish_children(MOUNT_POINT).is_err() {
+        return MountOutcome::Failed;
+    }
     let Some(result) = crate::ata::with_primary_master(|disk| {
         let mut volume = match Volume::mount(disk) {
             Ok(volume) => volume,
@@ -1356,51 +2254,57 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
             return MountOutcome::Failed;
         }
         let root = volume.super_block().root_inode;
-        let view = match volume.read_dir(root) {
-            Ok(view) => view,
+        match crate::vfs::mkdir(MOUNT_POINT) {
+            Ok(()) | Err(crate::vfs::Error::AlreadyExists) => {}
             Err(_) => return MountOutcome::Failed,
-        };
-
-        let _ = crate::vfs::mkdir(MOUNT_POINT);
+        }
         let mut imported = 0usize;
         let mut buffer = [0u8; MAX_FILE_SIZE];
-        for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
-            let name = entry.name_str();
-            if name.is_empty() || name.len() > MAX_NAME {
-                continue;
-            }
-            let mut path = [0u8; crate::config::MAX_PATH_SIZE];
-            let prefix = MOUNT_POINT.as_bytes();
-            let needed = prefix.len() + 1 + name.len();
-            if needed > path.len() {
-                continue;
-            }
-            path[..prefix.len()].copy_from_slice(prefix);
-            path[prefix.len()] = b'/';
-            path[prefix.len() + 1..needed].copy_from_slice(name.as_bytes());
-            let Ok(path) = core::str::from_utf8(&path[..needed]) else {
-                continue;
-            };
-
-            let Ok(length) = volume.read_file(entry.inode, &mut buffer) else {
-                // A content checksum failure must not be imported as if the
-                // bytes were good.
-                continue;
-            };
-            if length > crate::vfs::NODE_CAPACITY {
-                continue;
-            }
-            match crate::vfs::create_read_only(path, &buffer[..length]) {
-                Ok(()) => imported += 1,
-                Err(crate::vfs::Error::AlreadyExists) => imported += 1,
-                Err(_) => {}
-            }
+        let mut visited = [0u64; MAX_WFS_IMPORT_INODES];
+        let mut visited_len = 0usize;
+        if import_wfs_directory(
+            &mut volume,
+            root,
+            MOUNT_POINT,
+            0,
+            &mut visited,
+            &mut visited_len,
+            &mut buffer,
+        )
+        .map(|count| imported = count)
+        .is_err()
+        {
+            return MountOutcome::Failed;
         }
+        VFS_MOUNTED.store(true, Ordering::Release);
         MountOutcome::Mounted(imported)
     }) else {
         return MountOutcome::NoDevice;
     };
     result
+}
+
+/// Unpublish the native WovenFS namespace and invalidate all open child
+/// descriptions.  The disk is not modified; a later mount replays its
+/// journal and republishes a fresh namespace.
+#[cfg(feature = "stage15-2-test")]
+pub fn unmount_vfs() -> Result<usize, Error> {
+    let _mutation = MUTATION.lock();
+    VFS_MOUNTED.store(false, Ordering::Release);
+    crate::vfs::unpublish_children(MOUNT_POINT).map_err(|_| Error::Device)
+}
+
+/// Report whether the `/wfs` namespace is currently published for syscall
+/// access.  The authorized native adapter deliberately remains usable while
+/// preparing a volume before publication.
+#[cfg(not(test))]
+pub fn vfs_mounted() -> bool {
+    VFS_MOUNTED.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+pub fn vfs_mounted() -> bool {
+    true
 }
 
 /// Stage 15.2 acceptance: WovenFS on a real block device, through the ATA
@@ -1416,6 +2320,7 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
 pub fn stage15_2_self_test() -> bool {
     const INODES: u32 = 32;
     let alpha = b"wovenfs-alpha-contents";
+    let nested = b"wovenfs-nested-contents";
     let beta: [u8; 700] = {
         let mut bytes = [0u8; 700];
         for (index, byte) in bytes.iter_mut().enumerate() {
@@ -1521,9 +2426,135 @@ pub fn stage15_2_self_test() -> bool {
         let Ok(b) = volume.create(1, "beta.bin", 0o644, 3) else {
             return false;
         };
-        volume.write_file(b, &beta, 4).is_ok()
+        if volume.write_file(b, &beta, 4).is_err() {
+            return false;
+        }
+        let Ok(docs) = volume.mkdir(1, "docs", 0o755, 5) else {
+            return false;
+        };
+        let Ok(note) = volume.create(docs, "note.txt", 0o644, 6) else {
+            return false;
+        };
+        volume.write_file(note, nested, 7).is_ok()
     });
     if !step("create and write two files", created == Some(true)) {
+        return false;
+    }
+
+    // Exercise the authorized adapter across distinct mount lifetimes.
+    // The same ATA device is reopened for each operation, so the read must
+    // observe committed disk state rather than a retained Volume instance.
+    let authority = AuthorizedWfsWriter::after_capability_check();
+    let write_through = write_ata_file(&authority, "adapter.txt", b"persistent-v1", 20).is_ok();
+    let mut adapter_buf = [0u8; 64];
+    let read_through = read_ata_file("adapter.txt", &mut adapter_buf)
+        .map(|n| &adapter_buf[..n] == b"persistent-v1")
+        .unwrap_or(false);
+    let overwritten = write_ata_file(&authority, "adapter.txt", b"v2", 21).is_ok();
+    let mut overwritten_buf = [0u8; 64];
+    let reread = read_ata_file("adapter.txt", &mut overwritten_buf)
+        .map(|n| &overwritten_buf[..n] == b"v2")
+        .unwrap_or(false);
+    let removed = unlink_ata_file(&authority, "adapter.txt", 22).is_ok()
+        && read_ata_file("adapter.txt", &mut overwritten_buf) == Err(Error::NotFound);
+    if !step(
+        "authorized write-through across remounts",
+        write_through && read_through && overwritten && reread && removed,
+    ) {
+        return false;
+    }
+
+    // The VFS-path boundary must not accept sibling prefixes or traversal.
+    let authority = AuthorizedWfsWriter::after_capability_check();
+    let mut path_bytes = [0u8; 32];
+    let vfs_adapter_ok = vfs_write_through(&authority, "/wfs/vfs-test.txt", b"vfs-durable", 25)
+        .is_ok()
+        && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Ok(11)
+        && &path_bytes[..11] == b"vfs-durable"
+        && vfs_write_through(&authority, "/wfs2/escape", b"bad", 26) == Err(Error::InvalidName)
+        && vfs_write_through(&authority, "/wfs/../escape", b"bad", 26) == Err(Error::InvalidName)
+        && vfs_unlink_through(&authority, "/wfs/vfs-test.txt", 27).is_ok()
+        && vfs_read_through("/wfs/vfs-test.txt", &mut path_bytes) == Err(Error::NotFound);
+    if !step(
+        "VFS path write-through and namespace isolation",
+        vfs_adapter_ok,
+    ) {
+        return false;
+    }
+
+    // Invalid native names must fail before device access, regardless of
+    // whether the caller reaches the filesystem through a VFS path.
+    let invalid_native_names = ["", ".", "..", "nested/file", "nested\\file", "nul\0file"];
+    let native_boundary_ok = invalid_native_names.iter().all(|name| {
+        write_ata_file(&authority, name, b"no", 28) == Err(Error::InvalidName)
+            && read_ata_file(name, &mut path_bytes) == Err(Error::InvalidName)
+            && unlink_ata_file(&authority, name, 28) == Err(Error::InvalidName)
+    });
+    if !step("native WovenFS filename validation", native_boundary_ok) {
+        return false;
+    }
+    let invalid_vfs_paths = [
+        "/wfs",
+        "/wfs/",
+        "/wfs2/file",
+        "/wfs/../file",
+        "/wfs/sub/file",
+        "/wfs/nul\0file",
+    ];
+    let vfs_boundary_ok = invalid_vfs_paths.iter().all(|path| {
+        vfs_write_through(&authority, path, b"no", 29) == Err(Error::InvalidName)
+            && vfs_read_through(path, &mut path_bytes) == Err(Error::InvalidName)
+            && vfs_unlink_through(&authority, path, 29) == Err(Error::InvalidName)
+    });
+    if !step(
+        "VFS adapter rejects invalid paths for every operation",
+        vfs_boundary_ok,
+    ) {
+        return false;
+    }
+
+    // Reject oversized mutations and overlong names before touching ATA.
+    // A rejected overwrite must preserve the previously committed bytes.
+    let too_large = [0u8; MAX_FILE_SIZE + 1];
+    let oversized_rejected =
+        vfs_write_through(&authority, "/wfs/alpha.txt", &too_large, 30) == Err(Error::TooLarge);
+    let long_name = "x".repeat(MAX_NAME + 1);
+    let long_path = alloc::format!("/wfs/{long_name}");
+    let overlong_rejected =
+        vfs_write_through(&authority, &long_path, b"no", 31) == Err(Error::InvalidName);
+    let mut durable_after_rejection = [0u8; 64];
+    let original_preserved = vfs_read_through("/wfs/alpha.txt", &mut durable_after_rejection)
+        .map(|n| &durable_after_rejection[..n] == alpha)
+        .unwrap_or(false);
+    if !step(
+        "oversized and overlong mutations preserve durable data",
+        oversized_rejected && overlong_rejected && original_preserved,
+    ) {
+        return false;
+    }
+
+    // Regression for Stage 15: a rejected sparse write must not create an
+    // empty inode or publish a VFS cache entry. Check the disk directory too.
+    let mut sparse_out = [0u8; MAX_FILE_SIZE];
+    let mut sparse_published = false;
+    let sparse_rejected = write_vfs_path_at_with_publish(
+        "/wfs/sparse-reject.bin",
+        1,
+        b"x",
+        &mut sparse_out,
+        32,
+        |_, _, _| {
+            sparse_published = true;
+            Ok::<(), ()>(())
+        },
+    ) == Err(Error::TooLarge);
+    let sparse_absent =
+        with_ata_volume(|volume| volume.lookup(1, "sparse-reject.bin") == Err(Error::NotFound))
+            == Some(true);
+    if !step(
+        "rejected sparse write creates no inode or VFS publication",
+        sparse_rejected && sparse_absent && !sparse_published,
+    ) {
         return false;
     }
 
@@ -1544,17 +2575,22 @@ pub fn stage15_2_self_test() -> bool {
         if volume.read_file(b.inode, &mut out) != Ok(beta.len()) || out[..beta.len()] != beta {
             return false;
         }
-        volume.read_dir(1).map(|view| view.count()) == Ok(2)
+        let Ok(docs) = volume.lookup(1, "docs") else {
+            return false;
+        };
+        let Ok(note) = volume.lookup(docs.inode, "note.txt") else {
+            return false;
+        };
+        volume.read_file(note.inode, &mut out) == Ok(nested.len())
+            && out[..nested.len()] == *nested
+            && volume.read_dir(1).map(|view| view.count()) == Ok(3)
     });
     if !step("remount and verify contents", verified == Some(true)) {
         return false;
     }
 
     let mounted = mount_ata_into_vfs();
-    if !step(
-        "mount into the VFS",
-        mounted == MountOutcome::Mounted(2),
-    ) {
+    if !step("mount into the VFS", mounted == MountOutcome::Mounted(3)) {
         crate::serial::write_line(format_args!(
             "[S15.2] vfs mount imported {}",
             match mounted {
@@ -1569,13 +2605,53 @@ pub fn stage15_2_self_test() -> bool {
     let vfs_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer) == Ok(alpha.len())
         && vfs_buffer[..alpha.len()] == *alpha
         && crate::vfs::read_all("/wfs/beta.bin", &mut vfs_buffer) == Ok(beta.len())
-        && vfs_buffer[..beta.len()] == beta;
+        && vfs_buffer[..beta.len()] == beta
+        && crate::vfs::read_all("/wfs/docs/note.txt", &mut vfs_buffer) == Ok(nested.len())
+        && vfs_buffer[..nested.len()] == *nested;
     if !step("read both files through the VFS", vfs_read) {
         return false;
     }
 
+    // Unmount must invalidate open descriptions and the cached namespace;
+    // remount must then publish freshly journal-replayed contents.
+    let stale = crate::vfs::open("/wfs/alpha.txt");
+    let unmounted = unmount_vfs().is_ok();
+    let stale_rejected = stale.is_ok_and(|id| crate::vfs::read(id, &mut vfs_buffer).is_err());
+    let remounted = mount_ata_into_vfs() == MountOutcome::Mounted(3);
+    let fresh_read = crate::vfs::read_all("/wfs/alpha.txt", &mut vfs_buffer) == Ok(alpha.len())
+        && vfs_buffer[..alpha.len()] == *alpha;
+    if !step(
+        "unmount invalidates handles and remount refreshes the VFS",
+        unmounted && stale_rejected && remounted && fresh_read,
+    ) {
+        return false;
+    }
+
+    // VFS imports are read-only until an authorized durable backend is installed.
+    // Rejecting mutation prevents memory-only writes from masquerading as durable IO.
+    let denied = crate::vfs::write_file("/wfs/alpha.txt", b"unauthorized-change").is_err();
+    if !step("imported VFS file rejects write-through", denied) {
+        return false;
+    }
+
+    // A denied VFS write must not alter the durable device contents.
+    let unchanged = with_ata_volume(|volume| {
+        let Ok(entry) = volume.lookup(1, "alpha.txt") else {
+            return false;
+        };
+        let mut persisted = [0u8; MAX_FILE_SIZE];
+        volume.read_file(entry.inode, &mut persisted) == Ok(alpha.len())
+            && persisted[..alpha.len()] == *alpha
+    });
+    if !step(
+        "denied VFS write preserves durable contents",
+        unchanged == Some(true),
+    ) {
+        return false;
+    }
+
     let removed = with_ata_volume(|volume| {
-        volume.unlink(1, "alpha.txt", 5).is_ok()
+        volume.unlink(1, "alpha.txt", 8).is_ok()
             && volume.lookup(1, "alpha.txt") == Err(Error::NotFound)
             && volume.check().is_ok()
     });

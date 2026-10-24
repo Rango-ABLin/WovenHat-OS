@@ -8,6 +8,7 @@ use crate::irq_lock::IrqMutex as Mutex;
 pub const CAPACITY: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Action {
     CapabilityGrant,
     CapabilityRevoke,
@@ -22,6 +23,9 @@ pub enum Action {
     CapabilityDerived,
     CapabilityLineageRelease,
     CapabilityLineageRevoke,
+    PermissionRequest,
+    PermissionDecision,
+    PermissionRevoke,
     SandboxProfileBind,
     SandboxProfileDeny,
     SandboxServicePublish,
@@ -30,6 +34,39 @@ pub enum Action {
     SandboxFileRead,
     SandboxFileWrite,
     SandboxDeviceAccess,
+    SecretStore,
+    SecretRevoke,
+    AudioPlay,
+    /// Power off (detail 0) or restart (detail 1) requested.
+    PowerControl,
+    /// A local account's PIN was changed (or the attempt was refused).
+    AccountChangePin,
+    #[allow(dead_code)]
+    IdentityOpen,
+    #[allow(dead_code)]
+    IdentityLock,
+    #[allow(dead_code)]
+    IdentityUnlock,
+    #[allow(dead_code)]
+    IdentityElevate,
+    #[allow(dead_code)]
+    IdentityClose,
+    #[allow(dead_code)]
+    IdentityHardware,
+    #[allow(dead_code)]
+    IdentityAdminAddUser,
+    #[allow(dead_code)]
+    IdentityAdminDeleteUser,
+    #[allow(dead_code)]
+    IdentityAdminAddGroup,
+    #[allow(dead_code)]
+    IdentityAdminAddMember,
+    #[allow(dead_code)]
+    IdentityAdminRemoveMember,
+    #[allow(dead_code)]
+    IdentityAdminQuery,
+    #[allow(dead_code)]
+    IdentityAdminSetLockout,
 }
 
 /// One immutable security-ledger record.
@@ -179,6 +216,19 @@ pub fn recent_into(output: &mut [Option<Event>]) -> usize {
     with_log(|log| log.recent_into(output))
 }
 
+/// Return one retained record counted backward from newest. The ledger lock is
+/// held only for the bounded snapshot, so a userspace copy cannot block audit
+/// producers or hold the security lock across page validation.
+pub fn from_latest(offset: usize) -> Option<Event> {
+    with_log(|log| {
+        if offset >= log.count {
+            return None;
+        }
+        let newest = (log.next + CAPACITY - 1) % CAPACITY;
+        log.events[(newest + CAPACITY - offset) % CAPACITY]
+    })
+}
+
 /// Allocation-free local proof for ring ordering, retention and overwrite
 /// accounting. This does not mutate the production global ledger.
 pub fn self_test() -> bool {
@@ -288,4 +338,19 @@ pub fn stage9_3_runtime_probe() -> bool {
         && allow.allowed
         && !deny.allowed
         && deny.tick >= allow.tick
+}
+
+#[cfg(feature = "qemu-test")]
+pub fn stage15_8_self_test() -> bool {
+    const ACTOR: u64 = u64::MAX - 0x1580;
+    const TARGET: u64 = u64::MAX - 0x1581;
+    const DETAIL: u64 = 0x1580_0001;
+    record_detail(ACTOR, Action::PermissionDecision, TARGET, DETAIL, true);
+    from_latest(0).is_some_and(|event| {
+        event.actor == ACTOR
+            && event.action == Action::PermissionDecision
+            && event.target == TARGET
+            && event.detail == DETAIL
+            && event.allowed
+    })
 }

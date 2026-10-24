@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); self-tests and probing are exercised by the Stage 13.3 gate"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{fence, Ordering},
@@ -39,18 +46,36 @@ pub enum InitError {
     IoQueueFailed,
 }
 
-#[derive(Clone, Copy)]
 struct DmaPage {
     physical: u64,
     virtual_address: u64,
+}
+
+impl Drop for DmaPage {
+    fn drop(&mut self) {
+        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
+            x86_64::PhysAddr::new(self.physical),
+        ) {
+            // The page is no longer exposed to the controller when its owner
+            // is dropped.  Releasing it here makes every failed initialization
+            // path bounded and recoverable instead of leaking DMA memory.
+            let _ = memory::deallocate_frame(frame);
+        }
+    }
 }
 
 impl DmaPage {
     fn allocate_zeroed() -> Option<Self> {
         let frame = memory::allocate_contiguous_frames(1)?;
         let physical = frame.start_address().as_u64();
-        let offset = paging::physical_memory_offset()?;
-        let virtual_address = offset.checked_add(physical)?;
+        let Some(offset) = paging::physical_memory_offset() else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
+        let Some(virtual_address) = offset.checked_add(physical) else {
+            let _ = memory::deallocate_frame(frame);
+            return None;
+        };
         // SAFETY: The frame is exclusively owned by this DMA page and is
         // reachable through the bootloader's direct physical-memory mapping.
         unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
@@ -151,6 +176,9 @@ impl Queue {
 }
 
 pub struct NvmeController {
+    address: Address,
+    registers: u64,
+    original_command: u16,
     namespace_id: u32,
     sectors: u64,
     io: Queue,
@@ -170,9 +198,16 @@ impl NvmeController {
             device: device.device,
             function: device.function,
         };
+        let original_command = device.command;
         if !pci::enable_memory_bus_master(address) {
             return Err(InitError::MissingController);
         }
+        let mut rollback = ControllerRollback {
+            address,
+            registers: bar.address,
+            original_command,
+            enabled: true,
+        };
         let registers = bar.address;
         let cap = mmio_read64(registers)?;
         let mqes = ((cap & 0xffff) as u16).saturating_add(1);
@@ -254,7 +289,11 @@ impl NvmeController {
             registers + 0x1000 + 3 * stride,
         );
         let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        rollback.enabled = false;
         Ok(Self {
+            address,
+            registers,
+            original_command,
             namespace_id: 1,
             sectors: namespace_size,
             io,
@@ -289,6 +328,44 @@ impl NvmeController {
         }
         Ok(())
     }
+
+    /// Stop controller DMA before the PCI owner is released.  The caller has
+    /// already quiesced the driver's external users and interrupt lease; this
+    /// method owns only the NVMe controller state and its DMA pages.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        let cc = mmio_read32(self.registers + 0x14)?;
+        mmio_write32(self.registers + 0x14, cc & !1)?;
+        let ready = wait_ready(self.registers, false).is_ok();
+        let command = pci::restore_command(self.address, self.original_command);
+        if ready && command {
+            Ok(())
+        } else {
+            Err(InitError::ControllerTimeout)
+        }
+    }
+}
+
+struct ControllerRollback {
+    address: Address,
+    registers: u64,
+    original_command: u16,
+    enabled: bool,
+}
+
+impl Drop for ControllerRollback {
+    fn drop(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        // Best-effort bounded quiescence.  If the controller never became
+        // ready, the volatile access may fail; PCI command restoration still
+        // prevents further bus mastering on every path.
+        if let Ok(cc) = mmio_read32(self.registers + 0x14) {
+            let _ = mmio_write32(self.registers + 0x14, cc & !1);
+            let _ = wait_ready(self.registers, false);
+        }
+        let _ = pci::restore_command(self.address, self.original_command);
+    }
 }
 
 impl BlockDevice for NvmeController {
@@ -317,11 +394,23 @@ impl BlockDevice for NvmeController {
 }
 
 pub fn init() -> Result<u64, InitError> {
+    if let Some(sectors) = CONTROLLER
+        .lock()
+        .as_ref()
+        .map(|controller| controller.sectors)
+    {
+        return Ok(sectors);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(controller) = slot.as_ref() {
         return Ok(controller.sectors);
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let controller = NvmeController::initialize(device)?;
     let sectors = controller.sectors;
     *slot = Some(controller);
@@ -330,6 +419,25 @@ pub fn init() -> Result<u64, InitError> {
 
 pub fn with_controller<R>(operation: impl FnOnce(&mut NvmeController) -> R) -> Option<R> {
     CONTROLLER.lock().as_mut().map(operation)
+}
+
+/// Remove the owned controller only after bounded hardware quiescence.  The
+/// returned object is dropped outside the global controller lock so its DMA
+/// pages can safely return to the frame allocator.
+pub fn shutdown() -> Result<(), InitError> {
+    let Some(mut controller) = CONTROLLER.lock().take() else {
+        return Ok(());
+    };
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // Keep the binding and controller object together on a failed
+            // quiescence attempt; dropping DMA pages while hardware may still
+            // be active would be unsafe.
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
 }
 
 pub fn probe() -> bool {
