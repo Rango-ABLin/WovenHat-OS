@@ -29,6 +29,12 @@ def run_version(command):
 def check(output):
     root = Path(__file__).resolve().parents[1]
     source = root / "tools" / "runtime-fixtures" / "c-abi.c"
+    rust_sources = {
+        "shared-main": root / "tools" / "loader-fixtures" / "shared-main.rs",
+        "library": root / "tools" / "loader-fixtures" / "library.rs",
+        "static-tls": root / "tools" / "loader-fixtures" / "static-tls.rs",
+        "tls-threads": root / "tools" / "loader-fixtures" / "tls-threads.rs",
+    }
     text = source.read_text(encoding="utf-8")
     required = ("void _start", "int $0x80", "mov $3, %%eax", "42")
     missing = [token for token in required if token not in text]
@@ -52,6 +58,15 @@ def check(output):
         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "required_source_tokens": required,
         "source_shape": "PASS" if not missing else "FAIL",
+        "rust_fixtures": {
+            name: {
+                "path": str(path.relative_to(root)),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "present": path.is_file(),
+            }
+            for name, path in rust_sources.items()
+        },
+        "rust_fixture_inventory": "PASS" if all(path.is_file() for path in rust_sources.values()) else "FAIL",
         "elf_c_compiler": "AVAILABLE" if compiler and version else "NOT_AVAILABLE",
         "compiler": compiler,
         "compiler_version": version,
