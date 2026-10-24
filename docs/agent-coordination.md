@@ -46,6 +46,16 @@ service supervision, and system-app desktop boots. This is software/QEMU
 evidence; trust provisioning, production signing, native hardware, and
 independent security review remain open.
 
+## Codex - mandate M10-M15 final audit (2026-10-24)
+
+The current-head release chain passed 158/158 software/QEMU checks, but the
+fail-closed virtual trust preflight reports missing x86_64 OVMF VARS, `swtpm`,
+OpenSSL, and supplied development signing material. Physical/native
+qualification remains `PHYSICAL_NOT_TESTED`, and no independent security
+review or production-key custody evidence exists. The final checkpoint is
+therefore **NO-GO**; no host reboot, raw disk access, firmware/TPM mutation, or
+fabricated trust evidence was used.
+
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 
 The strict desktop harness had a real ordering race: it waited for the

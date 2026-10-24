@@ -1,9 +1,9 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T15:45:00Z",
-  "milestone": "M09",
-  "milestone_title": "UX, applications, and services",
-  "status": "PASS",
+  "updated_utc": "2026-10-24T16:05:00Z",
+  "milestone": "M15",
+  "milestone_title": "Final release decision",
+  "status": "NO-GO",
   "baseline_commit": "3eee80b8",
   "accepted_commit": "1283c1ec",
   "branch": "master",
@@ -35,17 +35,21 @@
     "gfx02_renderer": "PASS on 1/2/4 CPUs",
     "release_chain": "158/158 PASS on current head",
     "application_service_matrix": "PASS on 1/2/4 CPUs",
+    "virtual_trust_status": "NOT_QUALIFIED: missing OVMF VARS, swtpm, OpenSSL, key, certificate",
+    "physical_status": "PHYSICAL_NOT_TESTED",
+    "final_release_decision": "NO-GO",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
-    "M10/M14 trust provisioning, production signing, and release provenance",
+    "M10/M14 trust provisioning, production signing, release provenance, and independent review",
+    "M13 native hardware and physical power-loss qualification",
     "OVMF VARS and swtpm prerequisites",
     "development signing key and certificate",
     "supported installer transaction evidence",
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M10 close trust-boundary prerequisites where tools and credentials are available; keep blocked gates explicit",
+  "next_action": "Provision the required external trust/hardware evidence, then rerun M10-M15; no production release claim is permitted before that",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

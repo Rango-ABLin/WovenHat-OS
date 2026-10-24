@@ -104,6 +104,49 @@ service supervisor recovery, and application lint gates on the required
 1/2/4-CPU matrix. M09 is accepted for software/QEMU scope; production trust
 provisioning and native certification remain open.
 
+## Release Completion Mandate M10 - 2026-10-24 - BLOCKED
+
+The virtual trust preflight remains fail-closed. QEMU and OVMF CODE are
+available, but this host has no x86_64 OVMF VARS template, `swtpm`, OpenSSL, or
+caller-supplied development key/certificate. The release-key boundary test
+passes by rejecting missing material and accepting only matching disposable
+test material. No key was invented, no firmware variable store was modified,
+and no Secure Boot/TPM qualification is claimed.
+
+## Release Completion Mandate M11 - 2026-10-24
+
+Recovery software is covered by the accepted Stage 27.5 recovery, update
+rollback, WovenFS crash-atomicity, FAT32 remount/FSINFO repair, sudden-shutdown
+and service-supervisor evidence recorded in M04/M09. Native recovery and
+physical power-loss evidence remain open.
+
+## Release Completion Mandate M12 - 2026-10-24
+
+Software performance/repeatability evidence is present: Stage 30 benchmark
+history, the current 1/2/4 release matrix, full host tests, and isolated
+repeated shell boots with the usable 4-GiB floor. This is bounded QEMU/host
+evidence, not a native performance or long-duration production soak.
+
+## Release Completion Mandate M13 - 2026-10-24 - BLOCKED
+
+Physical qualification and native hardware certification remain `PHYSICAL_NOT_TESTED`.
+The read-only host preflight and deterministic hardware stimulator are
+available, but no physical media, firmware, TPM, radio, GPU, HID, or reboot
+operation was performed on the laptop.
+
+## Release Completion Mandate M14 - 2026-10-24 - BLOCKED
+
+Software release packaging and provenance pass through the current 158/158
+chain, but production signing-key custody, Secure Boot/TPM trust, clean-room
+provenance, SBOM attestation, and independent security review are not
+provisioned in this environment.
+
+## Release Completion Mandate M15 - 2026-10-24 - NO-GO
+
+The software/QEMU gates are green through the current release chain, but the
+mandatory trust, physical/native, and independent-review gates are open.
+Final release status is **NO-GO**; production readiness is not claimed.
+
 ## Release Completion Mandate M04 - 2026-10-24
 
 The persistent-storage and installer slice passed in disposable scope. Stage 28

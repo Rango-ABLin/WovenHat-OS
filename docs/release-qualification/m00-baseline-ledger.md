@@ -135,3 +135,13 @@ M09 passed for software/QEMU scope. The current-head release chain completed
 transactions, update/security services, AI features, service supervision,
 system-app boots, and app linting on 1/2/4 CPUs. This does not close trust
 provisioning, production signing, or native certification.
+
+## M10-M15 final status
+
+M10 is **BLOCKED** by unavailable OVMF VARS, `swtpm`, OpenSSL, and supplied
+development signing material. M11 recovery is software/QEMU-qualified through
+the evidence already recorded. M12 has bounded benchmark, repeatability, and
+release-matrix evidence but no native production soak. M13 physical/native
+qualification is **PHYSICAL_NOT_TESTED**. M14 production trust, signing
+custody, provenance, SBOM attestation, and independent security review remain
+open. Therefore M15 is **NO-GO** despite the green software/QEMU gates.
