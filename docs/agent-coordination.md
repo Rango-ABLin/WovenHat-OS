@@ -5,13 +5,22 @@
 Codex independently reproduced and repaired a real strict-desktop failure. The
 desktop qualification harness targeted the wrong cascade-window close point;
 after aligning it with `CASCADE_STEP` and `Window::close_area()`, the strict
-1/2/4-CPU QEMU matrix passed with sign-in, Files mouse input, Terminal keyboard
-input, client teardown, and framebuffer restoration. The shell compositor now
+1/2/4-CPU QEMU matrix passed with 5G configured guests (at least 4 GiB usable),
+sign-in, Files mouse input, Terminal keyboard input, client teardown, and
+framebuffer restoration. The shell compositor now
 forces a full-screen recompose when a client surface disappears, preventing
 stale pixels after close. The harness input budget is 20 seconds because a
 measured TCG run crossed 15 seconds under host contention; it remains bounded.
 Two sequential shell boots and the Stage 13.20 guest-reset gate passed at
 1/2/4 CPUs. No physical device, host reboot, firmware, or raw disk was used.
+
+## Codex - mandate M05 hardware-facing software qualification (2026-10-24)
+
+Controller-owned NVMe/AHCI/xHCI/HDA restart, Stage 20.14b dual-head graphics,
+and Stage 13.13 USB input passed on 1/2/4 CPUs. The repeated-shell rerun was
+isolated into timestamped roots; every new 5G-configured boot reported at
+least 4 GiB usable. These are QEMU/device-model results only and do not claim
+native driver crash recovery or physical hardware certification.
 
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 

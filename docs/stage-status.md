@@ -25,14 +25,17 @@ open.
 ## Release Completion Mandate M02 - 2026-10-24
 
 Closed the boot-to-desktop and session-reliability slice on the current tree.
-The strict QEMU desktop qualification passed on 1/2/4 CPUs with 4 GiB guests,
+The strict QEMU desktop qualification passed on 1/2/4 CPUs with 5 GiB
+configured guests, leaving at least 4 GiB usable after firmware reservations,
 covering sign-in, first desktop frame, Files launch/composition, mouse input,
 Files close, Terminal launch/composition, keyboard input, Terminal close, and
 post-close framebuffer restoration. The harness now uses the shell's actual
 cascade geometry and recomposes the full screen when a client surface is
 released, preventing stale pixels after window teardown. Its default input
 budget is 20 seconds to match the accepted TCG/QEMU measurements while
-remaining bounded.
+remaining bounded. The 4 GiB OS floor is a usable-memory requirement; QEMU's
+4 GiB configuration is insufficient because firmware/device reservations
+reduce the kernel-visible usable map.
 
 The normal shell repeated-boot suite passed two sequential boots at 1/2/4
 CPUs, and the guest reset gate passed at 1/2/4 CPUs. Evidence is retained in
@@ -54,6 +57,16 @@ and input/graphics contract tests remain green. M03 is accepted for the
 repository's software safety/concurrency scope; arbitrary in-guest faults,
 physical power-loss/torn-sector behavior, native devices, and independent
 security review remain outside this evidence.
+
+## Release Completion Mandate M05 - 2026-10-24
+
+The emulated hardware-facing software slice passed on 1/2/4 CPUs: controller-
+owned NVMe/AHCI/xHCI/HDA restart passed; Stage 20.14b graphics scanout passed
+on both heads; and Stage 13.13 USB input passed. The clean repeated shell
+roots also confirm `meets_minimum=true` with 5 GiB configured QEMU guests and
+at least 4 GiB usable. M05 is accepted for deterministic QEMU/device-model
+scope. Native GPU, USB HID, storage, audio, network, Bluetooth, and physical
+hardware certification remain open.
 
 ## Release Completion Mandate M04 - 2026-10-24
 

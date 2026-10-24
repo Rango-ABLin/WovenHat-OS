@@ -69,7 +69,8 @@ Secure Boot/TPM, signing-key, or external-review prerequisites.
 ## M02 result
 
 M02 passed for software/QEMU scope. Strict desktop qualification passed on
-1/2/4 CPUs after correcting the harness's cascade-window close coordinates and
+1/2/4 CPUs with 5 GiB configured guests (at least 4 GiB usable) after
+correcting the harness's cascade-window close coordinates and
 fixing full-screen recomposition when a client surface is released. Two
 sequential shell boots and the guest reset gate also passed on each of 1/2/4
 CPUs. This demonstrates bounded cold-boot/session and guest-reset behavior;
@@ -85,6 +86,15 @@ concurrency, allocator and page validation, PCI resource transactions,
 filesystem crash atomicity, and input/graphics contracts. This does not close
 the mandate's physical, arbitrary-fault, TPM/Secure Boot, signing, or external
 security-review gates.
+
+## M05 result
+
+M05 passed for deterministic QEMU/device-model scope. Controller-owned
+NVMe/AHCI/xHCI/HDA restart, dual-head graphics scanout, and USB input gates
+passed on 1/2/4 CPUs. The isolated repeated-shell reruns also report at least
+4 GiB usable memory in every boot. This does not claim native driver crash
+recovery, physical graphics/input/storage/audio/network/Bluetooth behavior,
+or hardware certification.
 
 ## M04 result
 

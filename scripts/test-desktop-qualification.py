@@ -598,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qemu", type=Path, default=Path(DEFAULT_QEMU))
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--memory", default="4G", help="guest RAM (default: documented 4 GiB emulator floor)")
+    parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G configured to leave 4 GiB usable after firmware reservations)")
     parser.add_argument("--timeout", type=float, default=180.0)
     # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
     # keep the bound finite while matching the accepted 1/2/4-CPU evidence.
