@@ -506,7 +506,9 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             keyboard_started = time.monotonic()
             # Put focus unambiguously in the terminal client before sending
             # the keyboard event; the shell routes keys to its focused window.
-            qmp.relative_mouse(-304, 56)
+            # From the Files close position (348,28), move into the terminal
+            # body at (100,100).
+            qmp.relative_mouse(-248, 72)
             qmp.click()
             time.sleep(0.3)
             qmp.key("h", 100)

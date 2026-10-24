@@ -3215,6 +3215,11 @@ impl Desktop {
                 // Otherwise the topmost window under the pointer: its close
                 // control asks the owner to close; anywhere else focuses it,
                 // and its title bar also starts a drag.
+            let mut pointer_x = [0u8; 20];
+            let mut pointer_y = [0u8; 20];
+            let pointer_x = libwoven::format_u64(self.pointer.0.max(0) as u64, &mut pointer_x);
+            let pointer_y = libwoven::format_u64(self.pointer.1.max(0) as u64, &mut pointer_y);
+            log(&[b"woven-shell: pointer press x=", pointer_x, b" y=", pointer_y]);
                 let hit = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
                     self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
                 });
