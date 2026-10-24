@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - software architecture mandate S00 inventory (2026-10-24)
+
+The attached `WovenHat_OS_Software_Architecture_Codex_Execution_Mandate.pdf`
+was read in full. It adds a sequential S00-S20 software-architecture track;
+it explicitly preserves the existing Rust-first design, native WovenHat API
+boundary, 1/2/4-CPU acceptance matrix, and separate physical, independent
+security-review, production-key, and release decisions. S00 is being closed by
+the source-level inventory in `docs/release-qualification/software-gap-inventory.md`.
+No source behavior, hardware, firmware, TPM, raw device, or release trust
+state is changed by this inventory increment.
+
 ## Codex - mandate M02 desktop/session qualification (2026-10-24)
 
 Codex independently reproduced and repaired a real strict-desktop failure. The

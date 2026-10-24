@@ -1,5 +1,16 @@
 ﻿# WovenHat OS Architecture & Codebase Guide
 
+## Software architecture mandate S00 inventory
+
+The S00-S20 software-architecture execution track is mapped in
+`docs/release-qualification/software-gap-inventory.md`. The inventory is a
+classification of current source and retained evidence, not a second API or
+roadmap. Native WovenHat interfaces remain the supported product contract;
+Linux and Windows compatibility are separate opt-in programs. The inventory
+must be refreshed at each accepted increment, and the machine-readable
+checkpoint must continue to distinguish software qualification, native-device
+qualification, trust/review prerequisites, and final production release.
+
 ### Stage 28 - kernel-backed installation transaction
 
 `kernel/src/installer.rs` is the privileged installation boundary reached by
