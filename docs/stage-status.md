@@ -1,5 +1,22 @@
 # Stage status
 
+## P0-03/P0-07 current-head release validation after Stage 28 repair - 2026-10-24
+
+The authoritative release chain passed all 158 checks with zero failures on
+current commit `c54b5dbc`. It includes warning-denying kernel/host Clippy,
+166 host tests, debug/release 1/2/4-CPU memory/storage/network gates,
+read/write storage-fault containment, shell, service supervision, orderly
+driver restart, application/system-app/package/AI gates, desktop boots, and
+final system-app Clippy. The report is retained at
+`target/release-validation/results.json`; `validated-image.json` records the
+current source hashes and release image digest.
+
+This closes the stale-release-report gap only. The result remains
+QEMU/OVMF/release-validation evidence: physical/native hardware, physical
+power-loss/torn-sector recovery, TPM/Secure Boot, production release-key
+custody, arbitrary fault injection, automatic driver-crash recovery, and
+independent Claude review remain open.
+
 ## Stage 28 bounded-resource acceptance repair - 2026-10-24
 
 The disposable Stage 28 harness now releases its completed success fixture

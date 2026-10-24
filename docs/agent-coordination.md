@@ -1,5 +1,21 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - current-head release validation after Stage 28 repair (2026-10-24)
+
+The authoritative release chain passed all 158 checks with zero failures on
+current commit `c54b5dbc`. The report is `target/release-validation/results.json`
+and the source/image digest record is `target/release-validation/validated-image.json`.
+This rerun includes the bounded-resource Stage 28 harness repair and the full
+1/2/4-CPU release matrix. It does not close physical/native hardware,
+power-loss, TPM/Secure Boot, production-key custody, arbitrary fault
+injection, automatic driver-crash recovery, or independent Claude review.
+
+Two Codex subagents performed read-only audits after this rerun. They edited no
+files and confirmed that the PDF-level gaps remain genuine: driver restart is
+orderly rebind rather than crash supervision, and no physical/native or
+independent Claude evidence is present. Their findings are review input, not a
+Claude Code sign-off.
+
 ## Codex - current-head release validation with storage faults (2026-10-24)
 
 The authoritative release chain passed all 158 checks on commit `76a3b6f6`.
