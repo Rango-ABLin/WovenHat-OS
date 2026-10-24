@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - hardware qualification CI workflow (2026-10-24)
+
+A scoped implementation agent added `.github/workflows/hardware-
+qualification.yml`. Codex independently parsed the YAML and ran 18 local
+qualification tests. The workflow covers Ubuntu/Windows unit and plan-only
+checks, Ubuntu's complete 108-job virtual matrix, evidence upload, and
+explicit `PHYSICAL_NOT_TESTED` verification without device access.
+
 ## Codex - read-only physical qualification preflight (2026-10-24)
 
 A scoped implementation agent added `scripts/physical-qualification-

@@ -1,5 +1,14 @@
 # Stage status
 
+## Hardware qualification CI workflow - 2026-10-24
+
+Added `.github/workflows/hardware-qualification.yml`. Push and pull-request
+jobs run the qualification unit suites and deterministic plan-only checks on
+Ubuntu and Windows; Ubuntu additionally runs the complete 108-job virtual
+matrix and verifies zero failures plus `PHYSICAL_NOT_TESTED`. The workflow
+uploads generated evidence and performs no raw-device, media-writing or
+native-certification operation.
+
 ## Read-only physical qualification preflight - 2026-10-24
 
 Added `scripts/physical-qualification-preflight.py` with a three-test

@@ -1,0 +1,127 @@
+name: Hardware Qualification
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Hardware qualification (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run hardware qualification unit tests (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_hardware_qualification_stimulator \
+            tests.test_hardware_qualification_matrix \
+            tests.test_physical_qualification_preflight
+
+      - name: Run hardware qualification unit tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m unittest `
+            tests.test_hardware_qualification_stimulator `
+            tests.test_hardware_qualification_matrix `
+            tests.test_physical_qualification_preflight
+
+      - name: Run deterministic qualification plan (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/run-hardware-qualification-matrix.py \
+            --plan-only \
+            --seed 0x51A7E \
+            --profile graphics.framebuffer \
+            --cpus 1 \
+            --ram-mib 256 \
+            --output-dir audit-artifacts/hardware-qualification-plan
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path('audit-artifacts/hardware-qualification-plan/summary.json').read_text())
+          assert summary['status'] == 'NOT_RUN', summary
+          assert summary['physical_status'] == 'PHYSICAL_NOT_TESTED', summary
+          PY
+
+      - name: Run deterministic qualification plan (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/run-hardware-qualification-matrix.py `
+            --plan-only `
+            --seed 0x51A7E `
+            --profile graphics.framebuffer `
+            --cpus 1 `
+            --ram-mib 256 `
+            --output-dir audit-artifacts/hardware-qualification-plan
+          $summary = Get-Content 'audit-artifacts/hardware-qualification-plan/summary.json' -Raw | ConvertFrom-Json
+          if ($summary.status -ne 'NOT_RUN') { throw "Unexpected plan status: $($summary.status)" }
+          if ($summary.physical_status -ne 'PHYSICAL_NOT_TESTED') { throw "Unexpected physical status: $($summary.physical_status)" }
+
+      - name: Run complete virtual qualification matrix (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/run-hardware-qualification-matrix.py \
+            --seed 0x51A7E \
+            --output-dir audit-artifacts/hardware-qualification-full
+
+      - name: Verify complete virtual matrix result (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path('audit-artifacts/hardware-qualification-full/summary.json').read_text())
+          assert summary['status'] == 'PASS', summary
+          assert summary['physical_status'] == 'PHYSICAL_NOT_TESTED', summary
+          assert summary['failed'] == 0, summary
+          assert summary['completed'] == summary['job_count'], summary
+          PY
+
+      - name: Verify complete virtual matrix result (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path 'audit-artifacts/hardware-qualification-full') {
+            throw 'The complete virtual matrix must not run on Windows.'
+          }
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-qualification-${{ runner.os }}
+          path: audit-artifacts/
+          if-no-files-found: ignore
