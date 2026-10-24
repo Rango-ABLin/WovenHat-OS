@@ -348,7 +348,7 @@ def run_gate(
     for profile in cpus:
         results.append(run_profile(source_info_path(source_info), qemu, firmware, firmware_vars, output_root, profile, timeout))
     passed = all(bool(item["guest"]["guest_execution"]) for item in results)
-    return {
+    result = {
         "schema": "woven-installed-disk-qemu-v1",
         "valid": passed,
         "host_preparation": {"source": source_info, "physical_device_access": "none"},
@@ -356,6 +356,8 @@ def run_gate(
         "media_attached": False,
         "profiles": results,
     }
+    (output_root / "result.json").write_text(json_dumps(result) + "\n", encoding="utf-8")
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
