@@ -424,9 +424,12 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # and input-focus lease have necessarily reached the lock screen.
             # Match the established hardware-demo harness's handoff settling
             # window and retain every attempt in the serial/QEMU evidence.
-            time.sleep(4.0)
+            # The desktop marker precedes the final compositor focus handoff;
+            # allow the guest a full settling interval before injecting the
+            # PIN, especially under host CPU contention.
+            time.sleep(8.0)
             input_started = time.monotonic()
-            for attempt in range(2):
+            for attempt in range(3):
                 for key in ("1", "2", "3", "4", "ret"):
                     qmp.key(key, 150)
                     time.sleep(0.4)
