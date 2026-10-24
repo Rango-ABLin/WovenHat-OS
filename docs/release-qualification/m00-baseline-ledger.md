@@ -74,3 +74,14 @@ fixing full-screen recomposition when a client surface is released. Two
 sequential shell boots and the guest reset gate also passed on each of 1/2/4
 CPUs. This demonstrates bounded cold-boot/session and guest-reset behavior;
 it is not physical power-loss or native hardware evidence.
+
+## M03 result
+
+M03 passed for current-head software safety and concurrency scope. The full
+Rust all-target test suite, 204-test Python host suite, warning-denying
+kernel-target Clippy, and warning-denying host all-targets Clippy all passed.
+The evidence covers bounded ownership/generation reuse, IPC and IRQ mailbox
+concurrency, allocator and page validation, PCI resource transactions,
+filesystem crash atomicity, and input/graphics contracts. This does not close
+the mandate's physical, arbitrary-fault, TPM/Secure Boot, signing, or external
+security-review gates.

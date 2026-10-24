@@ -43,6 +43,18 @@ for software/QEMU cold-boot, interaction, and guest-reset scope; physical
 power loss, native-device recovery, TPM/Secure Boot, and production signing
 remain open.
 
+## Release Completion Mandate M03 - 2026-10-24
+
+The current-head kernel safety/concurrency regression gate passed: `cargo test
+--all-targets` completed successfully, the full Python host suite completed
+204 tests successfully, warning-denying kernel-target Clippy passed, and
+warning-denying host all-targets Clippy passed. The existing owner-generation,
+IPC, IRQ-mailbox, allocator, PCI resource, user-address, filesystem crash,
+and input/graphics contract tests remain green. M03 is accepted for the
+repository's software safety/concurrency scope; arbitrary in-guest faults,
+physical power-loss/torn-sector behavior, native devices, and independent
+security review remain outside this evidence.
+
 ## Hardware qualification CI workflow - 2026-10-24
 
 Added `.github/workflows/hardware-qualification.yml`. Push and pull-request

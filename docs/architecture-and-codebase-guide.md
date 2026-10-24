@@ -4215,6 +4215,14 @@ and child-gate integration. The same orchestrator also includes the existing
 QEMU virtio link-loss gate, so network loss is part of the reproducible
 eight-scenario schedule. These gates do not turn the bounded scenarios into an
 arbitrary fault injector.
+
+The current WovenShell qualification also treats client-surface release as a
+composition boundary: when a client disappears, the shell removes its
+owner-tagged window and recomposes the complete screen before presenting.
+This avoids retaining stale client pixels in a partially damaged scanout
+while preserving the existing damage-region path for live clients. The strict
+desktop harness exercises this with Files and Terminal close/reopen journeys
+on 1/2/4 CPUs; it remains QEMU evidence, not native GPU certification.
 ## Stage 29 hardware qualification report boundary
 
 `scripts/qualify-hardware-report.py` is the report-only boundary for the
