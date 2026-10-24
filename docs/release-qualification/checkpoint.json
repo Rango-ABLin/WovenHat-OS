@@ -1,9 +1,9 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T18:20:00Z",
-  "milestone": "S01",
-  "milestone_title": "Stable native ABI and SDK",
-  "status": "CLOSED",
+  "updated_utc": "2026-10-24T18:35:00Z",
+  "milestone": "S02",
+  "milestone_title": "Bounded portable runtime compatibility",
+  "status": "IMPLEMENTING",
   "release_decision": "NO-GO",
   "baseline_commit": "3eee80b8",
   "accepted_commit": "f9091b6a",
@@ -36,6 +36,7 @@
     "gfx02_renderer": "PASS on 1/2/4 CPUs",
     "release_chain": "158/158 PASS on current head",
     "s01_native_abi": "PASS: independent libwoven fixture, current/unsupported/malformed cases on 1/2/4 CPUs",
+    "s02_contract_checker": "PASS: source contract validated; target-qualified ELF C compiler NOT_AVAILABLE; execution NOT_RUN",
     "application_service_matrix": "PASS on 1/2/4 CPUs",
     "virtual_trust_status": "NOT_QUALIFIED: missing OVMF VARS, swtpm, OpenSSL, key, certificate",
     "physical_status": "PHYSICAL_NOT_TESTED",
@@ -51,7 +52,7 @@
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "Begin S02 with a bounded libc/portable-runtime compatibility slice and actual C/Rust fixtures; preserve the separate M10-M15 NO-GO release boundary",
+  "next_action": "Provide a target-qualified ELF C compiler, build c-abi.c, then run the independent loader/QEMU 1/2/4 acceptance before extending the runtime contract; preserve the separate M10-M15 NO-GO release boundary",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,

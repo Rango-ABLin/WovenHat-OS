@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - software architecture mandate S02 runtime contract (2026-10-24)
+
+Added `tools/runtime-fixtures/c-abi.c`, a freestanding C entry/exit fixture,
+and `scripts/check-runtime-contract.py`, which validates the source contract
+and records target-qualified ELF C compiler availability. The checker passed
+the source-shape checks but reported `NOT_AVAILABLE` for an ELF C compiler on
+this host; no C ELF or QEMU result is claimed. S02 remains IMPLEMENTING.
+
+
 ## Codex - software architecture mandate S01 native ABI (2026-10-24)
 
 Added `libwoven::abi` contract negotiation and kernel syscall 243 with fixed

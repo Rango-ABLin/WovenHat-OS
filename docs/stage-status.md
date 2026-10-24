@@ -10320,3 +10320,12 @@ continuation. The independently built Ring-3 fixture passed at 1/2/4 CPUs;
 the inherited current-head release chain passed 158/158. This does not claim
 POSIX/foreign-OS compatibility, physical hardware support, production trust,
 or final release readiness. S02 is the next sequential prerequisite.
+
+## Software architecture mandate S02 runtime contract (2026-10-24)
+
+S02 implementation has started with a bounded freestanding C ABI contract in
+`tools/runtime-fixtures/c-abi.c` and the conservative checker
+`scripts/check-runtime-contract.py`. Source-shape validation passed, while the
+host reported no target-qualified ELF C compiler; therefore C ELF execution,
+loader qualification, libc coverage, destructors, and shared-library
+compatibility remain open. The checkpoint is `IMPLEMENTING`, not accepted.
