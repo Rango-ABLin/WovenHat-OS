@@ -10126,3 +10126,28 @@ injection or native hardware qualification.
 The release validator now invokes the same controller-restart gate at 1/2/4
 CPUs, keeping the release chain aligned with the accepted Stage 31 matrix.
 
+## Current-head release validation and firmware preflight (2026-10-24)
+
+The release validator had a real local-run defect: storage read/write-fault
+children require QEMU and OVMF arguments, but an invocation without explicit
+paths reached those gates with neither argument. The validator now resolves
+QEMU from `PATH` and the conventional adjacent OVMF CODE location, or fails
+closed before the acceptance chain with an actionable diagnostic. Explicit
+CI-provided paths remain supported. Three focused preflight tests cover
+explicit paths, missing OVMF, and missing QEMU.
+
+The current-head release chain then completed with `release_exit=0`: all 158
+recorded checks passed, including host warning-denying lint/tests, the 1/2/4
+CPU debug and release boot/storage/network matrix, storage read/write-fault
+containment, service and driver restart, signed system-app catalog and boot,
+package transactions, AI provider/security/search/action gates, and app
+qualification. Evidence is in `target/release-validation/results.json` and
+the preserved serial/evidence directories under `target/` and
+`audit-artifacts/`.
+
+This is a current software/QEMU acceptance result. It does not convert the
+read-only laptop preflight into native certification: no reboot, physical
+disk write, firmware change, TPM provisioning, or Secure Boot qualification
+was performed. Physical power-loss/torn-sector testing, production signing
+key custody, live TPM/Secure Boot evidence, native device qualification, and
+independent Claude review remain outside this run's evidence boundary.

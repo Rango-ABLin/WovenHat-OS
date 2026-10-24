@@ -5697,3 +5697,15 @@ evidence is under
 `audit-artifacts/stage31-repeated/memory-1cpu-100boots/`. This remains a
 disposable-QEMU sample and does not claim the roadmap's thousands-of-boots
 requirement or native qualification.
+**Codex current-head release validation and firmware preflight (Codex,
+2026-10-24):** Repaired the release validator's local storage-fault argument
+plumbing. It now resolves QEMU and adjacent OVMF CODE firmware when paths are
+omitted and fails closed with an actionable diagnostic when either is absent;
+CI explicit paths remain unchanged. Three focused tests passed. The complete
+current-head release chain passed all 158 recorded checks with
+`release_exit=0`, including the 1/2/4 CPU release matrix, fault containment,
+restart, signed application, package, AI, graphics, and app gates. This is
+software/QEMU evidence only; the laptop was inspected read-only and no
+reboot, disk write, firmware change, TPM provisioning, or native hardware
+claim was made. The physical and trust-boundary items listed in the mandate
+remain open until their required evidence exists.

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -19,6 +20,34 @@ def build_woven_shell(root):
     subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=env, check=True)
     return app_dir / 'target' / 'x86_64-unknown-none' / 'release' / 'wovenhat-woven-shell'
 
+
+def resolve_fault_gate_firmware(args):
+    """Return QEMU/OVMF inputs required by the storage-fault children.
+
+    The release chain must reject a missing OVMF pair before running dozens of
+    unrelated checks.  CI supplies both paths explicitly; local runs may use
+    the conventional QEMU installation layout.
+    """
+    qemu = args.qemu or shutil.which('qemu-system-x86_64')
+    firmware = args.firmware
+    if not firmware and qemu:
+        qemu_path = Path(qemu)
+        candidate = qemu_path.parent / 'share' / 'edk2-x86_64-code.fd'
+        if candidate.is_file():
+            firmware = str(candidate)
+    if not qemu:
+        raise SystemExit(
+            'Release acceptance requires QEMU. Supply --qemu or install '
+            'qemu-system-x86_64.'
+        )
+    if not firmware or not Path(firmware).is_file():
+        raise SystemExit(
+            'Release acceptance requires an OVMF CODE firmware file for the '
+            'storage-fault gates. Supply --firmware (and a matching '
+            '--firmware-vars for the full UEFI matrix).'
+        )
+    return qemu, firmware
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu')
@@ -26,6 +55,7 @@ def main():
     parser.add_argument('--firmware-vars')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    fault_qemu, fault_firmware = resolve_fault_gate_firmware(args)
     out = root / 'target' / 'release-validation'
     out.mkdir(parents=True, exist_ok=True)
     report = []
@@ -64,9 +94,7 @@ def main():
         if getattr(args, key):
             options.extend([f'--{key.replace("_", "-")}', getattr(args, key)])
     fault_options = []
-    for key in ('qemu', 'firmware'):
-        if getattr(args, key):
-            fault_options.extend([f'--{key}', getattr(args, key)])
+    fault_options.extend(['--qemu', fault_qemu, '--firmware', fault_firmware])
     for cpus in (1, 2, 4):
         for suite in ('memory', 'storage'):
             run(f'{suite}-{cpus}-debug', [sys.executable, f'scripts/test-{suite}-qemu.py', '--cpus', str(cpus)] + options)
