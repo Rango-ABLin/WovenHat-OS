@@ -1,5 +1,15 @@
 # Stage status
 
+## Hardware-qualification matrix orchestrator - 2026-10-24
+
+Added `scripts/run-hardware-qualification-matrix.py` with four unit tests.
+It expands the declarative hardware matrix over deterministic profile, CPU and
+RAM combinations, supports plan-only and evidence-producing runs, validates
+each child result, and fails closed on native, tier-1, raw-device and physical
+qualification arguments. Independent verification passed the unit suite and
+a plan-only graphics run. The orchestrator writes only under its requested
+output directory and keeps physical qualification at `PHYSICAL_NOT_TESTED`.
+
 ## Hardware-qualification stimulator foundation - 2026-10-24
 
 Added `scripts/hardware-qualification-stimulator.py` and its four-test

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - hardware-qualification matrix orchestrator (2026-10-24)
+
+A scoped implementation agent added `scripts/run-hardware-qualification-
+matrix.py` and its four-test stdlib suite. Codex independently reran the
+tests, a plan-only graphics job, and native/raw-device rejection. The runner
+expands deterministic profile/CPU/RAM jobs and validates child safety fields;
+it never opens devices and records `PHYSICAL_NOT_TESTED`.
+
 ## Codex - bounded hardware qualification stimulator (2026-10-24)
 
 Codex delegated a scoped implementation to a subagent, then independently
