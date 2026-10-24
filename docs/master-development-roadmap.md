@@ -1150,6 +1150,75 @@ The 1.0 stack would look approximately like this:
 ├─────────────────────────────────────────────┤
 │                  Hardware                   │
 └─────────────────────────────────────────────┘
+## Execution control: software completion and hardware qualification
+
+This section governs the remaining work across Stages 28-36. The objective is
+to finish the software that can be built and verified in this repository while
+keeping physical-hardware claims separate from simulation evidence.
+
+### Work streams
+
+1. **Installer and provisioning (Stage 28):** complete the bootable image,
+   graphical installer, disk discovery, kernel-backed GPT partitioning,
+   FAT32/EFI provisioning, user/timezone/keyboard/network setup, progress
+   reporting, rollback and recovery. Every disk-writing test uses disposable
+   image files or an explicitly approved test device; no acceptance test may
+   write an uncontrolled physical disk.
+2. **Hardware-facing software (Stages 29 and 33):** complete driver contracts,
+   restart/teardown, input routing, graphics/compositor integration, storage,
+   networking, audio and Bluetooth boundaries. Each driver requires host
+   tests, a deterministic virtual-device model where practical, and QEMU
+   acceptance before physical qualification is attempted.
+3. **Performance and reliability (Stages 30-31):** implement profiling,
+   memory-pressure, scheduler/IPC/filesystem/network benchmarks, seeded and
+   randomized fault injection, service restart, driver-failure containment,
+   process failure, disk-full, network-loss and sudden-shutdown recovery.
+   The 1/2/4-CPU matrix remains mandatory; 8/16 CPUs are added when the test
+   environment supports them.
+4. **Developer and user software (Stages 32, 34-35):** complete WovenDev,
+   SDK/API documentation, debugging and crash diagnostics, the desktop shell,
+   settings, update/recovery flows, application packaging and the app-store
+   service. Each user-facing component needs an integration test and a
+   documented security/permission boundary.
+
+### Agent operating model
+
+For every work stream, agents are assigned one of three non-overlapping roles:
+
+- **Implementer:** makes a bounded change, adds tests, and records limitations.
+- **Verifier:** reviews the change independently and runs the relevant host,
+  Clippy, QEMU and CPU-matrix checks without weakening assertions.
+- **Qualification agent:** exercises virtual hardware models, fault scenarios,
+  boot/recovery paths and evidence collection, and reports gaps.
+
+Agents may not claim physical hardware certification from QEMU or virtual
+devices. Physical qualification requires measured evidence from the named
+device class, preserved logs, firmware/configuration details and a repeatable
+test procedure. When hardware is unavailable, the qualification agent must
+create or improve the model and mark the physical gate **blocked**, not pass it.
+
+### Iteration and acceptance loop
+
+Work proceeds in dependency order. For each bounded increment: inspect the
+current tree; implement; add or update tests; run the affected prior-stage
+regressions; run warning-denying Clippy; run QEMU on 1/2/4 CPUs; have an
+independent verifier review the diff and evidence; fix findings; then update
+the architecture guide and stage status before committing. A stage is accepted
+only when its software criteria and all inherited gates pass. Open physical,
+security-key, interoperability or unavailable-agent gates remain explicitly
+open in the status record.
+
+### Definition of software completion
+
+Software completion means all Stage 28-36 software requirements have an
+implemented path, tests, documented interfaces, recovery behavior and
+repeatable evidence in CI or the local acceptance harness. It does **not** mean
+that every physical device works. Hardware certification remains a separate
+release gate with Tier 1 supported devices, Tier 2 expected devices and Tier 3
+experimental devices. No production-readiness claim may be made until both
+the software completion checklist and the applicable physical/security gates
+are signed off.
+
 Instructions to put above this roadmap when feeding it to Codex
 
 Give Codex this as the permanent operating rule:
