@@ -1,5 +1,23 @@
 # Agent coordination (Claude Code and Codex)
 
+## ChatGPT - release driver firmware argument regression (2026-10-24)
+
+Isolated branch `fix/release-driver-ovmf-vars-20261024` addresses the
+current-master kernel CI failure in the core-foundation release chain:
+`test-release.py` forwards `--firmware-vars` to
+`test-stage13-12-drivers.py`, whose parser previously rejected the argument.
+The driver harness now accepts an optional OVMF VARS template, copies it into
+each unique evidence directory, and attaches it as a writable second pflash
+unit without changing the supplied template or the read-only CODE image.
+Four stdlib regression tests cover CLI support, legacy CODE-only mode,
+independent writable copies, and rejection of missing templates. The
+core-foundation workflow runs these tests before the release chain.
+This work does not modify the kernel, driver restart semantics, security
+policy or release criteria. CI verification is required before review/merge.
+Other current-master failures (Stage 20.5 window-depth and Stage 20.15
+desktop-session acceptance) remain separate, unresolved blockers.
+
+
 ## Codex - hardware qualification CI workflow (2026-10-24)
 
 A scoped implementation agent added `.github/workflows/hardware-
