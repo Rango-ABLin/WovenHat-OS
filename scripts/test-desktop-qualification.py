@@ -499,6 +499,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 time.sleep(0.12)
             wait_marker(serial, "WovenTerminal: window opened", terminal_started + args.input_timeout,
                         process, "terminal_window_open_ms", timings, terminal_started)
+            # The client emits its marker immediately after sending WOPN.  Do
+            # not inject focus or keyboard input until WovenShell has consumed
+            # that IPC message and composed the window; otherwise a valid
+            # input sequence can land in the pre-window desktop state.
+            wait_marker(serial, "woven-shell: window opened: Terminal",
+                        terminal_started + args.input_timeout, process,
+                        "terminal_window_composed_ms", timings, terminal_started)
             terminal_frame = output / "terminal-window-open.ppm"
             capture_frame(qmp, terminal_frame, time.monotonic() + args.frame_timeout, timings, "terminal_window")
             screenshots.append(terminal_frame.name)

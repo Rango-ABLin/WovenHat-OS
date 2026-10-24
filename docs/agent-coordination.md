@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - desktop qualification synchronization fix (2026-10-24)
+
+The strict desktop harness had a real ordering race: it waited for the
+terminal client's `WovenTerminal: window opened` marker but injected the focus
+click and keyboard event before WovenShell consumed the `WOPN` IPC. Evidence
+showed the pointer press before `woven-shell: application message received` and
+`woven-shell: window opened: Terminal`, so the keyboard never reached the
+focused-window branch. The harness now waits for the shell-composed marker
+before interaction. No kernel/compositor assertion was weakened and no
+physical hardware was touched.
+
 ## Codex - hardware qualification CI workflow (2026-10-24)
 
 A scoped implementation agent added `.github/workflows/hardware-
