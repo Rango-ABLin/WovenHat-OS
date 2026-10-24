@@ -37,8 +37,9 @@ software-fixture qualification only, not native hardware or Claude sign-off.
 
 ## Codex - current-head release validation after Stage 28 repair (2026-10-24)
 
-The authoritative release chain passed all 158 checks with zero failures on
-current commit `6cc1806a`. The report is `target/release-validation/results.json`
+The authoritative release chain passed all 158 checks with zero failures from
+commit `6cc1806a`; current HEAD `792e6994` adds only stricter explicit
+QEMU/OVMF preflight validation. The report is `target/release-validation/results.json`
 and the source/image digest record is `target/release-validation/validated-image.json`.
 This rerun includes the bounded-resource Stage 28 harness repair and the full
 1/2/4-CPU release matrix. It does not close physical/native hardware,
