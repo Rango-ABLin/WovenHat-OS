@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded hardware qualification stimulator (2026-10-24)
+
+Codex delegated a scoped implementation to a subagent, then independently
+reviewed and reran it. Commit `633441ed` adds
+`scripts/hardware-qualification-stimulator.py` and
+`tests/test_hardware_qualification_stimulator.py`. Four stdlib tests pass;
+the 16-CPU/4 GiB storage smoke generated deterministic evidence, and a raw
+`PhysicalDrive0` invocation failed closed with exit code 2. The runner never
+opens devices and always records `PHYSICAL_NOT_TESTED`; this is emulation and
+software-fixture qualification only, not native hardware or Claude sign-off.
+
 ## Codex - current-head release validation after Stage 28 repair (2026-10-24)
 
 The authoritative release chain passed all 158 checks with zero failures on
