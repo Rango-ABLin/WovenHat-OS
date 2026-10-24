@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 28 software tree merge and qualification contract - 2026-10-24
+
+The Stage 28 installer/provisioning tree and the subsequent application,
+graphics, packaging, recovery and Stage 31 evidence from
+`codex/maturity-audit-20261022` are now merged into local `master` at
+`179f0737`. The merge includes the kernel installer boundary, disposable
+GPT/FAT32/EFI installation executors, installer service/UI, system-app
+packaging, and the existing 1/2/4-CPU software acceptance harnesses.
+
+The new `tests/hardware-matrix.json` records deterministic emulated and
+software-only qualification profiles, evidence fields, RAM/CPU dimensions,
+fault classes and the rule that emulation cannot claim physical certification.
+Focused hardware-qualification, installer-plan/UI, package-installer and
+Stage 28 disposable acceptance tests passed via Python `unittest`; the
+disposable Stage 28 test ran two image-backed cases in 158.451 seconds.
+
+This is a software-tree integration and focused-test result, not a claim that
+all software or hardware work is complete. Mouse/tablet, display-device,
+centralized full-stack fault, abrupt QEMU power-loss, automatic driver-crash
+recovery, 8/16-CPU expansion, physical hardware, Secure Boot/release-key
+qualification and independent external review remain open where not covered
+by existing evidence.
+
 ## P0-03/P0-07 current-head release validation after Stage 28 repair - 2026-10-24
 
 The authoritative release chain passed all 158 checks with zero failures on
