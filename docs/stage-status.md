@@ -86,6 +86,24 @@ GFX-02 CPU renderer feature gate all passed. M07 is accepted for the bounded
 software/QEMU graphics path; native Intel/AMD/NVIDIA GPU drivers, physical
 scanout, accelerated performance, and device-loss recovery remain open.
 
+## Release Completion Mandate M08 - 2026-10-24
+
+The desktop UX slice is covered by the current strict 1/2/4-CPU desktop
+matrix: sign-in, first frame, keyboard and mouse routing, window composition,
+teardown, framebuffer restoration, and guest reset all passed. M08 is accepted
+for software/QEMU UX scope; native accessibility devices and physical display
+qualification remain open.
+
+## Release Completion Mandate M09 - 2026-10-24
+
+The current-head authoritative release chain passed 158/158 checks. This
+includes the signed 11-application catalog and boot, WovenStore app-store
+flows, package transactions and rollback, update, security, monitor, settings,
+editor, images, terminal/files, AI broker/providers/actions/search/security,
+service supervisor recovery, and application lint gates on the required
+1/2/4-CPU matrix. M09 is accepted for software/QEMU scope; production trust
+provisioning and native certification remain open.
+
 ## Release Completion Mandate M04 - 2026-10-24
 
 The persistent-storage and installer slice passed in disposable scope. Stage 28

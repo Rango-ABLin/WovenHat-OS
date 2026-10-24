@@ -37,6 +37,15 @@ GFX-02 CPU renderer feature gate passed on 1/2/4 CPUs. This is bounded
 software/QEMU evidence; native GPU drivers, acceleration, physical scanout,
 and device-loss recovery remain unqualified.
 
+## Codex - mandate M08/M09 UX and software release qualification (2026-10-24)
+
+The strict desktop UX journey passed on 1/2/4 CPUs. The authoritative current
+head release chain then passed 158/158 checks, covering signed system apps,
+WovenStore, package transactions, update/security, AI providers and actions,
+service supervision, and system-app desktop boots. This is software/QEMU
+evidence; trust provisioning, production signing, native hardware, and
+independent security review remain open.
+
 ## Codex - desktop qualification synchronization fix (2026-10-24)
 
 The strict desktop harness had a real ordering race: it waited for the

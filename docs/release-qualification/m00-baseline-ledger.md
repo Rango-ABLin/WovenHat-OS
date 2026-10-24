@@ -120,3 +120,18 @@ M07 passed for bounded software/QEMU graphics scope. Dual-head scanout,
 single-output pixels, and GFX-02 CPU renderer feature tests passed on 1/2/4
 CPUs. Native GPU driver behavior, physical scanout, acceleration performance,
 and device-loss recovery remain unqualified.
+
+## M08 result
+
+M08 passed for software/QEMU UX scope through the strict desktop and guest
+reset matrices on 1/2/4 CPUs. Input, sign-in, window composition, teardown,
+frame restoration, and the bounded session journey are covered. Native
+accessibility devices and physical display qualification remain open.
+
+## M09 result
+
+M09 passed for software/QEMU scope. The current-head release chain completed
+158/158 checks, including the signed application catalog, app store, package
+transactions, update/security services, AI features, service supervision,
+system-app boots, and app linting on 1/2/4 CPUs. This does not close trust
+provisioning, production signing, or native certification.

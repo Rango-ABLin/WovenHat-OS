@@ -1,11 +1,11 @@
 {
   "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
-  "updated_utc": "2026-10-24T14:32:00Z",
-  "milestone": "M07",
-  "milestone_title": "Graphics and compositor qualification",
+  "updated_utc": "2026-10-24T15:45:00Z",
+  "milestone": "M09",
+  "milestone_title": "UX, applications, and services",
   "status": "PASS",
   "baseline_commit": "3eee80b8",
-  "accepted_commit": "d87ad4d7",
+  "accepted_commit": "1283c1ec",
   "branch": "master",
   "working_tree_clean_before_documentation": true,
   "tests": {
@@ -33,17 +33,19 @@
     "wifi_bluetooth_contracts": "Stage 13.10 PASS on 1/2/4 CPUs",
     "single_output_graphics": "Stage 20.14S PASS on 1/2/4 CPUs",
     "gfx02_renderer": "PASS on 1/2/4 CPUs",
+    "release_chain": "158/158 PASS on current head",
+    "application_service_matrix": "PASS on 1/2/4 CPUs",
     "virtual_trust": "NOT_QUALIFIED"
   },
   "blockers": [
-    "M08/M09 UX, application, and service integration closure",
+    "M10/M14 trust provisioning, production signing, and release provenance",
     "OVMF VARS and swtpm prerequisites",
     "development signing key and certificate",
     "supported installer transaction evidence",
     "physical/native hardware qualification",
     "independent security review"
   ],
-  "next_action": "M08 qualify desktop UX, accessibility, application, and service integration",
+  "next_action": "M10 close trust-boundary prerequisites where tools and credentials are available; keep blocked gates explicit",
   "safety": {
     "host_reboot_requested": false,
     "raw_device_opened": false,
