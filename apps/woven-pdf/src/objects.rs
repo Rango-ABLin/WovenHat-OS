@@ -156,7 +156,7 @@ mod tests {
     fn resolver() -> Resolver<'static> {
         Resolver::new(BODY, &[
             Entry { object: 1, generation: 0, offset: 0, in_use: true },
-            Entry { object: 2, generation: 0, offset: 78, in_use: true },
+            Entry { object: 2, generation: 0, offset: b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Extra << /Pages 99 0 R >> >>\nendobj\n".len(), in_use: true },
         ])
     }
 
