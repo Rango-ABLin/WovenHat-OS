@@ -257,14 +257,15 @@ const CURSOR_HEIGHT: i32 = 10;
 
 /// The application catalog: one `*.app` file per application.
 const CATALOG: &str = "/share/applications";
-// Production system-apps publishes ten bounded catalog entries. Keep the
-// launcher capacity aligned with that manifest so alphabetical loading does
-// not silently drop the last applications (notably Update and Terminal).
-const MAX_APPS: usize = 10;
+// The launcher stores catalog metadata in process-owned memory rather than
+// truncating the production catalog at its old ten-entry fixture size. This
+// is a generous staging capacity; the kernel still validates every catalog
+// entry and rejects malformed or resource-exhausting inputs.
+const MAX_APPS: usize = 64;
 const MAX_APP_NAME: usize = 20;
 const MAX_EXEC: usize = 96;
 const MAX_QUERY: usize = 16;
-const MAX_CHILDREN: usize = 8;
+const MAX_CHILDREN: usize = 32;
 
 const PANEL_X: i32 = 4;
 const PANEL_WIDTH: i32 = 160;

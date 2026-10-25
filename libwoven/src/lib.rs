@@ -14255,6 +14255,25 @@ pub fn write(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// The kernel intentionally validates each individual user pointer and caps
+/// one syscall transfer. This helper makes that implementation detail
+/// invisible to callers while retaining progress and overflow checks.
+pub fn write_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write bytes to an opened filesystem descriptor. The kernel enforces the
 /// descriptor's owner and `FileWrite` capability before mutating storage.
 pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
@@ -14263,14 +14282,29 @@ pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized file payload through chunked file-write calls.
+pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write_file(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write a string to standard output.
 pub fn print(text: &str) -> Result<usize, Error> {
-    write(syscall::STDOUT, text.as_bytes())
+    write_all(syscall::STDOUT, text.as_bytes())
 }
 
 /// Write a string to standard error.
 pub fn eprint(text: &str) -> Result<usize, Error> {
-    write(syscall::STDERR, text.as_bytes())
+    write_all(syscall::STDERR, text.as_bytes())
 }
 
 /// Read into a buffer, returning the count filled.
@@ -14278,6 +14312,29 @@ pub fn read(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
     // SAFETY: a slice is writable for its own length.
     let result = unsafe { syscall::read(descriptor, buffer.as_mut_ptr(), buffer.len()) };
     check(result).map(|count| count as usize)
+}
+
+/// Fill an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// A short read is returned as normal end-of-stream behavior. Every syscall
+/// still receives a separately validated slice, so this does not weaken the
+/// kernel's pointer or per-call memory checks.
+pub fn read_all(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < buffer.len() {
+        let end = (offset + CHUNK).min(buffer.len());
+        let requested = end - offset;
+        let read = read(descriptor, &mut buffer[offset..end])?;
+        if read == 0 || read > requested {
+            break;
+        }
+        offset += read;
+        if read < requested {
+            break;
+        }
+    }
+    Ok(offset)
 }
 
 /// This process's identifier.
