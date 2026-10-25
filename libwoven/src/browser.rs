@@ -26,6 +26,8 @@ pub struct Node<'a> {
     pub tag: &'a str,
     pub text: Option<&'a str>,
     pub parent: Option<usize>,
+    pub class_name: Option<&'a str>,
+    pub id: Option<&'a str>,
     pub style: Option<&'a str>,
 }
 
@@ -65,7 +67,7 @@ impl<'a, const N: usize> Document<'a, N> {
     }
 }
 
-fn style_attribute(attributes: &str) -> Option<&str> {
+fn attribute_value<'a>(attributes: &'a str, wanted: &str) -> Option<&'a str> {
     let mut rest = attributes;
     while !rest.trim_ascii().is_empty() {
         rest = rest.trim_ascii_start();
@@ -95,7 +97,7 @@ fn style_attribute(attributes: &str) -> Option<&str> {
             (&rest[..value_end], value_end)
         };
         rest = &rest[consumed..];
-        if name.eq_ignore_ascii_case("style") {
+        if name.eq_ignore_ascii_case(wanted) {
             return Some(value);
         }
     }
@@ -159,12 +161,14 @@ pub fn parse_html<'a, const N: usize>(input: &'a [u8]) -> Result<Document<'a, N>
                 let parent = depth
                     .checked_sub(1)
                     .and_then(|index| stack.get(index).copied());
-                let style = style_attribute(&tag[name_end..]);
+                let attributes = &tag[name_end..];
                 let index = document.push(Node {
                     tag: name,
                     text: None,
                     parent,
-                    style,
+                    class_name: attribute_value(attributes, "class"),
+                    id: attribute_value(attributes, "id"),
+                    style: attribute_value(attributes, "style"),
                 })?;
                 if !self_closing {
                     if depth == stack.len() {
@@ -212,6 +216,90 @@ pub struct Rect {
 pub struct LayoutBox {
     pub node: usize,
     pub rect: Rect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selector<'a> {
+    Tag(&'a str),
+    Class(&'a str),
+    Id(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rule<'a> {
+    selector: Selector<'a>,
+    declarations: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleSheetError {
+    TooManyRules,
+    MalformedRule,
+    EmptySelector,
+}
+
+pub struct StyleSheet<'a, const R: usize> {
+    rules: [Option<Rule<'a>>; R],
+    len: usize,
+}
+
+impl<'a, const R: usize> StyleSheet<'a, R> {
+    pub const fn new() -> Self {
+        Self {
+            rules: [None; R],
+            len: 0,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<Selector<'a>> {
+        self.rules
+            .get(index)
+            .copied()
+            .flatten()
+            .map(|rule| rule.selector)
+    }
+
+    pub fn parse(source: &'a str) -> Result<Self, StyleSheetError> {
+        let mut sheet = Self::new();
+        let mut rest = source;
+        while !rest.trim_ascii().is_empty() {
+            let close = rest.find('}').ok_or(StyleSheetError::MalformedRule)?;
+            let (header, declarations) = rest[..close]
+                .split_once('{')
+                .ok_or(StyleSheetError::MalformedRule)?;
+            let selector = header.trim_ascii();
+            let selector = selector
+                .strip_prefix('.')
+                .map(Selector::Class)
+                .or_else(|| selector.strip_prefix('#').map(Selector::Id))
+                .or_else(|| (!selector.is_empty()).then_some(Selector::Tag(selector)))
+                .ok_or(StyleSheetError::EmptySelector)?;
+            if sheet.len == R {
+                return Err(StyleSheetError::TooManyRules);
+            }
+            sheet.rules[sheet.len] = Some(Rule {
+                selector,
+                declarations,
+            });
+            sheet.len += 1;
+            rest = &rest[close + 1..];
+        }
+        Ok(sheet)
+    }
+}
+
+impl<const R: usize> Default for StyleSheet<'_, R> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -360,25 +448,7 @@ fn css_color(value: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
-fn style(node: Node<'_>) -> Style {
-    let mut result = Style {
-        width: None,
-        height: None,
-        margin: 0,
-        display: if matches!(node.tag, "script" | "style" | "head") {
-            DisplayMode::None
-        } else {
-            DisplayMode::Block
-        },
-        flex_direction: FlexDirection::Row,
-        gap: 0,
-        grid_columns: 1,
-        background: None,
-        color: None,
-    };
-    let Some(source) = node.style else {
-        return result;
-    };
+fn apply_declarations(result: &mut Style, source: &str) {
     for declaration in source.split(';') {
         let Some((name, value)) = declaration.split_once(':') else {
             continue;
@@ -425,17 +495,56 @@ fn style(node: Node<'_>) -> Style {
             result.color = css_color(value);
         }
     }
+}
+
+fn matches_selector(node: Node<'_>, selector: Selector<'_>) -> bool {
+    match selector {
+        Selector::Tag(tag) => node.tag.eq_ignore_ascii_case(tag),
+        Selector::Class(class) => node
+            .class_name
+            .is_some_and(|classes| classes.split_ascii_whitespace().any(|value| value == class)),
+        Selector::Id(id) => node.id == Some(id),
+    }
+}
+
+fn style<const R: usize>(node: Node<'_>, sheet: &StyleSheet<'_, R>) -> Style {
+    let mut result = Style {
+        width: None,
+        height: None,
+        margin: 0,
+        display: if matches!(node.tag, "script" | "style" | "head") {
+            DisplayMode::None
+        } else {
+            DisplayMode::Block
+        },
+        flex_direction: FlexDirection::Row,
+        gap: 0,
+        grid_columns: 1,
+        background: None,
+        color: None,
+    };
+    for index in 0..sheet.len {
+        if let Some(rule) = sheet.rules[index]
+            && matches_selector(node, rule.selector)
+        {
+            apply_declarations(&mut result, rule.declarations);
+        }
+    }
+    if let Some(source) = node.style {
+        apply_declarations(&mut result, source);
+    }
     result
 }
 
-struct LayoutContext<'document, 'output, const N: usize> {
+struct LayoutContext<'document, 'output, 'sheet, const N: usize, const R: usize> {
     document: &'document Document<'document, N>,
     output: &'output mut LayoutDocument<N>,
+    sheet: &'sheet StyleSheet<'document, R>,
     viewport_height: u32,
 }
 
-fn layout_subtree<const N: usize>(
-    context: &mut LayoutContext<'_, '_, N>,
+fn layout_subtree<const N: usize, const R: usize>(
+    context: &mut LayoutContext<'_, '_, '_, N, R>,
     node_index: usize,
     x: u32,
     y: u32,
@@ -449,7 +558,7 @@ fn layout_subtree<const N: usize>(
         .document
         .node(node_index)
         .ok_or(LayoutError::Overflow)?;
-    let node_style = style(node);
+    let node_style = style(node, context.sheet);
     if node_style.display == DisplayMode::None {
         return Ok(0);
     }
@@ -605,6 +714,15 @@ pub fn layout<const N: usize>(
     document: &Document<'_, N>,
     viewport: Viewport,
 ) -> Result<LayoutDocument<N>, LayoutError> {
+    let sheet = StyleSheet::<0>::new();
+    layout_with_stylesheet(document, viewport, &sheet)
+}
+
+pub fn layout_with_stylesheet<const N: usize, const R: usize>(
+    document: &Document<'_, N>,
+    viewport: Viewport,
+    sheet: &StyleSheet<'_, R>,
+) -> Result<LayoutDocument<N>, LayoutError> {
     if viewport.width == 0 || viewport.height == 0 {
         return Err(LayoutError::InvalidViewport);
     }
@@ -612,6 +730,7 @@ pub fn layout<const N: usize>(
     let mut context = LayoutContext {
         document,
         output: &mut output,
+        sheet,
         viewport_height: viewport.height,
     };
     let mut cursor_y = 0;
@@ -640,13 +759,22 @@ pub fn paint<'a, const N: usize, const P: usize>(
     document: &'a Document<'a, N>,
     layout: &LayoutDocument<N>,
 ) -> Result<PaintList<'a, P>, PaintError> {
+    let sheet = StyleSheet::<0>::new();
+    paint_with_stylesheet(document, layout, &sheet)
+}
+
+pub fn paint_with_stylesheet<'a, const N: usize, const P: usize, const R: usize>(
+    document: &'a Document<'a, N>,
+    layout: &LayoutDocument<N>,
+    sheet: &StyleSheet<'a, R>,
+) -> Result<PaintList<'a, P>, PaintError> {
     let mut output = PaintList::new();
     for index in 0..layout.len() {
         let layout_box = layout.get(index).ok_or(PaintError::MissingNode)?;
         let node = document
             .node(layout_box.node)
             .ok_or(PaintError::MissingNode)?;
-        let node_style = style(node);
+        let node_style = style(node, sheet);
         if let Some(color) = node_style.background {
             output.push(PaintCommand::Fill {
                 rect: layout_box.rect,
@@ -712,8 +840,8 @@ pub fn execute_script<'a, const N: usize, const V: usize>(
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutError, PaintCommand, ParseError, ScriptError, Viewport, execute_script, layout,
-        paint, parse_html, render,
+        LayoutError, PaintCommand, ParseError, ScriptError, StyleSheet, Viewport, execute_script,
+        layout, layout_with_stylesheet, paint, parse_html, render,
     };
 
     #[test]
@@ -812,6 +940,31 @@ mod tests {
         assert_eq!(third.rect.x, 0);
         assert_eq!(third.rect.y, 22);
         assert_eq!(third.rect.width, 49);
+    }
+
+    #[test]
+    fn applies_bounded_class_and_id_rules_before_inline_style() {
+        let document = parse_html::<4>(
+            br#"<main id="root" class="frame"><p class="card" style="height:12px"/></main>"#,
+        )
+        .unwrap();
+        let sheet = StyleSheet::<3>::parse(
+            ".frame { width: 100px; display: flex; gap: 4px; } .card { height: 20px; } #root { height: 40px; }",
+        )
+        .unwrap();
+        assert_eq!(sheet.len(), 3);
+        let layout = layout_with_stylesheet(
+            &document,
+            Viewport {
+                width: 200,
+                height: 100,
+            },
+            &sheet,
+        )
+        .unwrap();
+        assert_eq!(layout.get(0).unwrap().rect.height, 12);
+        assert_eq!(layout.get(1).unwrap().rect.width, 100);
+        assert_eq!(layout.get(1).unwrap().rect.height, 40);
     }
 
     #[test]
