@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics roadmap Stage 08 secure userspace surfaces and IPC - 2026-10-25
+
+Stage 08 is accepted for the secure userspace surface/IPC and QEMU scope. The
+roadmap-native `stage08-graphics-test` gate passed on 1/2/4 CPUs with exit 33:
+two independent Ring-3 processes submitted surfaces, unauthorized private
+surface reads were refused, shared pixels composed correctly, and client
+surfaces/grants were released on exit. Evidence is recorded in
+`docs/graphics/stage-08-surfaces-evidence.md`.
+
 ## Codec qualification update - 2026-10-25
 
 - External randomized codec campaign: **PASS** — 50,000 inputs and 250,000

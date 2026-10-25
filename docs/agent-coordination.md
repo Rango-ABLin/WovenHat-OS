@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics Stage 08 secure surfaces and IPC (2026-10-25)
+
+Added the roadmap-native `stage08-graphics-test` feature and acceptance marker
+around the existing owner/generation-bound surface delegation path. The gate
+passed on 1/2/4 CPUs with exit 33 using two independent Ring-3 processes. It
+verified explicit sharing, refusal of a private surface, composed pixels, and
+release of surfaces/grants on client exit. Target Clippy passed; host kernel
+`--all-targets` remains blocked by the existing freestanding-vs-std duplicate
+panic/allocator lang items when host-only WebP dependencies are linked.
+
 ## Codex - external codec fuzz campaign (2026-10-25)
 
 `tools/codec-fuzz` runs 50,000 random inputs through the image header parser

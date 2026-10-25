@@ -4465,6 +4465,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S19.7] surface delegation: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage08-graphics-test")]
+    {
+        if !stage19_7_self_test() {
+            serial::write_line(format_args!(
+                "[S08] secure userspace graphics surfaces: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S08] secure userspace graphics surfaces: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-6-test")]
     {
         if !stage19_6_self_test() {
@@ -7970,6 +7983,7 @@ fn stage16_1_self_test() -> bool {
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
@@ -8011,6 +8025,7 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
@@ -8050,6 +8065,7 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
@@ -8181,6 +8197,7 @@ fn stage13_15_self_test() -> bool {
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
@@ -8232,6 +8249,7 @@ fn spawn_hello_gui(
     feature = "stage19-5-test",
     feature = "stage19-6-test",
     feature = "stage19-7-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
@@ -17059,7 +17077,7 @@ fn stage19_8_self_test() -> bool {
 /// The compositor must draw the shared one and be refused the private one.
 /// The kernel then reads the composited pixel itself and checks the grant died
 /// with the client's surfaces.
-#[cfg(feature = "stage19-7-test")]
+#[cfg(any(feature = "stage19-7-test", feature = "stage08-graphics-test"))]
 fn stage19_7_self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(

@@ -101,6 +101,8 @@ hardware-demo = ["system-apps", "kernel/hardware-demo"]
 stage17-1-test = ["qemu-test", "kernel/stage17-1-test"]
 stage5-font-test = ["qemu-test", "kernel/stage5-font-test"]
 stage18-1-test = ["qemu-test", "kernel/stage18-1-test"]
+# Graphics roadmap Stage 08: secure two-process surface submission and IPC.
+stage08-graphics-test = ["qemu-test", "kernel/stage08-graphics-test"]
 stage18-2-test = ["qemu-test", "kernel/stage18-2-test"]
 stage19-1-test = ["qemu-test", "kernel/stage19-1-test"]
 stage19-2-test = ["qemu-test", "kernel/stage19-2-test"]
