@@ -6,6 +6,10 @@ on:
       - ".github/workflows/wovenpdf-host.yml"
   workflow_dispatch:
 
+concurrency:
+  group: wovenpdf-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   parser:
     name: Host unit tests and Clippy
