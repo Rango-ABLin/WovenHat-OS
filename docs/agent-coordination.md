@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI SDK primitives (2026-10-25)
+
+Added `libwoven::ui` with allocation-free bounded `Button` and UTF-8-safe
+fixed-capacity `TextField` widgets, shared dark-theme tokens, and vertical
+stack layout. Replaced WovenSettings' hand-painted Refresh control with the
+shared Button. The libwoven host suite passed 126 tests, the Settings target
+passed warning-denying Clippy, and changed files are rustfmt-clean. This is a
+real SDK/widget increment; the complete WovenUI component catalog and broader
+application migration remain open.
+
 ## Codex - Stage 20.17/20.18 3D acceptance repair (2026-10-25)
 
 Repaired stale 3D acceptance fixtures after the current branded desktop

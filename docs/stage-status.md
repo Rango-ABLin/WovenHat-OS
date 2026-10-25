@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenUI bounded native widget foundation - 2026-10-25
+
+Added `libwoven::ui` with bounded allocation-free Button and UTF-8-safe fixed
+capacity TextField primitives, shared theme tokens, and vertical stack layout.
+WovenSettings now renders its Refresh control through the shared Button.
+The libwoven host suite passed 126 tests, Settings warning-denying Clippy
+passed, and changed files are rustfmt-clean. The complete WovenUI catalog and
+full application migration remain in progress.
+
 ## Stage 20.17/20.18 3D acceptance repair - 2026-10-25
 
 Updated the stale 3D acceptance fixtures to the current branded teal
