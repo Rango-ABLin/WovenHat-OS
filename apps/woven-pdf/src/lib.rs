@@ -267,3 +267,74 @@ mod tests {
         assert_eq!(parse_command(&[b"--text", &[b'x'; 256]]), Command::Invalid);
     }
 }
+
+#[cfg(test)]
+mod pipeline_acceptance {
+    use super::{document, inspect, objects::Reference, paint, streams, xref};
+
+    // A real classic-xref PDF, not a bare content-stream snippet: prove that
+    // page selection, length-delimited stream reading and drawing agree.
+    #[test]
+    fn selected_pdf_page_reaches_text_painter() {
+        let content = [
+            b"BT /F1 12 Tf 10 20 Td (First) Tj ET".as_slice(),
+            b"BT /F1 12 Tf 10 20 Td (Second) Tj ET".as_slice(),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = [0usize; 7];
+        let mut add = |id: usize, body: &[u8]| {
+            offsets[id] = pdf.len();
+            pdf.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
+            pdf.extend_from_slice(body);
+            pdf.extend_from_slice(b"\nendobj\n");
+        };
+        add(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+        add(2, b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>");
+        add(3, b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>");
+        let mut first = format!("<< /Length {} >>\nstream\n", content[0].len()).into_bytes();
+        first.extend_from_slice(content[0]);
+        first.extend_from_slice(b"\nendstream");
+        add(4, &first);
+        add(5, b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>");
+        let mut second = format!("<< /Length {} >>\nstream\n", content[1].len()).into_bytes();
+        second.extend_from_slice(content[1]);
+        second.extend_from_slice(b"\nendstream");
+        add(6, &second);
+
+        let xref_at = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n")
+                .as_bytes(),
+        );
+        inspect(&pdf).unwrap();
+        let mut entries = [xref::Entry::default(); 8];
+        let entry_count = xref::read_table(&pdf, &mut entries).unwrap();
+        let mut pages = [Reference {
+            number: 0,
+            generation: 0,
+        }; 4];
+        for (index, expected) in ["First", "Second"].iter().enumerate() {
+            let (stream_ref, count) =
+                document::page_content(&pdf, &entries[..entry_count], index, &mut pages).unwrap();
+            assert_eq!(count, 2);
+            let mut decoded = [0u8; 256];
+            let len =
+                streams::decoded_stream(&pdf, &entries[..entry_count], stream_ref, &mut decoded)
+                    .unwrap();
+            assert_eq!(&decoded[..len], content[index]);
+            let mut draws = 0;
+            paint::paint_text_preview(&decoded[..len], 100.0, 1.0, 300, 300, |item| {
+                assert_eq!(item.text, *expected);
+                assert_eq!((item.x, item.y), (10, 80));
+                draws += 1;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(draws, 1);
+        }
+    }
+}
