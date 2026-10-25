@@ -130,6 +130,8 @@ mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
+#[cfg(feature = "wovenweb-net-test")]
+mod wovenweb_net_gate;
 // Stage 12.3 acceptance exercises the encrypted-mount path that lives here, so
 // this module is required by both the 12.3 and 12.5 gates. The features
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
@@ -2653,7 +2655,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(all(
         feature = "qemu-test",
         not(feature = "stage10-6-test"),
-        not(feature = "stage10-7-test")
+        not(feature = "stage10-7-test"),
+        not(feature = "wovenweb-net-test")
     ))]
     {
         match network::init() {
@@ -5393,6 +5396,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S10.6] userspace async UDP send/recv + socket pinning/cancel/teardown: PASSED"
         ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "wovenweb-net-test")]
+    {
+        if !wovenweb_net_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB] native network platform: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB] native network platform: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage10-7-test")]

@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenWeb native network platform - 2026-10-25
+
+Owned native SDK TCP/SOCKS5 transport passes host, Clippy and real QEMU 1/2/4-CPU
+acceptance with deadline/cancellation, capability denial and cleanup evidence.
+This accepts the controlled network platform fixture only. Native Ladybird,
+TLS/Tor daemon, UI, VPN and production browser installation remain unimplemented.
+See [network evidence](wovenweb-network-acceptance.md) and
+[the native port route](wovenweb-native-port.md). Graphics Stage 07 remains open.
+
 ## WovenWeb host foundation - 2026-10-25
 
 Experimental host source integration is recorded in

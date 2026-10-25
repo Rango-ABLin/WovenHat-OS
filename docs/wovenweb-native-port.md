@@ -1,0 +1,106 @@
+# WovenWeb native platform route
+
+The target is a Ladybird-derived browser running inside WovenHat. A Windows/Linux
+browser on the development machine is not native WovenHat execution. The current
+native deliverable is a network platform SDK and real Ring-3 protocol probe, not
+that finished browser. User priority permits this work alongside the unfinished
+graphics roadmap; no later graphics stage is accepted by it.
+
+## Port rather than replace the engine
+
+Keep LibWeb/LibJS and their standards behavior. Implement a WovenHat platform
+backend in AK/LibCore, then a native LibWebView UI backed by WovenUI surfaces.
+Upstream Documentation/Porting.md requires separate platform and UI work. This
+avoids a requirement to port the full Qt desktop stack, but does not eliminate
+libc, C++ runtime, dependency, IPC, memory, graphics or sandbox work.
+
+| Boundary | Existing WovenHat primitive | Required implementation / evidence |
+| --- | --- | --- |
+| Toolchain | Rust ELF loader and fixed native syscall ABI | Cross C/C++ sysroot, compiler runtime, libc/libc++, threading/TLS and exceptions policy; boot a C++ ABI fixture |
+| Memory | mmap/munmap, file mappings, surfaces, shared memory | Real allocation/free, larger safe arenas, protections, shared-buffer lifetime/sealing and stress/teardown gates |
+| Process | ELF loading, spawning, per-process handles | LibCore Process backend with explicit argv/environment/FD actions and renderer termination |
+| Threads | Thread create/join, TLS registration | C++ TLS/runtime integration and scheduling/synchronization tests |
+| Event loop | Generation-tagged completions, ports and event waits | LibCore EventLoopImplementationWovenHat using completions, timers and cancellation |
+| Files | Descriptor reads/writes/seeks and VFS | LibCore System/File bridge, scoped profile/resource access, errors and metadata |
+| IPC | Endpoint messages, service discovery and shared objects | LibIPC transport and handle transfer; do not pretend endpoint IDs are POSIX FDs |
+| Networking | New owned async TCP SDK + SOCKS5 remote-name CONNECT | LibCore Socket/CURL adapter, deadline/cancellation tests, certificate-verified TLS and trusted time |
+| Rendering | Shared surfaces, compositor, text/image substrates | LibWebView ViewImplementation and Application subclasses; input, resize, tabs, accessibility and frame damage |
+| Sandbox | Capabilities, service/file/device policy | UI/network/renderer/image-decoder roles, no renderer raw NetworkIo, broker-only egress and hostile guest tests |
+| Tor | SOCKS5 client transport now available | Native Tor daemon plus its TLS/crypto and runtime dependencies, bootstrap/control authentication and circuit isolation |
+| Updates | WovenHat signed package/update primitives | WovenWeb packaging, upstream security tracking, signed releases and rollback |
+
+The upstream vcpkg manifest pins OpenSSL/curl, ICU, HarfBuzz, compression and image
+libraries, FFmpeg, Skia and other dependencies. Cross-build those dependencies;
+changing a platform macro or renaming namespaces does not make them work.
+
+## Memory blockers found in source
+
+At the audited revision, config.rs limits anonymous mappings to 16 and shared
+memory objects to 16 pages. userspace.rs uses USER_MMAP_STRIDE=0x10000 and rejects
+anonymous mappings larger than that stride: 64 KiB per mapping, approximately
+1 MiB total anonymous arena. libwoven's current allocator owns one 64 KiB arena
+and does not reclaim individual allocations. These are concrete incompatibilities
+with a modern browser, not build-flag problems. Rework bounded region management,
+allocation/deallocation and shared buffers with ownership and OOM tests. Do not
+simply raise constants or use the current bump allocator as a browser heap.
+
+## First implemented platform boundary
+
+libwoven::net now exposes owned TcpStream handles and borrowed Pending operations.
+Sends are copied on submission; receives validate their original capacity before
+kernel copyout. Pending work is neither Send nor Sync because completions are task-owned.
+Drop cancels live operations and closes sockets, without exposing
+raw constructors or keeping Ring-3 pointers in kernel work queues. poll supports
+an asynchronous caller; wait blocks on completion events; wait_timeout uses a
+completion port and a relative 100 Hz deadline. A timeout cancels the operation.
+The legacy net::Socket token remains available for source compatibility.
+
+libwoven::socks5 validates bounded ASCII DNS/punycode names, encodes ATYP=DOMAIN,
+parses fragmented IPv4/IPv6/domain replies and refuses negotiation errors.
+Only the explicit proxy endpoint is connected; no local name lookup or direct
+target retry is implemented. No-auth SOCKS does not provide per-tab Tor circuit
+isolation. The transport is not TLS and does not authenticate a proxy as Tor.
+Deadlines are per operation; an overall request deadline and batched event-loop
+registration remain work for the engine/network-service adapter.
+
+The feature-isolated wovenweb-net-test boots an independently compiled Ring-3
+probe. It checks network-authority denial, SOCKS remote name resolution, HTTP
+content read into native DOM parsing, undersized receive refusal, repeated
+cancellation, proxy refusal, timeout, and cleanup against pre-run counters.
+The host captures packets and checks for IPv4 UDP DNS. This does not establish
+IPv6/DNS-over-HTTPS leak resistance, real Tor connectivity or anonymity.
+
+## Serverless-first network choice
+
+The user has no VPN gateway. First target native Tor access without a VPN; the
+Tor network supplies relays and exits, so a personally hosted VPN server is not
+required. Port the Tor daemon on top of the same runtime/TLS work and restrict
+browser network service egress to it. A desktop Tor process may be used as an
+explicit development proxy only; do not market that as an in-OS Tor daemon.
+
+WovenHat's future own VPN should use an established audited protocol such as
+WireGuard and have a separate local test gateway. It still needs an independent
+endpoint for public egress. Another home computer can test the tunnel but cannot
+hide the home's public exit address. No endpoint, keys or operating VPN is
+fabricated. Tor Project warns that adding a VPN can reduce anonymity if configured
+incorrectly: https://support.torproject.org/tor-browser/general/vpn-with-tor/
+
+## Ordered acceptance to a working browser
+
+1. Accept native networking transport on 1/2/4 CPUs and preserve its evidence.
+2. Accept native memory/runtime and a cross-built C++ ABI fixture, then AK tests.
+3. Accept LibCore files, processes, IPC, timers and sockets; run helper processes
+   inside the guest with cancellation, OOM, owner death and stale-handle tests.
+4. Cross-build and test cryptographic/TLS/font/image dependencies, then LibJS and
+   headless LibWeb inside WovenHat. TLS must verify certificates and hostnames.
+5. Implement native LibWebView chrome and display real pages with links, forms,
+   tabs, scrolling and download policy. Add the executable to the signed catalog.
+6. Port native Tor, enforce broker-only egress, test onion/HTTPS/WS/download paths
+   and failure containment with packet captures. Add a VPN only with a real endpoint.
+7. Run web-platform, engine, sandbox, update and full OS acceptance before calling
+   the result a full browser or asserting privacy properties.
+
+Upstream references (source pinned by integrations/wovenweb/upstream.json):
+Documentation/Porting.md, Libraries/LibCore/{System,Process,Socket,AnonymousBuffer,
+EventLoopImplementation}.h, Libraries/LibWebView/{Application,ViewImplementation}.h,
+AK/Platform.h and vcpkg.json.

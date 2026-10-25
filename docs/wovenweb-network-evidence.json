@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-25",
+  "scope": "native SDK TCP/SOCKS5 platform fixture only",
+  "real_tor_verified": false,
+  "native_ladybird_verified": false,
+  "tls_verified": false,
+  "vpn_implemented": false,
+  "sdk_unit_tests": 166,
+  "repository_host_tests": 202,
+  "packet_evidence_unit_tests": 6,
+  "source_sha256": {
+    "libwoven/src/net.rs": "76f004f0e9544238ed9b32fa1fffb64256ca937566a94d9483a77d2f82be5566",
+    "libwoven/src/socks5.rs": "e3902025fe4d01470c6cfc98b28324345a77d88718a2575b2b7814b2e66c2345",
+    "kernel/src/wovenweb_net_gate.rs": "de32b3649d67f70729787f29f32570dbe20e04e2a3f161c94881410e7bf2c8fa",
+    "tools/wovenweb-net-probe/src/main.rs": "da7faf90d892f8266c8f5b73256c6cecb472fc346dd46593c008869e10eb3da4"
+  },
+  "qemu": [
+    {
+      "passed": true,
+      "cpus": 1,
+      "exit": 33,
+      "ipv4_dns_packets": 0,
+      "ipv4_tcp_packets": 55,
+      "evidence_directory": "audit-artifacts/wovenweb-network-1792928693193834900-1cpu",
+      "image_sha256": "0fe67a1544612c16db9c8a9dedf6f9910ad02c1d4ffe75fccc8db3a54b1f7327",
+      "capture_sha256": "c2992718bad42b00c89f3025f060e0e7b3cf9c1248f160fa89849ffedc350c98",
+      "serial_sha256": "8ee8d85664ceea65bf318762a55f752a5b61f13697f30385cd3c7b7fc969adae"
+    },
+    {
+      "passed": true,
+      "cpus": 2,
+      "exit": 33,
+      "ipv4_dns_packets": 0,
+      "ipv4_tcp_packets": 54,
+      "evidence_directory": "audit-artifacts/wovenweb-network-1792928736371289500-2cpu",
+      "image_sha256": "0fe67a1544612c16db9c8a9dedf6f9910ad02c1d4ffe75fccc8db3a54b1f7327",
+      "capture_sha256": "7e3e261b86002839dbca777405ee6d15d20b93d0faeaf80fa2e88a5128c0fe0e",
+      "serial_sha256": "a8714a11bb4342f8b9b40e9c80ea486ced1e5d2c08e2a6ae9459d0967ee6ed2f"
+    },
+    {
+      "passed": true,
+      "cpus": 4,
+      "exit": 33,
+      "ipv4_dns_packets": 0,
+      "ipv4_tcp_packets": 58,
+      "evidence_directory": "audit-artifacts/wovenweb-network-1792928754448891600-4cpu",
+      "image_sha256": "0fe67a1544612c16db9c8a9dedf6f9910ad02c1d4ffe75fccc8db3a54b1f7327",
+      "capture_sha256": "506794d2bf0e63a512719a1f07cf05934ac2061a42e8755c9d94769689999d71",
+      "serial_sha256": "32fd84e82c9dea2fae3e68307baae5e5f0ae8316006e173ebe5fc9c579eabcac"
+    }
+  ],
+  "socket_lifetime_and_thread_compile_fail_tests": 3,
+  "canonical_lf_source_sha256": {
+    "libwoven/src/net.rs": "d2dfde96e113ebf5981516bb7dd23c9ff4eeea8b6d8f206741d5ef89847a1a6d",
+    "libwoven/src/socks5.rs": "e3902025fe4d01470c6cfc98b28324345a77d88718a2575b2b7814b2e66c2345",
+    "kernel/src/wovenweb_net_gate.rs": "de32b3649d67f70729787f29f32570dbe20e04e2a3f161c94881410e7bf2c8fa",
+    "tools/wovenweb-net-probe/src/main.rs": "da7faf90d892f8266c8f5b73256c6cecb472fc346dd46593c008869e10eb3da4"
+  },
+  "source_checksum_note": "source_sha256 records raw Windows working files; canonical_lf_source_sha256 matches Git-normalized source content.",
+  "prior_stage_10_7_qemu_cpus": [
+    1,
+    2,
+    4
+  ],
+  "prior_stage_10_7_log_sha256": {
+    "1": "89559f6f718a09f8d935a387fcaa38d70cec4cb50cc05ad38f785404b1f91b14",
+    "2": "4d055f984f5977ce042cc5ff75d7b7ecc619db69e7f1e1a0e8cbaee9f3d26f40",
+    "4": "d671e4108bc15f20c97452175be8b2f9f4209905e99ce82b7ae596284f11b52f"
+  }
+}

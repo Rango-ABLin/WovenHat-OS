@@ -6222,3 +6222,22 @@ Host foundation validation: 11 Python launcher tests, pinned patch application,
 154 libwoven tests and libwoven warning-denying Clippy passed. Browser build is
 blocked by missing Visual Studio/toolchain context; WSL returned access denied.
 No native/guest/VPN acceptance is claimed. See docs/wovenweb-integration.md.
+
+## Codex - WovenWeb native networking platform (2026-10-25)
+
+User explicitly prioritized missing browser platforms. Branch wovenweb/native-runtime
+incorporates current master and the published foundation. Work covers owned SDK
+async TCP/SOCKS transport and an isolated native probe/QEMU gate. Production
+capability policy remains unchanged; native browser acceptance is separate.
+
+Native network platform results: 166 SDK tests + three compile-fail lifetime/thread gates,
+202 repository host tests, six capture tests and all selected Clippy gates pass.
+The real 1/2/4-CPU probe matrix passed with the same image, zero observed IPv4 UDP
+DNS and baseline socket/operation/port/process cleanup. Raw failed and successful
+attempts are retained. The route/limits are in docs/wovenweb-native-port.md and
+docs/wovenweb-network-acceptance.md. User has no VPN endpoint; Tor-first access
+is prioritized without fabricating VPN infrastructure. Full browser remains open.
+
+Final ownership review made Pending non-Send/non-Sync to preserve submitting-task
+completion ownership. The final 1/2/4-CPU matrix and the preserved Stage 10.7 TCP
+matrix pass. Published evidence now includes the final source/image/capture hashes.

@@ -230,10 +230,8 @@ pub mod fs {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Handle(pub u64);
 }
-pub mod net {
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub struct Socket(pub u64);
-}
+pub mod net;
+pub mod socks5;
 pub mod ipc {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Handle(pub u64);

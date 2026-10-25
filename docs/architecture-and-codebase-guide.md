@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenWeb native network SDK - 2026-10-25
+
+`libwoven::net` owns native async TCP sockets and borrowed pending operations,
+including completion-port deadlines and cancellation. `libwoven::socks5` adds
+bounded remote-name CONNECT without local DNS/direct fallback. The isolated
+`wovenweb-net-test` boots a separately compiled Ring-3 probe and checks native
+I/O/teardown on 1/2/4 CPUs; this is separate from Ladybird engine/UI integration.
+See [the platform route](wovenweb-native-port.md) and
+[acceptance evidence](wovenweb-network-acceptance.md).
+
 ## WovenWeb host integration - 2026-10-25
 
 `integrations/wovenweb` contains a pinned Ladybird source patch, preparation

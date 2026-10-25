@@ -77,3 +77,11 @@ external handlers. Add independent sandbox/fingerprinting review, supply-chain
 verification, signed updates and maintained tracker lists. Native OS acceptance
 requires the repository's full build/Clippy/host/QEMU gates on 1/2/4 CPUs.
 No such release or native guest acceptance is claimed by this foundation.
+
+## Native platform continuation
+
+The OS now has an owned async TCP/SOCKS5 SDK and a real native userspace probe,
+qualified against a controlled fixture on 1/2/4 CPUs. See
+../../docs/wovenweb-network-acceptance.md and ../../docs/wovenweb-native-port.md.
+This does not make the Ladybird host fork a native browser executable. The user
+has no VPN server; native Tor access is prioritized as the first network route.
