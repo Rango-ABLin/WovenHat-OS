@@ -7307,7 +7307,7 @@ fn install_production_system_apps() -> bool {
     }
     let share_created = if vfs::stat("/share").is_err() {
         if let Err(error) = vfs::mkdir("/share") {
-            serial::write_line(format_args!("[APPS] /share mkdir failed: {:?}", error));
+            serial::write_line(format_args!("[APPS] /share mkdir failed; code={}", error as u8));
             return false;
         }
         true
@@ -7316,7 +7316,7 @@ fn install_production_system_apps() -> bool {
     };
     let applications_created = if vfs::stat("/share/applications").is_err() {
         if let Err(error) = vfs::mkdir("/share/applications") {
-            serial::write_line(format_args!("[APPS] applications mkdir failed: {:?}", error));
+            serial::write_line(format_args!("[APPS] applications mkdir failed; code={}", error as u8));
             if share_created {
                 let _ = vfs::remove("/share");
             }
@@ -7332,7 +7332,7 @@ fn install_production_system_apps() -> bool {
     let mut installed = 0usize;
     for app in apps {
         if let Err(error) = vfs::create_read_only(app.binary_path, app.image) {
-            serial::write_line(format_args!("[APPS] binary {} failed: {:?} size={}", app.name, error, app.image.len()));
+            serial::write_line(format_args!("[APPS] binary {} failed; code={} size={}", app.name, error as u8, app.image.len()));
             for rollback in apps.into_iter().take(installed) {
                 let _ = vfs::remove(rollback.binary_path);
             }
@@ -7349,7 +7349,7 @@ fn install_production_system_apps() -> bool {
     let mut catalogs = 0usize;
     for app in apps {
         if let Err(error) = vfs::create_read_only(app.catalog_path, app.catalog) {
-            serial::write_line(format_args!("[APPS] catalog {} failed: {:?}", app.name, error));
+            serial::write_line(format_args!("[APPS] catalog {} failed; code={}", app.name, error as u8));
             for rollback in apps {
                 if catalogs > 0 {
                     let _ = vfs::remove(rollback.catalog_path);
