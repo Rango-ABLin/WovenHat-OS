@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics roadmap Stage 03 buffered presentation - 2026-10-25
+
+`docs/graphics/stage-03-presentation-damage-evidence.md` records the green
+damage/ownership sub-gates. Real QEMU hello-gui damage acceptance passed at
+1/2/4 CPUs. Dedicated frame pacing, repeated buffer reuse, and flicker/stress
+evidence remain open, so Stage 03 is partial.
+
 ## Graphics roadmap Stage 01 architecture contracts - 2026-10-25
 
 Accepted the current-boundary architecture contract in

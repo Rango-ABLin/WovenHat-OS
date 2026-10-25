@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 03 presentation evidence (2026-10-25)
+
+Real QEMU hello-gui damage acceptance passed at 1/2/4 CPUs, covering bounded
+damage, ownership refusal, sleep-on-damage, damage-only copy,
+undeclared-region protection, clean exits, and lease release. Stage 03 remains
+partial pending dedicated frame-pacing/flicker/stress evidence.
+
 ## Codex - graphics roadmap Stage 01 architecture contracts (2026-10-25)
 
 Added `docs/graphics/stage-01-architecture-contracts.md`, mapping the roadmap
