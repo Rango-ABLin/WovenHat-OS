@@ -74,13 +74,61 @@ impl Console {
     /// diagnostic boot transcript on the normal desktop path.
     #[cfg(feature = "system-apps")]
     pub fn show_splash(&mut self) {
+        self.show_splash_frame(0);
+    }
+
+    /// Paint a branded boot frame. The spinner is deliberately composed from
+    /// integer primitives so the loader works before the compositor exists.
+    #[cfg(feature = "system-apps")]
+    pub fn show_splash_frame(&mut self, frame: usize) {
         let quiet = self.quiet;
         self.quiet = false;
         self.clear();
+
+        let centre_x = self.info.width / 2;
+        let centre_y = self.info.height / 2;
+        let ring = [
+            (0isize, -34isize),
+            (17, -29),
+            (29, -17),
+            (34, 0),
+            (29, 17),
+            (17, 29),
+            (0, 34),
+            (-17, 29),
+            (-29, 17),
+            (-34, 0),
+            (-29, -17),
+            (-17, -29),
+        ];
+        for (index, (dx, dy)) in ring.iter().copied().enumerate() {
+            let distance = (index + frame) % ring.len();
+            let (red, green, blue) = match distance {
+                0 => (255, 205, 96),
+                1 | 2 => (105, 232, 225),
+                3 | 4 => (55, 164, 178),
+                _ => (25, 74, 103),
+            };
+            let x = centre_x.saturating_add_signed(dx).saturating_sub(3);
+            let y = centre_y.saturating_add_signed(dy).saturating_sub(3);
+            terminal::with_framebuffer(|buffer, info| {
+                fill_color(buffer, info, x, y, 7, 7, red, green, blue);
+            });
+        }
+
+        // A small woven-hat mark above the wordmark: crown, band and brim.
+        let mark_y = centre_y.saturating_sub(88);
+        terminal::with_framebuffer(|buffer, info| {
+            fill_color(buffer, info, centre_x.saturating_sub(24), mark_y, 48, 4, 38, 128, 149);
+            fill_color(buffer, info, centre_x.saturating_sub(17), mark_y.saturating_sub(12), 34, 13, 76, 190, 188);
+            fill_color(buffer, info, centre_x.saturating_sub(10), mark_y.saturating_sub(19), 20, 8, 255, 205, 96);
+            fill_color(buffer, info, centre_x.saturating_sub(30), mark_y + 5, 60, 5, 255, 205, 96);
+        });
+
         let title = "WOVENHAT";
         let title_width = title.chars().count() * 6 * self.scale;
         let x = self.info.width.saturating_sub(title_width) / 2;
-        let y = self.info.height.saturating_sub(9 * self.scale) / 2;
+        let y = centre_y.saturating_add(48);
         self.set_cursor_position(x, y);
         self.print(title);
         self.newline();
@@ -256,6 +304,26 @@ pub(crate) fn fill(
     for row in y..y.saturating_add(height) {
         for column in x..x.saturating_add(width) {
             pixel(buffer, info, column, row, BG_R, BG_G, BG_B);
+        }
+    }
+}
+
+#[cfg(feature = "system-apps")]
+#[allow(clippy::too_many_arguments)]
+fn fill_color(
+    buffer: &mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    red: u8,
+    green: u8,
+    blue: u8,
+) {
+    for row in y..y.saturating_add(height) {
+        for column in x..x.saturating_add(width) {
+            pixel(buffer, info, column, row, red, green, blue);
         }
     }
 }

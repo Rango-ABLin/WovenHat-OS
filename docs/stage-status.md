@@ -10350,3 +10350,11 @@ QEMU evidence reached the desktop and confirmed F1 opens the WovenShell
 launcher; screenshots are `target/updated-desktop.png` and
 `target/f1-launcher.png` (generated, ignored artifacts). This is a
 visual/QEMU pass, not native hardware or production-release qualification.
+
+## Branded circular boot loader (2026-10-25)
+
+Refined the production splash with a woven-hat emblem, decorated WOVENHAT
+wordmark, and an integer-rendered segmented circular spinner. The spinner
+advances at each boot-loader milestone while verbose diagnostics remain on
+serial. Plain and `system-apps` warning-denying kernel Clippy passed; this is
+still a QEMU/UI qualification change, not native graphics certification.
