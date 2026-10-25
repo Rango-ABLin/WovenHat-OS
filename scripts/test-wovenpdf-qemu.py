@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 APP = 'wovenhat-pdf'
-MARKER = '[S16.1] out-of-kernel application: PASSED'
+MARKER = '[S16.1] out-of-kernel application: PASSED'\n# This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
 
 def app_build_env(app_dir):
     """Build environment for an application crate.
@@ -135,8 +135,8 @@ def main():
         print(f'FAILED (exit {code}). Evidence: {out}', file=sys.stderr)
         print(text[-3000:], file=sys.stderr)
         return 1
-    print(f'WovenPDF generic Ring-3 gate: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
-    print('WARNING: This does not validate --gui, WovenShell IPC, PDF drawing or page navigation.')
+    print(f'Generic Ring-3 kernel stage: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
+    print('WARNING: This stage may execute its built-in hello fixture instead of WovenPDF.')\n    print('No WovenPDF execution, --gui, WovenShell IPC, PDF drawing or navigation is certified.')
     return 0
 
 
