@@ -9,6 +9,7 @@ pub mod lexer;
 pub mod layout;
 pub mod objects;
 pub mod pages;
+pub mod paint;
 pub mod streams;
 pub mod xref;
 
