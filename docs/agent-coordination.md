@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - launcher and desktop visual polish (2026-10-25)
+
+Added a code-native icon system for WovenStart rows and the production
+WovenFiles, WovenTerminal, and WovenStore desktop shortcuts. The launcher now
+uses readable foreground rendering with crisp icon tiles, while the desktop
+wallpaper/taskbar retain the 3D presentation. Launcher damage now recomposes
+the full screen on close, preventing stale projected card corners or glyphs.
+The Stage 20.3 launcher acceptance passed through catalog filtering, keyboard
+and pointer launch, missing-app handling, reaping, and F1 close on 1 CPU.
+WovenShell warning-denying Clippy passed. Stage 20.1 still has a small
+branded-wallpaper projection-oracle mismatch at its center sample and is not
+claimed closed by this visual pass.
+
 ## Codex - CI blocker repair (2026-10-25)
 
 Repaired the three blockers reproduced from the red CI audit. The Stage 13.12

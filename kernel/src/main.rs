@@ -14211,14 +14211,13 @@ fn stage20_3_self_test() -> bool {
             let expected_px = sample(4 + x, y + py);
             actual == Ok(expected_px)
         };
-        let passed = until(500, || {
+        until(500, || {
             (14..h).all(|py| (40..140).all(|x| matches(compositor::pixel(4 + x, y + py), x, py)))
                 && (h / 2..h).all(|py| {
                     matches(compositor::pixel(4, y + py), 0, py)
                         && matches(compositor::pixel(4 + 159, y + py), 159, py)
                 })
-        });
-        passed
+        })
     };
     let closed = || {
         let h = panel_height(3);
@@ -15490,18 +15489,6 @@ fn stage20_1_self_test() -> bool {
         })
         && region(width - 40, top - 40, 40, 40, |x, y| expected_wallpaper(x, y, width, height));
     if !step("wallpaper matches its formula", wall) {
-        'wall_debug: for (x0, y0, label) in [(0, 0, "corner"), (width / 2 - 20, height / 2 - 20, "center"), (width - 40, top - 40, "lower-right")] {
-            for y in y0..y0 + 40 {
-                for x in x0..x0 + 40 {
-                    let actual = compositor::pixel(x, y);
-                    let expected = expected_wallpaper(x, y, width, height);
-                    if actual != Ok(expected) {
-                        serial::write_line(format_args!("[S20.1] wallpaper debug {} {:?} {:?} at {},{}", label, actual, expected, x, y));
-                        break 'wall_debug;
-                    }
-                }
-            }
-        }
         return false;
     }
     // The Quick Settings button (Stage 20.10) sits left of the tray's four

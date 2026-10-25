@@ -1,5 +1,16 @@
 # Stage status
 
+## Launcher and desktop visual polish - 2026-10-25
+
+Added readable code-native app icons to the launcher and desktop shortcuts for
+Files, Terminal, and Store, including the `Woven*` production catalog names.
+The launcher remains a crisp foreground surface while the desktop retains its
+3D wallpaper/taskbar presentation. Full-screen recomposition on launcher close
+prevents stale projected edges. Stage 20.3 launcher QEMU acceptance passed on
+1 CPU and WovenShell warning-denying Clippy passed. Stage 20.1's branded
+wallpaper oracle still needs a small projection-rounding repair and remains
+open; no production graphics gate is claimed fully green from this change.
+
 ## CI blocker repair - 2026-10-25
 
 Closed the locally reproduced red CI defects: Stage 13.12 now has a complete
