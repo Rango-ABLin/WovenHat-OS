@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics Stage 20.8/20.13 flat-renderer oracle repairs - 2026-10-25
+
+Updated the tiling/resize and workspace acceptance oracles to the current
+flat WovenShell renderer: branded wallpaper gradient/weave and taskbar token.
+Stage 20.8 and Stage 20.13 each passed on 1/2/4 CPUs with QEMU exit 33,
+covering edge snap, resize, master/stack tiling, workspace switching, focus,
+hidden-window teardown, and display recovery. These close additional Stage 10
+dependency slices; the full roadmap Stage 10 acceptance remains broader than
+these component gates.
+
 ## Graphics Stage 20.4 interaction oracle repair - 2026-10-25
 
 Repaired the current-head window interaction oracle to match WovenShell's

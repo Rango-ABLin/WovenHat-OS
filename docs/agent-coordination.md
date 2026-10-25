@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.8/20.13 flat-renderer oracle repairs (2026-10-25)
+
+Aligned the tiling/resize and workspace fixtures with WovenShell's current
+flat wallpaper and taskbar tokens. Stage 20.8 and Stage 20.13 passed on 1/2/4
+CPUs with exit 33. The evidence covers edge snapping, resize handshakes,
+master/stack tiling, workspace switching, focus, hidden-window teardown, and
+display recovery. These are dependency slices, not a claim that every Stage
+10 accessibility and clipboard requirement is complete.
+
 ## Codex - Stage 20.4 flat-renderer interaction oracle repair (2026-10-25)
 
 The current-head Stage 20.4 drag gate was red because its independent oracle
