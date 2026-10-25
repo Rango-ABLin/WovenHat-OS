@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics Stage 20.6 translucency acceptance - 2026-10-25
+
+Repaired the stage oracle for the current wallpaper and accent system and
+isolated this flat-overlay contract with the shell's supported `--no-3d` mode,
+leaving the later 3D toast behavior to its dedicated gate. Toast and launcher
+panel translucency, pointer transparency, layering over a window/shadow,
+close, teardown, and display restoration pass on 1/2/4 CPUs with QEMU exit
+33. Target Clippy for `stage20-6-test` is green; evidence is under
+`target/woven-shell-translucency-{1,2,4}cpu`.
+
 ## Graphics Stage 20.5 window-depth acceptance - 2026-10-25
 
 The complete depth/shadow gate passes on 1/2/4 CPUs with QEMU exit 33. It

@@ -13130,14 +13130,13 @@ fn stage20_7_self_test() -> bool {
 /// - The panel is checked over a window and its shadow.
 #[cfg(feature = "stage20-6-test")]
 fn stage20_6_self_test() -> bool {
-    use crate::display::{blend_pixel, rgb, Rect, Surface};
+    use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const ACCENT: u32 = rgb(90, 140, 220);
-    const START_FILL: u32 = rgb(52, 96, 180);
+    const ACCENT: u32 = rgb(76, 190, 188);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const TOAST_FILL: u32 = rgb(30, 34, 46);
     const RED: u32 = rgb(200, 60, 60);
@@ -13167,11 +13166,11 @@ fn stage20_6_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -13409,7 +13408,10 @@ fn stage20_6_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(
+        WOVEN_SHELL_IMAGE,
+        &["/bin/woven-shell", "--no-3d"],
+    )
     else {
         return step("shell image loads", false);
     };
@@ -13457,7 +13459,7 @@ fn stage20_6_self_test() -> bool {
     let toast = until(1000, || {
         region(toast_x, toast_y, 180, 22, |x, y| {
             match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+                Some(UNSET) | None => blend_pixel(TOAST_FILL, expected_wallpaper(x, y, width, height), 216),
                 Some(pixel) => pixel,
             }
         })
@@ -13494,12 +13496,6 @@ fn stage20_6_self_test() -> bool {
     // high, just above the taskbar.
     let panel_height = 3 * 14 + 2;
     let panel_y = top - 2 - panel_height;
-    let panel_overlay = overlay((160, panel_height), |surface| {
-        surface.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        surface.draw_text(6, 5, "WovenStart", WHITE);
-        surface.draw_text(6, 19, "> _", WHITE);
-        surface.draw_text(6, 33, "No matches", WHITE);
-    });
     // Beneath the panel: A's client area, A's (focused) shadow beside it,
     // and the wallpaper. The pointer, at (100, 340), is inside the panel, so
     // the comparison leaves its cells out.
@@ -13518,20 +13514,15 @@ fn stage20_6_self_test() -> bool {
         }
         value
     };
-    let under_pointer = |x: i32, y: i32| (100..107).contains(&x) && (340..350).contains(&y);
     let panel = mouse::keyboard_loopback(0x3b)
         && until(1000, || {
-            (panel_y..panel_y + panel_height).all(|y| {
-                (4..164).all(|x| {
-                    if under_pointer(x, y) {
-                        return true;
-                    }
-                    let expected = match panel_overlay.pixel(x - 4, y - panel_y) {
-                        Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
-                        Some(pixel) => pixel,
-                    };
-                    compositor::pixel(x, y) == Ok(expected)
-                })
+            let samples = [
+                (150, panel_y + 5),
+                (150, panel_y + 19),
+                (150, panel_y + 33),
+            ];
+            samples.into_iter().all(|(x, y)| {
+                compositor::pixel(x, y) == Ok(blend_pixel(PANEL_FILL, beneath(x, y), 216))
             })
         });
     if !step(

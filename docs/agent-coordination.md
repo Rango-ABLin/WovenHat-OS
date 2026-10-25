@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.6 translucency acceptance (2026-10-25)
+
+Stage 20.6 was using the retired wallpaper/accent oracle and the shell's later
+3D-default toast path, whose separate projection defect is tracked by the 3D
+gate. The gate now explicitly launches the supported flat mode and checks the
+current palette, toast/panel translucency over wallpaper, window, and shadow,
+pointer layering, close, teardown, and display restoration. It passes on
+1/2/4 CPUs with target Clippy green; evidence is under
+`target/woven-shell-translucency-{1,2,4}cpu`.
+
 ## Codex - Stage 20.5 window-depth acceptance (2026-10-25)
 
 The complete window-depth gate passes on 1/2/4 CPUs, including focused-shadow

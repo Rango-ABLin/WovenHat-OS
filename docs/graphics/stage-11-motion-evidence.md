@@ -26,6 +26,7 @@ the next holder's default scale.
 | Stage 20.10 Quick Settings accessibility/motion path | PASS | PASS | PASS |
 | Stage 20.9 notification center | PASS | PASS | PASS |
 | Stage 20.5 window depth and shadows | PASS | PASS | PASS |
+| Stage 20.6 flat translucent overlays | PASS | PASS | PASS |
 
 | Stage 20.11 lock screen and PIN isolation | PASS | PASS | PASS |
 | Stage 20.12 sign-in and identity-bound lock/unlock | PASS | PASS | PASS |
