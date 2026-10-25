@@ -6624,3 +6624,11 @@ height against the bounded viewport. The 189-test libwoven suite and
 freestanding target warning-denying Clippy pass; media queries and full
 responsive semantics remain open.
 
+# Graphics bounded media-query increment - 2026-10-25
+
+Codex added viewport-aware `@media (min-width: Npx)` and
+`@media (max-width: Npx)` stylesheet selection with bounded nesting and
+fail-closed malformed input handling. The 190-test libwoven suite and
+freestanding target warning-denying Clippy pass. Broader media features and
+responsive semantics remain open.
+

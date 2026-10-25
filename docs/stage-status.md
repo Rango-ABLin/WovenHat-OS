@@ -1,5 +1,13 @@
 # Stage status
 
+## Graphics bounded media-query increment - 2026-10-25
+
+`StyleSheet::parse_for_viewport` now evaluates bounded `@media
+(min-width: Npx)` and `@media (max-width: Npx)` blocks, skips inactive rules,
+and rejects malformed or over-nested input. The full 190-test libwoven suite
+and warning-denying freestanding target Clippy pass. Broader media features and
+responsive semantics remain open.
+
 ## Graphics bounded responsive-length increment - 2026-10-25
 
 Browser inline and stylesheet `width`/`height` now accept checked percentage
