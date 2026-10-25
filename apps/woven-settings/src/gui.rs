@@ -30,10 +30,7 @@ impl ThemeMode {
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 190;
 const BUTTON_WIDTH: usize = 90;
@@ -74,11 +71,12 @@ fn draw_number(
     label: &str,
     value: u64,
     digits: &mut [u8; 20],
+    theme: Theme,
 ) {
-    canvas.draw_text(x, y, label, TEXT);
+    canvas.draw_text(x, y, label, theme.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, ACCENT);
+        canvas.draw_text(x + label.len() as i32 * 6, y, text, theme.accent);
     }
 }
 
@@ -88,11 +86,36 @@ fn draw_clock(
     y: i32,
     time: libwoven::DateTime,
     digits: &mut [u8; 20],
+    theme: Theme,
 ) {
-    draw_number(canvas, x, y, "Year ", u64::from(time.year), digits);
-    draw_number(canvas, x + 100, y, "Month ", u64::from(time.month), digits);
-    draw_number(canvas, x + 210, y, "Day ", u64::from(time.day), digits);
-    draw_number(canvas, x, y + 16, "Hour ", u64::from(time.hour), digits);
+    draw_number(canvas, x, y, "Year ", u64::from(time.year), digits, theme);
+    draw_number(
+        canvas,
+        x + 100,
+        y,
+        "Month ",
+        u64::from(time.month),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x + 210,
+        y,
+        "Day ",
+        u64::from(time.day),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x,
+        y + 16,
+        "Hour ",
+        u64::from(time.hour),
+        digits,
+        theme,
+    );
     draw_number(
         canvas,
         x + 100,
@@ -100,6 +123,7 @@ fn draw_clock(
         "Min ",
         u64::from(time.minute),
         digits,
+        theme,
     );
     draw_number(
         canvas,
@@ -108,6 +132,7 @@ fn draw_clock(
         "Sec ",
         u64::from(time.second),
         digits,
+        theme,
     );
 }
 
@@ -147,6 +172,7 @@ fn draw_settings(
         "UID ",
         unsafe { libwoven::syscall::getuid() },
         &mut digits,
+        shared,
     );
     // SAFETY: argument-free identity queries.
     draw_number(
@@ -156,10 +182,18 @@ fn draw_settings(
         "GID ",
         unsafe { libwoven::syscall::getgid() },
         &mut digits,
+        shared,
     );
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
-        draw_clock(canvas, PANEL_X + 10, PANEL_Y + 96, time, &mut digits);
+        draw_clock(
+            canvas,
+            PANEL_X + 10,
+            PANEL_Y + 96,
+            time,
+            &mut digits,
+            shared,
+        );
     } else {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
     }
@@ -172,6 +206,7 @@ fn draw_settings(
             "W ",
             u64::from(info.width),
             &mut digits,
+            shared,
         );
         draw_number(
             canvas,
@@ -180,6 +215,7 @@ fn draw_settings(
             "H ",
             u64::from(info.height),
             &mut digits,
+            shared,
         );
         draw_number(
             canvas,
@@ -188,6 +224,7 @@ fn draw_settings(
             "Scale ",
             u64::from(info.scale),
             &mut digits,
+            shared,
         );
     } else {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
@@ -200,6 +237,7 @@ fn draw_settings(
         "Refreshes ",
         u64::from(refresh_count),
         &mut refresh_digits,
+        shared,
     );
     let mut refresh = Button::new(
         Frame::new(
@@ -211,16 +249,7 @@ fn draw_settings(
         "Refresh",
     );
     refresh.pressed = pressed;
-    refresh.draw(
-        canvas,
-        Theme {
-            surface: BUTTON,
-            accent: ACCENT,
-            text: TEXT,
-            disabled: BUTTON,
-            focus: ACCENT,
-        },
-    );
+    refresh.draw(canvas, shared);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
