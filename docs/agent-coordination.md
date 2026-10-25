@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.5 window-depth acceptance (2026-10-25)
+
+The complete window-depth gate passes on 1/2/4 CPUs, including focused-shadow
+ordering, raise/lower behavior, taskbar clipping, application teardown, and
+display restoration. Target Clippy is green; evidence is under
+`target/woven-shell-depth-{1,2,4}cpu`.
+
 ## Codex - Stage 20.9 notification-center oracle repair (2026-10-25)
 
 Stage 20.9 initially modeled the retired purple wallpaper, old accent, and

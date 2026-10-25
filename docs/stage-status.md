@@ -1,5 +1,13 @@
 # Stage status
 
+## Graphics Stage 20.5 window-depth acceptance - 2026-10-25
+
+The complete depth/shadow gate passes on 1/2/4 CPUs with QEMU exit 33. It
+verifies focused-window shadow ordering, shadow contrast, taskbar clipping,
+raise/lower behavior, application teardown, and display restoration. Evidence
+is retained under `target/woven-shell-depth-{1,2,4}cpu`; warning-denying
+freestanding kernel Clippy for `stage20-5-test` passes.
+
 ## Graphics Stage 20.9 notification-center acceptance - 2026-10-25
 
 Repaired the notification-center oracle to match the production wallpaper,
