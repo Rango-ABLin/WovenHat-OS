@@ -1,5 +1,12 @@
 # Stage status
 
+## WovenMonitor shared-control migration - 2026-10-25
+
+WovenMonitor now uses shared bounded Label and Button rendering, and its
+Refresh action uses the Button release-inside contract. Target Clippy, target
+build, formatting, and diff checks passed. No QEMU client acceptance is
+claimed for this increment.
+
 ## WovenUpdate shared-control migration - 2026-10-25
 
 WovenUpdate now uses shared bounded Label and Button rendering, and its

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenMonitor shared-control migration (2026-10-25)
+
+Migrated WovenMonitor's title, section heading, and Refresh control to shared
+bounded WovenUI Label and Button primitives. Target warning-denying Clippy,
+target build, formatting, and diff checks passed. No QEMU client acceptance
+was run for this increment; the earlier desktop qualification remains a
+separate failed sign-in evidence record.
+
 ## Codex - WovenUpdate shared-control migration (2026-10-25)
 
 Migrated WovenUpdate's title, section heading, and Refresh control to the
