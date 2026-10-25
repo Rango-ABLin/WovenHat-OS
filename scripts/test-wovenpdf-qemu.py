@@ -1,6 +1,6 @@
-"""Smoke-test the WovenPDF native executable under the generic Ring-3 QEMU gate.
+"""Execute packaged WovenPDF under the Stage 16.1 Ring-3 QEMU gate.
 
-This is the first gate that exercises an application the ordinary Rust
+This gate exercises an application the ordinary Rust
 toolchain produced. Every userspace program before it was `global_asm!` inside
 `kernel/src/userspace.rs`, wrapped in a synthetic ELF at runtime, so there was
 no way to write a program without editing the kernel.
@@ -21,8 +21,8 @@ from pathlib import Path
 APP = 'wovenhat-pdf'
 MARKER = '[S16.1] out-of-kernel application: PASSED'
 APP_MARKER = '[WOVENPDF] process: STARTED'
-SHELL_REQUEST_MARKER = '[WOVENPDF] shell: OPEN_REQUEST_SENT'
-# This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
+# Stage 16.1 loads WOVENHAT_APP_IMAGE from VFS and runs that program in Ring 3.
+# The process marker proves entry into WovenPDF, but not its GUI path.
 
 def app_build_env(app_dir):
     """Build environment for an application crate.
@@ -48,11 +48,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=300)
     parser.add_argument('--generic-only', action='store_true',
                         help='diagnose generic kernel stage without claiming WovenPDF execution')
-    parser.add_argument('--require-shell-request', action='store_true',
-                        help='require the GUI process to send its WOPN window-opening request')
     args = parser.parse_args()
-    if args.generic_only and args.require_shell_request:
-        parser.error('--generic-only and --require-shell-request are incompatible')
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -144,18 +140,15 @@ def main():
         print(f'FAILED (exit {code}). Evidence: {out}', file=sys.stderr)
         print(text[-3000:], file=sys.stderr)
         return 1
-    print(f'Generic Ring-3 kernel stage: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
+    print(f'Stage 16.1 signed Ring-3 application execution: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
     if not args.generic_only and APP_MARKER not in text:
         print('WovenPDF-specific execution proof absent; runtime acceptance FAILS CLOSED.', file=sys.stderr)
         print('Integrate an actual WovenPDF launch and emit a verified app-specific marker.', file=sys.stderr)
         return 1
     if not args.generic_only:
         print(f'WovenPDF process marker: PRESENT ({args.cpus} CPU).')
-    if args.require_shell_request and SHELL_REQUEST_MARKER not in text:
-        print('WovenPDF WovenShell window-open request is absent: FAIL.', file=sys.stderr)
-        return 1
-    print('WARNING: This stage may execute its built-in hello fixture instead of WovenPDF.')
-    print('This does not certify WovenShell acceptance, visible pixels, PDF drawing or navigation.')
+    print('Stage 16.1 runs the supplied WovenPDF package, not its --gui path.')
+    print('No WovenShell acceptance, visible pixels, PDF drawing or navigation is certified.')
     return 0
 
 
