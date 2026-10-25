@@ -70,6 +70,9 @@ launch modes (`--light` and `--high-contrast`), with dark remaining the
 default. The target release build and warning-denying target Clippy pass for
 the updated application.
 
+The signed WovenSettings QEMU gate remains green at 1/2/4 CPUs; evidence is
+retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
+
 ## Boundary
 
 This accepts the motion/pacing, Quick Settings accessibility, and desktop

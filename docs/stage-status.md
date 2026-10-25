@@ -9,6 +9,9 @@ is an application-level theme increment only: the shell still uses its
 accepted production palette, and no compositor-wide persisted accessibility
 settings service is claimed.
 
+The existing signed WovenSettings QEMU gate also passes at 1/2/4 CPUs; evidence
+is retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
+
 ## Graphics Stage 24.59 low-memory Change-PIN acceptance - 2026-10-25
 
 The 256 MiB system-apps fixture initially failed in the bootloader because
