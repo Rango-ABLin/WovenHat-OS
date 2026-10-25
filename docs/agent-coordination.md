@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 24.59 low-memory task-stack repair (2026-10-25)
+
+The current 256 MiB system-apps fixture panicked in the bootloader before
+kernel execution because the generic system-apps profile reserved 128 MiB of
+1 MiB task stacks alongside the 256 KiB VFS nodes. A feature-local 256 KiB
+`stage24-59-test` profile restores mapping headroom without changing
+production system-apps sizing. The full Change-PIN flow passes on 1/2/4 CPUs;
+target Clippy is green and the prior bootloader failure log remains preserved.
+
 ## Codex - Stage 20.15 session oracle repair and acceptance (2026-10-25)
 
 The session gate initially failed on stale launcher text coordinates and a

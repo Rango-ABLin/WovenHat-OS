@@ -26,9 +26,13 @@ pub const MAX_FILE_DESCRIPTORS: usize = 64;
 // The package authority also carries two bounded WovenStore snapshots while
 // crossing the native WovenFS boundary, so service-enabled builds reserve the
 // larger stack explicitly rather than allowing a transaction to overrun the
-// canary-protected 64-KiB baseline.
-pub const TASK_STACK_SIZE: usize = if cfg!(any(feature = "stage22-5-test", feature = "system-apps"))
-{
+// canary-protected 64-KiB baseline. The 256 MiB Stage 24.59 regression fixture
+// is intentionally tighter: its bounded system-app image set must boot without
+// spending 128 MiB on idle task stacks, while 256 KiB still leaves four times
+// the ordinary stack budget for the Change-PIN path.
+pub const TASK_STACK_SIZE: usize = if cfg!(feature = "stage24-59-test") {
+    4096 * 64
+} else if cfg!(any(feature = "stage22-5-test", feature = "system-apps")) {
     4096 * 256
 } else {
     4096 * 64

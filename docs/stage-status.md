@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics Stage 24.59 low-memory Change-PIN acceptance - 2026-10-25
+
+The 256 MiB system-apps fixture initially failed in the bootloader because
+128 service-sized 1 MiB task stacks plus the bounded VFS/catalog footprint
+left no mapping headroom. Stage 24.59 now uses an explicit 256 KiB task-stack
+profile (four times the ordinary stack) while production system-apps sizing
+remains unchanged. The complete Change-PIN flow passes on 1/2/4 CPUs with
+QEMU exit 33 and target Clippy green; evidence is under
+`target/woven-shell-change-pin-{1,2,4}cpu`.
+
 ## Graphics Stage 20.15 session acceptance - 2026-10-25
 
 Repaired the session oracle to account for the launcher’s app-icon text

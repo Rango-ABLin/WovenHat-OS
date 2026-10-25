@@ -2121,6 +2121,9 @@ remain explicit prerequisites for a release claim.
 The service-enabled kernel task stack is 256 KiB. This is an explicit resource
 budget for the bounded WovenStore/WovenFS transaction call chain and is
 validated by the stack canary on the focused 1/2/4-CPU acceptance gate.
+The 256 MiB Stage 24.59 regression profile selects the same 256 KiB bound
+explicitly, rather than inheriting the larger production `system-apps` stack
+profile, so its bounded low-memory fixture retains boot-mapping headroom.
 
 ## Stage 23.1 controlled WovenAI broker boundary (2026-10-20)
 
