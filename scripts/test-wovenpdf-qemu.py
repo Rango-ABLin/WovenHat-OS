@@ -5,7 +5,7 @@ toolchain produced. Every userspace program before it was `global_asm!` inside
 `kernel/src/userspace.rs`, wrapped in a synthetic ELF at runtime, so there was
 no way to write a program without editing the kernel.
 
-The application is a separate crate with its own linker script and link flags,
+The CLI-only 'ring3-smoke' build excludes large GUI statics to fit Stage 16.1.\nThe graphical executable remains separately validated and must pass its own load gate.\nThe application is a separate crate with its own linker script and link flags,
 excluded from the kernel workspace. Its path is handed to the kernel build
 through WOVENHAT_APP_IMAGE, the kernel installs it into the filesystem, reads
 it back, and loads those filesystem bytes through the same ELF loader that
@@ -99,7 +99,7 @@ def main():
         return 1
     boot_image = boot.stdout.strip()
 
-    out = root / 'target' / f'wovenpdf-ring3-{args.cpus}cpu'
+    out = root / 'audit-artifacts' / f'wovenpdf-ring3-{args.cpus}cpu'
     out.mkdir(parents=True, exist_ok=True)
     serial = out / 'serial.log'
     serial.write_text('')
