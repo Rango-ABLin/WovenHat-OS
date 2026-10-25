@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded image codec metadata boundary (2026-10-25)
+
+Added `libwoven::media` with bounded header validation and dimension metadata
+parsing for PNG, GIF, BMP, and JPEG. Oversized/invalid dimensions and unknown
+formats fail closed before any pixel allocation or rasterization. The full
+libwoven host suite passed 145 tests, Settings target warning-denying Clippy
+passed, and formatting/diff checks passed. Full format decoders, codec
+security fuzzing, and streaming media remain separate work.
+
 ## Codex - bounded HTTP(S) WebView network boundary (2026-10-25)
 
 Added `libwoven::web` with allocation-free HTTP(S) endpoint parsing,

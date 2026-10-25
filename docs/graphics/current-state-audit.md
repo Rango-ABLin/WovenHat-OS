@@ -54,7 +54,7 @@ stale palette/start-mode fixtures were repaired.
 | 3D presentation | PARTIAL | WovenShell has a bounded depth-tested textured path; Stage 20.17/20.18 pass on 1/2/4 CPUs, but this is not GPU acceleration or a general 3D API. |
 | Typography/font engine | PARTIAL | Built-in font/text paths exist, but full TrueType/OpenType shaping, fallback, bidi, and complex-script coverage are not verified. |
 | Icon/vector assets | PARTIAL | Code-native original icons are present in WovenShell; a complete reusable scalable asset library is not established. |
-| PNG/JPEG/image assets | PARTIAL | Image-related application and asset paths exist; complete hardened PNG/JPEG service coverage is not verified by this audit. |
+| PNG/JPEG/image assets | PARTIAL | `libwoven::media` now validates bounded PNG/GIF/BMP/JPEG headers and dimensions before rasterization; complete hardened decoders, codec fuzzing, and image service coverage are not verified by this audit. |
 | Window surfaces | PARTIAL | Kernel client-surface registry and shell windows exist; the complete isolated production surface protocol is not closed. |
 | Compositor | PARTIAL | Bounded kernel compositor supports client blits, damage, ownership, and VirtIO outputs; a dedicated userspace compositor boundary is not complete. |
 | Window management | PARTIAL | Shell supports application windows, focus, close, resize-related behavior, and launcher interactions; full snapping/workspaces/modal policy is not complete. |
@@ -80,7 +80,7 @@ stale palette/start-mode fixtures were repaired.
   and independent-review boundaries.
 - Stage 20.1 now passes on 1/2/4 CPUs with the strict flat software-renderer
   contract and current branded palette.
-- The WovenUI increments pass 139 libwoven host tests and Settings
+- The WovenUI/media increments pass 145 libwoven host tests and Settings
   warning-denying Clippy; it is an SDK foundation, not full UI completion.
 - WovenUpdate passes target build/Clippy/format checks; its app-specific QEMU
   run and the 5 GiB desktop gate both failed before sign-in in this run, so no
