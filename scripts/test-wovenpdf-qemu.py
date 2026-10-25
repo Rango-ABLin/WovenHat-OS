@@ -50,6 +50,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=300)
     parser.add_argument('--generic-only', action='store_true',
                         help='diagnose generic kernel stage without claiming WovenPDF execution')
+    parser.add_argument('--full-gui-image', action='store_true',\n                        help='load full GUI ELF without opening a window (tests large static mappings)')
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -63,8 +64,10 @@ def main():
     # A separate cargo invocation on purpose: this crate has its own workspace
     # root, target directory, linker script and code model, none of which the
     # kernel build shares.
-    build = subprocess.run(['cargo', 'build', '--release', '--features', 'ring3-smoke'],
-                           cwd=app_dir, env=app_build_env(app_dir))
+    build_command = ['cargo', 'build', '--release']
+    if not args.full_gui_image:
+        build_command.extend(['--features', 'ring3-smoke'])
+    build = subprocess.run(build_command, cwd=app_dir, env=app_build_env(app_dir))
     if build.returncode != 0:
         print('Application build failed.', file=sys.stderr)
         return 1
@@ -102,7 +105,8 @@ def main():
         return 1
     boot_image = boot.stdout.strip()
 
-    out = root / 'audit-artifacts' / f'wovenpdf-ring3-{args.cpus}cpu'
+    mode = 'full-gui' if args.full_gui_image else 'smoke'
+    out = root / 'audit-artifacts' / f'wovenpdf-ring3-{mode}-{args.cpus}cpu'
     out.mkdir(parents=True, exist_ok=True)
     serial = out / 'serial.log'
     serial.write_text('')
@@ -150,7 +154,7 @@ def main():
         return 1
     if not args.generic_only:
         print(f'WovenPDF process marker: PRESENT ({args.cpus} CPU).')
-    print('Stage 16.1 runs the supplied WovenPDF package, not its --gui path.')
+    print(f'Stage 16.1 ran WovenPDF executable variant: {mode}; not its --gui path.')
     print('No WovenShell acceptance, visible pixels, PDF drawing or navigation is certified.')
     return 0
 
