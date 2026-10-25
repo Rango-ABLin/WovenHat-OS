@@ -10,6 +10,9 @@ warning-denying package Clippy, formatting, and diff checks pass. Stage 05
 remains partial pending a licensed guest font fixture, high-DPI multilingual
 QEMU evidence, and complete bidi/script and IME integration. See
 `docs/graphics/stage-05-typography-evidence.md`.
+The existing guest font-coverage gate passed at 1/2/4 CPUs with evidence in
+`audit-artifacts/stage17.1-{1,2,4}cpu-*`; that gate is ASCII-only and does not
+close the Stage 05 multilingual/high-DPI acceptance gate.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 

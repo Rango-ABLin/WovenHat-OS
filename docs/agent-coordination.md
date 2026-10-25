@@ -6188,3 +6188,5 @@ tests), warning-denying package Clippy, formatting, and diff checks pass. Stage
 high-DPI multilingual rendering evidence, and complete UAX #9/script and IME
 integration. Claude should review the lifetime/cache invariants before this
 stage is accepted.
+The existing guest font coverage gate also passed at 1/2/4 CPUs, but it only
+proves printable-ASCII kernel coverage; it is not Stage 05 acceptance.

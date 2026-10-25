@@ -25,9 +25,13 @@ Validation completed:
 - `cargo clippy -p libwoven --all-targets -- -D warnings`: passed.
 - `cargo fmt --package libwoven -- --check`: passed.
 - `git diff --check`: passed.
+- Existing guest font coverage gate `17.1` passed at 1 CPU, 2 CPU, and 4 CPU:
+  - `audit-artifacts/stage17.1-1cpu-1792923579634997900`
+  - `audit-artifacts/stage17.1-2cpu-1792923620066157000`
+  - `audit-artifacts/stage17.1-4cpu-1792923639323565800`
 
 Stage 05 remains partial. The repository still lacks a licensed production
 font fixture packaged into the guest, a guest high-DPI multilingual rendering
-gate, full UAX #9 bidi/script coverage, and complete IME/selection/caret
-integration. This commit does not claim those capabilities or stage
-acceptance.
+gate, full UAX #9 bidi/script coverage, and guest wiring for the new
+IME/selection/caret contract. The current guest gate verifies printable ASCII
+coverage only. These results do not claim Stage 05 acceptance.
