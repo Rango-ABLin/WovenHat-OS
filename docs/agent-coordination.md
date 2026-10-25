@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 04 raster/vector acceptance (2026-10-25)
+
+The bounded CPU renderer and vector path suite passed host tests and the real
+QEMU `gfx02-test` at 1/2/4 CPUs. Stage 04 is accepted for software/UEFI/QEMU
+scope; GPU acceleration and professional shaping remain later stages.
+
 ## Codex - graphics roadmap Stage 03 accepted for software/QEMU scope (2026-10-25)
 
 Damage/ownership acceptance and the real QEMU scaling/frame-pacing gate passed

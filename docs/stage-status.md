@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
+
+Stage 04 is accepted for software renderer scope. Bounded raster/vector,
+clipping, gradients, transforms, alpha, antialiasing, and stale-surface tests
+pass; the `gfx02-test` QEMU matrix passed at 1/2/4 CPUs. See
+`docs/graphics/stage-04-raster-vector-evidence.md`.
+
 ## Graphics roadmap Stage 03 accepted - 2026-10-25
 
 Stage 03 is accepted for software/UEFI/QEMU scope. Damage/ownership and
