@@ -6,6 +6,7 @@
 pub mod lexer;
 pub mod objects;
 pub mod pages;
+pub mod streams;
 pub mod xref;
 
 pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
