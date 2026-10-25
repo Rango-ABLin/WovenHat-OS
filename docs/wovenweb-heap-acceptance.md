@@ -24,12 +24,18 @@ mappings and process counts. Guest threads currently share the creator CPU;
 1/2/4-CPU configurations do not prove parallel guest allocator execution. The
 host backend separately exercises four concurrent threads.
 
-Windows Application Control blocked the generated root build script during
-workspace Clippy (error 4551). Remaining warning-denying feature/probe checks,
-fresh-image rebuild and network/legacy-GUI regressions are incomplete. No policy
-was disabled or bypassed. This is a draft implementation, not stage acceptance.
-The reused guest image predates a documentation-only allocator comment edit;
-its original source hashes are preserved separately from current checkout hashes.
+The current source was rebuilt and the fresh heap matrix passed on 1/2/4 CPUs.
+The networking regression with the opt-in allocator and the legacy GUI compositor
+regression also passed on 1/2/4 CPUs. SDK all-feature/all-target, selected browser
+kernel features, probe and legacy GUI release Clippy checks pass with -D warnings.
+The GUI lockfile now includes the SDK's existing image dependencies, preserving
+its prior libc version. Compiler hard-link fallback diagnostics are separate.
+
+Windows Application Control still blocks the root workspace Clippy build script
+(error 4551). Ordinary test/build paths completed without bypassing that policy.
+Full runtime acceptance remains open; production VM transaction integration is
+still required. Original fixture evidence is retained as historical evidence.
+See [the VM ownership model and integration map](wovenweb-vm-transactions.md).
 
 ## Runtime limits
 

@@ -1,17 +1,46 @@
 {
-  "status": "draft; not full stage acceptance",
-  "guest_image_build_provenance": {
-    "image_sha256": "c02e831ffbf8578b808fbeeab41233c53aba6759c5e9b313ec2fd66df250f6a4",
-    "source_sha256": {
-      "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
-      "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
-      "libwoven/src/heap_allocator.rs": "2d51686c0b2cdd896e30cb2c1bde0df0d6291362a0201650cde56b21037acccf",
-      "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
-      "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
-      "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+  "status": "controlled heap/network/legacy GUI matrices passed; full runtime acceptance open",
+  "checks": {
+    "sdk": {
+      "passed_tests": 180,
+      "log_sha256": "6cbe1a3ba9216596b0aff4efee1601fa6085d54f89cc0ae58ed81944472e1515"
+    },
+    "host": {
+      "passed_tests": 202,
+      "log_sha256": "7e21ee31ec79293af2c13d8d01462273c035b04fa195abdd9f5e3d7f7aa047a6"
+    },
+    "python_harness": {
+      "passed": 8
+    },
+    "selected_clippy": {
+      "sdk_all_features_all_targets": "passed",
+      "kernel_wovenweb_memory_test": "passed",
+      "kernel_wovenweb_net_test": "passed",
+      "probe_release": "passed",
+      "legacy_gui_release": "passed",
+      "flags": "-D warnings",
+      "note": "compiler cache hard-link fallback diagnostics separately emitted"
+    },
+    "host_followup": {
+      "passed_tests": 211,
+      "log_sha256": "3f8b51948162f618fc797e8aaed5c281556a39eb8e449182f37bc31fec0634ec",
+      "vm_model_tests": 9,
+      "two_operation_schedules": 512
     }
   },
-  "runs": [
+  "incomplete": [
+    "Root workspace Clippy build script blocked by Windows Application Control error 4551",
+    "production VM lease integration and qualification"
+  ],
+  "checkout_source_sha256": {
+    "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+    "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+    "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
+    "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+    "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
+    "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+  },
+  "historical_runs": [
     {
       "artifact": "audit-artifacts/wovenweb-memory-1792932750128279600-1cpu",
       "result": {
@@ -49,32 +78,181 @@
       ]
     }
   ],
-  "checks": {
-    "sdk": {
-      "passed_tests": 180,
-      "log_sha256": "6cbe1a3ba9216596b0aff4efee1601fa6085d54f89cc0ae58ed81944472e1515"
-    },
-    "host": {
-      "passed_tests": 202,
-      "log_sha256": "7e21ee31ec79293af2c13d8d01462273c035b04fa195abdd9f5e3d7f7aa047a6"
-    },
-    "python_harness": {
-      "passed": 8
+  "historical_build_provenance": {
+    "image_sha256": "c02e831ffbf8578b808fbeeab41233c53aba6759c5e9b313ec2fd66df250f6a4",
+    "source_sha256": {
+      "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+      "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+      "libwoven/src/heap_allocator.rs": "2d51686c0b2cdd896e30cb2c1bde0df0d6291362a0201650cde56b21037acccf",
+      "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+      "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
+      "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
     }
   },
-  "incomplete": [
-    "Workspace Clippy blocked by Windows Application Control error 4551",
-    "remaining feature/probe/legacy Clippy",
-    "fresh guest rebuild after comment edit",
-    "native network regression with opt-in allocator",
-    "legacy GUI regression"
+  "runs": [
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792939482601806300-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "provenance": {
+        "image_sha256": "9e713324316e2eccc72f5596438a29fedeece6ebeb7b794bde92d4d0b2460a5c",
+        "source_sha256": {
+          "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+          "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+          "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
+          "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+          "tools/wovenweb-net-probe/src/heap.rs": "1fa42a648ea77c065bdbb73c151f350366cfc765ff664b22828198c1fa75b5cd",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363",
+          "libwoven/Cargo.toml": "848d8c59319d3ad0b7851909a2aa863b07433503df27d793f881b21e54d86bd1",
+          "tools/wovenweb-net-probe/Cargo.toml": "0b8463b17a215e4885ca9272a3b83516b34c836fd64c6f2e3424b3ca60db24ec"
+        }
+      },
+      "serial_sha256": "e82be90db260a90d9facb95a94174705e97dff1799d5def02a4045682943fa45",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3494/3494 processes=2/2"
+      ]
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792939520583490200-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "provenance": {
+        "image_sha256": "9e713324316e2eccc72f5596438a29fedeece6ebeb7b794bde92d4d0b2460a5c",
+        "source_sha256": {
+          "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+          "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+          "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
+          "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+          "tools/wovenweb-net-probe/src/heap.rs": "1fa42a648ea77c065bdbb73c151f350366cfc765ff664b22828198c1fa75b5cd",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363",
+          "libwoven/Cargo.toml": "848d8c59319d3ad0b7851909a2aa863b07433503df27d793f881b21e54d86bd1",
+          "tools/wovenweb-net-probe/Cargo.toml": "0b8463b17a215e4885ca9272a3b83516b34c836fd64c6f2e3424b3ca60db24ec"
+        }
+      },
+      "serial_sha256": "fccae1f0e2e5280930cce4d54b1e2e4e7b6c565b4f63008003e38bc180636733",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3497/3497 processes=2/2"
+      ]
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792939536494441400-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "provenance": {
+        "image_sha256": "9e713324316e2eccc72f5596438a29fedeece6ebeb7b794bde92d4d0b2460a5c",
+        "source_sha256": {
+          "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+          "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+          "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
+          "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+          "tools/wovenweb-net-probe/src/heap.rs": "1fa42a648ea77c065bdbb73c151f350366cfc765ff664b22828198c1fa75b5cd",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363",
+          "libwoven/Cargo.toml": "848d8c59319d3ad0b7851909a2aa863b07433503df27d793f881b21e54d86bd1",
+          "tools/wovenweb-net-probe/Cargo.toml": "0b8463b17a215e4885ca9272a3b83516b34c836fd64c6f2e3424b3ca60db24ec"
+        }
+      },
+      "serial_sha256": "901e49457d8564ed389fb25cd9095acfd06acbbe8ef5bf6eb845af9e5f7a6562",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3497/3497 processes=2/2"
+      ]
+    }
   ],
-  "checkout_source_sha256": {
-    "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
-    "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
-    "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
-    "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
-    "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
-    "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
-  }
+  "network_regression": [
+    {
+      "artifact": "audit-artifacts/wovenweb-network-1792939553677139700-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 57
+      },
+      "provenance": {
+        "image_sha256": "8cbb670869c8d41e70c43d1484f9d745b3b26039b68701f7ca6a33f300fb4aa4",
+        "source_sha256": {
+          "libwoven/src/net.rs": "76f004f0e9544238ed9b32fa1fffb64256ca937566a94d9483a77d2f82be5566",
+          "libwoven/src/socks5.rs": "e3902025fe4d01470c6cfc98b28324345a77d88718a2575b2b7814b2e66c2345",
+          "kernel/src/wovenweb_net_gate.rs": "de32b3649d67f70729787f29f32570dbe20e04e2a3f161c94881410e7bf2c8fa",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+        }
+      },
+      "capture_sha256": "48ff638f662158a781823aa6b0ad73f176428c80f7013355bb9b0d4087396cdf"
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-network-1792939608341735100-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 55
+      },
+      "provenance": {
+        "image_sha256": "8cbb670869c8d41e70c43d1484f9d745b3b26039b68701f7ca6a33f300fb4aa4",
+        "source_sha256": {
+          "libwoven/src/net.rs": "76f004f0e9544238ed9b32fa1fffb64256ca937566a94d9483a77d2f82be5566",
+          "libwoven/src/socks5.rs": "e3902025fe4d01470c6cfc98b28324345a77d88718a2575b2b7814b2e66c2345",
+          "kernel/src/wovenweb_net_gate.rs": "de32b3649d67f70729787f29f32570dbe20e04e2a3f161c94881410e7bf2c8fa",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+        }
+      },
+      "capture_sha256": "ee59b620113f3a69ea64ab3986cf64b00b0c757a9b112b4880d0ffba54946d22"
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-network-1792939622974516900-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 56
+      },
+      "provenance": {
+        "image_sha256": "8cbb670869c8d41e70c43d1484f9d745b3b26039b68701f7ca6a33f300fb4aa4",
+        "source_sha256": {
+          "libwoven/src/net.rs": "76f004f0e9544238ed9b32fa1fffb64256ca937566a94d9483a77d2f82be5566",
+          "libwoven/src/socks5.rs": "e3902025fe4d01470c6cfc98b28324345a77d88718a2575b2b7814b2e66c2345",
+          "kernel/src/wovenweb_net_gate.rs": "de32b3649d67f70729787f29f32570dbe20e04e2a3f161c94881410e7bf2c8fa",
+          "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+        }
+      },
+      "capture_sha256": "aa35f63d9d0d8107991d9a8b651361f253fb7e0e280b8409e5441ee0403336f6"
+    }
+  ],
+  "legacy_gui_regression": {
+    "artifact": "audit-artifacts/wovenweb-legacy-gui-1792939684120283000",
+    "result": {
+      "image_sha256": "201e1c07619464cd39630089e4e670036b39447f719d072e41ad4110c719dc94",
+      "runs": [
+        {
+          "cpus": 1,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "216fc64d6a3b831108b9870185d674c761d02e416fd568cc0495c62aaf5a2a44"
+        },
+        {
+          "cpus": 2,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "aa12f997b2f099a7607f40bbd013c9558d57a774df182f585c80d7e04a88c985"
+        },
+        {
+          "cpus": 4,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "417c243527d1b67820e411566203bd4170a7e30f378a1284f913be13d2a0c991"
+        }
+      ]
+    }
+  },
+  "vm_model_source_sha256": "209f72ade36036fb65373cf6e4b50a498dd4f89c18844074d762b4b488fa7fa1"
 }

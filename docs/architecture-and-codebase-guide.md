@@ -4326,3 +4326,12 @@ Default SDK applications retain the legacy allocator. The bounded VM window
 is unchanged; full runtime acceptance remains open because Clippy/fresh builds
 were blocked by Windows Application Control and network/GUI regressions remain
 incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).
+
+## WovenWeb regression follow-up (2026-10-25)
+
+Fresh current-source heap, opt-in heap networking and default-allocator legacy
+GUI matrices pass on 1/2/4 CPUs. Selected SDK/kernel/probe/GUI Clippy gates pass;
+root workspace Clippy remains policy-blocked. The VM transaction state machine
+is host-tested scaffolding only; production integration and larger VM limits
+remain open. See wovenweb-heap-acceptance.md, wovenweb-heap-evidence.json and
+wovenweb-vm-transactions.md. No native browser completion is claimed.
