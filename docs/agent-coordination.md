@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Graphics shell high-contrast launch mode - 2026-10-25
+
+Codex added WovenShell's explicit `--high-contrast` mode and routed the major
+desktop surfaces through the selected palette while preserving the default
+production colors. Target release/Clippy pass and the default Stage 20.1
+desktop gate passes at 1/2/4 CPUs. This is not persisted compositor-wide
+accessibility state.
+
 ## Codex - Stage 24.59 low-memory task-stack repair (2026-10-25)
 
 The current 256 MiB system-apps fixture panicked in the bootloader before

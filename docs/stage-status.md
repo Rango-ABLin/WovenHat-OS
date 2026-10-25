@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics shell high-contrast launch mode - 2026-10-25
+
+WovenShell now accepts `--high-contrast` and routes wallpaper, taskbar,
+launcher, panels, title bars, badges, workspace/Quick Settings entries, and
+text through a high-contrast palette. The default production palette remains
+unchanged. Target release build and warning-denying target Clippy pass; the
+default desktop gate passes at 1/2/4 CPUs with evidence under
+`target/woven-shell-{1,2,4}cpu`. This is an application launch mode, not
+persisted compositor-wide accessibility settings or full Stage 11 acceptance.
+
 ## Graphics bounded HTTP chunked-body increment - 2026-10-25
 
 `libwoven::web` now records chunked transfer encoding and decodes bounded

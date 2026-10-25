@@ -70,6 +70,11 @@ launch modes (`--light` and `--high-contrast`), with dark remaining the
 default. The target release build and warning-denying target Clippy pass for
 the updated application.
 
+WovenShell also accepts an explicit `--high-contrast` launch mode covering its
+desktop palette. The default shell desktop gate remains green at 1/2/4 CPUs;
+the mode is application-scoped and does not yet provide persisted,
+compositor-wide accessibility settings.
+
 The signed WovenSettings QEMU gate remains green at 1/2/4 CPUs; evidence is
 retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
 
