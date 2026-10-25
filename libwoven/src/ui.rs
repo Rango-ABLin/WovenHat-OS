@@ -913,6 +913,112 @@ impl<'a, const N: usize> Tabs<'a, N> {
     }
 }
 
+/// A fixed-capacity vertical navigation rail.
+pub struct Navigation<'a, const N: usize> {
+    labels: [Option<&'a str>; N],
+    len: usize,
+    pub frame: Frame,
+    pub selected: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const N: usize> Navigation<'a, N> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            labels: [None; N],
+            len: 0,
+            frame,
+            selected: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push(&mut self, label: &'a str) -> bool {
+        if self.len == N {
+            return false;
+        }
+        self.labels[self.len] = Some(label);
+        self.len += 1;
+        true
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.len == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        }
+        .min(self.len - 1);
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if !self.enabled || pressed || self.len == 0 {
+            return false;
+        }
+        if x < self.frame.x
+            || y < self.frame.y
+            || x >= self.frame.x.saturating_add(self.frame.width.max(0))
+            || y >= self.frame.y.saturating_add(self.frame.height.max(0))
+        {
+            return false;
+        }
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        let next = ((y - self.frame.y) / row_height) as usize;
+        if next >= self.len {
+            return false;
+        }
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        for index in 0..self.len {
+            let y = self.frame.y + index as i32 * row_height;
+            if y >= self.frame.y.saturating_add(self.frame.height.max(0)) {
+                break;
+            }
+            if index == self.selected {
+                canvas.fill_rect(
+                    self.frame.x,
+                    y,
+                    self.frame.width.max(0) as usize,
+                    row_height as usize,
+                    theme.accent,
+                );
+            }
+            if let Some(label) = self.labels[index] {
+                canvas.draw_text(self.frame.x + 4, y + 2, label, theme.text);
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                1,
+                self.frame.height.max(0) as usize,
+                theme.focus,
+            );
+        }
+    }
+}
+
 /// A bounded modal dialog with explicit accept/cancel actions.
 pub struct Dialog<'a> {
     pub frame: Frame,
@@ -1033,8 +1139,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, Checkbox, Dialog, Label, ListBox, Menu, Table, Tabs, TextField, Theme, Tree,
-        stack_vertical,
+        Button, Checkbox, Dialog, Label, ListBox, Menu, Navigation, Table, Tabs, TextField, Theme,
+        Tree, stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -1217,5 +1323,21 @@ mod tests {
         assert!(dialog.activate_cancel());
         assert!(!dialog.open);
         assert!(!dialog.activate_accept());
+    }
+
+    #[test]
+    fn navigation_is_capacity_bounded_and_draws_focus() {
+        let mut navigation = Navigation::<2>::new(Frame::new(1, 1, 40, 24));
+        assert!(navigation.push("Files"));
+        assert!(navigation.push("Settings"));
+        assert!(!navigation.push("Overflow"));
+        assert!(navigation.pointer(4, 14, false));
+        assert_eq!(navigation.selected, 1);
+        navigation.focused = true;
+        let mut pixels = [0; 48 * 32];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 48, 32).unwrap();
+        navigation.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
     }
 }

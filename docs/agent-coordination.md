@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI Navigation component (2026-10-25)
+
+Added a fixed-capacity vertical Navigation control to `libwoven::ui` with
+bounded insertion, keyboard/pointer selection, focus rendering, and selected
+item painting. The full libwoven host suite passed 137 tests, Settings target
+warning-denying Clippy passed, and formatting/diff checks passed. The named
+WovenUI control catalog is now covered through Navigation; media/view
+abstractions and broader application migration remain open.
+
 ## Codex - bounded WovenUI Tabs and Dialog components (2026-10-25)
 
 Added fixed-capacity Tabs and a bounded modal Dialog to `libwoven::ui`.
