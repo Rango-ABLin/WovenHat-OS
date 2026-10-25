@@ -67,9 +67,9 @@ pub fn stream_with_filter<'a>(
             }
             Token::Name(name) if depth == 1 && (name == b"Filter" || name == b"F") => {
                 filter = match next(&mut lex)? {
-                    Token::Name(b"ASCIIHexDecode" | b"AHx") => Filter::AsciiHex,
-                    Token::Name(b"RunLengthDecode" | b"RL") => Filter::RunLength,
-                    Token::Name(b"FlateDecode" | b"Fl") => Filter::Flate,
+                    Token::Name(name) if name == b"ASCIIHexDecode" || name == b"AHx" => Filter::AsciiHex,
+                    Token::Name(name) if name == b"RunLengthDecode" || name == b"RL" => Filter::RunLength,
+                    Token::Name(name) if name == b"FlateDecode" || name == b"Fl" => Filter::Flate,
                     _ => return Err(StreamError::UnsupportedFilter),
                 };
             }
