@@ -237,8 +237,14 @@ mod tests {
     #[test]
     fn eof_marker_must_be_final_non_whitespace_bytes() {
         assert!(inspect(b"%PDF-1.4\n%%EOF\n\r\t ").is_ok());
-        assert_eq!(inspect(b"%PDF-1.4\n%%EOF\ntrailing payload"), Err(Error::MissingEof));
-        assert_eq!(inspect(b"%PDF-1.4\n%%EOF in content\n"), Err(Error::MissingEof));
+        assert_eq!(
+            inspect(b"%PDF-1.4\n%%EOF\ntrailing payload"),
+            Err(Error::MissingEof)
+        );
+        assert_eq!(
+            inspect(b"%PDF-1.4\n%%EOF in content\n"),
+            Err(Error::MissingEof)
+        );
     }
     #[test]
     fn refuses_filtered_streams() {
