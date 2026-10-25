@@ -307,8 +307,7 @@ mod pipeline_acceptance {
             pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
         }
         pdf.extend_from_slice(
-            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n")
-                .as_bytes(),
+            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n").as_bytes(),
         );
         inspect(&pdf).unwrap();
         let mut entries = [xref::Entry::default(); 8];
