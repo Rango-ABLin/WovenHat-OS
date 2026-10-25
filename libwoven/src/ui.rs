@@ -443,6 +443,131 @@ impl<'a, const N: usize> ListBox<'a, N> {
     }
 }
 
+/// A fixed-capacity table with borrowed cell text and one selected row.
+pub struct Table<'a, const ROWS: usize, const COLS: usize> {
+    cells: [[Option<&'a str>; COLS]; ROWS],
+    row_count: usize,
+    pub frame: Frame,
+    pub selected_row: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const ROWS: usize, const COLS: usize> Table<'a, ROWS, COLS> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            cells: [[None; COLS]; ROWS],
+            row_count: 0,
+            frame,
+            selected_row: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push_row(&mut self, values: &[&'a str]) -> bool {
+        if self.row_count == ROWS || values.len() > COLS {
+            return false;
+        }
+        for (column, value) in values.iter().enumerate() {
+            self.cells[self.row_count][column] = Some(*value);
+        }
+        self.row_count += 1;
+        true
+    }
+
+    pub const fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.row_count == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected_row
+                .saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected_row.saturating_add(delta as usize)
+        }
+        .min(self.row_count - 1);
+        let changed = next != self.selected_row;
+        self.selected_row = next;
+        changed
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if !self.enabled || pressed || self.row_count == 0 {
+            return false;
+        }
+        if x < self.frame.x
+            || y < self.frame.y
+            || x >= self.frame.x.saturating_add(self.frame.width.max(0))
+            || y >= self.frame.y.saturating_add(self.frame.height.max(0))
+        {
+            return false;
+        }
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        let row = ((y - self.frame.y) / row_height) as usize;
+        if row >= self.row_count {
+            return false;
+        }
+        let changed = row != self.selected_row;
+        self.selected_row = row;
+        changed
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        let column_width = if COLS == 0 {
+            0
+        } else {
+            self.frame.width.max(0) / COLS as i32
+        };
+        for row in 0..self.row_count {
+            let y = self.frame.y + row as i32 * row_height;
+            if y >= self.frame.y.saturating_add(self.frame.height.max(0)) {
+                break;
+            }
+            if row == self.selected_row {
+                canvas.fill_rect(
+                    self.frame.x,
+                    y,
+                    self.frame.width.max(0) as usize,
+                    row_height as usize,
+                    theme.accent,
+                );
+            }
+            for column in 0..COLS {
+                if let Some(value) = self.cells[row][column] {
+                    canvas.draw_text(
+                        self.frame.x + column as i32 * column_width + 4,
+                        y + 2,
+                        value,
+                        theme.text,
+                    );
+                }
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -466,7 +591,7 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, Checkbox, Label, ListBox, TextField, Theme, stack_vertical};
+    use super::{Button, Checkbox, Label, ListBox, Table, TextField, Theme, stack_vertical};
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
     #[test]
@@ -560,6 +685,32 @@ mod tests {
         let mut pixels = [0; 32 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
         list.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+    }
+
+    #[test]
+    fn table_is_capacity_bounded_and_selects_rows() {
+        let mut table = Table::<2, 2>::new(Frame::new(0, 0, 80, 32));
+        assert!(table.push_row(&["Name", "State"]));
+        assert!(table.push_row(&["Ada", "Ready"]));
+        assert!(!table.push_row(&["Extra", "Rejected"]));
+        assert_eq!(table.row_count(), 2);
+        assert!(table.move_selection(1));
+        assert!(!table.move_selection(1));
+        assert!(table.pointer(4, 2, false));
+        assert_eq!(table.selected_row, 0);
+    }
+
+    #[test]
+    fn table_draws_selected_row_and_focus_marker() {
+        let mut table = Table::<2, 2>::new(Frame::new(1, 1, 30, 24));
+        table.push_row(&["A", "B"]);
+        table.push_row(&["C", "D"]);
+        table.focused = true;
+        let mut pixels = [0; 32 * 32];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
+        table.draw(&mut canvas, Theme::DARK);
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
     }

@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI Table component (2026-10-25)
+
+Added a fixed-capacity Table to `libwoven::ui` with borrowed cell text,
+bounded row insertion, keyboard row navigation, pointer row selection, focus
+rendering, and selected-row painting. The full libwoven host suite passed 132
+tests, Settings target warning-denying Clippy passed, and formatting/diff
+checks passed. WovenUI remains partial; Tree, Menu, Dialog, Tabs, Navigation,
+and broader application migration remain open.
+
 ## Codex - bounded WovenUI ListBox component (2026-10-25)
 
 Added the first selectable collection control to `libwoven::ui`: a fixed-
