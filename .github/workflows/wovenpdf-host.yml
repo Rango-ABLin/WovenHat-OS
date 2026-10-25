@@ -4,6 +4,7 @@ on:
     paths:
       - "apps/woven-pdf/**"
       - ".github/workflows/wovenpdf-host.yml"
+      - "scripts/test-wovenpdf-package.py"
   workflow_dispatch:
 
 concurrency:
@@ -43,6 +44,26 @@ jobs:
         with:
           name: wovenpdf-native-elf
           path: apps/woven-pdf/target/x86_64-unknown-none/debug/wovenhat-pdf
+          if-no-files-found: error
+
+  packaging:
+    name: Experimental WAPP package verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain for Ring-3 packaging
+        run: rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
+      - name: Build and verify WovenPDF WAPP package
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: python3 scripts/test-wovenpdf-package.py
+      - name: Publish experimental WAPP
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-experimental-wapp
+          path: apps/woven-pdf/target/x86_64-unknown-none/release/wovenhat-pdf.wapp
           if-no-files-found: error
 
   formatting:
