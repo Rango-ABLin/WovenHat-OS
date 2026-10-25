@@ -278,32 +278,134 @@ impl<'a, const R: usize> StyleSheet<'a, R> {
     }
 
     pub fn parse(source: &'a str) -> Result<Self, StyleSheetError> {
+        Self::parse_internal(source, None)
+    }
+
+    /// Parse the bounded stylesheet for one viewport width. Only
+    /// `@media (min-width: Npx)` and `@media (max-width: Npx)` conditions are
+    /// accepted; inactive blocks are skipped without entering the rule
+    /// capacity.
+    pub fn parse_for_viewport(
+        source: &'a str,
+        viewport_width: u32,
+    ) -> Result<Self, StyleSheetError> {
+        Self::parse_internal(source, Some(viewport_width))
+    }
+
+    fn parse_internal(
+        source: &'a str,
+        viewport_width: Option<u32>,
+    ) -> Result<Self, StyleSheetError> {
         let mut sheet = Self::new();
-        let mut rest = source;
-        while !rest.trim_ascii().is_empty() {
-            let close = rest.find('}').ok_or(StyleSheetError::MalformedRule)?;
-            let (header, declarations) = rest[..close]
-                .split_once('{')
-                .ok_or(StyleSheetError::MalformedRule)?;
-            let selector = header.trim_ascii();
-            let selector = selector
-                .strip_prefix('.')
-                .map(Selector::Class)
-                .or_else(|| selector.strip_prefix('#').map(Selector::Id))
-                .or_else(|| (!selector.is_empty()).then_some(Selector::Tag(selector)))
-                .ok_or(StyleSheetError::EmptySelector)?;
-            if sheet.len == R {
-                return Err(StyleSheetError::TooManyRules);
-            }
-            sheet.rules[sheet.len] = Some(Rule {
-                selector,
-                declarations,
-            });
-            sheet.len += 1;
-            rest = &rest[close + 1..];
-        }
+        sheet.parse_rules(source, viewport_width, 0)?;
         Ok(sheet)
     }
+
+    fn parse_rules(
+        &mut self,
+        source: &'a str,
+        viewport_width: Option<u32>,
+        nesting: usize,
+    ) -> Result<(), StyleSheetError> {
+        if nesting > 8 {
+            return Err(StyleSheetError::MalformedRule);
+        }
+        let mut cursor = 0usize;
+        while !source[cursor..].trim_ascii().is_empty() {
+            let open = cursor
+                .checked_add(
+                    source[cursor..]
+                        .find('{')
+                        .ok_or(StyleSheetError::MalformedRule)?,
+                )
+                .ok_or(StyleSheetError::MalformedRule)?;
+            let header = source[cursor..open].trim_ascii();
+            let mut depth = 1usize;
+            let mut close = None;
+            for (offset, byte) in source[open + 1..].bytes().enumerate() {
+                match byte {
+                    b'{' => {
+                        depth += 1;
+                        if depth > 8 {
+                            return Err(StyleSheetError::MalformedRule);
+                        }
+                    }
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(open + 1 + offset);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let close = close.ok_or(StyleSheetError::MalformedRule)?;
+            let body = &source[open + 1..close];
+            if header.starts_with("@media") {
+                let active = media_matches(header, viewport_width)?;
+                if active {
+                    self.parse_rules(body, viewport_width, nesting + 1)?;
+                }
+            } else {
+                if body.contains('{') {
+                    return Err(StyleSheetError::MalformedRule);
+                }
+                let selector = header;
+                if selector.contains(',') {
+                    return Err(StyleSheetError::MalformedRule);
+                }
+                let selector = selector
+                    .strip_prefix('.')
+                    .map(Selector::Class)
+                    .or_else(|| selector.strip_prefix('#').map(Selector::Id))
+                    .or_else(|| (!selector.is_empty()).then_some(Selector::Tag(selector)))
+                    .ok_or(StyleSheetError::EmptySelector)?;
+                if self.len == R {
+                    return Err(StyleSheetError::TooManyRules);
+                }
+                self.rules[self.len] = Some(Rule {
+                    selector,
+                    declarations: body,
+                });
+                self.len += 1;
+            }
+            cursor = close + 1;
+        }
+        Ok(())
+    }
+}
+
+fn media_matches(header: &str, viewport_width: Option<u32>) -> Result<bool, StyleSheetError> {
+    let condition = header
+        .strip_prefix("@media")
+        .map(str::trim_ascii)
+        .ok_or(StyleSheetError::MalformedRule)?;
+    let prefix = if condition.starts_with("(min-width:") {
+        "min"
+    } else if condition.starts_with("(max-width:") {
+        "max"
+    } else {
+        return Err(StyleSheetError::MalformedRule);
+    };
+    let pixels = condition
+        .strip_prefix(if prefix == "min" {
+            "(min-width:"
+        } else {
+            "(max-width:"
+        })
+        .and_then(|value| value.strip_suffix(')'))
+        .map(str::trim_ascii)
+        .and_then(|value| value.strip_suffix("px"))
+        .and_then(|value| value.trim_ascii().parse::<u32>().ok())
+        .ok_or(StyleSheetError::MalformedRule)?;
+    Ok(viewport_width.is_some_and(|width| {
+        if prefix == "min" {
+            width >= pixels
+        } else {
+            width <= pixels
+        }
+    }))
 }
 
 impl<const R: usize> Default for StyleSheet<'_, R> {
@@ -1041,6 +1143,36 @@ mod tests {
         assert_eq!(layout.get(1).unwrap().rect.width, 100);
         assert_eq!(layout.get(0).unwrap().rect.height, 10);
         assert_eq!(layout.get(1).unwrap().rect.height, 30);
+    }
+
+    #[test]
+    fn selects_bounded_media_rules_for_the_requested_viewport() {
+        let source = "@media (min-width: 200px) { main { width: 80%; } } @media (max-width: 199px) { main { width: 40%; } }";
+        let document = parse_html::<2>(b"<main/>").unwrap();
+        let wide = StyleSheet::<2>::parse_for_viewport(source, 240).unwrap();
+        let narrow = StyleSheet::<2>::parse_for_viewport(source, 160).unwrap();
+        assert_eq!(wide.len(), 1);
+        assert_eq!(narrow.len(), 1);
+        let wide_layout = layout_with_stylesheet(
+            &document,
+            Viewport {
+                width: 100,
+                height: 50,
+            },
+            &wide,
+        )
+        .unwrap();
+        let narrow_layout = layout_with_stylesheet(
+            &document,
+            Viewport {
+                width: 100,
+                height: 50,
+            },
+            &narrow,
+        )
+        .unwrap();
+        assert_eq!(wide_layout.get(0).unwrap().rect.width, 80);
+        assert_eq!(narrow_layout.get(0).unwrap().rect.width, 40);
     }
 
     #[test]
