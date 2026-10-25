@@ -18,6 +18,12 @@ jobs:
           components: clippy, rustfmt
       - name: Install components for repository-pinned nightly
         run: rustup component add --toolchain nightly-2026-07-10 clippy rustfmt
+      - name: Install freestanding target and rust-src
+        run: |
+          rustup target add --toolchain nightly-2026-07-10 x86_64-unknown-none
+          rustup component add --toolchain nightly-2026-07-10 rust-src
+      - name: Freestanding graphical PDF app build
+        run: cargo +nightly-2026-07-10 build --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-none --bin wovenhat-pdf
       - name: Parser unit tests
         run: cargo test --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib
       - name: Deny compiler warnings
