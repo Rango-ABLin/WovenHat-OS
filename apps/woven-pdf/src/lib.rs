@@ -3,6 +3,8 @@
 //! This is NOT a general PDF renderer: no compression, encryption, fonts,
 //! page-tree traversal, object streams, or images are supported yet.
 
+pub mod lexer;
+
 pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
 pub const MAX_TEXT_BYTES: usize = 16 * 1024;
 
