@@ -12,9 +12,9 @@ UAX #9/script shaping and guest font/input qualification remain open in
 `docs/graphics/stage-05-typography-evidence.md`.
 `libwoven::graphics::TextInputState` supplies the companion fixed 512-byte
 UTF-8 editing state with scalar-boundary caret and selection operations.
-The licensed fixture at `assets/fonts/NotoSans[wdth,wght].ttf` is validated for
-cmap and metrics; complex variable-outline rasterization remains fail-closed
-until the outline decoder supports those contours.
+The licensed fixture at `assets/fonts/NotoSans-Regular.ttf` is validated for
+cmap and metrics; guest-side font loading and rasterization remain separate
+qualification gates.
 
 ## Software architecture mandate S00 inventory
 

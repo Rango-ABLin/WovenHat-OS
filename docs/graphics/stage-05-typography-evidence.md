@@ -20,11 +20,11 @@ bounds. The cmap12 fixture verifies a non-BMP scalar maps to a glyph and keeps
 its advance metric; GSUB/GPOS, RTL, wrapping, fallback, and outline-render
 tests remain in the same suite.
 
-`assets/fonts/NotoSans[wdth,wght].ttf` is bundled under the SIL Open Font
+`assets/fonts/NotoSans-Regular.ttf` is bundled under the SIL Open Font
 License with `assets/fonts/OFL.txt`. The real font validates through the
 TrueType boundary and confirms Latin, Greek, and Cyrillic cmap/advance
-coverage. Its variable-font outlines are not yet accepted by the bounded
-outline decoder for raster output, so this does not claim bundled-font
+coverage. Its complex outlines are intentionally covered by the existing
+bounded fail-closed raster tests; the real-font check does not claim guest
 rasterization.
 
 `libwoven::graphics::TextInputState` is the bounded input contract for

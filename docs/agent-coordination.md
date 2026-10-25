@@ -6192,6 +6192,6 @@ The existing guest font coverage gate also passed at 1/2/4 CPUs, but it only
 proves printable-ASCII kernel coverage; it is not Stage 05 acceptance.
 The host suite also asserts bounded 4x outline raster coverage and a non-BMP
 cmap12 mapping/advance fixture.
-An OFL Noto Sans variable-font fixture now validates Latin/Greek/Cyrillic cmap
-and metrics. Its complex variable outlines are not yet accepted by the bounded
-raster decoder, so no bundled-font raster claim is made.
+An OFL Noto Sans static fixture now validates Latin/Greek/Cyrillic cmap and
+metrics. Guest-side rasterization is not yet qualified, so no guest-font
+raster claim is made.
