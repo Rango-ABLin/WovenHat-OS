@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics roadmap Stage 01 architecture contracts - 2026-10-25
+
+Accepted the current-boundary architecture contract in
+`docs/graphics/stage-01-architecture-contracts.md`. It maps WovenDisplay,
+WovenRender, WovenText, WovenAssets, WovenCompositor, WovenWindow, WovenUI,
+and WovenDesktop to concrete source paths and records capability, pointer,
+lock, bounded-resource, CPU-fallback, migration, and rollback invariants.
+This stage does not claim later web, codec, JavaScript, GPU, or hardware gates.
+
 ## Graphics roadmap Stage 00 baseline acceptance - 2026-10-25
 
 The complete graphics Stage 00-24 roadmap was audited against the current

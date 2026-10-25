@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 01 architecture contracts (2026-10-25)
+
+Added `docs/graphics/stage-01-architecture-contracts.md`, mapping the roadmap
+boundaries to existing kernel/userspace modules, dependency order, fallback,
+ownership, capability, pointer, lock, resource, migration, and rollback rules.
+This is a contract acceptance for current interfaces, not a claim of later
+text shaping, web, codec, JavaScript, acceleration, or hardware support.
+
 ## Codex - graphics roadmap Stage 00 live audit (2026-10-25)
 
 Audited the complete supplied graphics roadmap against the current tree and
