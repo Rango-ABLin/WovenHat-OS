@@ -1,14 +1,5 @@
 # Stage status
 
-## Bounded image codec metadata boundary - 2026-10-25
-
-Added `libwoven::media` with bounded header validation and dimension metadata
-parsing for PNG, GIF, BMP, and JPEG. Invalid/oversized dimensions and unknown
-formats fail closed before pixel allocation or rasterization. The full
-libwoven host suite passed 145 tests, Settings warning-denying Clippy passed,
-and formatting/diff checks passed. Full decoders, codec fuzzing, and streaming
-media remain open.
-
 ## Bounded WebView HTTP(S) network boundary - 2026-10-25
 
 Added `libwoven::web` with allocation-free HTTP(S) endpoint parsing,

@@ -32,7 +32,6 @@ pub mod ai_provider;
 pub mod i18n;
 pub mod identity;
 pub mod installer_ipc;
-pub mod media;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
