@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics roadmap Stage 06 iconography - 2026-10-25
+
+Stage 06 is accepted for the versioned code-native icon pack and WovenShell
+integration. Eight semantic icons, MIME metadata, Normal/Active/Disabled
+states, Light/Dark themes, and integer-DPI rendering are covered by 152
+libwoven tests. All Ring-3 release images build, and the launcher/QEMU
+acceptance passed at 1/2/4 CPUs. SVG import, external thumbnail services, and
+physical/GPU qualification remain outside this bounded gate. See
+`docs/graphics/stage-06-iconography-evidence.md`.
+
 ## Graphics roadmap Stage 05 typography increment - 2026-10-25
 
 Stage 05 is accepted for the bundled static-font kernel/QEMU scope. The

@@ -6,7 +6,6 @@
 //! malformed/oversized tables fail closed to the existing bitmap font.
 
 use alloc::vec;
-use alloc::vec::Vec;
 
 const MAX_TABLES: usize = 64;
 const MAX_POINTS: usize = 256;

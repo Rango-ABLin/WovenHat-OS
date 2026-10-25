@@ -173,6 +173,7 @@ mod terminal;
 mod thread;
 mod timer;
 mod tpm2;
+#[allow(dead_code)]
 mod ttf;
 #[cfg(any(feature = "qemu-test", feature = "system-apps"))]
 mod update;

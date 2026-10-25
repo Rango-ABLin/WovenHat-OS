@@ -331,6 +331,21 @@ fn icon_colors(icon: AppIcon) -> (u32, u32) {
     }
 }
 
+fn shared_icon_id(icon: AppIcon) -> libwoven::icons::IconId {
+    match icon {
+        AppIcon::Files => libwoven::icons::IconId::Files,
+        AppIcon::Terminal => libwoven::icons::IconId::Terminal,
+        AppIcon::Store => libwoven::icons::IconId::Store,
+        AppIcon::Settings => libwoven::icons::IconId::Settings,
+        AppIcon::Security => libwoven::icons::IconId::Security,
+        AppIcon::Images => libwoven::icons::IconId::Images,
+        AppIcon::Calculator => libwoven::icons::IconId::Calculator,
+        AppIcon::Editor | AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
+            libwoven::icons::IconId::Generic
+        }
+    }
+}
+
 /// Draw a compact, legible app tile. The glyphs are deliberately geometric so
 /// they stay crisp in both the flat and 3D launcher textures.
 fn draw_app_icon(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i32, selected: bool) {
@@ -388,6 +403,20 @@ fn draw_app_icon(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i
             canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
         }
     }
+    let scale = (size.max(8) as usize / libwoven::icons::ICON_SIZE).clamp(1, 16);
+    let _ = libwoven::icons::IconPack::draw(
+        canvas,
+        x + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
+        y + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
+        shared_icon_id(icon),
+        if selected {
+            libwoven::icons::IconState::Active
+        } else {
+            libwoven::icons::IconState::Normal
+        },
+        libwoven::icons::IconTheme::Dark,
+        scale,
+    );
 }
 
 /// Notifications remembered for the Notification Center.

@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics roadmap Stage 06 iconography (2026-10-25)
+
+`libwoven/src/icons.rs` owns the versioned code-native icon contract used by
+WovenShell. It provides stable semantic IDs and MIME associations, bounded
+8x8 masks rendered with integer scaling, and explicit theme/state colors. The
+shell maps catalog entries to these IDs for launcher and desktop tiles. This
+boundary deliberately excludes parsing untrusted SVG or fetching thumbnails;
+those require a later capability-checked asset service.
+
 ## Graphics roadmap Stage 05 typography increment (2026-10-25)
 
 `libwoven::graphics::FontFallback` is the scene-facing fallback provider for

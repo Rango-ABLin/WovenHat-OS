@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 06 iconography (2026-10-25)
+
+Added the versioned `libwoven::icons` pack with semantic MIME metadata,
+integer-DPI masks, theme/state variants, and tests. WovenShell consumes the
+shared pack for launcher and desktop tiles. The full Ring-3 release build and
+the real launcher QEMU gate passed at 1/2/4 CPUs. Stage 06 is accepted for the
+code-native/QEMU scope; external SVG import and physical/GPU qualification are
+later boundaries.
+
 ## Codex - graphics roadmap Stage 04 raster/vector acceptance (2026-10-25)
 
 The bounded CPU renderer and vector path suite passed host tests and the real

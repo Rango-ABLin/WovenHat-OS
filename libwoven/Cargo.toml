@@ -6,6 +6,10 @@ edition = "2024"
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = ["userspace-allocator"]
+userspace-allocator = []
+
 [dependencies]
 # The same audited, freestanding SHA-256 the kernel uses for boot
 # measurement; software-only so it needs no CPU feature detection.
