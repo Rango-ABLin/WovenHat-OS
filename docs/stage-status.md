@@ -10389,3 +10389,10 @@ SHA256 manifests were merged into
 `docs/sha256-stage-manifests-consolidated.txt`. All 74 stage run scripts remain
 separate and executable. A fresh repository-wide SHA-256 inventory is recorded
 in `docs/repository-sha256-2026-10-25.txt`.
+
+## Stage-run and README cleanup (2026-10-25)
+
+Removed obsolete stage-only README files and legacy Stage 6–9, Stage 10.8–10.9,
+and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
+`RUN-STAGE10.7.ps1`, `run-release.ps1`, the root README, and app/tool/vendor
+READMEs remain because they are active instructions or package documentation.

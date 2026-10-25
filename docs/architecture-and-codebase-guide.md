@@ -3268,7 +3268,9 @@ ports after detaching owned operations.
 `tests/async_runtime.rs` exercises production operation and port state with host
 scheduler/lock doubles. `stage10_8.S` tests the real Ring-3 ABI;
 `async_acceptance.rs` exercises multicore producers and a waiting consumer.
-`RUN-STAGE10.8.ps1` preserves Stage 10.7 and adds 1/2/4-CPU completion-port boots.
+The historical Stage 10.8 completion-port gate is preserved in
+`audit-stages-consolidated.md`; its obsolete runner is no longer part of the
+active repository surface.
 Timers, event objects, IPC completion integration and per-thread cleanup remain
 later roadmap work.
 
