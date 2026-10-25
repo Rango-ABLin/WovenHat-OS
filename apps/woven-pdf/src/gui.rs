@@ -6,6 +6,10 @@ use core::cell::UnsafeCell;
 use libwoven::{rgb, Canvas, GraphicsSurface};
 use libwoven::process::Id;
 use wovenhat_pdf::{extract_plain_text, inspect, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES};
+use wovenhat_pdf::xref::{read_table, Entry};
+use wovenhat_pdf::objects::Reference;
+use wovenhat_pdf::streams::decoded_stream;
+use wovenhat_pdf::paint::paint_text_preview;
 
 const WIDTH: u32 = 480;
 const HEIGHT: u32 = 320;
@@ -15,6 +19,17 @@ const INK: u32 = rgb(28, 38, 57);
 const ACCENT: u32 = rgb(88, 210, 176);
 const WIDTH_MAX: usize = 480;
 const HEIGHT_MAX: usize = 320;
+const DECODE_CAPACITY: usize = 64 * 1024;
+const MAX_XREF: usize = 128;
+struct DecodeBytes(UnsafeCell<[u8; DECODE_CAPACITY]>);
+unsafe impl Sync for DecodeBytes {}
+static DECODED: DecodeBytes = DecodeBytes(UnsafeCell::new([0; DECODE_CAPACITY]));
+struct XrefBuffer(UnsafeCell<[Entry; MAX_XREF]>);
+unsafe impl Sync for XrefBuffer {}
+static XREF: XrefBuffer = XrefBuffer(UnsafeCell::new([Entry {
+    object: 0, generation: 0, offset: 0, in_use: false
+}; MAX_XREF]));
+static mut DECODED_LENGTH: usize = 0;
 
 struct Pixels(UnsafeCell<[u32; WIDTH_MAX * HEIGHT_MAX]>);
 // SAFETY: this GUI is a single-threaded process and owns its static buffer.
@@ -69,6 +84,23 @@ fn read_preview(path: Option<&[u8]>) -> usize {
     let _ = libwoven::close(fd);
     if !good || inspect(&buffer[..n]).is_err() { return 0; }
     let output = unsafe { &mut *TEXT.0.get() };
+    // Experimental bridge: try a supported decoded content stream first.
+    // This does not yet resolve the page /Contents object from the page tree.
+    let entries = unsafe { &mut *XREF.0.get() };
+    if let Ok(count) = read_table(&buffer[..n], entries) {
+        let decoded = unsafe { &mut *DECODED.0.get() };
+        for entry in &entries[..count] {
+            if !entry.in_use { continue; }
+            let reference = Reference { number: entry.object, generation: entry.generation };
+            if let Ok(size) = decoded_stream(&buffer[..n], &entries[..count], reference, decoded) {
+                if paint_text_preview(&decoded[..size], 280.0, 1.0, 456, 250, |_| Ok(())).is_ok() {
+                    unsafe { DECODED_LENGTH = size; }
+                    return 0;
+                }
+            }
+        }
+    }
+    unsafe { DECODED_LENGTH = 0; }
     extract_plain_text(&buffer[..n], output).unwrap_or_default()
 }
 
@@ -81,7 +113,18 @@ fn paint(window: &GraphicsSurface, content_len: usize, first_line: usize) -> boo
     canvas.draw_text(14, 12, "WovenPDF  |  Text Preview", ACCENT);
     canvas.draw_text(14, 32, "Scroll: click top/bottom bar", ACCENT);
     canvas.fill_rect(12, 56, 456, 250, PAGE);
-    if content_len == 0 {
+    let decoded_len = unsafe { DECODED_LENGTH };
+    if decoded_len != 0 {
+        let decoded = unsafe { &*DECODED.0.get() };
+        let page_height = 280.0;
+        let result = paint_text_preview(&decoded[..decoded_len], page_height, 1.0, 456, 250, |item| {
+            canvas.draw_text(25 + item.x, 56 + item.y, item.text, INK);
+            Ok(())
+        });
+        if result.is_err() {
+            canvas.draw_text(25, 75, "Unsupported page content", INK);
+        }
+    } else if content_len == 0 {
         canvas.draw_text(25, 75, "No supported PDF text to display.", INK);
         canvas.draw_text(25, 94, "Uncompressed Tj strings only.", INK);
     } else {
