@@ -46,7 +46,6 @@ struct Pixels(UnsafeCell<[u32; WIDTH_MAX * HEIGHT_MAX]>);
 unsafe impl Sync for Pixels {}
 static PIXELS: Pixels = Pixels(UnsafeCell::new([0; WIDTH_MAX * HEIGHT_MAX]));
 
-
 fn exit_error(msg: &str) -> ! {
     let _ = libwoven::print(msg);
     libwoven::exit(4)
