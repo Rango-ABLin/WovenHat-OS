@@ -6578,3 +6578,11 @@ dark, light, and high-contrast WovenUI themes. The libwoven suite passes
 183/183 and warning-denying all-targets Clippy passes. This is host visual
 regression evidence; desktop screenshot, starvation, and low-power gates
 remain open.
+# Graphics theme-mode boundary increment - 2026-10-25
+
+Codex added bounded `--light` and `--high-contrast` GUI modes to
+WovenSettings, sourced from `libwoven::ui::Theme`; dark remains the default.
+Target release build and warning-denying target Clippy pass. This does not
+change the shell's accepted production palette or claim a persisted,
+compositor-wide accessibility settings service.
+

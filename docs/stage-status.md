@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics theme-mode boundary increment - 2026-10-25
+
+WovenSettings now selects the shared `libwoven::ui::Theme` palette through
+bounded `--light` and `--high-contrast` GUI modes, while retaining dark as the
+default. The target release build and warning-denying target Clippy pass. This
+is an application-level theme increment only: the shell still uses its
+accepted production palette, and no compositor-wide persisted accessibility
+settings service is claimed.
+
 ## Graphics Stage 24.59 low-memory Change-PIN acceptance - 2026-10-25
 
 The 256 MiB system-apps fixture initially failed in the bootloader because

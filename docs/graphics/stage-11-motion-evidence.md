@@ -65,6 +65,11 @@ Button plus checked Checkbox composition in dark, light, and high-contrast
 themes. The 183-test libwoven suite and warning-denying all-targets Clippy
 pass.
 
+WovenSettings now consumes those shared palettes for explicit bounded GUI
+launch modes (`--light` and `--high-contrast`), with dark remaining the
+default. The target release build and warning-denying target Clippy pass for
+the updated application.
+
 ## Boundary
 
 This accepts the motion/pacing, Quick Settings accessibility, and desktop

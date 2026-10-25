@@ -12,7 +12,12 @@ libwoven::entry!(main);
 
 fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--gui") {
-        gui::run(args.get(2));
+        let theme = match args.get(3) {
+            Some(b"--light") => gui::ThemeMode::Light,
+            Some(b"--high-contrast") => gui::ThemeMode::HighContrast,
+            _ => gui::ThemeMode::Dark,
+        };
+        gui::run(args.get(2), theme);
     }
     let command = parse(args.get(1).unwrap_or(b"--all"));
     let status = match command {
@@ -39,7 +44,7 @@ fn main(args: Args) -> ! {
 }
 
 fn print_help() {
-    let _ = libwoven::print("WovenSettings: --all, --identity, --clock, --display\n");
+    let _ = libwoven::print("WovenSettings: --all, --identity, --clock, --display; --gui <shell> [--light|--high-contrast]\n");
 }
 
 fn print_number(value: u64) {

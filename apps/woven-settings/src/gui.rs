@@ -1,11 +1,35 @@
 use libwoven::layout::Frame;
 use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::{rgb, Canvas, GraphicsSurface};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ThemeMode {
+    Dark,
+    Light,
+    HighContrast,
+}
+
+impl ThemeMode {
+    fn shared(self) -> Theme {
+        match self {
+            Self::Dark => Theme::DARK,
+            Self::Light => Theme::LIGHT,
+            Self::HighContrast => Theme::HIGH_CONTRAST,
+        }
+    }
+
+    fn background(self) -> u32 {
+        match self {
+            Self::Dark => BACKGROUND,
+            Self::Light => rgb(248, 250, 253),
+            Self::HighContrast => rgb(0, 0, 0),
+        }
+    }
+}
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
@@ -92,17 +116,16 @@ fn draw_settings(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    mode: ThemeMode,
 ) {
-    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let title_theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
+    let shared = mode.shared();
+    let panel = shared.surface;
+    let accent = shared.accent;
+    let text = shared.text;
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), mode.background());
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, panel);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, accent);
+    let title_theme = shared;
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenSettings",
@@ -111,7 +134,7 @@ fn draw_settings(
     Label::new(Frame::new(PANEL_X + 10, PANEL_Y + 32, 120, 16), "Identity").draw(
         canvas,
         Theme {
-            text: ACCENT,
+            text: accent,
             ..title_theme
         },
     );
@@ -134,13 +157,13 @@ fn draw_settings(
         unsafe { libwoven::syscall::getgid() },
         &mut digits,
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
         draw_clock(canvas, PANEL_X + 10, PANEL_Y + 96, time, &mut digits);
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -167,7 +190,7 @@ fn draw_settings(
             &mut digits,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
     }
     let mut refresh_digits = [0u8; 20];
     draw_number(
@@ -204,7 +227,7 @@ fn draw_settings(
             i32::from(y).saturating_sub(2),
             5,
             5,
-            if pressed { TEXT } else { POINTER_MARKER },
+            if pressed { text } else { POINTER_MARKER },
         );
     }
 }
@@ -214,6 +237,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    mode: ThemeMode,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -225,7 +249,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_settings(&mut canvas, pointer, pressed, refresh_count);
+    draw_settings(&mut canvas, pointer, pressed, refresh_count, mode);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -240,12 +264,12 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
 
 /// Open a read-only Settings window through WovenShell's WOPN protocol.
 /// The shell PID is supplied by the catalog's `%p` token.
-pub fn run(shell: Option<&[u8]>) -> ! {
+pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    if !render(&window, None, false, 0) {
+    if !render(&window, None, false, 0, mode) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -284,7 +308,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count) {
+                        if render(&resized, pointer, pointer_pressed, refresh_count, mode) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenSettings: window resized\n");
@@ -300,7 +324,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     u16::from_le_bytes([message[4], message[5]]),
                     u16::from_le_bytes([message[6], message[7]]),
                 ));
-                if !render(&window, pointer, pointer_pressed, refresh_count) {
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
@@ -318,7 +342,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSettings: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count) {
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
