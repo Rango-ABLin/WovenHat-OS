@@ -6367,3 +6367,7 @@ is explicit. Zero-size requests return null. Hosted SDK tests and a fresh CodeQL
 scan remain required because Windows blocked the SDK unit executable. Native
 fixture evidence and limits: [pointer-origin follow-up](wovenweb-pointer-origin.md).
 This does not integrate production VM leases or qualify a complete browser.
+
+The focused SDK workflow also runs on path-filtered branch pushes, so its host
+validation does not depend solely on PR event admission. No test or security
+check is skipped. Await its result before claiming the new host regression passed.

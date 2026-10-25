@@ -1,6 +1,11 @@
 name: WovenWeb SDK checks
 
 on:
+  push:
+    paths:
+      - '.github/workflows/wovenweb-sdk.yml'
+      - 'libwoven/**'
+      - 'tools/wovenweb-*/**'
   pull_request:
     paths:
       - '.github/workflows/wovenweb-sdk.yml'
