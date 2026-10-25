@@ -161,7 +161,18 @@ def main():
             while vm.poll() is None and time.monotonic() < deadline:
                 events = serial.read_text(errors="replace")
                 if START in events and REQUEST in events:
-                    capture(port, screenshot, min(deadline, time.monotonic() + 10))
+                    # WOPN is only a request; the compositor may need several
+                    # frames before the window becomes visible. Capture anew
+                    # until page pixels appear or the bounded grace expires.
+                    grace = min(deadline, time.monotonic() + 8)
+                    while vm.poll() is None and time.monotonic() < grace:
+                        capture(port, screenshot, min(grace, time.monotonic() + 3))
+                        try:
+                            if page_surface_pixels(screenshot) >= 5000:
+                                break
+                        except ValueError:
+                            pass
+                        time.sleep(0.25)
                     break
                 time.sleep(0.2)
         finally:
