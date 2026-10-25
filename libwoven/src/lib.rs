@@ -18,7 +18,6 @@
 //! exit-status payload. After checking the full-width error sentinels, casting
 //! that payload to `i32` recovers negative statuses, including -1 and -2.
 
-#[cfg(feature = "userspace-allocator")]
 extern crate alloc;
 
 #[cfg(all(feature = "userspace-allocator", not(test)))]
@@ -96,6 +95,7 @@ pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
 pub mod browser;
+pub mod codecs;
 pub mod i18n;
 pub mod icons;
 pub mod identity;

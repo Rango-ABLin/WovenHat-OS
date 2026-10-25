@@ -2,11 +2,12 @@
 
 ## Codex - graphics roadmap Stage 07 image increment (2026-10-25)
 
-Started Stage 07 with bounded image policy, VP8X WebP metadata recognition,
-and allocation-free uncompressed BMP RGBA decoding. Host tests and warning-
-denying Clippy pass with 154 tests. The stage remains open pending PNG/JPEG/
-WebP pixel decoders, asset manifest/cache, wallpapers, VFS integration, and
-guest acceptance.
+Started Stage 07 with bounded image policy, PNG/JPEG RGBA adapters, host-target
+WebP decoding, allocation-free BMP RGBA decoding, fixed thumbnail cache,
+license/digest wallpaper catalog, and bounded VFS loading. Host and
+freestanding Clippy plus 157 tests pass. The stage remains open pending a
+freestanding WebP backend, licensed wallpaper binaries, persistent boot-image
+installation, thumbnail UI integration, and guest acceptance.
 
 ## Codex - graphics roadmap Stage 06 iconography (2026-10-25)
 

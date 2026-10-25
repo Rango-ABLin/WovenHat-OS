@@ -2,12 +2,15 @@
 
 ## Graphics roadmap Stage 07 image/asset increment (2026-10-25)
 
-`libwoven::media` owns the first bounded image decode boundary. It rejects
-dimensions above 8192 or 16 megapixels, recognizes the supported container
-headers, and decodes only uncompressed 24/32-bit BMP into caller-owned RGBA
-storage after validating all offsets and strides. PNG/JPEG/WebP pixel decode,
-asset caching, manifests, and VFS wallpaper integration remain an explicit
-unaccepted continuation of Stage 07.
+`libwoven::media` owns the bounded image decode boundary. It rejects dimensions
+above 8192 or 16 megapixels, recognizes the supported container headers, and
+provides caller-buffer PNG/JPEG RGBA adapters plus uncompressed 24/32-bit BMP
+decoding after validating all offsets and strides. The fixed thumbnail cache,
+license/digest wallpaper catalog, and `load_vfs_asset` VFS read helper keep
+ownership and capacity explicit. WebP pixel decoding is currently host-target
+only because its VP8 dependency is not no-std; the freestanding path fails
+closed until a suitable backend is integrated. Wallpaper binaries, boot-image
+installation, and guest UI qualification remain open.
 
 ## Graphics roadmap Stage 06 iconography (2026-10-25)
 

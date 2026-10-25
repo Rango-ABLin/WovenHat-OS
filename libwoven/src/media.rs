@@ -22,6 +22,9 @@ pub struct ImageMetadata {
 
 pub const MAX_ASSETS: usize = 32;
 pub const MAX_ASSET_NAME: usize = 64;
+pub const THUMBNAIL_SIDE: usize = 32;
+pub const THUMBNAIL_PIXELS: usize = THUMBNAIL_SIDE * THUMBNAIL_SIDE;
+pub const MAX_WALLPAPERS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AssetRecord {
@@ -85,6 +88,154 @@ impl Default for AssetManifest {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub struct Thumbnail {
+    pub key: u64,
+    pub width: u8,
+    pub height: u8,
+    pub pixels: [u32; THUMBNAIL_PIXELS],
+}
+
+pub struct ThumbnailCache<const CAPACITY: usize = 4> {
+    entries: [Option<Thumbnail>; CAPACITY],
+    next: usize,
+}
+
+impl<const CAPACITY: usize> ThumbnailCache<CAPACITY> {
+    pub const fn new() -> Self {
+        Self {
+            entries: [const { None }; CAPACITY],
+            next: 0,
+        }
+    }
+
+    pub fn get(&self, key: u64) -> Option<&Thumbnail> {
+        self.entries
+            .iter()
+            .flatten()
+            .find(|thumbnail| thumbnail.key == key)
+    }
+
+    pub fn insert(&mut self, key: u64, width: usize, height: usize, pixels: &[u32]) -> bool {
+        if CAPACITY == 0
+            || width == 0
+            || height == 0
+            || width > THUMBNAIL_SIDE
+            || height > THUMBNAIL_SIDE
+            || pixels.len() < width.saturating_mul(height)
+        {
+            return false;
+        }
+        let mut thumbnail = Thumbnail {
+            key,
+            width: width as u8,
+            height: height as u8,
+            pixels: [0; THUMBNAIL_PIXELS],
+        };
+        for row in 0..height {
+            let source = &pixels[row * width..(row + 1) * width];
+            thumbnail.pixels[row * THUMBNAIL_SIDE..row * THUMBNAIL_SIDE + width]
+                .copy_from_slice(source);
+        }
+        self.entries[self.next] = Some(thumbnail);
+        self.next = (self.next + 1) % CAPACITY;
+        true
+    }
+}
+
+impl<const CAPACITY: usize> Default for ThumbnailCache<CAPACITY> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WallpaperLicense {
+    pub id: [u8; MAX_ASSET_NAME],
+    pub id_len: u8,
+    pub spdx: [u8; 32],
+    pub spdx_len: u8,
+    pub source_hash: [u8; 32],
+}
+
+pub struct WallpaperCatalog {
+    records: [Option<WallpaperLicense>; MAX_WALLPAPERS],
+    len: usize,
+}
+
+impl WallpaperCatalog {
+    pub const fn new() -> Self {
+        Self {
+            records: [None; MAX_WALLPAPERS],
+            len: 0,
+        }
+    }
+
+    pub fn register(
+        &mut self,
+        id: &[u8],
+        spdx: &[u8],
+        source_hash: [u8; 32],
+    ) -> bool {
+        if id.is_empty()
+            || id.len() > MAX_ASSET_NAME
+            || spdx.is_empty()
+            || spdx.len() > 32
+            || source_hash == [0; 32]
+            || self.len == MAX_WALLPAPERS
+        {
+            return false;
+        }
+        let mut record = WallpaperLicense {
+            id: [0; MAX_ASSET_NAME],
+            id_len: id.len() as u8,
+            spdx: [0; 32],
+            spdx_len: spdx.len() as u8,
+            source_hash,
+        };
+        record.id[..id.len()].copy_from_slice(id);
+        record.spdx[..spdx.len()].copy_from_slice(spdx);
+        self.records[self.len] = Some(record);
+        self.len += 1;
+        true
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl Default for WallpaperCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VfsAssetError {
+    Open,
+    Read,
+    InvalidImage(ImageError),
+    TooLarge,
+}
+
+/// Read one immutable image asset from the mounted VFS into caller storage.
+/// The descriptor is always closed before returning.
+pub fn load_vfs_asset(path: &str, buffer: &mut [u8]) -> Result<(usize, ImageMetadata), VfsAssetError> {
+    let descriptor = crate::open(path).map_err(|_| VfsAssetError::Open)?;
+    let result = crate::read(descriptor, buffer).map_err(|_| VfsAssetError::Read);
+    let _ = crate::close(descriptor);
+    let length = result?;
+    if length == buffer.len() {
+        return Err(VfsAssetError::TooLarge);
+    }
+    let metadata = parse_image_header(&buffer[..length]).map_err(VfsAssetError::InvalidImage)?;
+    Ok((length, metadata))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,7 +396,10 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetManifest, ImageError, ImageFormat, decode_bmp_rgba, parse_image_header};
+    use super::{
+        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, decode_bmp_rgba,
+        parse_image_header,
+    };
 
     #[test]
     fn parses_bounded_png_gif_and_bmp_headers() {
@@ -320,5 +474,25 @@ mod tests {
         assert_eq!(record.name(), b"wallpaper.png");
         assert_eq!(record.metadata.width, 64);
         assert_eq!(record.byte_len, 24);
+    }
+
+    #[test]
+    fn thumbnail_cache_replaces_in_fixed_round_robin_storage() {
+        let mut cache = ThumbnailCache::<2>::new();
+        let pixels = [0x1122_3344; 4];
+        assert!(cache.insert(1, 2, 2, &pixels));
+        assert_eq!(cache.get(1).unwrap().pixels[0], 0x1122_3344);
+        assert!(cache.insert(2, 1, 1, &pixels));
+        assert!(cache.insert(3, 1, 1, &pixels));
+        assert!(cache.get(3).is_some());
+        assert!(cache.get(1).is_none());
+    }
+
+    #[test]
+    fn wallpaper_catalog_requires_license_and_source_digest() {
+        let mut catalog = WallpaperCatalog::new();
+        assert!(!catalog.register(b"wall", b"CC0-1.0", [0; 32]));
+        assert!(catalog.register(b"wall", b"CC0-1.0", [7; 32]));
+        assert_eq!(catalog.len(), 1);
     }
 }

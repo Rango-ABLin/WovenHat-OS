@@ -20,6 +20,14 @@ hmac = { version = "0.12", default-features = false }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 # Full Unicode Bidirectional Algorithm (UAX #9), no_std + alloc capable.
 unicode-bidi = { version = "0.3.18", default-features = false, features = ["hardcoded-data"] }
+# Pure-Rust no_std+alloc image decoders. SIMD and std integrations stay off so
+# the same bounded codec boundary can build into Ring-3 images.
+zune-core = { version = "0.5.3", default-features = false }
+zune-jpeg = { version = "0.5.16-rc3", default-features = false }
+zune-png = { version = "0.5.2", default-features = false }
+
+[target.'cfg(not(target_os = "none"))'.dependencies]
+oxideav-webp = { version = "0.3.1", default-features = false }
 
 [lints.rust]
 warnings = "deny"
