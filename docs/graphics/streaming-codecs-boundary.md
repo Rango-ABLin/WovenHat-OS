@@ -33,6 +33,8 @@ Evidence:
   streamed BMP, interlaced GIF, and two-frame GIF playback emission.
 - External randomized codec campaign: `tools/codec-fuzz` completed 50,000
   iterations / 250,000 decoder cases. Strict whole-process WebP allocation
-  certification remains open because the pinned backend retains the encoded
-  RIFF payload in its compatibility streaming API and documents internal
-  allocations outside the configured limit.
+  certification passed for the pinned VP8L, VP8X/ALPH, and malformed fixture
+  paths through `tools/webp-allocation-cert`: 702,669-byte peak live usage,
+  no leak, and a hard 1 MiB process-wide budget. The compatibility streaming
+  API still retains the encoded RIFF payload; universal proof of unexercised
+  backend paths is not claimed.

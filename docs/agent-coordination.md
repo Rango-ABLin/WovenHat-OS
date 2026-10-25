@@ -9,11 +9,14 @@ animation paths (250,000 decoder cases). The verified run completed with
 the userspace allocator feature disabled so the host process remains safe.
 
 The compatibility WebP streaming API still retains the complete encoded RIFF
-payload and has internal allocations. A separate
-`decode_webp_rgba_stream_bounded` API now reads into caller-owned encoded
-workspace and applies explicit decoder limits. Strict whole-process
-allocation certification remains open because the pinned backend documents
-that some internal allocations may ignore its memory limit.
+payload and has internal allocations. The separate
+`decode_webp_rgba_stream_bounded` API reads into caller-owned encoded
+workspace and applies explicit decoder limits. The standalone
+`tools/webp-allocation-cert` harness now measures the process-wide allocator
+under a hard 1 MiB peak-live budget across VP8L, VP8X/ALPH, and malformed
+fixtures. It passed with a 702,669-byte peak and no live-byte leak. This is a
+certification of the pinned exercised paths; zenwebp's documented caveat that
+some internal allocations may ignore its limit remains recorded.
 
 ## Codex - bounded multi-frame GIF playback emission (2026-10-25)
 

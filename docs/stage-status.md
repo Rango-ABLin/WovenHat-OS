@@ -8,9 +8,11 @@
   qualified through the WovenImages QEMU gate.
 - Caller-workspace-bounded WebP final decoding: **implemented and tested** via
   `decode_webp_rgba_stream_bounded`, with dimension/file/memory limits.
-  Strict whole-process allocation certification remains **OPEN** because the
-  pinned `zenwebp` backend documents that some internal allocations may ignore
-  its configured memory limit.
+- Strict whole-process allocation certification: **PASS for the pinned
+  exercised paths** through `tools/webp-allocation-cert`; peak live allocation
+  was 702,669 bytes under a hard 1 MiB budget, with no leak. Universal proof
+  for every future zenwebp code path is not claimed because the backend
+  documents that some internal allocations may ignore its configured limit.
 - WovenImages guest qualification: **PASS** on 1/2/4 CPUs, exit 33, with
   streamed BMP, interlaced GIF, and two-frame GIF playback markers.
 

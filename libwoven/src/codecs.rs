@@ -1191,6 +1191,7 @@ pub fn decode_webp_rgba_stream_bounded<S: ImageStream>(
         return Err(ImageError::OutputTooSmall);
     }
     read_stream_exact(stream, 0, &mut encoded_workspace[..total])?;
+    const WEBP_DECODER_MEMORY_BUDGET: u64 = 1024 * 1024;
     let limits = zenwebp::decoder::Limits::default()
         .max_dimensions(metadata.width, metadata.height)
         .max_total_pixels(u64::from(metadata.width) * u64::from(metadata.height))
@@ -1198,7 +1199,7 @@ pub fn decode_webp_rgba_stream_bounded<S: ImageStream>(
         .max_memory(
             (total as u64)
                 .saturating_add((output.len() * 4) as u64)
-                .saturating_add(64 * 1024),
+                .saturating_add(WEBP_DECODER_MEMORY_BUDGET),
         );
     let config = zenwebp::decoder::DecodeConfig::default().limits(limits);
     let (width, height) =
