@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics roadmap ledger correction - 2026-10-25
+
+The live audit now classifies the existing bounded browser substrate and scalar
+JavaScript seam as PARTIAL rather than MISSING: browser DOM/layout/paint/software
+rendering and inline script execution are implemented and tested, while full
+browser, ECMAScript, DOM, module, async, and sandbox capabilities remain open.
+
 ## Graphics bounded PCM WAVE parser increment - 2026-10-25
 
 `libwoven::media::parse_wav_pcm` now validates RIFF/WAVE chunk bounds, PCM

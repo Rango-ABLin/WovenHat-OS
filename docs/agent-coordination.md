@@ -6601,3 +6601,9 @@ metadata boundary with checked chunk extents, format/rate/alignment validation,
 and caller-visible sample offsets. Eleven media tests and freestanding target
 warning-denying Clippy pass. This does not claim audio decoding or playback.
 
+# Graphics roadmap ledger correction - 2026-10-25
+
+The graphics audit was corrected to classify the existing bounded browser and
+scalar JavaScript seams as PARTIAL, backed by current source and test evidence.
+This is not a completion claim for full browser/ECMAScript capability.
+

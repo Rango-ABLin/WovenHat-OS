@@ -56,8 +56,8 @@ the next mandatory stage is accepted.
 | 13 | Desktop shell and boot-to-desktop | PARTIAL | `kernel/src/shell.rs` and desktop harnesses exist; the repaired production catalog reaches the signed-in desktop and app interaction qualification on 1/2/4 CPUs. |
 | 14 | VirtIO GPU 2D/QEMU | PARTIAL | `kernel/src/virtio_gpu.rs` exists; current end-to-end VirtIO GPU runtime acceptance is not green. |
 | 15 | GPU acceleration foundation | UNVERIFIED | No current evidence proves a production acceleration path; CPU fallback remains the only safe assumption. |
-| 16 | DOM/HTML visual runtime | PARTIAL | `libwoven/src/browser.rs` is a bounded borrowed HTML parser, not a visual browser engine or layout runtime. |
-| 17 | JavaScript runtime and bindings | MISSING | No production JavaScript runtime/bindings are present or accepted. |
+| 16 | DOM/HTML visual runtime | PARTIAL | `libwoven::browser` now provides a bounded borrowed DOM, block/flex/grid layout, paint commands, and software-canvas rendering with host/target evidence; full browser integration and modern layout remain open. |
+| 17 | JavaScript runtime and bindings | PARTIAL | `libwoven::javascript` provides a fixed-capacity scalar expression runtime and `browser::execute_script` integration with host/target evidence; full ECMAScript objects, DOM, modules, async, and sandboxing remain open. |
 | 18 | CSS, Flexbox, Grid, styling | PARTIAL | `libwoven::browser` now has bounded inline style parsing plus fixed `display:flex`/`display:grid` placement, gap handling, paint commands, and software rendering with host/target evidence. Full CSS parsing/cascade, responsive semantics, and browser integration remain open. |
 | 19 | HTTP/TLS fetch and network imagery | PARTIAL | `libwoven/src/web.rs` parses bounded HTTP(S) endpoints/response heads; sockets, TLS, policy, body streaming, and imagery integration remain open. |
 | 20 | Streaming image/video/audio/codecs | PARTIAL | Bounded PNG/JPEG/BMP/GIF/WebP pixel paths and a validated PCM WAVE container parser now exist with host/target evidence. Full video/audio codec streaming and playback remain open. |
