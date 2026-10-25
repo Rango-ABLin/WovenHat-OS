@@ -25,11 +25,13 @@ the next holder's default scale.
 | Stage 20.7 spring animation | PASS | PASS | PASS |
 | Stage 20.10 Quick Settings accessibility/motion path | PASS | PASS | PASS |
 
-The full desktop screenshot/input qualification also passes on 1 CPU after
-the production catalog capacity repair. It captured the signed-in desktop,
-WovenFiles open/click/close, WovenTerminal keyboard input/close, and the
-restored desktop. Evidence is retained under
-`audit-artifacts/desktop-qualification-1792952128648637100`.
+The full desktop screenshot/input qualification also passes on 1/2/4 CPUs
+after the production catalog capacity repair. Each run captured the signed-in
+desktop, WovenFiles open/click/close, WovenTerminal keyboard input/close, and
+the restored desktop. Evidence is retained under
+`audit-artifacts/desktop-qualification-1792952128648637100`,
+`audit-artifacts/desktop-qualification-1792952312640236600`, and
+`audit-artifacts/desktop-qualification-1792952447677142500`.
 
 Stage 20.7 observed monotonic opacity sequences including
 `[0, 48, 194, 236, 250, 253, 255]` on the 1-CPU run and completed with QEMU
@@ -59,7 +61,7 @@ pass.
 
 ## Boundary
 
-This accepts the motion/pacing and Quick Settings accessibility runtime slices
-only. A complete Stage 11 claim still requires the desktop screenshot/theme
-matrix and low-power runtime evidence; the sustained-input starvation slice is
-now covered by the Stage 20.7 matrix above.
+This accepts the motion/pacing, Quick Settings accessibility, and desktop
+screenshot/input runtime slices. A complete Stage 11 claim still requires
+theme-variation screenshots and low-power runtime evidence; the sustained-input
+starvation slice is covered by the Stage 20.7 matrix above.

@@ -35,10 +35,12 @@ fade and passes its sustained-input starvation check on 1/2/4 CPUs. Full Stage
 The earlier desktop screenshot qualification stopped before the session
 because the production system-app catalog could not fit `woven-images.wapp`.
 After raising the bounded VFS node capacity to 256 KiB, the full desktop
-qualification passed on 1 CPU with six captured PPM frames and signed-in
-WovenFiles/WovenTerminal interaction evidence under
-`audit-artifacts/desktop-qualification-1792952128648637100`. The 2/4-CPU
-desktop screenshot matrix and low-power runtime remain open.
+qualification passed on 1/2/4 CPUs with six captured PPM frames per run and
+signed-in WovenFiles/WovenTerminal interaction evidence under
+`audit-artifacts/desktop-qualification-1792952128648637100`,
+`audit-artifacts/desktop-qualification-1792952312640236600`, and
+`audit-artifacts/desktop-qualification-1792952447677142500`. Theme-variation
+screenshots and low-power runtime remain open.
 
 ## Graphics Stage 11 shared-theme visual regression - 2026-10-25
 

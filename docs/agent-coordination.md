@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 11 desktop screenshot/input matrix (2026-10-25)
+
+The production catalog failed because `woven-images.wapp` is 166,248 bytes,
+above the 128 KiB VFS node/exec-image bound. `VFS_NODE_CAPACITY` is now a
+bounded 256 KiB. The signed system-app catalog passed with all eleven apps,
+and the full desktop qualification passed on 1/2/4 CPUs with preserved PPM
+frames and WovenFiles/WovenTerminal input evidence under
+`audit-artifacts/desktop-qualification-1792952128648637100`,
+`audit-artifacts/desktop-qualification-1792952312640236600`, and
+`audit-artifacts/desktop-qualification-1792952447677142500`. Remaining Stage
+11 prerequisites are theme-variation screenshots and low-power runtime.
+
 ## Codex - Stage 11 design tokens increment (2026-10-25)
 
 Added allocation-free `libwoven::ui::DesignTokens` and accessibility-aware

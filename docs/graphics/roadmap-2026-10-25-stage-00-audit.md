@@ -51,9 +51,9 @@ the next mandatory stage is accepted.
 | 08 | Secure userspace graphics surfaces and IPC | PARTIAL | Graphics ABI and userspace graphics boundaries exist; full roadmap isolation and IPC acceptance is not current. |
 | 09 | Compositor and scheduler | PARTIAL | `kernel/src/compositor.rs` exists; complete scheduling, damage, latency, and stress evidence is missing. |
 | 10 | Window manager, input, accessibility | PARTIAL | Shell/input and bounded UI controls exist; full window management and accessibility acceptance is not complete. |
-| 11 | Tokens, theming, motion | PARTIAL | `libwoven::ui::Theme`/`DesignTokens` exist; Stage 19.14 pacing, Stage 20.7 spring animation with sustained-input coverage, and Stage 20.10 Quick Settings accessibility slices pass on 1/2/4 CPUs. The full desktop screenshot/input qualification now passes on 1 CPU; the 2/4-CPU matrix, theme matrix, and low-power qualification remain open. |
+| 11 | Tokens, theming, motion | PARTIAL | `libwoven::ui::Theme`/`DesignTokens` exist; Stage 19.14 pacing, Stage 20.7 spring animation with sustained-input coverage, Stage 20.10 Quick Settings accessibility, and desktop screenshot/input qualification pass on 1/2/4 CPUs. Theme-variation screenshots and low-power qualification remain open. |
 | 12 | Widget framework and responsive layouts | PARTIAL | Shared bounded controls are implemented and tested on host; full responsive layout and QEMU acceptance is not complete. |
-| 13 | Desktop shell and boot-to-desktop | PARTIAL | `kernel/src/shell.rs` and desktop harnesses exist; the repaired production catalog reaches the signed-in desktop and app interaction qualification on 1 CPU, while the 2/4-CPU matrix remains open. |
+| 13 | Desktop shell and boot-to-desktop | PARTIAL | `kernel/src/shell.rs` and desktop harnesses exist; the repaired production catalog reaches the signed-in desktop and app interaction qualification on 1/2/4 CPUs. |
 | 14 | VirtIO GPU 2D/QEMU | PARTIAL | `kernel/src/virtio_gpu.rs` exists; current end-to-end VirtIO GPU runtime acceptance is not green. |
 | 15 | GPU acceleration foundation | UNVERIFIED | No current evidence proves a production acceleration path; CPU fallback remains the only safe assumption. |
 | 16 | DOM/HTML visual runtime | PARTIAL | `libwoven/src/browser.rs` is a bounded borrowed HTML parser, not a visual browser engine or layout runtime. |
