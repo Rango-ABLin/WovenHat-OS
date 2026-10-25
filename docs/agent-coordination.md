@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded HTTP(S) WebView network boundary (2026-10-25)
+
+Added `libwoven::web` with allocation-free HTTP(S) endpoint parsing,
+default/explicit port handling, credential/control-character rejection, and
+bounded HTTP/1.1 response-head parsing with content-length extraction. It is
+designed to feed the existing async TCP layer; TLS, socket policy, body
+streaming, and browser execution remain separate boundaries. The full
+libwoven host suite passed 143 tests, Settings target warning-denying Clippy
+passed, and formatting/diff checks passed.
+
 ## Codex - bounded WovenUI WebView host boundary (2026-10-25)
 
 Added a fail-closed WebView host boundary with bounded HTTP(S) URI

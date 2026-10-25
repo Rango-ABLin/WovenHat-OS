@@ -1,5 +1,15 @@
 # Stage status
 
+## Bounded WebView HTTP(S) network boundary - 2026-10-25
+
+Added `libwoven::web` with allocation-free HTTP(S) endpoint parsing,
+credential/control-character rejection, bounded explicit/default ports, and
+HTTP/1.1 response-head parsing with content-length extraction. The boundary
+is designed for the existing async TCP layer; TLS, socket policy, body
+streaming, and browser execution remain separate. The full libwoven host
+suite passed 143 tests, Settings warning-denying Clippy passed, and
+formatting/diff checks passed.
+
 ## WovenUI bounded WebView host boundary - 2026-10-25
 
 Added a fail-closed WebView host boundary with bounded HTTP(S) URI
