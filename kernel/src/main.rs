@@ -7306,7 +7306,8 @@ fn install_production_system_apps() -> bool {
         }
     }
     let share_created = if vfs::stat("/share").is_err() {
-        if vfs::mkdir("/share").is_err() {
+        if let Err(error) = vfs::mkdir("/share") {
+            serial::write_line(format_args!("[APPS] /share mkdir failed: {:?}", error));
             return false;
         }
         true
@@ -7314,7 +7315,8 @@ fn install_production_system_apps() -> bool {
         false
     };
     let applications_created = if vfs::stat("/share/applications").is_err() {
-        if vfs::mkdir("/share/applications").is_err() {
+        if let Err(error) = vfs::mkdir("/share/applications") {
+            serial::write_line(format_args!("[APPS] applications mkdir failed: {:?}", error));
             if share_created {
                 let _ = vfs::remove("/share");
             }
@@ -7329,7 +7331,8 @@ fn install_production_system_apps() -> bool {
     }
     let mut installed = 0usize;
     for app in apps {
-        if vfs::create_read_only(app.binary_path, app.image).is_err() {
+        if let Err(error) = vfs::create_read_only(app.binary_path, app.image) {
+            serial::write_line(format_args!("[APPS] binary {} failed: {:?} size={}", app.name, error, app.image.len()));
             for rollback in apps.into_iter().take(installed) {
                 let _ = vfs::remove(rollback.binary_path);
             }
@@ -7345,7 +7348,8 @@ fn install_production_system_apps() -> bool {
     }
     let mut catalogs = 0usize;
     for app in apps {
-        if vfs::create_read_only(app.catalog_path, app.catalog).is_err() {
+        if let Err(error) = vfs::create_read_only(app.catalog_path, app.catalog) {
+            serial::write_line(format_args!("[APPS] catalog {} failed: {:?}", app.name, error));
             for rollback in apps {
                 if catalogs > 0 {
                     let _ = vfs::remove(rollback.catalog_path);
