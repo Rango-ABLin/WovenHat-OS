@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics mandate current-state audit (2026-10-25)
+
+Read the pasted graphics modernization mandate and audited the current source,
+boot path, compositor, VirtIO-GPU path, shell, and recorded QEMU evidence.
+Added `docs/graphics/current-state-audit.md`. The audit confirms automatic
+system-apps desktop boot and launcher interaction in QEMU, while keeping the
+Stage 20.1 projection-oracle mismatch, complete text/image/UI coverage,
+accelerated GPU execution, native hardware, and independent review explicitly
+open or unverified. No source runtime behavior was changed by this audit.
+
 ## Codex - launcher and desktop visual polish (2026-10-25)
 
 Added a code-native icon system for WovenStart rows and the production

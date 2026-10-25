@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics mandate baseline audit - 2026-10-25
+
+Added `docs/graphics/current-state-audit.md` from the pasted graphics
+modernization mandate. The current system has an automatic system-apps QEMU
+desktop, buffered software display, compositor, VirtIO-GPU 2D support, and
+WovenShell visual polish. The audit keeps full graphics phases, the Stage 20.1
+projection-oracle mismatch, hardware acceleration, native qualification, and
+independent review open or unverified where evidence is absent.
+
 ## Launcher and desktop visual polish - 2026-10-25
 
 Added readable code-native app icons to the launcher and desktop shortcuts for
