@@ -76,6 +76,11 @@ impl<'a> Button<'a> {
         }
     }
 
+    /// Activate the button from a keyboard or accessibility action.
+    pub fn activate(&mut self) -> bool {
+        self.enabled
+    }
+
     pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
         let fill = if !self.enabled {
             theme.disabled
@@ -253,6 +258,20 @@ impl<const N: usize> TextField<N> {
         core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
     }
 
+    /// Give focus on a press inside the bounded field frame.
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if !pressed {
+            return false;
+        }
+        let inside = x >= self.frame.x
+            && y >= self.frame.y
+            && x < self.frame.x.saturating_add(self.frame.width.max(0))
+            && y < self.frame.y.saturating_add(self.frame.height.max(0));
+        let changed = self.focused != inside;
+        self.focused = inside;
+        changed
+    }
+
     pub fn handle(&mut self, event: InputEvent) -> bool {
         if !self.focused {
             return false;
@@ -343,12 +362,16 @@ mod tests {
         assert!(!button.pointer(12, 22, false));
         assert!(!button.pointer(12, 22, true));
         assert!(!button.pointer(80, 80, false));
+        assert!(button.activate());
+        button.enabled = false;
+        assert!(!button.activate());
     }
 
     #[test]
     fn text_field_is_utf8_bounded_and_backspaces_codepoints() {
         let mut field = TextField::<5>::new(Frame::new(0, 0, 40, 16));
-        field.focused = true;
+        assert!(field.pointer(1, 1, true));
+        assert!(!field.pointer(1, 1, true));
         assert!(field.handle(InputEvent::Key(Key::Char('é'))));
         assert_eq!(field.as_str(), "é");
         assert!(field.handle(InputEvent::Key(Key::Backspace)));
@@ -358,6 +381,8 @@ mod tests {
         assert!(field.handle(InputEvent::Key(Key::Char('界'))));
         assert!(!field.handle(InputEvent::Key(Key::Char('!'))));
         assert_eq!(field.as_str(), "ab界");
+        assert!(field.pointer(100, 100, true));
+        assert!(!field.focused);
     }
 
     #[test]

@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenUI keyboard/pointer action boundary - 2026-10-25
+
+Buttons now expose enabled-aware keyboard/accessibility activation, and
+TextFields use bounded pointer coordinates to acquire or clear focus. The
+libwoven host suite passed 128 tests with interaction coverage, Settings
+warning-denying Clippy passed, and formatting/diff checks passed. Complete
+focus traversal and full application migration remain open.
+
 ## WovenSettings shared-label migration - 2026-10-25
 
 WovenSettings now uses the shared bounded WovenUI Label primitive for its title

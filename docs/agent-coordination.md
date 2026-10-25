@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded keyboard and pointer widget actions (2026-10-25)
+
+Extended `libwoven::ui` so Buttons expose an enabled-aware keyboard/accessibility
+activation path and TextFields acquire or clear focus through bounded pointer
+coordinates. The full libwoven host suite passed 128 tests, including the new
+interaction coverage; Settings target warning-denying Clippy and formatting
+checks passed. This improves the SDK interaction boundary but does not claim
+complete focus traversal or full application migration.
+
 ## Codex - WovenSettings adopts shared Label (2026-10-25)
 
 Migrated the Settings title and Identity heading from direct canvas text calls
