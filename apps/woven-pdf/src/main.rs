@@ -27,6 +27,12 @@ fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--gui") {
         gui::run(args.get(2), args.get(3));
     }
+    // Stage 20.2's experimental desktop client slot uses this argument.
+    // Unlike normal --gui, its fourth argument is a fixture identifier,
+    // not a PDF path. Never attempt to open it as a document.
+    if args.get(1) == Some(b"--desktop-client") {
+        gui::run(args.get(2), None);
+    }
     let raw = [args.get(1), args.get(2)];
     let status = match (raw[0], raw[1]) {
         (None, None) => run(Command::Help),
