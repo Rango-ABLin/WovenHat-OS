@@ -1633,6 +1633,10 @@ impl Desktop {
         self.render_desktop_background(canvas);
         if self.three_d {
             self.render_taskbar_3d(canvas);
+            // Keep the desktop's depth and perspective while presenting the
+            // taskbar as a crisp foreground surface. Projecting a 24px bar
+            // compresses the bitmap font enough to make labels unreadable.
+            self.paint_taskbar_content(canvas);
         } else {
             self.paint_taskbar_content(canvas);
         }

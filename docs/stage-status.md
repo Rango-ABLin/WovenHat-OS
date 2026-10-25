@@ -10358,3 +10358,14 @@ wordmark, and an integer-rendered segmented circular spinner. The spinner
 advances at each boot-loader milestone while verbose diagnostics remain on
 serial. Plain and `system-apps` warning-denying kernel Clippy passed; this is
 still a QEMU/UI qualification change, not native graphics certification.
+
+## Login and taskbar readability pass (2026-10-25)
+
+The hardware-demo QEMU path was verified with the real sign-in screen and
+`ada` PIN authentication. The production system-apps path remains account-file
+driven: it cannot show a usable login until `/etc/wovenhat/accounts` is
+provisioned. The taskbar now keeps the desktop 3D background but renders its
+foreground bar flat and crisp, restoring readable Woven, account, workspace,
+and clock labels. Evidence was captured in
+`target/hardware-demo-login-final.png` and
+`target/hardware-demo-desktop-final2.png`.
