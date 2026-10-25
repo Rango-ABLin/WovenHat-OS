@@ -21,6 +21,7 @@ from pathlib import Path
 APP = 'wovenhat-pdf'
 MARKER = '[S16.1] out-of-kernel application: PASSED'
 APP_MARKER = '[WOVENPDF] process: STARTED'
+SHELL_REQUEST_MARKER = '[WOVENPDF] shell: OPEN_REQUEST_SENT'
 # This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
 
 def app_build_env(app_dir):
@@ -47,7 +48,11 @@ def main():
     parser.add_argument('--timeout', type=float, default=300)
     parser.add_argument('--generic-only', action='store_true',
                         help='diagnose generic kernel stage without claiming WovenPDF execution')
+    parser.add_argument('--require-shell-request', action='store_true',
+                        help='require the GUI process to send its WOPN window-opening request')
     args = parser.parse_args()
+    if args.generic_only and args.require_shell_request:
+        parser.error('--generic-only and --require-shell-request are incompatible')
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -146,8 +151,11 @@ def main():
         return 1
     if not args.generic_only:
         print(f'WovenPDF process marker: PRESENT ({args.cpus} CPU).')
+    if args.require_shell_request and SHELL_REQUEST_MARKER not in text:
+        print('WovenPDF WovenShell window-open request is absent: FAIL.', file=sys.stderr)
+        return 1
     print('WARNING: This stage may execute its built-in hello fixture instead of WovenPDF.')
-    print('No WovenPDF execution, --gui, WovenShell IPC, PDF drawing or navigation is certified.')
+    print('This does not certify WovenShell acceptance, visible pixels, PDF drawing or navigation.')
     return 0
 
 
