@@ -1364,8 +1364,8 @@ mod tests {
         let mut checkbox = Checkbox::new(Frame::new(1, 10, 28, 10), "B");
         checkbox.checked = true;
         checkbox.draw(&mut canvas, theme);
-        assert!(pixels.iter().any(|pixel| *pixel == theme.focus));
-        assert!(pixels.iter().any(|pixel| *pixel == theme.accent));
+        assert!(pixels.contains(&theme.focus));
+        assert!(pixels.contains(&theme.accent));
     }
 
     #[test]
@@ -1394,8 +1394,8 @@ mod tests {
         let mut pixels = [0; 32 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
         list.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+        assert!(pixels.contains(&Theme::DARK.accent));
+        assert!(pixels.contains(&Theme::DARK.focus));
     }
 
     #[test]
@@ -1420,8 +1420,8 @@ mod tests {
         let mut pixels = [0; 32 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
         table.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+        assert!(pixels.contains(&Theme::DARK.accent));
+        assert!(pixels.contains(&Theme::DARK.focus));
     }
 
     #[test]
@@ -1451,8 +1451,8 @@ mod tests {
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
         tree.focused = true;
         tree.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+        assert!(pixels.contains(&Theme::DARK.accent));
+        assert!(pixels.contains(&Theme::DARK.focus));
     }
 
     #[test]
@@ -1478,7 +1478,7 @@ mod tests {
         let mut pixels = [0; 128 * 80];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 128, 80).unwrap();
         dialog.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(pixels.contains(&Theme::DARK.accent));
         assert!(dialog.activate_cancel());
         assert!(!dialog.open);
         assert!(!dialog.activate_accept());
@@ -1496,8 +1496,8 @@ mod tests {
         let mut pixels = [0; 48 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 48, 32).unwrap();
         navigation.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+        assert!(pixels.contains(&Theme::DARK.accent));
+        assert!(pixels.contains(&Theme::DARK.focus));
     }
 
     #[test]
@@ -1552,7 +1552,7 @@ mod tests {
         let mut pixels = [0; 40 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 40, 32).unwrap();
         view.draw(&mut canvas, Theme::DARK);
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
-        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.surface));
+        assert!(pixels.contains(&Theme::DARK.focus));
+        assert!(pixels.contains(&Theme::DARK.surface));
     }
 }

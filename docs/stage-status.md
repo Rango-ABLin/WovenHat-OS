@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics roadmap Stage 05 typography increment - 2026-10-25
+
+Added the bounded `libwoven::graphics::FontFallback` provider and glyph
+decision cache, with priority selection and fail-closed metrics validation.
+The 147-test libwoven suite, warning-denying package Clippy, formatting, and
+diff checks pass. Stage 05 remains partial pending a licensed guest font
+fixture, high-DPI multilingual QEMU evidence, and complete bidi/script and
+input integration. See `docs/graphics/stage-05-typography-evidence.md`.
+
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 
 Stage 04 is accepted for software renderer scope. Bounded raster/vector,

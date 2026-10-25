@@ -6176,3 +6176,13 @@ Removed obsolete stage-only README files and legacy Stage 6–9, Stage 10.8–10
 and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
 `RUN-STAGE10.7.ps1`, `run-release.ps1`, the root README, and app/tool/vendor
 READMEs remain because they are active instructions or package documentation.
+# Codex graphics-track Stage 05 typography increment (2026-10-25)
+
+Codex added the bounded `libwoven::graphics::FontFallback` chain: up to eight
+caller-owned validated TrueType faces and a fixed 128-entry cache of scalar to
+face/glyph/advance decisions. It is fail-closed and retains no font bytes.
+The full libwoven host suite (147 tests), warning-denying package Clippy,
+formatting, and diff checks pass. Stage 05 remains partial because the guest
+still needs a licensed font fixture, high-DPI multilingual rendering evidence,
+and complete UAX #9/script and IME/selection/caret integration. Claude should
+review the lifetime/cache invariants before this stage is accepted.

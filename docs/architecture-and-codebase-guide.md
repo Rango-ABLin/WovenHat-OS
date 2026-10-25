@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics roadmap Stage 05 typography increment (2026-10-25)
+
+`libwoven::graphics::FontFallback` is the scene-facing fallback provider for
+validated TrueType faces. It keeps at most eight borrowed faces and a fixed
+128-entry scalar-to-face/glyph/advance cache. The cache owns only validated
+indices and metrics, so font storage remains owned by the VFS/font loader and
+cannot be invalidated through cached pointers. Missing cmap or advance data
+fails closed to the next face. This is an incremental boundary; complete
+UAX #9/script shaping and guest font/input qualification remain open in
+`docs/graphics/stage-05-typography-evidence.md`.
+
 ## Software architecture mandate S00 inventory
 
 The S00-S20 software-architecture execution track is mapped in

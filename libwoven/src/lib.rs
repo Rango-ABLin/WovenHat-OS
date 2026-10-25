@@ -597,6 +597,110 @@ pub mod graphics {
         pub ppem: Option<u16>,
     }
 
+    /// Maximum number of faces in a bounded fallback chain.  The chain is
+    /// caller-owned so font bytes can remain in the VFS/cache that loaded
+    /// them; this type never copies or retains font data.
+    pub const MAX_FALLBACK_FONTS: usize = 8;
+    /// Maximum number of character-to-face decisions retained by one chain.
+    pub const MAX_GLYPH_CACHE: usize = 128;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct GlyphCacheEntry {
+        character: char,
+        face: u8,
+        glyph_id: u16,
+        advance: u16,
+    }
+
+    /// A bounded, deterministic font fallback chain.  Face selection is
+    /// fail-closed: a face is eligible only when it maps the scalar and has a
+    /// usable advance.  The cache stores only validated IDs and metrics, so a
+    /// later font-byte eviction cannot leave an unsafe pointer behind.
+    pub struct FontFallback<'a> {
+        faces: [Option<&'a TrueTypeFace<'a>>; MAX_FALLBACK_FONTS],
+        face_count: usize,
+        cache: [Option<GlyphCacheEntry>; MAX_GLYPH_CACHE],
+        next_cache: usize,
+    }
+
+    impl<'a> FontFallback<'a> {
+        pub const fn new() -> Self {
+            Self {
+                faces: [None; MAX_FALLBACK_FONTS],
+                face_count: 0,
+                cache: [None; MAX_GLYPH_CACHE],
+                next_cache: 0,
+            }
+        }
+
+        /// Add a face in priority order.  Additional faces are rejected
+        /// without changing the existing chain.
+        pub fn push(&mut self, face: &'a TrueTypeFace<'a>) -> bool {
+            if self.face_count >= MAX_FALLBACK_FONTS {
+                return false;
+            }
+            self.faces[self.face_count] = Some(face);
+            self.face_count += 1;
+            true
+        }
+
+        pub const fn len(&self) -> usize {
+            self.face_count
+        }
+
+        pub const fn is_empty(&self) -> bool {
+            self.face_count == 0
+        }
+
+        /// Resolve a scalar to its highest-priority face and validated glyph
+        /// metrics.  Results are cached in a fixed-size round-robin table.
+        pub fn resolve(&mut self, character: char) -> Option<(usize, u16, u16)> {
+            if let Some(entry) = self
+                .cache
+                .iter()
+                .flatten()
+                .find(|entry| entry.character == character)
+            {
+                return Some((usize::from(entry.face), entry.glyph_id, entry.advance));
+            }
+            for (index, face) in self.faces[..self.face_count].iter().flatten().enumerate() {
+                let Some(glyph_id) = face.glyph_index(character) else {
+                    continue;
+                };
+                let Some(advance) = face.advance_width(character) else {
+                    continue;
+                };
+                let entry = GlyphCacheEntry {
+                    character,
+                    face: u8::try_from(index).ok()?,
+                    glyph_id,
+                    advance,
+                };
+                self.cache[self.next_cache] = Some(entry);
+                self.next_cache = (self.next_cache + 1) % MAX_GLYPH_CACHE;
+                return Some((index, glyph_id, advance));
+            }
+            None
+        }
+
+        pub fn face(&self, index: usize) -> Option<&'a TrueTypeFace<'a>> {
+            (index < self.face_count)
+                .then(|| self.faces[index])
+                .flatten()
+        }
+
+        pub fn clear_cache(&mut self) {
+            self.cache = [None; MAX_GLYPH_CACHE];
+            self.next_cache = 0;
+        }
+    }
+
+    impl Default for FontFallback<'_> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum TextDirection {
         Ltr,
@@ -14620,6 +14724,18 @@ mod tests {
             TrueTypeFace::from_bytes(b"not-a-font"),
             Err(TrueTypeError::TooSmall)
         ));
+
+        let mut fallback = crate::graphics::FontFallback::new();
+        assert!(fallback.is_empty());
+        assert!(fallback.push(&face));
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+        // The second lookup is served from the bounded cache and remains
+        // stable even after a failed fallback search.
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+        assert_eq!(fallback.resolve('B'), None);
+        fallback.clear_cache();
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
     }
 
     #[test]
