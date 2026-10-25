@@ -7,7 +7,7 @@ import cairosvg
 from PIL import Image
 
 SIZES=(16,24,32,48,64)
-DENIED={"script","foreignObject","image","use","animate","animateTransform","set","filter"}
+DENIED={"script","foreignObject","image","use","animate","animateTransform","set","filter","style","textPath","a"}
 def validate_svg(raw):
     if len(raw)>65536 or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():raise ValueError("SVG size or entity policy")
     root=ET.fromstring(raw)
@@ -16,9 +16,10 @@ def validate_svg(raw):
     for node in root.iter():
         name=node.tag.rsplit("}",1)[-1]
         if name in DENIED:raise ValueError("forbidden element")
+        if node.text and ("url(" in node.text.lower() or "@import" in node.text.lower()):raise ValueError("external style resource")
         for key,value in node.attrib.items():
             attr=key.rsplit("}",1)[-1].lower()
-            if attr.startswith("on") or attr in ("href","src") or "url(" in value.lower() or "@import" in value.lower():raise ValueError("external resource")
+            if attr.startswith("on") or attr in ("href","src") or "url(" in value.lower() or "@import" in value.lower() or "data:" in value.lower():raise ValueError("external resource")
 def build(source,dest,sizes=SIZES):
     source=Path(source);dest=Path(dest);dest.mkdir(parents=True,exist_ok=True);entries=[]
     for path in sorted(source.glob("*.svg")):
