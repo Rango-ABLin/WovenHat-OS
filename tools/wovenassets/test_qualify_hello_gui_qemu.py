@@ -1,4 +1,5 @@
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from qualify_hello_gui_qemu import run
@@ -58,6 +59,24 @@ class EndToEndHarnessTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             run(self.root, self.manifest, "hello-gui", self.output, capturer=failed)
         self.assertFalse((self.output / "hello-gui.png").exists())
+        self.assertFalse((self.output / "visual-qualification.json").exists())
+
+    def test_non_boolean_result_is_rejected(self):
+        def capture(root, output, qemu, firmware, timeout):
+            output.write_bytes(b"fixture")
+            return {"capture": str(output)}
+        def invalid_result(manifest, identifier, image):
+            return {"pass": "success"}
+        with self.assertRaisesRegex(ValueError, "explicit boolean"):
+            run(self.root, self.manifest, "hello-gui", self.output,
+                capturer=capture, qualifier=invalid_result)
+        self.assertFalse((self.output / "visual-qualification.json").exists())
+
+    def test_timeout_does_not_leave_success_report(self):
+        def timeout(*args):
+            raise subprocess.TimeoutExpired(["qemu-system-x86_64"], 90)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run(self.root, self.manifest, "hello-gui", self.output, capturer=timeout)
         self.assertFalse((self.output / "visual-qualification.json").exists())
 
 
