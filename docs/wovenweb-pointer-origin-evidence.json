@@ -270,11 +270,43 @@
   },
   "hosted_sdk": {
     "workflow": ".github/workflows/wovenweb-sdk.yml",
-    "status": "awaiting publication and execution"
+    "status": "explicit test-guard follow-up awaiting fresh hosted execution",
+    "expected_unit_tests": 179
   },
   "source_sha256": {
     "libwoven/src/heap_allocator.rs": "cb13ed54a018e977c376cc1ac3a8eb8e1a1cd8014cbf5322bca7119bb226bd27"
   },
-  "codeql": "previous high alerts remain open; no clean scan claimed",
-  "production_vm_integration": "not implemented"
+  "codeql": {
+    "revision": "b72a26d941d36d57b5cb584fb7b5c9c16d983b63",
+    "result": "failure; five high invalid-pointer findings",
+    "check_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121217055543",
+    "reported_lines": [
+      252,
+      285,
+      287,
+      303,
+      350
+    ],
+    "follow_up": "explicit null-guard helper and negative test; fresh scan required, no suppression or dismissal",
+    "query_source": "https://github.com/github/codeql/blob/main/rust/ql/lib/codeql/rust/security/Barriers.qll"
+  },
+  "production_vm_integration": "not implemented",
+  "hosted_sdk_previous": {
+    "revision": "b72a26d941d36d57b5cb584fb7b5c9c16d983b63",
+    "job_id": 121216854403,
+    "conclusion": "success",
+    "url": "https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40209282675/job/121216854403",
+    "unit_tests": 178,
+    "compile_fail_tests": 3,
+    "full_buffer_test": "full_backing_extent_preserves_origin_and_last_byte passed",
+    "clippy": "all features/all targets; -D warnings passed",
+    "artifact_url": "https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40209282675/artifacts/12604527881",
+    "artifact_zip_sha256": "368f2e83de8da49ec3415ca10f0eb7e9d2d57f67b8b3207a986d36c6d4187be3"
+  },
+  "guard_followup": {
+    "production_prefix_unchanged": true,
+    "production_prefix_sha256_lf": "f59d549b82c59d9e998792a926c0735042d4f690a6bd889e9ea4b293d21e07bb",
+    "test_source_sha256": "1e9640de5224b25cf7b9f09793312e3b2b2c390a706c678abbd81321a0fe8810",
+    "local_clippy": "passed all features/all targets with -D warnings"
+  }
 }

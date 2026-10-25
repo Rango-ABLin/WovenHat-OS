@@ -177,6 +177,22 @@ mod tests {
     use super::*;
     use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicUsize};
     use std::{alloc::System, sync::Arc, thread};
+
+    // Keep the failed-allocation branch explicit before any unsafe payload
+    // access. This checks only non-nullness; VM ownership/layout still come
+    // from RuntimeHeap and each test's GlobalAlloc contract.
+    fn require_test_allocation(pointer: *mut u8) -> *mut u8 {
+        if pointer.is_null() {
+            panic!("test allocation failed");
+        } else {
+            pointer
+        }
+    }
+    #[test]
+    #[should_panic(expected = "test allocation failed")]
+    fn failed_test_allocation_is_rejected_before_payload_access() {
+        let _ = require_test_allocation(core::ptr::null_mut());
+    }
     struct HostVm {
         base: AtomicPtr<u8>,
         slots: AtomicU16,
@@ -187,8 +203,7 @@ mod tests {
         fn new(limit: usize) -> Self {
             let spec = Layout::from_size_align(REGION_BYTES * MAX_REGIONS, REGION_BYTES).unwrap();
             // SAFETY: System owns a suitably aligned test buffer until HostVm Drop.
-            let pointer = unsafe { System.alloc_zeroed(spec) };
-            assert!(!pointer.is_null());
+            let pointer = require_test_allocation(unsafe { System.alloc_zeroed(spec) });
             Self {
                 base: AtomicPtr::new(pointer),
                 slots: AtomicU16::new(0),
@@ -247,11 +262,9 @@ mod tests {
         let spec = Layout::from_size_align(4096, 256).unwrap();
         // SAFETY: test follows GlobalAlloc ownership/layout contracts exactly.
         unsafe {
-            let old = heap.alloc(spec);
-            assert!(!old.is_null());
+            let old = require_test_allocation(heap.alloc(spec));
             old.write_bytes(0xa5, 4096);
-            let large = heap.realloc(old, spec, 180000);
-            assert!(!large.is_null());
+            let large = require_test_allocation(heap.realloc(old, spec, 180000));
             assert_eq!(large as usize % 256, 0);
             assert!(
                 core::slice::from_raw_parts(large, 4096)
@@ -259,8 +272,7 @@ mod tests {
                     .all(|b| *b == 0xa5)
             );
             heap.dealloc(large, Layout::from_size_align(180000, 256).unwrap());
-            let zeroed = heap.alloc_zeroed(spec);
-            assert!(!zeroed.is_null());
+            let zeroed = require_test_allocation(heap.alloc_zeroed(spec));
             assert!(
                 core::slice::from_raw_parts(zeroed, 4096)
                     .iter()
@@ -279,8 +291,7 @@ mod tests {
         // SAFETY: this is one live allocation within the owned System buffer.
         // First/last-byte access verifies the resolver's complete accepted span.
         unsafe {
-            let pointer = heap.alloc(spec);
-            assert!(!pointer.is_null());
+            let pointer = require_test_allocation(heap.alloc(spec));
             assert_eq!(pointer.addr(), heap.vm.base.load(Ordering::Relaxed).addr());
             pointer.write(0x31);
             pointer.add(size - 1).write(0x73);
@@ -298,8 +309,7 @@ mod tests {
         let small = Layout::from_size_align(32, 16).unwrap();
         // SAFETY: the kept allocation remains owned throughout failed growth.
         unsafe {
-            let kept = heap.alloc(small);
-            assert!(!kept.is_null());
+            let kept = require_test_allocation(heap.alloc(small));
             kept.write_bytes(0x55, 32);
             assert!(
                 heap.alloc(Layout::from_size_align(3 * REGION_BYTES, 16).unwrap())
@@ -321,8 +331,7 @@ mod tests {
         let spec = Layout::from_size_align(2 * REGION_BYTES, 16).unwrap();
         // SAFETY: the single live allocation is released with its original layout.
         unsafe {
-            let pointer = heap.alloc(spec);
-            assert!(!pointer.is_null());
+            let pointer = require_test_allocation(heap.alloc(spec));
             heap.vm.refuse_unmap.store(true, Ordering::Relaxed);
             heap.dealloc(pointer, spec);
             assert_eq!(heap.stats().quarantined_regions, 2);
@@ -345,8 +354,7 @@ mod tests {
                     let spec = Layout::from_size_align(128 + id * 32, 64).unwrap();
                     // SAFETY: each worker owns its returned live span until free.
                     unsafe {
-                        let pointer = heap.alloc(spec);
-                        assert!(!pointer.is_null());
+                        let pointer = require_test_allocation(heap.alloc(spec));
                         pointer.write_bytes(id as u8 + 1, spec.size());
                         thread::yield_now();
                         assert!(

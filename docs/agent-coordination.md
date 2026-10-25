@@ -6371,3 +6371,34 @@ This does not integrate production VM leases or qualify a complete browser.
 The focused SDK workflow also runs on path-filtered branch pushes, so its host
 validation does not depend solely on PR event admission. No test or security
 check is skipped. Await its result before claiming the new host regression passed.
+
+Hosted SDK result: b72a26d941d36d57b5cb584fb7b5c9c16d983b63 passed 178 SDK unit
+tests, three compile-fail ownership checks and all-feature/all-target Clippy.
+The full_backing_extent_preserves_origin_and_last_byte test explicitly passed.
+Job 121216854403 / run 40209282675; compact proof is retained at
+audit-artifacts/wovenweb-pointer-1792943022339/hosted-sdk.json. PR body updated.
+Holding this documentation-only update locally while Rust CodeQL on b72a26d is
+still running, to avoid needlessly replacing its tested head with another docs
+commit. The neutral missing-configuration summary is not a clean security scan.
+Next collect that scan, update pointer evidence/docs, and proceed with durable
+production VM registry/pager/lifecycle integration. Do not re-run policy-blocked
+Windows executables or the browser URL-verification path.
+
+## Explicit allocator test guards (2026-10-25)
+
+CodeQL on b72a26d completed with five high invalid-pointer annotations in host
+heap tests, including the added boundary writes. Hosted tests/Clippy passed.
+Official query source identifies core::ptr::null_mut as a pointer-invalidation
+source and an explicit is_null() false branch as a flow barrier. Current tests
+use assertion macros; expressing identical failure behavior with explicit if
+branches before writes, without removing any payload/ownership assertions or
+adding suppressions. This is an analyzer-model hypothesis pending a fresh scan,
+not dismissal of the findings. Full analyzer paths remain unavailable.
+
+Guard follow-up keeps a shared explicit if/else null rejection helper before
+payload accesses and adds a should-panic negative test. Existing payload checks,
+loop counts, layouts, ownership and OOM assertions remain intact. Production
+allocator prefix was compared byte-for-byte after LF normalization and is
+unchanged. Local all-feature/all-target SDK Clippy passes. Hosted unit count is
+expected to become 179; prior b72a26d hosted 178+3/Clippy pass is preserved, while
+its completed security scan has five high findings. Await new tests/scan.
