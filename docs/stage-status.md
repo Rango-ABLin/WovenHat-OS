@@ -1,5 +1,10 @@
 # Stage status
 
+## Stage 13.20 power-off matrix - 2026-10-25
+
+The ACPI PM1/_S5 power-off gate passes on 1/2/4 CPUs. Evidence is preserved
+under `audit-artifacts/stage13.20-poweroff-{1,2,4}cpu-*`.
+
 ## Graphics Stage 20 feature-lint sweep - 2026-10-25
 
 With the built hello-gui and woven-shell images supplied through the required

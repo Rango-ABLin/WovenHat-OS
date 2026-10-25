@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 13.20 power-off matrix (2026-10-25)
+
+ACPI PM1/_S5 power-off passed on 1/2/4 CPUs. Evidence is preserved under
+`audit-artifacts/stage13.20-poweroff-{1,2,4}cpu-*`; no source changes were
+needed.
+
 ## Codex - Stage 20 image-wired feature lint sweep (2026-10-25)
 
 The all-feature sweep was rerun with the built hello-gui and woven-shell image
