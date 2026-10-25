@@ -3,6 +3,7 @@
 //! This is NOT a general PDF renderer: no compression, encryption, fonts,
 //! page-tree traversal, object streams, or images are supported yet.
 
+pub mod content;
 pub mod filters;
 pub mod lexer;
 pub mod objects;
