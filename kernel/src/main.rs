@@ -65,10 +65,10 @@ mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
-#[cfg(not(feature = "system-apps"))]
+#[cfg(any(test, feature = "qemu-test"))]
 mod graphics;
 pub mod graphics_abi;
-#[cfg(not(feature = "system-apps"))]
+#[cfg(any(test, feature = "qemu-test"))]
 mod gui;
 mod hal;
 #[cfg(any(
@@ -2217,7 +2217,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("KEYBOARD DECODER: FAILED");
         halt();
     }
-    #[cfg(not(feature = "system-apps"))]
+    #[cfg(any(test, feature = "qemu-test"))]
     {
         if gui::self_test() {
             console.println("GUI INPUT: OK");

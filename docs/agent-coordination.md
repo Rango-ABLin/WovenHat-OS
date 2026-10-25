@@ -1,5 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - production desktop fallback cleanup (2026-10-25)
+
+The interactive QEMU run exposed the old no-`system-apps` fallback: a kernel
+diagnostic shell with an F1 desktop switch and placeholder `ACTIVATE`/`SECOND`
+buttons. The fallback controls and F1 switch are now removed. Legacy GUI
+self-test/compositor helpers are compiled only for tests/QEMU-test builds, so
+plain and `system-apps` production builds pass warning-denying Clippy. The
+production WovenShell starts in its 3D presentation, which still uses the
+bounded 2D painters for texture generation. Interactive `system-apps` QEMU
+boot reached the real 3D desktop and F1 opened the shell launcher; no
+placeholder controls appeared. Evidence is under `target/system-apps-desktop.*`.
+
+
 ## Codex - software architecture mandate S02 runtime contract (2026-10-24)
 
 Added `tools/runtime-fixtures/c-abi.c`, a freestanding C entry/exit fixture,

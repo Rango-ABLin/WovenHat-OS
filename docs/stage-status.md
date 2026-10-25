@@ -10329,3 +10329,13 @@ S02 implementation has started with a bounded freestanding C ABI contract in
 host reported no target-qualified ELF C compiler; therefore C ELF execution,
 loader qualification, libc coverage, destructors, and shared-library
 compatibility remain open. The checkpoint is `IMPLEMENTING`, not accepted.
+
+## Production desktop fallback cleanup (2026-10-25)
+
+Interactive QEMU reproduced and then removed the obsolete diagnostic fallback
+desktop. Normal `system-apps` boots now start WovenShell directly; the kernel
+fallback no longer exposes an F1 desktop switch or placeholder controls. The
+WovenShell production default is 3D, with its 2D painters retained as the
+texture/composition source for the depth-tested renderer. Plain and
+`system-apps` kernel warning-denying Clippy passed. A 1-vCPU interactive
+`system-apps` boot reached the real desktop and its F1 launcher.
