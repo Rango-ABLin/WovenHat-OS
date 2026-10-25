@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI Menu and Tree components (2026-10-25)
+
+Added fixed-capacity Menu and hierarchical Tree controls to `libwoven::ui`.
+Menu activation and pointer selection fail closed when disabled or out of
+bounds; Tree insertion rejects invalid parent references and supports bounded
+selection, expansion toggling, and depth-limited rendering. The full libwoven
+host suite passed 134 tests, Settings target warning-denying Clippy passed,
+and formatting/diff checks passed. Dialog, Tabs, Navigation, and broader
+application migration remain open.
+
 ## Codex - bounded WovenUI Table component (2026-10-25)
 
 Added a fixed-capacity Table to `libwoven::ui` with borrowed cell text,

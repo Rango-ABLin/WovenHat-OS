@@ -1,5 +1,15 @@
 # Stage status
 
+## WovenUI bounded Menu and Tree components - 2026-10-25
+
+Added fixed-capacity Menu and hierarchical Tree controls to `libwoven::ui`.
+Menu activation and pointer selection fail closed when disabled or outside the
+frame; Tree parent validation rejects invalid references and rendering is
+depth-limited. The full libwoven host suite passed 134 tests, Settings
+warning-denying Clippy passed, and formatting/diff checks passed. Dialog,
+Tabs, Navigation, and broader application migration remain open in this
+stage.
+
 ## WovenUI bounded Table component - 2026-10-25
 
 Added a fixed-capacity Table to `libwoven::ui` with borrowed cells, bounded

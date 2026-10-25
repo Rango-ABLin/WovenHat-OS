@@ -568,6 +568,250 @@ impl<'a, const ROWS: usize, const COLS: usize> Table<'a, ROWS, COLS> {
     }
 }
 
+/// A fixed-capacity menu with bounded selection and activation.
+pub struct Menu<'a, const N: usize> {
+    items: [Option<&'a str>; N],
+    len: usize,
+    pub frame: Frame,
+    pub selected: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const N: usize> Menu<'a, N> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            items: [None; N],
+            len: 0,
+            frame,
+            selected: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push(&mut self, label: &'a str) -> bool {
+        if self.len == N {
+            return false;
+        }
+        self.items[self.len] = Some(label);
+        self.len += 1;
+        true
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.len == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        }
+        .min(self.len - 1);
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn activate(&self) -> Option<&'a str> {
+        if self.enabled {
+            self.items.get(self.selected).copied().flatten()
+        } else {
+            None
+        }
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> Option<&'a str> {
+        if !self.enabled || pressed || self.len == 0 {
+            return None;
+        }
+        if x < self.frame.x
+            || y < self.frame.y
+            || x >= self.frame.x.saturating_add(self.frame.width.max(0))
+            || y >= self.frame.y.saturating_add(self.frame.height.max(0))
+        {
+            return None;
+        }
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        let row = ((y - self.frame.y) / row_height) as usize;
+        if row >= self.len {
+            return None;
+        }
+        self.selected = row;
+        self.activate()
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        for index in 0..self.len {
+            let y = self.frame.y + index as i32 * row_height;
+            if y >= self.frame.y.saturating_add(self.frame.height.max(0)) {
+                break;
+            }
+            if index == self.selected {
+                canvas.fill_rect(
+                    self.frame.x,
+                    y,
+                    self.frame.width.max(0) as usize,
+                    row_height as usize,
+                    theme.accent,
+                );
+            }
+            if let Some(label) = self.items[index] {
+                canvas.draw_text(self.frame.x + 4, y + 2, label, theme.text);
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TreeNode<'a> {
+    label: &'a str,
+    parent: Option<usize>,
+    expanded: bool,
+}
+
+/// A bounded tree model. Parent links must refer to an earlier node.
+pub struct Tree<'a, const N: usize> {
+    nodes: [Option<TreeNode<'a>>; N],
+    len: usize,
+    pub frame: Frame,
+    pub selected: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const N: usize> Tree<'a, N> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            nodes: [None; N],
+            len: 0,
+            frame,
+            selected: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push(&mut self, label: &'a str, parent: Option<usize>) -> bool {
+        if self.len == N || parent.is_some_and(|index| index >= self.len) {
+            return false;
+        }
+        self.nodes[self.len] = Some(TreeNode {
+            label,
+            parent,
+            expanded: true,
+        });
+        self.len += 1;
+        true
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn toggle_selected(&mut self) -> bool {
+        if !self.enabled || self.selected >= self.len {
+            return false;
+        }
+        if let Some(node) = &mut self.nodes[self.selected] {
+            node.expanded = !node.expanded;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.len == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        }
+        .min(self.len - 1);
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        for index in 0..self.len {
+            let y = self.frame.y + index as i32 * row_height;
+            if y >= self.frame.y.saturating_add(self.frame.height.max(0)) {
+                break;
+            }
+            if index == self.selected {
+                canvas.fill_rect(
+                    self.frame.x,
+                    y,
+                    self.frame.width.max(0) as usize,
+                    row_height as usize,
+                    theme.accent,
+                );
+            }
+            if let Some(node) = self.nodes[index] {
+                let mut depth = 0usize;
+                let mut parent = node.parent;
+                while let Some(index) = parent {
+                    depth = depth.saturating_add(1);
+                    parent = self
+                        .nodes
+                        .get(index)
+                        .copied()
+                        .flatten()
+                        .and_then(|item| item.parent);
+                    if depth >= 16 {
+                        break;
+                    }
+                }
+                canvas.draw_text(
+                    self.frame.x + 4 + depth as i32 * 8,
+                    y + 2,
+                    node.label,
+                    theme.text,
+                );
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -591,7 +835,9 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, Checkbox, Label, ListBox, Table, TextField, Theme, stack_vertical};
+    use super::{
+        Button, Checkbox, Label, ListBox, Menu, Table, TextField, Theme, Tree, stack_vertical,
+    };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
     #[test]
@@ -711,6 +957,37 @@ mod tests {
         let mut pixels = [0; 32 * 32];
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
         table.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+    }
+
+    #[test]
+    fn menu_is_capacity_bounded_and_activation_is_fail_closed() {
+        let mut menu = Menu::<2>::new(Frame::new(0, 0, 80, 32));
+        assert!(menu.push("Open"));
+        assert!(menu.push("Close"));
+        assert!(!menu.push("Overflow"));
+        assert_eq!(menu.activate(), Some("Open"));
+        assert!(menu.move_selection(1));
+        assert_eq!(menu.activate(), Some("Close"));
+        menu.enabled = false;
+        assert_eq!(menu.activate(), None);
+        assert_eq!(menu.pointer(4, 2, false), None);
+    }
+
+    #[test]
+    fn tree_rejects_invalid_parents_and_toggles_nodes() {
+        let mut tree = Tree::<2>::new(Frame::new(0, 0, 80, 32));
+        assert!(tree.push("Root", None));
+        assert!(tree.push("Child", Some(0)));
+        assert!(!tree.push("Bad", Some(9)));
+        assert_eq!(tree.len(), 2);
+        assert!(tree.toggle_selected());
+        assert!(tree.move_selection(1));
+        let mut pixels = [0; 32 * 32];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
+        tree.focused = true;
+        tree.draw(&mut canvas, Theme::DARK);
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
     }
