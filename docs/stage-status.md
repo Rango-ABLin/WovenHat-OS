@@ -1,5 +1,14 @@
 # Stage status
 
+## Bounded multi-frame GIF playback emission - 2026-10-25
+
+`decode_gif_animation_stream` now emits every source frame through a
+synchronous `GifFrameSink`, using caller-owned canvas/previous buffers for
+composition. Frame delays, Background disposal, Previous disposal, local
+palettes, transparency, interlace mapping, and fail-closed malformed input
+handling are integrated. The 180-test libwoven suite and host/freestanding
+warning-denying Clippy pass.
+
 ## Bounded GIF playback state - 2026-10-25
 
 `GifPlayback` now provides caller-owned canvas/previous buffers, frame timing

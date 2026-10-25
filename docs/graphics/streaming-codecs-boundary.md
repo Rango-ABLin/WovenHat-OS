@@ -13,12 +13,13 @@ retains the encoded RIFF payload until final decode. GIF now has a true
 memory-bounded single-frame entry point: fixed palette/LZW tables and a
 1024-byte source request are retained while pixels stream to the caller.
 Interlaced row ordering is supported; animated GIF and multi-frame composition
-remain separate gates. `GifPlayback` now supplies the bounded caller-owned
-canvas/previous-frame state and disposal/timing contract for that integration.
+are now integrated through `decode_gif_animation_stream` and a synchronous
+`GifFrameSink`. `GifPlayback` supplies bounded caller-owned canvas/previous-
+frame state and disposal/timing metadata without buffering a frame sequence.
 
 Evidence:
 
-- Full `libwoven` host suite: 179 passed, including exhaustive truncation
+- Full `libwoven` host suite: 180 passed, including exhaustive truncation
   prefix checks for BMP/GIF and malformed/truncated WebP stream cases.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.

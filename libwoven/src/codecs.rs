@@ -414,9 +414,14 @@ impl<'a, S: ImageStream> GifStreamReader<'a, S> {
 
     fn finish_data(&mut self) -> Result<(), ImageError> {
         if !self.sub_ended {
+            let mut scratch = [0u8; 1024];
+            while self.sub_remaining != 0 {
+                let count = self.sub_remaining.min(scratch.len());
+                self.read_exact(&mut scratch[..count])?;
+                self.sub_remaining -= count;
+            }
             self.skip_subblocks()?;
             self.sub_ended = true;
-            self.sub_remaining = 0;
         }
         Ok(())
     }
@@ -579,6 +584,277 @@ impl<'a> GifPlayback<'a> {
                 let pixels = self.width * self.height;
                 self.canvas[..pixels].copy_from_slice(&self.previous[..pixels]);
             }
+        }
+    }
+}
+
+pub trait GifFrameSink {
+    fn present(&mut self, info: GifFrameInfo, pixels: &[u32]) -> Result<(), ImageError>;
+}
+
+#[derive(Clone, Copy)]
+struct GifFrameDescriptor {
+    info: GifFrameInfo,
+    image_packed: u8,
+}
+
+fn decode_gif_animation_frame<S: ImageStream>(
+    reader: &mut GifStreamReader<'_, S>,
+    logical_width: usize,
+    palette: &mut [u8; 768],
+    global_entries: usize,
+    canvas: &mut [u32],
+    transparent: Option<u8>,
+    descriptor: GifFrameDescriptor,
+) -> Result<(), ImageError> {
+    let info = descriptor.info;
+    let image_packed = descriptor.image_packed;
+    let width = usize::from(info.width);
+    let height = usize::from(info.height);
+    let local_entries = if image_packed & 0x80 != 0 {
+        2usize << usize::from(image_packed & 0x07)
+    } else {
+        0
+    };
+    let palette_entries = if local_entries != 0 {
+        reader.read_exact(&mut palette[..local_entries * 3])?;
+        local_entries
+    } else {
+        global_entries
+    };
+    if palette_entries == 0 {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let min_code_size = reader.read_u8()?;
+    if !(2..=8).contains(&min_code_size) {
+        return Err(ImageError::Malformed);
+    }
+    reader.sub_remaining = 0;
+    reader.sub_ended = false;
+    let clear = 1u16 << min_code_size;
+    let end = clear + 1;
+    let mut code_size = min_code_size + 1;
+    let mut next_code = end + 1;
+    let mut prefix = boxed_zeroed::<[u16; 4096]>();
+    let mut suffix = boxed_zeroed::<[u8; 4096]>();
+    let mut stack = boxed_zeroed::<[u8; 4096]>();
+    let mut old = None;
+    let mut first = 0u8;
+    let expected = width.checked_mul(height).ok_or(ImageError::Malformed)?;
+    let mut writer = GifPixelWriter {
+        output: canvas,
+        output_index: 0,
+        expected,
+        width,
+        screen_width: logical_width,
+        left: usize::from(info.left),
+        top: usize::from(info.top),
+        palette,
+        palette_entries,
+        transparent,
+        interlaced: image_packed & 0x40 != 0,
+    };
+    let mut saw_end = false;
+    {
+        let mut bits = GifStreamBits::new(reader);
+        while let Some(raw_code) = bits.read(code_size)? {
+            if raw_code == clear {
+                code_size = min_code_size + 1;
+                next_code = end + 1;
+                old = None;
+                continue;
+            }
+            if raw_code == end {
+                saw_end = true;
+                break;
+            }
+            if raw_code >= 4096 || raw_code > next_code {
+                return Err(ImageError::Malformed);
+            }
+            let mut code = raw_code;
+            let mut stack_len = 0usize;
+            if let Some(old_code) = old {
+                let in_code = raw_code;
+                if code == next_code {
+                    stack[stack_len] = first;
+                    stack_len += 1;
+                    code = old_code;
+                }
+                while code >= clear {
+                    let index = usize::from(code);
+                    if index >= next_code as usize || stack_len == stack.len() {
+                        return Err(ImageError::Malformed);
+                    }
+                    stack[stack_len] = suffix[index];
+                    stack_len += 1;
+                    code = prefix[index];
+                }
+                first = code as u8;
+                stack[stack_len] = first;
+                stack_len += 1;
+                while stack_len != 0 {
+                    writer.write(stack[stack_len - 1])?;
+                    stack_len -= 1;
+                }
+                if next_code < 4096 {
+                    prefix[next_code as usize] = old_code;
+                    suffix[next_code as usize] = first;
+                    next_code += 1;
+                    if next_code == (1u16 << code_size) && code_size < 12 {
+                        code_size += 1;
+                    }
+                }
+                old = Some(in_code);
+            } else {
+                if code >= clear {
+                    return Err(ImageError::Malformed);
+                }
+                first = code as u8;
+                writer.write(first)?;
+                old = Some(code);
+            }
+        }
+    }
+    reader.finish_data()?;
+    if !saw_end || writer.output_index != expected {
+        return Err(ImageError::Truncated);
+    }
+    Ok(())
+}
+
+/// Decode and present every GIF frame through a bounded caller-owned playback
+/// state. `sink` must consume each frame synchronously before the next frame
+/// is prepared; it receives the frame delay in centiseconds and disposal mode.
+pub fn decode_gif_animation_stream<S: ImageStream, K: GifFrameSink>(
+    stream: &mut S,
+    metadata: ImageMetadata,
+    canvas: &mut [u32],
+    previous: &mut [u32],
+    sink: &mut K,
+) -> Result<usize, ImageError> {
+    if metadata.format != ImageFormat::Gif {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let pixels = capacity(metadata, canvas)?;
+    if previous.len() < pixels {
+        return Err(ImageError::OutputTooSmall);
+    }
+    let mut reader = GifStreamReader::new(stream);
+    let mut header = [0u8; 13];
+    reader.read_exact(&mut header)?;
+    if !(header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a")) {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let logical_width = usize::from(u16::from_le_bytes([header[6], header[7]]));
+    let logical_height = usize::from(u16::from_le_bytes([header[8], header[9]]));
+    if logical_width != metadata.width as usize || logical_height != metadata.height as usize {
+        return Err(ImageError::Malformed);
+    }
+    let packed = header[10];
+    let background_index = usize::from(header[11]);
+    let mut palette = [0u8; 768];
+    let global_entries = if packed & 0x80 != 0 {
+        2usize << usize::from(packed & 0x07)
+    } else {
+        0
+    };
+    if global_entries != 0 {
+        reader.read_exact(&mut palette[..global_entries * 3])?;
+    }
+    let background = if background_index < global_entries {
+        let offset = background_index * 3;
+        u32::from_be_bytes([
+            palette[offset],
+            palette[offset + 1],
+            palette[offset + 2],
+            255,
+        ])
+    } else {
+        0
+    };
+    let mut playback = GifPlayback::new(
+        canvas,
+        previous,
+        metadata.width as u16,
+        metadata.height as u16,
+        background,
+    )?;
+    let mut pending_delay = 0u16;
+    let mut pending_disposal = GifDisposal::Keep;
+    let mut transparent = None;
+    let mut frame_count = 0usize;
+    loop {
+        match reader.read_u8()? {
+            0x3b if frame_count != 0 => return Ok(frame_count),
+            0x3b => return Err(ImageError::Truncated),
+            0x21 => {
+                let label = reader.read_u8()?;
+                if label == 0xf9 {
+                    if reader.read_u8()? != 4 {
+                        return Err(ImageError::Malformed);
+                    }
+                    let mut block = [0u8; 4];
+                    reader.read_exact(&mut block)?;
+                    pending_disposal = match (block[0] >> 2) & 0x07 {
+                        0 | 1 => GifDisposal::Keep,
+                        2 => GifDisposal::Background,
+                        3 => GifDisposal::Previous,
+                        _ => return Err(ImageError::Malformed),
+                    };
+                    pending_delay = u16::from_le_bytes([block[1], block[2]]);
+                    transparent = (block[0] & 1 != 0).then_some(block[3]);
+                    if reader.read_u8()? != 0 {
+                        return Err(ImageError::Malformed);
+                    }
+                } else {
+                    reader.skip_subblocks()?;
+                }
+            }
+            0x2c => {
+                let mut descriptor = [0u8; 9];
+                reader.read_exact(&mut descriptor)?;
+                let info = GifFrameInfo {
+                    left: u16::from_le_bytes([descriptor[0], descriptor[1]]),
+                    top: u16::from_le_bytes([descriptor[2], descriptor[3]]),
+                    width: u16::from_le_bytes([descriptor[4], descriptor[5]]),
+                    height: u16::from_le_bytes([descriptor[6], descriptor[7]]),
+                    delay_centiseconds: pending_delay,
+                    disposal: pending_disposal,
+                };
+                let right = usize::from(info.left)
+                    .checked_add(usize::from(info.width))
+                    .ok_or(ImageError::Malformed)?;
+                let bottom = usize::from(info.top)
+                    .checked_add(usize::from(info.height))
+                    .ok_or(ImageError::Malformed)?;
+                if info.width == 0
+                    || info.height == 0
+                    || right > logical_width
+                    || bottom > logical_height
+                {
+                    return Err(ImageError::Malformed);
+                }
+                playback.prepare_frame(info)?;
+                decode_gif_animation_frame(
+                    &mut reader,
+                    logical_width,
+                    &mut palette,
+                    global_entries,
+                    playback.pixels_mut(),
+                    transparent,
+                    GifFrameDescriptor {
+                        info,
+                        image_packed: descriptor[8],
+                    },
+                )?;
+                sink.present(info, playback.pixels())?;
+                playback.finish_frame(info);
+                frame_count += 1;
+                pending_delay = 0;
+                pending_disposal = GifDisposal::Keep;
+                transparent = None;
+            }
+            _ => return Err(ImageError::Malformed),
         }
     }
 }
@@ -942,8 +1218,9 @@ fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{
-        GifDisposal, GifFrameInfo, GifPlayback, ImageStream, StreamError, decode_bmp_rgba_stream,
-        decode_gif_rgba_stream, decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
+        GifDisposal, GifFrameInfo, GifFrameSink, GifPlayback, ImageError, ImageStream, StreamError,
+        decode_bmp_rgba_stream, decode_gif_animation_stream, decode_gif_rgba_stream,
+        decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
     };
     use crate::media::parse_image_header;
 
@@ -1192,6 +1469,58 @@ mod tests {
         };
         playback.prepare_frame(third).unwrap();
         assert_eq!(playback.pixels()[3], 0x00000011);
+    }
+
+    struct AnimationSink {
+        frames: usize,
+        delays: [u16; 2],
+        pixels: [u32; 2],
+    }
+
+    impl GifFrameSink for AnimationSink {
+        fn present(&mut self, info: GifFrameInfo, pixels: &[u32]) -> Result<(), ImageError> {
+            let slot = self.frames;
+            if slot >= self.delays.len() {
+                return Err(ImageError::OutputTooSmall);
+            }
+            self.delays[slot] = info.delay_centiseconds;
+            self.pixels[slot] = pixels[0];
+            self.frames += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn decodes_multiple_gif_frames_with_timing_and_disposal() {
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x21, 0xf9, 4, 8, 5, 0, 0, 0, 0x2c,
+            0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x4c, 1, 0, 0x3b,
+        ];
+        let metadata = parse_image_header(&gif).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &gif,
+            largest_request: 0,
+        };
+        let mut canvas = [0u32; 1];
+        let mut previous = [0u32; 1];
+        let mut sink = AnimationSink {
+            frames: 0,
+            delays: [0; 2],
+            pixels: [0; 2],
+        };
+        let count = decode_gif_animation_stream(
+            &mut stream,
+            metadata,
+            &mut canvas,
+            &mut previous,
+            &mut sink,
+        )
+        .unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(sink.frames, 2);
+        assert_eq!(sink.delays, [0, 5]);
+        assert_eq!(sink.pixels, [0x000000ff, 0xFFFFFFFF]);
     }
 
     #[test]

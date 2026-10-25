@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded multi-frame GIF playback emission (2026-10-25)
+
+Integrated the source-driven GIF parser with `GifFrameSink` and
+`GifPlayback`. Each frame is decoded directly onto caller-owned canvas state,
+presented synchronously with delay/disposal metadata, and disposed before the
+next frame. Multi-frame timing and Background/Previous behavior are covered
+by a two-frame fixture; no frame sequence is buffered.
+
 ## Codex - bounded GIF playback state (2026-10-25)
 
 Added caller-owned `GifPlayback`, `GifFrameInfo`, and `GifDisposal` contracts.
