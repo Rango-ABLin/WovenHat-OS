@@ -10,7 +10,7 @@ use wovenhat_pdf::objects::Reference;
 use wovenhat_pdf::paint::paint_text_preview;
 use wovenhat_pdf::streams::decoded_stream;
 use wovenhat_pdf::xref::{read_table, Entry};
-use wovenhat_pdf::{extract_plain_text, inspect, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES};
+use wovenhat_pdf::{extract_plain_text, inspect, MAX_TEXT_BYTES};
 
 const WIDTH: u32 = 480;
 const HEIGHT: u32 = 320;
@@ -46,15 +46,6 @@ struct Pixels(UnsafeCell<[u32; WIDTH_MAX * HEIGHT_MAX]>);
 unsafe impl Sync for Pixels {}
 static PIXELS: Pixels = Pixels(UnsafeCell::new([0; WIDTH_MAX * HEIGHT_MAX]));
 
-struct PdfBytes(UnsafeCell<[u8; MAX_DOCUMENT_BYTES]>);
-// SAFETY: the event loop accesses this buffer exclusively.
-unsafe impl Sync for PdfBytes {}
-static PDF: PdfBytes = PdfBytes(UnsafeCell::new([0; MAX_DOCUMENT_BYTES]));
-
-struct Preview(UnsafeCell<[u8; MAX_TEXT_BYTES]>);
-// SAFETY: the event loop accesses this buffer exclusively.
-unsafe impl Sync for Preview {}
-static TEXT: Preview = Preview(UnsafeCell::new([0; MAX_TEXT_BYTES]));
 
 fn exit_error(msg: &str) -> ! {
     let _ = libwoven::print(msg);
@@ -82,7 +73,7 @@ fn read_preview(path: Option<&[u8]>) -> usize {
     let Ok(fd) = libwoven::open(path) else {
         return 0;
     };
-    let buffer = unsafe { &mut *PDF.0.get() };
+    let buffer = unsafe { &mut *crate::FILE.0.get() };
     let mut n = 0;
     let mut good = true;
     loop {
@@ -109,7 +100,7 @@ fn read_preview(path: Option<&[u8]>) -> usize {
     unsafe {
         DOCUMENT_LENGTH = n;
     }
-    let output = unsafe { &mut *TEXT.0.get() };
+    let output = unsafe { &mut *crate::TEXT.0.get() };
     if select_page(0) {
         return 0;
     }
@@ -120,7 +111,7 @@ fn read_preview(path: Option<&[u8]>) -> usize {
 /// decoded by this bounded preview. No arbitrary stream selection is allowed.
 fn select_page(index: usize) -> bool {
     let length = unsafe { DOCUMENT_LENGTH };
-    let bytes = unsafe { &*PDF.0.get() };
+    let bytes = unsafe { &*crate::FILE.0.get() };
     let entries = unsafe { &mut *XREF.0.get() };
     let Ok(count) = read_table(&bytes[..length], entries) else {
         return false;
@@ -186,7 +177,7 @@ fn paint(window: &GraphicsSurface, content_len: usize, first_line: usize) -> boo
         canvas.draw_text(25, 75, "No supported PDF text to display.", INK);
         canvas.draw_text(25, 94, "Uncompressed Tj strings only.", INK);
     } else {
-        let data = unsafe { &*TEXT.0.get() };
+        let data = unsafe { &*crate::TEXT.0.get() };
         let mut line = 0usize;
         let mut start = 0usize;
         let mut y = 74i32;
