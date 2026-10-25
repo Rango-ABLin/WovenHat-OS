@@ -102,6 +102,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG-DIAG] read application");
     let application = fs::read(&input).expect("failed to read application ELF");
     if application.is_empty()
         || application.len() as u64 > libwoven::package::MAX_APPLICATION_BYTES
@@ -119,6 +120,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG-DIAG] build manifest");
     let mut manifest = Vec::new();
     manifest.push(name.len() as u8);
     manifest.extend_from_slice(name.as_bytes());
@@ -143,10 +145,13 @@ fn main() {
     package.extend_from_slice(&application);
     package.extend_from_slice(&resource_bytes);
 
+    eprintln!("[WPKG-DIAG] package assembled bytes={}", package.len());
     let seed = env::var("WOVENHAT_APP_SIGNING_SEED_HEX")
         .map(|value| parse_hex(&value))
         .unwrap_or(TEST_SEED);
+    eprintln!("[WPKG-DIAG] derive signing key");
     let key_pair = KeyPair::from_seed(Seed::new(seed));
+    eprintln!("[WPKG-DIAG] signing key derived");
     if let Ok(value) = env::var("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX") {
         assert_eq!(
             key_pair.pk.as_ref(),
@@ -159,8 +164,11 @@ fn main() {
     signed.update(&package[..28]);
     signed.update(&package[HEADER_LEN..]);
     let digest: [u8; 32] = signed.finalize().into();
+    eprintln!("[WPKG-DIAG] sign digest");
     let signature = key_pair.sk.sign(digest, None);
+    eprintln!("[WPKG-DIAG] digest signed");
     package[28..HEADER_LEN].copy_from_slice(signature.as_ref());
+    eprintln!("[WPKG-DIAG] validate package envelope");
     assert!(
         parse(&package).is_ok(),
         "packager emitted an invalid WPKG envelope"
