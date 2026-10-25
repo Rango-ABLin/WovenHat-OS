@@ -701,6 +701,151 @@ pub mod graphics {
         }
     }
 
+    /// Maximum UTF-8 storage for one bounded text-input control.
+    pub const MAX_TEXT_INPUT_BYTES: usize = 512;
+
+    /// Allocation-free UTF-8 text editing state for controls and IME
+    /// adapters. Cursor and selection offsets are always byte offsets at
+    /// scalar boundaries; malformed UTF-8 cannot be created through this API.
+    pub struct TextInputState {
+        bytes: [u8; MAX_TEXT_INPUT_BYTES],
+        len: usize,
+        cursor: usize,
+        anchor: Option<usize>,
+    }
+
+    impl TextInputState {
+        pub const fn new() -> Self {
+            Self {
+                bytes: [0; MAX_TEXT_INPUT_BYTES],
+                len: 0,
+                cursor: 0,
+                anchor: None,
+            }
+        }
+
+        pub fn as_str(&self) -> &str {
+            core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
+        }
+
+        pub const fn len_bytes(&self) -> usize {
+            self.len
+        }
+
+        pub const fn cursor(&self) -> usize {
+            self.cursor
+        }
+
+        pub fn selection(&self) -> Option<(usize, usize)> {
+            let anchor = self.anchor?;
+            Some((anchor.min(self.cursor), anchor.max(self.cursor)))
+        }
+
+        pub fn select_all(&mut self) {
+            self.anchor = Some(0);
+            self.cursor = self.len;
+        }
+
+        pub fn clear_selection(&mut self) {
+            self.anchor = None;
+        }
+
+        fn delete_selection(&mut self) -> bool {
+            let Some((start, end)) = self.selection() else {
+                return false;
+            };
+            if start == end {
+                self.anchor = None;
+                return false;
+            }
+            self.bytes.copy_within(end..self.len, start);
+            self.len -= end - start;
+            self.cursor = start;
+            self.anchor = None;
+            true
+        }
+
+        pub fn insert(&mut self, character: char) -> bool {
+            let mut encoded = [0u8; 4];
+            let encoded = character.encode_utf8(&mut encoded).as_bytes();
+            self.delete_selection();
+            if self.len.saturating_add(encoded.len()) > MAX_TEXT_INPUT_BYTES {
+                return false;
+            }
+            self.bytes
+                .copy_within(self.cursor..self.len, self.cursor + encoded.len());
+            self.bytes[self.cursor..self.cursor + encoded.len()].copy_from_slice(encoded);
+            self.len += encoded.len();
+            self.cursor += encoded.len();
+            true
+        }
+
+        pub fn backspace(&mut self) -> bool {
+            if self.delete_selection() {
+                return true;
+            }
+            let Some(previous) = self.as_str()[..self.cursor].char_indices().next_back() else {
+                return false;
+            };
+            self.bytes.copy_within(self.cursor..self.len, previous.0);
+            self.len -= self.cursor - previous.0;
+            self.cursor = previous.0;
+            true
+        }
+
+        pub fn delete(&mut self) -> bool {
+            if self.delete_selection() {
+                return true;
+            }
+            let Some(character) = self.as_str()[self.cursor..].chars().next() else {
+                return false;
+            };
+            let width = character.len_utf8();
+            self.bytes
+                .copy_within(self.cursor + width..self.len, self.cursor);
+            self.len -= width;
+            true
+        }
+
+        pub fn move_left(&mut self, extend_selection: bool) {
+            if !extend_selection && let Some((start, _end)) = self.selection() {
+                self.cursor = start;
+                self.anchor = None;
+                return;
+            }
+            if let Some(previous) = self.as_str()[..self.cursor].char_indices().next_back() {
+                self.cursor = previous.0;
+            }
+            if !extend_selection {
+                self.anchor = None;
+            }
+        }
+
+        pub fn move_right(&mut self, extend_selection: bool) {
+            if !extend_selection && let Some((_start, end)) = self.selection() {
+                self.cursor = end;
+                self.anchor = None;
+                return;
+            }
+            if let Some(character) = self.as_str()[self.cursor..].chars().next() {
+                self.cursor += character.len_utf8();
+            }
+            if !extend_selection {
+                self.anchor = None;
+            }
+        }
+
+        pub fn begin_selection(&mut self) {
+            self.anchor.get_or_insert(self.cursor);
+        }
+    }
+
+    impl Default for TextInputState {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum TextDirection {
         Ltr,
@@ -14736,6 +14881,29 @@ mod tests {
         assert_eq!(fallback.resolve('B'), None);
         fallback.clear_cache();
         assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+    }
+
+    #[test]
+    fn wovengraphics_text_input_preserves_utf8_boundaries_and_selection() {
+        use crate::graphics::TextInputState;
+
+        let mut input = TextInputState::new();
+        assert!(input.insert('A'));
+        assert!(input.insert('界'));
+        assert!(input.insert('Z'));
+        assert_eq!(input.as_str(), "A界Z");
+        input.move_left(false);
+        input.backspace();
+        assert_eq!(input.as_str(), "AZ");
+        input.select_all();
+        assert_eq!(input.selection(), Some((0, 2)));
+        assert!(input.insert('é'));
+        assert_eq!(input.as_str(), "é");
+        input.begin_selection();
+        input.move_left(true);
+        assert_eq!(input.selection(), Some((0, 2)));
+        assert!(input.delete());
+        assert_eq!(input.as_str(), "");
     }
 
     #[test]

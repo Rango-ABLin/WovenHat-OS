@@ -4,10 +4,12 @@
 
 Added the bounded `libwoven::graphics::FontFallback` provider and glyph
 decision cache, with priority selection and fail-closed metrics validation.
-The 147-test libwoven suite, warning-denying package Clippy, formatting, and
-diff checks pass. Stage 05 remains partial pending a licensed guest font
-fixture, high-DPI multilingual QEMU evidence, and complete bidi/script and
-input integration. See `docs/graphics/stage-05-typography-evidence.md`.
+The bounded `libwoven::graphics::TextInputState` UTF-8 editing contract now
+provides caret and selection operations. The 148-test libwoven suite,
+warning-denying package Clippy, formatting, and diff checks pass. Stage 05
+remains partial pending a licensed guest font fixture, high-DPI multilingual
+QEMU evidence, and complete bidi/script and IME integration. See
+`docs/graphics/stage-05-typography-evidence.md`.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 

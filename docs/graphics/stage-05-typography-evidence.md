@@ -14,9 +14,14 @@ word wrapping, and bitmap fallback remain intact. The new test exercises
 priority selection, cache reuse, cache invalidation, and fail-closed missing
 glyph behavior using the existing synthetic TrueType fixture.
 
+`libwoven::graphics::TextInputState` is the bounded input contract for
+controls: it stores at most 512 UTF-8 bytes, keeps caret and selection offsets
+on scalar boundaries, and supports insertion, deletion, backspace, and
+selection-aware left/right movement without allocation.
+
 Validation completed:
 
-- `cargo test -p libwoven --quiet`: 147 passed.
+- `cargo test -p libwoven --quiet`: 148 passed.
 - `cargo clippy -p libwoven --all-targets -- -D warnings`: passed.
 - `cargo fmt --package libwoven -- --check`: passed.
 - `git diff --check`: passed.
