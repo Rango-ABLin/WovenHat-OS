@@ -29,7 +29,15 @@ def main():
     parser.add_argument("--image", type=Path)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
+    parser.add_argument("--firmware", type=Path, help="OVMF CODE image (required on Linux)")
+    parser.add_argument("--firmware-vars", type=Path, help="optional OVMF VARS template; copied per run")
     args = parser.parse_args()
+    qemu = Path(args.qemu)
+    firmware = args.firmware or qemu.parent / "share/edk2-x86_64-code.fd"
+    if not qemu.is_file() or not firmware.is_file():
+        parser.error("QEMU and OVMF CODE must exist; use --qemu and --firmware")
+    if args.firmware_vars is not None and not args.firmware_vars.is_file():
+        parser.error("OVMF VARS template does not exist")
     root = Path(__file__).resolve().parents[1]
     out = root / "audit-artifacts" / f"wovenweb-vm-{time.time_ns()}-{args.cpus}cpu"
     out.mkdir(parents=True)
@@ -52,12 +60,15 @@ def main():
     provenance = {"image_sha256": sha(image), "source_sha256": {file: sha(root / file) for file in sources}}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
     (out / "image.txt").write_text(str(image.resolve()))
-    qemu = Path(args.qemu)
-    firmware = qemu.parent / "share/edk2-x86_64-code.fd"
+    vars_copy = None
+    if args.firmware_vars is not None:
+        vars_copy = out / "OVMF_VARS.fd"
+        shutil.copyfile(args.firmware_vars, vars_copy)
     serial = out / "serial.log"
     command = [str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "256M", "-smp", str(args.cpus),
                "-display", "none", "-serial", f"file:{serial}", "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
                "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
+               *(["-drive", f"if=pflash,unit=1,format=raw,file={vars_copy}"] if vars_copy else []),
                "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}", "-device", "virtio-blk-pci,drive=boot,bootindex=1"]
     with (out / "qemu.log").open("w") as log:
         result = subprocess.run(command, cwd=root, stdout=log, stderr=log, timeout=args.timeout,

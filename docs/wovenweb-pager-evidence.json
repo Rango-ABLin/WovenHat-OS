@@ -200,5 +200,74 @@
         }
       ]
     }
-  }
+  },
+  "hosted_followup": {
+    "revision": "3695a253431506cc03c3a9c99bd7b0132f1d8362",
+    "sdk_unit_passed": 179,
+    "compile_fail_passed": 3,
+    "production_queue_passed": 7,
+    "sdk_and_queue_clippy": "passed",
+    "job_url": "https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40215998584/job/121237129810",
+    "rust_codeql": "complete Rust analysis succeeded; PR CodeQL success, no new alerts, zero annotations",
+    "codeql_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121237246327",
+    "release_failures": [
+      {
+        "job": "desktop-userspace",
+        "id": 121237130544,
+        "failure": "Stage20.2 taskbar entry for A, focused FAIL (1 CPU)"
+      },
+      {
+        "job": "drivers-radio",
+        "id": 121237130612,
+        "failure": "Stage20.15 launcher lists installed application FAIL (1 CPU)"
+      }
+    ],
+    "release_status": "not accepted; desktop pixel failures unresolved, no causal attribution to pager change"
+  },
+  "portable_harness_runs": [
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792950310784131500-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "serial_sha256": "79068f9a559ea4c3a9e4a14e6a338f57f1e8bc03c2e5d3719fe583dfbeffb7ea",
+      "writable_vars_copy": false
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792950334779367500-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "serial_sha256": "a5c418e87eb56710e4a893145982ea4266439683f32e4aeebacf0e7daaed9f72",
+      "writable_vars_copy": true
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792950349793952400-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "serial_sha256": "3e02bf580a5324b5b04bbdd12687f4fc5760ee08600fa707b7f9e3e9f3c5dd29",
+      "writable_vars_copy": true
+    }
+  ],
+  "firmware_template_after_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
+  "firmware_template_unchanged": true
 }

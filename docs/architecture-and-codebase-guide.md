@@ -4381,3 +4381,9 @@ affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
 thread-fault publication and native browser acceptance remain open. Local root
 host checks remain signing-policy blocked; new hosted queue lint is pending.
 See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).
+
+Hosted pager follow-up on 3695a253: SDK 179+3, production queue 7, both lints
+and complete Rust/PR CodeQL checks passed. Broader release jobs failed Stage20.2
+taskbar and Stage20.15 launcher pixel assertions; full release is not accepted.
+The portable pager harness and Linux 1/2/4-CPU CI matrix are added, awaiting
+hosted qualification. See wovenweb-pager-lifetime.md and evidence JSON.

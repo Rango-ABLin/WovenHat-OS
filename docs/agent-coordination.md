@@ -6433,3 +6433,14 @@ affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
 thread-fault publication and native browser acceptance remain open. Local root
 host checks remain signing-policy blocked; new hosted queue lint is pending.
 See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).
+
+## Pager hosted follow-up and portable gate (2026-10-25)
+
+Claiming only WovenWeb gate/harness documentation and SDK CI. Hosted 3695a253
+passed 179 SDK tests, 3 compile-fail checks, 7 production queue tests and both
+lints; complete Rust analysis and PR CodeQL succeeded with no new alerts. Broader
+release jobs failed desktop pixel assertions: Stage20.2 focused taskbar and
+Stage20.15 launcher. Their causes are unresolved; do not label full release
+accepted or weaken assertions. Existing 3D UI work is preserved. Adding explicit
+OVMF input and isolated Linux 1/2/4 CPU pager CI to continuously qualify the
+production boundary before further VM changes.

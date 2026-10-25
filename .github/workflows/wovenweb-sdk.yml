@@ -5,6 +5,12 @@ on:
     paths:
       - '.github/workflows/wovenweb-sdk.yml'
       - 'libwoven/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'kernel/Cargo.toml'
+      - 'kernel/src/main.rs'
+      - 'scripts/test-wovenweb-vm-qemu.py'
+      - 'scripts/test-wovenweb-network-qemu.py'
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
@@ -13,6 +19,12 @@ on:
     paths:
       - '.github/workflows/wovenweb-sdk.yml'
       - 'libwoven/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'kernel/Cargo.toml'
+      - 'kernel/src/main.rs'
+      - 'scripts/test-wovenweb-vm-qemu.py'
+      - 'scripts/test-wovenweb-network-qemu.py'
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
@@ -62,3 +74,35 @@ jobs:
             sdk-clippy.log
             pager-queue-tests.log
             pager-queue-clippy.log
+
+  pager-guest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Production pager ownership and reaping
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=/usr/share/OVMF/OVMF_CODE_4M.fd
+          vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -f "$code"
+          test -f "$vars"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features wovenweb-vm-test --locked -- -D warnings
+          python3 scripts/test-wovenweb-vm-qemu.py --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-pager-${{ matrix.cpus }}cpu
+          path: audit-artifacts/wovenweb-vm-*/

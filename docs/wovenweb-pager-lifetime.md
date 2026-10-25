@@ -30,7 +30,8 @@ regressions also pass on 1/2/4 CPUs.
 Default production kernel, four affected WovenWeb feature configurations and the
 Rust probe pass warning-denying Clippy. Root host lint and SDK unit execution are
 still blocked locally by Windows signing policy; no policy was bypassed. Hosted
-queue tests/lint have been added to SDK CI and await this revision's publication.
+queue tests/lint passed on 3695a253 alongside 179 SDK and three compile-fail checks.
+Complete Rust analysis and the PR CodeQL check also succeeded with no new alerts.
 See [machine-readable evidence](wovenweb-pager-evidence.json) for logs and hashes.
 
 ## Remaining boundaries
@@ -43,3 +44,17 @@ quiescence semantics and does not qualify a new CPU handoff protocol. The host-o
 lease/journal model is still separate from production mappings. Native libc/C++,
 LibCore, TLS/dependencies, engine, UI and Tor are unfinished. There is no VPN gateway
 and no complete or untrackable browser claim.
+
+## Continuous guest qualification
+
+The focused workflow now includes separate Linux 1/2/4-CPU pager guest jobs,
+with pinned Rust, warning-denying kernel lint and retained serial/build/provenance
+artifacts. The harness accepts explicit OVMF CODE and an optional VARS template;
+only a per-run VARS copy is writable. Windows adjacent-firmware defaults remain.
+The Linux matrix is newly added and awaits hosted qualification.
+
+Broader release validation on 3695a253 failed the Stage20.2 focused taskbar pixel
+assertion and Stage20.15 launcher pixel assertion on one CPU. Those failures are
+unresolved; their causes have not been attributed to this increment. Existing
+assertions and production rendering are preserved. Focused pager acceptance is
+not complete release acceptance.
