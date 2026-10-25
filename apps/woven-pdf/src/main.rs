@@ -6,6 +6,8 @@ use core::panic::PanicInfo;
 use libwoven::Args;
 use wovenhat_pdf::{extract_plain_text, inspect, parse_command, Command, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES};
 
+mod gui;
+
 libwoven::entry!(main);
 
 // Single-threaded program: this buffer is exclusively accessed from main.
@@ -18,6 +20,9 @@ unsafe impl Sync for TextBuffer {}
 static TEXT: TextBuffer = TextBuffer(UnsafeCell::new([0; MAX_TEXT_BYTES]));
 
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--gui") {
+        gui::run(args.get(2), args.get(3));
+    }
     let raw = [args.get(1), args.get(2)];
     let status = match (raw[0], raw[1]) {
         (None, None) => run(Command::Help),
