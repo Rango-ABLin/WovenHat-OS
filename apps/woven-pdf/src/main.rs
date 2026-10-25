@@ -14,13 +14,13 @@ mod gui;
 libwoven::entry!(main);
 
 // Single-threaded program: this buffer is exclusively accessed from main.
-struct Buffer(UnsafeCell<[u8; MAX_DOCUMENT_BYTES]>);
+pub(crate) struct Buffer(pub(crate) UnsafeCell<[u8; MAX_DOCUMENT_BYTES]>);
 unsafe impl Sync for Buffer {}
-static FILE: Buffer = Buffer(UnsafeCell::new([0; MAX_DOCUMENT_BYTES]));
+pub(crate) static FILE: Buffer = Buffer(UnsafeCell::new([0; MAX_DOCUMENT_BYTES]));
 
-struct TextBuffer(UnsafeCell<[u8; MAX_TEXT_BYTES]>);
+pub(crate) struct TextBuffer(pub(crate) UnsafeCell<[u8; MAX_TEXT_BYTES]>);
 unsafe impl Sync for TextBuffer {}
-static TEXT: TextBuffer = TextBuffer(UnsafeCell::new([0; MAX_TEXT_BYTES]));
+pub(crate) static TEXT: TextBuffer = TextBuffer(UnsafeCell::new([0; MAX_TEXT_BYTES]));
 
 fn main(args: Args) -> ! {
     // A process-start diagnostic, not proof of rendered content.
