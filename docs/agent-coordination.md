@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - incremental WebP stream delivery (2026-10-25)
+
+Added `decode_webp_rgba_stream` over the shared `ImageStream` boundary. WebP
+input is delivered in validated 1024-byte source requests and decoded into
+caller-owned pixels; dimensions are checked against the caller's metadata.
+The pinned `zenwebp 0.3.2` streaming backend retains the encoded RIFF payload
+until final decode, so this is incremental delivery rather than a
+memory-bounded WebP implementation. Host/freestanding lint and the image
+codec tests remain required gates.
+
 ## Codex - WovenFiles shared-control migration (2026-10-25)
 
 Migrated WovenFiles' `/mnt` title and Refresh interaction to the shared
@@ -13,7 +23,8 @@ Added `ImageStream` and a seekable chunk reader for PNG/JPEG RGBA decoding.
 Source callbacks are split into 1024-byte requests, support seek/peek/EOF,
 and preserve caller-owned pixel output. A real PNG fixture decodes through
 the callback source; host/freestanding Clippy and the 166-test suite pass.
-WebP remains whole-slice until its backend exposes incremental input.
+WebP now has a separate incremental-delivery path, with backend buffering
+limitations recorded above.
 
 ## Codex - bounded freestanding JavaScript runtime foundation (2026-10-25)
 

@@ -1,12 +1,12 @@
 //! Bounded pixel decoders for the image asset boundary.
 
-use crate::media::{ImageError, ImageFormat, ImageMetadata, MAX_PIXELS, parse_image_header};
+use crate::media::{parse_image_header, ImageError, ImageFormat, ImageMetadata, MAX_PIXELS};
 use alloc::vec::Vec;
 use zune_core::bytestream::{ZByteIoError, ZByteReaderTrait, ZCursor, ZSeekFrom};
 use zune_core::colorspace::ColorSpace;
 use zune_core::options::DecoderOptions;
-use zune_png::PngDecoder;
 use zune_jpeg::JpegDecoder;
+use zune_png::PngDecoder;
 
 /// Source-side error for a chunk-backed image stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,8 +22,7 @@ pub trait ImageStream {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn read_at(&mut self, offset: u64, destination: &mut [u8])
-        -> Result<usize, StreamError>;
+    fn read_at(&mut self, offset: u64, destination: &mut [u8]) -> Result<usize, StreamError>;
 }
 
 struct ChunkReader<'a, S: ImageStream> {
@@ -33,7 +32,10 @@ struct ChunkReader<'a, S: ImageStream> {
 
 impl<'a, S: ImageStream> ChunkReader<'a, S> {
     fn new(source: &'a mut S) -> Self {
-        Self { source, position: 0 }
+        Self {
+            source,
+            position: 0,
+        }
     }
 
     fn read_into(&mut self, destination: &mut [u8]) -> Result<usize, ZByteIoError> {
@@ -176,7 +178,9 @@ pub fn decode_png_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
         .png_set_add_alpha_channel(true)
         .png_set_strip_to_8bit(true);
     let mut decoder = PngDecoder::new_with_options(ZCursor::new(bytes), options);
-    decoder.decode_into(bytemuck_slice(output)).map_err(|_| ImageError::Malformed)?;
+    decoder
+        .decode_into(bytemuck_slice(output))
+        .map_err(|_| ImageError::Malformed)?;
     Ok(metadata)
 }
 
@@ -211,9 +215,13 @@ pub fn decode_jpeg_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadat
         .jpeg_set_out_colorspace(ColorSpace::RGB)
         .set_use_unsafe(false);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
-    decoder.decode_headers().map_err(|_| ImageError::Malformed)?;
+    decoder
+        .decode_headers()
+        .map_err(|_| ImageError::Malformed)?;
     let mut rgb = alloc::vec![0u8; pixels.saturating_mul(3)];
-    decoder.decode_into(&mut rgb).map_err(|_| ImageError::Malformed)?;
+    decoder
+        .decode_into(&mut rgb)
+        .map_err(|_| ImageError::Malformed)?;
     let (chunks, remainder) = rgb.as_chunks::<3>();
     if !remainder.is_empty() {
         return Err(ImageError::Malformed);
@@ -266,6 +274,75 @@ pub fn decode_webp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadat
     Ok(metadata)
 }
 
+/// Feed WebP data to the decoder in bounded source requests and rasterize into
+/// caller-owned pixels. `zenwebp::StreamingDecoder` incrementally accepts the
+/// encoded bytes, but retains the complete RIFF payload internally until the
+/// final decode. This is therefore an incremental-delivery API, not a
+/// memory-bounded WebP decoder.
+pub fn decode_webp_rgba_stream<S: ImageStream>(
+    stream: &mut S,
+    metadata: ImageMetadata,
+    output: &mut [u32],
+) -> Result<ImageMetadata, ImageError> {
+    if metadata.format != ImageFormat::WebP {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    capacity(metadata, output)?;
+
+    let mut decoder = zenwebp::decoder::StreamingDecoder::new();
+    let mut offset = 0u64;
+    let mut chunk = [0u8; 1024];
+    loop {
+        let count = stream
+            .read_at(offset, &mut chunk)
+            .map_err(|_| ImageError::Truncated)?;
+        if count == 0 || count > chunk.len() {
+            return Err(ImageError::Truncated);
+        }
+        offset = offset
+            .checked_add(count as u64)
+            .ok_or(ImageError::Malformed)?;
+        let status = decoder
+            .append(&chunk[..count])
+            .map_err(|_| ImageError::Malformed)?;
+        if matches!(status, zenwebp::decoder::StreamStatus::Complete) {
+            break;
+        }
+    }
+
+    let info = decoder.info().map_err(|_| ImageError::Malformed)?;
+    if info.width != metadata.width || info.height != metadata.height {
+        return Err(ImageError::Malformed);
+    }
+    finish_webp_stream(decoder, output, metadata)?;
+    Ok(metadata)
+}
+
+#[cfg(target_os = "none")]
+fn finish_webp_stream(
+    decoder: zenwebp::decoder::StreamingDecoder,
+    output: &mut [u32],
+    metadata: ImageMetadata,
+) -> Result<(), ImageError> {
+    let (width, height) = decoder
+        .finish_rgba_into(bytemuck_slice(output))
+        .map_err(|_| ImageError::Malformed)?;
+    if width != metadata.width || height != metadata.height {
+        return Err(ImageError::Malformed);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "none"))]
+fn finish_webp_stream(
+    decoder: zenwebp::decoder::StreamingDecoder,
+    output: &mut [u32],
+    metadata: ImageMetadata,
+) -> Result<(), ImageError> {
+    let bytes = decoder.into_inner();
+    decode_webp_pixels(&bytes, output, metadata)
+}
+
 #[cfg(target_os = "none")]
 fn decode_webp_pixels(
     bytes: &[u8],
@@ -294,14 +371,14 @@ fn decode_webp_pixels(
 // This cast is valid because u32 has alignment 4 and the output slice is a
 // contiguous initialized pixel buffer; the decoder only writes bytes.
 fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
-    unsafe {
-        core::slice::from_raw_parts_mut(output.as_mut_ptr().cast::<u8>(), output.len() * 4)
-    }
+    unsafe { core::slice::from_raw_parts_mut(output.as_mut_ptr().cast::<u8>(), output.len() * 4) }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ImageStream, StreamError, decode_png_rgba_stream, decode_webp_rgba};
+    use super::{
+        decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream, ImageStream, StreamError,
+    };
     use crate::media::parse_image_header;
 
     struct MemoryStream<'a> {
@@ -329,12 +406,11 @@ mod tests {
     #[test]
     fn decodes_png_through_bounded_chunk_reader() {
         let png = [
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
-            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
-            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
-            0x41, 0x54, 0x78, 0x9c, 0x63, 0xe0, 0x12, 0x91, 0xfb, 0x0f, 0x00, 0x01, 0xa4,
-            0x01, 0x3c, 0x93, 0x8b, 0x0e, 0xb7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-            0x44, 0xae, 0x42, 0x60, 0x82,
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0xe0, 0x12, 0x91, 0xfb, 0x0f, 0x00, 0x01, 0xa4, 0x01, 0x3c, 0x93, 0x8b,
+            0x0e, 0xb7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
         ];
         let metadata = parse_image_header(&png).unwrap();
         let mut stream = MemoryStream {
@@ -350,10 +426,9 @@ mod tests {
     #[test]
     fn decodes_lossless_webp_into_caller_pixels() {
         let webp = [
-            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-            0x56, 0x50, 0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
-            0x00, 0x07, 0x50, 0x94, 0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f,
-            0x00, 0x00,
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
         ];
         let mut pixels = [0u32; 4];
         let metadata = decode_webp_rgba(&webp, &mut pixels).unwrap();
@@ -362,15 +437,33 @@ mod tests {
     }
 
     #[test]
+    fn decodes_webp_through_incremental_stream_input() {
+        let webp = [
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
+        ];
+        let metadata = parse_image_header(&webp).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &webp,
+            largest_request: 0,
+        };
+        let mut pixels = [0u32; 4];
+        let decoded = decode_webp_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert!(pixels.iter().all(|pixel| *pixel != 0));
+        assert!(stream.largest_request <= 1024);
+    }
+
+    #[test]
     fn decodes_extended_lossy_webp_with_alpha() {
         let webp = [
-            0x52, 0x49, 0x46, 0x46, 0x54, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-            0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x41, 0x4c, 0x50, 0x48, 0x05, 0x00,
-            0x00, 0x00, 0x00, 0x80, 0x80, 0x80, 0x80, 0x00, 0x56, 0x50, 0x38, 0x20,
-            0x28, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x9d, 0x01, 0x2a, 0x02, 0x00,
-            0x02, 0x00, 0x00, 0xc0, 0x12, 0x25, 0x00, 0x4e, 0x97, 0x40, 0x00, 0x8c,
-            0xd0, 0x00, 0xfe, 0xfe, 0x22, 0x72, 0xfd, 0x5d, 0x89, 0xf0, 0x9f, 0xa0,
+            0x52, 0x49, 0x46, 0x46, 0x54, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x41, 0x4c, 0x50, 0x48, 0x05, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x80,
+            0x80, 0x00, 0x56, 0x50, 0x38, 0x20, 0x28, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x9d,
+            0x01, 0x2a, 0x02, 0x00, 0x02, 0x00, 0x00, 0xc0, 0x12, 0x25, 0x00, 0x4e, 0x97, 0x40,
+            0x00, 0x8c, 0xd0, 0x00, 0xfe, 0xfe, 0x22, 0x72, 0xfd, 0x5d, 0x89, 0xf0, 0x9f, 0xa0,
             0xfe, 0xe6, 0xc7, 0x38, 0xb6, 0x43, 0x00, 0x00,
         ];
         let mut pixels = [0u32; 4];

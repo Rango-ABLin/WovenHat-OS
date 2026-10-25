@@ -1,5 +1,14 @@
 # Stage status
 
+## Incremental WebP stream delivery - 2026-10-25
+
+`libwoven::codecs::decode_webp_rgba_stream` now consumes WebP input through
+the shared `ImageStream` boundary in validated 1024-byte requests, checks the
+decoded dimensions, and writes RGBA pixels into caller-owned storage. The
+pinned `zenwebp 0.3.2` backend buffers the encoded RIFF payload internally
+before rasterization, so this closes incremental input delivery but does not
+claim memory-bounded WebP decoding. Animation remains outside this gate.
+
 ## WovenFiles shared-control migration - 2026-10-25
 
 WovenFiles now uses shared bounded Label and Button controls for its title and
@@ -13,8 +22,8 @@ application migration remains in progress.
 `libwoven::codecs` now exposes a seekable `ImageStream` boundary for PNG and
 JPEG decoding. Reads are split into validated 1024-byte source requests and
 pixels remain caller-owned. The 166-test libwoven suite, host/freestanding
-Clippy, and WovenImages target lint pass. WebP remains whole-slice pending an
-incremental backend, so complete streaming media support is not yet claimed.
+Clippy, and WovenImages target lint pass. WebP has a separate incremental
+delivery path, but its backend buffers the encoded payload before decode.
 
 ## Bounded freestanding JavaScript runtime foundation - 2026-10-25
 
