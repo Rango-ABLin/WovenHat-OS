@@ -1,5 +1,18 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 bounded filter increment
+
+- Added `src/filters.rs`: independent fixed-capacity ASCIIHexDecode and
+  RunLengthDecode routines, plus Identity copies and unsupported-filter refusal.
+- These filters are exported from the library but **not connected** to the
+  stream dictionary pipeline or the graphical preview.
+- Important: FlateDecode (used by most PDF documents), ASCII85Decode, LZW,
+  predictors, font decoding and actual page graphics remain incomplete.
+- Added unit test source for valid, malformed, truncated and output-capacity
+  cases. No Rust toolchain was available to compile or execute tests.
+- The app remains a non-production preview on draft PR #122.
+
+
 ## 2026-10-25 stream boundary increment
 
 - Added `src/streams.rs` to resolve direct numeric `/Length` values in
