@@ -116,67 +116,36 @@ impl Console {
             });
         }
 
-        // A small woven-hat mark above the wordmark: crown, band and brim.
-        let mark_y = centre_y.saturating_sub(88);
+        // Minimal woven-W identity: drawn with early-boot integer primitives.
+        // The alternating ribbon colours make the weave legible without an
+        // image decoder, heap allocation, or additional framebuffer ownership.
+        let mark_x = centre_x.saturating_sub(66);
+        let mark_y = centre_y.saturating_sub(120);
         terminal::with_framebuffer(|buffer, info| {
-            fill_color(
-                buffer,
-                info,
-                centre_x.saturating_sub(24),
-                mark_y,
-                48,
-                4,
-                38,
-                128,
-                149,
-            );
-            fill_color(
-                buffer,
-                info,
-                centre_x.saturating_sub(17),
-                mark_y.saturating_sub(12),
-                34,
-                13,
-                76,
-                190,
-                188,
-            );
-            fill_color(
-                buffer,
-                info,
-                centre_x.saturating_sub(10),
-                mark_y.saturating_sub(19),
-                20,
-                8,
-                255,
-                205,
-                96,
-            );
-            fill_color(
-                buffer,
-                info,
-                centre_x.saturating_sub(30),
-                mark_y + 5,
-                60,
-                5,
-                255,
-                205,
-                96,
-            );
+            for step in 0..48usize {
+                let down = step / 2;
+                let up = 24usize.saturating_sub(down);
+                let x = mark_x.saturating_add(step);
+                fill_color(buffer, info, x, mark_y + down, 5, 7, 56, 205, 208);
+                fill_color(buffer, info, x + 30, mark_y + up, 5, 7, 241, 188, 91);
+                fill_color(buffer, info, x + 59, mark_y + down, 5, 7, 56, 205, 208);
+                fill_color(buffer, info, x + 87, mark_y + up, 5, 7, 241, 188, 91);
+            }
         });
 
-        let title = "WOVENHAT";
+        let title = "WovenHat OS";
         let title_width = title.chars().count() * 6 * self.scale;
         let x = self.info.width.saturating_sub(title_width) / 2;
-        let y = centre_y.saturating_add(48);
+        let y = centre_y.saturating_add(53);
         self.set_cursor_position(x, y);
         self.print(title);
-        self.newline();
+        let theme = "Weave Will into Honor";
+        let theme_width = theme.chars().count() * 6 * self.scale;
         self.set_cursor_position(
-            (self.info.width / 2).saturating_sub(12 * self.scale),
-            y + 18 * self.scale,
+            self.info.width.saturating_sub(theme_width) / 2,
+            y.saturating_add(18 * self.scale),
         );
-        self.print("Starting desktop");
+        self.print(theme);
         self.quiet = quiet;
     }
 
