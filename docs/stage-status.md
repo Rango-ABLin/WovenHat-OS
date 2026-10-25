@@ -1,5 +1,15 @@
 # Stage status
 
+## Browser paint-command boundary - 2026-10-25
+
+`libwoven::browser::paint` now turns the bounded DOM/layout result into a
+capacity-checked renderer-neutral command list for background fills and text.
+Inline six-digit CSS hex `color` and `background-color` are supported, with
+tests for command ordering and capacity failure. The 169-test libwoven suite
+and host/freestanding warning-denying Clippy pass. Full CSS cascade, layout
+features, network, JavaScript, shaping, and GPU composition remain separate
+gates.
+
 ## Incremental WebP stream delivery - 2026-10-25
 
 `libwoven::codecs::decode_webp_rgba_stream` now consumes WebP input through

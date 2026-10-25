@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - browser paint-command boundary (2026-10-25)
+
+Added bounded `PaintList` output for the browser document/layout substrate.
+Supported inline properties include six-digit CSS hex `color` and
+`background-color`; layout boxes become renderer-neutral fill/text commands
+with explicit capacity errors. This does not claim full CSS, shaping,
+networking, script execution, sandboxing, or GPU composition.
+
 ## Codex - incremental WebP stream delivery (2026-10-25)
 
 Added `decode_webp_rgba_stream` over the shared `ImageStream` boundary. WebP

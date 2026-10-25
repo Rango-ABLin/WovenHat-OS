@@ -207,6 +207,67 @@ pub struct LayoutBox {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaintCommand<'a> {
+    Fill {
+        rect: Rect,
+        color: u32,
+    },
+    Text {
+        x: u32,
+        y: u32,
+        text: &'a str,
+        color: u32,
+    },
+}
+
+pub struct PaintList<'a, const N: usize> {
+    commands: [Option<PaintCommand<'a>>; N],
+    len: usize,
+}
+
+impl<'a, const N: usize> PaintList<'a, N> {
+    pub const fn new() -> Self {
+        Self {
+            commands: [None; N],
+            len: 0,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<PaintCommand<'a>> {
+        self.commands.get(index).copied().flatten()
+    }
+
+    fn push(&mut self, command: PaintCommand<'a>) -> Result<(), PaintError> {
+        if self.len == N {
+            return Err(PaintError::TooManyCommands);
+        }
+        self.commands[self.len] = Some(command);
+        self.len += 1;
+        Ok(())
+    }
+}
+
+impl<const N: usize> Default for PaintList<'_, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaintError {
+    TooManyCommands,
+    MissingNode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutError {
     InvalidViewport,
     TooManyBoxes,
@@ -261,6 +322,16 @@ struct Style {
     height: Option<u32>,
     margin: u32,
     display: bool,
+    background: Option<u32>,
+    color: Option<u32>,
+}
+
+fn css_color(value: &str) -> Option<u32> {
+    let digits = value.strip_prefix('#')?;
+    if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(digits, 16).ok()
 }
 
 fn style(node: Node<'_>) -> Style {
@@ -269,6 +340,8 @@ fn style(node: Node<'_>) -> Style {
         height: None,
         margin: 0,
         display: !matches!(node.tag, "script" | "style" | "head"),
+        background: None,
+        color: None,
     };
     let Some(source) = node.style else {
         return result;
@@ -278,7 +351,11 @@ fn style(node: Node<'_>) -> Style {
             continue;
         };
         let value = value.trim_ascii();
-        let parse_px = || value.strip_suffix("px").and_then(|px| px.parse::<u32>().ok());
+        let parse_px = || {
+            value
+                .strip_suffix("px")
+                .and_then(|px| px.parse::<u32>().ok())
+        };
         let name = name.trim_ascii();
         if name.eq_ignore_ascii_case("width") {
             result.width = parse_px();
@@ -288,6 +365,10 @@ fn style(node: Node<'_>) -> Style {
             result.margin = parse_px().unwrap_or(0);
         } else if name.eq_ignore_ascii_case("display") {
             result.display = value != "none";
+        } else if name.eq_ignore_ascii_case("background-color") {
+            result.background = css_color(value);
+        } else if name.eq_ignore_ascii_case("color") {
+            result.color = css_color(value);
         }
     }
     result
@@ -335,15 +416,11 @@ fn layout_subtree<const N: usize>(
         {
             continue;
         }
-        let child_height = layout_subtree(
-            context,
-            child_index,
-            content_x,
-            cursor_y,
-            width,
-            depth + 1,
-        )?;
-        cursor_y = cursor_y.checked_add(child_height).ok_or(LayoutError::Overflow)?;
+        let child_height =
+            layout_subtree(context, child_index, content_x, cursor_y, width, depth + 1)?;
+        cursor_y = cursor_y
+            .checked_add(child_height)
+            .ok_or(LayoutError::Overflow)?;
         child_count += 1;
     }
     let content_height = node_style
@@ -392,22 +469,50 @@ pub fn layout<const N: usize>(
         {
             continue;
         }
-        let height = layout_subtree(
-            &mut context,
-            node_index,
-            0,
-            cursor_y,
-            viewport.width,
-            0,
-        )?;
+        let height = layout_subtree(&mut context, node_index, 0, cursor_y, viewport.width, 0)?;
         cursor_y = cursor_y.checked_add(height).ok_or(LayoutError::Overflow)?;
+    }
+    Ok(output)
+}
+
+/// Convert layout boxes into renderer-neutral fill and text commands.
+///
+/// This intentionally covers only the inline style properties supported by
+/// [`layout`]. A compositor may translate these commands to a [`crate::Canvas`], a
+/// GPU command buffer, or another renderer without coupling the browser
+/// parser to a display backend.
+pub fn paint<'a, const N: usize, const P: usize>(
+    document: &'a Document<'a, N>,
+    layout: &LayoutDocument<N>,
+) -> Result<PaintList<'a, P>, PaintError> {
+    let mut output = PaintList::new();
+    for index in 0..layout.len() {
+        let layout_box = layout.get(index).ok_or(PaintError::MissingNode)?;
+        let node = document
+            .node(layout_box.node)
+            .ok_or(PaintError::MissingNode)?;
+        let node_style = style(node);
+        if let Some(color) = node_style.background {
+            output.push(PaintCommand::Fill {
+                rect: layout_box.rect,
+                color,
+            })?;
+        }
+        if let (Some(text), Some(color)) = (node.text, node_style.color) {
+            output.push(PaintCommand::Text {
+                x: layout_box.rect.x,
+                y: layout_box.rect.y,
+                text,
+                color,
+            })?;
+        }
     }
     Ok(output)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LayoutError, ParseError, Viewport, layout, parse_html};
+    use super::{LayoutError, PaintCommand, ParseError, Viewport, layout, paint, parse_html};
 
     #[test]
     fn parses_borrowed_nested_document_with_text() {
@@ -437,10 +542,9 @@ mod tests {
 
     #[test]
     fn parses_inline_style_and_lays_out_bounded_blocks() {
-        let document = parse_html::<4>(
-            br#"<main style="margin:4px"><p style="height:20px">Hello</p></main>"#,
-        )
-        .unwrap();
+        let document =
+            parse_html::<4>(br#"<main style="margin:4px"><p style="height:20px">Hello</p></main>"#)
+                .unwrap();
         assert_eq!(document.node(0).unwrap().style, Some("margin:4px"));
         let layout = layout(
             &document,
@@ -460,7 +564,13 @@ mod tests {
     fn rejects_invalid_viewport_and_layout_overflow() {
         let document = parse_html::<2>(b"<main><p/></main>").unwrap();
         assert!(matches!(
-            layout(&document, Viewport { width: 0, height: 10 }),
+            layout(
+                &document,
+                Viewport {
+                    width: 0,
+                    height: 10
+                }
+            ),
             Err(LayoutError::InvalidViewport)
         ));
         let document = parse_html::<2>(b"<main style=\"height:4294967295px\"/>").unwrap();
@@ -473,6 +583,59 @@ mod tests {
                 }
             ),
             Err(LayoutError::Overflow)
+        ));
+    }
+
+    #[test]
+    fn emits_bounded_background_and_text_paint_commands() {
+        let document = parse_html::<4>(
+            br#"<main style="background-color:#102030"><p style="color:#ffffff">Hello</p></main>"#,
+        )
+        .unwrap();
+        let layout = layout(
+            &document,
+            Viewport {
+                width: 320,
+                height: 200,
+            },
+        )
+        .unwrap();
+        let commands = paint::<4, 4>(&document, &layout).unwrap();
+        assert_eq!(commands.len(), 2);
+        assert!(matches!(
+            commands.get(0),
+            Some(PaintCommand::Text {
+                text: "Hello",
+                color: 0x00ff_ffff,
+                ..
+            })
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(PaintCommand::Fill {
+                color: 0x0010_2030,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_paint_command_overflow() {
+        let document = parse_html::<2>(
+            br#"<main style="background-color:#000000"><p style="color:#ffffff">x</p></main>"#,
+        )
+        .unwrap();
+        let layout = layout(
+            &document,
+            Viewport {
+                width: 100,
+                height: 100,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            paint::<2, 1>(&document, &layout),
+            Err(super::PaintError::TooManyCommands)
         ));
     }
 }
