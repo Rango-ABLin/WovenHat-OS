@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenCalculator shared-control migration (2026-10-25)
+
+Migrated WovenCalculator's title and Evaluate control to shared bounded
+WovenUI Label and Button primitives. The real calculator evaluation behavior
+now uses the Button release-inside contract for pointer activation. Target
+warning-denying Clippy, target build, formatting, and diff checks passed. No
+QEMU client acceptance is claimed for this increment.
+
 ## Codex - bounded WovenUI ImageView and VideoView components (2026-10-25)
 
 Added caller-owned, allocation-free ImageView and VideoView controls. ImageView

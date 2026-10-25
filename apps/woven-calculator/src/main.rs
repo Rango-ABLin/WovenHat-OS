@@ -3,7 +3,9 @@
 
 use core::panic::PanicInfo;
 
-use libwoven::{rgb, Args, Canvas, GraphicsSurface};
+use libwoven::layout::Frame;
+use libwoven::ui::{Button, Label, Theme};
+use libwoven::{Args, Canvas, GraphicsSurface, rgb};
 use wovenhat_calculator::evaluate;
 
 libwoven::entry!(main);
@@ -42,8 +44,9 @@ struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_
 // SAFETY: woven-calculator is single-threaded and run_gui takes the only reference.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
+));
 
 /// A one-pixel-thick rectangle outline, since `Canvas` has no stroke
 /// primitive of its own.
@@ -89,12 +92,26 @@ fn draw_gui(
     active: bool,
     pointer: Option<(u16, u16)>,
     pressed: bool,
+    evaluate_button: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.fill_rect(PANEL_X + 184, PANEL_Y + 8, 18, 8, if active { ACCENT } else { PANEL });
-    canvas.draw_text(PANEL_X - 2, PANEL_Y, "WovenCalculator", TEXT);
+    canvas.fill_rect(
+        PANEL_X + 184,
+        PANEL_Y + 8,
+        18,
+        8,
+        if active { ACCENT } else { PANEL },
+    );
+    let theme = Theme {
+        surface: PANEL,
+        accent: ACCENT,
+        text: TEXT,
+        disabled: BUTTON,
+        focus: ACCENT,
+    };
+    Label::new(Frame::new(PANEL_X - 2, PANEL_Y, 180, 16), "WovenCalculator").draw(canvas, theme);
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
     if let Ok(text) = core::str::from_utf8(expression) {
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, text, TEXT);
@@ -107,18 +124,17 @@ fn draw_gui(
     } else {
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", ACCENT);
     }
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
-    );
-    canvas.draw_text(BUTTON_X + 6, BUTTON_Y + 5, "Evaluate", TEXT);
+    evaluate_button.draw(canvas, theme);
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter evaluates", TEXT);
     if let Some((x, y)) = pointer {
         let color = if pressed { TEXT } else { ACCENT };
-        canvas.fill_rect(i32::from(x).saturating_sub(1), i32::from(y).saturating_sub(1), 3, 3, color);
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(1),
+            i32::from(y).saturating_sub(1),
+            3,
+            3,
+            color,
+        );
     }
 }
 
@@ -129,6 +145,7 @@ fn render(
     active: bool,
     pointer: Option<(u16, u16)>,
     pressed: bool,
+    evaluate_button: &Button<'_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -140,7 +157,15 @@ fn render(
     ) else {
         return false;
     };
-    draw_gui(&mut canvas, expression, result, active, pointer, pressed);
+    draw_gui(
+        &mut canvas,
+        expression,
+        result,
+        active,
+        pointer,
+        pressed,
+        evaluate_button,
+    );
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -167,8 +192,25 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Ok(window) => window,
         Err(_) => fail(3),
     };
+    let mut evaluate_button = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Evaluate",
+    );
     let expression = [0u8; MAX_INPUT];
-    if !render(&window, &expression, None, false, None, false) {
+    if !render(
+        &window,
+        &expression,
+        None,
+        false,
+        None,
+        false,
+        &evaluate_button,
+    ) {
         fail(5);
     }
 
@@ -218,7 +260,15 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     // expensive pixel upload, so the shell's bounded resize
                     // grace window cannot expire while copying the canvas.
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, &expression[..length], result, true, pointer, pointer_pressed) {
+                        if render(
+                            &resized,
+                            &expression[..length],
+                            result,
+                            true,
+                            pointer,
+                            pointer_pressed,
+                            &evaluate_button,
+                        ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenCalculator: window resized\n");
@@ -236,7 +286,18 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     u16::from_le_bytes([message[4], message[5]]),
                     u16::from_le_bytes([message[6], message[7]]),
                 ));
-                if !render(&window, &expression[..length], result, true, pointer, pointer_pressed) {
+                if let Some((x, y)) = pointer {
+                    evaluate_button.pointer(i32::from(x), i32::from(y), pointer_pressed);
+                }
+                if !render(
+                    &window,
+                    &expression[..length],
+                    result,
+                    true,
+                    pointer,
+                    pointer_pressed,
+                    &evaluate_button,
+                ) {
                     fail(10)
                 }
                 let _ = libwoven::print("WovenCalculator: pointer updated\n");
@@ -247,16 +308,20 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer_pressed = message[5] != 0;
                 pointer = Some((local_x, local_y));
-                if !pointer_pressed
-                    && i32::from(local_x) >= BUTTON_X
-                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
-                    && i32::from(local_y) >= BUTTON_Y
-                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
+                if evaluate_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed)
                 {
                     result = evaluate(&expression[..length]).ok();
                     let _ = libwoven::print("WovenCalculator: pointer evaluated\n");
                 }
-                if !render(&window, &expression[..length], result, true, pointer, pointer_pressed) {
+                if !render(
+                    &window,
+                    &expression[..length],
+                    result,
+                    true,
+                    pointer,
+                    pointer_pressed,
+                    &evaluate_button,
+                ) {
                     fail(10)
                 }
                 let _ = libwoven::print("WovenCalculator: pointer updated\n");
@@ -280,7 +345,15 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             } else {
                 continue;
             }
-            if !render(&window, &expression[..length], result, active, pointer, pointer_pressed) {
+            if !render(
+                &window,
+                &expression[..length],
+                result,
+                active,
+                pointer,
+                pointer_pressed,
+                &evaluate_button,
+            ) {
                 fail(10)
             }
             let _ = libwoven::print("WovenCalculator: input updated\n");
@@ -299,7 +372,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         if !digit.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }
