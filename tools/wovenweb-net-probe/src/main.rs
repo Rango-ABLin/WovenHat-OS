@@ -85,7 +85,50 @@ fn check() -> Result<(), u64> {
     let _ = libwoven::print("[WOVENWEB] deadline + cancellation + proxy refusal: PASSED\n");
     Ok(())
 }
+static PAGER_THREAD_ADDRESS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+libwoven::thread_entry!(pager_thread_entry, pager_thread);
+extern "C" fn pager_thread() -> ! {
+    let base = PAGER_THREAD_ADDRESS.load(core::sync::atomic::Ordering::Acquire);
+    // SAFETY: the leader published a live read-only 8192-byte lazy mapping and
+    // waits for this thread before exiting. Each volatile read must fault in a
+    // different page, independently of optimizer load folding.
+    let passed = unsafe {
+        core::ptr::with_exposed_provenance::<u8>(base as usize).read_volatile() == 0x71
+            && core::ptr::with_exposed_provenance::<u8>((base + 4096) as usize).read_volatile()
+                == 0x71
+    };
+    // SAFETY: terminating this native sibling thread through its integer ABI.
+    unsafe { libwoven::syscall::thread_exit(if passed { 0 } else { 94 }) }
+}
+fn pager_thread_probe() -> ! {
+    let Ok(file) = libwoven::open("/tmp/wovenweb-pager-thread") else {
+        libwoven::exit(92)
+    };
+    // SAFETY: integer file descriptor and bounded mapping request, no pointer.
+    let base = unsafe { libwoven::syscall::invoke(60, file, 8192, 0) };
+    let _ = libwoven::close(file);
+    if base == 0 || base >= libwoven::syscall::WOULD_BLOCK {
+        libwoven::exit(93)
+    }
+    PAGER_THREAD_ADDRESS.store(base, core::sync::atomic::Ordering::Release);
+    // SAFETY: executable raw-entry trampoline establishes the required C frame.
+    let thread =
+        unsafe { libwoven::syscall::thread_create(pager_thread_entry as *const () as u64, 16384) };
+    if thread >= libwoven::syscall::WOULD_BLOCK {
+        libwoven::exit(95)
+    }
+    // SAFETY: this is the generation-tagged sibling handle just created here.
+    let result = unsafe { libwoven::syscall::thread_join(libwoven::thread::Id(thread)) };
+    libwoven::exit(if result == libwoven::thread::Join::Exited(0) {
+        0
+    } else {
+        96
+    })
+}
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--vm-thread") {
+        pager_thread_probe()
+    }
     if args.get(1) == Some(b"--vm-reap") {
         // SAFETY: integer-only native mmap ABI; no user pointer is retained.
         let base = unsafe { libwoven::syscall::invoke(8, 4096, 1, 0) };

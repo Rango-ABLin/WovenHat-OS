@@ -10797,3 +10797,14 @@ and complete Rust/PR CodeQL checks passed. Broader release jobs failed Stage20.2
 taskbar and Stage20.15 launcher pixel assertions; full release is not accepted.
 The portable pager harness and Linux 1/2/4-CPU CI matrix are added, awaiting
 hosted qualification. See wovenweb-pager-lifetime.md and evidence JSON.
+
+## Sibling pager publication follow-up (2026-10-25)
+
+The worker now publishes through retained process ownership instead of assuming
+the faulting task is the leader. A real two-page sibling-thread fixture fails
+the old lookup with zero canonical resident pages and passes the corrected
+lookup with two, two completed faults and exact reaping/cache cleanup on 1/2/4
+CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
+and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
+VM generations and exec/unmap/fork races remain open. See pager lifetime
+evidence and limits in wovenweb-pager-lifetime.md.

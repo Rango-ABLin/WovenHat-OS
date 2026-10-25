@@ -280,6 +280,254 @@
     "reason": "standalone kernel Clippy ran before WOVENHAT_WEB_NET_PROBE_IMAGE was defined",
     "correction": "same warning-denying lint runs inside fresh-build harness after real probe build/environment setup",
     "local_fresh_build_requalification": "audit-artifacts/wovenweb-vm-1792950549843775100-1cpu",
-    "hosted_requalification": "pending"
+    "hosted_requalification": "passed on dac3686ef4b887d3b9a382682650cd2f6292e52c: all three pager guest jobs"
+  },
+  "portable_ci_qualified": {
+    "revision": "dac3686ef4b887d3b9a382682650cd2f6292e52c",
+    "guest_jobs": {
+      "1cpu": 121244264526,
+      "2cpu": 121244264412,
+      "4cpu": 121244264546
+    },
+    "guest_conclusion": "all succeeded",
+    "sdk_job": 121244264171,
+    "sdk_conclusion": "success",
+    "rust_analysis_job": 121244271700,
+    "rust_analysis_conclusion": "success",
+    "codeql_check": 121244632407,
+    "codeql_conclusion": "success",
+    "full_release": "still open: desktop-userspace and drivers-radio jobs failed"
+  },
+  "sibling_thread_followup": {
+    "production_change": "Pager publishes through retained work.key.owner process identity rather than leader task_id; no ABI/capability change",
+    "negative_control": {
+      "path": "audit-artifacts/wovenweb-vm-1792951984803688700-1cpu",
+      "result": {
+        "passed": false,
+        "cpus": 1,
+        "exit": 35,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "serial_sha256": "a99538a5837089d9821610609730224651451a365c5f23f89eacb5f2db7cf4bd",
+      "observed": "0 canonical resident pages for two successful sibling faults with original leader lookup",
+      "provenance": {
+        "image_sha256": "e2d39cc060ed4a0304b74abc5dfd1457877b8a3abf7b03bd9b25a7b717240ac0",
+        "source_sha256": {
+          "kernel/src/task.rs": "f72a9210ba717649edda25eb308742cea4d38f863847c4aeb6b7d7fb7f389ddc",
+          "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/main.rs": "4123d86ad6471d7ec7791b345afcf57cdf556c498979823a17f9f3203ea749ec",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+        }
+      }
+    },
+    "positive_runs": [
+      {
+        "path": "audit-artifacts/wovenweb-vm-1792952028699980500-1cpu",
+        "result": {
+          "passed": true,
+          "cpus": 1,
+          "exit": 33,
+          "real_pager_faults": [
+            8,
+            8
+          ]
+        },
+        "provenance": {
+          "image_sha256": "67419d5f88c44b0109020173a4447845dea3947ed4bcd97d46a5c67dd51b4970",
+          "source_sha256": {
+            "kernel/src/task.rs": "9b1edba21d7361fad43fd6464e767b1b6e953fabc099c6ad9c05f436963ed04d",
+            "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+            "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+            "kernel/src/main.rs": "4123d86ad6471d7ec7791b345afcf57cdf556c498979823a17f9f3203ea749ec",
+            "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+            "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+          }
+        },
+        "serial_sha256": "0efe933d768ffe1bbdc5eda616d2868ba3e4a960bf2f328947fdc09daaa2be0a"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-vm-1792952062802168600-2cpu",
+        "result": {
+          "passed": true,
+          "cpus": 2,
+          "exit": 33,
+          "real_pager_faults": [
+            8,
+            8
+          ]
+        },
+        "provenance": {
+          "image_sha256": "67419d5f88c44b0109020173a4447845dea3947ed4bcd97d46a5c67dd51b4970",
+          "source_sha256": {
+            "kernel/src/task.rs": "9b1edba21d7361fad43fd6464e767b1b6e953fabc099c6ad9c05f436963ed04d",
+            "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+            "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+            "kernel/src/main.rs": "4123d86ad6471d7ec7791b345afcf57cdf556c498979823a17f9f3203ea749ec",
+            "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+            "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+          }
+        },
+        "serial_sha256": "9e3d1b069c2cde0bcb4b51c1530bf431cee62da372e7ecd737462ef8cdd43427"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-vm-1792952078064193300-4cpu",
+        "result": {
+          "passed": true,
+          "cpus": 4,
+          "exit": 33,
+          "real_pager_faults": [
+            8,
+            8
+          ]
+        },
+        "provenance": {
+          "image_sha256": "67419d5f88c44b0109020173a4447845dea3947ed4bcd97d46a5c67dd51b4970",
+          "source_sha256": {
+            "kernel/src/task.rs": "9b1edba21d7361fad43fd6464e767b1b6e953fabc099c6ad9c05f436963ed04d",
+            "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+            "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+            "kernel/src/main.rs": "4123d86ad6471d7ec7791b345afcf57cdf556c498979823a17f9f3203ea749ec",
+            "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+            "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+          }
+        },
+        "serial_sha256": "c6cd93272dfa38ce4c2b7536ec5077000bff5e7c73d8b9d0c698dfbf024ba79e"
+      }
+    ],
+    "limits": "Sibling runs on existing default process placement; multicore system and independent remote leader pager fixture run on SMP. Mapping generations, exec/raw-unmap/fork and full VM transaction integration remain open.",
+    "regressions": [
+      {
+        "path": "audit-artifacts/wovenweb-memory-1792952099571663700-1cpu",
+        "result": {
+          "passed": true,
+          "cpus": 1,
+          "exit": 33
+        },
+        "serial_sha256": "02a950b4515f483b6b3f2554d1e4f01626a250dca070c0fc69d7ef1c9686e87f"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-memory-1792952118796692400-2cpu",
+        "result": {
+          "passed": true,
+          "cpus": 2,
+          "exit": 33
+        },
+        "serial_sha256": "b9d67737961c13ec75516921cf33c5b5d692c72519de701e4db7c8357cf62116"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-memory-1792952133274543100-4cpu",
+        "result": {
+          "passed": true,
+          "cpus": 4,
+          "exit": 33
+        },
+        "serial_sha256": "87131a3975b4918c1e81bb3df03b20aad4c3cbd6211aa7c856c811283ad538c8"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-network-1792952148926163000-1cpu",
+        "result": {
+          "passed": true,
+          "cpus": 1,
+          "exit": 33,
+          "ipv4_dns_packets": 0,
+          "ipv4_tcp_packets": 55
+        },
+        "serial_sha256": "6518a2b0e62de01244c748f6cc56efdd9f2da53c1e8f8c001e15cc452a93b65c"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-network-1792952173736138700-2cpu",
+        "result": {
+          "passed": true,
+          "cpus": 2,
+          "exit": 33,
+          "ipv4_dns_packets": 0,
+          "ipv4_tcp_packets": 54
+        },
+        "serial_sha256": "b41dfebba44a9d32e823b7361b506a522eefa2deae93b77adc5b4f02bbd57098"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-network-1792952190584392400-4cpu",
+        "result": {
+          "passed": true,
+          "cpus": 4,
+          "exit": 33,
+          "ipv4_dns_packets": 0,
+          "ipv4_tcp_packets": 54
+        },
+        "serial_sha256": "f037617c63cc892cc868f41c66275b060984a2a940fd12a2c34c1eca47e15112"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-cxx-1792952207908209500-1cpu",
+        "result": {
+          "passed": true,
+          "cpus": 1,
+          "exit": 33
+        },
+        "serial_sha256": "8ce79564a4ea4642d7f2a634f868ca91f895762ae2dce54c565bdc20d9e91530"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-cxx-1792952226084246200-2cpu",
+        "result": {
+          "passed": true,
+          "cpus": 2,
+          "exit": 33
+        },
+        "serial_sha256": "862e0e667c4a8513dabde626444a14f3f64d0f5094f2b74c2f8ed0dcd02c95c8"
+      },
+      {
+        "path": "audit-artifacts/wovenweb-cxx-1792952239676817100-4cpu",
+        "result": {
+          "passed": true,
+          "cpus": 4,
+          "exit": 33
+        },
+        "serial_sha256": "fc5240af373fc63b250ffb62fa8b70225eab45b757dbc4d058fe4e85b724e0b1"
+      }
+    ],
+    "probe_clippy": "release --locked -- -D warnings passed on current Rust net/thread probe",
+    "hosted_status": "pending publication",
+    "kernel_clippy": {
+      "passed": true,
+      "path": "audit-artifacts/wovenweb-sibling-checks-1792952272294122200",
+      "logs": {
+        "production.log": "ad00dc0c1f520da6f4e1388aa813d33b695d1d2c17377e3efdb79bb12efa1a87",
+        "wovenweb-vm-test.log": "83c620daf045b492efab826207673e13d37d12f5fb60413bdef1f4c0e5ed282e",
+        "wovenweb-memory-test.log": "63808c5236c80f5d2bf7354a3f0259594b815fb65dbb48cf3686ab05a41608b7",
+        "wovenweb-net-test.log": "984b74bb09f3d6bc715b90e69e020ce784ea007b70ec386ce35c3eebd70a1c1a",
+        "wovenweb-cxx-test-corrected-env.log": "524327a9f95cdbc2b110faaf5ef19cef4564defd11099941b87ea14819ff41f9"
+      },
+      "initial_cxx_failure": "The retained wovenweb-cxx-test.log records a missing fixture environment variable in the local validation driver; rerun with the real existing CXX image passed. No warning or code check was removed."
+    },
+    "legacy_gui": {
+      "path": "audit-artifacts/wovenweb-legacy-gui-1792952405505800300",
+      "result": {
+        "image_sha256": "08da6b5bc6f763edeb6afd93b316f975001cda2dbc8ea81082efb2e5bf43de9b",
+        "runs": [
+          {
+            "cpus": 1,
+            "exit": 33,
+            "passed": true,
+            "serial_sha256": "4a089abdfe451e0761ac1f6f411141de8d7026ea54f14cd19e848c1e44eeaf97"
+          },
+          {
+            "cpus": 2,
+            "exit": 33,
+            "passed": true,
+            "serial_sha256": "3d637ab9c4b42a8ad14effb7a42b50f84efb7c90bed3a16b342348e9d567890c"
+          },
+          {
+            "cpus": 4,
+            "exit": 33,
+            "passed": true,
+            "serial_sha256": "018f95e1d16a64ae104b0f20982c6895e73d073ef09d49bbb6aab8af72ab4325"
+          }
+        ]
+      }
+    }
   }
 }

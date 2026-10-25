@@ -5835,6 +5835,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: FAILED"));
             qemu_test_exit_failure();
         }
+        if !task::pager_thread_publication_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] sibling-thread publication: FAILED"));
+            qemu_test_exit_failure();
+        }
         serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: PASSED"));
         qemu_test_exit_success();
     }

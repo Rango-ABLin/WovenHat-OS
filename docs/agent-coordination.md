@@ -6450,3 +6450,30 @@ lacked WOVENHAT_WEB_NET_PROBE_IMAGE. Move identical warning-denying lint into
 the fresh-build harness after building the probe and setting its real image
 path; retain its log beside kernel build/guest evidence. No test or warning
 is disabled. Requalification pending.
+
+## Sibling-thread pager publication (2026-10-25)
+
+Claiming pager publication plus feature-isolated real thread/fault regression.
+Latest dac3686e Linux pager matrix 1/2/4 and SDK checks passed; CodeQL complete
+Rust/PR checks passed. Current worker finds process by leader task_id, which
+misses sibling-thread faults. Add a two-page lazy-file thread fixture and first
+confirm the existing lookup fails canonical residency, then select retained
+work owner identity for publication. This is not mapping-generation or full
+exec/unmap/fork race repair. Preserve all release pixel assertions.
+
+## Sibling pager publication follow-up (2026-10-25)
+
+The worker now publishes through retained process ownership instead of assuming
+the faulting task is the leader. A real two-page sibling-thread fixture fails
+the old lookup with zero canonical resident pages and passes the corrected
+lookup with two, two completed faults and exact reaping/cache cleanup on 1/2/4
+CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
+and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
+VM generations and exec/unmap/fork races remain open. See pager lifetime
+evidence and limits in wovenweb-pager-lifetime.md.
+
+Sibling follow-up qualification completed locally: all nine heap/network/C++
+runs plus legacy GUI 1/2/4 pass; default and four feature kernel lints and Rust
+probe lint pass. C++ lint driver omission of its fixture image was corrected
+without source/test changes, with both logs retained. Publishing focused fix
+and evidence to PR123; latest source hosted checks remain pending.

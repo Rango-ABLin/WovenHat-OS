@@ -4526,6 +4526,17 @@ pub struct AnonymousMapping {
     swap_slots: [Option<crate::swap::Handle>; USER_MMAP_PAGES],
 }
 
+#[cfg(feature = "wovenweb-vm-test")]
+impl AnonymousMapping {
+    pub(crate) fn file_resident_pages(&self) -> u32 {
+        if self.lazy.is_some() {
+            self.resident.count_ones()
+        } else {
+            0
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct LazyFile {
     shared: bool,

@@ -38,9 +38,9 @@ See [machine-readable evidence](wovenweb-pager-evidence.json) for logs and hashe
 
 This closes a pager-versus-reaper lifetime boundary, not all address-space races.
 Exec, raw unmap, fork, mapping reservations/capacity and full VM journal integration
-remain open. Thread-fault canonical publication still uses the existing leader
-lookup and needs separate correction. This increment relies on existing scheduler
-quiescence semantics and does not qualify a new CPU handoff protocol. The host-only
+remain open. Sibling-thread canonical publication now uses retained process
+ownership, as qualified below. Mapping-generation serialization remains a separate
+prerequisite. This increment relies on existing scheduler quiescence semantics and does not qualify a new CPU handoff protocol. The host-only
 lease/journal model is still separate from production mappings. Native libc/C++,
 LibCore, TLS/dependencies, engine, UI and Tor are unfinished. There is no VPN gateway
 and no complete or untrackable browser claim.
@@ -51,10 +51,40 @@ The focused workflow now includes separate Linux 1/2/4-CPU pager guest jobs,
 with pinned Rust, warning-denying kernel lint and retained serial/build/provenance
 artifacts. The harness accepts explicit OVMF CODE and an optional VARS template;
 only a per-run VARS copy is writable. Windows adjacent-firmware defaults remain.
-The Linux matrix is newly added and awaits hosted qualification.
+The original Linux matrix passed on dac3686e; the expanded sibling gate awaits
+qualification on its new revision.
 
 Broader release validation on 3695a253 failed the Stage20.2 focused taskbar pixel
 assertion and Stage20.15 launcher pixel assertion on one CPU. Those failures are
 unresolved; their causes have not been attributed to this increment. Existing
 assertions and production rendering are preserved. Focused pager acceptance is
 not complete release acceptance.
+
+## Sibling-thread publication regression
+
+The pager previously looked up a faulting task as the process leader. A sibling
+could therefore populate real pages without updating the owning process's
+resident bitmap. Production publication now uses the process identity retained
+by the queued work. The regression creates a read-only two-page lazy mapping,
+closes the descriptor, reads each page from a raw-entry sibling, joins it, and
+exits. The kernel independently checks two canonical resident pages and exactly
+two pager requests/completions before reaping, then removes the fixture file,
+reclaims unused cache pages and checks exact frame/mapping/process baselines.
+
+The original production lookup fails this new fixture with zero canonical
+resident pages (negative serial retained); the corrected lookup passes on
+1/2/4 CPUs. The sibling uses existing default placement; the earlier real pager
+workload separately exercises remote leader faults on SMP. No simultaneous
+unmap/exec/fork claim follows from this fixture. The resident inspection helper
+and test calls compile only in wovenweb-vm-test. Existing authority stays fixed.
+
+The preceding portable gate revision dac3686e passed all three Linux guest jobs,
+SDK checks and Rust/PR CodeQL checks. The expanded sibling gate now awaits its
+own hosted qualification; historical success is not assigned to a new head.
+
+Current-source heap, TCP/SOCKS, C++ ABI and legacy GUI regression matrices also
+pass on 1/2/4 CPUs. Default kernel and all four affected WovenWeb feature lint
+gates pass with -D warnings; the Rust probe release lint passes. The local lint
+driver initially omitted the C++ fixture image environment variable; its failure
+log is retained and the identical lint passed with the real fixture supplied.
+Root host executables remain policy-blocked and were not retried.

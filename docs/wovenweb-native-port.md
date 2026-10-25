@@ -141,3 +141,14 @@ affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
 thread-fault publication and native browser acceptance remain open. Local root
 host checks remain signing-policy blocked; new hosted queue lint is pending.
 See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).
+
+## Sibling pager publication follow-up (2026-10-25)
+
+The worker now publishes through retained process ownership instead of assuming
+the faulting task is the leader. A real two-page sibling-thread fixture fails
+the old lookup with zero canonical resident pages and passes the corrected
+lookup with two, two completed faults and exact reaping/cache cleanup on 1/2/4
+CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
+and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
+VM generations and exec/unmap/fork races remain open. See pager lifetime
+evidence and limits in wovenweb-pager-lifetime.md.

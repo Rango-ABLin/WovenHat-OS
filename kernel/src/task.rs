@@ -2752,7 +2752,9 @@ fn pager_task() -> ! {
             if let Some(process) = processes
                 .iter_mut()
                 .flatten()
-                .find(|p| p.task_id == request.task)
+                // A fault may come from any sibling, not only the process leader.
+                // The retained queue owner is the canonical process identity.
+                .find(|p| p.id.as_u64() == work.key.owner)
             {
                 process.memory_mappings[request.slot] = Some(mapping);
             }
@@ -6826,4 +6828,75 @@ pub fn pager_reap_lifetime_self_test(image: &[u8]) -> bool {
         "[WOVENWEB-VM] completion owner cleanup + exact reaping baseline: PASSED"
     ));
     true
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_thread_publication_self_test(image: &[u8]) -> bool {
+    const PATH: &str = "/tmp/wovenweb-pager-thread";
+    let _ = crate::file_frames::reclaim_unused();
+    let frames = crate::memory::stats().allocated_frames;
+    let mappings = anonymous_mapping_count();
+    let processes = process_count();
+    let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+    let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+    if crate::vfs::create_read_only(PATH, &[0x71; 8192]).is_err() {
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", "--vm-thread"])
+    else {
+        return false;
+    };
+    let Ok((pid, _)) = spawn_user_process_with_sandbox(
+        "pager-thread-publication",
+        program,
+        wovenguard::SandboxProfile::new(
+            0x575b,
+            CapabilitySet::only(Capability::Console).with(Capability::FileRead),
+        ),
+    ) else {
+        return false;
+    };
+    let start = timer::ticks();
+    while !process_exited(pid) || process_has_live_tasks(pid.as_u64()) {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    let resident = {
+        let table = process_table_lock();
+        let Some(child) = table.iter().flatten().find(|p| p.id == pid) else {
+            return false;
+        };
+        child
+            .memory_mappings
+            .iter()
+            .flatten()
+            .map(userspace::AnonymousMapping::file_resident_pages)
+            .sum::<u32>()
+    };
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] sibling-thread canonical resident pages={} expected=2",
+        resident
+    ));
+    if resident != 2
+        || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 2
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 2
+        || wait_process(pid.as_u64()) != Ok(0)
+    {
+        return false;
+    }
+    if crate::vfs::remove(PATH).is_err() {
+        return false;
+    }
+    let _ = crate::file_frames::reclaim_unused();
+    let passed = crate::memory::stats().allocated_frames == frames
+        && anonymous_mapping_count() == mappings
+        && process_count() == processes;
+    if passed {
+        crate::serial::write_line(format_args!(
+            "[WOVENWEB-VM] sibling-thread lazy faults + canonical publication + exact cleanup: PASSED"
+        ));
+    }
+    passed
 }
