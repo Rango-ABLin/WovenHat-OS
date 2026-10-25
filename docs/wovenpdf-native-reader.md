@@ -1,5 +1,20 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 FlateDecode increment
+
+- Added `miniz_oxide` 0.9.1 with default features disabled to retain
+  `no_std` support and avoid dynamic allocation for decompression.
+- Wired `/FlateDecode` and `/Fl` to a caller-bounded output buffer using
+  `decompress_slice_iter_to_slice`, with zlib wrapper and checksum verification.
+- Added unit test source for a known zlib fixture, undersized output and
+  checksum damage. These tests have **not been executed** in this environment.
+- Limitations: no predictor decoding, filter pipelines, indirect stream
+  lengths, object streams, or page content interpreter. The GUI is still
+  a limited text preview and does not use the new decoder.
+- Do not merge until the application builds with its freestanding target,
+  cargo tests and Clippy pass, and QEMU 1/2/4 CPU acceptance is recorded.
+
+
 ## 2026-10-25 stream-to-filter integration
 
 - The classic stream reader now exposes `stream_with_filter`, preserving
