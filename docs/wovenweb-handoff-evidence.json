@@ -1,0 +1,253 @@
+{
+  "scope": "Production outgoing owner pin across every physical CPU context handoff, consulted by process reaping; not a complete scheduler/VM transaction proof",
+  "host_tests": {
+    "passed": 6,
+    "ordered_cpu_pair_schedules": 24,
+    "execution": "cargo test --test vm_handoff --locked: normal Windows execution passed; transcript retained in task history",
+    "source_sha256": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531"
+  },
+  "vm_runs": [
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792954359565698600-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "4f4b947dd8edfa7f921bd435b53f92165c96c4184586d7595c97fcbba963f7e4",
+        "source_sha256": {
+          "kernel/src/task.rs": "83339b2a7de92bff9f2c542611157bb4f831b2caa219fed20973ffa759f4df45",
+          "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "c57ee04a74d1ae40e93581d471854478c6800f072dcdf40f733215c0b976266d",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+        }
+      },
+      "serial_sha256": "cf3801cf0f8d58f686a62715d655ee14d8ba63f0b580c67d90ad7340b9ab06d0"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792954405847593300-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "4f4b947dd8edfa7f921bd435b53f92165c96c4184586d7595c97fcbba963f7e4",
+        "source_sha256": {
+          "kernel/src/task.rs": "83339b2a7de92bff9f2c542611157bb4f831b2caa219fed20973ffa759f4df45",
+          "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "c57ee04a74d1ae40e93581d471854478c6800f072dcdf40f733215c0b976266d",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+        }
+      },
+      "serial_sha256": "99757764bed796522b2bc3da839b38faa99023fff6d60188d645809bda166654"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792954420167718600-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "4f4b947dd8edfa7f921bd435b53f92165c96c4184586d7595c97fcbba963f7e4",
+        "source_sha256": {
+          "kernel/src/task.rs": "83339b2a7de92bff9f2c542611157bb4f831b2caa219fed20973ffa759f4df45",
+          "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "c57ee04a74d1ae40e93581d471854478c6800f072dcdf40f733215c0b976266d",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "9b6750dd7adfe3e834773928a4cb69ed63b3f0306bf4643ed7e88f009633c58c"
+        }
+      },
+      "serial_sha256": "41f86a9f5fa2303bdaaad17579da3ac759ebc27ecb27ee4db86ee0d1d03cf5a4"
+    }
+  ],
+  "initial_failure": {
+    "path": "audit-artifacts/wovenweb-vm-1792954215859655900-2cpu",
+    "result": {
+      "passed": false,
+      "cpus": 2,
+      "exit": 35,
+      "real_pager_faults": [
+        0,
+        0
+      ]
+    },
+    "serial_sha256": "11a224fe7553a776bd4f2308b07d6cc30d7a9f188ee2d81fb9ac2b23e611c627",
+    "observed": "Unchanged Stage7.4 hard-affinity reap assertion failed after metadata-only process_exited returned true before physical handoff. Correct reaper refused early destruction.",
+    "correction": "Internal nonblocking exit observer now releases process table then checks scheduler quiescence. No assertion/deadline change."
+  },
+  "qualification_limits": [
+    "Local Scheduler metadata fixture, not live injected cross-CPU stall/reap race",
+    "Real boot and Ring3 pager/sibling/migration paths run independently on 1/2/4 CPUs",
+    "Wake/migration, thread-stack lifetime, VM journal integration and exec/unmap/fork remain open"
+  ],
+  "preceding_hosted_revision": {
+    "revision": "743459512661cc017368ce181e51b9dda13c2d18",
+    "pager_jobs": [
+      121252109395,
+      121252109388,
+      121252109444
+    ],
+    "sdk_job": 121252109168,
+    "codeql_check": 121252250458,
+    "conclusion": "all succeeded; historical evidence only for this new source"
+  },
+  "hosted_current": "pending publication",
+  "regressions": [
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792954435464074200-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "serial_sha256": "298ecac71497d6391c5bdf20b4bc1c66dcbf951263a00c6120797e99c0a7af8c"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792954468588170100-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "serial_sha256": "748d3c06c06dd76a26cd727b8a7918267199bb0a8ae275ec139b0ecf753acea8"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792954492632865200-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "serial_sha256": "d90e7bf8ba4238adfbfe3b6b31ae13e9ffc7aad88e5becd831c0b994078f6a0b"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792954517716692400-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 55
+      },
+      "serial_sha256": "8a4ed07a51b35f7df163ab44dad510d0aa6ac17e6340a27a0a6804d3b827daec"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792954554360932800-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 53
+      },
+      "serial_sha256": "147f5a69a4717b01fefee23fda5477b6e98d40c8266f62183b3e2bed35281b10"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792954576375127800-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 54
+      },
+      "serial_sha256": "415fafab79035f76932d492dad44b34179e69552e4a38aa8ebb5e2cff5106a4e"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792954601013607500-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "serial_sha256": "c539877afd7c9ed7449cc9cc39cb2d2da61be1aae49f07bf7ff129560cd244c5"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792954624179963200-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "serial_sha256": "5015373bb9966e2e029ee4ee3cbc260a45b2917a1085d34375142dbb9a68cb19"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792954641524260900-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "serial_sha256": "f3a1bf3063b78bace99ab7cc5bd5595c401496cda950ae2c7bdf2d15565f0486"
+    }
+  ],
+  "kernel_clippy": {
+    "path": "audit-artifacts/wovenweb-sibling-checks-1792954658486210300",
+    "result": {
+      "passed": true,
+      "features": [
+        "production",
+        "wovenweb-vm-test",
+        "wovenweb-memory-test",
+        "wovenweb-net-test",
+        "wovenweb-cxx-test"
+      ]
+    },
+    "log_sha256": {
+      "production.log": "e394aeca9e9a27d8a0c4ffb3ee22f78cad70eda818a6c049bfb98bc31dd4b65d",
+      "wovenweb-cxx-test.log": "d310dfccd4bca8a5467fa0cc5ec89f421d6b4fd3ac9199c8eb0ecb1dc05ae308",
+      "wovenweb-memory-test.log": "13ebab163728f98f27c02f590bc251cc63ebb62551f6737e752991c1290f31ac",
+      "wovenweb-net-test.log": "42d21e55568e88e7f8b950399ef72e8d45ab46c929379dc123d04191b91cd5b0",
+      "wovenweb-vm-test.log": "6a5d99e821fbb0f081e08de5e5669906d1a203e0514c92d501b59d175c9ab7c0"
+    }
+  },
+  "legacy_gui": {
+    "path": "audit-artifacts/wovenweb-legacy-gui-1792954721311281000",
+    "result": {
+      "image_sha256": "496b9c541eda906a90df42689ce127079af903b9f9b58bee97bf281cf4b1aa3b",
+      "runs": [
+        {
+          "cpus": 1,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "f3494fd0679bd4dc3242685b1dccadc8939a8179095b2c86652e39b7b5d682ee"
+        },
+        {
+          "cpus": 2,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "4b8f500ea62e69caa08c69d398d5e6c9c0730fc004289696cb7412d408e2b678"
+        },
+        {
+          "cpus": 4,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "adef93644848855093028a282801fe9ddb4b4916746ca9a8a469d2f41d06567e"
+        }
+      ]
+    }
+  }
+}

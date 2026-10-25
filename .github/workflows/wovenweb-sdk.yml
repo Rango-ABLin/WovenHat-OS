@@ -15,6 +15,8 @@ on:
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
+      - 'tests/vm_handoff.rs'
+      - 'kernel/src/vm_handoff.rs'
       - 'tools/wovenweb-*/**'
   pull_request:
     paths:
@@ -30,6 +32,8 @@ on:
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
+      - 'tests/vm_handoff.rs'
+      - 'kernel/src/vm_handoff.rs'
       - 'tools/wovenweb-*/**'
   workflow_dispatch:
 
@@ -61,12 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
-      - name: Pager queue ownership checks
+      - name: Pager queue and physical handoff ownership checks
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --test pager_queue --locked 2>&1 | tee pager-queue-tests.log
-          cargo clippy --test pager_queue --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
+          cargo test --test pager_queue --test vm_handoff --locked 2>&1 | tee pager-queue-tests.log
+          cargo clippy --test pager_queue --test vm_handoff --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

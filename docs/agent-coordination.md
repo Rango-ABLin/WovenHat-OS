@@ -6477,3 +6477,38 @@ runs plus legacy GUI 1/2/4 pass; default and four feature kernel lints and Rust
 probe lint pass. C++ lint driver omission of its fixture image was corrected
 without source/test changes, with both logs retained. Publishing focused fix
 and evidence to PR123; latest source hosted checks remain pending.
+
+## Physical handoff owner retention (2026-10-25)
+
+Claiming a narrow scheduler-to-reaper ownership prerequisite. 74345951 hosted
+pager 1/2/4, SDK and PR CodeQL checks passed. prepare_switch protects outgoing
+Running tasks with Switching, but outgoing Dead/Blocked tasks lack that marker
+while assembly is still pending. CURRENT_PROCESS_IDS/current_slot already name
+the incoming task before physical handoff. Retain the outgoing process identity
+for every prepared switch until incoming-stack finalization, and consult it
+when checking reaping quiescence. This does not repair all wake/migration or
+VM reservation/generation races. Qualify exact production pin module, isolated
+scheduler metadata fixture and existing real guest matrices; do not imply a
+deterministic cross-CPU exit-race injection where none is performed.
+
+Initial handoff 2-CPU run exposed the old Stage7.4 observation race: the
+metadata-only process_exited returned true before physical handoff, then the
+new correct reaper refused StillRunning. Preserve the assertion and deadline.
+Strengthen the internal nonblocking exit observer to require scheduler handoff
+acknowledgement after releasing PROCESS_TABLE, rather than changing acceptance
+or weakening the reaper. External syscall state/ABI remains unchanged. Initial
+serial is retained at wovenweb-vm-1792954215859655900-2cpu. Requalification pending.
+
+## Physical handoff retention qualification (2026-10-25)
+
+Production reaping now includes an outgoing process pin for every prepared CPU
+context switch, released only on the incoming stack. Dead/Blocked metadata no
+longer stands in for physical departure. The internal nonblocking exit observer
+requires scheduler acknowledgement after dropping PROCESS_TABLE; syscall ABI
+and process-info state encoding remain unchanged. An unchanged Stage7.4 assertion
+first exposed the observer race; its failure log is retained. Six production
+module host tests, metadata fixture plus real boot/pager/sibling tests and
+heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
+kernel lints pass. Hosted current-head qualification is pending; full VM journal,
+wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
+open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.

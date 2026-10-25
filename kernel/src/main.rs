@@ -19,6 +19,7 @@ extern crate alloc;
 mod physical_probe;
 
 mod pager_queue;
+mod vm_handoff;
 mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
@@ -5831,6 +5832,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "wovenweb-vm-test")]
     {
         const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_WEB_NET_PROBE_IMAGE"));
+        if !task::vm_handoff_reaping_self_test() {
+            serial::write_line(format_args!("[WOVENWEB-VM] physical handoff reaping guard: FAILED"));
+            qemu_test_exit_failure();
+        }
         if !task::pager_reap_lifetime_self_test(IMAGE) {
             serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: FAILED"));
             qemu_test_exit_failure();

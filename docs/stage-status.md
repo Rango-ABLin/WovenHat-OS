@@ -10808,3 +10808,17 @@ CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
 and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
 VM generations and exec/unmap/fork races remain open. See pager lifetime
 evidence and limits in wovenweb-pager-lifetime.md.
+
+## Physical handoff retention qualification (2026-10-25)
+
+Production reaping now includes an outgoing process pin for every prepared CPU
+context switch, released only on the incoming stack. Dead/Blocked metadata no
+longer stands in for physical departure. The internal nonblocking exit observer
+requires scheduler acknowledgement after dropping PROCESS_TABLE; syscall ABI
+and process-info state encoding remain unchanged. An unchanged Stage7.4 assertion
+first exposed the observer race; its failure log is retained. Six production
+module host tests, metadata fixture plus real boot/pager/sibling tests and
+heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
+kernel lints pass. Hosted current-head qualification is pending; full VM journal,
+wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
+open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.

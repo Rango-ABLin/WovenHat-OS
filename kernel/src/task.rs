@@ -919,6 +919,8 @@ struct Scheduler {
     /// Slot whose CPU->CPU hand-off is physically in progress. `MAX_TASKS`
     /// means no outgoing runnable task is awaiting finalization.
     switching_out: [usize; crate::smp::MAX_CPUS],
+    // Covers every outgoing state, including Dead/Blocked before assembly.
+    vm_handoffs: crate::vm_handoff::Handoffs<{ crate::smp::MAX_CPUS }>,
 }
 
 impl Scheduler {
@@ -930,6 +932,7 @@ impl Scheduler {
             context_switches: 0,
             last_selected: [[0; 3]; crate::smp::MAX_CPUS],
             switching_out: [MAX_TASKS; crate::smp::MAX_CPUS],
+            vm_handoffs: crate::vm_handoff::Handoffs::empty(),
         }
     }
 
@@ -1034,6 +1037,11 @@ impl Scheduler {
             TASK_STACKS[previous_slot].canary_intact(),
             "kernel task stack canary corrupted"
         );
+        assert!(
+            self.vm_handoffs
+                .begin(cpu, self.tasks[previous_slot].process_id.as_u64()),
+            "nested physical address-space handoff"
+        );
         if self.tasks[previous_slot].state == TaskState::Running {
             // Do NOT publish the outgoing task as Ready yet. The Rust guard is
             // dropped before the assembly stack switch, so another CPU could
@@ -1081,6 +1089,7 @@ impl Scheduler {
         let cpu = crate::smp::cpu_index();
         let outgoing = self.switching_out[cpu];
         if outgoing == MAX_TASKS {
+            let _ = self.vm_handoffs.finish(cpu);
             return;
         }
         assert!(
@@ -1132,6 +1141,7 @@ impl Scheduler {
             self.tasks[outgoing].state = TaskState::Ready;
         }
         self.switching_out[cpu] = MAX_TASKS;
+        let _ = self.vm_handoffs.finish(cpu);
     }
 
     /// Request scheduler-owned termination of one task. The scheduler may
@@ -2406,12 +2416,19 @@ pub fn spawn_migratable_user_probe(
     Ok((process_id, task_id, context))
 }
 
+/// Nonblocking exit observation includes scheduler handoff acknowledgement.
+/// Zombie metadata alone can precede the exiting CPU's physical stack switch.
+/// Pager work still has its separate drain gate in wait_process.
 pub fn process_exited(id: ProcessId) -> bool {
-    process_table_lock()
-        .iter()
-        .flatten()
-        .find(|process| process.id == id)
-        .is_some_and(|process| process.state == ProcessState::Exited)
+    let exited = {
+        process_table_lock()
+            .iter()
+            .flatten()
+            .find(|process| process.id == id)
+            .is_some_and(|process| process.state == ProcessState::Exited)
+    };
+    // Release the higher-ranked process-table guard before scheduler inspection.
+    exited && !process_has_live_tasks(id.as_u64())
 }
 
 /// Whether the process named by the raw id `id` is in the table and has not
@@ -3308,18 +3325,24 @@ pub fn exit_current_process(exit_code: i32) -> ! {
 }
 
 fn process_has_live_tasks(process_id: u64) -> bool {
-    let scheduler = SCHEDULER.lock();
-    scheduler.tasks.iter().any(|task| {
-        task.process_id.as_u64() == process_id
-            && matches!(
-                task.state,
-                TaskState::Ready
-                    | TaskState::Running
-                    | TaskState::Switching
-                    | TaskState::Blocked
-                    | TaskState::Sleeping
-            )
-    })
+    SCHEDULER.lock().process_has_live_tasks(process_id)
+}
+
+impl Scheduler {
+    fn process_has_live_tasks(&self, process_id: u64) -> bool {
+        self.vm_handoffs.retains(process_id)
+            || self.tasks.iter().any(|task| {
+                task.process_id.as_u64() == process_id
+                    && matches!(
+                        task.state,
+                        TaskState::Ready
+                            | TaskState::Running
+                            | TaskState::Switching
+                            | TaskState::Blocked
+                            | TaskState::Sleeping
+                    )
+            })
+    }
 }
 
 pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
@@ -6899,4 +6922,32 @@ pub fn pager_thread_publication_self_test(image: &[u8]) -> bool {
         ));
     }
     passed
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn vm_handoff_reaping_self_test() -> bool {
+    // Isolated scheduler metadata: no fake stack switch, task or process-table
+    // entry is injected into the live scheduler. All real boot switches use
+    // the same production guard and incoming-stack finalization paths.
+    let mut scheduler = Scheduler::empty();
+    let cpu = crate::smp::cpu_index();
+    scheduler.tasks[0].process_id = ProcessId(7);
+    for state in [TaskState::Dead, TaskState::Blocked, TaskState::Sleeping] {
+        scheduler.tasks[0].state = state;
+        if !scheduler.vm_handoffs.begin(cpu, 7) || !scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+        scheduler.tasks[0].state = TaskState::Dead;
+        if !scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+        scheduler.finalize_switch();
+        if scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] physical handoff reaping guard: PASSED"
+    ));
+    true
 }

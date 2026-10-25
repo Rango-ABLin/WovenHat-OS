@@ -88,3 +88,12 @@ gates pass with -D warnings; the Rust probe release lint passes. The local lint
 driver initially omitted the C++ fixture image environment variable; its failure
 log is retained and the identical lint passed with the real fixture supplied.
 Root host executables remain policy-blocked and were not retried.
+
+## Physical handoff prerequisite
+
+Outgoing ownership now has an independent scheduler pin through incoming-stack
+finalization, including exits/blocks that do not use Switching state. The internal
+exit observer checks that acknowledgement before reporting completion; pager drain
+remains separate. See [handoff scope and qualification](wovenweb-handoff-lifetime.md).
+This replaces the earlier reliance on metadata-only scheduler quiescence for this
+reaping boundary, without claiming all VM/CPU lifecycle races are repaired.
