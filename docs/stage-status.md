@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics Stage 20.4 interaction oracle repair - 2026-10-25
+
+Repaired the current-head window interaction oracle to match WovenShell's
+accepted flat software default: the previous fixture still expected an old
+palette, weave pitch, and projected 3D wallpaper. The move, repaint, close,
+focus, and teardown gate now passes on 1/2/4 CPUs with QEMU exit 33. This
+repairs the Stage 10 dependency slice; full roadmap Stage 10 still requires
+its complete focus, snapping, workspace, clipboard, keyboard-navigation, and
+accessibility acceptance matrix.
+
 ## Graphics roadmap Stage 09 compositor and composition scheduler - 2026-10-25
 
 Stage 09 is accepted for the compositor scheduler scope. The roadmap-native

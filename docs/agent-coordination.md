@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.4 flat-renderer interaction oracle repair (2026-10-25)
+
+The current-head Stage 20.4 drag gate was red because its independent oracle
+still modeled the retired projected wallpaper and palette. Updated only the
+oracle to the production flat software renderer and split the repaint checks
+into named bounded waits. QEMU acceptance passed on 1/2/4 CPUs with exit 33.
+This closes the interaction dependency slice; it does not by itself close
+the full graphics roadmap Stage 10 gate.
+
 ## Codex - graphics Stage 09 compositor and composition scheduler (2026-10-25)
 
 Added the roadmap-native `stage09-compositor-test` feature. Its 1/2/4-CPU

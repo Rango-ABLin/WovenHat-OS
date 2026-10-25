@@ -14040,8 +14040,8 @@ fn stage20_4_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
     use crate::user_graphics::{Error as SurfaceError, OWNER_PIXEL_BUDGET};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const ACTIVE: u32 = rgb(70, 120, 210);
@@ -14074,11 +14074,11 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -14160,8 +14160,10 @@ fn stage20_4_self_test() -> bool {
         }
         None
     }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+    fn expected_wallpaper(_x: i32, _y: i32, _width: i32, height: i32) -> u32 {
+        // WovenShell's production default is the accepted flat software
+        // renderer; projected wallpaper is covered by dedicated 3D gates.
+        wallpaper(_x, _y, height)
     }
 
     fn region(
@@ -14317,20 +14319,22 @@ fn stage20_4_self_test() -> bool {
         && move_by(600 - 380, 150 - 282, false);
     // A's client area lands at (380 - 40, 282 + 8) = (340, 290): above the
     // wide window, which it now overlaps, and focused.
-    let moved = dragged
-        && until(1000, || compositor::pixel(345, 295) == Ok(RED))
+    let red = dragged && until(1000, || compositor::pixel(345, 295) == Ok(RED));
+    let frame = red && until(500, || title_bar(340, 276, 120, "Alpha", ACTIVE));
+    let body = frame
         && until(500, || {
-            title_bar(340, 276, 120, "Alpha", ACTIVE)
-                && region(340, 290, 120, 80, |x, y| {
-                    if (350..370).contains(&x) && (300..310).contains(&y) {
-                        WHITE
-                    } else {
-                        RED
-                    }
-                })
-                && compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
-                && compositor::pixel(100, 100) == Ok(GREEN)
+            region(340, 290, 120, 80, |x, y| {
+                if (350..370).contains(&x) && (300..310).contains(&y) {
+                    WHITE
+                } else {
+                    RED
+                }
+            })
         });
+    let old = body
+        && until(500, || compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height)));
+    let wide_pixel = old && until(500, || compositor::pixel(100, 100) == Ok(GREEN));
+    let moved = red && frame && body && old && wide_pixel;
     if !step(
         "dragging the title bar moves the window and repaints both places",
         moved,
