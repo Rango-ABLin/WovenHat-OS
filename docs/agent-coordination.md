@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded VirtIO recovery and lint repair (2026-10-25)
+
+Added one-shot VirtIO reprobe/resource rebuild after presentation failure with
+UEFI framebuffer fallback in `kernel/src/compositor.rs`. Also repaired
+warning-denying Clippy defects in the bounded browser/UI/web boundaries.
+Kernel Stage 20.14 Clippy, 147 libwoven tests, rustfmt checks, and a real
+single-output QEMU scanout passed. Fault-injected guest recovery is still open.
+
 ## Codex - graphics roadmap Stage 03 presentation evidence (2026-10-25)
 
 Real QEMU hello-gui damage acceptance passed at 1/2/4 CPUs, covering bounded

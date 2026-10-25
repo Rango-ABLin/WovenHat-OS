@@ -17,6 +17,12 @@ The current display path has real, bounded implementations in:
 - `kernel/src/virtio_gpu.rs` for the VirtIO-GPU transport and mode/resource
   operations.
 
+Commit `4062f3eb` adds a bounded one-shot VirtIO reprobe/resource rebuild after
+presentation failure. If reprobe fails, the compositor drops the GPU binding
+and presents through the UEFI framebuffer CPU fallback while retaining pending
+damage. This closes the source-level recovery/fallback design gap; the
+fault-injected guest qualification remains open.
+
 ## Executed QEMU evidence
 
 The existing real-QEMU VirtIO harnesses passed serially, with pixel captures

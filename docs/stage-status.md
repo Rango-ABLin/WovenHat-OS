@@ -1,5 +1,13 @@
 # Stage status
 
+## Graphics display recovery increment - 2026-10-25
+
+Commit `4062f3eb` adds bounded VirtIO reprobe/resource rebuild after a
+presentation failure and falls back to the UEFI framebuffer if reprobe fails.
+Kernel warning-denying Clippy and 147 libwoven tests pass; QEMU single-output
+scanout passes. Stage 02 remains partial until fault-injected guest recovery
+and supported-mode coverage are executed.
+
 ## Graphics roadmap Stage 03 buffered presentation - 2026-10-25
 
 `docs/graphics/stage-03-presentation-damage-evidence.md` records the green
