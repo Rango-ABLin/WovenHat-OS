@@ -349,10 +349,148 @@ pub fn decode_bmp_rgba_stream<S: ImageStream>(
     Ok(metadata)
 }
 
-/// Deliver GIF input through bounded source requests before invoking the
-/// single-frame decoder. The current GIF backend retains the encoded payload
-/// internally, so this is incremental delivery rather than memory-bounded GIF
-/// decoding.
+struct GifStreamReader<'a, S: ImageStream> {
+    source: &'a mut S,
+    position: u64,
+    sub_remaining: usize,
+    sub_ended: bool,
+}
+
+impl<'a, S: ImageStream> GifStreamReader<'a, S> {
+    fn new(source: &'a mut S) -> Self {
+        Self {
+            source,
+            position: 0,
+            sub_remaining: 0,
+            sub_ended: false,
+        }
+    }
+
+    fn read_exact(&mut self, destination: &mut [u8]) -> Result<(), ImageError> {
+        read_stream_exact(self.source, self.position, destination)?;
+        self.position = self
+            .position
+            .checked_add(destination.len() as u64)
+            .ok_or(ImageError::Malformed)?;
+        Ok(())
+    }
+
+    fn read_u8(&mut self) -> Result<u8, ImageError> {
+        let mut byte = [0u8; 1];
+        self.read_exact(&mut byte)?;
+        Ok(byte[0])
+    }
+
+    fn skip_subblocks(&mut self) -> Result<(), ImageError> {
+        let mut scratch = [0u8; 1024];
+        loop {
+            let size = usize::from(self.read_u8()?);
+            if size == 0 {
+                return Ok(());
+            }
+            let mut remaining = size;
+            while remaining != 0 {
+                let count = remaining.min(scratch.len());
+                self.read_exact(&mut scratch[..count])?;
+                remaining -= count;
+            }
+        }
+    }
+
+    fn next_data_byte(&mut self) -> Result<Option<u8>, ImageError> {
+        if self.sub_ended {
+            return Ok(None);
+        }
+        if self.sub_remaining == 0 {
+            self.sub_remaining = usize::from(self.read_u8()?);
+            if self.sub_remaining == 0 {
+                self.sub_ended = true;
+                return Ok(None);
+            }
+        }
+        self.sub_remaining -= 1;
+        Ok(Some(self.read_u8()?))
+    }
+
+    fn finish_data(&mut self) -> Result<(), ImageError> {
+        if !self.sub_ended {
+            self.skip_subblocks()?;
+            self.sub_ended = true;
+            self.sub_remaining = 0;
+        }
+        Ok(())
+    }
+}
+
+struct GifStreamBits<'reader, 'source, S: ImageStream> {
+    reader: &'reader mut GifStreamReader<'source, S>,
+    bits: u32,
+    available: u8,
+}
+
+impl<'reader, 'source, S: ImageStream> GifStreamBits<'reader, 'source, S> {
+    fn new(reader: &'reader mut GifStreamReader<'source, S>) -> Self {
+        Self {
+            reader,
+            bits: 0,
+            available: 0,
+        }
+    }
+
+    fn read(&mut self, width: u8) -> Result<Option<u16>, ImageError> {
+        while self.available < width {
+            let Some(byte) = self.reader.next_data_byte()? else {
+                return Ok(None);
+            };
+            self.bits |= u32::from(byte) << self.available;
+            self.available += 8;
+        }
+        let code = (self.bits & ((1u32 << width) - 1)) as u16;
+        self.bits >>= width;
+        self.available -= width;
+        Ok(Some(code))
+    }
+}
+
+struct GifPixelWriter<'a> {
+    output: &'a mut [u32],
+    output_index: usize,
+    expected: usize,
+    width: usize,
+    screen_width: usize,
+    left: usize,
+    top: usize,
+    palette: &'a [u8; 768],
+    palette_entries: usize,
+    transparent: Option<u8>,
+}
+
+impl GifPixelWriter<'_> {
+    fn write(&mut self, palette_index: u8) -> Result<(), ImageError> {
+        if self.output_index >= self.expected || usize::from(palette_index) >= self.palette_entries
+        {
+            return Err(ImageError::Malformed);
+        }
+        if self.transparent != Some(palette_index) {
+            let offset = usize::from(palette_index) * 3;
+            let destination = (self.top + self.output_index / self.width) * self.screen_width
+                + self.left
+                + self.output_index % self.width;
+            self.output[destination] = u32::from_be_bytes([
+                self.palette[offset],
+                self.palette[offset + 1],
+                self.palette[offset + 2],
+                255,
+            ]);
+        }
+        self.output_index += 1;
+        Ok(())
+    }
+}
+
+/// Decode a single non-interlaced GIF frame directly from an `ImageStream`.
+/// Only fixed palette/LZW tables and a 1024-byte source request are retained;
+/// the encoded GIF payload is never assembled in memory.
 pub fn decode_gif_rgba_stream<S: ImageStream>(
     stream: &mut S,
     metadata: ImageMetadata,
@@ -361,30 +499,184 @@ pub fn decode_gif_rgba_stream<S: ImageStream>(
     if metadata.format != ImageFormat::Gif {
         return Err(ImageError::UnsupportedEncoding);
     }
-    let length = usize::try_from(stream.len()).map_err(|_| ImageError::Malformed)?;
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(length)
-        .map_err(|_| ImageError::OutputTooSmall)?;
-    let mut offset = 0u64;
-    let mut chunk = [0u8; 1024];
-    while offset < stream.len() {
-        let count = stream
-            .read_at(offset, &mut chunk)
-            .map_err(|_| ImageError::Truncated)?;
-        if count == 0 || count > chunk.len() {
-            return Err(ImageError::Truncated);
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-        offset = offset
-            .checked_add(count as u64)
-            .ok_or(ImageError::Malformed)?;
+    let pixels = capacity(metadata, output)?;
+    let mut reader = GifStreamReader::new(stream);
+    let mut header = [0u8; 13];
+    reader.read_exact(&mut header)?;
+    if !(header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a")) {
+        return Err(ImageError::UnsupportedEncoding);
     }
-    let decoded = crate::media::decode_gif_rgba(&bytes, output)?;
-    if decoded.width != metadata.width || decoded.height != metadata.height {
+    let logical_width = usize::from(u16::from_le_bytes([header[6], header[7]]));
+    let logical_height = usize::from(u16::from_le_bytes([header[8], header[9]]));
+    if logical_width != metadata.width as usize || logical_height != metadata.height as usize {
         return Err(ImageError::Malformed);
     }
-    Ok(metadata)
+    let packed = header[10];
+    let mut palette = [0u8; 768];
+    let global_entries = if packed & 0x80 != 0 {
+        2usize << usize::from(packed & 0x07)
+    } else {
+        0
+    };
+    if global_entries != 0 {
+        reader.read_exact(&mut palette[..global_entries * 3])?;
+    }
+    output[..pixels].fill(0);
+    let mut transparent = None;
+    let mut frame_seen = false;
+    loop {
+        match reader.read_u8()? {
+            0x3b if frame_seen => return Ok(metadata),
+            0x3b => return Err(ImageError::Truncated),
+            0x21 => {
+                let label = reader.read_u8()?;
+                if label == 0xf9 {
+                    if reader.read_u8()? != 4 {
+                        return Err(ImageError::Malformed);
+                    }
+                    let mut block = [0u8; 4];
+                    reader.read_exact(&mut block)?;
+                    if block[0] & 1 != 0 {
+                        transparent = Some(block[3]);
+                    }
+                    if reader.read_u8()? != 0 {
+                        return Err(ImageError::Malformed);
+                    }
+                } else {
+                    reader.skip_subblocks()?;
+                }
+            }
+            0x2c => {
+                if frame_seen {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                frame_seen = true;
+                let mut descriptor = [0u8; 9];
+                reader.read_exact(&mut descriptor)?;
+                let left = usize::from(u16::from_le_bytes([descriptor[0], descriptor[1]]));
+                let top = usize::from(u16::from_le_bytes([descriptor[2], descriptor[3]]));
+                let width = usize::from(u16::from_le_bytes([descriptor[4], descriptor[5]]));
+                let height = usize::from(u16::from_le_bytes([descriptor[6], descriptor[7]]));
+                let image_packed = descriptor[8];
+                if width == 0 || height == 0 || image_packed & 0x40 != 0 {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                let right = left.checked_add(width).ok_or(ImageError::Malformed)?;
+                let bottom = top.checked_add(height).ok_or(ImageError::Malformed)?;
+                if right > logical_width || bottom > logical_height {
+                    return Err(ImageError::Malformed);
+                }
+                let local_entries = if image_packed & 0x80 != 0 {
+                    2usize << usize::from(image_packed & 0x07)
+                } else {
+                    0
+                };
+                let palette_entries = if local_entries != 0 {
+                    reader.read_exact(&mut palette[..local_entries * 3])?;
+                    local_entries
+                } else {
+                    global_entries
+                };
+                if palette_entries == 0 {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                let min_code_size = reader.read_u8()?;
+                if !(2..=8).contains(&min_code_size) {
+                    return Err(ImageError::Malformed);
+                }
+                reader.sub_remaining = 0;
+                reader.sub_ended = false;
+                let clear = 1u16 << min_code_size;
+                let end = clear + 1;
+                let mut code_size = min_code_size + 1;
+                let mut next_code = end + 1;
+                let mut prefix = [0u16; 4096];
+                let mut suffix = [0u8; 4096];
+                let mut stack = [0u8; 4096];
+                let mut old = None;
+                let mut first = 0u8;
+                let expected = width.checked_mul(height).ok_or(ImageError::Malformed)?;
+                let mut writer = GifPixelWriter {
+                    output,
+                    output_index: 0,
+                    expected,
+                    width,
+                    screen_width: logical_width,
+                    left,
+                    top,
+                    palette: &palette,
+                    palette_entries,
+                    transparent,
+                };
+                let mut saw_end = false;
+                {
+                    let mut bits = GifStreamBits::new(&mut reader);
+                    while let Some(raw_code) = bits.read(code_size)? {
+                        if raw_code == clear {
+                            code_size = min_code_size + 1;
+                            next_code = end + 1;
+                            old = None;
+                            continue;
+                        }
+                        if raw_code == end {
+                            saw_end = true;
+                            break;
+                        }
+                        if raw_code >= 4096 || raw_code > next_code {
+                            return Err(ImageError::Malformed);
+                        }
+                        let mut code = raw_code;
+                        let mut stack_len = 0usize;
+                        if let Some(old_code) = old {
+                            let in_code = raw_code;
+                            if code == next_code {
+                                stack[stack_len] = first;
+                                stack_len += 1;
+                                code = old_code;
+                            }
+                            while code >= clear {
+                                let index = usize::from(code);
+                                if index >= next_code as usize || stack_len == stack.len() {
+                                    return Err(ImageError::Malformed);
+                                }
+                                stack[stack_len] = suffix[index];
+                                stack_len += 1;
+                                code = prefix[index];
+                            }
+                            first = code as u8;
+                            stack[stack_len] = first;
+                            stack_len += 1;
+                            while stack_len != 0 {
+                                writer.write(stack[stack_len - 1])?;
+                                stack_len -= 1;
+                            }
+                            if next_code < 4096 {
+                                prefix[next_code as usize] = old_code;
+                                suffix[next_code as usize] = first;
+                                next_code += 1;
+                                if next_code == (1u16 << code_size) && code_size < 12 {
+                                    code_size += 1;
+                                }
+                            }
+                            old = Some(in_code);
+                        } else {
+                            if code >= clear {
+                                return Err(ImageError::Malformed);
+                            }
+                            first = code as u8;
+                            writer.write(first)?;
+                            old = Some(code);
+                        }
+                    }
+                }
+                reader.finish_data()?;
+                if !saw_end || writer.output_index != expected {
+                    return Err(ImageError::Truncated);
+                }
+            }
+            _ => return Err(ImageError::Malformed),
+        }
+    }
 }
 
 pub fn decode_webp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata, ImageError> {

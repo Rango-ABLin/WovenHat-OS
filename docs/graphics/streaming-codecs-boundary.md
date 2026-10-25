@@ -9,10 +9,11 @@ uses the same boundary to fetch its header and each validated 24/32-bit row
 without assembling the encoded file in a caller buffer.
 
 WebP has incremental delivery through `StreamingDecoder`, but that backend
-retains the encoded RIFF payload until final decode. GIF now has a chunk-fed
-single-frame entry point, but its backend also retains the encoded payload
-before rasterization. Animated GIF and memory-bounded GIF streaming are not
-claimed.
+retains the encoded RIFF payload until final decode. GIF now has a true
+memory-bounded single-frame, non-interlaced entry point: fixed palette/LZW
+tables and a 1024-byte source request are retained while pixels stream to the
+caller. Animated GIF, disposal/timing playback, and interlaced GIF remain
+separate gates.
 
 Evidence:
 

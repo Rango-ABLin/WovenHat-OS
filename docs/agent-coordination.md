@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - memory-bounded GIF stream decoder (2026-10-25)
+
+Replaced GIF stream buffering with a source-driven decoder. Header/palette
+reads, sub-block traversal, and LZW codes come directly from `ImageStream`;
+only fixed palette/LZW tables and a 1024-byte request buffer are retained.
+Pixels are written directly to caller-owned output. The current path is still
+single-frame and non-interlaced pending the next GIF capability slices.
+
 ## Codex - GIF incremental-delivery boundary (2026-10-25)
 
 Added `decode_gif_rgba_stream`, which feeds GIF bytes through validated
