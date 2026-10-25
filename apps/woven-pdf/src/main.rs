@@ -22,6 +22,8 @@ unsafe impl Sync for TextBuffer {}
 static TEXT: TextBuffer = TextBuffer(UnsafeCell::new([0; MAX_TEXT_BYTES]));
 
 fn main(args: Args) -> ! {
+    // A process-start diagnostic, not proof of rendered content.
+    let _ = libwoven::print("[WOVENPDF] process: STARTED\n");
     if args.get(1) == Some(b"--gui") {
         gui::run(args.get(2), args.get(3));
     }
