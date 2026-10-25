@@ -574,6 +574,27 @@ fn css_length(value: &str) -> Option<Length> {
     (percent <= 100).then_some(Length::Percent(percent))
 }
 
+fn grid_column_count(value: &str) -> Option<usize> {
+    let value = value.trim_ascii();
+    if let Some(arguments) = value
+        .strip_prefix("repeat(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let count = arguments
+            .split_once(',')?
+            .0
+            .trim_ascii()
+            .parse::<usize>()
+            .ok()?;
+        return (count > 0 && count <= 16).then_some(count);
+    }
+    let count = value
+        .split_ascii_whitespace()
+        .filter(|column| !column.is_empty())
+        .count();
+    (count > 0 && count <= 16).then_some(count)
+}
+
 fn apply_declarations(result: &mut Style, source: &str) {
     for declaration in source.split(';') {
         let Some((name, value)) = declaration.split_once(':') else {
@@ -608,11 +629,7 @@ fn apply_declarations(result: &mut Style, source: &str) {
         } else if name.eq_ignore_ascii_case("gap") {
             result.gap = parse_px().unwrap_or(0);
         } else if name.eq_ignore_ascii_case("grid-template-columns") {
-            let columns = value
-                .split_ascii_whitespace()
-                .filter(|column| !column.is_empty())
-                .count();
-            if columns > 0 {
+            if let Some(columns) = grid_column_count(value) {
                 result.grid_columns = columns;
             }
         } else if name.eq_ignore_ascii_case("background-color") {
@@ -1083,7 +1100,7 @@ mod tests {
         assert_eq!(column_layout.get(1).unwrap().rect.y, 13);
 
         let grid = parse_html::<5>(
-            br#"<main style="display:grid;gap:2px;grid-template-columns:1fr 1fr"><p style="height:10px"/><p style="height:20px"/><p style="height:12px"/></main>"#,
+            br#"<main style="display:grid;gap:2px;grid-template-columns:repeat(2, 1fr)"><p style="height:10px"/><p style="height:20px"/><p style="height:12px"/></main>"#,
         )
         .unwrap();
         let grid_layout = layout(
