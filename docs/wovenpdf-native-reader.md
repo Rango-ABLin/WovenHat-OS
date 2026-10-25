@@ -1,5 +1,19 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 experimental Canvas integration
+
+- Added a development-only bridge in `gui.rs` that loads bounded classic
+  xref entries, attempts to decode one supported PDF content stream, uses the
+  strict text-operation subset and paints ASCII runs to `Canvas::draw_text`.
+- Deliberate limitation: this currently probes the first stream the interpreter
+  accepts instead of resolving `/Catalog -> /Pages -> /Contents`. It may not
+  correspond to the requested page and is **not** faithful PDF display.
+- Existing raw Tj text preview remains the fallback. Work remains to resolve
+  actual page content, resource/font names, PDFs with multiple filters,
+  graphics operators and coordinate transforms.
+- This code requires fresh CI and a WovenShell QEMU launch test; do not merge.
+
+
 ## 2026-10-25 CI repair and layout bridge
 
 - CI job 40190219694 compiled the parser and ran 29 tests: 28 passed,
