@@ -4,6 +4,7 @@
 //! page-tree traversal, object streams, or images are supported yet.
 
 pub mod lexer;
+pub mod objects;
 pub mod xref;
 
 pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
