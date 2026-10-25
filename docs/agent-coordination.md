@@ -5823,6 +5823,17 @@ launcher; screenshots are `target/updated-desktop.png` and
 `target/f1-launcher.png` (generated, ignored artifacts). This is a
 visual/QEMU pass, not native hardware or production-release qualification.
 
+## Repository merge and cleanup audit (2026-10-25)
+
+`master` was clean and matched `origin/master` before cleanup. Local branches
+that were already merged into `master` were pruned. Historical or WIP branches
+with unmerged code were retained rather than blindly merging stale changes.
+Exact duplicate hashes found in per-application `.cargo/config.toml`, `build.rs`,
+and linker templates are intentional shared build inputs; audit and archived
+documents remain because they preserve acceptance evidence. Ignored build,
+QEMU, firmware, and audit artifacts were not deleted while interactive QEMU
+was active.
+
 ## Branded circular boot loader (2026-10-25)
 
 Refined the production splash with a woven-hat emblem, decorated WOVENHAT

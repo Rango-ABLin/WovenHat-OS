@@ -10359,6 +10359,17 @@ advances at each boot-loader milestone while verbose diagnostics remain on
 serial. Plain and `system-apps` warning-denying kernel Clippy passed; this is
 still a QEMU/UI qualification change, not native graphics certification.
 
+## Repository merge and cleanup audit (2026-10-25)
+
+`master` was clean and matched `origin/master` before cleanup. Local branches
+that were already merged into `master` were pruned. Historical or WIP branches
+with unmerged code were retained rather than blindly merging stale changes.
+Exact duplicate hashes found in per-application `.cargo/config.toml`, `build.rs`,
+and linker templates are intentional shared build inputs; audit and archived
+documents remain because they preserve acceptance evidence. Ignored build,
+QEMU, firmware, and audit artifacts were not deleted while interactive QEMU
+was active.
+
 ## Login and taskbar readability pass (2026-10-25)
 
 The hardware-demo QEMU path was verified with the real sign-in screen and
