@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenUI labels and checkboxes - 2026-10-25
+
+Added bounded allocation-free Label and Checkbox primitives to `libwoven::ui`.
+Checkbox activation is enabled-state aware and release based; both controls
+have rendering coverage. The libwoven host suite passed 128 tests and the
+Settings warning-denying Clippy gate passed. The complete WovenUI catalog and
+full application migration remain in progress.
+
 ## WovenUI bounded native widget foundation - 2026-10-25
 
 Added `libwoven::ui` with bounded allocation-free Button and UTF-8-safe fixed

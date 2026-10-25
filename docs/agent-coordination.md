@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI labels and checkboxes (2026-10-25)
+
+Extended `libwoven::ui` with allocation-free Label and Checkbox primitives,
+including bounded focus rendering, enabled-state handling, and release-based
+pointer activation. The libwoven host suite passed 128 tests, the Settings
+target passed warning-denying Clippy, and changed Rust files are rustfmt-clean.
+This remains a focused SDK increment; the complete WovenUI catalog and broad
+application migration remain open.
+
 ## Codex - bounded WovenUI SDK primitives (2026-10-25)
 
 Added `libwoven::ui` with allocation-free bounded `Button` and UTF-8-safe

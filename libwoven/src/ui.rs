@@ -116,6 +116,120 @@ impl<'a> Button<'a> {
     }
 }
 
+/// A non-interactive text label with an optional focus indicator.
+pub struct Label<'a> {
+    pub frame: Frame,
+    pub text: &'a str,
+    pub focused: bool,
+}
+
+impl<'a> Label<'a> {
+    pub const fn new(frame: Frame, text: &'a str) -> Self {
+        Self {
+            frame,
+            text,
+            focused: false,
+        }
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y + self.frame.height.saturating_sub(1),
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+        canvas.draw_text(self.frame.x, self.frame.y, self.text, theme.text);
+    }
+}
+
+/// A fixed-size checkbox with bounded pointer interaction.
+pub struct Checkbox<'a> {
+    pub frame: Frame,
+    pub label: &'a str,
+    pub checked: bool,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a> Checkbox<'a> {
+    pub const BOX_SIZE: i32 = 10;
+
+    pub const fn new(frame: Frame, label: &'a str) -> Self {
+        Self {
+            frame,
+            label,
+            checked: false,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.frame.x
+            && y >= self.frame.y
+            && x < self.frame.x.saturating_add(self.frame.width.max(0))
+            && y < self.frame.y.saturating_add(self.frame.height.max(0))
+    }
+
+    pub fn activate(&mut self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.checked = !self.checked;
+        true
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if pressed || !self.contains(x, y) {
+            return false;
+        }
+        self.activate()
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        let border = if self.enabled {
+            theme.text
+        } else {
+            theme.disabled
+        };
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            Self::BOX_SIZE.min(self.frame.width.max(0)) as usize,
+            Self::BOX_SIZE.min(self.frame.height.max(0)) as usize,
+            border,
+        );
+        if self.checked {
+            canvas.fill_rect(
+                self.frame.x + 2,
+                self.frame.y + 2,
+                Self::BOX_SIZE.saturating_sub(4) as usize,
+                Self::BOX_SIZE.saturating_sub(4) as usize,
+                theme.accent,
+            );
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y + Self::BOX_SIZE + 1,
+                Self::BOX_SIZE as usize,
+                1,
+                theme.focus,
+            );
+        }
+        canvas.draw_text(
+            self.frame.x + Self::BOX_SIZE + 5,
+            self.frame.y,
+            self.label,
+            theme.text,
+        );
+    }
+}
+
 /// A fixed-capacity UTF-8 text field. Input is deliberately event-based so an
 /// application can apply its own permission, clipboard, and submission policy.
 pub struct TextField<const N: usize> {
@@ -218,8 +332,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, TextField, stack_vertical};
-    use crate::{InputEvent, Key, layout::Frame};
+    use super::{Button, Checkbox, Label, TextField, Theme, stack_vertical};
+    use crate::{Canvas, InputEvent, Key, layout::Frame};
 
     #[test]
     fn button_click_requires_press_and_release_inside() {
@@ -253,5 +367,30 @@ mod tests {
         assert_eq!(frames[0], Frame::new(2, 4, 20, 9));
         assert_eq!(frames[1], Frame::new(2, 15, 20, 9));
         assert_eq!(frames[2], Frame::new(2, 26, 20, 9));
+    }
+
+    #[test]
+    fn checkbox_activation_is_bounded_and_disabled_is_inert() {
+        let mut checkbox = Checkbox::new(Frame::new(2, 2, 40, 12), "Ready");
+        assert!(checkbox.pointer(4, 4, false));
+        assert!(checkbox.checked);
+        checkbox.enabled = false;
+        assert!(!checkbox.pointer(4, 4, false));
+        assert!(checkbox.checked);
+    }
+
+    #[test]
+    fn label_and_checkbox_draw_inside_their_frames() {
+        let mut pixels = [0; 32 * 20];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 20).unwrap();
+        let theme = Theme::DARK;
+        let mut label = Label::new(Frame::new(1, 1, 20, 8), "A");
+        label.focused = true;
+        label.draw(&mut canvas, theme);
+        let mut checkbox = Checkbox::new(Frame::new(1, 10, 28, 10), "B");
+        checkbox.checked = true;
+        checkbox.draw(&mut canvas, theme);
+        assert!(pixels.iter().any(|pixel| *pixel == theme.focus));
+        assert!(pixels.iter().any(|pixel| *pixel == theme.accent));
     }
 }
