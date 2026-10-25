@@ -48,11 +48,32 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     if let Some(path) = accounts {
         crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
     }
-    let program = match accounts {
-        Some(path) => {
+    #[cfg(feature = "system-apps")]
+    let settings = crate::vfs::stat("/etc/wovenhat/settings.json")
+        .ok()
+        .filter(|stat| stat.kind == crate::vfs::NodeKind::File)
+        .map(|_| "/etc/wovenhat/settings.json");
+    #[cfg(not(feature = "system-apps"))]
+    let settings: Option<&str> = None;
+    let program = match (accounts, settings) {
+        (Some(path), Some(settings)) => crate::userspace::load_elf_with_argv(
+            image,
+            &[
+                "/bin/woven-shell",
+                "--accounts",
+                path,
+                "--settings",
+                settings,
+            ],
+        ),
+        (Some(path), None) => {
             crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path])
         }
-        None => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell"]),
+        (None, Some(settings)) => crate::userspace::load_elf_with_argv(
+            image,
+            &["/bin/woven-shell", "--settings", settings],
+        ),
+        (None, None) => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell"]),
     }
     .ok_or(Error::Image)?;
     let (pid, _, _) = crate::task::spawn_user_system_service("woven-shell", program, CAPABILITIES)

@@ -1688,6 +1688,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             ));
             halt();
         }
+        #[cfg(feature = "system-apps")]
+        if !install_persistent_settings() {
+            serial::write_line(format_args!(
+                "[SESSION] persistent settings provisioning failed"
+            ));
+            halt();
+        }
         // Sub-stage timing within [3/7]->[4/7]: this span was found (boot
         // profiling, Stage 30) to dominate the whole boot -- 4323 of a
         // ~4350-tick total boot under QEMU TCG -- and PBKDF2 account hashing
@@ -7607,6 +7614,46 @@ fn has_valid_account_line(data: &[u8]) -> bool {
             && hash.len() == 64
             && hash.iter().all(u8::is_ascii_hexdigit)
     })
+}
+
+#[cfg(feature = "system-apps")]
+fn install_persistent_settings() -> bool {
+    const SOURCE: &str = "/mnt/etc/wovenhat/settings.json";
+    const TARGET: &str = "/etc/wovenhat/settings.json";
+    let source = match vfs::stat(SOURCE) {
+        Ok(stat) if stat.kind == vfs::NodeKind::File => stat,
+        Ok(_) => return false,
+        Err(vfs::Error::NotFound) => return true,
+        Err(_) => return false,
+    };
+    if source.size == 0 || source.size > vfs::NODE_CAPACITY {
+        return false;
+    }
+    let mut data = alloc::vec![0u8; source.size];
+    let Ok(read) = vfs::read_all(SOURCE, &mut data) else {
+        return false;
+    };
+    if read != source.size
+        || !data
+            .windows(b"schema".len())
+            .any(|window| window == b"schema")
+    {
+        return false;
+    }
+    for directory in ["/etc", "/etc/wovenhat"] {
+        match vfs::mkdir(directory) {
+            Ok(()) | Err(vfs::Error::AlreadyExists) => {}
+            Err(_) => return false,
+        }
+    }
+    if vfs::create_read_only(TARGET, &data).is_err() {
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[SESSION] persistent settings imported from {}",
+        SOURCE
+    ));
+    true
 }
 
 #[cfg(feature = "hardware-demo")]
