@@ -1,12 +1,20 @@
 # Stage status
 
+## Graphics Stage 20.11 lock-screen acceptance - 2026-10-25
+
+Repaired the Stage 20.11 lock-screen oracle to match the production flat
+wallpaper palette, weave, and projected 3D background. The complete lock,
+input isolation, PIN masking, wrong-PIN, unlock delivery, lockout, recovery,
+and teardown gate passes on 1/2/4 CPUs with QEMU exit 33.
+
 ## Graphics Stage 11 desktop catalog blocker repair - 2026-10-25
 
 The production catalog blocker was traced to `woven-images.wapp` (166,248
 bytes) exceeding the 128 KiB VFS node/exec-image bound. The bounded capacity is
 now 256 KiB. The focused signed system-app catalog gate passes on 1 CPU with
-all eleven applications installed; the full desktop screenshot/theme gate is
-the next acceptance step.
+all eleven applications installed; the desktop screenshot/input matrix now
+passes on 1/2/4 CPUs, while theme-variation screenshots and low-power runtime
+remain open.
 
 ## Graphics Stage 11 design tokens increment - 2026-10-25
 

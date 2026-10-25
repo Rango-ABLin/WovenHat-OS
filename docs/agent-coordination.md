@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.11 lock-screen oracle repair (2026-10-25)
+
+Stage 20.11 initially failed because its independent oracle still used the
+retired purple 32-pixel wallpaper and compared the lock screen against an
+unprojected background. The oracle now matches the accepted flat palette,
+96-pixel weave, and projected wallpaper fallback. The full lock-screen gate
+passes on 1/2/4 CPUs with input isolation, PIN masking, lockout/recovery, and
+teardown evidence under `target/woven-shell-lock-{1,2,4}cpu`.
+
 ## Codex - Stage 11 desktop screenshot/input matrix (2026-10-25)
 
 The production catalog failed because `woven-images.wapp` is 166,248 bytes,

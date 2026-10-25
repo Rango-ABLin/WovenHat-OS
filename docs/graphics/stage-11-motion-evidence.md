@@ -25,6 +25,8 @@ the next holder's default scale.
 | Stage 20.7 spring animation | PASS | PASS | PASS |
 | Stage 20.10 Quick Settings accessibility/motion path | PASS | PASS | PASS |
 
+| Stage 20.11 lock screen and PIN isolation | PASS | PASS | PASS |
+
 The full desktop screenshot/input qualification also passes on 1/2/4 CPUs
 after the production catalog capacity repair. Each run captured the signed-in
 desktop, WovenFiles open/click/close, WovenTerminal keyboard input/close, and

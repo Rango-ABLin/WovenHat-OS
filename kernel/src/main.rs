@@ -10299,8 +10299,8 @@ fn stage20_12_self_test() -> bool {
 fn stage20_11_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const RED: u32 = rgb(200, 60, 60);
@@ -10340,11 +10340,11 @@ fn stage20_11_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -10609,7 +10609,9 @@ fn stage20_11_self_test() -> bool {
 
     // The lock screen as the kernel renders it: dimmed wallpaper, with
     // "Locked", the time, the prompt and the dots centred on the middle row.
-    let dim = move |x: i32, y: i32| blend_pixel(BLACK, wallpaper(x, y, height), 160);
+    let dim = move |x: i32, y: i32| {
+        blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
+    };
     let middle = height / 2;
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
