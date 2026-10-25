@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics bounded HTTP chunked-body increment - 2026-10-25
+
+`libwoven::web` now records chunked transfer encoding and decodes bounded
+HTTP/1.1 chunked bodies into caller-owned storage. Hex sizes, extensions,
+CRLF framing, trailers, overflow, truncation, and output capacity are checked
+fail-closed. The full 191-test libwoven suite and warning-denying freestanding
+target Clippy pass. Socket transport, TLS, policy, and network imagery remain
+open.
+
 ## Graphics bounded grid-repeat increment - 2026-10-25
 
 The browser grid parser now recognizes bounded `repeat(N, …)` column syntax

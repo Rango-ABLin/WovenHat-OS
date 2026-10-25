@@ -6638,3 +6638,11 @@ Codex corrected grid column parsing for bounded `repeat(N, …)` syntax, capped
 at 16 columns. The 190-test libwoven suite and freestanding target
 warning-denying Clippy pass.
 
+# Graphics bounded HTTP chunked-body increment - 2026-10-25
+
+Codex extended `libwoven::web` with chunked transfer detection and a
+caller-owned HTTP/1.1 chunked-body decoder. Hex sizes, extensions, framing,
+trailers, overflow, truncation, and output capacity fail closed. The 191-test
+libwoven suite and freestanding target warning-denying Clippy pass. Transport,
+TLS, policy, and network imagery remain open.
+
