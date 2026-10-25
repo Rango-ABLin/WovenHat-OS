@@ -229,6 +229,8 @@ pub fn run(shell: Option<&[u8]>, path: Option<&[u8]>) -> ! {
     if libwoven::message_send(shell, &packet).is_err() {
         exit_error("WovenPDF: shell registration failed\n")
     }
+    // WOPN was sent to the shell. This does not imply it was accepted or visible.
+    let _ = libwoven::print("[WOVENPDF] shell: OPEN_REQUEST_SENT\n");
     let mut message = [0u8; 64];
     let mut first_line = 0usize;
     let mut pressed = false;
