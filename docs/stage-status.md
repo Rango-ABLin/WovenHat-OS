@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 20.17/20.18 3D acceptance repair - 2026-10-25
+
+Updated the stale 3D acceptance fixtures to the current branded teal
+wallpaper/accent and made both tests begin with `--no-3d` before exercising the
+real Quick Settings 3D toggle. Stage 20.17 Quick Settings and Stage 20.18
+window title bars passed warning-denying kernel Clippy and QEMU acceptance on
+1, 2, and 4 CPUs. This closes the software 3D presentation gates only; GPU
+acceleration and native hardware qualification remain separate.
+
 ## Stage 20.1 graphics oracle and fallback contract - 2026-10-25
 
 Closed the branded wallpaper/taskbar mismatch in the foundational desktop

@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.17/20.18 3D acceptance repair (2026-10-25)
+
+Repaired stale 3D acceptance fixtures after the current branded desktop
+exposed them. Stage 20.17's wallpaper/accent oracle now matches the production
+teal woven desktop, and both 3D gates start from the explicit flat contract
+before toggling the real production 3D mode. Stage 20.17 Quick Settings and
+Stage 20.18 title bars passed QEMU on 1/2/4 CPUs with warning-denying kernel
+Clippy. This qualifies the software 3D presentation path, not hardware GPU
+acceleration or native graphics devices.
+
 ## Codex - Stage 20.1 graphics oracle and fallback contract (2026-10-25)
 
 Closed the Stage 20.1 wallpaper/taskbar mismatch without weakening pixel

@@ -22,7 +22,9 @@ protocol, professional text/image pipeline, complete widget framework,
 accelerated rendering path, native hardware qualification, and independent
 security review remain incomplete or unverified. The Stage 20.1 software/QEMU
 gate was subsequently closed on the 1/2/4-CPU matrix by separating its flat
-fallback contract from the dedicated 3D presentation gates.
+fallback contract from the dedicated 3D presentation gates. Those Stage
+20.17/20.18 software 3D gates are now also green on 1/2/4 CPUs after their
+stale palette/start-mode fixtures were repaired.
 
 ## Source and initialization path
 
@@ -49,7 +51,7 @@ fallback contract from the dedicated 3D presentation gates.
 | Off-screen surface and damage | IMPLEMENTED | Checked surface, damage rectangles, and present path are present and host-tested. |
 | Double-buffered desktop composition | PARTIAL | Shell staging buffers and compositor damage exist; full frame pacing/triple buffering is not demonstrated. |
 | CPU rasterization | PARTIAL | Rectangles, panels, icons, alpha/texture helpers, and shell painting exist; the mandate's complete antialiased vector API is not complete. |
-| 3D presentation | PARTIAL | WovenShell has a bounded depth-tested textured path; this is not GPU acceleration or a general 3D API. |
+| 3D presentation | PARTIAL | WovenShell has a bounded depth-tested textured path; Stage 20.17/20.18 pass on 1/2/4 CPUs, but this is not GPU acceleration or a general 3D API. |
 | Typography/font engine | PARTIAL | Built-in font/text paths exist, but full TrueType/OpenType shaping, fallback, bidi, and complex-script coverage are not verified. |
 | Icon/vector assets | PARTIAL | Code-native original icons are present in WovenShell; a complete reusable scalable asset library is not established. |
 | PNG/JPEG/image assets | PARTIAL | Image-related application and asset paths exist; complete hardened PNG/JPEG service coverage is not verified by this audit. |

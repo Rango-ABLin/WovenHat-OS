@@ -10986,9 +10986,9 @@ fn stage20_10_self_test() -> bool {
 #[cfg(feature = "stage20-17-test")]
 fn stage20_17_self_test() -> bool {
     use crate::display::rgb;
-    const ACCENT: u32 = rgb(90, 140, 220);
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const ACCENT: u32 = rgb(76, 190, 188);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
 
@@ -11036,11 +11036,11 @@ fn stage20_17_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = crate::display::blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            crate::display::blend_pixel(WHITE, woven, 36)
+        let woven = crate::display::blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            crate::display::blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -11126,7 +11126,9 @@ fn stage20_17_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    // Begin from the accepted flat contract, then exercise the real toggle.
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -11280,7 +11282,9 @@ fn stage20_18_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    // Begin from the accepted flat contract, then exercise the real toggle.
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
