@@ -4,10 +4,13 @@
 
 Started Stage 07 with bounded image policy, PNG/JPEG RGBA adapters, host-target
 WebP decoding, allocation-free BMP RGBA decoding, fixed thumbnail cache,
-license/digest wallpaper catalog, and bounded VFS loading. Host and
-freestanding Clippy plus 157 tests pass. The stage remains open pending a
-freestanding WebP backend, licensed wallpaper binaries, persistent boot-image
-installation, thumbnail UI integration, and guest acceptance.
+license/digest wallpaper catalog, and bounded VFS loading. This increment now
+ships a deterministic CC0-1.0 wallpaper with a manifest SHA-256, embeds it
+through `kernel/build.rs`, installs and reads it back from the boot VFS, and
+connects WovenImages thumbnail rendering to the real VFS decoder. Host tests,
+warning-denying checks, and production system-app QEMU at 1/2 CPUs passed with
+1280x800 guest frames. The broader stage remains open only for freestanding
+WebP pixel decoding.
 
 ## Codex - graphics roadmap Stage 06 iconography (2026-10-25)
 

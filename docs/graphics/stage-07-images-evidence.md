@@ -17,7 +17,19 @@ adapter. The freestanding WebP path fails closed because the current VP8
 dependency is not no-std; it is not linked into the kernel. `ThumbnailCache`
 provides fixed round-robin storage, `WallpaperCatalog` requires an SPDX-like
 license identifier and nonzero source digest, and `load_vfs_asset` reads one
-bounded immutable asset through the normal VFS descriptor API.
+bounded immutable asset through the normal VFS descriptor API. Its guest read
+path is chunked to the kernel's 1024-byte syscall limit, so larger assets do
+not silently fail.
+
+The shipped wallpaper is a deterministic WovenHat-original 160x90 BMP24
+gradient. It is declared CC0-1.0 in `assets/wallpapers/manifest.toml` with
+SHA-256 `7c059d7f598f220879a4f1af16388df047c0b726cd0eaf2b2624317b208f9de9`.
+`kernel/build.rs` generates and embeds the exact binary; production app
+installation writes it read-only to `/share/wallpapers/wovenhat-gradient.bmp`
+and installs the manifest at `/share/wallpapers/manifest.toml`; it reads all
+43,254 wallpaper bytes back from the VFS. WovenImages loads that path,
+decodes it through `libwoven::media`, and draws a bounded nearest-neighbor
+thumbnail through the shared one-entry `ThumbnailCache` in its GUI surface.
 
 ## Evidence
 
@@ -25,11 +37,13 @@ bounded immutable asset through the normal VFS descriptor API.
 - `cargo clippy -p libwoven --all-targets -- -D warnings`: passed.
 - Freestanding kernel Clippy and release build: passed.
 - WovenShell freestanding release build: passed.
+- Production system-app QEMU at 1 CPU: passed with a 1280x800 guest frame and
+  the wallpaper VFS readback marker.
+- Production system-app QEMU at 2 CPUs: passed with a 1280x800 guest frame and
+  the wallpaper VFS readback marker.
 
 ## Gate status
 
-Stage 07 remains partial. WebP is only host-target complete, and the repository
-still lacks licensed wallpaper binaries/manifests, persistent VFS boot-image
-installation, thumbnail rendering in WovenImages, and guest full-resolution
-image acceptance. This commit must not be treated as the Stage 07 acceptance
-gate.
+The requested wallpaper deliverables are complete and verified. Stage 07 as a
+whole remains partial because WebP pixel decoding is still host-target only;
+this increment deliberately does not claim a freestanding WebP backend.

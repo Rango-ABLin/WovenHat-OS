@@ -228,7 +228,26 @@ pub enum VfsAssetError {
 /// The descriptor is always closed before returning.
 pub fn load_vfs_asset(path: &str, buffer: &mut [u8]) -> Result<(usize, ImageMetadata), VfsAssetError> {
     let descriptor = crate::open(path).map_err(|_| VfsAssetError::Open)?;
-    let result = crate::read(descriptor, buffer).map_err(|_| VfsAssetError::Read);
+    const READ_CHUNK: usize = 1024;
+    let mut length = 0usize;
+    let result = loop {
+        if length == buffer.len() {
+            break Ok(length);
+        }
+        let end = (length + READ_CHUNK).min(buffer.len());
+        let chunk_length = end - length;
+        let count = match crate::read(descriptor, &mut buffer[length..end]) {
+            Ok(count) if count <= chunk_length => count,
+            Ok(_) | Err(_) => break Err(VfsAssetError::Read),
+        };
+        if count == 0 {
+            break Ok(length);
+        }
+        length += count;
+        if count < chunk_length {
+            break Ok(length);
+        }
+    };
     let _ = crate::close(descriptor);
     let length = result?;
     if length == buffer.len() {

@@ -7,10 +7,13 @@ above 8192 or 16 megapixels, recognizes the supported container headers, and
 provides caller-buffer PNG/JPEG RGBA adapters plus uncompressed 24/32-bit BMP
 decoding after validating all offsets and strides. The fixed thumbnail cache,
 license/digest wallpaper catalog, and `load_vfs_asset` VFS read helper keep
-ownership and capacity explicit. WebP pixel decoding is currently host-target
+ownership and capacity explicit. The guest helper reads in 1024-byte chunks to
+match the kernel syscall cap. The production kernel embeds the manifest-listed
+CC0-1.0 wallpaper and installs it read-only in the boot VFS at
+`/share/wallpapers/wovenhat-gradient.bmp`; WovenImages decodes that asset and
+renders its bounded thumbnail. WebP pixel decoding is currently host-target
 only because its VP8 dependency is not no-std; the freestanding path fails
-closed until a suitable backend is integrated. Wallpaper binaries, boot-image
-installation, and guest UI qualification remain open.
+closed until a suitable backend is integrated.
 
 ## Graphics roadmap Stage 06 iconography (2026-10-25)
 
