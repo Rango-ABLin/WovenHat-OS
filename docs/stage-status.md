@@ -1,5 +1,12 @@
 # Stage status
 
+## WovenStore shared-control migration - 2026-10-25
+
+WovenStore now uses shared bounded Label and Button rendering, and its Refresh
+action uses the Button release-inside contract. Target Clippy, target build,
+formatting, and diff checks passed. No QEMU client acceptance is claimed for
+this increment.
+
 ## WovenImages shared-control migration - 2026-10-25
 
 WovenImages now uses shared bounded Label and Button rendering, and its Refresh
