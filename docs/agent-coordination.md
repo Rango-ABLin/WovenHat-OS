@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - browser software-canvas renderer (2026-10-25)
+
+Connected the bounded browser `PaintList` to the existing software `Canvas`.
+Fill and text commands now render actual pixels after checked integer
+conversion; out-of-range coordinates fail closed. The browser path remains
+software-only at this boundary and does not claim GPU composition or full CSS.
+
 ## Codex - browser paint-command boundary (2026-10-25)
 
 Added bounded `PaintList` output for the browser document/layout substrate.

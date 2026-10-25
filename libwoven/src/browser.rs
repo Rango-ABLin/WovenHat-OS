@@ -265,6 +265,7 @@ impl<const N: usize> Default for PaintList<'_, N> {
 pub enum PaintError {
     TooManyCommands,
     MissingNode,
+    CoordinateOutOfRange,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -510,9 +511,37 @@ pub fn paint<'a, const N: usize, const P: usize>(
     Ok(output)
 }
 
+/// Render a bounded paint list through the existing software canvas.
+pub fn render<const N: usize>(
+    canvas: &mut crate::Canvas<'_>,
+    commands: &PaintList<'_, N>,
+) -> Result<(), PaintError> {
+    for index in 0..commands.len() {
+        match commands.get(index).ok_or(PaintError::MissingNode)? {
+            PaintCommand::Fill { rect, color } => {
+                let x = i32::try_from(rect.x).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                let y = i32::try_from(rect.y).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                let width =
+                    usize::try_from(rect.width).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                let height =
+                    usize::try_from(rect.height).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                canvas.fill_rect(x, y, width, height, color);
+            }
+            PaintCommand::Text { x, y, text, color } => {
+                let x = i32::try_from(x).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                let y = i32::try_from(y).map_err(|_| PaintError::CoordinateOutOfRange)?;
+                canvas.draw_text(x, y, text, color);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LayoutError, PaintCommand, ParseError, Viewport, layout, paint, parse_html};
+    use super::{
+        LayoutError, PaintCommand, ParseError, Viewport, layout, paint, parse_html, render,
+    };
 
     #[test]
     fn parses_borrowed_nested_document_with_text() {
@@ -637,5 +666,26 @@ mod tests {
             paint::<2, 1>(&document, &layout),
             Err(super::PaintError::TooManyCommands)
         ));
+    }
+
+    #[test]
+    fn renders_fill_commands_into_the_software_canvas() {
+        let document =
+            parse_html::<2>(br#"<main style="width:4px;height:4px;background-color:#102030"/>"#)
+                .unwrap();
+        let layout = layout(
+            &document,
+            Viewport {
+                width: 4,
+                height: 4,
+            },
+        )
+        .unwrap();
+        let commands = paint::<2, 2>(&document, &layout).unwrap();
+        let mut pixels = [0u32; 16];
+        let mut canvas = crate::Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+        render(&mut canvas, &commands).unwrap();
+        assert_eq!(canvas.get(0, 0), Some(0x0010_2030));
+        assert_eq!(canvas.get(3, 3), Some(0x0010_2030));
     }
 }

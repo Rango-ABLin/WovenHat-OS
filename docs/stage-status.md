@@ -1,5 +1,13 @@
 # Stage status
 
+## Browser software-canvas renderer - 2026-10-25
+
+`libwoven::browser::render` now consumes the bounded paint list through the
+existing software `Canvas`, rendering fill and text commands into caller-owned
+pixels. Coordinate conversions are checked and fail closed. The 170-test
+libwoven suite and host/freestanding warning-denying Clippy pass. GPU
+composition, full CSS, networking, JavaScript, and text shaping remain open.
+
 ## Browser paint-command boundary - 2026-10-25
 
 `libwoven::browser::paint` now turns the bounded DOM/layout result into a
