@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 11 shared accessibility-profile parser (2026-10-25)
+
+`libwoven::accessibility::Settings::apply_json` is now the shared bounded
+parser for installer profiles consumed by WovenShell. It accepts only quoted
+recognized fields, checked booleans, and clamped scale/magnification values;
+malformed fields fail closed. The 193-test libwoven suite and host/target
+warning-denying Clippy pass. WovenSettings remains read-only because packaged
+apps do not have `/etc` write authority.
+
 ## Codex - Stage 11 persisted accessibility profile handoff (2026-10-25)
 
 The installer settings JSON now carries conservative `high_contrast:false` and

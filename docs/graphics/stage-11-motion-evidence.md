@@ -78,6 +78,13 @@ WovenShell; recognized `high_contrast` and `reduced_motion` true values are
 applied before the desktop loop starts. Settings UI write-back and
 compositor-wide persistence remain open.
 
+The profile format is now parsed by the shared bounded
+`libwoven::accessibility::Settings::apply_json` contract, including checked
+boolean tokens and clamped scale/magnification fields. The 193-test libwoven
+suite covers valid and malformed profile input. WovenSettings remains
+read-only because the package sandbox intentionally grants no `/etc` write
+authority.
+
 The signed WovenSettings QEMU gate remains green at 1/2/4 CPUs; evidence is
 retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
 

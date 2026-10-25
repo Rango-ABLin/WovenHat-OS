@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics shared accessibility-profile parser - 2026-10-25
+
+`libwoven::accessibility::Settings::apply_json` now parses the bounded
+accessibility profile format shared by the installer and WovenShell. It
+accepts only quoted recognized keys, checked booleans, and clamped small
+integer values; malformed or unknown fields fail closed. The full 193-test
+libwoven suite and warning-denying host/freestanding Clippy pass. Direct
+settings write-back remains intentionally unavailable because packaged apps
+have no `/etc` write authority.
+
 ## Graphics persisted accessibility profile handoff - 2026-10-25
 
 The installer now emits bounded `high_contrast` and `reduced_motion` keys in
