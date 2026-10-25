@@ -2102,7 +2102,7 @@ operation and a bounded source path, checks `FileRead`, `FileWrite`, and
 `StorageIo` on the current broker task, and then creates the private
 `AuthorizedWfsWriter`. The Ring-3 broker uses it for install, remove, and
 rollback; package bytes never cross the IPC frame. Install reads at most one
-64 KiB VFS node, verifies the WPKG envelope, and calls the existing
+256 KiB VFS node, verifies the WPKG envelope, and calls the existing
 authenticated WovenFS journal/catalog/chunk publication path. Remove and
 rollback use recovered catalog state and durable rollback/install intent
 records before committing the next catalog generation. The production
@@ -2112,7 +2112,7 @@ Stage 22.3 fixture remains least-privilege.
 The accepted transaction gate formats a disposable ATA volume and exercises
 install, durable catalog verification, removal, rollback, and restoration on
 1/2/4 CPUs. The source-path limit is the normal 512-byte syscall bound; the
-single-package ingress limit is the 64 KiB VFS node capacity; native package
+single-package ingress limit is the 256 KiB VFS node capacity; native package
 publication remains chunked by the WovenFS file limit. This is a transaction
 authority, not yet a complete update daemon: key rotation, multi-package
 power-loss timing, larger/chunked source ingress, and physical USB validation
