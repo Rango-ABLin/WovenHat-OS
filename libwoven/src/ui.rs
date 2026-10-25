@@ -1645,4 +1645,35 @@ mod tests {
         assert_eq!(tokens.motion_normal_ms, 0);
         assert_eq!(tokens.space_4, DesignTokens::DEFAULT.space_4);
     }
+
+    #[test]
+    fn theme_widget_visual_regressions_are_distinct_and_stable() {
+        fn signature(pixels: &[u32]) -> u64 {
+            pixels.iter().fold(0xcbf2_9ce4_8422_2325, |hash, pixel| {
+                (hash ^ u64::from(*pixel)).wrapping_mul(0x1000_0000_01b3)
+            })
+        }
+        fn render(theme: Theme) -> u64 {
+            let mut pixels = [0_u32; 64 * 40];
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 64, 40).unwrap();
+            let mut button = Button::new(Frame::new(2, 2, 42, 14), "Apply");
+            button.hovered = true;
+            button.focused = true;
+            button.draw(&mut canvas, theme);
+            let mut checkbox = Checkbox::new(Frame::new(2, 20, 42, 14), "Enabled");
+            checkbox.checked = true;
+            checkbox.draw(&mut canvas, theme);
+            signature(&pixels)
+        }
+
+        let dark = render(Theme::DARK);
+        let light = render(Theme::LIGHT);
+        let high_contrast = render(Theme::HIGH_CONTRAST);
+        assert_ne!(dark, light);
+        assert_ne!(dark, high_contrast);
+        assert_ne!(light, high_contrast);
+        assert_eq!(dark, 14_167_676_546_058_782_013);
+        assert_eq!(light, 13_378_977_747_546_284_125);
+        assert_eq!(high_contrast, 13_757_308_704_317_173_985);
+    }
 }

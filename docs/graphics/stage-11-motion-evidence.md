@@ -41,6 +41,11 @@ including an actual Reduced Motion toggle with visible `On` state, Do Not
 Disturb state, tiling over a live client, scale 1/2 transitions, panel close,
 input routing, and teardown.
 
+The shared WovenUI renderer also has golden pixel signatures for a focused
+Button plus checked Checkbox composition in dark, light, and high-contrast
+themes. The 183-test libwoven suite and warning-denying all-targets Clippy
+pass.
+
 ## Boundary
 
 This accepts the motion/pacing and Quick Settings accessibility runtime slices

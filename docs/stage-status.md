@@ -20,6 +20,15 @@ checks independent of wallpaper/projection geometry. Warning-denying freestandin
 `docs/graphics/stage-11-motion-evidence.md`; full Stage 11 screenshot/theme,
 starvation, and low-power acceptance remains open.
 
+## Graphics Stage 11 shared-theme visual regression - 2026-10-25
+
+Added allocation-free golden pixel signatures for a representative focused
+Button and checked Checkbox composition under dark, light, and high-contrast
+WovenUI themes. All three themes remain visually distinct and stable. The
+libwoven suite passes 183/183 tests and warning-denying all-targets Clippy
+passes. This is host visual-regression evidence; the full desktop screenshot,
+starvation, and low-power gates remain open.
+
 ## Graphics Stage 11 Quick Settings accessibility acceptance - 2026-10-25
 
 Repaired the Stage 20.10 oracle to match the current shell's branded wallpaper

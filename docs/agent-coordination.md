@@ -6469,3 +6469,11 @@ verifies the visible `On` state instead of only rendering the row. The full
 gate still passes on 1/2/4 CPUs with exit 33, and warning-denying freestanding
 kernel Clippy remains green. Screenshot/theme, starvation, and low-power
 evidence remain open.
+
+# Codex - graphics Stage 11 shared-theme visual regression (2026-10-25)
+
+Added golden pixel signatures for a focused Button and checked Checkbox under
+dark, light, and high-contrast WovenUI themes. The libwoven suite passes
+183/183 and warning-denying all-targets Clippy passes. This is host visual
+regression evidence; desktop screenshot, starvation, and low-power gates
+remain open.
