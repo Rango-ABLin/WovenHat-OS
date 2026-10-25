@@ -10,6 +10,7 @@ use wovenhat_pdf::xref::{read_table, Entry};
 use wovenhat_pdf::objects::Reference;
 use wovenhat_pdf::streams::decoded_stream;
 use wovenhat_pdf::paint::paint_text_preview;
+use wovenhat_pdf::document::page_content;
 
 const WIDTH: u32 = 480;
 const HEIGHT: u32 = 320;
@@ -89,10 +90,9 @@ fn read_preview(path: Option<&[u8]>) -> usize {
     let entries = unsafe { &mut *XREF.0.get() };
     if let Ok(count) = read_table(&buffer[..n], entries) {
         let decoded = unsafe { &mut *DECODED.0.get() };
-        for entry in &entries[..count] {
-            if !entry.in_use { continue; }
-            let reference = Reference { number: entry.object, generation: entry.generation };
-            if let Ok(size) = decoded_stream(&buffer[..n], &entries[..count], reference, decoded) {
+        let mut pages = [Reference { number: 0, generation: 0 }; 64];
+        if let Ok((contents, _)) = page_content(&buffer[..n], &entries[..count], 0, &mut pages) {
+            if let Ok(size) = decoded_stream(&buffer[..n], &entries[..count], contents, decoded) {
                 if paint_text_preview(&decoded[..size], 280.0, 1.0, 456, 250, |_| Ok(())).is_ok() {
                     unsafe { DECODED_LENGTH = size; }
                     return 0;
