@@ -20,7 +20,7 @@ from pathlib import Path
 
 APP = 'wovenhat-pdf'
 MARKER = '[S16.1] out-of-kernel application: PASSED'
-APP_MARKER = '[WOVENPDF] runtime: PASSED'
+APP_MARKER = '[WOVENPDF] process: STARTED'
 # This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
 
 def app_build_env(app_dir):
