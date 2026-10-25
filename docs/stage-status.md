@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics Stage 20 feature-lint sweep - 2026-10-25
+
+With the built hello-gui and woven-shell images supplied through the required
+environment variables, `python scripts/lint-all-features.py --only stage20`
+passes every Stage 20 feature, production kernel Clippy, and host
+`--all-targets` Clippy with warnings denied.
+
 ## Graphics Stage 20.6 translucency acceptance - 2026-10-25
 
 Repaired the stage oracle for the current wallpaper and accent system and

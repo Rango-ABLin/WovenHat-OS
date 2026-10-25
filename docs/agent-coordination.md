@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20 image-wired feature lint sweep (2026-10-25)
+
+The all-feature sweep was rerun with the built hello-gui and woven-shell image
+paths supplied. Every Stage 20 feature, production kernel lint, and host
+`--all-targets` lint passed with warnings denied. The worktree remains clean.
+
 ## Codex - Stage 20.6 translucency acceptance (2026-10-25)
 
 Stage 20.6 was using the retired wallpaper/accent oracle and the shell's later
