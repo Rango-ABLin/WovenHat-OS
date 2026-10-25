@@ -703,6 +703,8 @@ pub mod graphics {
 
     /// Maximum UTF-8 storage for one bounded text-input control.
     pub const MAX_TEXT_INPUT_BYTES: usize = 512;
+    /// Maximum UTF-8 storage for one active IME preedit string.
+    pub const MAX_IME_PREEDIT_BYTES: usize = 256;
 
     /// Allocation-free UTF-8 text editing state for controls and IME
     /// adapters. Cursor and selection offsets are always byte offsets at
@@ -712,6 +714,8 @@ pub mod graphics {
         len: usize,
         cursor: usize,
         anchor: Option<usize>,
+        preedit: [u8; MAX_IME_PREEDIT_BYTES],
+        preedit_len: usize,
     }
 
     impl TextInputState {
@@ -721,6 +725,8 @@ pub mod graphics {
                 len: 0,
                 cursor: 0,
                 anchor: None,
+                preedit: [0; MAX_IME_PREEDIT_BYTES],
+                preedit_len: 0,
             }
         }
 
@@ -838,12 +844,89 @@ pub mod graphics {
         pub fn begin_selection(&mut self) {
             self.anchor.get_or_insert(self.cursor);
         }
+
+        /// Replace the active IME preedit. Invalid UTF-8 or an over-capacity
+        /// composition is rejected without changing the previous preedit.
+        pub fn composition_update(&mut self, text: &str) -> bool {
+            if text.len() > MAX_IME_PREEDIT_BYTES || core::str::from_utf8(text.as_bytes()).is_err()
+            {
+                return false;
+            }
+            self.preedit[..text.len()].copy_from_slice(text.as_bytes());
+            self.preedit_len = text.len();
+            true
+        }
+
+        pub fn composition_active(&self) -> bool {
+            self.preedit_len != 0
+        }
+
+        pub fn preedit(&self) -> &str {
+            core::str::from_utf8(&self.preedit[..self.preedit_len]).unwrap_or("")
+        }
+
+        pub fn composition_cancel(&mut self) {
+            self.preedit_len = 0;
+        }
+
+        /// Commit the preedit transactionally into the main text buffer. If
+        /// any scalar would exceed the bounded control capacity, the main
+        /// text and selection are restored and the preedit remains active.
+        pub fn composition_commit(&mut self) -> bool {
+            if self.preedit_len == 0 {
+                return true;
+            }
+            let bytes = self.preedit;
+            let length = self.preedit_len;
+            let old_bytes = self.bytes;
+            let old_len = self.len;
+            let old_cursor = self.cursor;
+            let old_anchor = self.anchor;
+            let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+            for character in text.chars() {
+                if !self.insert(character) {
+                    self.bytes = old_bytes;
+                    self.len = old_len;
+                    self.cursor = old_cursor;
+                    self.anchor = old_anchor;
+                    return false;
+                }
+            }
+            self.preedit_len = 0;
+            true
+        }
     }
 
     impl Default for TextInputState {
         fn default() -> Self {
             Self::new()
         }
+    }
+
+    /// Reorder one UTF-8 paragraph using the full Unicode Bidirectional
+    /// Algorithm (UAX #9). The result is caller-owned and bounded; this API
+    /// does not silently truncate visual text.
+    pub fn reorder_text_uax9(text: &str, output: &mut [char]) -> Result<usize, TrueTypeError> {
+        let bidi = unicode_bidi::BidiInfo::new(text, None);
+        let mut count = 0;
+        for (paragraph_index, paragraph) in bidi.paragraphs.iter().enumerate() {
+            let visual = bidi.reorder_line(paragraph, paragraph.range.clone());
+            for character in visual.chars() {
+                if count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                output[count] = character;
+                count += 1;
+            }
+            if paragraph_index + 1 < bidi.paragraphs.len() {
+                if count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                output[count] = '\n';
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -14904,6 +14987,28 @@ mod tests {
         assert_eq!(input.selection(), Some((0, 2)));
         assert!(input.delete());
         assert_eq!(input.as_str(), "");
+        assert!(input.composition_update("é界"));
+        assert!(input.composition_active());
+        assert_eq!(input.preedit(), "é界");
+        assert!(input.composition_commit());
+        assert_eq!(input.as_str(), "é界");
+        assert!(!input.composition_active());
+        assert!(input.composition_update("cancelled"));
+        input.composition_cancel();
+        assert!(!input.composition_active());
+    }
+
+    #[test]
+    fn wovengraphics_uax9_reorders_mixed_text_without_truncation() {
+        let mut visual = ['\0'; 32];
+        let count = crate::graphics::reorder_text_uax9("abc אבג, 123", &mut visual).unwrap();
+        let reordered: String = visual[..count].iter().collect();
+        assert_eq!(reordered, "abc 123 ,גבא");
+        let mut tiny = ['\0'; 4];
+        assert!(matches!(
+            crate::graphics::reorder_text_uax9("abc אבג", &mut tiny),
+            Err(crate::graphics::TrueTypeError::TooLarge)
+        ));
     }
 
     #[test]

@@ -31,9 +31,16 @@ controls: it stores at most 512 UTF-8 bytes, keeps caret and selection offsets
 on scalar boundaries, and supports insertion, deletion, backspace, and
 selection-aware left/right movement without allocation.
 
+The userspace text boundary now uses `unicode-bidi` 0.3.18 with hardcoded
+Unicode data and no_std+alloc configuration for full UAX #9 visual reordering.
+`reorder_text_uax9` preserves paragraph separators and fails closed when the
+caller-owned output buffer is too small. `TextInputState` supports bounded IME
+preedit replacement, commit, and cancellation; commit is transactional and
+restores prior text and selection on capacity failure.
+
 Validation completed:
 
-- `cargo test -p libwoven --quiet`: 149 passed, including the high-DPI raster
+- `cargo test -p libwoven --quiet`: 150 passed, including the high-DPI raster
   and non-BMP cmap fixtures.
 - `cargo clippy -p libwoven --all-targets -- -D warnings`: passed.
 - `cargo fmt --package libwoven -- --check`: passed.

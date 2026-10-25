@@ -6187,5 +6187,7 @@ and selection operations for controls. The full libwoven host suite (148
 tests), warning-denying package Clippy, formatting, and diff checks pass. Stage
 05 now has a licensed guest fixture, kernel loader/raster self-test, and 1/2/4
 CPU QEMU evidence. The host suite asserts bounded 4x outline raster coverage,
-non-BMP cmap12 mapping/advance, and UTF-8 editing. Full UAX #9/script shaping
-and IME remain explicit higher-level limits.
+non-BMP cmap12 mapping/advance, and UTF-8 editing. Full UAX #9 reordering is
+now provided by `unicode-bidi`, and IME preedit/commit/cancel is transactional
+in `TextInputState`. Script-specific glyph shaping remains a separate
+OpenType capability.

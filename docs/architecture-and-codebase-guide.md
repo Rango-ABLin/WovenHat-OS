@@ -13,6 +13,10 @@ UAX #9/script shaping and full IME remain higher-level limits recorded in
 kernel loader/raster path is qualified by the Stage 05 QEMU matrix.
 `libwoven::graphics::TextInputState` supplies the companion fixed 512-byte
 UTF-8 editing state with scalar-boundary caret and selection operations.
+`reorder_text_uax9` uses `unicode-bidi` hardcoded Unicode data for complete
+paragraph visual reordering into caller-owned storage. `TextInputState` owns a
+bounded IME preedit buffer and commits it transactionally into the main UTF-8
+buffer, preserving selection state on overflow.
 The licensed fixture at `assets/fonts/NotoSans-Regular.ttf` is validated for
 cmap/metrics and loaded by the bounded kernel `ttf` module for simple-glyf
 rasterization. Composite or malformed outlines fail closed to the bitmap

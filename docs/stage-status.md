@@ -8,9 +8,13 @@ bounded `libwoven::graphics::FontFallback` provider and glyph cache,
 sfnt/cmap/hmtx/glyf loader, and raster self-test are implemented. Host tests,
 warning-denying Clippy, and the kernel QEMU gate pass at 1/2/4 CPUs. See
 `docs/graphics/stage-05-typography-evidence.md` for limits and evidence.
+The userspace text layer now also provides full UAX #9 reordering and
+transactional bounded IME preedit/commit/cancel behavior; the full libwoven
+suite passes 150 tests.
 The existing guest font-coverage gate passed at 1/2/4 CPUs, and the new
-bundled-font loader/raster gate passed at 1/2/4 CPUs. Full UAX #9/script
-shaping and IME remain explicit later-capability limits.
+bundled-font loader/raster gate passed at 1/2/4 CPUs. Full UAX #9 reordering
+and IME composition are now implemented; script-specific glyph shaping remains
+an OpenType capability boundary.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 
