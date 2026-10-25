@@ -1,5 +1,18 @@
 # Stage status
 
+## Scalable I/O and launcher capacity increment - 2026-10-25
+
+The safe userspace API no longer treats the kernel's per-syscall transfer
+validation as an application-level payload ceiling. `libwoven::read_all`,
+`write_all`, and `write_file_all` stream arbitrarily sized buffers in validated
+chunks; standard output and media VFS loading use those helpers. The WovenShell
+launcher no longer truncates the production catalog at ten entries: its
+metadata staging capacity is 64 applications and its child-process staging is
+32. Pointer, integer-overflow, memory, IPC, path, and resource limits remain
+intentional safety gates and are not removed. Host tests and warning-denying
+Clippy pass; production system-app QEMU passes at 1/2/4 CPUs with 1280x800
+desktop evidence.
+
 ## Graphics roadmap Stage 07 image/asset increment - 2026-10-25
 
 Stage 07 remains partial only at the freestanding WebP boundary. The wallpaper

@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - scalable I/O and launcher capacity increment (2026-10-25)
+
+The kernel retains per-call validation limits for memory safety, but libwoven
+now exposes `read_all`, `write_all`, and `write_file_all` so arbitrarily sized
+application buffers stream through the validated 1024-byte syscall chunks.
+`print`/`eprint` use the streaming path, and media loading reuses it. The
+WovenShell catalog staging capacity increased from the accidental ten-entry
+fixture ceiling to 64 entries, with child-process staging increased to 32.
+This is a scalability increment, not a removal of fail-closed pointer,
+overflow, or resource validation.
+
 ## Codex - graphics roadmap Stage 07 image increment (2026-10-25)
 
 Started Stage 07 with bounded image policy, PNG/JPEG RGBA adapters, host-target

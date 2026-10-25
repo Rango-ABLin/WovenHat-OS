@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Scalable userspace I/O contract (2026-10-25)
+
+Kernel read/write syscalls continue to validate each pointer and cap one
+transfer to a safe chunk. Applications must use `libwoven::read_all`,
+`write_all`, or `write_file_all` for payloads larger than one syscall; these
+helpers make progress across the complete caller buffer without introducing a
+second artificial application limit. A zero-progress result stops the stream
+to avoid hangs. These APIs provide scalability without weakening the kernel's
+memory-safety boundary.
+
 ## Graphics roadmap Stage 07 image/asset increment (2026-10-25)
 
 `libwoven::media` owns the bounded image decode boundary. It rejects dimensions
