@@ -1,4 +1,4 @@
-name: WovenPDF host parser tests
+name: WovenPDF validation
 on:
   pull_request:
     paths:
@@ -8,25 +8,41 @@ on:
 
 jobs:
   parser:
+    name: Host unit tests and Clippy
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Install components for repository-pinned nightly
-        run: rustup component add --toolchain nightly-2026-07-10 clippy rustfmt
-      - name: Install freestanding target and rust-src
-        run: |
-          rustup target add --toolchain nightly-2026-07-10 x86_64-unknown-none
-          rustup component add --toolchain nightly-2026-07-10 rust-src
-      - name: Freestanding graphical PDF app build
-        run: cargo +nightly-2026-07-10 build --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-none --bin wovenhat-pdf
+      - name: Install pinned nightly Clippy
+        run: rustup component add --toolchain nightly-2026-07-10 clippy
       - name: Parser unit tests
-        run: cargo test --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib
+        run: cargo +nightly-2026-07-10 test --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib
       - name: Deny compiler warnings
-        run: cargo clippy --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib -- -D warnings
-      - name: Formatting
-        run: cargo fmt --manifest-path apps/woven-pdf/Cargo.toml --all -- --check
+        run: cargo +nightly-2026-07-10 clippy --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib -- -D warnings
+
+  freestanding:
+    name: Freestanding GUI build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust target and source
+        run: |
+          rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
+      - name: Compile native WovenPDF binary
+        run: cargo +nightly-2026-07-10 build --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-none --bin wovenhat-pdf
+
+  formatting:
+    name: Rust formatting
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned rustfmt
+        run: rustup toolchain install nightly-2026-07-10 --component rustfmt
+      - name: Check formatting
+        run: cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all -- --check
