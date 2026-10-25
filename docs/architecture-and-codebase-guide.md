@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graphics roadmap Stage 07 image/asset increment (2026-10-25)
+
+`libwoven::media` owns the first bounded image decode boundary. It rejects
+dimensions above 8192 or 16 megapixels, recognizes the supported container
+headers, and decodes only uncompressed 24/32-bit BMP into caller-owned RGBA
+storage after validating all offsets and strides. PNG/JPEG/WebP pixel decode,
+asset caching, manifests, and VFS wallpaper integration remain an explicit
+unaccepted continuation of Stage 07.
+
 ## Graphics roadmap Stage 06 iconography (2026-10-25)
 
 `libwoven/src/icons.rs` owns the versioned code-native icon contract used by

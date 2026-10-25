@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 07 image increment (2026-10-25)
+
+Started Stage 07 with bounded image policy, VP8X WebP metadata recognition,
+and allocation-free uncompressed BMP RGBA decoding. Host tests and warning-
+denying Clippy pass with 154 tests. The stage remains open pending PNG/JPEG/
+WebP pixel decoders, asset manifest/cache, wallpapers, VFS integration, and
+guest acceptance.
+
 ## Codex - graphics roadmap Stage 06 iconography (2026-10-25)
 
 Added the versioned `libwoven::icons` pack with semantic MIME metadata,

@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics roadmap Stage 07 image/asset increment - 2026-10-25
+
+Stage 07 has started but is not accepted. `libwoven::media` now has bounded
+pixel/dimension policy, VP8X WebP header recognition, and an allocation-free
+24/32-bit BMP decoder with malformed-input and output-bound checks. The suite
+and warning-denying Clippy pass (154 tests). PNG/JPEG/WebP pixel decoding,
+asset caching/manifest integration, licensed wallpapers, and guest image
+qualification remain open. See
+`docs/graphics/stage-07-images-evidence.md`.
+
 ## Graphics roadmap Stage 06 iconography - 2026-10-25
 
 Stage 06 is accepted for the versioned code-native icon pack and WovenShell
