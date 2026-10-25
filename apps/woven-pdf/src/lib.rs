@@ -4,6 +4,7 @@
 //! page-tree traversal, object streams, or images are supported yet.
 
 pub mod content;
+pub mod document;
 pub mod filters;
 pub mod lexer;
 pub mod layout;
