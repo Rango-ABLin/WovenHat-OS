@@ -32,11 +32,13 @@ The Stage 20.7 matrix now also injects neutral pointer packets throughout the
 fade and passes its sustained-input starvation check on 1/2/4 CPUs. Full Stage
 11 screenshot/theme and low-power acceptance remains open.
 
-The full desktop screenshot qualification was attempted on 1 CPU but did not
-reach the session: production system-app catalog installation failed during
-boot before any frame capture. Evidence is preserved under
-`audit-artifacts/desktop-qualification-1792950550125532300`; no screenshot
-acceptance claim is made from that run.
+The earlier desktop screenshot qualification stopped before the session
+because the production system-app catalog could not fit `woven-images.wapp`.
+After raising the bounded VFS node capacity to 256 KiB, the full desktop
+qualification passed on 1 CPU with six captured PPM frames and signed-in
+WovenFiles/WovenTerminal interaction evidence under
+`audit-artifacts/desktop-qualification-1792952128648637100`. The 2/4-CPU
+desktop screenshot matrix and low-power runtime remain open.
 
 ## Graphics Stage 11 shared-theme visual regression - 2026-10-25
 
