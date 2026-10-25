@@ -6,6 +6,7 @@ own output. The existing source QEMU harness handles guest boot and screenshot.
 """
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from capture_hello_gui import capture
@@ -22,7 +23,9 @@ def run(root, manifest, baseline_id, evidence_dir, qemu=None, firmware=None,
     report_path.unlink(missing_ok=True)
     captured = capturer(root, screenshot, qemu, firmware, timeout)
     result = qualifier(manifest, baseline_id, screenshot)
-    report = {"pass": bool(result["pass"]), "capture": captured, "comparison": result}
+    if not isinstance(result, dict) or type(result.get("pass")) is not bool:
+        raise ValueError("qualifier did not return an explicit boolean PASS/FAIL")
+    report = {"pass": result["pass"], "capture": captured, "comparison": result}
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
 
@@ -42,7 +45,7 @@ def main():
                       args.evidence_dir, args.qemu, args.firmware, args.timeout)
         print(json.dumps(outcome, indent=2))
         return 0 if outcome["pass"] else 1
-    except (OSError, ValueError, RuntimeError, KeyError) as error:
+    except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired) as error:
         print(json.dumps({"pass": False, "error": str(error)}), file=sys.stderr)
         return 2
 
