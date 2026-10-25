@@ -201,7 +201,13 @@ pub fn run(shell: Option<&[u8]>, path: Option<&[u8]>) -> ! {
             if n == 10 && &message[..4] == b"WPBT" && message[4] == 0 {
                 let now = message[5] != 0;
                 let y = u16::from_le_bytes([message[8], message[9]]);
-                if pressed && !now {\n                    let x = u16::from_le_bytes([message[6], message[7]]);\n                    if y < 54 && unsafe { PAGE_COUNT } > 0 {\n                        let old = unsafe { SELECTED_PAGE };\n                        let next = if x < 240 { old.saturating_sub(1) } else { old.saturating_add(1) };\n                        if next != old { let _ = select_page(next); }\n                    }
+                if pressed && !now {
+                    let x = u16::from_le_bytes([message[6], message[7]]);
+                    if y < 54 && unsafe { PAGE_COUNT } > 0 {
+                        let old = unsafe { SELECTED_PAGE };
+                        let next = if x < 240 { old.saturating_sub(1) } else { old.saturating_add(1) };
+                        if next != old { let _ = select_page(next); }
+                    }
                     if y < 54 {
                         first_line = first_line.saturating_sub(8);
                     } else if y > 275 {
