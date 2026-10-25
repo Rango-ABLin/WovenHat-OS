@@ -1,5 +1,13 @@
 # Stage status
 
+## Graphics bounded responsive-length increment - 2026-10-25
+
+Browser inline and stylesheet `width`/`height` now accept checked percentage
+lengths in addition to pixels. Width resolves against the containing box and
+height against the bounded viewport; invalid or overflowing values fail closed.
+The full 189-test libwoven suite and warning-denying freestanding target
+Clippy pass. Media queries and full responsive semantics remain open.
+
 ## Graphics bounded stylesheet cascade increment - 2026-10-25
 
 `libwoven::browser` now captures HTML class/id attributes and parses a

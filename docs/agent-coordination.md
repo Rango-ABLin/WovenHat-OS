@@ -6616,3 +6616,11 @@ The 188-test libwoven suite plus host all-targets and freestanding target
 warning-denying Clippy pass. Media queries and full responsive/browser
 semantics remain open.
 
+# Graphics bounded responsive-length increment - 2026-10-25
+
+Codex added checked percentage width/height lengths to the browser's inline
+and stylesheet declarations. Width resolves against the containing box and
+height against the bounded viewport. The 189-test libwoven suite and
+freestanding target warning-denying Clippy pass; media queries and full
+responsive semantics remain open.
+
