@@ -273,6 +273,122 @@ const PANEL_FILL: u32 = rgb(28, 32, 44);
 const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
 
+/// The first desktop release keeps a small, curated set of shortcuts visible
+/// so the desktop feels useful before the launcher is opened. The catalog
+/// remains the source of truth: these names are resolved against it at click
+/// time, so a missing package simply leaves the shortcut inert.
+const DESKTOP_ICON_NAMES: [&str; 3] = ["Files", "Terminal", "Store"];
+const DESKTOP_ICON_X: i32 = 24;
+const DESKTOP_ICON_Y: i32 = 52;
+const DESKTOP_ICON_STEP: i32 = 76;
+const DESKTOP_ICON_SIZE: i32 = 32;
+
+#[derive(Clone, Copy)]
+enum AppIcon {
+    Files,
+    Terminal,
+    Store,
+    Settings,
+    Security,
+    Images,
+    Calculator,
+    Editor,
+    Update,
+    Ai,
+    Generic,
+}
+
+fn app_icon(name: &[u8]) -> AppIcon {
+    match name {
+        b"Files" => AppIcon::Files,
+        b"Terminal" => AppIcon::Terminal,
+        b"Store" => AppIcon::Store,
+        b"Settings" => AppIcon::Settings,
+        b"Security" => AppIcon::Security,
+        b"Images" => AppIcon::Images,
+        b"Calculator" => AppIcon::Calculator,
+        b"Editor" => AppIcon::Editor,
+        b"Update" => AppIcon::Update,
+        b"AI" => AppIcon::Ai,
+        _ => AppIcon::Generic,
+    }
+}
+
+fn icon_colors(icon: AppIcon) -> (u32, u32) {
+    match icon {
+        AppIcon::Files => (rgb(45, 150, 190), rgb(170, 230, 232)),
+        AppIcon::Terminal => (rgb(35, 45, 62), rgb(100, 220, 172)),
+        AppIcon::Store => (rgb(175, 82, 105), rgb(255, 210, 170)),
+        AppIcon::Settings => (rgb(88, 105, 150), rgb(224, 232, 255)),
+        AppIcon::Security => (rgb(54, 126, 112), rgb(210, 255, 218)),
+        AppIcon::Images => (rgb(68, 126, 186), rgb(255, 220, 120)),
+        AppIcon::Calculator => (rgb(124, 82, 160), rgb(242, 216, 255)),
+        AppIcon::Editor => (rgb(170, 112, 55), rgb(255, 236, 172)),
+        AppIcon::Update => (rgb(48, 132, 156), rgb(210, 255, 255)),
+        AppIcon::Ai => (rgb(112, 74, 164), rgb(235, 210, 255)),
+        AppIcon::Generic => (rgb(74, 88, 112), rgb(220, 230, 242)),
+    }
+}
+
+/// Draw a compact, legible app tile. The glyphs are deliberately geometric so
+/// they stay crisp in both the flat and 3D launcher textures.
+fn draw_app_icon(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i32, selected: bool) {
+    let (fill, ink) = icon_colors(icon);
+    canvas.fill_rect(x + 1, y + 2, size as usize, size as usize, rgb(0, 0, 0));
+    canvas.fill_rect(x, y, size as usize, size as usize, fill);
+    canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
+    if selected {
+        outline(canvas, Area::new(x - 1, y - 1, size + 2, size + 2), ACCENT);
+    }
+    let left = x + size / 4;
+    let top = y + size / 3;
+    let span = (size / 2).max(4) as usize;
+    match icon {
+        AppIcon::Files => {
+            canvas.fill_rect(left, top - 2, span / 2 + 2, 3, ink);
+            canvas.fill_rect(left, top, span, span / 2 + 2, ink);
+        }
+        AppIcon::Terminal => {
+            canvas.fill_rect(left, top, span, 2, ink);
+            canvas.fill_rect(left, top + 4, 2, 2, ink);
+            canvas.fill_rect(left + 4, top + 4, span.saturating_sub(4), 2, ink);
+        }
+        AppIcon::Store => {
+            canvas.fill_rect(left, top, span, 2, ink);
+            canvas.fill_rect(left + 2, top + 4, span.saturating_sub(4), 2, ink);
+            canvas.fill_rect(left + 2, top + 8, span.saturating_sub(4), 2, ink);
+        }
+        AppIcon::Security => {
+            canvas.fill_rect(left + 2, top - 1, span.saturating_sub(4), 2, ink);
+            canvas.fill_rect(left, top + 1, span, 5, ink);
+            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
+        }
+        AppIcon::Images => {
+            canvas.fill_rect(left, top + 3, span, span.saturating_sub(2), ink);
+            canvas.fill_rect(left + 3, top, 3, 3, ink);
+        }
+        AppIcon::Calculator => {
+            canvas.fill_rect(left, top, span, 2, ink);
+            canvas.fill_rect(left, top + 4, 2, 2, ink);
+            canvas.fill_rect(left + 5, top + 4, 2, 2, ink);
+            canvas.fill_rect(left, top + 8, 2, 2, ink);
+            canvas.fill_rect(left + 5, top + 8, 2, 2, ink);
+        }
+        AppIcon::Editor => {
+            canvas.fill_rect(left + 2, top - 1, 3, span + 2, ink);
+            canvas.fill_rect(left, top + span as i32, span, 2, ink);
+        }
+        AppIcon::Settings => {
+            canvas.fill_rect(left, top + 2, span, 3, ink);
+            canvas.fill_rect(left + 3, top - 1, 3, span + 2, ink);
+        }
+        AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
+            canvas.fill_rect(left, top + 2, span, 2, ink);
+            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
+        }
+    }
+}
+
 /// Notifications remembered for the Notification Center.
 const MAX_NOTES: usize = 8;
 const CENTER_WIDTH: i32 = 164;
@@ -1267,6 +1383,20 @@ impl Desktop {
         Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
     }
 
+    /// The perspective card can leave a few pixels outside its flat source
+    /// rectangle at the receded top corners. Include that halo in damage so
+    /// closing or filtering the launcher cannot leave an old projected edge
+    /// on the wallpaper.
+    fn panel_damage_area(&self) -> Area {
+        let panel = self.panel_area();
+        if panel.is_empty() {
+            return panel;
+        }
+        panel
+            .union(Area::new(panel.x - 24, panel.y - 24, panel.width + 48, panel.height + 28))
+            .intersect(self.screen())
+    }
+
     /// The panel's overlay: border, title row, selection and text, drawn at
     /// `area`'s own position in `canvas`. Used both for the ordinary flat
     /// 2D panel and, rendered once at local origin into an offscreen
@@ -1278,7 +1408,8 @@ impl Desktop {
         let inner = (area.width - 2) as usize;
         outline(canvas, area, ACCENT);
         canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
-        canvas.draw_text(x + 6, y + 5, PANEL_TITLE, TEXT);
+        draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
+        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, TEXT);
 
         let mut search = [0u8; MAX_QUERY + 3];
         search[..2].copy_from_slice(b"> ");
@@ -1297,18 +1428,18 @@ impl Desktop {
             if row == self.selected {
                 canvas.fill_rect(x + 1, row_y, inner, PANEL_ROW as usize, ENTRY_ACTIVE);
             }
+            draw_app_icon(canvas, x + 4, row_y + 1, app_icon(app.name()), 12, row == self.selected);
             let text = core::str::from_utf8(app.name()).unwrap_or("?");
-            canvas.draw_text(x + 6, row_y + 4, text, TEXT);
+            canvas.draw_text(x + 22, row_y + 4, text, TEXT);
         }
     }
 
     fn render_panel(&self, canvas: &mut Canvas<'_>) {
-        let area = self.panel_area();
-        if self.three_d {
-            self.render_panel_3d(canvas, area);
-        } else {
-            self.paint_panel_content(canvas, area);
-        }
+        // Keep launcher text and icons crisp in the foreground. The desktop,
+        // taskbar, title bars, and wallpaper retain their 3D presentation;
+        // this card intentionally follows the taskbar's readable-surface
+        // treatment instead of perspective-compressing bitmap glyphs.
+        self.paint_panel_content(canvas, self.panel_area());
     }
 
     /// The launcher panel, perspective-projected as a card tilted back in
@@ -1317,6 +1448,7 @@ impl Desktop {
     /// [`Self::render_qs_3d`]: the flat content is rendered once into
     /// `LAUNCHER_PANEL_TEXTURE` at local origin, then sampled by two
     /// `textured_triangle_3d` calls per tile `canvas` this is invoked for.
+    #[allow(dead_code)]
     fn render_panel_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
@@ -1398,7 +1530,8 @@ impl Desktop {
 
     /// Open or close the launcher. Returns the area to repaint.
     fn toggle_launcher(&mut self) -> Area {
-        let mut before = self.panel_area();
+        let closing = self.launcher_open;
+        let mut before = self.panel_damage_area();
         if !self.launcher_open && (self.center_open || self.qs_open) {
             // Only one panel at a time.
             before = before.union(self.center_area()).union(self.qs_area()).union(self.qs_button());
@@ -1408,7 +1541,14 @@ impl Desktop {
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
-        before.union(self.panel_area())
+        // A close must restore every pixel under the projected card. The
+        // launcher is a foreground mode switch, so a full recomposition is
+        // bounded and prevents stale projected corners or icon glyphs.
+        if closing {
+            before.union(self.screen())
+        } else {
+            before.union(self.panel_damage_area())
+        }
     }
 
     /// Launch catalog entry `index` and close the launcher. A failure is
@@ -1627,10 +1767,45 @@ impl Desktop {
         self.render_floor_3d(canvas, |x, y| wallpaper(x, y, height));
     }
 
+    fn desktop_icon_area(&self, index: usize) -> Area {
+        Area::new(
+            DESKTOP_ICON_X,
+            DESKTOP_ICON_Y + index as i32 * DESKTOP_ICON_STEP,
+            64,
+            62,
+        )
+    }
+
+    fn desktop_icon_app(&self, index: usize) -> Option<usize> {
+        let name = DESKTOP_ICON_NAMES.get(index)?.as_bytes();
+        self.apps[..self.app_count]
+            .iter()
+            .position(|app| app.is_some_and(|app| app.name() == name))
+    }
+
+    /// A small desktop dock: familiar shortcuts with a consistent tile and
+    /// label treatment. It is painted above the wallpaper but below windows,
+    /// so open applications retain normal z-order and the shortcuts remain
+    /// useful on an otherwise empty desktop.
+    fn paint_desktop_icons(&self, canvas: &mut Canvas<'_>) {
+        for (index, name) in DESKTOP_ICON_NAMES.iter().enumerate() {
+            let area = self.desktop_icon_area(index);
+            let Some(app_index) = self.desktop_icon_app(index) else { continue };
+            let Some(app) = self.apps[app_index] else { continue };
+            let icon_x = area.x + (area.width - DESKTOP_ICON_SIZE) / 2;
+            canvas.fill_rect(icon_x + 2, area.y + 3, DESKTOP_ICON_SIZE as usize, DESKTOP_ICON_SIZE as usize, rgb(0, 0, 0));
+            draw_app_icon(canvas, icon_x, area.y, app_icon(app.name()), DESKTOP_ICON_SIZE, false);
+            let width = font::text_width(name) as i32;
+            let text_x = area.x + ((area.width - width) / 2).max(0);
+            canvas.draw_text(text_x, area.y + 40, name, TEXT);
+        }
+    }
+
     /// The desktop layer: wallpaper and taskbar, with its start button,
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
+        self.paint_desktop_icons(canvas);
         if self.three_d {
             self.render_taskbar_3d(canvas);
             // Keep the desktop's depth and perspective while presenting the
@@ -3218,6 +3393,18 @@ impl Desktop {
                     .map(|(_, (slot, _))| slot);
                 if let Some(slot) = entry {
                     return self.focus(slot);
+                }
+                // Desktop shortcuts are below windows in the visual stack;
+                // only activate one when no window frame covers the click.
+                if let Some(index) = (0..DESKTOP_ICON_NAMES.len()).find(|&index| {
+                    self.desktop_icon_area(index).contains(x, y)
+                        && !self.stack[..self.stacked].iter().rev().any(|&slot| {
+                            self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
+                        })
+                }) {
+                    if let Some(app) = self.desktop_icon_app(index) {
+                        return self.launch(app);
+                    }
                 }
                 // Otherwise the topmost window under the pointer: its close
                 // control asks the owner to close; anywhere else focuses it,

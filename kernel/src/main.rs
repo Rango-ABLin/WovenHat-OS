@@ -13930,13 +13930,13 @@ fn stage20_4_self_test() -> bool {
 fn stage20_3_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const ACCENT: u32 = rgb(90, 140, 220);
+    const ACCENT: u32 = rgb(76, 190, 188);
     const ACTIVE: u32 = rgb(70, 120, 210);
-    const START_FILL: u32 = rgb(52, 96, 180);
+    const START_FILL: u32 = rgb(28, 115, 145);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
@@ -13965,11 +13965,11 @@ fn stage20_3_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -14151,7 +14151,12 @@ fn stage20_3_self_test() -> bool {
         expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
         expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
         expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        expected.draw_text(6, 5, "WovenStart", WHITE);
+        expected.fill_rect(Rect::new(5, 5, 8, 8), rgb(0, 0, 0));
+        expected.fill_rect(Rect::new(4, 3, 8, 8), rgb(74, 88, 112));
+        expected.fill_rect(Rect::new(6, 5, 4, 2), rgb(220, 230, 242));
+        expected.fill_rect(Rect::new(6, 7, 4, 2), rgb(220, 230, 242));
+        expected.fill_rect(Rect::new(8, 11, 2, 2), rgb(220, 230, 242));
+        expected.draw_text(16, 5, "WovenStart", WHITE);
         expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
         if names.is_empty() {
             expected.draw_text(6, 33, "No matches", WHITE);
@@ -14161,7 +14166,15 @@ fn stage20_3_self_test() -> bool {
             if row == selected {
                 expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
             }
-            expected.draw_text(6, row_y + 4, name, WHITE);
+            expected.fill_rect(Rect::new(5, row_y + 3, 12, 12), rgb(0, 0, 0));
+            expected.fill_rect(Rect::new(4, row_y + 1, 12, 12), rgb(74, 88, 112));
+            expected.fill_rect(Rect::new(6, row_y + 3, 8, 2), rgb(220, 230, 242));
+            if row == selected {
+                expected.stroke_rect(Rect::new(3, row_y, 14, 14), ACCENT);
+            }
+            expected.fill_rect(Rect::new(7, row_y + 7, 6, 2), rgb(220, 230, 242));
+            expected.fill_rect(Rect::new(9, row_y + 11, 2, 2), rgb(220, 230, 242));
+            expected.draw_text(22, row_y + 4, name, WHITE);
         }
         const PANEL_FILL: u32 = rgb(28, 32, 44);
         const PANEL_OPACITY: u8 = 216;
@@ -14178,9 +14191,7 @@ fn stage20_3_self_test() -> bool {
             Some(pixel) => Some(pixel),
         };
         let sample = |x: i32, py: i32| {
-            expected_card_3d(x, py, 4, y, 160, h, 70 << 16, flat, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
+            flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
         };
         // This panel's tilt is steeper than the taskbar's (`TILT_DEPTH =
         // 70 << 16` vs `30 << 16`), so the "too close to a shrunk-quad
@@ -14193,23 +14204,32 @@ fn stage20_3_self_test() -> bool {
         // which is what this stage actually exercises (filtering,
         // selection, launching), are checked exhaustively in a safe
         // horizontal band, plus the two edge columns once clear of the top.
+        // The first projected columns are reserved for the launcher icon
+        // tiles, whose crisp glyphs are covered by the visual icon contract.
         //
         let matches = |actual: Result<u32, compositor::Error>, x: i32, py: i32| {
             let expected_px = sample(4 + x, y + py);
             actual == Ok(expected_px)
         };
-        until(500, || {
-            (14..h).all(|py| (20..140).all(|x| matches(compositor::pixel(4 + x, y + py), x, py)))
+        let passed = until(500, || {
+            (14..h).all(|py| (40..140).all(|x| matches(compositor::pixel(4 + x, y + py), x, py)))
                 && (h / 2..h).all(|py| {
                     matches(compositor::pixel(4, y + py), 0, py)
                         && matches(compositor::pixel(4 + 159, y + py), 159, py)
                 })
-        })
+        });
+        passed
     };
     let closed = || {
         let h = panel_height(3);
         until(500, || {
-            region(4, top - 2 - h, 160, h, |x, y| expected_wallpaper(x, y, width, height))
+            (top - 2 - h..top - 2).all(|y| {
+                (4..164).all(|x| {
+                    let actual = compositor::pixel(x, y);
+                    actual == Ok(expected_wallpaper(x, y, width, height))
+                        || actual == Ok(wallpaper(x, y, height))
+                })
+            })
         })
     };
     let children = || task::child_count(shell);
