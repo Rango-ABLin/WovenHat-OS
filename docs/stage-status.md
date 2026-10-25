@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenSettings shared-label migration - 2026-10-25
+
+WovenSettings now uses the shared bounded WovenUI Label primitive for its title
+and Identity heading. The libwoven host suite passed 128 tests, Settings
+warning-denying Clippy passed, and formatting/diff checks passed. A Checkbox
+is not used for a cosmetic option; it remains reserved for a real persisted
+setting.
+
 ## WovenUI labels and checkboxes - 2026-10-25
 
 Added bounded allocation-free Label and Checkbox primitives to `libwoven::ui`.

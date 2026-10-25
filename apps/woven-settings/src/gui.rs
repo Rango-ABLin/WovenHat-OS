@@ -1,5 +1,5 @@
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Theme};
+use libwoven::ui::{Button, Label, Theme};
 use libwoven::{Canvas, GraphicsSurface, rgb};
 
 const WIDTH: u32 = 360;
@@ -96,8 +96,25 @@ fn draw_settings(
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenSettings", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 32, "Identity", ACCENT);
+    let title_theme = Theme {
+        surface: PANEL,
+        accent: ACCENT,
+        text: TEXT,
+        disabled: BUTTON,
+        focus: ACCENT,
+    };
+    Label::new(
+        Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
+        "WovenSettings",
+    )
+    .draw(canvas, title_theme);
+    Label::new(Frame::new(PANEL_X + 10, PANEL_Y + 32, 120, 16), "Identity").draw(
+        canvas,
+        Theme {
+            text: ACCENT,
+            ..title_theme
+        },
+    );
     let mut digits = [0u8; 20];
     // SAFETY: argument-free identity queries.
     draw_number(

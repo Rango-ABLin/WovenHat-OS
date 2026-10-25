@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenSettings adopts shared Label (2026-10-25)
+
+Migrated the Settings title and Identity heading from direct canvas text calls
+to the shared bounded WovenUI Label primitive. The libwoven host suite passed
+128 tests, the Settings target passed warning-denying Clippy, and formatting
+and diff checks passed. Checkbox remains available for future settings that
+have a real persisted behavior rather than a cosmetic toggle.
+
 ## Codex - bounded WovenUI labels and checkboxes (2026-10-25)
 
 Extended `libwoven::ui` with allocation-free Label and Checkbox primitives,

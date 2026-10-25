@@ -58,7 +58,7 @@ stale palette/start-mode fixtures were repaired.
 | Window surfaces | PARTIAL | Kernel client-surface registry and shell windows exist; the complete isolated production surface protocol is not closed. |
 | Compositor | PARTIAL | Bounded kernel compositor supports client blits, damage, ownership, and VirtIO outputs; a dedicated userspace compositor boundary is not complete. |
 | Window management | PARTIAL | Shell supports application windows, focus, close, resize-related behavior, and launcher interactions; full snapping/workspaces/modal policy is not complete. |
-| WovenUI framework | PARTIAL | `libwoven::ui` now provides bounded Button/TextField/Label/Checkbox primitives, theme tokens, and vertical stack layout; the complete responsive widget catalog and full application migration are not complete. |
+| WovenUI framework | PARTIAL | `libwoven::ui` now provides bounded Button/TextField/Label/Checkbox primitives, theme tokens, and vertical stack layout; WovenSettings uses shared Button/Label controls; the complete responsive widget catalog and full application migration are not complete. |
 | WovenDesktop shell | IMPLEMENTED for current QEMU scope | Automatic system-apps desktop boot, taskbar, launcher, clock, shortcuts, and visual shell are evidenced in QEMU. |
 | Core graphical applications | PARTIAL | System app catalog includes Files, Terminal, Store, Settings, Images, Calculator, Editor, Update, Security, and Monitor; full real-service behavior for every listed feature is not verified. |
 | Keyboard/mouse input | PARTIAL | QEMU keyboard/pointer acceptance exists, including launcher and desktop qualification; native hardware input remains unqualified. |
