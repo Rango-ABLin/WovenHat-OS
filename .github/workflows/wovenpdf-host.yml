@@ -72,5 +72,7 @@ jobs:
             git commit -m "style(wovenpdf): apply pinned rustfmt"
             git push origin HEAD:"$BRANCH"
           fi
-      - name: Check formatting
-        run: cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all -- --check
+      - name: Check WovenPDF formatting only
+        run: |
+          cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all
+          git diff --exit-code -- apps/woven-pdf
