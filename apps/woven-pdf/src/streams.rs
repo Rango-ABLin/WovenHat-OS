@@ -2,6 +2,7 @@
 //! This never searches binary content for "endstream" to determine length.
 //! Indirect /Length references and compressed streams remain unsupported.
 use crate::lexer::{Lexer, Token};
+use crate::filters::{self, Filter, FilterError};
 use crate::objects::Reference;
 use crate::xref::Entry;
 
@@ -14,6 +15,7 @@ pub enum StreamError {
     UnsupportedFilter,
     Truncated,
     InvalidTerminator,
+    Decode(FilterError),
 }
 
 fn next<'a>(scanner: &mut Lexer<'a>) -> Result<Token<'a>, StreamError> {
@@ -29,11 +31,11 @@ fn number(t: Token<'_>) -> Result<u32, StreamError> {
 
 /// Returns a borrowed view of an unfiltered stream attached to the specified
 /// indirect object. Dictionary /Length must be a direct nonnegative integer.
-pub fn raw_stream<'a>(
+pub fn stream_with_filter<'a>(
     input: &'a [u8],
     entries: &[Entry],
     target: Reference,
-) -> Result<&'a [u8], StreamError> {
+) -> Result<(&'a [u8], Filter), StreamError> {
     let entry = entries.iter().find(|e| e.in_use
         && e.object == target.number && e.generation == target.generation)
         .ok_or(StreamError::NotFound)?;
@@ -49,7 +51,7 @@ pub fn raw_stream<'a>(
     }
     let mut depth = 1usize;
     let mut length = None;
-    let mut filter = false;
+    let mut filter = Filter::Identity;
     while depth != 0 {
         match next(&mut lex)? {
             Token::DictionaryStart | Token::ArrayStart => {
@@ -64,12 +66,15 @@ pub fn raw_stream<'a>(
                 length = Some(value as usize);
             }
             Token::Name(name) if depth == 1 && (name == b"Filter" || name == b"F") => {
-                filter = true;
+                filter = match next(&mut lex)? {
+                    Token::Name(b"ASCIIHexDecode" | b"AHx") => Filter::AsciiHex,
+                    Token::Name(b"RunLengthDecode" | b"RL") => Filter::RunLength,
+                    _ => return Err(StreamError::UnsupportedFilter),
+                };
             }
             _ => {}
         }
     }
-    if filter { return Err(StreamError::UnsupportedFilter); }
     let length = length.ok_or(StreamError::InvalidLength)?;
     if next(&mut lex)? != Token::Keyword(b"stream") {
         return Err(StreamError::InvalidDictionary);
@@ -88,7 +93,31 @@ pub fn raw_stream<'a>(
         else if suffix.starts_with(b"\n") || suffix.starts_with(b"\r") { &suffix[1..] }
         else { suffix };
     if !suffix.starts_with(b"endstream") { return Err(StreamError::InvalidTerminator); }
-    Ok(bytes)
+    Ok((bytes, filter))
+}
+
+/// Retain the original interface for callers requiring a borrowed,
+/// uncompressed stream with no decoding or scratch allocation.
+pub fn raw_stream<'a>(
+    input: &'a [u8],
+    entries: &[Entry],
+    target: Reference,
+) -> Result<&'a [u8], StreamError> {
+    let (data, filter) = stream_with_filter(input, entries, target)?;
+    if filter != Filter::Identity { return Err(StreamError::UnsupportedFilter); }
+    Ok(data)
+}
+
+/// Decode one supported stream filter into caller-owned bounded memory.
+/// Callers must not interpret bytes following a decoding error.
+pub fn decoded_stream(
+    input: &[u8],
+    entries: &[Entry],
+    target: Reference,
+    output: &mut [u8],
+) -> Result<usize, StreamError> {
+    let (data, filter) = stream_with_filter(input, entries, target)?;
+    filters::decode(filter, data, output).map_err(StreamError::Decode)
 }
 
 #[cfg(test)]
@@ -108,6 +137,14 @@ mod tests {
             Err(StreamError::NotFound));
         const COMP: &[u8] = b"1 0 obj << /Length 3 /Filter /FlateDecode >>\nstream\nabc\nendstream\nendobj";
         assert_eq!(raw_stream(COMP, &ENTRY, REF), Err(StreamError::UnsupportedFilter));
+    }
+    #[test]
+    fn decodes_ascii_hex_stream() {
+        const DATA: &[u8] = b"1 0 obj << /Length 7 /Filter /ASCIIHexDecode >>\nstream\n486921>\nendstream\nendobj";
+        let mut out = [0; 10];
+        assert_eq!(decoded_stream(DATA, &ENTRY, REF, &mut out), Ok(3));
+        assert_eq!(&out[..3], b"Hi!");
+        assert_eq!(raw_stream(DATA, &ENTRY, REF), Err(StreamError::UnsupportedFilter));
     }
     #[test]
     fn rejects_incorrect_lengths() {
