@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenInstaller shared-control migration (2026-10-25)
+
+Migrated WovenInstaller's title and Close control to shared bounded WovenUI
+Label and Button primitives while preserving its existing bounded installer
+state and close protocol. Target warning-denying Clippy, target build,
+formatting, and diff checks passed. No QEMU client acceptance is claimed for
+this increment.
+
 ## Codex - WovenCalculator shared-control migration (2026-10-25)
 
 Migrated WovenCalculator's title and Evaluate control to shared bounded

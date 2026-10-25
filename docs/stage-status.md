@@ -1,5 +1,12 @@
 # Stage status
 
+## WovenInstaller shared-control migration - 2026-10-25
+
+WovenInstaller now uses shared bounded Label and Button rendering for its
+title and Close action while preserving the installer state and WCLS close
+protocol. Target Clippy, target build, formatting, and diff checks passed. No
+QEMU client acceptance is claimed for this increment.
+
 ## WovenCalculator shared-control migration - 2026-10-25
 
 WovenCalculator now uses shared bounded Label and Button rendering, and its
