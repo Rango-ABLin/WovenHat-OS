@@ -94,7 +94,7 @@ pub fn raw_stream<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    const PDF: &[u8] = b"1 0 obj\n<< /Length 13 >>\nstream\nhelloendobj!\nendstream\nendobj";
+    const PDF: &[u8] = b"1 0 obj\n<< /Length 12 >>\nstream\nhelloendobj!\nendstream\nendobj";
     const ENTRY: [Entry; 1] = [Entry { object: 1, generation: 0, offset: 0, in_use: true }];
     const REF: Reference = Reference { number: 1, generation: 0 };
 
