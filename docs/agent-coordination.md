@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - browser layout substrate increment (2026-10-25)
+
+Extended `libwoven::browser` beyond the borrowed HTML parser with allocation-
+free inline-style extraction and a fixed-capacity checked block-layout pass.
+The pass handles bounded nesting, margins, explicit pixel width/height,
+`display:none`, viewport validation, overflow, and layout-box capacity. Host
+tests now pass 162/162; host and `x86_64-unknown-none` Clippy pass. Network,
+full CSS cascade, JavaScript, sandboxing, and pixel rendering remain separate
+gates.
+
 ## Codex - Stage 07 freestanding WebP completion (2026-10-25)
 
 Pinned `zenwebp 0.3.2` behind the `target_os = "none"` codec boundary and

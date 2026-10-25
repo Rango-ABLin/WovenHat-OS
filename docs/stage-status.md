@@ -114,6 +114,15 @@ real-QEMU desktop qualification passed serially at 1/2/4 CPUs with 5 GiB
 configured RAM and the 4 GiB usable-memory floor. Stage 00 is accepted. No
 later graphics stage is accepted by this entry.
 
+## Browser layout substrate increment - 2026-10-25
+
+`libwoven::browser` now provides a fixed-capacity borrowed DOM layout pass
+with inline `width`, `height`, `margin`, and `display:none` handling. It emits
+checked block rectangles for a caller viewport and rejects invalid or
+overflowing layouts. The 162-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Full CSS cascade, networking, JavaScript,
+sandboxing, and pixel rendering remain open.
+
 ## Bounded WebView HTTP(S) network boundary - 2026-10-25
 
 Added `libwoven::web` with allocation-free HTTP(S) endpoint parsing,
