@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics bounded grid-repeat increment - 2026-10-25
+
+The browser grid parser now recognizes bounded `repeat(N, …)` column syntax
+with a fixed maximum of 16 columns, while retaining explicit track-list
+support and fail-closed invalid counts. The full 190-test libwoven suite and
+warning-denying freestanding target Clippy pass.
+
 ## Graphics bounded media-query increment - 2026-10-25
 
 `StyleSheet::parse_for_viewport` now evaluates bounded `@media

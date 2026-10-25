@@ -6632,3 +6632,9 @@ fail-closed malformed input handling. The 190-test libwoven suite and
 freestanding target warning-denying Clippy pass. Broader media features and
 responsive semantics remain open.
 
+# Graphics bounded grid-repeat increment - 2026-10-25
+
+Codex corrected grid column parsing for bounded `repeat(N, …)` syntax, capped
+at 16 columns. The 190-test libwoven suite and freestanding target
+warning-denying Clippy pass.
+
