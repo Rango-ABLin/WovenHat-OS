@@ -1,0 +1,24 @@
+name: WovenPDF host parser tests
+on:
+  pull_request:
+    paths:
+      - "apps/woven-pdf/**"
+      - ".github/workflows/wovenpdf-host.yml"
+  workflow_dispatch:
+
+jobs:
+  parser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Parser unit tests
+        run: cargo test --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib
+      - name: Deny compiler warnings
+        run: cargo clippy --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-linux-gnu --lib -- -D warnings
+      - name: Formatting
+        run: cargo fmt --manifest-path apps/woven-pdf/Cargo.toml --all -- --check
