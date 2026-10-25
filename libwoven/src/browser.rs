@@ -225,6 +225,16 @@ pub enum Selector<'a> {
     Id(&'a str),
 }
 
+impl Selector<'_> {
+    const fn specificity(self) -> u8 {
+        match self {
+            Self::Tag(_) => 0,
+            Self::Class(_) => 1,
+            Self::Id(_) => 2,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rule<'a> {
     selector: Selector<'a>,
@@ -523,11 +533,14 @@ fn style<const R: usize>(node: Node<'_>, sheet: &StyleSheet<'_, R>) -> Style {
         background: None,
         color: None,
     };
-    for index in 0..sheet.len {
-        if let Some(rule) = sheet.rules[index]
-            && matches_selector(node, rule.selector)
-        {
-            apply_declarations(&mut result, rule.declarations);
+    for specificity in 0..=2 {
+        for index in 0..sheet.len {
+            if let Some(rule) = sheet.rules[index]
+                && rule.selector.specificity() == specificity
+                && matches_selector(node, rule.selector)
+            {
+                apply_declarations(&mut result, rule.declarations);
+            }
         }
     }
     if let Some(source) = node.style {
@@ -949,7 +962,7 @@ mod tests {
         )
         .unwrap();
         let sheet = StyleSheet::<3>::parse(
-            ".frame { width: 100px; display: flex; gap: 4px; } .card { height: 20px; } #root { height: 40px; }",
+            "#root { width: 100px; height: 40px; } .frame { width: 80px; display: flex; gap: 4px; } .card { height: 20px; }",
         )
         .unwrap();
         assert_eq!(sheet.len(), 3);
