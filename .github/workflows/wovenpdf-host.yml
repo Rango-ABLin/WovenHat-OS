@@ -6,6 +6,7 @@ on:
       - ".github/workflows/wovenpdf-host.yml"
       - "scripts/test-wovenpdf-package.py"
       - "scripts/test-wovenpdf-qemu.py"
+      - "scripts/test-wovenpdf-desktop-qemu.py"
   workflow_dispatch:
 
 concurrency:
@@ -57,7 +58,7 @@ jobs:
       - name: Install pinned Rust toolchain for Ring-3 packaging
         run: rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
       - name: Validate WovenPDF Python harness syntax
-        run: python3 -m py_compile scripts/test-wovenpdf-package.py scripts/test-wovenpdf-qemu.py
+        run: python3 -m py_compile scripts/test-wovenpdf-package.py scripts/test-wovenpdf-qemu.py scripts/test-wovenpdf-desktop-qemu.py
       - name: Build and verify WovenPDF WAPP package
         env:
           RUSTUP_TOOLCHAIN: nightly-2026-07-10
