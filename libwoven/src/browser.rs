@@ -549,6 +549,23 @@ fn style<const R: usize>(node: Node<'_>, sheet: &StyleSheet<'_, R>) -> Style {
     result
 }
 
+fn inherited_color<const N: usize, const R: usize>(
+    document: &Document<'_, N>,
+    node_index: usize,
+    sheet: &StyleSheet<'_, R>,
+) -> Option<u32> {
+    let mut current = Some(node_index);
+    for _ in 0..16 {
+        let index = current?;
+        let node = document.node(index)?;
+        if let Some(color) = style(node, sheet).color {
+            return Some(color);
+        }
+        current = node.parent;
+    }
+    None
+}
+
 struct LayoutContext<'document, 'output, 'sheet, const N: usize, const R: usize> {
     document: &'document Document<'document, N>,
     output: &'output mut LayoutDocument<N>,
@@ -794,7 +811,9 @@ pub fn paint_with_stylesheet<'a, const N: usize, const P: usize, const R: usize>
                 color,
             })?;
         }
-        if let (Some(text), Some(color)) = (node.text, node_style.color) {
+        if let (Some(text), Some(color)) =
+            (node.text, inherited_color(document, layout_box.node, sheet))
+        {
             output.push(PaintCommand::Text {
                 x: layout_box.rect.x,
                 y: layout_box.rect.y,
@@ -854,7 +873,7 @@ pub fn execute_script<'a, const N: usize, const V: usize>(
 mod tests {
     use super::{
         LayoutError, PaintCommand, ParseError, ScriptError, StyleSheet, Viewport, execute_script,
-        layout, layout_with_stylesheet, paint, parse_html, render,
+        layout, layout_with_stylesheet, paint, paint_with_stylesheet, parse_html, render,
     };
 
     #[test]
@@ -1037,6 +1056,30 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn inherits_stylesheet_text_color_through_bounded_parent_chain() {
+        let document = parse_html::<4>(b"<main><p>Hello</p></main>").unwrap();
+        let sheet = StyleSheet::<1>::parse("main { color: #123456; }").unwrap();
+        let layout = layout_with_stylesheet(
+            &document,
+            Viewport {
+                width: 100,
+                height: 100,
+            },
+            &sheet,
+        )
+        .unwrap();
+        let commands = paint_with_stylesheet::<4, 4, 1>(&document, &layout, &sheet).unwrap();
+        assert!(commands.get(0).is_some_and(|command| matches!(
+            command,
+            PaintCommand::Text {
+                color: 0x0012_3456,
+                text: "Hello",
+                ..
+            }
+        )));
     }
 
     #[test]
