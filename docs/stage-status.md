@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics browser bounded flex/grid layout increment - 2026-10-25
+
+The borrowed browser layout substrate now supports bounded `display:flex` rows,
+`display:grid` columns, and fixed inline `gap` placement. Child capacity,
+column count, coordinate arithmetic, viewport bounds, and overflow remain
+fail-closed. The 184-test libwoven suite, host all-targets Clippy, and
+freestanding target Clippy pass with warnings denied. This is not a full CSS
+cascade or responsive browser claim.
+
 ## Graphics theme-mode boundary increment - 2026-10-25
 
 WovenSettings now selects the shared `libwoven::ui::Theme` palette through

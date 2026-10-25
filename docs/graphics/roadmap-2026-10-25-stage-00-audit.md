@@ -58,7 +58,7 @@ the next mandatory stage is accepted.
 | 15 | GPU acceleration foundation | UNVERIFIED | No current evidence proves a production acceleration path; CPU fallback remains the only safe assumption. |
 | 16 | DOM/HTML visual runtime | PARTIAL | `libwoven/src/browser.rs` is a bounded borrowed HTML parser, not a visual browser engine or layout runtime. |
 | 17 | JavaScript runtime and bindings | MISSING | No production JavaScript runtime/bindings are present or accepted. |
-| 18 | CSS, Flexbox, Grid, styling | MISSING | No accepted CSS parser, cascade, layout, Flexbox, or Grid runtime is present. |
+| 18 | CSS, Flexbox, Grid, styling | PARTIAL | `libwoven::browser` now has bounded inline style parsing plus fixed `display:flex`/`display:grid` placement, gap handling, paint commands, and software rendering with host/target evidence. Full CSS parsing/cascade, responsive semantics, and browser integration remain open. |
 | 19 | HTTP/TLS fetch and network imagery | PARTIAL | `libwoven/src/web.rs` parses bounded HTTP(S) endpoints/response heads; sockets, TLS, policy, body streaming, and imagery integration remain open. |
 | 20 | Streaming image/video/audio/codecs | PARTIAL | `libwoven/src/media.rs` parses bounded image headers only; no complete pixel/video/audio decoder pipeline is accepted. |
 | 21 | App sandbox and graphics capabilities | PARTIAL | Existing security and graphics boundaries exist; roadmap-complete capability enforcement is not requalified. |

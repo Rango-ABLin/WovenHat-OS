@@ -6586,3 +6586,11 @@ Target release build and warning-denying target Clippy pass. This does not
 change the shell's accepted production palette or claim a persisted,
 compositor-wide accessibility settings service.
 
+# Graphics browser bounded flex/grid layout increment - 2026-10-25
+
+Codex extended `libwoven::browser` with fixed-capacity `display:flex` rows,
+`display:grid` columns, inline `gap`, and fail-closed overflow/viewport
+arithmetic. The 184-test libwoven suite plus host all-targets and freestanding
+target warning-denying Clippy pass. Full CSS cascade and responsive browser
+semantics remain open.
+
