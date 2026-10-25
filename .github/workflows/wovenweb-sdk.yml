@@ -5,11 +5,17 @@ on:
     paths:
       - '.github/workflows/wovenweb-sdk.yml'
       - 'libwoven/**'
+      - 'kernel/src/pager_queue.rs'
+      - 'kernel/src/task.rs'
+      - 'tests/pager_queue.rs'
       - 'tools/wovenweb-*/**'
   pull_request:
     paths:
       - '.github/workflows/wovenweb-sdk.yml'
       - 'libwoven/**'
+      - 'kernel/src/pager_queue.rs'
+      - 'kernel/src/task.rs'
+      - 'tests/pager_queue.rs'
       - 'tools/wovenweb-*/**'
   workflow_dispatch:
 
@@ -29,7 +35,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-10
-          components: clippy
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
       - name: SDK unit tests and compile-fail ownership checks
         shell: bash
         run: |
@@ -40,6 +47,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
+      - name: Pager queue ownership checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --test pager_queue --locked 2>&1 | tee pager-queue-tests.log
+          cargo clippy --test pager_queue --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -47,3 +60,5 @@ jobs:
           path: |
             sdk-tests.log
             sdk-clippy.log
+            pager-queue-tests.log
+            pager-queue-clippy.log

@@ -130,3 +130,14 @@ initialization, aligned virtual objects and destructors; selected Clippy gates
 pass. This is a controlled ABI fixture, not libc++, an engine build or full
 runtime acceptance. Production VM integration remains open. Evidence and limits:
 [Native C++ ABI fixture](wovenweb-cxx-acceptance.md).
+
+## Pager ownership qualification (2026-10-25)
+
+Production queued/active pager work now prevents exited-owner reaping, with
+sequence-qualified completion and bounded reserved result capacity. Seven host
+queue tests and the real-pager plus focused zombie fixture pass on 1/2/4 CPUs;
+heap/network/C++ regressions also pass on all three CPU counts. Default and
+affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
+thread-fault publication and native browser acceptance remain open. Local root
+host checks remain signing-policy blocked; new hosted queue lint is pending.
+See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).

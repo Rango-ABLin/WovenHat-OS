@@ -18,6 +18,7 @@ extern crate alloc;
 #[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
+mod pager_queue;
 mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
@@ -5826,6 +5827,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S7.6] fork-affinity baseline preserved on single CPU"
         ));
+    }
+    #[cfg(feature = "wovenweb-vm-test")]
+    {
+        const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_WEB_NET_PROBE_IMAGE"));
+        if !task::pager_reap_lifetime_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: PASSED"));
+        qemu_test_exit_success();
     }
     console.println("KEYBOARD IRQ: READY");
 

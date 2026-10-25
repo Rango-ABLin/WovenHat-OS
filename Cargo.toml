@@ -10,6 +10,7 @@ exclude = ["vendor/bootloader", "apps/hello", "apps/hello-gui", "apps/woven-shel
 bootloader = { path = "vendor/bootloader" }
 
 [features]
+wovenweb-vm-test = ["qemu-test", "kernel/wovenweb-vm-test"]
 wovenweb-cxx-test = ["qemu-test", "kernel/wovenweb-cxx-test"]
 wovenweb-memory-test = ["qemu-test", "kernel/wovenweb-memory-test"]
 wovenweb-net-test = ["qemu-test", "kernel/wovenweb-net-test"]

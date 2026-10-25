@@ -6410,3 +6410,26 @@ and all-feature/all-target Clippy. Complete Rust CodeQL finished and its PR
 check reports success: no new alerts in changed code, zero annotations. No
 manual dismissal or suppression was used. Production VM integration and full
 browser acceptance remain open. See wovenweb-pointer-origin-evidence.json.
+
+## Production pager/reaping lifetime increment (2026-10-25)
+
+Connecting the first bounded production VM lifetime boundary: retain queued and
+active pager ownership through page work and canonical publication, then prevent
+wait_process from destroying an exited owner's space until that work drains.
+Queue pop must transfer its owner pin atomically to active work; completions
+need sequence identities and owner cleanup. Also retain the queue lock through
+faulting-task Blocked publication, releasing it before any context switch.
+This does not close exec/raw-unmap/fork races or implement the complete VM lease
+layer. Qualification will include pure queue schedules, real Ring-3 pager boot
+and a feature-isolated queued/active zombie-reaping fixture on 1/2/4 CPUs.
+
+## Pager ownership qualification (2026-10-25)
+
+Production queued/active pager work now prevents exited-owner reaping, with
+sequence-qualified completion and bounded reserved result capacity. Seven host
+queue tests and the real-pager plus focused zombie fixture pass on 1/2/4 CPUs;
+heap/network/C++ regressions also pass on all three CPU counts. Default and
+affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
+thread-fault publication and native browser acceptance remain open. Local root
+host checks remain signing-policy blocked; new hosted queue lint is pending.
+See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).

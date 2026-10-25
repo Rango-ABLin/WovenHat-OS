@@ -86,6 +86,17 @@ fn check() -> Result<(), u64> {
     Ok(())
 }
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--vm-reap") {
+        // SAFETY: integer-only native mmap ABI; no user pointer is retained.
+        let base = unsafe { libwoven::syscall::invoke(8, 4096, 1, 0) };
+        if base == 0 || base >= libwoven::syscall::WOULD_BLOCK {
+            libwoven::exit(91);
+        }
+        let pointer = core::ptr::with_exposed_provenance_mut::<u8>(base as usize);
+        // SAFETY: mmap returned a fresh writable page owned by this child.
+        unsafe { pointer.write(0x71) };
+        libwoven::exit(0);
+    }
     if args.get(1) == Some(b"--heap") {
         libwoven::exit(heap::run().err().unwrap_or(0));
     }
