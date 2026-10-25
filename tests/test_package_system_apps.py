@@ -24,7 +24,7 @@ class SystemAppPackagingTests(unittest.TestCase):
 
     def test_shell_catalog_capacity_covers_all_signed_system_apps(self):
         shell_source = (ROOT / "apps" / "woven-shell" / "src" / "main.rs").read_text()
-        match = re.search(r"^const MAX_APPS: usize = (\\d+);$", shell_source, re.MULTILINE)
+        match = re.search(r"^const MAX_APPS: usize = ([0-9]+);$", shell_source, re.MULTILINE)
         self.assertIsNotNone(match, "WovenShell catalog capacity declaration missing")
         capacity = int(match.group(1))
         self.assertGreaterEqual(
