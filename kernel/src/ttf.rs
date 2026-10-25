@@ -458,10 +458,13 @@ impl<'a> Face<'a> {
                         let ay = target.baseline - i32::from(a.y) * target.scale / units;
                         let bx = target.origin_x + i32::from(b.x) * target.scale / units;
                         let by = target.baseline - i32::from(b.y) * target.scale / units;
-                        if ((ay > py) != (by > py))
-                            && (px < (bx - ax) * (py - ay) / (by - ay).max(1) + ax)
-                        {
-                            inside = !inside;
+                        if (ay > py) != (by > py) {
+                            let lhs = i64::from(bx - ax) * i64::from(py - ay);
+                            let rhs = i64::from(by - ay) * i64::from(px - ax);
+                            let crosses = if by > ay { lhs < rhs } else { lhs > rhs };
+                            if crosses {
+                                inside = !inside;
+                            }
                         }
                         previous = index;
                     }

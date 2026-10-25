@@ -2,22 +2,15 @@
 
 ## Graphics roadmap Stage 05 typography increment - 2026-10-25
 
-Added the bounded `libwoven::graphics::FontFallback` provider and glyph
-decision cache, with priority selection and fail-closed metrics validation.
-The bounded `libwoven::graphics::TextInputState` UTF-8 editing contract now
-provides caret and selection operations. The 148-test libwoven suite,
-warning-denying package Clippy, formatting, and diff checks pass. Stage 05
-remains partial pending a licensed guest font fixture, high-DPI multilingual
-QEMU evidence, and complete bidi/script and IME integration. See
-`docs/graphics/stage-05-typography-evidence.md`.
-The existing guest font-coverage gate passed at 1/2/4 CPUs with evidence in
-`audit-artifacts/stage17.1-{1,2,4}cpu-*`; that gate is ASCII-only and does not
-close the Stage 05 multilingual/high-DPI acceptance gate.
-The host typography suite also includes deterministic 4x outline raster
-coverage and non-BMP cmap12 assertions.
-An OFL Noto Sans static fixture is bundled and its Latin/Greek/Cyrillic cmap
-and metrics validate; guest-side rasterization remains unqualified, so Stage
-05 is still not accepted.
+Stage 05 is accepted for the bundled static-font kernel/QEMU scope. The
+bounded `libwoven::graphics::FontFallback` provider and glyph cache,
+`TextInputState` UTF-8 editing contract, licensed Noto Sans fixture, kernel
+sfnt/cmap/hmtx/glyf loader, and raster self-test are implemented. Host tests,
+warning-denying Clippy, and the kernel QEMU gate pass at 1/2/4 CPUs. See
+`docs/graphics/stage-05-typography-evidence.md` for limits and evidence.
+The existing guest font-coverage gate passed at 1/2/4 CPUs, and the new
+bundled-font loader/raster gate passed at 1/2/4 CPUs. Full UAX #9/script
+shaping and IME remain explicit later-capability limits.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 

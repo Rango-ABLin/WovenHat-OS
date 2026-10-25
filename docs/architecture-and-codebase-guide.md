@@ -8,13 +8,15 @@ validated TrueType faces. It keeps at most eight borrowed faces and a fixed
 indices and metrics, so font storage remains owned by the VFS/font loader and
 cannot be invalidated through cached pointers. Missing cmap or advance data
 fails closed to the next face. This is an incremental boundary; complete
-UAX #9/script shaping and guest font/input qualification remain open in
-`docs/graphics/stage-05-typography-evidence.md`.
+UAX #9/script shaping and full IME remain higher-level limits recorded in
+`docs/graphics/stage-05-typography-evidence.md`; the bundled static-font
+kernel loader/raster path is qualified by the Stage 05 QEMU matrix.
 `libwoven::graphics::TextInputState` supplies the companion fixed 512-byte
 UTF-8 editing state with scalar-boundary caret and selection operations.
 The licensed fixture at `assets/fonts/NotoSans-Regular.ttf` is validated for
-cmap and metrics; guest-side font loading and rasterization remain separate
-qualification gates.
+cmap/metrics and loaded by the bounded kernel `ttf` module for simple-glyf
+rasterization. Composite or malformed outlines fail closed to the bitmap
+fallback.
 
 ## Software architecture mandate S00 inventory
 

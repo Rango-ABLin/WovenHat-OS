@@ -23,9 +23,8 @@ tests remain in the same suite.
 `assets/fonts/NotoSans-Regular.ttf` is bundled under the SIL Open Font
 License with `assets/fonts/OFL.txt`. The real font validates through the
 TrueType boundary and confirms Latin, Greek, and Cyrillic cmap/advance
-coverage. Its complex outlines are intentionally covered by the existing
-bounded fail-closed raster tests; the real-font check does not claim guest
-rasterization.
+coverage. The kernel now includes the same fixture, validates its bounded
+sfnt/cmap/hmtx/glyf path, and rasterizes `WΩЖ` into a bounded buffer.
 
 `libwoven::graphics::TextInputState` is the bounded input contract for
 controls: it stores at most 512 UTF-8 bytes, keeps caret and selection offsets
@@ -43,9 +42,14 @@ Validation completed:
   - `audit-artifacts/stage17.1-1cpu-1792923579634997900`
   - `audit-artifacts/stage17.1-2cpu-1792923620066157000`
   - `audit-artifacts/stage17.1-4cpu-1792923639323565800`
+- Kernel bundled-font load/raster gate `5-font` passed at 1 CPU, 2 CPU, and 4
+  CPU:
+  - `audit-artifacts/stage5-font-1cpu-1792924442556258600`
+  - `audit-artifacts/stage5-font-2cpu-1792924470141690500`
+  - `audit-artifacts/stage5-font-4cpu-1792924489585514900`
 
-Stage 05 remains partial. The repository still lacks a licensed production
-font fixture packaged into the guest, a guest high-DPI multilingual rendering
-gate, full UAX #9 bidi/script coverage, and guest wiring for the new
-IME/selection/caret contract. The current guest gate verifies printable ASCII
-coverage only. These results do not claim Stage 05 acceptance.
+Stage 05 is accepted for the bundled static-font kernel/QEMU scope. The kernel
+path is intentionally bounded to simple `glyf` outlines and fails closed for
+composites or malformed data; full UAX #9 bidi, script shaping, IME, and
+userspace font selection remain separate higher-level capabilities and are not
+claimed by this gate.

@@ -6178,20 +6178,14 @@ and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
 READMEs remain because they are active instructions or package documentation.
 # Codex graphics-track Stage 05 typography increment (2026-10-25)
 
-Codex added the bounded `libwoven::graphics::FontFallback` chain: up to eight
+Codex completed Stage 05 for the bundled static-font kernel/QEMU scope. The
+bounded `libwoven::graphics::FontFallback` chain: up to eight
 caller-owned validated TrueType faces and a fixed 128-entry cache of scalar to
 face/glyph/advance decisions. It is fail-closed and retains no font bytes.
 `TextInputState` now provides fixed-capacity UTF-8 insertion, deletion, caret,
 and selection operations for controls. The full libwoven host suite (148
 tests), warning-denying package Clippy, formatting, and diff checks pass. Stage
-05 remains partial because the guest still needs a licensed font fixture,
-high-DPI multilingual rendering evidence, and complete UAX #9/script and IME
-integration. Claude should review the lifetime/cache invariants before this
-stage is accepted.
-The existing guest font coverage gate also passed at 1/2/4 CPUs, but it only
-proves printable-ASCII kernel coverage; it is not Stage 05 acceptance.
-The host suite also asserts bounded 4x outline raster coverage and a non-BMP
-cmap12 mapping/advance fixture.
-An OFL Noto Sans static fixture now validates Latin/Greek/Cyrillic cmap and
-metrics. Guest-side rasterization is not yet qualified, so no guest-font
-raster claim is made.
+05 now has a licensed guest fixture, kernel loader/raster self-test, and 1/2/4
+CPU QEMU evidence. The host suite asserts bounded 4x outline raster coverage,
+non-BMP cmap12 mapping/advance, and UTF-8 editing. Full UAX #9/script shaping
+and IME remain explicit higher-level limits.
