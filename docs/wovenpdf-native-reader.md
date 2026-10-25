@@ -1,5 +1,17 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 stream boundary increment
+
+- Added `src/streams.rs` to resolve direct numeric `/Length` values in
+  classic uncompressed PDF stream objects and return borrowed stream bytes.
+- Stream extraction uses the declared length rather than scanning for
+  `endstream` within binary content. Unsupported filters are rejected.
+- Indirect stream lengths, FlateDecode, predictors, object-stream support,
+  stream/object caching and actual page rendering remain unimplemented.
+- The new module is not yet wired into the GUI preview. Tests are authored
+  but not executed because Rust and QEMU tools are unavailable here.
+
+
 ## 2026-10-25 graphical preview increment
 
 - `apps/woven-pdf/src/gui.rs` adds a WovenShell shared GraphicsSurface
