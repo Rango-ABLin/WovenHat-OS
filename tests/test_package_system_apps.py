@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -20,6 +21,16 @@ class SystemAppPackagingTests(unittest.TestCase):
             "woven-editor", "woven-images", "woven-update", "woven-store",
         ])
         self.assertEqual(ids[-1], "woven-installer")
+
+    def test_shell_catalog_capacity_covers_all_signed_system_apps(self):
+        shell_source = (ROOT / "apps" / "woven-shell" / "src" / "main.rs").read_text()
+        match = re.search(r"^const MAX_APPS: usize = (\\d+);$", shell_source, re.MULTILINE)
+        self.assertIsNotNone(match, "WovenShell catalog capacity declaration missing")
+        capacity = int(match.group(1))
+        self.assertGreaterEqual(
+            capacity, len(MODULE.APPS),
+            "WovenShell must enumerate every signed packaged application",
+        )
 
     def test_installer_catalog_contract_is_non_privileged_display_only(self):
         installer = next(app for app in MODULE.APPS if app["id"] == "woven-installer")
