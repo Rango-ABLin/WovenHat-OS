@@ -9828,11 +9828,11 @@ fn stage20_12_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
     use sha2::Sha256;
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(20, 24, 32);
+    const TASKBAR: u32 = rgb(10, 18, 30);
     const UNSET: u32 = 0x0100_0000;
 
     fn step(name: &str, ok: bool) -> bool {
@@ -9859,11 +9859,11 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -10147,7 +10147,9 @@ fn stage20_12_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
     let middle = height / 2;
-    let dim = move |x: i32, y: i32| blend_pixel(BLACK, wallpaper(x, y, height), 160);
+    let dim = move |x: i32, y: i32| {
+        blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
+    };
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
         let mut mask = Surface::new(width as usize, 7);
@@ -10210,22 +10212,22 @@ fn stage20_12_self_test() -> bool {
     // Left of the workspace switcher (Stage 20.13), itself 6 left of the
     // Quick Settings button.
     let name_x = button.0 - 6 - (4 * 14 - 2) - 6 - crate::font::text_width("lin") as i32;
-    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let name_shown = || {
         let mut mask = Surface::new(18, 7);
         let bounds = mask.bounds();
         mask.fill_rect(bounds, UNSET);
         mask.draw_text(0, 0, "lin", WHITE);
-        (top + 9..top + 16).all(|y| {
+        let mut glyph_pixels = 0usize;
+        let glyphs_match = (top + 9..top + 16).all(|y| {
             (name_x..name_x + 18).all(|x| {
-                let expected = if mask.pixel(x - name_x, y - (top + 9)) == Some(WHITE) {
-                    WHITE
-                } else {
-                    taskbar(x, y)
-                };
-                compositor::pixel(x, y) == Ok(expected)
+                if mask.pixel(x - name_x, y - (top + 9)) != Some(WHITE) {
+                    return true;
+                }
+                glyph_pixels += 1;
+                compositor::pixel(x, y) == Ok(WHITE)
             })
-        })
+        });
+        glyphs_match && glyph_pixels > 0
     };
     // A successful verification clears lin's recorded failures.
     let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])

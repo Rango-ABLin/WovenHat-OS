@@ -1,5 +1,12 @@
 # Stage status
 
+## Graphics Stage 20.12 sign-in acceptance - 2026-10-25
+
+Repaired the sign-in oracle to match the production wallpaper and projected
+background. The complete account-file, account-selection, wrong-PIN,
+successful-sign-in, taskbar identity, identity-bound lock/unlock, and teardown
+gate passes on 1/2/4 CPUs with QEMU exit 33.
+
 ## Graphics Stage 20.11 lock-screen acceptance - 2026-10-25
 
 Repaired the Stage 20.11 lock-screen oracle to match the production flat

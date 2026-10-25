@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.12 sign-in oracle repair (2026-10-25)
+
+Stage 20.12 reached the real sign-in flow but its oracle still modeled the
+retired wallpaper and flat taskbar. The oracle now matches the current
+projected background and checks the signed-in account's actual taskbar glyphs.
+The full account/sign-in/identity-lock gate passes on 1/2/4 CPUs with target
+Clippy green; evidence is under `target/woven-shell-sign-in-{1,2,4}cpu`.
+
 ## Codex - Stage 20.11 lock-screen oracle repair (2026-10-25)
 
 Stage 20.11 initially failed because its independent oracle still used the
