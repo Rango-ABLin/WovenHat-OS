@@ -335,13 +335,37 @@ pub fn parse_image_header(bytes: &[u8]) -> Result<ImageMetadata, ImageError> {
         }
         return Err(ImageError::Truncated);
     }
-    if bytes.len() >= 30 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        if &bytes[12..16] != b"VP8X" {
-            return Err(ImageError::UnsupportedEncoding);
-        }
-        let width = 1 + (u32::from(bytes[24]) | (u32::from(bytes[25]) << 8) | (u32::from(bytes[26]) << 16));
-        let height = 1 + (u32::from(bytes[27]) | (u32::from(bytes[28]) << 8) | (u32::from(bytes[29]) << 16));
-        return dimensions(ImageFormat::WebP, width, height);
+    if bytes.len() >= 20 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return match &bytes[12..16] {
+            b"VP8X" if bytes.len() >= 30 => {
+                let width = 1
+                    + (u32::from(bytes[24])
+                        | (u32::from(bytes[25]) << 8)
+                        | (u32::from(bytes[26]) << 16));
+                let height = 1
+                    + (u32::from(bytes[27])
+                        | (u32::from(bytes[28]) << 8)
+                        | (u32::from(bytes[29]) << 16));
+                dimensions(ImageFormat::WebP, width, height)
+            }
+            b"VP8L" if bytes.len() >= 25 && bytes[20] == 0x2f => {
+                let bits = u32::from(bytes[21])
+                    | (u32::from(bytes[22]) << 8)
+                    | (u32::from(bytes[23]) << 16)
+                    | (u32::from(bytes[24]) << 24);
+                dimensions(
+                    ImageFormat::WebP,
+                    1 + (bits & 0x3fff),
+                    1 + ((bits >> 14) & 0x3fff),
+                )
+            }
+            b"VP8 " if bytes.len() >= 30 && bytes[23..26] == [0x9d, 0x01, 0x2a] => {
+                let width = u16::from_le_bytes([bytes[26], bytes[27]]) & 0x3fff;
+                let height = u16::from_le_bytes([bytes[28], bytes[29]]) & 0x3fff;
+                dimensions(ImageFormat::WebP, u32::from(width), u32::from(height))
+            }
+            _ => Err(ImageError::UnsupportedEncoding),
+        };
     }
     Err(ImageError::Unsupported)
 }
@@ -458,6 +482,18 @@ mod tests {
         let metadata = parse_image_header(&webp).unwrap();
         assert_eq!(metadata.format, ImageFormat::WebP);
         assert_eq!((metadata.width, metadata.height), (10, 5));
+    }
+
+    #[test]
+    fn parses_webp_lossless_dimensions() {
+        let webp = [
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+            0x56, 0x50, 0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
+            0x00, 0x07, 0x50, 0x94, 0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f,
+            0x00, 0x00,
+        ];
+        let metadata = parse_image_header(&webp).unwrap();
+        assert_eq!((metadata.width, metadata.height), (2, 2));
     }
 
     #[test]

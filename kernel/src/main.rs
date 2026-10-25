@@ -4631,6 +4631,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S17.1] WovenHat font coverage: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage07-webp-test")]
+    {
+        if !stage07_webp_self_test() {
+            serial::write_line(format_args!("[S07] freestanding WebP decode: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S07] freestanding WebP decode: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage16-1-test")]
     {
         if !stage16_1_self_test() {
@@ -6080,7 +6089,7 @@ fn preemption_probe_task() -> ! {
 /// The path arrives through the environment so the kernel does not hard-code a
 /// build layout; the Stage 16.1 harness builds the application first and sets
 /// it.
-#[cfg(feature = "stage16-1-test")]
+#[cfg(any(feature = "stage07-webp-test", feature = "stage16-1-test"))]
 const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
 
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
@@ -7783,6 +7792,35 @@ fn stage19_app_catalog_self_test() -> bool {
         }
     }
     step("eleven signed applications installed", true)
+}
+
+/// Stage 07 acceptance: execute the freestanding WebP decoder in Ring 3.
+#[cfg(feature = "stage07-webp-test")]
+fn stage07_webp_self_test() -> bool {
+    if signed_app::verify_package(EXTERNAL_APPLICATION).is_err() {
+        serial::write_line(format_args!("[S07] signed WAPP package refused"));
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        EXTERNAL_APPLICATION,
+        &["/bin/wovenhat-images-self-test"],
+    ) else {
+        serial::write_line(format_args!("[S07] external image rejected by ELF loader"));
+        return false;
+    };
+    let Ok((pid, _context)) = task::spawn_user_process("woven-images-webp", program) else {
+        serial::write_line(format_args!("[S07] failed to spawn decoder test"));
+        return false;
+    };
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 500 {
+            serial::write_line(format_args!("[S07] decoder test timed out"));
+            return false;
+        }
+        task::yield_now();
+    }
+    task::wait_process(pid.as_u64()) == Ok(0)
 }
 
 /// Stage 16.1 acceptance: an application built outside the kernel is installed

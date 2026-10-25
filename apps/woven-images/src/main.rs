@@ -17,6 +17,11 @@ fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--gui") {
         gui::run(args.get(2));
     }
+    if args.get(0) == Some(b"/bin/wovenhat-images-self-test")
+        || args.get(1) == Some(b"--self-test")
+    {
+        codec_self_test();
+    }
     let mut raw = [&[][..]; 2];
     let mut count = 0usize;
     for index in 1..args.len() {
@@ -41,6 +46,26 @@ fn main(args: Args) -> ! {
         }
     };
     libwoven::exit(status)
+}
+
+fn codec_self_test() -> ! {
+    let webp = [
+        0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+        0x56, 0x50, 0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
+        0x00, 0x07, 0x50, 0x94, 0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f,
+        0x00, 0x00,
+    ];
+    let mut pixels = [0u32; 4];
+    match libwoven::codecs::decode_webp_rgba(&webp, &mut pixels) {
+        Ok(metadata) if (metadata.width, metadata.height) == (2, 2) => {
+            let _ = libwoven::print("[WEBP] freestanding decode: PASSED 2x2\n");
+            libwoven::exit(0)
+        }
+        _ => {
+            let _ = libwoven::print("[WEBP] freestanding decode: FAILED\n");
+            libwoven::exit(1)
+        }
+    }
 }
 
 fn list(raw_path: &[u8]) -> u64 {
