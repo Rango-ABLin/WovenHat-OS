@@ -6611,8 +6611,8 @@ This is not a completion claim for full browser/ECMAScript capability.
 
 Codex added fixed-capacity browser stylesheet rules for tag, class, and id
 selectors, with specificity followed by source-order application and inline
-declarations last. The
-187-test libwoven suite plus host all-targets and freestanding target
-warning-denying Clippy pass. Specificity, inheritance, media queries, and full
-responsive/browser semantics remain open.
+declarations last. Bounded text color now inherits through the parent chain.
+The 188-test libwoven suite plus host all-targets and freestanding target
+warning-denying Clippy pass. Media queries and full responsive/browser
+semantics remain open.
 

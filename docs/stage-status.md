@@ -5,11 +5,11 @@
 `libwoven::browser` now captures HTML class/id attributes and parses a
 fixed-capacity stylesheet with tag, class, and id selectors. Matching rules
 apply by selector specificity, then source order, and inline declarations apply
-last; the existing
+last; bounded inherited text color follows the parent chain, and the existing
 flex/grid layout and paint paths can consume the stylesheet through dedicated
-APIs. The 187-test libwoven suite, host all-targets Clippy, and freestanding
-target Clippy pass with warnings denied. Full CSS selector specificity,
-inheritance, media queries, and responsive semantics remain open.
+APIs. The 188-test libwoven suite, host all-targets Clippy, and freestanding
+target Clippy pass with warnings denied. Media-query evaluation and full
+responsive semantics remain open.
 
 ## Graphics roadmap ledger correction - 2026-10-25
 
