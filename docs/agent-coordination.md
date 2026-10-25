@@ -6594,3 +6594,10 @@ arithmetic. The 184-test libwoven suite plus host all-targets and freestanding
 target warning-denying Clippy pass. Full CSS cascade and responsive browser
 semantics remain open.
 
+# Graphics bounded PCM WAVE parser increment - 2026-10-25
+
+Codex added `libwoven::media::parse_wav_pcm`, a no-allocation RIFF/WAVE PCM
+metadata boundary with checked chunk extents, format/rate/alignment validation,
+and caller-visible sample offsets. Eleven media tests and freestanding target
+warning-denying Clippy pass. This does not claim audio decoding or playback.
+

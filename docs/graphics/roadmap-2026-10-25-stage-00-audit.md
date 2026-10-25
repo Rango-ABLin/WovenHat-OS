@@ -60,7 +60,7 @@ the next mandatory stage is accepted.
 | 17 | JavaScript runtime and bindings | MISSING | No production JavaScript runtime/bindings are present or accepted. |
 | 18 | CSS, Flexbox, Grid, styling | PARTIAL | `libwoven::browser` now has bounded inline style parsing plus fixed `display:flex`/`display:grid` placement, gap handling, paint commands, and software rendering with host/target evidence. Full CSS parsing/cascade, responsive semantics, and browser integration remain open. |
 | 19 | HTTP/TLS fetch and network imagery | PARTIAL | `libwoven/src/web.rs` parses bounded HTTP(S) endpoints/response heads; sockets, TLS, policy, body streaming, and imagery integration remain open. |
-| 20 | Streaming image/video/audio/codecs | PARTIAL | `libwoven/src/media.rs` parses bounded image headers only; no complete pixel/video/audio decoder pipeline is accepted. |
+| 20 | Streaming image/video/audio/codecs | PARTIAL | Bounded PNG/JPEG/BMP/GIF/WebP pixel paths and a validated PCM WAVE container parser now exist with host/target evidence. Full video/audio codec streaming and playback remain open. |
 | 21 | App sandbox and graphics capabilities | PARTIAL | Existing security and graphics boundaries exist; roadmap-complete capability enforcement is not requalified. |
 | 22 | Core app migration and parity | PARTIAL | Several apps use shared controls; complete migration, functionality parity, and runtime qualification are not complete. |
 | 23 | Performance, stress, reliability | INCOMPLETE | Existing qualification/fault scripts exist, but the graphics roadmap matrix and current desktop baseline are not green. |

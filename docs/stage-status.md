@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics bounded PCM WAVE parser increment - 2026-10-25
+
+`libwoven::media::parse_wav_pcm` now validates RIFF/WAVE chunk bounds, PCM
+format, sample alignment, byte rate, and caller-visible sample ranges without
+allocating or copying audio data. Eleven media tests pass for the affected
+module, and freestanding target Clippy passes with warnings denied. This is a
+container/metadata boundary only; full streaming playback and codec support
+remain open.
+
 ## Graphics browser bounded flex/grid layout increment - 2026-10-25
 
 The borrowed browser layout substrate now supports bounded `display:flex` rows
