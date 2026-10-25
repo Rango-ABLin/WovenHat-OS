@@ -1,5 +1,17 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 page-content selection increment
+
+- Added `document.rs`: reads the classic trailer `/Root`, validates
+  `/Catalog`, walks `/Pages` and chooses a leaf `/Page` `/Contents`.
+- The GUI now attempts to decode and paint the **first selected page's**
+  direct `/Contents` reference rather than probing arbitrary streams.
+- Limitations: trailer parser is narrowly scoped; page /Contents arrays,
+  inherited resources, fonts, graphics, stream filter arrays, annotations,
+  multi-page navigation and faithful layout remain unsupported.
+- No completed CI or QEMU runtime acceptance for this increment.
+
+
 ## 2026-10-25 experimental Canvas integration
 
 - Added a development-only bridge in `gui.rs` that loads bounded classic
