@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - external codec fuzz campaign (2026-10-25)
+
+`tools/codec-fuzz` runs 50,000 random inputs through the image header parser
+and PNG/JPEG/BMP/GIF/WebP stream decoders, including GIF single-frame and
+animation paths (250,000 decoder cases). The verified run completed with
+`codec fuzz complete iterations=50000 cases=250000`. It uses `libwoven` with
+the userspace allocator feature disabled so the host process remains safe.
+
+The pinned WebP backend still retains the complete encoded RIFF payload and
+has internal allocations; the WebP path is not described as truly
+caller-workspace-bounded until that backend limitation is removed.
+
 ## Codex - bounded multi-frame GIF playback emission (2026-10-25)
 
 Integrated the source-driven GIF parser with `GifFrameSink` and

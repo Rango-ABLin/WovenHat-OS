@@ -76,6 +76,7 @@ def main() -> int:
         '[WEBP] freestanding decode: PASSED 2x2',
         '[BMP] stream decode: PASSED 2x1',
         '[GIF] interlaced stream decode: PASSED 1x1',
+        '[GIF] animation playback: PASSED 2 frames',
     )
     if code != 33 or any(marker not in text for marker in required_markers):
         print(f'WovenImages failed (exit {code}); evidence: {out}')

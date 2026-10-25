@@ -1,5 +1,15 @@
 # Stage status
 
+## Codec qualification update - 2026-10-25
+
+- External randomized codec campaign: **PASS** — 50,000 inputs and 250,000
+  decoder cases through `tools/codec-fuzz`.
+- Multi-frame GIF playback emission: implemented and unit-tested; guest
+  emission qualification is being added to the WovenImages QEMU gate.
+- Truly memory-bounded WebP final decoding: **OPEN**. The pinned `zenwebp`
+  streaming API retains the full encoded RIFF payload and uses internal
+  allocations, so the current path is bounded-request incremental delivery.
+
 ## Bounded multi-frame GIF playback emission - 2026-10-25
 
 `decode_gif_animation_stream` now emits every source frame through a

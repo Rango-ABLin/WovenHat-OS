@@ -114,7 +114,63 @@ fn codec_self_test() -> ! {
         libwoven::exit(1);
     }
     let _ = libwoven::print("[GIF] interlaced stream decode: PASSED 1x1\n");
+
+    let animation = [
+        b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255, 0x2c,
+        0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x21, 0xf9, 4, 8, 5, 0, 0, 0, 0x2c, 0, 0, 0,
+        0, 1, 0, 1, 0, 0, 2, 2, 0x4c, 1, 0, 0, 0x3b,
+    ];
+    let animation_metadata = libwoven::media::parse_image_header(&animation);
+    let mut animation_stream = SelfTestStream { bytes: &animation };
+    let mut animation_canvas = [0u32; 1];
+    let mut animation_previous = [0u32; 1];
+    let mut animation_sink = SelfTestGifSink::default();
+    let animation_result = match animation_metadata {
+        Ok(metadata) => libwoven::codecs::decode_gif_animation_stream(
+            &mut animation_stream,
+            metadata,
+            &mut animation_canvas,
+            &mut animation_previous,
+            &mut animation_sink,
+        ),
+        Err(error) => Err(error),
+    };
+    if animation_result.is_err() {
+        let _ = libwoven::print("[GIF] animation parser: FAILED\n");
+        libwoven::exit(1);
+    }
+    let animation_ok = animation_sink.frames == 2
+        && animation_sink.delays == [0, 5]
+        && animation_sink.pixels == [0x000000FF, 0xFFFFFFFF];
+    if !animation_ok {
+        let _ = libwoven::print("[GIF] animation playback: FAILED\n");
+        libwoven::exit(1);
+    }
+    let _ = libwoven::print("[GIF] animation playback: PASSED 2 frames\n");
     libwoven::exit(0)
+}
+
+#[derive(Default)]
+struct SelfTestGifSink {
+    frames: usize,
+    delays: [u16; 2],
+    pixels: [u32; 2],
+}
+
+impl libwoven::codecs::GifFrameSink for SelfTestGifSink {
+    fn present(
+        &mut self,
+        info: libwoven::codecs::GifFrameInfo,
+        pixels: &[u32],
+    ) -> Result<(), libwoven::media::ImageError> {
+        if self.frames >= self.pixels.len() || pixels.len() != 1 {
+            return Err(libwoven::media::ImageError::Malformed);
+        }
+        self.delays[self.frames] = info.delay_centiseconds;
+        self.pixels[self.frames] = pixels[0];
+        self.frames += 1;
+        Ok(())
+    }
 }
 
 struct SelfTestStream<'a> {

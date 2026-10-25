@@ -23,3 +23,7 @@ Evidence:
   prefix checks for BMP/GIF and malformed/truncated WebP stream cases.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.
+- External randomized codec campaign: `tools/codec-fuzz` completed 50,000
+  iterations / 250,000 decoder cases. WebP remains explicitly open for a
+  truly caller-workspace-bounded final decode because the pinned backend
+  retains the encoded RIFF payload internally.
