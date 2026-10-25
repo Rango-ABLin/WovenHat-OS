@@ -20,6 +20,12 @@ use core::{
 pub(crate) unsafe trait Vm: Sync {
     fn map(&self) -> Option<usize>;
     fn unmap(&self, base: usize) -> bool;
+    /// Recover a payload pointer with backend-appropriate allocation provenance.
+    /// # Safety
+    /// The entire nonempty range must be in live mapped regions owned by this
+    /// backend, reserved by Heap for one allocation, with its metadata lock held.
+    /// The pointer must cover that complete range, including adjacent regions.
+    unsafe fn resolve(&self, address: usize, size: usize) -> *mut u8;
 }
 
 pub(crate) struct RuntimeHeap<V> {
@@ -81,14 +87,18 @@ impl<V: Vm> RuntimeHeap<V> {
 unsafe impl<V: Vm> GlobalAlloc for RuntimeHeap<V> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if layout.size() == 0 {
-            return layout.align() as *mut u8;
+            // GlobalAlloc requires a nonzero layout from its caller. Refuse
+            // zero rather than manufacture a dangling low-address pointer.
+            return core::ptr::null_mut();
         }
         if !Heap::can_fit(layout) {
             return core::ptr::null_mut();
         }
         let mut guard = self.lock();
         if let Some(address) = guard.state().allocate(layout) {
-            return address as *mut u8;
+            // SAFETY: Heap just reserved this complete mapped, aligned extent
+            // while this guard excludes VM release and metadata changes.
+            return unsafe { self.vm.resolve(address, layout.size()) };
         }
         let mut grown = [0usize; MAX_REGIONS];
         let mut count = 0;
@@ -104,7 +114,8 @@ unsafe impl<V: Vm> GlobalAlloc for RuntimeHeap<V> {
             grown[count] = base;
             count += 1;
             if let Some(address) = guard.state().allocate(layout) {
-                return address as *mut u8;
+                // SAFETY: same reservation/lock contract as the cached path.
+                return unsafe { self.vm.resolve(address, layout.size()) };
             }
         }
         // No client could use a new arena while the lock was held. Roll back
@@ -153,15 +164,21 @@ unsafe impl Vm for NativeVm {
         // SAFETY: only an idle mapped region is passed, with its original size.
         unsafe { crate::syscall::invoke(9, base as u64, REGION_BYTES as u64, 0) == 0 }
     }
+    unsafe fn resolve(&self, address: usize, _size: usize) -> *mut u8 {
+        // The native syscall creates foreign memory outside Rust's host
+        // allocation API. Heap has validated and reserved the complete extent;
+        // recovering its exposed address is the explicit foreign-memory boundary.
+        core::ptr::with_exposed_provenance_mut(address)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::sync::atomic::{AtomicU16, AtomicUsize};
+    use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicUsize};
     use std::{alloc::System, sync::Arc, thread};
     struct HostVm {
-        base: usize,
+        base: AtomicPtr<u8>,
         slots: AtomicU16,
         limit: usize,
         refuse_unmap: AtomicBool,
@@ -173,7 +190,7 @@ mod tests {
             let pointer = unsafe { System.alloc_zeroed(spec) };
             assert!(!pointer.is_null());
             Self {
-                base: pointer as usize,
+                base: AtomicPtr::new(pointer),
                 slots: AtomicU16::new(0),
                 limit,
                 refuse_unmap: AtomicBool::new(false),
@@ -190,15 +207,29 @@ mod tests {
             }
             let slot = (0..MAX_REGIONS).find(|index| slots & (1 << index) == 0)?;
             self.slots.store(slots | (1 << slot), Ordering::Relaxed);
-            Some(self.base + slot * REGION_BYTES)
+            Some(self.base.load(Ordering::Relaxed).addr() + slot * REGION_BYTES)
         }
         fn unmap(&self, base: usize) -> bool {
             if self.refuse_unmap.load(Ordering::Relaxed) {
                 return false;
             }
-            let slot = (base - self.base) / REGION_BYTES;
+            let slot = (base - self.base.load(Ordering::Relaxed).addr()) / REGION_BYTES;
             self.slots.fetch_and(!(1 << slot), Ordering::Relaxed);
             true
+        }
+        unsafe fn resolve(&self, address: usize, size: usize) -> *mut u8 {
+            let base = self.base.load(Ordering::Relaxed);
+            let offset = address.checked_sub(base.addr()).expect("host VM address");
+            assert!(size != 0);
+            assert!(
+                offset
+                    .checked_add(size)
+                    .is_some_and(|end| end <= REGION_BYTES * MAX_REGIONS)
+            );
+            // SAFETY: this pointer derives from the original live System buffer,
+            // not from an integer. The checked extent is inside that allocation.
+            // Heap reserves disjoint payload ranges and the buffer outlives them.
+            unsafe { base.add(offset) }
         }
     }
     impl Drop for HostVm {
@@ -206,7 +237,7 @@ mod tests {
             let spec = Layout::from_size_align(REGION_BYTES * MAX_REGIONS, REGION_BYTES).unwrap();
             // SAFETY: matching System allocation, after all test payload owners stop.
             unsafe {
-                System.dealloc(self.base as *mut u8, spec);
+                System.dealloc(self.base.load(Ordering::Relaxed), spec);
             }
         }
     }
@@ -240,6 +271,27 @@ mod tests {
         assert_eq!(heap.stats().live_allocations, 0);
         assert_eq!(heap.stats().regions, 1);
     }
+    #[test]
+    fn full_backing_extent_preserves_origin_and_last_byte() {
+        let heap = RuntimeHeap::new(HostVm::new(MAX_REGIONS));
+        let size = REGION_BYTES * MAX_REGIONS;
+        let spec = Layout::from_size_align(size, REGION_BYTES).unwrap();
+        // SAFETY: this is one live allocation within the owned System buffer.
+        // First/last-byte access verifies the resolver's complete accepted span.
+        unsafe {
+            let pointer = heap.alloc(spec);
+            assert!(!pointer.is_null());
+            assert_eq!(pointer.addr(), heap.vm.base.load(Ordering::Relaxed).addr());
+            pointer.write(0x31);
+            pointer.add(size - 1).write(0x73);
+            assert_eq!(pointer.read(), 0x31);
+            assert_eq!(pointer.add(size - 1).read(), 0x73);
+            heap.dealloc(pointer, spec);
+        }
+        assert_eq!(heap.stats().live_allocations, 0);
+        assert_eq!(heap.stats().regions, 1);
+    }
+
     #[test]
     fn failed_growth_rolls_back_without_destroying_existing_allocations() {
         let heap = RuntimeHeap::new(HostVm::new(2));
@@ -276,7 +328,7 @@ mod tests {
             assert_eq!(heap.stats().quarantined_regions, 2);
             assert!(
                 heap.alloc(Layout::from_size_align(1, 1).unwrap()) as usize
-                    >= heap.vm.base + 2 * REGION_BYTES
+                    >= heap.vm.base.load(Ordering::Relaxed).addr() + 2 * REGION_BYTES
             );
         }
     }

@@ -4353,3 +4353,12 @@ completions and quarantines uncertain cleanup. Production mapping/pager/lifecycl
 integration remains open. See [VM ownership](wovenweb-vm-transactions.md).
 Three CodeQL heap-test pointer alerts remain under review; a missing null
 assertion in one test has been added without suppressing the remaining alerts.
+
+## Allocator pointer-origin follow-up (2026-10-25)
+
+Payload resolution now belongs to the VM backend. Host pointers derive from the
+original System allocation with checked extents; native foreign memory conversion
+is explicit. Zero-size requests return null. Hosted SDK tests and a fresh CodeQL
+scan remain required because Windows blocked the SDK unit executable. Native
+fixture evidence and limits: [pointer-origin follow-up](wovenweb-pointer-origin.md).
+This does not integrate production VM leases or qualify a complete browser.

@@ -1,0 +1,44 @@
+name: WovenWeb SDK checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/wovenweb-sdk.yml'
+      - 'libwoven/**'
+      - 'tools/wovenweb-*/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wovenweb-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy
+      - name: SDK unit tests and compile-fail ownership checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p libwoven --all-features --locked 2>&1 | tee sdk-tests.log
+      - name: SDK warning-denying lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-sdk-checks
+          path: |
+            sdk-tests.log
+            sdk-clippy.log

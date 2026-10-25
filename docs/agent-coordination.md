@@ -6348,3 +6348,22 @@ No native guest behavior was changed, so prior heap/network/C++ guest evidence
 is historical; this is not a production VM integration or full runtime gate.
 The three high CodeQL pointer alerts are still open pending analyzer-path review
 and a fresh scan; none was dismissed or suppressed.
+
+## Allocator pointer-origin review (2026-10-25)
+
+CI on the current published journal revision is running; a neutral interim
+CodeQL summary with missing Rust configuration is not a clean security scan.
+Refactoring backend pointer resolution so host payload pointers derive from
+the original System allocation, with checked extent, rather than numeric
+reconstruction. Numeric heap metadata stays unchanged. Native foreign-memory
+conversion is explicit, and zero-size allocator requests return null. This is
+a pointer-origin improvement, not proof that existing alerts are resolved.
+
+## Allocator pointer-origin follow-up (2026-10-25)
+
+Payload resolution now belongs to the VM backend. Host pointers derive from the
+original System allocation with checked extents; native foreign memory conversion
+is explicit. Zero-size requests return null. Hosted SDK tests and a fresh CodeQL
+scan remain required because Windows blocked the SDK unit executable. Native
+fixture evidence and limits: [pointer-origin follow-up](wovenweb-pointer-origin.md).
+This does not integrate production VM leases or qualify a complete browser.
