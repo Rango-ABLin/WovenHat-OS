@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics roadmap Stage 09 compositor and composition scheduler - 2026-10-25
+
+Stage 09 is accepted for the compositor scheduler scope. The roadmap-native
+`stage09-compositor-test` gate passed on 1/2/4 CPUs with QEMU exit 33. It
+combines the damage-only composition contract with overlapping-window
+stacking, raise/focus, keyboard routing, compositor lease ownership, and
+owner teardown. The gate also removes the damage fixture before exercising
+the window-manager fixture, so both paths are validated in one boot without
+stale filesystem state. Existing Stage 20.8 remains the complementary
+resize/tiling/killed-window recovery gate. Evidence is recorded in
+`docs/graphics/stage-09-compositor-evidence.md`.
+
 ## Graphics roadmap Stage 08 secure userspace surfaces and IPC - 2026-10-25
 
 Stage 08 is accepted for the secure userspace surface/IPC and QEMU scope. The

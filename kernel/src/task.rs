@@ -2102,6 +2102,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -2489,6 +2490,7 @@ pub fn task_live(id: TaskId) -> bool {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test"
 ))]
 pub fn process_task_blocked(id: ProcessId) -> bool {

@@ -4478,6 +4478,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage09-compositor-test")]
+    {
+        if !stage09_compositor_self_test() {
+            serial::write_line(format_args!("[S09] compositor scheduler: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S09] compositor scheduler: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-6-test")]
     {
         if !stage19_6_self_test() {
@@ -7986,7 +7995,9 @@ fn stage16_1_self_test() -> bool {
     feature = "stage08-graphics-test",
     feature = "stage19-8-test",
     feature = "stage19-9-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -8029,6 +8040,7 @@ const HELLO_GUI_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_HELLO_GUI_IMAGE"));
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -8069,6 +8081,7 @@ fn display_client_capabilities() -> capability::CapabilitySet {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -8201,6 +8214,7 @@ fn stage13_15_self_test() -> bool {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -8253,6 +8267,7 @@ fn spawn_hello_gui(
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -16646,6 +16661,16 @@ fn stage19_12_self_test() -> bool {
     )
 }
 
+/// Graphics roadmap Stage 09 acceptance combines damage-only composition with
+/// overlapping-window stacking/focus. The existing Stage 20.8 gate separately
+/// qualifies resize, tiling, and killed-window recovery.
+#[cfg(feature = "stage09-compositor-test")]
+fn stage09_compositor_self_test() -> bool {
+    let damage_ok = stage19_9_self_test();
+    let fixture_released = vfs::remove("/bin/hello-gui").is_ok();
+    damage_ok && fixture_released && stage19_11_self_test()
+}
+
 /// Stage 19.11 acceptance: a userspace window manager stacks windows and
 /// routes input to the focused one.
 ///
@@ -16656,7 +16681,7 @@ fn stage19_12_self_test() -> bool {
 /// top window; each client must receive exactly its own key (A: `x` once
 /// raised, B: `y` once raised back). The kernel then reads the overlap and
 /// each window's private area from the compositor itself.
-#[cfg(feature = "stage19-11-test")]
+#[cfg(any(feature = "stage19-11-test", feature = "stage09-compositor-test"))]
 fn stage19_11_self_test() -> bool {
     use woven_input::Key;
 
@@ -16792,7 +16817,7 @@ fn stage19_11_self_test() -> bool {
 /// region and declares it, and recolours another without declaring it. The
 /// compositor must be woken, copy exactly the declared region, and leave the
 /// undeclared change off screen.
-#[cfg(feature = "stage19-9-test")]
+#[cfg(any(feature = "stage19-9-test", feature = "stage09-compositor-test"))]
 fn stage19_9_self_test() -> bool {
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
