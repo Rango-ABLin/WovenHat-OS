@@ -1,6 +1,6 @@
 # WovenPDF native PDF reader — development increment
 
-Status: initial inspection, bounded lexical scanner, and narrow text-preview application only; **not a complete reader**.
+Status: initial inspection, bounded lexical scanner, strict classic xref-table parsing, and narrow text-preview application only; **not a complete reader**.
 
 ## Source and rights
 
@@ -22,7 +22,8 @@ Keep the reference out of the freestanding WovenHat build graph.
 ## Current code
 
 - `apps/woven-pdf` is a standalone Rust `no_std` Ring-3 ELF app.
-- `src/lexer.rs` introduces a non-allocating bounded scanner for PDF tokens, with unit test sources covering malformed input, comments, names, strings, arrays, and dictionaries. Lexing does not yet resolve indirect objects or PDF reference tables.
+- `src/lexer.rs` introduces a non-allocating bounded scanner for PDF tokens, with unit test sources covering malformed input, comments, names, strings, arrays, and dictionaries. Lexing does not yet resolve indirect objects.
+- `src/xref.rs` reads strictly formatted classic `xref` tables via `startxref`, records bounded object offset/generation/free state entries, and rejects malformed offsets, duplicate object numbers, unsupported xref streams, and incremental `/Prev` trailers. It does not yet verify that object offsets point to correctly matching `obj` headers, parse the trailer `/Root`, or resolve references. The `--text` path remains the earlier proof-of-concept stream scan and does **not** consume the xref parser.
 - `--info /mnt/example.pdf` validates bounded PDF header and EOF and prints version.
 - `--text /mnt/example.pdf` previews literal text strings directly followed by
   `Tj` in streams without a declared filter.
