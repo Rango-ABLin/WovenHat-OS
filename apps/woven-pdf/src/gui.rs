@@ -30,6 +30,7 @@ unsafe impl Sync for XrefBuffer {}
 static XREF: XrefBuffer = XrefBuffer(UnsafeCell::new([Entry {
     object: 0, generation: 0, offset: 0, in_use: false
 }; MAX_XREF]));
+// SAFETY: single-threaded GUI event loop exclusively updates selection state.
 static mut DECODED_LENGTH: usize = 0;
 static mut DOCUMENT_LENGTH: usize = 0;
 static mut SELECTED_PAGE: usize = 0;
