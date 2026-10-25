@@ -6114,6 +6114,8 @@ const RECOVERY_APP_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RECOVERY_IMAGE")
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_INSTALLER: &[u8] = include_bytes!(env!("WOVENHAT_INSTALLER_IMAGE"));
+#[cfg(feature = "system-apps")]
+const SYSTEM_WALLPAPER: &[u8] = include_bytes!(env!("WOVENHAT_WALLPAPER_IMAGE"));
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -7305,6 +7307,29 @@ fn install_production_system_apps() -> bool {
             return false;
         }
     }
+    if vfs::stat("/share/wallpapers/wovenhat-gradient.bmp").is_ok() {
+        serial::write_line(format_args!("[APPS] wallpaper path collision"));
+        return false;
+    }
+    if SYSTEM_WALLPAPER.len() < 54
+        || &SYSTEM_WALLPAPER[..2] != b"BM"
+        || u32::from_le_bytes([
+            SYSTEM_WALLPAPER[18],
+            SYSTEM_WALLPAPER[19],
+            SYSTEM_WALLPAPER[20],
+            SYSTEM_WALLPAPER[21],
+        ]) != 160
+        || u32::from_le_bytes([
+            SYSTEM_WALLPAPER[22],
+            SYSTEM_WALLPAPER[23],
+            SYSTEM_WALLPAPER[24],
+            SYSTEM_WALLPAPER[25],
+        ]) != 90
+        || u16::from_le_bytes([SYSTEM_WALLPAPER[28], SYSTEM_WALLPAPER[29]]) != 24
+    {
+        serial::write_line(format_args!("[APPS] wallpaper validation failed"));
+        return false;
+    }
     let share_created = if vfs::stat("/share").is_err() {
         if vfs::mkdir("/share").is_err() {
             return false;
@@ -7327,6 +7352,14 @@ fn install_production_system_apps() -> bool {
     if vfs::stat("/share").is_err() {
         return false;
     }
+    let wallpapers_created = if vfs::stat("/share/wallpapers").is_err() {
+        if vfs::mkdir("/share/wallpapers").is_err() {
+            return false;
+        }
+        true
+    } else {
+        false
+    };
     let mut installed = 0usize;
     for app in apps {
         if vfs::create_read_only(app.binary_path, app.image).is_err() {
@@ -7365,8 +7398,26 @@ fn install_production_system_apps() -> bool {
         }
         catalogs += 1;
     }
+    if vfs::create_read_only("/share/wallpapers/wovenhat-gradient.bmp", SYSTEM_WALLPAPER)
+        .is_err()
+    {
+        for rollback in apps {
+            let _ = vfs::remove(rollback.catalog_path);
+            let _ = vfs::remove(rollback.binary_path);
+        }
+        if wallpapers_created {
+            let _ = vfs::remove("/share/wallpapers");
+        }
+        if applications_created {
+            let _ = vfs::remove("/share/applications");
+        }
+        if share_created {
+            let _ = vfs::remove("/share");
+        }
+        return false;
+    }
     serial::write_line(format_args!(
-        "[APPS] {} signed applications installed",
+        "[APPS] {} signed applications and licensed wallpaper installed",
         installed
     ));
     true
