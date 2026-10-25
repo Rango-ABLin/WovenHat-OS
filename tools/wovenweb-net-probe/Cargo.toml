@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 [dependencies]
-libwoven = { path = "../../libwoven" }
+libwoven = { path = "../../libwoven", features = ["reclaiming-allocator"] }
 [profile.release]
 panic = "abort"
 opt-level = "s"

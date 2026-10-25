@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import struct
+import json
 from unittest.mock import MagicMock
 import unittest
 
@@ -22,6 +23,17 @@ def ipv4(protocol, source=1234, destination=80):
     frame[23] = protocol
     frame[34:38] = struct.pack("!HH", source, destination)
     return frame
+
+
+class CargoImageTests(unittest.TestCase):
+    def test_reads_unique_image_without_executing_host_launcher(self):
+        output = json.dumps({"reason": "build-script-executed", "env": [["WOVENHAT_UEFI_IMAGE", "test/image.img"]]})
+        self.assertEqual(MODULE.image_from_cargo(output), Path("test/image.img"))
+
+    def test_missing_and_ambiguous_images_are_refused(self):
+        for values in [[], [["WOVENHAT_UEFI_IMAGE", "a"], ["WOVENHAT_UEFI_IMAGE", "b"]]]:
+            with self.assertRaises(RuntimeError):
+                MODULE.image_from_cargo(json.dumps({"reason": "build-script-executed", "env": values}))
 
 
 class CaptureTests(unittest.TestCase):

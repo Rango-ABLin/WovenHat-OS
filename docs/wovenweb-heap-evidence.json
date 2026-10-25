@@ -1,0 +1,80 @@
+{
+  "status": "draft; not full stage acceptance",
+  "guest_image_build_provenance": {
+    "image_sha256": "c02e831ffbf8578b808fbeeab41233c53aba6759c5e9b313ec2fd66df250f6a4",
+    "source_sha256": {
+      "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+      "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+      "libwoven/src/heap_allocator.rs": "2d51686c0b2cdd896e30cb2c1bde0df0d6291362a0201650cde56b21037acccf",
+      "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+      "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
+      "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+    }
+  },
+  "runs": [
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792932750128279600-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "serial_sha256": "3b6b8715fa1da1669d7b29665c52831800651d71d917eec61a5d81a9acd4f6ff",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3494/3494 processes=2/2"
+      ]
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792933593156456200-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "serial_sha256": "8e94a2c045057c0270052829cde7acebfabe8cf8022f5e9f26b3874c070cf91a",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3497/3497 processes=2/2"
+      ]
+    },
+    {
+      "artifact": "audit-artifacts/wovenweb-memory-1792933619077301900-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "serial_sha256": "3408695eb42df1195b6781836b9290b7ede8a0a63dedb11455a7b7e01c1aaca0",
+      "cleanup": [
+        "[WOVENWEB-HEAP] exit=Some(0) mappings=0/0 frames=3497/3497 processes=2/2"
+      ]
+    }
+  ],
+  "checks": {
+    "sdk": {
+      "passed_tests": 180,
+      "log_sha256": "6cbe1a3ba9216596b0aff4efee1601fa6085d54f89cc0ae58ed81944472e1515"
+    },
+    "host": {
+      "passed_tests": 202,
+      "log_sha256": "7e21ee31ec79293af2c13d8d01462273c035b04fa195abdd9f5e3d7f7aa047a6"
+    },
+    "python_harness": {
+      "passed": 8
+    }
+  },
+  "incomplete": [
+    "Workspace Clippy blocked by Windows Application Control error 4551",
+    "remaining feature/probe/legacy Clippy",
+    "fresh guest rebuild after comment edit",
+    "native network regression with opt-in allocator",
+    "legacy GUI regression"
+  ],
+  "checkout_source_sha256": {
+    "libwoven/src/lib.rs": "29c5e6271aee674b9db93c706e623e3dc7a21e5997606a2b087c77654f2c5bb5",
+    "libwoven/src/heap.rs": "1f6ebd428ec8e0242788ae2247f29ac6e470a6582c3b6aa6e7e06f7575417763",
+    "libwoven/src/heap_allocator.rs": "512762c0b164b731d14c0b0d3effcae135e72067950775beba1589ef750b2273",
+    "kernel/src/wovenweb_memory_gate.rs": "91f3213c65f9e01a230e0b14feb8a62096a0877142cfff5b4f7ea4e363298fbe",
+    "tools/wovenweb-net-probe/src/heap.rs": "a88eb4c64658e31f657678aaf84b4d0714a045f0d1c774e2e80e7ee9fd0c42da",
+    "tools/wovenweb-net-probe/src/main.rs": "dd7eb3ae5e859387968e41ea52c398d957c5d3e91c70a69a14d996992e1c9363"
+  }
+}

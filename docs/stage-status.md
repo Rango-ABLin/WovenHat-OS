@@ -10728,3 +10728,11 @@ Removed obsolete stage-only README files and legacy Stage 6–9, Stage 10.8–10
 and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
 `RUN-STAGE10.7.ps1`, `run-release.ps1`, the root README, and app/tool/vendor
 READMEs remain because they are active instructions or package documentation.
+
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).

@@ -6241,3 +6241,19 @@ is prioritized without fabricating VPN infrastructure. Full browser remains open
 Final ownership review made Pending non-Send/non-Sync to preserve submitting-task
 completion ownership. The final 1/2/4-CPU matrix and the preserved Stage 10.7 TCP
 matrix pass. Published evidence now includes the final source/image/capture hashes.
+
+## Codex - WovenWeb reclaiming userspace heap (2026-10-25)
+
+User said proceed with native memory/runtime. Branch wovenweb/memory-runtime
+starts from the published a9e478e tree. Implementing a safe bitmap heap core and
+serialized native mapping backend, with real guest reuse/alignment/OOM/thread
+and teardown checks. Existing kernel mapping ceilings and authority stay intact.
+Large VM/C++ runtime remain subsequent boundaries; no browser completion claim.
+
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).

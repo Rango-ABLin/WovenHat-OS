@@ -130,6 +130,8 @@ mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
+#[cfg(feature = "wovenweb-memory-test")]
+mod wovenweb_memory_gate;
 #[cfg(feature = "wovenweb-net-test")]
 mod wovenweb_net_gate;
 // Stage 12.3 acceptance exercises the encrypted-mount path that lives here, so
@@ -5396,6 +5398,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S10.6] userspace async UDP send/recv + socket pinning/cancel/teardown: PASSED"
         ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "wovenweb-memory-test")]
+    {
+        if !wovenweb_memory_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "wovenweb-net-test")]

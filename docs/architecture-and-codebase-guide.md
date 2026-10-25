@@ -4318,3 +4318,11 @@ QEMU/emulated evidence from claiming Tier 1: native failures are Tier 3,
 complete native coverage is Tier 1, and incomplete native coverage without a
 failure is Tier 2. This separates evidence collection from policy and keeps
 the release claim fail-closed until real hardware records exist.
+
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).

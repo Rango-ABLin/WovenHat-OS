@@ -28,3 +28,8 @@ only Console and NetworkIo to the positive probe and only Console to its denied
 probe, using existing user-domain sandbox ceilings. No capability policy or
 syscall number is changed. See docs/wovenweb-native-port.md for the full browser
 port and remaining platform limits.
+
+The probe opts into `reclaiming-allocator`. `--heap` runs the isolated memory
+fixture through `scripts/test-wovenweb-memory-qemu.py`; it needs no NIC. This
+allocator is experimental and bounded by the existing VM window. See
+`docs/wovenweb-heap-acceptance.md` for validation gaps and ownership limits.

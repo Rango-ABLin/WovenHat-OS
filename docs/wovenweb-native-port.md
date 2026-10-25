@@ -104,3 +104,11 @@ Upstream references (source pinned by integrations/wovenweb/upstream.json):
 Documentation/Porting.md, Libraries/LibCore/{System,Process,Socket,AnonymousBuffer,
 EventLoopImplementation}.h, Libraries/LibWebView/{Application,ViewImplementation}.h,
 AK/Platform.h and vcpkg.json.
+
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).

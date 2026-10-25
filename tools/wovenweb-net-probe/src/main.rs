@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+extern crate alloc;
+mod heap;
 use libwoven::{
     Args,
     net::{self, Endpoint, TcpStream},
@@ -84,6 +86,9 @@ fn check() -> Result<(), u64> {
     Ok(())
 }
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--heap") {
+        libwoven::exit(heap::run().err().unwrap_or(0));
+    }
     if args.get(1) == Some(b"--denied") {
         let status = if matches!(TcpStream::new(), Err(net::Error::Rejected)) {
             0

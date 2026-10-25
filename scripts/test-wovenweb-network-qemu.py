@@ -122,8 +122,28 @@ def run_build(command, cwd, env, log):
     with log.open("w", encoding="utf-8") as errors:
         result = subprocess.run(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=errors, text=True)
     if result.returncode:
-        raise RuntimeError(f"build failed: {log}\n{log.read_text(encoding="utf-8")[-4000:]}")
+        raise RuntimeError(f"build failed: {log}\n{log.read_text(encoding='utf-8')[-4000:]}")
     return result.stdout.strip()
+
+
+
+def image_from_cargo(output):
+    paths = set()
+    for line in output.splitlines():
+        message = json.loads(line)
+        if message.get("reason") == "build-script-executed":
+            paths.update(value for key, value in message.get("env", []) if key == "WOVENHAT_UEFI_IMAGE")
+    if len(paths) != 1:
+        raise RuntimeError("Cargo did not emit exactly one WovenHat boot-image path")
+    return Path(paths.pop())
+
+
+def build_image(root, env, feature, log):
+    # The host executable only prints this build-time value. Reading Cargo's
+    # metadata avoids executing a generated Windows launcher unnecessarily.
+    output = run_build(["cargo", "build", "--features", feature, "--message-format=json"], root, env, log)
+    log.with_suffix(".cargo.jsonl").write_text(output, encoding="utf-8")
+    return image_from_cargo(output)
 
 
 def main():
@@ -148,7 +168,7 @@ def main():
         print("Building native probe and kernel; logs:", out, flush=True)
         run_build(["cargo", "build", "--release", "--locked"], probe, app_env, out / "probe-build.log")
         env["WOVENHAT_WEB_NET_PROBE_IMAGE"] = str(probe / "target/x86_64-unknown-none/release/wovenweb-net-probe")
-        image = Path(run_build(["cargo", "run", "--quiet", "--features", "wovenweb-net-test", "--", "--print-image"], root, env, out / "kernel-build.log"))
+        image = build_image(root, env, "wovenweb-net-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")
     (out / "image.txt").write_text(str(image.resolve()), encoding="utf-8")
