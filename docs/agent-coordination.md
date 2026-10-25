@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - memory-bounded interlaced GIF rows (2026-10-25)
+
+Enabled the GIF four-pass interlace row mapping in the source-driven decoder.
+Interlaced frames now rasterize directly into caller-owned output without
+additional frame-sized storage; the 1024-byte source request and fixed
+palette/LZW tables remain the only decoder workspace.
+
 ## Codex - memory-bounded GIF stream decoder (2026-10-25)
 
 Replaced GIF stream buffering with a source-driven decoder. Header/palette

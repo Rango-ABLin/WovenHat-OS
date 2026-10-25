@@ -10,13 +10,13 @@ without assembling the encoded file in a caller buffer.
 
 WebP has incremental delivery through `StreamingDecoder`, but that backend
 retains the encoded RIFF payload until final decode. GIF now has a true
-memory-bounded single-frame, non-interlaced entry point: fixed palette/LZW
-tables and a 1024-byte source request are retained while pixels stream to the
-caller. Animated GIF, disposal/timing playback, and interlaced GIF remain
-separate gates.
+memory-bounded single-frame entry point: fixed palette/LZW tables and a
+1024-byte source request are retained while pixels stream to the caller.
+Interlaced row ordering is supported; animated GIF, disposal/timing playback,
+and multi-frame composition remain separate gates.
 
 Evidence:
 
-- Full `libwoven` host suite: 175 passed.
+- Full `libwoven` host suite: 176 passed.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.

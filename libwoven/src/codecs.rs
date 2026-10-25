@@ -463,9 +463,26 @@ struct GifPixelWriter<'a> {
     palette: &'a [u8; 768],
     palette_entries: usize,
     transparent: Option<u8>,
+    interlaced: bool,
 }
 
 impl GifPixelWriter<'_> {
+    fn row_for_sequence(sequence: usize, height: usize, interlaced: bool) -> usize {
+        let row = sequence;
+        if !interlaced {
+            return row;
+        }
+        let mut remaining = row;
+        for (start, step) in [(0usize, 8usize), (4, 8), (2, 4), (1, 2)] {
+            let count = height.saturating_sub(start).div_ceil(step);
+            if remaining < count {
+                return start + remaining * step;
+            }
+            remaining -= count;
+        }
+        height
+    }
+
     fn write(&mut self, palette_index: u8) -> Result<(), ImageError> {
         if self.output_index >= self.expected || usize::from(palette_index) >= self.palette_entries
         {
@@ -473,9 +490,13 @@ impl GifPixelWriter<'_> {
         }
         if self.transparent != Some(palette_index) {
             let offset = usize::from(palette_index) * 3;
-            let destination = (self.top + self.output_index / self.width) * self.screen_width
-                + self.left
-                + self.output_index % self.width;
+            let row = Self::row_for_sequence(
+                self.output_index / self.width,
+                self.expected / self.width,
+                self.interlaced,
+            );
+            let destination =
+                (self.top + row) * self.screen_width + self.left + self.output_index % self.width;
             self.output[destination] = u32::from_be_bytes([
                 self.palette[offset],
                 self.palette[offset + 1],
@@ -558,7 +579,7 @@ pub fn decode_gif_rgba_stream<S: ImageStream>(
                 let width = usize::from(u16::from_le_bytes([descriptor[4], descriptor[5]]));
                 let height = usize::from(u16::from_le_bytes([descriptor[6], descriptor[7]]));
                 let image_packed = descriptor[8];
-                if width == 0 || height == 0 || image_packed & 0x40 != 0 {
+                if width == 0 || height == 0 {
                     return Err(ImageError::UnsupportedEncoding);
                 }
                 let right = left.checked_add(width).ok_or(ImageError::Malformed)?;
@@ -607,6 +628,7 @@ pub fn decode_gif_rgba_stream<S: ImageStream>(
                     palette: &palette,
                     palette_entries,
                     transparent,
+                    interlaced: image_packed & 0x40 != 0,
                 };
                 let mut saw_end = false;
                 {
@@ -877,6 +899,22 @@ mod tests {
         decode_gif_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
         assert_eq!(pixels[0], 0x000000ff);
         assert!(stream.largest_request <= 1024);
+    }
+
+    #[test]
+    fn decodes_interlaced_gif_row_order() {
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0x40, 2, 2, 0x44, 1, 0, 0x3b,
+        ];
+        let metadata = parse_image_header(&gif).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &gif,
+            largest_request: 0,
+        };
+        let mut pixels = [0u32; 1];
+        decode_gif_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
+        assert_eq!(pixels[0], 0x000000ff);
     }
 
     #[test]

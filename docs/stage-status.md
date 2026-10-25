@@ -1,5 +1,12 @@
 # Stage status
 
+## Memory-bounded interlaced GIF rows - 2026-10-25
+
+The source-driven GIF decoder now supports the four-pass interlace mapping
+while retaining fixed palette/LZW workspace and direct caller-owned output.
+The 176-test libwoven suite and host/freestanding warning-denying Clippy pass.
+Animated frame timing, disposal, and playback remain open.
+
 ## Memory-bounded GIF stream decoder - 2026-10-25
 
 `decode_gif_rgba_stream` now parses GIF headers, palettes, sub-blocks, and LZW
@@ -7,7 +14,7 @@ codes directly from `ImageStream`; it no longer assembles the encoded payload.
 The decoder retains only fixed palette/LZW tables and a 1024-byte source
 request, then writes directly into caller-owned pixels. The 175-test libwoven
 suite and host/freestanding warning-denying Clippy pass. Animation, disposal,
-timing, and interlaced frames remain open.
+and timing remain open.
 
 ## GIF incremental-delivery boundary - 2026-10-25
 
