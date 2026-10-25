@@ -23,6 +23,7 @@ the next holder's default scale.
 |---|---|---|---|
 | Stage 19.14 display scaling and frame pacing | PASS | PASS | PASS |
 | Stage 20.7 spring animation | PASS | PASS | PASS |
+| Stage 20.10 Quick Settings accessibility/motion path | PASS | PASS | PASS |
 
 Stage 20.7 observed monotonic opacity sequences including
 `[0, 48, 194, 236, 250, 253, 255]` on the 1-CPU run and completed with QEMU
@@ -33,10 +34,16 @@ Evidence is retained under:
 
 - `target/hello-gui-scaled-{1,2,4}cpu`
 - `target/woven-shell-animation-{1,2,4}cpu`
+- `target/woven-shell-quick-settings-{1,2,4}cpu`
+
+The Stage 20.10 matrix exercises the production Quick Settings path,
+including Reduced Motion visibility, Do Not Disturb state, tiling over a live
+client, scale 1/2 transitions, panel close, input routing, and teardown.
 
 ## Boundary
 
-This accepts the motion/pacing runtime slice only. A complete Stage 11 claim
+This accepts the motion/pacing and Quick Settings accessibility runtime slices
+only. A complete Stage 11 claim
 still requires the desktop screenshot/theme matrix, reduced-motion interaction
 coverage through the production settings path, animation-starvation coverage
 under sustained input, and low-power runtime evidence.

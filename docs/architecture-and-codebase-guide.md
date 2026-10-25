@@ -4330,3 +4330,10 @@ display release. Stage 19.14 separately validates paced frames across integer
 display scaling changes. This is a runtime acceptance of the software motion
 and pacing boundary, not a claim of v-sync, low-power scheduling, or hardware
 GPU acceleration; those remain separate qualifications.
+
+The Stage 20.10 Quick Settings gate is the shell-facing accessibility seam for
+the current motion policy. Its Reduced Motion row is exercised through the real
+pointer path while the same gate checks bounded panel composition over both
+wallpaper and a tiled client, scale changes, and teardown. The gate uses the
+flat compatibility presentation so those checks remain independent of the
+separate 3D projection path.

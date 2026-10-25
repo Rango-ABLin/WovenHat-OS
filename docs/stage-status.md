@@ -20,6 +20,17 @@ checks independent of wallpaper/projection geometry. Warning-denying freestandin
 `docs/graphics/stage-11-motion-evidence.md`; full Stage 11 screenshot/theme,
 starvation, and low-power acceptance remains open.
 
+## Graphics Stage 11 Quick Settings accessibility acceptance - 2026-10-25
+
+Repaired the Stage 20.10 oracle to match the current shell's branded wallpaper
+weave and flat compatibility presentation. The panel model now composes its
+translucent background over the actual beneath-surface, including the tiled
+client. The complete Quick Settings gate passed on 1/2/4 CPUs with exit 33,
+covering Reduced Motion visibility, Do Not Disturb, tiling, scale 1/2,
+keyboard/pointer routing, and teardown. Warning-denying freestanding kernel
+Clippy for `stage20-10-test` passes. Full Stage 11 screenshot/theme,
+starvation, and low-power acceptance remains open.
+
 ## Graphics Stage 20.8/20.13 flat-renderer oracle repairs - 2026-10-25
 
 Updated the tiling/resize and workspace acceptance oracles to the current

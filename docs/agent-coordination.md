@@ -6452,3 +6452,12 @@ settling, input routing and display teardown. Stage 20.7 and Stage 19.14 passed 
 This accepts only the motion/pacing slice; Stage 11 screenshot/theme,
 starvation, and low-power evidence remains open. See
 `docs/graphics/stage-11-motion-evidence.md`.
+
+# Codex - graphics Stage 11 Quick Settings accessibility acceptance (2026-10-25)
+
+Repaired the Stage 20.10 oracle for the current shell's wallpaper/weave and
+flat compatibility renderer, and made panel translucency account for the
+actual beneath surface during tiling. The Quick Settings gate passed on 1/2/4
+CPUs with exit 33; warning-denying freestanding kernel Clippy passed for
+`stage20-10-test`. Full Stage 11 screenshot/theme, starvation, and low-power
+evidence remains open.

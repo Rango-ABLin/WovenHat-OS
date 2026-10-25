@@ -10758,8 +10758,8 @@ fn stage20_11_self_test() -> bool {
 fn stage20_10_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const ACCENT: u32 = rgb(90, 140, 220);
@@ -10768,6 +10768,9 @@ fn stage20_10_self_test() -> bool {
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const QUIET: u32 = rgb(90, 170, 170);
     const UNSET: u32 = 0x0100_0000;
+    const WEAVE_PITCH: i32 = 96;
+    const WEAVE_OPACITY: u8 = 10;
+    const WEAVE_TINT_OPACITY: u8 = 12;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -10793,11 +10796,11 @@ fn stage20_10_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / WEAVE_PITCH + y / WEAVE_PITCH) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, WEAVE_TINT_OPACITY);
+        if x % WEAVE_PITCH == 0 || y % WEAVE_PITCH == 0 {
+            blend_pixel(WHITE, woven, WEAVE_OPACITY)
         } else {
             woven
         }
@@ -11039,7 +11042,7 @@ fn stage20_10_self_test() -> bool {
         width: i32,
         height: i32,
         rows: [&str; 10],
-        _beneath: impl Fn(i32, i32) -> u32,
+        beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
         let top = height - 24;
@@ -11068,24 +11071,12 @@ fn stage20_10_self_test() -> bool {
                     x += 1;
                     continue;
                 }
-                let expected = expected_card_3d(
-                    x,
-                    y,
-                    x0,
-                    y0,
-                    164,
-                    h,
-                    70 << 16,
-                    |lx, ly| match image.pixel(lx, ly) {
-                        Some(UNSET) | None => Some(blend_pixel(
-                            PANEL_FILL,
-                            wallpaper(x0 + lx, y0 + ly, height),
-                            216,
-                        )),
-                        Some(pixel) => Some(pixel),
-                    },
-                    |x, y| expected_wallpaper(x, y, width, height),
-                );
+                let lx = x - x0;
+                let ly = y - y0;
+                let expected = match image.pixel(lx, ly) {
+                    Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
+                    Some(pixel) => pixel,
+                };
                 if compositor::pixel(x, y) != Ok(expected) {
                     return false;
                 }
@@ -11101,7 +11092,8 @@ fn stage20_10_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -11151,28 +11143,29 @@ fn stage20_10_self_test() -> bool {
 
     let (mut px, mut py) = (width / 2, height / 2);
     let button_clicked = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    let panel_rendered = button_clicked
-        && until(1000, || {
-            panel(
-                width,
-                height,
-                [
-                    "Power off",
-                    "Restart",
-                    "Display scale: 2x",
-                    "Do not disturb: Off",
-                    "Tiling: Off",
-                    "Lock screen",
-                    "Change PIN",
-                    "Language: English",
-                    "3D Desktop: Off",
-                    "Reduced Motion: Off",
-                ],
-                wall,
-                (button.0 + 8, button.1 + 8),
-            )
-        });
-    let opened = button_clicked && panel_rendered;
+    if !step("the Quick Settings button receives the click", button_clicked) {
+        return false;
+    }
+    let opened = until(1000, || {
+        panel(
+            width,
+            height,
+            [
+                "Power off",
+                "Restart",
+                "Display scale: 2x",
+                "Do not disturb: Off",
+                "Tiling: Off",
+                "Lock screen",
+                "Change PIN",
+                "Language: English",
+                "3D Desktop: Off",
+                "Reduced Motion: Off",
+            ],
+            wall,
+            (button.0 + 8, button.1 + 8),
+        )
+    });
     (px, py) = (button.0 + 8, button.1 + 8);
     if !step("the Quick Settings button opens its panel", opened) {
         return false;
