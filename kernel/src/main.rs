@@ -4217,7 +4217,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(all(
         feature = "stage20-14-test",
-        not(feature = "stage20-14-single-test")
+        not(feature = "stage20-14-single-test"),
+        not(feature = "stage20-14-recovery-test")
     ))]
     {
         if !virtio_gpu::self_test() {
@@ -4234,6 +4235,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S20.14S] single-output GPU: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage20-14-recovery-test")]
+    {
+        if !compositor::recovery_self_test() {
+            serial::write_line(format_args!(
+                "[S20.14R] VirtIO presentation recovery: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S20.14R] VirtIO presentation recovery: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage24-59-test")]
