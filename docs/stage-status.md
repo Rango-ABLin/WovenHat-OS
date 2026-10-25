@@ -4,11 +4,15 @@
 
 - External randomized codec campaign: **PASS** — 50,000 inputs and 250,000
   decoder cases through `tools/codec-fuzz`.
-- Multi-frame GIF playback emission: implemented and unit-tested; guest
-  emission qualification is being added to the WovenImages QEMU gate.
-- Truly memory-bounded WebP final decoding: **OPEN**. The pinned `zenwebp`
-  streaming API retains the full encoded RIFF payload and uses internal
-  allocations, so the current path is bounded-request incremental delivery.
+- Multi-frame GIF playback emission: implemented, unit-tested, and guest
+  qualified through the WovenImages QEMU gate.
+- Caller-workspace-bounded WebP final decoding: **implemented and tested** via
+  `decode_webp_rgba_stream_bounded`, with dimension/file/memory limits.
+  Strict whole-process allocation certification remains **OPEN** because the
+  pinned `zenwebp` backend documents that some internal allocations may ignore
+  its configured memory limit.
+- WovenImages guest qualification: **PASS** on 1/2/4 CPUs, exit 33, with
+  streamed BMP, interlaced GIF, and two-frame GIF playback markers.
 
 ## Bounded multi-frame GIF playback emission - 2026-10-25
 

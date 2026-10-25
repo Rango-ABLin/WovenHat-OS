@@ -118,7 +118,7 @@ fn codec_self_test() -> ! {
     let animation = [
         b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255, 0x2c,
         0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x21, 0xf9, 4, 8, 5, 0, 0, 0, 0x2c, 0, 0, 0,
-        0, 1, 0, 1, 0, 0, 2, 2, 0x4c, 1, 0, 0, 0x3b,
+        0, 1, 0, 1, 0, 0, 2, 2, 0x4c, 1, 0, 0x3b,
     ];
     let animation_metadata = libwoven::media::parse_image_header(&animation);
     let mut animation_stream = SelfTestStream { bytes: &animation };

@@ -8,9 +8,12 @@ animation paths (250,000 decoder cases). The verified run completed with
 `codec fuzz complete iterations=50000 cases=250000`. It uses `libwoven` with
 the userspace allocator feature disabled so the host process remains safe.
 
-The pinned WebP backend still retains the complete encoded RIFF payload and
-has internal allocations; the WebP path is not described as truly
-caller-workspace-bounded until that backend limitation is removed.
+The compatibility WebP streaming API still retains the complete encoded RIFF
+payload and has internal allocations. A separate
+`decode_webp_rgba_stream_bounded` API now reads into caller-owned encoded
+workspace and applies explicit decoder limits. Strict whole-process
+allocation certification remains open because the pinned backend documents
+that some internal allocations may ignore its memory limit.
 
 ## Codex - bounded multi-frame GIF playback emission (2026-10-25)
 

@@ -1159,6 +1159,59 @@ pub fn decode_webp_rgba_stream<S: ImageStream>(
     Ok(metadata)
 }
 
+/// Decode WebP from a caller-owned encoded workspace and caller-owned pixels.
+///
+/// The workspace must be large enough for the RIFF payload declared by the
+/// source. No encoded-payload `Vec` is created by this entry point; the
+/// decoder receives the caller's slice directly. Decoder dimensions, file
+/// size, and memory limits are derived from the supplied workspace/output
+/// budget before rasterization.
+pub fn decode_webp_rgba_stream_bounded<S: ImageStream>(
+    stream: &mut S,
+    metadata: ImageMetadata,
+    encoded_workspace: &mut [u8],
+    output: &mut [u32],
+) -> Result<ImageMetadata, ImageError> {
+    if metadata.format != ImageFormat::WebP {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    capacity(metadata, output)?;
+    let mut header = [0u8; 12];
+    read_stream_exact(stream, 0, &mut header)?;
+    if &header[..4] != b"RIFF" || &header[8..] != b"WEBP" {
+        return Err(ImageError::Malformed);
+    }
+    let total = usize::try_from(u32::from_le_bytes([
+        header[4], header[5], header[6], header[7],
+    ]))
+    .ok()
+    .and_then(|size| size.checked_add(8))
+    .ok_or(ImageError::Malformed)?;
+    if total > encoded_workspace.len() {
+        return Err(ImageError::OutputTooSmall);
+    }
+    read_stream_exact(stream, 0, &mut encoded_workspace[..total])?;
+    let limits = zenwebp::decoder::Limits::default()
+        .max_dimensions(metadata.width, metadata.height)
+        .max_total_pixels(u64::from(metadata.width) * u64::from(metadata.height))
+        .max_file_size(total as u64)
+        .max_memory(
+            (total as u64)
+                .saturating_add((output.len() * 4) as u64)
+                .saturating_add(64 * 1024),
+        );
+    let config = zenwebp::decoder::DecodeConfig::default().limits(limits);
+    let (width, height) =
+        zenwebp::decoder::DecodeRequest::new(&config, &encoded_workspace[..total])
+            .stride(metadata.width)
+            .decode_rgba_into(bytemuck_slice(output))
+            .map_err(|_| ImageError::Malformed)?;
+    if width != metadata.width || height != metadata.height {
+        return Err(ImageError::Malformed);
+    }
+    Ok(metadata)
+}
+
 #[cfg(target_os = "none")]
 fn finish_webp_stream(
     decoder: zenwebp::decoder::StreamingDecoder,
@@ -1221,6 +1274,7 @@ mod tests {
         GifDisposal, GifFrameInfo, GifFrameSink, GifPlayback, ImageError, ImageStream, StreamError,
         decode_bmp_rgba_stream, decode_gif_animation_stream, decode_gif_rgba_stream,
         decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
+        decode_webp_rgba_stream_bounded,
     };
     use crate::media::parse_image_header;
 
@@ -1349,6 +1403,32 @@ mod tests {
         };
         let mut pixels = [0u32; 4];
         let decoded = decode_webp_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert!(pixels.iter().all(|pixel| *pixel != 0));
+        assert!(stream.largest_request <= 1024);
+    }
+
+    #[test]
+    fn decodes_webp_through_caller_owned_encoded_workspace() {
+        let webp = [
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
+        ];
+        let metadata = parse_image_header(&webp).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &webp,
+            largest_request: 0,
+        };
+        let mut encoded_workspace = [0u8; 38];
+        let mut pixels = [0u32; 4];
+        let decoded = decode_webp_rgba_stream_bounded(
+            &mut stream,
+            metadata,
+            &mut encoded_workspace,
+            &mut pixels,
+        )
+        .unwrap();
         assert_eq!((decoded.width, decoded.height), (2, 2));
         assert!(pixels.iter().all(|pixel| *pixel != 0));
         assert!(stream.largest_request <= 1024);

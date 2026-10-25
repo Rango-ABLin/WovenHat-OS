@@ -9,7 +9,13 @@ uses the same boundary to fetch its header and each validated 24/32-bit row
 without assembling the encoded file in a caller buffer.
 
 WebP has incremental delivery through `StreamingDecoder`, but that backend
-retains the encoded RIFF payload until final decode. GIF now has a true
+retains the encoded RIFF payload until final decode. For callers that require
+bounded final decoding, `decode_webp_rgba_stream_bounded` accepts a
+caller-owned encoded workspace, reads only into that workspace, and applies
+dimension/file/memory limits before writing caller-owned RGBA output. The
+pinned zenwebp backend documents that some internal allocations may ignore its
+memory limit, so strict whole-process allocation certification remains an
+explicit backend qualification item. GIF now has a true
 memory-bounded single-frame entry point: fixed palette/LZW tables and a
 1024-byte source request are retained while pixels stream to the caller.
 Interlaced row ordering is supported; animated GIF and multi-frame composition
@@ -19,11 +25,14 @@ frame state and disposal/timing metadata without buffering a frame sequence.
 
 Evidence:
 
-- Full `libwoven` host suite: 180 passed, including exhaustive truncation
+- Full `libwoven` host suite: 181 passed, including caller-workspace WebP and exhaustive truncation
   prefix checks for BMP/GIF and malformed/truncated WebP stream cases.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.
+- WovenImages QEMU guest gate: passed on 1, 2, and 4 CPUs (exit 33), including
+  streamed BMP, interlaced GIF, and two-frame GIF playback emission.
 - External randomized codec campaign: `tools/codec-fuzz` completed 50,000
-  iterations / 250,000 decoder cases. WebP remains explicitly open for a
-  truly caller-workspace-bounded final decode because the pinned backend
-  retains the encoded RIFF payload internally.
+  iterations / 250,000 decoder cases. Strict whole-process WebP allocation
+  certification remains open because the pinned backend retains the encoded
+  RIFF payload in its compatibility streaming API and documents internal
+  allocations outside the configured limit.
