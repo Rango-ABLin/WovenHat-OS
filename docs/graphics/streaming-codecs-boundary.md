@@ -17,6 +17,7 @@ and multi-frame composition remain separate gates.
 
 Evidence:
 
-- Full `libwoven` host suite: 176 passed.
+- Full `libwoven` host suite: 178 passed, including exhaustive truncation
+  prefix checks for BMP/GIF and malformed/truncated WebP stream cases.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.

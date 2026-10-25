@@ -1,5 +1,13 @@
 # Stage status
 
+## Codec truncation/property qualification - 2026-10-25
+
+The codec suite now exhaustively checks every truncated BMP/GIF fixture prefix
+and malformed/truncated WebP stream prefix, requiring fail-closed errors. The
+178-test libwoven suite and host/freestanding warning-denying Clippy pass.
+External fuzzing and long-running randomized campaigns remain separate
+qualification work.
+
 ## Userspace stack qualification for streamed codecs - 2026-10-25
 
 The WovenImages Ring-3 self-test exposed a stack fault while entering the

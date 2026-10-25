@@ -961,6 +961,80 @@ mod tests {
     }
 
     #[test]
+    fn stream_decoders_reject_every_truncated_bmp_and_gif_prefix() {
+        let mut bmp = [0u8; 62];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&2i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&(-1i32).to_le_bytes());
+        bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24u16.to_le_bytes());
+        bmp[34..38].copy_from_slice(&8u32.to_le_bytes());
+        bmp[54..62].copy_from_slice(&[0, 0, 255, 0, 255, 0, 0, 0]);
+        let bmp_metadata = parse_image_header(&bmp).unwrap();
+        for length in 0..bmp.len() {
+            let mut stream = MemoryStream {
+                bytes: &bmp[..length],
+                largest_request: 0,
+            };
+            let mut pixels = [0u32; 2];
+            assert!(
+                decode_bmp_rgba_stream(&mut stream, bmp_metadata, &mut pixels).is_err(),
+                "truncated BMP prefix {length} unexpectedly decoded"
+            );
+        }
+
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0x40, 2, 2, 0x44, 1, 0, 0x3b,
+        ];
+        let gif_metadata = parse_image_header(&gif).unwrap();
+        for length in 0..gif.len() {
+            let mut stream = MemoryStream {
+                bytes: &gif[..length],
+                largest_request: 0,
+            };
+            let mut pixels = [0u32; 1];
+            assert!(
+                decode_gif_rgba_stream(&mut stream, gif_metadata, &mut pixels).is_err(),
+                "truncated GIF prefix {length} unexpectedly decoded"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_webp_rejects_malformed_signatures_and_truncations() {
+        let webp = [
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
+        ];
+        let metadata = parse_image_header(&webp).unwrap();
+        for length in 0..webp.len() {
+            let mut prefix = [0u8; 38];
+            prefix[..length].copy_from_slice(&webp[..length]);
+            let mut stream = MemoryStream {
+                bytes: &prefix[..length],
+                largest_request: 0,
+            };
+            let mut pixels = [0u32; 4];
+            assert!(
+                decode_webp_rgba_stream(&mut stream, metadata, &mut pixels).is_err(),
+                "truncated WebP prefix {length} unexpectedly decoded"
+            );
+        }
+        let mut malformed = webp;
+        malformed[0] = b'X';
+        let mut stream = MemoryStream {
+            bytes: &malformed,
+            largest_request: 0,
+        };
+        let mut pixels = [0u32; 4];
+        assert!(decode_webp_rgba_stream(&mut stream, metadata, &mut pixels).is_err());
+    }
+
+    #[test]
     fn decodes_extended_lossy_webp_with_alpha() {
         let webp = [
             0x52, 0x49, 0x46, 0x46, 0x54, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,

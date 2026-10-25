@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - codec truncation/property qualification (2026-10-25)
+
+Added deterministic malformed-input qualification for the stream boundary:
+every truncated BMP and interlaced GIF fixture prefix must fail, and every
+truncated or signature-corrupted WebP prefix must fail. The 178-test libwoven
+suite and host/freestanding warning-denying Clippy pass. This is deterministic
+property coverage, not a replacement for external fuzzing.
+
 ## Codex - userspace stack qualification for streamed codecs (2026-10-25)
 
 The guest GIF stream self-test exposed the historical 16-KiB userspace stack
