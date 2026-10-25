@@ -21,8 +21,8 @@ the new full-buffer first/last-byte host regression. The signing policy was not
 changed. The dedicated workflow retains logs for relevant branch/PR changes.
 
 A test-only follow-up now centralizes explicit null rejection before unsafe
-payload access and adds a negative test verifying null input panics. The expected
-new unit count is 179; fresh hosted execution and a fresh scan are required.
+payload access and adds a negative test verifying null input panics. Hosted validation on 0b8e3158 passed
+179 unit tests (including null rejection), three compile-fail checks and Clippy.
 Local all-target Clippy compiles the new test but does not run its assertions.
 The production allocator prefix is byte-identical after LF normalization; no
 native runtime code changed in this guard follow-up.
@@ -33,7 +33,8 @@ These fixtures do not execute the host-only System backend. Existing GUI default
 allocator behavior is unchanged. Full VM/runtime/browser acceptance remains open.
 
 The complete scan on b72a26d reported five high invalid-pointer alerts at host
-test writes. Those findings remain open. The connector does not supply the full
+test writes. The complete follow-up scan on 0b8e3158
+reports success with no new alerts in the PR changed code and zero annotations. The connector does not supply the full
 dataflow paths, and the blocked browser URL-verification path was not retried.
 No warning, query, path or test is disabled, and no finding is dismissed.
 
@@ -45,3 +46,14 @@ explicit helper as an analyzer-model hypothesis, not proof that the old findings
 are false positives. Non-nullness alone is not a lifetime/extent proof; backend
 ownership and the unsafe GlobalAlloc caller contract still apply. A neutral scan
 with a missing Rust configuration is not a clean scan.
+
+## Confirmed follow-up result
+
+The hosted [SDK job](https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40212623575/job/121226934940)
+and [complete CodeQL check](https://github.com/Rango-ABLin/WovenHat-OS/runs/121227062425)
+both succeeded on 0b8e31584e6c6eacea9585a3cdec83f7fadbc577. The complete Rust
+analysis finished before this result was recorded. This is not the earlier
+neutral missing-configuration result. No alert was manually dismissed; no test,
+query, unsafe write check, loop bound or warning was disabled. The five earlier
+annotations are not present in the new check. This is PR-code scan evidence,
+not proof of repository-wide security, privacy or complete browser readiness.

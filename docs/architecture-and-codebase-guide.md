@@ -4362,3 +4362,11 @@ is explicit. Zero-size requests return null. Hosted SDK tests and a fresh CodeQL
 scan remain required because Windows blocked the SDK unit executable. Native
 fixture evidence and limits: [pointer-origin follow-up](wovenweb-pointer-origin.md).
 This does not integrate production VM leases or qualify a complete browser.
+
+## Confirmed allocator follow-up (2026-10-25)
+
+Hosted SDK checks on 0b8e3158 passed 179 unit tests, three compile-fail checks
+and all-feature/all-target Clippy. Complete Rust CodeQL finished and its PR
+check reports success: no new alerts in changed code, zero annotations. No
+manual dismissal or suppression was used. Production VM integration and full
+browser acceptance remain open. See wovenweb-pointer-origin-evidence.json.

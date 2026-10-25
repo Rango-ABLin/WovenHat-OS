@@ -1,5 +1,5 @@
 {
-  "status": "native matrices passed; host execution and CodeQL resolution pending hosted CI",
+  "status": "native matrices and hosted allocator checks passed; CodeQL reports no new PR-code alerts; production VM integration remains open",
   "runs": [
     {
       "artifact": "audit-artifacts/wovenweb-memory-1792943373371924700-1cpu",
@@ -269,26 +269,26 @@
     }
   },
   "hosted_sdk": {
-    "workflow": ".github/workflows/wovenweb-sdk.yml",
-    "status": "explicit test-guard follow-up awaiting fresh hosted execution",
-    "expected_unit_tests": 179
+    "result": "success",
+    "unit_tests": 179,
+    "compile_fail_tests": 3,
+    "negative_null_test": "passed",
+    "full_buffer_test": "passed",
+    "clippy": "all features/all targets; -D warnings passed",
+    "job_url": "https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40212623575/job/121226934940",
+    "revision": "0b8e31584e6c6eacea9585a3cdec83f7fadbc577",
+    "workflow": ".github/workflows/wovenweb-sdk.yml"
   },
   "source_sha256": {
     "libwoven/src/heap_allocator.rs": "cb13ed54a018e977c376cc1ac3a8eb8e1a1cd8014cbf5322bca7119bb226bd27"
   },
   "codeql": {
-    "revision": "b72a26d941d36d57b5cb584fb7b5c9c16d983b63",
-    "result": "failure; five high invalid-pointer findings",
-    "check_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121217055543",
-    "reported_lines": [
-      252,
-      285,
-      287,
-      303,
-      350
-    ],
-    "follow_up": "explicit null-guard helper and negative test; fresh scan required, no suppression or dismissal",
-    "query_source": "https://github.com/github/codeql/blob/main/rust/ql/lib/codeql/rust/security/Barriers.qll"
+    "result": "success",
+    "summary": "No new alerts in code changed by this pull request",
+    "check_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121227062425",
+    "rust_analysis_url": "https://github.com/Rango-ABLin/WovenHat-OS/actions/runs/40212624886/job/121226941141",
+    "annotations_count": 0,
+    "revision": "0b8e31584e6c6eacea9585a3cdec83f7fadbc577"
   },
   "production_vm_integration": "not implemented",
   "hosted_sdk_previous": {
@@ -308,5 +308,19 @@
     "production_prefix_sha256_lf": "f59d549b82c59d9e998792a926c0735042d4f690a6bd889e9ea4b293d21e07bb",
     "test_source_sha256": "1e9640de5224b25cf7b9f09793312e3b2b2c390a706c678abbd81321a0fe8810",
     "local_clippy": "passed all features/all targets with -D warnings"
+  },
+  "historical_codeql": {
+    "revision": "b72a26d941d36d57b5cb584fb7b5c9c16d983b63",
+    "result": "failure; five high invalid-pointer findings",
+    "check_url": "https://github.com/Rango-ABLin/WovenHat-OS/runs/121217055543",
+    "reported_lines": [
+      252,
+      285,
+      287,
+      303,
+      350
+    ],
+    "follow_up": "explicit null-guard helper and negative test; fresh scan required, no suppression or dismissal",
+    "query_source": "https://github.com/github/codeql/blob/main/rust/ql/lib/codeql/rust/security/Barriers.qll"
   }
 }

@@ -6402,3 +6402,11 @@ allocator prefix was compared byte-for-byte after LF normalization and is
 unchanged. Local all-feature/all-target SDK Clippy passes. Hosted unit count is
 expected to become 179; prior b72a26d hosted 178+3/Clippy pass is preserved, while
 its completed security scan has five high findings. Await new tests/scan.
+
+## Confirmed allocator follow-up (2026-10-25)
+
+Hosted SDK checks on 0b8e3158 passed 179 unit tests, three compile-fail checks
+and all-feature/all-target Clippy. Complete Rust CodeQL finished and its PR
+check reports success: no new alerts in changed code, zero annotations. No
+manual dismissal or suppression was used. Production VM integration and full
+browser acceptance remain open. See wovenweb-pointer-origin-evidence.json.
