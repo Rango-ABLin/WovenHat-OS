@@ -1,5 +1,13 @@
 # Stage status
 
+## Bounded JavaScript boolean/comparison operators - 2026-10-25
+
+The scalar runtime now supports boolean literals, `!`, `==`, `!=`, integer
+ordering, and boolean `&&`/`||` with checked precedence and type validation.
+The 173-test libwoven suite and host/freestanding warning-denying Clippy pass.
+Objects, strings, functions, DOM, async, modules, JIT, and sandbox
+certification remain open.
+
 ## Bounded GIF pixel decoder - 2026-10-25
 
 `libwoven::media::decode_gif_rgba` now rasterizes a validated first GIF frame

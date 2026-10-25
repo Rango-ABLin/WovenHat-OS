@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded JavaScript boolean/comparison operators (2026-10-25)
+
+Extended the scalar runtime with `true`/`false`, checked integer comparison,
+equality, boolean negation, and logical `&&`/`||` operators. Precedence and
+operator/type mismatches remain fail-closed; the runtime still exposes no
+objects, DOM, I/O, async, module, or JIT capability.
+
 ## Codex - bounded GIF pixel decoder (2026-10-25)
 
 Added `libwoven::media::decode_gif_rgba` with validated global/local palettes,

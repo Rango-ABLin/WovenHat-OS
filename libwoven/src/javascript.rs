@@ -94,6 +94,15 @@ enum Token<'a> {
     Star,
     Slash,
     Equal,
+    EqualEqual,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    AndAnd,
+    OrOr,
+    Bang,
     LParen,
     RParen,
     Semicolon,
@@ -117,9 +126,7 @@ impl<'a> Lexer<'a> {
         if self.cursor == bytes.len() {
             return Ok(Token::End);
         }
-        if bytes[self.cursor] == b'/'
-            && bytes.get(self.cursor + 1) == Some(&b'/')
-        {
+        if bytes[self.cursor] == b'/' && bytes.get(self.cursor + 1) == Some(&b'/') {
             self.cursor += 2;
             while self.cursor < bytes.len() && bytes[self.cursor] != b'\n' {
                 self.cursor += 1;
@@ -128,11 +135,38 @@ impl<'a> Lexer<'a> {
         }
         let start = self.cursor;
         let token = match bytes[self.cursor] {
+            b'=' if bytes.get(self.cursor + 1) == Some(&b'=') => {
+                self.cursor += 1;
+                Token::EqualEqual
+            }
+            b'!' if bytes.get(self.cursor + 1) == Some(&b'=') => {
+                self.cursor += 1;
+                Token::NotEqual
+            }
+            b'<' if bytes.get(self.cursor + 1) == Some(&b'=') => {
+                self.cursor += 1;
+                Token::LessEqual
+            }
+            b'>' if bytes.get(self.cursor + 1) == Some(&b'=') => {
+                self.cursor += 1;
+                Token::GreaterEqual
+            }
+            b'&' if bytes.get(self.cursor + 1) == Some(&b'&') => {
+                self.cursor += 1;
+                Token::AndAnd
+            }
+            b'|' if bytes.get(self.cursor + 1) == Some(&b'|') => {
+                self.cursor += 1;
+                Token::OrOr
+            }
             b'+' => Token::Plus,
             b'-' => Token::Minus,
             b'*' => Token::Star,
             b'/' => Token::Slash,
             b'=' => Token::Equal,
+            b'<' => Token::Less,
+            b'>' => Token::Greater,
+            b'!' => Token::Bang,
             b'(' => Token::LParen,
             b')' => Token::RParen,
             b';' => Token::Semicolon,
@@ -232,12 +266,25 @@ impl<'source, 'runtime, const N: usize> Parser<'source, 'runtime, N> {
             }
             Token::Identifier(name) => {
                 self.advance()?;
-                self.runtime.get(name).ok_or(Error::UnknownVariable)?
+                match name {
+                    "true" => Value::Boolean(true),
+                    "false" => Value::Boolean(false),
+                    _ => self.runtime.get(name).ok_or(Error::UnknownVariable)?,
+                }
             }
             Token::Minus => {
                 self.advance()?;
-                match self.expression(depth + 1, 3)? {
-                    Value::Integer(value) => Value::Integer(value.checked_neg().ok_or(Error::ArithmeticOverflow)?),
+                match self.expression(depth + 1, 7)? {
+                    Value::Integer(value) => {
+                        Value::Integer(value.checked_neg().ok_or(Error::ArithmeticOverflow)?)
+                    }
+                    _ => return Err(Error::UnexpectedToken),
+                }
+            }
+            Token::Bang => {
+                self.advance()?;
+                match self.expression(depth + 1, 7)? {
+                    Value::Boolean(value) => Value::Boolean(!value),
                     _ => return Err(Error::UnexpectedToken),
                 }
             }
@@ -255,8 +302,12 @@ impl<'source, 'runtime, const N: usize> Parser<'source, 'runtime, N> {
         loop {
             let operator = self.current;
             let precedence = match operator {
-                Token::Plus | Token::Minus => 1,
-                Token::Star | Token::Slash => 2,
+                Token::OrOr => 1,
+                Token::AndAnd => 2,
+                Token::EqualEqual | Token::NotEqual => 3,
+                Token::Less | Token::LessEqual | Token::Greater | Token::GreaterEqual => 4,
+                Token::Plus | Token::Minus => 5,
+                Token::Star | Token::Slash => 6,
                 _ => break,
             };
             if precedence < minimum_precedence {
@@ -265,16 +316,46 @@ impl<'source, 'runtime, const N: usize> Parser<'source, 'runtime, N> {
             self.advance()?;
             let right = self.expression(depth + 1, precedence + 1)?;
             left = match (left, right, operator, precedence) {
-                (Value::Integer(left), Value::Integer(right), Token::Plus, 1) => {
+                (Value::Boolean(left), Value::Boolean(right), Token::OrOr, 1) => {
+                    Value::Boolean(left || right)
+                }
+                (Value::Boolean(left), Value::Boolean(right), Token::AndAnd, 2) => {
+                    Value::Boolean(left && right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::EqualEqual, 3) => {
+                    Value::Boolean(left == right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::NotEqual, 3) => {
+                    Value::Boolean(left != right)
+                }
+                (Value::Boolean(left), Value::Boolean(right), Token::EqualEqual, 3) => {
+                    Value::Boolean(left == right)
+                }
+                (Value::Boolean(left), Value::Boolean(right), Token::NotEqual, 3) => {
+                    Value::Boolean(left != right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::Less, 4) => {
+                    Value::Boolean(left < right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::LessEqual, 4) => {
+                    Value::Boolean(left <= right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::Greater, 4) => {
+                    Value::Boolean(left > right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::GreaterEqual, 4) => {
+                    Value::Boolean(left >= right)
+                }
+                (Value::Integer(left), Value::Integer(right), Token::Plus, 5) => {
                     Value::Integer(left.checked_add(right).ok_or(Error::ArithmeticOverflow)?)
                 }
-                (Value::Integer(left), Value::Integer(right), Token::Minus, 1) => {
+                (Value::Integer(left), Value::Integer(right), Token::Minus, 5) => {
                     Value::Integer(left.checked_sub(right).ok_or(Error::ArithmeticOverflow)?)
                 }
-                (Value::Integer(left), Value::Integer(right), Token::Star, 2) => {
+                (Value::Integer(left), Value::Integer(right), Token::Star, 6) => {
                     Value::Integer(left.checked_mul(right).ok_or(Error::ArithmeticOverflow)?)
                 }
-                (Value::Integer(left), Value::Integer(right), Token::Slash, 2) => {
+                (Value::Integer(left), Value::Integer(right), Token::Slash, 6) => {
                     if right == 0 {
                         return Err(Error::DivisionByZero);
                     }
@@ -314,15 +395,41 @@ mod tests {
     #[test]
     fn rejects_unknown_variables_capacity_and_division_by_zero() {
         let mut runtime = Runtime::<1>::new();
-        assert_eq!(eval("missing + 1", &mut runtime), Err(Error::UnknownVariable));
-        assert_eq!(eval("let a = 1; let b = 2", &mut runtime), Err(Error::VariableCapacity));
+        assert_eq!(
+            eval("missing + 1", &mut runtime),
+            Err(Error::UnknownVariable)
+        );
+        assert_eq!(
+            eval("let a = 1; let b = 2", &mut runtime),
+            Err(Error::VariableCapacity)
+        );
         assert_eq!(eval("1 / 0", &mut runtime), Err(Error::DivisionByZero));
     }
 
     #[test]
     fn supports_comments_unary_values_and_fail_closed_tokens() {
         let mut runtime = Runtime::<1>::new();
-        assert_eq!(eval("// comment\n-3 + (2 * 4)", &mut runtime), Ok(Value::Integer(5)));
+        assert_eq!(
+            eval("// comment\n-3 + (2 * 4)", &mut runtime),
+            Ok(Value::Integer(5))
+        );
         assert_eq!(eval("1.5", &mut runtime), Err(Error::InvalidToken));
+    }
+
+    #[test]
+    fn evaluates_bounded_booleans_comparisons_and_logical_operators() {
+        let mut runtime = Runtime::<2>::new();
+        assert_eq!(
+            eval("let ready = 6 * 7 == 42; ready && !false", &mut runtime),
+            Ok(Value::Boolean(true))
+        );
+        assert_eq!(
+            eval("3 < 4 && 8 >= 8", &mut runtime),
+            Ok(Value::Boolean(true))
+        );
+        assert_eq!(
+            eval("true != false", &mut runtime),
+            Ok(Value::Boolean(true))
+        );
     }
 }
