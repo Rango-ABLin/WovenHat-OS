@@ -466,6 +466,123 @@ struct GifPixelWriter<'a> {
     interlaced: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GifDisposal {
+    Keep,
+    Background,
+    Previous,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GifFrameInfo {
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub height: u16,
+    pub delay_centiseconds: u16,
+    pub disposal: GifDisposal,
+}
+
+impl GifFrameInfo {
+    pub const fn duration_milliseconds(self) -> u32 {
+        self.delay_centiseconds as u32 * 10
+    }
+}
+
+/// Caller-owned GIF animation compositor state. The decoder can prepare a
+/// frame, rasterize its rectangle into [`pixels_mut`](Self::pixels_mut), then
+/// finish it with the frame's timing/disposal metadata. No frame-sized heap
+/// allocation is performed.
+pub struct GifPlayback<'a> {
+    canvas: &'a mut [u32],
+    previous: &'a mut [u32],
+    width: usize,
+    height: usize,
+    background: u32,
+    previous_frame: Option<GifFrameInfo>,
+}
+
+impl<'a> GifPlayback<'a> {
+    pub fn new(
+        canvas: &'a mut [u32],
+        previous: &'a mut [u32],
+        width: u16,
+        height: u16,
+        background: u32,
+    ) -> Result<Self, ImageError> {
+        let width = usize::from(width);
+        let height = usize::from(height);
+        let pixels = width
+            .checked_mul(height)
+            .ok_or(ImageError::InvalidDimensions)?;
+        if canvas.len() < pixels || previous.len() < pixels {
+            return Err(ImageError::OutputTooSmall);
+        }
+        canvas[..pixels].fill(background);
+        previous[..pixels].fill(background);
+        Ok(Self {
+            canvas,
+            previous,
+            width,
+            height,
+            background,
+            previous_frame: None,
+        })
+    }
+
+    pub fn prepare_frame(&mut self, info: GifFrameInfo) -> Result<(), ImageError> {
+        let left = usize::from(info.left);
+        let top = usize::from(info.top);
+        let width = usize::from(info.width);
+        let height = usize::from(info.height);
+        let right = left.checked_add(width).ok_or(ImageError::Malformed)?;
+        let bottom = top.checked_add(height).ok_or(ImageError::Malformed)?;
+        if right > self.width || bottom > self.height || width == 0 || height == 0 {
+            return Err(ImageError::Malformed);
+        }
+        if let Some(previous) = self.previous_frame {
+            self.apply_disposal(previous);
+        }
+        if info.disposal == GifDisposal::Previous {
+            let pixels = self.width * self.height;
+            self.previous[..pixels].copy_from_slice(&self.canvas[..pixels]);
+        }
+        Ok(())
+    }
+
+    pub fn pixels_mut(&mut self) -> &mut [u32] {
+        self.canvas
+    }
+
+    pub fn pixels(&self) -> &[u32] {
+        self.canvas
+    }
+
+    pub fn finish_frame(&mut self, info: GifFrameInfo) {
+        self.previous_frame = Some(info);
+    }
+
+    fn apply_disposal(&mut self, info: GifFrameInfo) {
+        let left = usize::from(info.left);
+        let top = usize::from(info.top);
+        let width = usize::from(info.width);
+        let height = usize::from(info.height);
+        match info.disposal {
+            GifDisposal::Keep => {}
+            GifDisposal::Background => {
+                for row in top..top + height {
+                    self.canvas[row * self.width + left..row * self.width + left + width]
+                        .fill(self.background);
+                }
+            }
+            GifDisposal::Previous => {
+                let pixels = self.width * self.height;
+                self.canvas[..pixels].copy_from_slice(&self.previous[..pixels]);
+            }
+        }
+    }
+}
+
 fn boxed_zeroed<T>() -> alloc::boxed::Box<T> {
     let layout = core::alloc::Layout::new::<T>();
     let pointer = unsafe { alloc::alloc::alloc_zeroed(layout) };
@@ -825,8 +942,8 @@ fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageStream, StreamError, decode_bmp_rgba_stream, decode_gif_rgba_stream,
-        decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
+        GifDisposal, GifFrameInfo, GifPlayback, ImageStream, StreamError, decode_bmp_rgba_stream,
+        decode_gif_rgba_stream, decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
     };
     use crate::media::parse_image_header;
 
@@ -1032,6 +1149,49 @@ mod tests {
         };
         let mut pixels = [0u32; 4];
         assert!(decode_webp_rgba_stream(&mut stream, metadata, &mut pixels).is_err());
+    }
+
+    #[test]
+    fn gif_playback_applies_background_and_previous_disposal() {
+        let mut canvas = [0x00000000; 4];
+        let mut previous = [0x00000000; 4];
+        let mut playback = GifPlayback::new(&mut canvas, &mut previous, 2, 2, 0x00000011).unwrap();
+        let first = GifFrameInfo {
+            left: 0,
+            top: 0,
+            width: 1,
+            height: 1,
+            delay_centiseconds: 7,
+            disposal: GifDisposal::Background,
+        };
+        playback.prepare_frame(first).unwrap();
+        playback.pixels_mut()[0] = 0x000000aa;
+        playback.finish_frame(first);
+        assert_eq!(first.duration_milliseconds(), 70);
+
+        let second = GifFrameInfo {
+            left: 1,
+            top: 1,
+            width: 1,
+            height: 1,
+            delay_centiseconds: 3,
+            disposal: GifDisposal::Previous,
+        };
+        playback.prepare_frame(second).unwrap();
+        assert_eq!(playback.pixels()[0], 0x00000011);
+        playback.pixels_mut()[3] = 0x000000bb;
+        playback.finish_frame(second);
+
+        let third = GifFrameInfo {
+            left: 0,
+            top: 0,
+            width: 1,
+            height: 1,
+            delay_centiseconds: 1,
+            disposal: GifDisposal::Keep,
+        };
+        playback.prepare_frame(third).unwrap();
+        assert_eq!(playback.pixels()[3], 0x00000011);
     }
 
     #[test]

@@ -1,5 +1,13 @@
 # Stage status
 
+## Bounded GIF playback state - 2026-10-25
+
+`GifPlayback` now provides caller-owned canvas/previous buffers, frame timing
+metadata, and checked Keep/Background/Previous disposal behavior. The 179-test
+libwoven suite and host/freestanding warning-denying Clippy pass. The GIF
+source parser still emits only one frame; multi-frame parsing and playback
+integration remain open.
+
 ## Codec truncation/property qualification - 2026-10-25
 
 The codec suite now exhaustively checks every truncated BMP/GIF fixture prefix

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded GIF playback state (2026-10-25)
+
+Added caller-owned `GifPlayback`, `GifFrameInfo`, and `GifDisposal` contracts.
+Frame timing conversion and Background/Previous/Keep disposal are applied over
+caller-provided canvas/previous buffers without frame-sized heap allocation.
+The source parser remains single-frame; multi-frame emission into this state
+machine is still required.
+
 ## Codex - codec truncation/property qualification (2026-10-25)
 
 Added deterministic malformed-input qualification for the stream boundary:
