@@ -8,6 +8,13 @@ ownership, capability, pointer, lock, resource, migration, and rollback rules.
 This is a contract acceptance for current interfaces, not a claim of later
 text shaping, web, codec, JavaScript, acceleration, or hardware support.
 
+## Codex - graphics roadmap Stage 02 display evidence (2026-10-25)
+
+Ran the real VirtIO-GPU single-output and two-head QEMU scanout harnesses at
+1/2/4 CPUs. All six runs passed pixel-for-pixel with preserved evidence. Stage
+02 remains partial because EDID/full mode enumeration and injected display
+error recovery are not yet evidenced.
+
 ## Codex - graphics roadmap Stage 00 live audit (2026-10-25)
 
 Audited the complete supplied graphics roadmap against the current tree and

@@ -9,6 +9,13 @@ and WovenDesktop to concrete source paths and records capability, pointer,
 lock, bounded-resource, CPU-fallback, migration, and rollback invariants.
 This stage does not claim later web, codec, JavaScript, GPU, or hardware gates.
 
+## Graphics roadmap Stage 02 display HAL - 2026-10-25
+
+Partial evidence is recorded in `docs/graphics/stage-02-display-hal-evidence.md`.
+The real VirtIO-GPU single-output and two-head scanout harnesses passed at
+1/2/4 CPUs with exact pixel captures. EDID/full supported-mode diagnostics and
+injected display error recovery remain open, so Stage 02 is not accepted.
+
 ## Graphics roadmap Stage 00 baseline acceptance - 2026-10-25
 
 The complete graphics Stage 00-24 roadmap was audited against the current
