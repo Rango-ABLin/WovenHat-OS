@@ -1,5 +1,15 @@
 # Stage status
 
+## Graphics bounded stylesheet cascade increment - 2026-10-25
+
+`libwoven::browser` now captures HTML class/id attributes and parses a
+fixed-capacity stylesheet with tag, class, and id selectors. Matching rules
+apply in source order and inline declarations apply last; the existing
+flex/grid layout and paint paths can consume the stylesheet through dedicated
+APIs. The 187-test libwoven suite, host all-targets Clippy, and freestanding
+target Clippy pass with warnings denied. Full CSS selector specificity,
+inheritance, media queries, and responsive semantics remain open.
+
 ## Graphics roadmap ledger correction - 2026-10-25
 
 The live audit now classifies the existing bounded browser substrate and scalar

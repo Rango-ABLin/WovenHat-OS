@@ -6607,3 +6607,11 @@ The graphics audit was corrected to classify the existing bounded browser and
 scalar JavaScript seams as PARTIAL, backed by current source and test evidence.
 This is not a completion claim for full browser/ECMAScript capability.
 
+# Graphics bounded stylesheet cascade increment - 2026-10-25
+
+Codex added fixed-capacity browser stylesheet rules for tag, class, and id
+selectors, with source-order application and inline declarations last. The
+187-test libwoven suite plus host all-targets and freestanding target
+warning-denying Clippy pass. Specificity, inheritance, media queries, and full
+responsive/browser semantics remain open.
+
