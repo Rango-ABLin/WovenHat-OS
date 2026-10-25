@@ -89,8 +89,8 @@ mod hid;
 mod identity_runtime;
 #[cfg(any(feature = "stage24-3-test", feature = "system-apps"))]
 mod identity_storage;
-mod interrupts;
 mod installer;
+mod interrupts;
 mod ipc;
 mod irq_lock;
 mod journal;
@@ -121,10 +121,10 @@ mod secret_vault;
 #[cfg(feature = "secure-boot")]
 mod secure_boot;
 mod serial;
-mod session;
-mod shell;
 #[cfg(feature = "system-apps")]
 mod service_supervisor;
+mod session;
+mod shell;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
@@ -161,6 +161,8 @@ mod package;
     feature = "system-apps"
 ))]
 mod package_service;
+#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+mod recovery;
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
 mod storage_manager;
 mod swap;
@@ -171,12 +173,11 @@ mod terminal;
 mod thread;
 mod timer;
 mod tpm2;
+mod ttf;
 #[cfg(any(feature = "qemu-test", feature = "system-apps"))]
 mod update;
 #[cfg(any(feature = "stage27-5-test", feature = "system-apps"))]
 mod update_service;
-#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
-mod recovery;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod usb_msc;
 mod user_address;
@@ -1768,8 +1769,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // A virtio-gpu becomes the desktop display when available; multiple
         // heads are arranged side by side and a single head is also valid.
         match compositor::attach_gpu_outputs() {
-            Ok(heads) => serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads)),
-            Err(error) => serial::write_line(format_args!("[DISPLAY] virtio-gpu unavailable: {:?}", error)),
+            Ok(heads) => {
+                serial::write_line(format_args!("[DISPLAY] virtio-gpu: {} monitors", heads))
+            }
+            Err(error) => serial::write_line(format_args!(
+                "[DISPLAY] virtio-gpu unavailable: {:?}",
+                error
+            )),
         }
         boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
@@ -2105,9 +2111,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage28-installer-test")]
     if installer::self_test() {
-        serial::write_line(format_args!("[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED"));
+        serial::write_line(format_args!(
+            "[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED"
+        ));
     } else {
-        serial::write_line(format_args!("[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: FAILED"));
+        serial::write_line(format_args!(
+            "[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: FAILED"
+        ));
         halt();
     }
     if network::self_test() {
@@ -2979,9 +2989,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage27-5-recovery-test"),
         not(feature = "stage24-3-test")
     ))]
-    serial::write_line(format_args!(
-        "[STORAGE MUTATION] recovery injection armed"
-    ));
+    serial::write_line(format_args!("[STORAGE MUTATION] recovery injection armed"));
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -4604,6 +4612,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S18.1] client surface registry: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage5-font-test")]
+    {
+        if !ttf::structural_self_test() {
+            serial::write_line(format_args!("[S05] bundled TTF load/raster: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S05] bundled TTF load/raster: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage17-1-test")]
     {
         if !font::structural_self_test() {
@@ -5009,23 +5026,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stage31-process-crash-test")]
     {
         let Some(program) = userspace::create_stage31_process_crash_process() else {
-            serial::write_line(format_args!(
-                "[S31.PROCESS-CRASH] probe image: FAILED"
-            ));
+            serial::write_line(format_args!("[S31.PROCESS-CRASH] probe image: FAILED"));
             qemu_test_exit_failure();
         };
         let Ok((pid, _context)) = task::spawn_user_process("stage31-crash-probe", program) else {
-            serial::write_line(format_args!(
-                "[S31.PROCESS-CRASH] probe spawn: FAILED"
-            ));
+            serial::write_line(format_args!("[S31.PROCESS-CRASH] probe spawn: FAILED"));
             qemu_test_exit_failure();
         };
         let deadline = timer::ticks().wrapping_add(3000);
         while !task::process_exited(pid) {
             if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
-                serial::write_line(format_args!(
-                    "[S31.PROCESS-CRASH] probe wait: TIMEOUT"
-                ));
+                serial::write_line(format_args!("[S31.PROCESS-CRASH] probe wait: TIMEOUT"));
                 qemu_test_exit_failure();
             }
             task::yield_now();
@@ -5922,7 +5933,8 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
             serial::write_line(format_args!("[S27.5] recovery {} load failed", command));
             return None;
         };
-        let Ok((pid, _, _)) = task::spawn_user_system_service("woven-recovery", program, capabilities)
+        let Ok((pid, _, _)) =
+            task::spawn_user_system_service("woven-recovery", program, capabilities)
         else {
             serial::write_line(format_args!("[S27.5] recovery {} spawn failed", command));
             return None;
@@ -5951,11 +5963,20 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     }
     recovery::set_test_boot_mode(true);
     let status = run(image, "status", capabilities);
-    serial::write_line(format_args!("[S27.5] recovery status command={}", status.unwrap_or(-1)));
+    serial::write_line(format_args!(
+        "[S27.5] recovery status command={}",
+        status.unwrap_or(-1)
+    ));
     let logs = run(image, "logs", capabilities);
-    serial::write_line(format_args!("[S27.5] recovery logs command={}", logs.unwrap_or(-1)));
+    serial::write_line(format_args!(
+        "[S27.5] recovery logs command={}",
+        logs.unwrap_or(-1)
+    ));
     let reset = run(image, "reset", capabilities);
-    serial::write_line(format_args!("[S27.5] recovery reset command={}", reset.unwrap_or(-1)));
+    serial::write_line(format_args!(
+        "[S27.5] recovery reset command={}",
+        reset.unwrap_or(-1)
+    ));
     let reinstall = run(image, "reinstall", capabilities);
     serial::write_line(format_args!(
         "[S27.5] recovery reinstall command={}",
@@ -5968,7 +5989,10 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     // either a real check or an explicit unavailable result is acceptable,
     // but a fabricated success is not.
     let check = run(image, "check", capabilities);
-    serial::write_line(format_args!("[S27.5] recovery check command={}", check.unwrap_or(-1)));
+    serial::write_line(format_args!(
+        "[S27.5] recovery check command={}",
+        check.unwrap_or(-1)
+    ));
     matches!(check, Some(0) | Some(4))
 }
 
@@ -7065,7 +7089,9 @@ fn start_production_system_services() -> bool {
         return false;
     };
     if !service_supervisor::register(service_supervisor::ServiceKind::Package, pid) {
-        serial::write_line(format_args!("[SERVICES] woven-package supervisor registration failed"));
+        serial::write_line(format_args!(
+            "[SERVICES] woven-package supervisor registration failed"
+        ));
         return false;
     }
     let deadline = timer::ticks().wrapping_add(500);
@@ -7100,7 +7126,9 @@ fn start_production_system_services() -> bool {
         return false;
     };
     if !service_supervisor::register(service_supervisor::ServiceKind::Update, pid) {
-        serial::write_line(format_args!("[SERVICES] woven-update supervisor registration failed"));
+        serial::write_line(format_args!(
+            "[SERVICES] woven-update supervisor registration failed"
+        ));
         return false;
     }
     let deadline = timer::ticks().wrapping_add(500);
@@ -7135,7 +7163,9 @@ fn start_production_system_services() -> bool {
         return false;
     };
     if !service_supervisor::register(service_supervisor::ServiceKind::Installer, pid) {
-        serial::write_line(format_args!("[SERVICES] woven-installer supervisor registration failed"));
+        serial::write_line(format_args!(
+            "[SERVICES] woven-installer supervisor registration failed"
+        ));
         return false;
     }
     let deadline = timer::ticks().wrapping_add(500);
@@ -7151,7 +7181,9 @@ fn start_production_system_services() -> bool {
         }
         if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
             let _ = task::kill_process(pid.as_u64(), 9);
-            serial::write_line(format_args!("[SERVICES] woven-installer publication failed"));
+            serial::write_line(format_args!(
+                "[SERVICES] woven-installer publication failed"
+            ));
             return false;
         }
         task::yield_now();
@@ -8174,25 +8206,26 @@ fn stage20_14b_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -8221,7 +8254,14 @@ fn stage20_14b_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -8256,25 +8296,26 @@ fn stage20_14b_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -8294,7 +8335,15 @@ fn stage20_14b_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -8768,25 +8817,26 @@ fn stage24_59_change_pin_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -8815,7 +8865,14 @@ fn stage24_59_change_pin_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -8850,25 +8907,26 @@ fn stage24_59_change_pin_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -8888,7 +8946,15 @@ fn stage24_59_change_pin_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -9190,25 +9256,26 @@ fn stage20_13_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -9237,7 +9304,14 @@ fn stage20_13_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -9272,25 +9346,26 @@ fn stage20_13_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -9310,7 +9385,15 @@ fn stage20_13_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -9602,25 +9685,26 @@ fn stage20_12_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -9649,7 +9733,14 @@ fn stage20_12_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -9684,25 +9775,26 @@ fn stage20_12_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -9722,7 +9814,15 @@ fn stage20_12_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -9840,8 +9940,7 @@ fn stage20_12_self_test() -> bool {
                 if x == x0 + 82 && y == y0 + 30 {
                     serial::write_line(format_args!(
                         "[S20.10] panel sample actual={:?} expected={:#x}",
-                        actual,
-                        expected
+                        actual, expected
                     ));
                 }
                 actual == Ok(expected)
@@ -10067,25 +10166,26 @@ fn stage20_11_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -10114,7 +10214,14 @@ fn stage20_11_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -10149,25 +10256,26 @@ fn stage20_11_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -10187,7 +10295,15 @@ fn stage20_11_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -10503,25 +10619,26 @@ fn stage20_10_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -10550,7 +10667,14 @@ fn stage20_10_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -10585,25 +10709,26 @@ fn stage20_10_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -10623,7 +10748,15 @@ fn stage20_10_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -11101,25 +11234,26 @@ fn stage20_17_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -11175,7 +11309,10 @@ fn stage20_17_self_test() -> bool {
         && click()
         && until(1000, || compositor::pixel(panel_x, panel_y) == Ok(ACCENT));
     (px, py) = (button.0 + 8, button.1 + 8);
-    if !step("the flat panel's top-left corner is exactly where expected", opened) {
+    if !step(
+        "the flat panel's top-left corner is exactly where expected",
+        opened,
+    ) {
         return false;
     }
 
@@ -11224,7 +11361,8 @@ fn stage20_17_self_test() -> bool {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell))
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
     {
         return step("shell killed", false);
     }
@@ -11385,7 +11523,8 @@ fn stage20_18_self_test() -> bool {
         return false;
     }
 
-    if task::kill_process(shell.as_u64(), 9).is_err() || !until(1000, || task::process_exited(shell))
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
     {
         return step("shell killed", false);
     }
@@ -11501,25 +11640,26 @@ fn stage20_9_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -11548,7 +11688,14 @@ fn stage20_9_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -11583,25 +11730,26 @@ fn stage20_9_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -11621,7 +11769,15 @@ fn stage20_9_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -11852,20 +12008,15 @@ fn stage20_9_self_test() -> bool {
         true
     };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered = clock_clicked
-        && until(1000, || center_3d(x0, y0, full_height, &full));
+    let center_rendered = clock_clicked && until(1000, || center_3d(x0, y0, full_height, &full));
     let badge_removed = center_rendered
-        && until(500, || region(badge_x, badge_y, 10, 11, |x, y| {
-            expected_taskbar_3d(
-                x,
-                y,
-                width,
-                top,
-                24,
-                taskbar,
-                |x, y| expected_wallpaper(x, y, width, height),
-            )
-        }));
+        && until(500, || {
+            region(badge_x, badge_y, 10, 11, |x, y| {
+                expected_taskbar_3d(x, y, width, top, 24, taskbar, |x, y| {
+                    expected_wallpaper(x, y, width, height)
+                })
+            })
+        });
     let opened = badge_removed;
     if !step(
         "clicking the clock opens the center, newest first, and clears the badge",
@@ -11886,7 +12037,9 @@ fn stage20_9_self_test() -> bool {
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
         && until(1000, || {
-            region(ex, ey, 164, eh, |x, y| expected_wallpaper(x, y, width, height))
+            region(ex, ey, 164, eh, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            })
         });
     if !step("clicking the clock again closes it", closed) {
         return false;
@@ -12011,25 +12164,26 @@ fn stage20_8_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -12058,7 +12212,14 @@ fn stage20_8_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -12093,25 +12254,26 @@ fn stage20_8_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -12131,7 +12293,15 @@ fn stage20_8_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -12440,25 +12610,26 @@ fn stage20_7_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -12487,7 +12658,14 @@ fn stage20_7_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -12522,25 +12700,26 @@ fn stage20_7_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -12560,7 +12739,15 @@ fn stage20_7_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -12799,25 +12986,26 @@ fn stage20_6_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -12846,7 +13034,14 @@ fn stage20_6_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -12881,25 +13076,26 @@ fn stage20_6_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -12919,7 +13115,15 @@ fn stage20_6_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -13238,25 +13442,26 @@ fn stage20_5_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -13285,7 +13490,14 @@ fn stage20_5_self_test() -> bool {
     /// contains at that position); `None` means the point falls in the
     /// gap neither projected triangle covers, where the flat content
     /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+    fn projected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> Option<u32> {
         fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
             i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
         }
@@ -13320,25 +13532,26 @@ fn stage20_5_self_test() -> bool {
         let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let sample = |u: i64, v: i64| {
             let sx = (u * i64::from(width - 1) / 255) as i32;
             let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
@@ -13358,7 +13571,15 @@ fn stage20_5_self_test() -> bool {
         }
         None
     }
-    fn expected_taskbar(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, height: i32, flat: impl Fn(i32, i32) -> u32) -> u32 {
+    fn expected_taskbar(
+        x: i32,
+        y: i32,
+        width: i32,
+        top: i32,
+        taskbar_height: i32,
+        height: i32,
+        flat: impl Fn(i32, i32) -> u32,
+    ) -> u32 {
         // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
         // fallback paints the (also 3D-projected) desktop background, not
         // the flat taskbar content -- the same gap-filling pattern as
@@ -13420,10 +13641,8 @@ fn stage20_5_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(
-        WOVEN_SHELL_IMAGE,
-        &["/bin/woven-shell", "--no-3d"],
-    )
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -13681,25 +13900,26 @@ fn stage20_4_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -14034,25 +14254,26 @@ fn stage20_3_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -14324,7 +14545,9 @@ fn stage20_3_self_test() -> bool {
     let toast = || {
         let (x0, y0) = (width - 188, 8);
         until(1000, || {
-            region(x0, y0, 180, 22, |x, y| expected_wallpaper(x, y, width, height))
+            region(x0, y0, 180, 22, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            })
         })
     };
     let failed = keys(&[0x3b, 0x22])
@@ -14462,25 +14685,26 @@ fn stage20_2_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -14676,7 +14900,10 @@ fn stage20_2_self_test() -> bool {
             })
     });
     let entry_a = until(500, || {
-        let alpha_active = [TaskbarEntryMask3D { mask: &alpha_mask, active: true }];
+        let alpha_active = [TaskbarEntryMask3D {
+            mask: &alpha_mask,
+            active: true,
+        }];
         entry_region(&alpha_active, entry(0).0, entry(0).1, 80, 16)
     });
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
@@ -14694,12 +14921,17 @@ fn stage20_2_self_test() -> bool {
     // toast itself should look like. Tracked as an open defect, not
     // evidence the toast is correct.
     let toast = until(500, || {
-        region(toast_x, toast_y, 180, 22, |x, y| expected_wallpaper(x, y, width, height))
+        region(toast_x, toast_y, 180, 22, |x, y| {
+            expected_wallpaper(x, y, width, height)
+        })
     });
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
         || !step("tray icon shown", tray)
-        || !step("notification toast area still renders (toast content tracked as a known 3D bug)", toast)
+        || !step(
+            "notification toast area still renders (toast content tracked as a known 3D bug)",
+            toast,
+        )
     {
         return false;
     }
@@ -14727,8 +14959,14 @@ fn stage20_2_self_test() -> bool {
                 && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE)
                 && {
                     let both = [
-                        TaskbarEntryMask3D { mask: &alpha_mask, active: false },
-                        TaskbarEntryMask3D { mask: &beta_mask, active: true },
+                        TaskbarEntryMask3D {
+                            mask: &alpha_mask,
+                            active: false,
+                        },
+                        TaskbarEntryMask3D {
+                            mask: &beta_mask,
+                            active: true,
+                        },
                     ];
                     entry_region(&both, entry(0).0, entry(0).1, 80, 16)
                         && entry_region(&both, entry(1).0, entry(1).1, 80, 16)
@@ -14740,7 +14978,9 @@ fn stage20_2_self_test() -> bool {
     if !step(
         "toast expires and the desktop shows through",
         until(1000, || {
-            region(toast_x, toast_y, 180, 22, |x, y| expected_wallpaper(x, y, width, height))
+            region(toast_x, toast_y, 180, 22, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            })
         }),
     ) {
         return false;
@@ -14780,7 +15020,10 @@ fn stage20_2_self_test() -> bool {
     let gone = until(1000, || {
         compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
     }) && until(500, || {
-        let beta_active = [TaskbarEntryMask3D { mask: &beta_mask, active: true }];
+        let beta_active = [TaskbarEntryMask3D {
+            mask: &beta_mask,
+            active: true,
+        }];
         entry_region(&beta_active, tray_x, tray_y, 16, 16)
             && entry_region(&beta_active, entry(0).0, entry(0).1, 80, 16)
             && entry_region(&beta_active, entry(1).0, entry(1).1, 80, 16)
@@ -14852,7 +15095,14 @@ fn stage20_2_self_test() -> bool {
     feature = "stage20-14b-test",
     feature = "stage24-59-test",
 ))]
-fn projected_taskbar_3d(x: i32, y: i32, width: i32, top: i32, taskbar_height: i32, flat: impl Fn(i32, i32) -> u32) -> Option<u32> {
+fn projected_taskbar_3d(
+    x: i32,
+    y: i32,
+    width: i32,
+    top: i32,
+    taskbar_height: i32,
+    flat: impl Fn(i32, i32) -> u32,
+) -> Option<u32> {
     fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
         i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
     }
@@ -15222,7 +15472,16 @@ fn expected_card_3d(
     flat: impl Fn(i32, i32) -> Option<u32>,
     background: impl Fn(i32, i32) -> u32,
 ) -> u32 {
-    match projected_card_3d(x, y, area_x, area_y, area_width, area_height, tilt_depth, &flat) {
+    match projected_card_3d(
+        x,
+        y,
+        area_x,
+        area_y,
+        area_width,
+        area_height,
+        tilt_depth,
+        &flat,
+    ) {
         Some(color) => color,
         None => background(x, y),
     }
@@ -15315,25 +15574,26 @@ fn stage20_1_self_test() -> bool {
         let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
         let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
         let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric = |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-            let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-            if area == 0 {
-                return None;
-            }
-            let wa = edge(b.0, b.1, c.0, c.1, x, y);
-            let wb = edge(c.0, c.1, a.0, a.1, x, y);
-            let wc = edge(a.0, a.1, b.0, b.1, x, y);
-            let inside = if area > 0 {
-                wa >= 0 && wb >= 0 && wc >= 0
-            } else {
-                wa <= 0 && wb <= 0 && wc <= 0
+        let barycentric =
+            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
+                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
+                if area == 0 {
+                    return None;
+                }
+                let wa = edge(b.0, b.1, c.0, c.1, x, y);
+                let wb = edge(c.0, c.1, a.0, a.1, x, y);
+                let wc = edge(a.0, a.1, b.0, b.1, x, y);
+                let inside = if area > 0 {
+                    wa >= 0 && wb >= 0 && wc >= 0
+                } else {
+                    wa <= 0 && wb <= 0 && wc <= 0
+                };
+                if inside {
+                    Some((wa.abs(), wb.abs(), wc.abs()))
+                } else {
+                    None
+                }
             };
-            if inside {
-                Some((wa.abs(), wb.abs(), wc.abs()))
-            } else {
-                None
-            }
-        };
         let (w, h) = (i64::from(width), i64::from(height));
         if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
             let total = wa + wb + wc;
@@ -15512,7 +15772,9 @@ fn stage20_1_self_test() -> bool {
         && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
             expected_wallpaper(x, y, width, height)
         })
-        && region(width - 40, top - 40, 40, 40, |x, y| expected_wallpaper(x, y, width, height));
+        && region(width - 40, top - 40, 40, 40, |x, y| {
+            expected_wallpaper(x, y, width, height)
+        });
     if !step("wallpaper matches its formula", wall) {
         return false;
     }
@@ -15569,25 +15831,29 @@ fn stage20_1_self_test() -> bool {
     // of both the top edge and the clock.
     let safe_sample = |x: i32, y: i32| {
         let expected = flat_taskbar_3d(
-                x,
-                y,
-                width,
-                top,
-                &button_mask,
-                &ws_digit_masks,
-                0,
-                &qs_mask,
-                false,
-                &no_entries,
-                Some(&clock_mask_now),
-                |x, y| wallpaper(x, y, height),
-            );
+            x,
+            y,
+            width,
+            top,
+            &button_mask,
+            &ws_digit_masks,
+            0,
+            &qs_mask,
+            false,
+            &no_entries,
+            Some(&clock_mask_now),
+            |x, y| wallpaper(x, y, height),
+        );
         let actual = compositor::pixel(x, y);
         actual == Ok(expected)
     };
     let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
         .into_iter()
-        .all(|x| (top..top + TASKBAR_HEIGHT).step_by(3).all(|y| safe_sample(x, y)));
+        .all(|x| {
+            (top..top + TASKBAR_HEIGHT)
+                .step_by(3)
+                .all(|y| safe_sample(x, y))
+        });
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
@@ -15599,7 +15865,12 @@ fn stage20_1_self_test() -> bool {
     }
     // Workspace boxes: the first current (active fill), digits 1-4.
     let switcher = (0..4)
-        .flat_map(|index| [(ws_x + index * 14 + 3, top + 10), (ws_x + index * 14 + 8, top + 14)])
+        .flat_map(|index| {
+            [
+                (ws_x + index * 14 + 3, top + 10),
+                (ws_x + index * 14 + 8, top + 14),
+            ]
+        })
         .all(|(x, y)| safe_sample(x, y));
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
@@ -15622,9 +15893,9 @@ fn stage20_1_self_test() -> bool {
         let mut sum = 0u64;
         for y in top + 4..top + TASKBAR_HEIGHT {
             for x in clock_x..clock_x + clock_width {
-                sum = sum.wrapping_mul(31).wrapping_add(
-                    compositor::pixel(x, y).map_or(0, u64::from),
-                );
+                sum = sum
+                    .wrapping_mul(31)
+                    .wrapping_add(compositor::pixel(x, y).map_or(0, u64::from));
             }
         }
         sum
@@ -15632,8 +15903,9 @@ fn stage20_1_self_test() -> bool {
     let Some(first_time) = rtc::read() else {
         return step("clock shows the hardware time", false);
     };
-    let first_second =
-        u32::from(first_time.hour) * 3600 + u32::from(first_time.minute) * 60 + u32::from(first_time.second);
+    let first_second = u32::from(first_time.hour) * 3600
+        + u32::from(first_time.minute) * 60
+        + u32::from(first_time.second);
     let first_checksum = clock_area_checksum();
     serial::write_line(format_args!(
         "[S20.1] clock area checksum {:#x} at {:02}:{:02}:{:02}",
@@ -17319,9 +17591,11 @@ fn stage30_4_self_test() -> bool {
     }
     // Needs DisplayIo to claim the compositor and present, so this runs the
     // service-spawn path with display authority.
-    let Some((_pid, exit_status)) =
-        run_hello_gui(&readback, &["/bin/hello-gui", "--compositor-benchmark"], true)
-    else {
+    let Some((_pid, exit_status)) = run_hello_gui(
+        &readback,
+        &["/bin/hello-gui", "--compositor-benchmark"],
+        true,
+    ) else {
         return step(
             "load and spawn with display authority, run to completion",
             false,
@@ -17370,9 +17644,11 @@ fn stage30_5_self_test() -> bool {
     }
     // No DisplayIo: the benchmark needs no capability beyond an ordinary
     // process's own, so this runs the plain `task::spawn_user_process` path.
-    let Some((_pid, exit_status)) =
-        run_hello_gui(&readback, &["/bin/hello-gui", "--scheduler-benchmark"], false)
-    else {
+    let Some((_pid, exit_status)) = run_hello_gui(
+        &readback,
+        &["/bin/hello-gui", "--scheduler-benchmark"],
+        false,
+    ) else {
         return step(
             "load and spawn as an ordinary process, run to completion",
             false,

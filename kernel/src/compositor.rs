@@ -402,12 +402,10 @@ fn configured_gpu_outputs(mut gpu: crate::virtio_gpu::Gpu) -> Result<GpuOutputs,
         ));
     }
     let (width, height) = match modes[0] {
-        mode if mode.enabled && mode.width > 0 && mode.height > 0 => {
-            (
-                mode.width.min(MAX_GPU_OUTPUT_WIDTH),
-                mode.height.min(MAX_GPU_OUTPUT_HEIGHT),
-            )
-        }
+        mode if mode.enabled && mode.width > 0 && mode.height > 0 => (
+            mode.width.min(MAX_GPU_OUTPUT_WIDTH),
+            mode.height.min(MAX_GPU_OUTPUT_HEIGHT),
+        ),
         _ => (1024, 768),
     };
     let heads = (gpu.scanouts as usize)

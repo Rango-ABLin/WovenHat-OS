@@ -119,10 +119,50 @@ impl Console {
         // A small woven-hat mark above the wordmark: crown, band and brim.
         let mark_y = centre_y.saturating_sub(88);
         terminal::with_framebuffer(|buffer, info| {
-            fill_color(buffer, info, centre_x.saturating_sub(24), mark_y, 48, 4, 38, 128, 149);
-            fill_color(buffer, info, centre_x.saturating_sub(17), mark_y.saturating_sub(12), 34, 13, 76, 190, 188);
-            fill_color(buffer, info, centre_x.saturating_sub(10), mark_y.saturating_sub(19), 20, 8, 255, 205, 96);
-            fill_color(buffer, info, centre_x.saturating_sub(30), mark_y + 5, 60, 5, 255, 205, 96);
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(24),
+                mark_y,
+                48,
+                4,
+                38,
+                128,
+                149,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(17),
+                mark_y.saturating_sub(12),
+                34,
+                13,
+                76,
+                190,
+                188,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(10),
+                mark_y.saturating_sub(19),
+                20,
+                8,
+                255,
+                205,
+                96,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(30),
+                mark_y + 5,
+                60,
+                5,
+                255,
+                205,
+                96,
+            );
         });
 
         let title = "WOVENHAT";

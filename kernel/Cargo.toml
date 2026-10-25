@@ -140,6 +140,8 @@ system-apps = []
 hardware-demo = ["system-apps"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
+# Bundled OFL TrueType load/raster qualification.
+stage5-font-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.
 stage18-1-test = ["qemu-test"]
 # A userspace app that drives the graphics syscalls end-to-end.
