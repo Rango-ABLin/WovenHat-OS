@@ -6209,3 +6209,16 @@ non-BMP cmap12 mapping/advance, and UTF-8 editing. Full UAX #9 reordering is
 now provided by `unicode-bidi`, and IME preedit/commit/cancel is transactional
 in `TextInputState`. Script-specific glyph shaping remains a separate
 OpenType capability.
+
+## Codex - WovenWeb host-side foundation (2026-10-25)
+
+User explicitly requested a Ladybird-derived WovenWeb browser and OS integration.
+Work is isolated to integrations/wovenweb and host tests on branch
+codex/wovenweb-foundation. No kernel ABI, native app catalog, accepted graphics
+stage, or release acceptance claim is changed. Native Ladybird portability and
+WovenHat VPN transport are unimplemented prerequisites.
+
+Host foundation validation: 11 Python launcher tests, pinned patch application,
+154 libwoven tests and libwoven warning-denying Clippy passed. Browser build is
+blocked by missing Visual Studio/toolchain context; WSL returned access denied.
+No native/guest/VPN acceptance is claimed. See docs/wovenweb-integration.md.
