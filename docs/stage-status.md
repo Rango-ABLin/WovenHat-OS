@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics Stage 11 design tokens increment - 2026-10-25
+
+Added allocation-free `libwoven::ui::DesignTokens` for spacing, radii,
+elevation, and motion durations, plus light, dark, and high-contrast `Theme`
+variants selected from the shared accessibility settings. Host qualification
+passes with 182 libwoven tests and warning-denying libwoven Clippy. This is a
+code/library increment only; full Stage 11 desktop screenshot, animation
+starvation, and low-power runtime acceptance remains open.
+
 ## Graphics Stage 20.8/20.13 flat-renderer oracle repairs - 2026-10-25
 
 Updated the tiling/resize and workspace acceptance oracles to the current

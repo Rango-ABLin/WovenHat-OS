@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 11 design tokens increment (2026-10-25)
+
+Added allocation-free `libwoven::ui::DesignTokens` and accessibility-aware
+light/dark/high-contrast theme selection, including reduced-motion durations.
+The libwoven suite passes 182 tests and warning-denying Clippy. The complete
+Stage 11 runtime/screenshot and low-power acceptance gate remains open.
+
 ## Codex - Stage 20.8/20.13 flat-renderer oracle repairs (2026-10-25)
 
 Aligned the tiling/resize and workspace fixtures with WovenShell's current
