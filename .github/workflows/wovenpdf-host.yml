@@ -109,9 +109,13 @@ jobs:
           git diff --exit-code -- apps/woven-pdf
 
   ring3:
-    name: WovenPDF Ring-3 QEMU execution (1 CPU)
+    name: WovenPDF Ring-3 QEMU execution (${{ matrix.cpus }} CPU)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
     permissions:
       contents: read
     steps:
@@ -133,12 +137,12 @@ jobs:
             if [ -f "$file" ]; then ovmf="$file"; break; fi
           done
           test -n "$ovmf"
-          python3 scripts/test-wovenpdf-qemu.py --cpus 1 --timeout 240 \
+          python3 scripts/test-wovenpdf-qemu.py --cpus ${{ matrix.cpus }} --timeout 240 \
             --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
       - name: Preserve QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wovenpdf-ring3-qemu-evidence
+          name: wovenpdf-ring3-${{ matrix.cpus }}cpu-evidence
           if-no-files-found: ignore
-          path: audit-artifacts/wovenpdf-ring3-1cpu/
+          path: audit-artifacts/wovenpdf-ring3-${{ matrix.cpus }}cpu/
