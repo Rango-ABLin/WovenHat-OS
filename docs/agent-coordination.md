@@ -6461,3 +6461,11 @@ actual beneath surface during tiling. The Quick Settings gate passed on 1/2/4
 CPUs with exit 33; warning-denying freestanding kernel Clippy passed for
 `stage20-10-test`. Full Stage 11 screenshot/theme, starvation, and low-power
 evidence remains open.
+
+# Codex - graphics Stage 11 Reduced Motion interaction closure (2026-10-25)
+
+Strengthened Stage 20.10 so it clicks the production Reduced Motion row and
+verifies the visible `On` state instead of only rendering the row. The full
+gate still passes on 1/2/4 CPUs with exit 33, and warning-denying freestanding
+kernel Clippy remains green. Screenshot/theme, starvation, and low-power
+evidence remain open.

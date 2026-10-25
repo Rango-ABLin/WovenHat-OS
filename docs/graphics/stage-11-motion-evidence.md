@@ -37,8 +37,9 @@ Evidence is retained under:
 - `target/woven-shell-quick-settings-{1,2,4}cpu`
 
 The Stage 20.10 matrix exercises the production Quick Settings path,
-including Reduced Motion visibility, Do Not Disturb state, tiling over a live
-client, scale 1/2 transitions, panel close, input routing, and teardown.
+including an actual Reduced Motion toggle with visible `On` state, Do Not
+Disturb state, tiling over a live client, scale 1/2 transitions, panel close,
+input routing, and teardown.
 
 ## Boundary
 

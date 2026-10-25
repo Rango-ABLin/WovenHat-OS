@@ -11171,6 +11171,37 @@ fn stage20_10_self_test() -> bool {
         return false;
     }
 
+    // Reduced Motion is a production accessibility setting, not only a
+    // library token. Exercise its real pointer path and verify the visible
+    // state transition before continuing with the other panel controls.
+    let (rx, ry) = row(9);
+    let reduced_motion = move_by(rx - px, ry - py)
+        && click()
+        && until(1000, || {
+            panel(
+                width,
+                height,
+                [
+                    "Power off",
+                    "Restart",
+                    "Display scale: 2x",
+                    "Do not disturb: Off",
+                    "Tiling: Off",
+                    "Lock screen",
+                    "Change PIN",
+                    "Language: English",
+                    "3D Desktop: Off",
+                    "Reduced Motion: On",
+                ],
+                wall,
+                (rx, ry),
+            )
+        });
+    (px, py) = (rx, ry);
+    if !step("Reduced Motion toggles on through Quick Settings", reduced_motion) {
+        return false;
+    }
+
     // Do Not Disturb on, then have Q post a notification: the badge counts
     // it, but no toast appears.
     let (dx, dy) = row(3);

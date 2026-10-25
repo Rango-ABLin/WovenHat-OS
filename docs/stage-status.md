@@ -27,7 +27,8 @@ weave and flat compatibility presentation. The panel model now composes its
 translucent background over the actual beneath-surface, including the tiled
 client. The complete Quick Settings gate passed on 1/2/4 CPUs with exit 33,
 covering Reduced Motion visibility, Do Not Disturb, tiling, scale 1/2,
-keyboard/pointer routing, and teardown. Warning-denying freestanding kernel
+and now an actual Reduced Motion toggle with visible `On` state, plus
+keyboard/pointer routing and teardown. Warning-denying freestanding kernel
 Clippy for `stage20-10-test` passes. Full Stage 11 screenshot/theme,
 starvation, and low-power acceptance remains open.
 
