@@ -1,6 +1,6 @@
 //! Allocation-free PDF stream filter primitives.
 //!
-//! Supported here: ASCIIHexDecode and RunLengthDecode. FlateDecode,
+//! Supported here: ASCIIHexDecode, RunLengthDecode and FlateDecode.
 //! ASCII85Decode, predictors, LZW and image-specific filters remain TODO.
 //! Callers must identify the filter from the parsed stream dictionary and
 //! provide a capacity-bounded output buffer.
@@ -18,6 +18,7 @@ pub enum Filter {
     Identity,
     AsciiHex,
     RunLength,
+    Flate,
     Unsupported,
 }
 
@@ -108,6 +109,9 @@ pub fn decode(filter: Filter, input: &[u8], output: &mut [u8]) -> Result<usize, 
         }
         Filter::AsciiHex => ascii_hex(input, output),
         Filter::RunLength => run_length(input, output),
+        Filter::Flate => miniz_oxide::inflate::decompress_slice_iter_to_slice(
+            output, core::iter::once(input), true, false
+        ).map_err(|_| FilterError::InvalidByte),
         Filter::Unsupported => Err(FilterError::Unsupported),
     }
 }
@@ -135,6 +139,18 @@ mod tests {
         let mut out = [0; 10];
         assert_eq!(run_length(&[2, b'A', b'B', b'C', 254, b'!', 128], &mut out), Ok(6));
         assert_eq!(&out[..6], b"ABC!!!");
+    }
+    #[test]
+    fn flate_zlib_checksum_and_bounds() {
+        const ZLIB: &[u8] = &[120,156,243,72,205,201,201,215,81,168,202,201,76,82,4,0,27,101,4,19];
+        let mut out = [0u8; 64];
+        assert_eq!(decode(Filter::Flate, ZLIB, &mut out), Ok(12));
+        assert_eq!(&out[..12], b"Hello, zlib!");
+        assert!(decode(Filter::Flate, ZLIB, &mut [0u8; 2]).is_err());
+        let mut bad = ZLIB.to_vec();
+        let last = bad.len() - 1;
+        bad[last] ^= 1;
+        assert!(decode(Filter::Flate, &bad, &mut out).is_err());
     }
     #[test]
     fn run_length_malformed_rejected() {
