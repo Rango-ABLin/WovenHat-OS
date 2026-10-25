@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded GIF pixel decoder (2026-10-25)
+
+Added `libwoven::media::decode_gif_rgba` with validated global/local palettes,
+single-frame GIF control extensions, transparency, and bounded GIF LZW into
+caller-owned pixels. Interlaced and animated/multi-frame inputs fail closed;
+no partial frame is reported as complete.
+
 ## Codex - bounded browser script seam (2026-10-25)
 
 Added `browser::execute_script`, which executes only borrowed inline

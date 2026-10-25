@@ -172,12 +172,7 @@ impl WallpaperCatalog {
         }
     }
 
-    pub fn register(
-        &mut self,
-        id: &[u8],
-        spdx: &[u8],
-        source_hash: [u8; 32],
-    ) -> bool {
+    pub fn register(&mut self, id: &[u8], spdx: &[u8], source_hash: [u8; 32]) -> bool {
         if id.is_empty()
             || id.len() > MAX_ASSET_NAME
             || spdx.is_empty()
@@ -226,7 +221,10 @@ pub enum VfsAssetError {
 
 /// Read one immutable image asset from the mounted VFS into caller storage.
 /// The descriptor is always closed before returning.
-pub fn load_vfs_asset(path: &str, buffer: &mut [u8]) -> Result<(usize, ImageMetadata), VfsAssetError> {
+pub fn load_vfs_asset(
+    path: &str,
+    buffer: &mut [u8],
+) -> Result<(usize, ImageMetadata), VfsAssetError> {
     let descriptor = crate::open(path).map_err(|_| VfsAssetError::Open)?;
     let result = crate::read_all(descriptor, buffer).map_err(|_| VfsAssetError::Read);
     let _ = crate::close(descriptor);
@@ -398,13 +396,19 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
         .and_then(|row| row.checked_add(3).map(|padded| padded & !3))
         .ok_or(ImageError::Malformed)?;
     let pixel_bytes = row_bytes.checked_mul(height).ok_or(ImageError::Malformed)?;
-    let end = pixel_offset.checked_add(pixel_bytes).ok_or(ImageError::Malformed)?;
+    let end = pixel_offset
+        .checked_add(pixel_bytes)
+        .ok_or(ImageError::Malformed)?;
     if pixel_offset < 14 + dib_size as usize || end > bytes.len() {
         return Err(ImageError::Truncated);
     }
     let source_height = i32::from_le_bytes(bytes[22..26].try_into().unwrap());
     for source_y in 0..height {
-        let destination_y = if source_height < 0 { source_y } else { height - 1 - source_y };
+        let destination_y = if source_height < 0 {
+            source_y
+        } else {
+            height - 1 - source_y
+        };
         let row = &bytes[pixel_offset + source_y * row_bytes..];
         for x in 0..width {
             let offset = x * usize::from(bits / 8);
@@ -418,11 +422,327 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
     Ok(metadata)
 }
 
+struct GifSubBlocks<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+    remaining: usize,
+    ended: bool,
+}
+
+impl<'a> GifSubBlocks<'a> {
+    fn new(bytes: &'a [u8], cursor: usize) -> Self {
+        Self {
+            bytes,
+            cursor,
+            remaining: 0,
+            ended: false,
+        }
+    }
+
+    fn next_byte(&mut self) -> Result<Option<u8>, ImageError> {
+        if self.ended {
+            return Ok(None);
+        }
+        if self.remaining == 0 {
+            let size = *self.bytes.get(self.cursor).ok_or(ImageError::Truncated)? as usize;
+            self.cursor += 1;
+            if size == 0 {
+                self.ended = true;
+                return Ok(None);
+            }
+            self.remaining = size;
+        }
+        let byte = *self.bytes.get(self.cursor).ok_or(ImageError::Truncated)?;
+        self.cursor += 1;
+        self.remaining -= 1;
+        Ok(Some(byte))
+    }
+
+    fn skip(&mut self) -> Result<usize, ImageError> {
+        while self.next_byte()?.is_some() {}
+        Ok(self.cursor)
+    }
+}
+
+struct GifBitReader<'a> {
+    data: GifSubBlocks<'a>,
+    bits: u32,
+    available: u8,
+}
+
+impl<'a> GifBitReader<'a> {
+    fn new(data: GifSubBlocks<'a>) -> Self {
+        Self {
+            data,
+            bits: 0,
+            available: 0,
+        }
+    }
+
+    fn read(&mut self, width: u8) -> Result<Option<u16>, ImageError> {
+        while self.available < width {
+            let Some(byte) = self.data.next_byte()? else {
+                return Ok(None);
+            };
+            self.bits |= u32::from(byte) << self.available;
+            self.available += 8;
+        }
+        let mask = (1u32 << width) - 1;
+        let code = (self.bits & mask) as u16;
+        self.bits >>= width;
+        self.available -= width;
+        Ok(Some(code))
+    }
+
+    fn finish(&mut self) -> Result<(), ImageError> {
+        self.data.skip()?;
+        Ok(())
+    }
+}
+
+fn gif_color_table(
+    bytes: &[u8],
+    cursor: &mut usize,
+    entries: usize,
+    palette: &mut [u8; 768],
+) -> Result<(), ImageError> {
+    let length = entries.checked_mul(3).ok_or(ImageError::Malformed)?;
+    let source = bytes
+        .get(*cursor..cursor.checked_add(length).ok_or(ImageError::Malformed)?)
+        .ok_or(ImageError::Truncated)?;
+    palette[..length].copy_from_slice(source);
+    *cursor += length;
+    Ok(())
+}
+
+/// Decode the first non-interlaced GIF frame into caller-owned RGBA pixels.
+///
+/// Global and local palettes, transparency control extensions, and GIF LZW
+/// are supported. Animated/multi-frame and interlaced images fail closed so a
+/// caller never mistakes a partial frame for a complete image.
+pub fn decode_gif_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata, ImageError> {
+    let metadata = parse_image_header(bytes)?;
+    if metadata.format != ImageFormat::Gif {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let pixels = (metadata.width as usize)
+        .checked_mul(metadata.height as usize)
+        .ok_or(ImageError::InvalidDimensions)?;
+    if output.len() < pixels {
+        return Err(ImageError::OutputTooSmall);
+    }
+    let packed = *bytes.get(10).ok_or(ImageError::Truncated)?;
+    let mut cursor = 13usize;
+    let mut global_palette = [0u8; 768];
+    let global_entries = if packed & 0x80 != 0 {
+        2usize << usize::from(packed & 0x07)
+    } else {
+        0
+    };
+    if global_entries != 0 {
+        gif_color_table(bytes, &mut cursor, global_entries, &mut global_palette)?;
+    }
+    if global_entries == 0 {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    output[..pixels].fill(0);
+    let mut transparent = None;
+    let mut frame_seen = false;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            0x3b => break,
+            0x21 => {
+                cursor += 2;
+                let label = *bytes.get(cursor - 1).ok_or(ImageError::Truncated)?;
+                if label == 0xf9 {
+                    if *bytes.get(cursor).ok_or(ImageError::Truncated)? != 4 {
+                        return Err(ImageError::Malformed);
+                    }
+                    let block = bytes
+                        .get(cursor + 1..cursor + 5)
+                        .ok_or(ImageError::Truncated)?;
+                    if block[0] & 1 != 0 {
+                        transparent = Some(block[3]);
+                    }
+                    cursor += 5;
+                    if *bytes.get(cursor).ok_or(ImageError::Truncated)? != 0 {
+                        return Err(ImageError::Malformed);
+                    }
+                    cursor += 1;
+                } else {
+                    let mut data = GifSubBlocks::new(bytes, cursor);
+                    cursor = data.skip()?;
+                }
+            }
+            0x2c => {
+                if frame_seen {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                frame_seen = true;
+                let descriptor = bytes
+                    .get(cursor + 1..cursor + 10)
+                    .ok_or(ImageError::Truncated)?;
+                let left = usize::from(u16::from_le_bytes([descriptor[0], descriptor[1]]));
+                let top = usize::from(u16::from_le_bytes([descriptor[2], descriptor[3]]));
+                let width = usize::from(u16::from_le_bytes([descriptor[4], descriptor[5]]));
+                let height = usize::from(u16::from_le_bytes([descriptor[6], descriptor[7]]));
+                let image_packed = descriptor[8];
+                if image_packed & 0x40 != 0 || width == 0 || height == 0 {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                let right = left.checked_add(width).ok_or(ImageError::Malformed)?;
+                let bottom = top.checked_add(height).ok_or(ImageError::Malformed)?;
+                if right > metadata.width as usize || bottom > metadata.height as usize {
+                    return Err(ImageError::Malformed);
+                }
+                let mut palette = global_palette;
+                let local_entries = if image_packed & 0x80 != 0 {
+                    2usize << usize::from(image_packed & 0x07)
+                } else {
+                    0
+                };
+                cursor += 10;
+                if local_entries != 0 {
+                    gif_color_table(bytes, &mut cursor, local_entries, &mut palette)?;
+                }
+                let min_code_size = *bytes.get(cursor).ok_or(ImageError::Truncated)?;
+                if !(2..=8).contains(&min_code_size) {
+                    return Err(ImageError::Malformed);
+                }
+                cursor += 1;
+                let mut reader = GifBitReader::new(GifSubBlocks::new(bytes, cursor));
+                let clear = 1u16 << min_code_size;
+                let end = clear + 1;
+                let mut code_size = min_code_size + 1;
+                let mut next_code = end + 1;
+                let mut prefix = [0u16; 4096];
+                let mut suffix = [0u8; 4096];
+                let mut stack = [0u8; 4096];
+                let mut old = None;
+                let mut first = 0u8;
+                let mut output_index = 0usize;
+                let expected = width.checked_mul(height).ok_or(ImageError::Malformed)?;
+                let mut saw_end = false;
+                while let Some(raw_code) = reader.read(code_size)? {
+                    if raw_code == clear {
+                        code_size = min_code_size + 1;
+                        next_code = end + 1;
+                        old = None;
+                        continue;
+                    }
+                    if raw_code == end {
+                        saw_end = true;
+                        break;
+                    }
+                    if raw_code >= 4096 || raw_code >= (1u16 << code_size) {
+                        return Err(ImageError::Malformed);
+                    }
+                    let mut code = raw_code;
+                    let mut stack_len = 0usize;
+                    if let Some(old_code) = old {
+                        let in_code = raw_code;
+                        if code == next_code {
+                            if stack_len == stack.len() {
+                                return Err(ImageError::Malformed);
+                            }
+                            stack[stack_len] = first;
+                            stack_len += 1;
+                            code = old_code;
+                        } else if code > next_code {
+                            return Err(ImageError::Malformed);
+                        }
+                        while code >= clear {
+                            let index = usize::from(code);
+                            if index >= next_code as usize || stack_len == stack.len() {
+                                return Err(ImageError::Malformed);
+                            }
+                            stack[stack_len] = suffix[index];
+                            stack_len += 1;
+                            code = prefix[index];
+                        }
+                        first = code as u8;
+                        stack[stack_len] = first;
+                        stack_len += 1;
+                        while stack_len != 0 {
+                            let index = output_index;
+                            if index >= expected {
+                                return Err(ImageError::Malformed);
+                            }
+                            let palette_index = stack[stack_len - 1];
+                            if transparent != Some(palette_index) {
+                                let color = usize::from(palette_index);
+                                if color >= global_entries.max(local_entries) {
+                                    return Err(ImageError::Malformed);
+                                }
+                                let offset = color * 3;
+                                let destination = (top + index / width) * metadata.width as usize
+                                    + left
+                                    + index % width;
+                                output[destination] = u32::from_be_bytes([
+                                    palette[offset],
+                                    palette[offset + 1],
+                                    palette[offset + 2],
+                                    255,
+                                ]);
+                            }
+                            output_index += 1;
+                            stack_len -= 1;
+                        }
+                        if next_code < 4096 {
+                            prefix[next_code as usize] = old_code;
+                            suffix[next_code as usize] = first;
+                            next_code += 1;
+                            if next_code == (1u16 << code_size) && code_size < 12 {
+                                code_size += 1;
+                            }
+                        }
+                        old = Some(in_code);
+                    } else {
+                        if code >= clear {
+                            return Err(ImageError::Malformed);
+                        }
+                        first = code as u8;
+                        if output_index == expected {
+                            return Err(ImageError::Malformed);
+                        }
+                        let color = usize::from(first);
+                        if color >= global_entries.max(local_entries) {
+                            return Err(ImageError::Malformed);
+                        }
+                        if transparent != Some(first) {
+                            let offset = color * 3;
+                            let destination = top * metadata.width as usize + left + output_index;
+                            output[destination] = u32::from_be_bytes([
+                                palette[offset],
+                                palette[offset + 1],
+                                palette[offset + 2],
+                                255,
+                            ]);
+                        }
+                        output_index += 1;
+                        old = Some(code);
+                    }
+                }
+                reader.finish()?;
+                if !saw_end || output_index != expected {
+                    return Err(ImageError::Truncated);
+                }
+                cursor = reader.data.cursor;
+            }
+            _ => return Err(ImageError::Malformed),
+        }
+    }
+    if !frame_seen || cursor >= bytes.len() || bytes[cursor] != 0x3b {
+        return Err(ImageError::Truncated);
+    }
+    Ok(metadata)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, decode_bmp_rgba,
-        parse_image_header,
+        decode_gif_rgba, parse_image_header,
     };
 
     #[test]
@@ -472,6 +792,18 @@ mod tests {
     }
 
     #[test]
+    fn decodes_bounded_single_frame_gif_lzw_to_rgba() {
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3b,
+        ];
+        let mut pixels = [0u32; 1];
+        let metadata = decode_gif_rgba(&gif, &mut pixels).unwrap();
+        assert_eq!((metadata.width, metadata.height), (1, 1));
+        assert_eq!(pixels[0], 0x000000ff);
+    }
+
+    #[test]
     fn validates_webp_vp8x_dimensions_without_allocating() {
         let mut webp = [0u8; 30];
         webp[..4].copy_from_slice(b"RIFF");
@@ -487,10 +819,9 @@ mod tests {
     #[test]
     fn parses_webp_lossless_dimensions() {
         let webp = [
-            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-            0x56, 0x50, 0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
-            0x00, 0x07, 0x50, 0x94, 0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f,
-            0x00, 0x00,
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
         ];
         let metadata = parse_image_header(&webp).unwrap();
         assert_eq!((metadata.width, metadata.height), (2, 2));

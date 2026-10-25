@@ -1,5 +1,14 @@
 # Stage status
 
+## Bounded GIF pixel decoder - 2026-10-25
+
+`libwoven::media::decode_gif_rgba` now rasterizes a validated first GIF frame
+with global/local palettes, transparency control, and bounded LZW tables into
+caller-owned RGBA storage. Interlaced and animated/multi-frame inputs fail
+closed. The 172-test libwoven suite and host/freestanding warning-denying
+Clippy pass. GIF streaming delivery, animation playback, and GPU decode remain
+separate gates.
+
 ## Bounded browser script seam - 2026-10-25
 
 `libwoven::browser::execute_script` now connects inline `<script>` node text
