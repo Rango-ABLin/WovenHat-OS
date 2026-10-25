@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenUI bounded Tabs and Dialog components - 2026-10-25
+
+Added fixed-capacity Tabs and a bounded modal Dialog to `libwoven::ui`.
+Tabs support keyboard/pointer selection and focus rendering; Dialogs own
+explicit bounded accept/cancel actions and close only while open. The full
+libwoven host suite passed 136 tests, Settings warning-denying Clippy passed,
+and formatting/diff checks passed. Navigation and broader application
+migration remain open in this stage.
+
 ## WovenUI bounded Menu and Tree components - 2026-10-25
 
 Added fixed-capacity Menu and hierarchical Tree controls to `libwoven::ui`.

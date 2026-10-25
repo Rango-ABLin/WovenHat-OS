@@ -812,6 +812,203 @@ impl<'a, const N: usize> Tree<'a, N> {
     }
 }
 
+/// A fixed-capacity tab strip with bounded selection.
+pub struct Tabs<'a, const N: usize> {
+    labels: [Option<&'a str>; N],
+    len: usize,
+    pub frame: Frame,
+    pub selected: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const N: usize> Tabs<'a, N> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            labels: [None; N],
+            len: 0,
+            frame,
+            selected: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push(&mut self, label: &'a str) -> bool {
+        if self.len == N {
+            return false;
+        }
+        self.labels[self.len] = Some(label);
+        self.len += 1;
+        true
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.len == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        }
+        .min(self.len - 1);
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if !self.enabled || pressed || self.len == 0 {
+            return false;
+        }
+        if x < self.frame.x
+            || y < self.frame.y
+            || x >= self.frame.x.saturating_add(self.frame.width.max(0))
+            || y >= self.frame.y.saturating_add(self.frame.height.max(0))
+        {
+            return false;
+        }
+        let tab_width = (self.frame.width.max(0) / self.len as i32).max(1);
+        let next = ((x - self.frame.x) / tab_width) as usize;
+        if next >= self.len {
+            return false;
+        }
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let tab_width = if self.len == 0 {
+            0
+        } else {
+            (self.frame.width.max(0) / self.len as i32).max(1)
+        };
+        for index in 0..self.len {
+            let x = self.frame.x + index as i32 * tab_width;
+            if index == self.selected {
+                canvas.fill_rect(x, self.frame.y, tab_width as usize, 2, theme.accent);
+            }
+            if let Some(label) = self.labels[index] {
+                canvas.draw_text(x + 4, self.frame.y + 5, label, theme.text);
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y + self.frame.height.saturating_sub(1),
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
+/// A bounded modal dialog with explicit accept/cancel actions.
+pub struct Dialog<'a> {
+    pub frame: Frame,
+    pub title: &'a str,
+    pub message: &'a str,
+    pub accept: Button<'a>,
+    pub cancel: Option<Button<'a>>,
+    pub open: bool,
+}
+
+impl<'a> Dialog<'a> {
+    pub fn new(
+        frame: Frame,
+        title: &'a str,
+        message: &'a str,
+        accept_label: &'a str,
+        cancel_label: Option<&'a str>,
+    ) -> Self {
+        let button_y = frame.y + frame.height.saturating_sub(28);
+        let accept = Button::new(
+            Frame::new(frame.x + frame.width - 88, button_y, 76, 20),
+            accept_label,
+        );
+        let cancel = cancel_label.map(|label| {
+            Button::new(
+                Frame::new(frame.x + frame.width - 176, button_y, 76, 20),
+                label,
+            )
+        });
+        Self {
+            frame,
+            title,
+            message,
+            accept,
+            cancel,
+            open: true,
+        }
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+
+    pub fn activate_accept(&mut self) -> bool {
+        if self.open && self.accept.activate() {
+            self.close();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn activate_cancel(&mut self) -> bool {
+        if self.open {
+            if let Some(cancel) = &mut self.cancel {
+                if cancel.activate() {
+                    self.close();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        if !self.open {
+            return;
+        }
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            2,
+            theme.accent,
+        );
+        canvas.draw_text(self.frame.x + 8, self.frame.y + 8, self.title, theme.text);
+        canvas.draw_text(
+            self.frame.x + 8,
+            self.frame.y + 28,
+            self.message,
+            theme.text,
+        );
+        self.accept.draw(canvas, theme);
+        if let Some(cancel) = &self.cancel {
+            cancel.draw(canvas, theme);
+        }
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -836,7 +1033,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, Checkbox, Label, ListBox, Menu, Table, TextField, Theme, Tree, stack_vertical,
+        Button, Checkbox, Dialog, Label, ListBox, Menu, Table, Tabs, TextField, Theme, Tree,
+        stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -990,5 +1188,34 @@ mod tests {
         tree.draw(&mut canvas, Theme::DARK);
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+    }
+
+    #[test]
+    fn tabs_are_capacity_bounded_and_pointer_selectable() {
+        let mut tabs = Tabs::<2>::new(Frame::new(0, 0, 80, 20));
+        assert!(tabs.push("Home"));
+        assert!(tabs.push("Settings"));
+        assert!(!tabs.push("Overflow"));
+        assert!(tabs.pointer(60, 8, false));
+        assert_eq!(tabs.selected, 1);
+        assert!(!tabs.move_selection(1));
+    }
+
+    #[test]
+    fn dialog_actions_close_only_an_open_dialog() {
+        let mut dialog = Dialog::new(
+            Frame::new(2, 2, 100, 60),
+            "Confirm",
+            "Continue?",
+            "Yes",
+            Some("No"),
+        );
+        let mut pixels = [0; 128 * 80];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 128, 80).unwrap();
+        dialog.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(dialog.activate_cancel());
+        assert!(!dialog.open);
+        assert!(!dialog.activate_accept());
     }
 }

@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI Tabs and Dialog components (2026-10-25)
+
+Added fixed-capacity Tabs and a bounded modal Dialog to `libwoven::ui`.
+Tabs support bounded insertion, keyboard/pointer selection, focus rendering,
+and selected-tab painting. Dialogs own explicit accept/cancel Button actions,
+close only through an open modal state, and render within the caller's bounded
+canvas. The full libwoven host suite passed 136 tests, Settings target
+warning-denying Clippy passed, and formatting/diff checks passed. Navigation
+and broader application migration remain open.
+
 ## Codex - bounded WovenUI Menu and Tree components (2026-10-25)
 
 Added fixed-capacity Menu and hierarchical Tree controls to `libwoven::ui`.
