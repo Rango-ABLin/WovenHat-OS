@@ -20,6 +20,73 @@ pub struct ImageMetadata {
     pub height: u32,
 }
 
+pub const MAX_ASSETS: usize = 32;
+pub const MAX_ASSET_NAME: usize = 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AssetRecord {
+    pub name: [u8; MAX_ASSET_NAME],
+    pub name_len: u8,
+    pub metadata: ImageMetadata,
+    pub byte_len: u32,
+}
+
+impl AssetRecord {
+    pub fn name(&self) -> &[u8] {
+        &self.name[..usize::from(self.name_len)]
+    }
+}
+
+pub struct AssetManifest {
+    records: [Option<AssetRecord>; MAX_ASSETS],
+    len: usize,
+}
+
+impl AssetManifest {
+    pub const fn new() -> Self {
+        Self {
+            records: [None; MAX_ASSETS],
+            len: 0,
+        }
+    }
+
+    pub fn register(&mut self, name: &[u8], bytes: &[u8]) -> Result<usize, ImageError> {
+        if name.is_empty() || name.len() > MAX_ASSET_NAME || self.len == MAX_ASSETS {
+            return Err(ImageError::Malformed);
+        }
+        let metadata = parse_image_header(bytes)?;
+        let mut record = AssetRecord {
+            name: [0; MAX_ASSET_NAME],
+            name_len: name.len() as u8,
+            metadata,
+            byte_len: bytes.len().min(u32::MAX as usize) as u32,
+        };
+        record.name[..name.len()].copy_from_slice(name);
+        let index = self.len;
+        self.records[index] = Some(record);
+        self.len += 1;
+        Ok(index)
+    }
+
+    pub fn get(&self, index: usize) -> Option<AssetRecord> {
+        self.records.get(index).copied().flatten()
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl Default for AssetManifest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageError {
     Truncated,
@@ -178,7 +245,7 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
 
 #[cfg(test)]
 mod tests {
-    use super::{ImageError, ImageFormat, decode_bmp_rgba, parse_image_header};
+    use super::{AssetManifest, ImageError, ImageFormat, decode_bmp_rgba, parse_image_header};
 
     #[test]
     fn parses_bounded_png_gif_and_bmp_headers() {
@@ -237,5 +304,21 @@ mod tests {
         let metadata = parse_image_header(&webp).unwrap();
         assert_eq!(metadata.format, ImageFormat::WebP);
         assert_eq!((metadata.width, metadata.height), (10, 5));
+    }
+
+    #[test]
+    fn manifest_registers_bounded_metadata_without_copying_pixels() {
+        let mut png = [0u8; 24];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        png[12..16].copy_from_slice(b"IHDR");
+        png[16..20].copy_from_slice(&64u32.to_be_bytes());
+        png[20..24].copy_from_slice(&32u32.to_be_bytes());
+        let mut manifest = AssetManifest::new();
+        let index = manifest.register(b"wallpaper.png", &png).unwrap();
+        let record = manifest.get(index).unwrap();
+        assert_eq!(manifest.len(), 1);
+        assert_eq!(record.name(), b"wallpaper.png");
+        assert_eq!(record.metadata.width, 64);
+        assert_eq!(record.byte_len, 24);
     }
 }
