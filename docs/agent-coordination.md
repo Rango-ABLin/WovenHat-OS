@@ -6294,3 +6294,30 @@ The ordinary root build succeeds; only the root Clippy build-script executable
 is policy-blocked. VM model remains host-only, with no production call sites.
 Next work is atomic per-process registry ownership and pager/lifecycle integration
 per docs/wovenweb-vm-transactions.md; do not raise the VM ceiling prematurely.
+
+## Native C++ ABI bootstrap alongside VM review (2026-10-25)
+
+Production VM integration is still open; pager and cancellation ownership must
+be included before claiming a repair. In the same memory/runtime prerequisite
+stream, preparing a small header-free cross-built C++ ABI fixture under the
+existing VM ceiling. Host lacks Clang; obtaining checksum-pinned official MSYS2
+compiler archives into workspace work/toolchains, without changing system PATH
+or global packages. This fixture is not a C++ standard library/sysroot or engine.
+
+## Native C++ ABI fixture (2026-10-25)
+
+A header-free Clang C++23/Rust Ring-3 probe passes on 1/2/4 CPUs with exact
+resource cleanup. It covers integer/aggregate calls, guarded local static
+initialization, aligned virtual objects and destructors; selected Clippy gates
+pass. This is a controlled ABI fixture, not libc++, an engine build or full
+runtime acceptance. Production VM integration remains open. Evidence and limits:
+[Native C++ ABI fixture](wovenweb-cxx-acceptance.md).
+
+Final C++ increment: current-source same-image QEMU 1/2/4 and selected kernel/
+probe Clippy checks pass. Fresh host suite stopped after 150 passed tests when
+Application Control blocked tls_layout-c381f7e8e591f042.exe (4551), never executed.
+Do not rename, copy or bypass that executable to evade policy. Prior 211-test
+run remains historical. Full runtime stage remains open. Workspace Clang is at
+work/toolchains/clang23/ucrt64/bin/clang.exe; host dependency DLLs require the
+existing MSYS2 UCRT64 bin on the child environment PATH. Explicitly select
+Program Files QEMU, because the MSYS2 QEMU lacks the expected firmware path.

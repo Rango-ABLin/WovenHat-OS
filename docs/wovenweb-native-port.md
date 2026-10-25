@@ -121,3 +121,12 @@ root workspace Clippy remains policy-blocked. The VM transaction state machine
 is host-tested scaffolding only; production integration and larger VM limits
 remain open. See wovenweb-heap-acceptance.md, wovenweb-heap-evidence.json and
 wovenweb-vm-transactions.md. No native browser completion is claimed.
+
+## Native C++ ABI fixture (2026-10-25)
+
+A header-free Clang C++23/Rust Ring-3 probe passes on 1/2/4 CPUs with exact
+resource cleanup. It covers integer/aggregate calls, guarded local static
+initialization, aligned virtual objects and destructors; selected Clippy gates
+pass. This is a controlled ABI fixture, not libc++, an engine build or full
+runtime acceptance. Production VM integration remains open. Evidence and limits:
+[Native C++ ABI fixture](wovenweb-cxx-acceptance.md).

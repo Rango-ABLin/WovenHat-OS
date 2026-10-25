@@ -130,6 +130,8 @@ mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
+#[cfg(feature = "wovenweb-cxx-test")]
+mod wovenweb_cxx_gate;
 #[cfg(feature = "wovenweb-memory-test")]
 mod wovenweb_memory_gate;
 #[cfg(feature = "wovenweb-net-test")]
@@ -5399,6 +5401,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S10.6] userspace async UDP send/recv + socket pinning/cancel/teardown: PASSED"
         ));
         qemu_test_exit_success();
+    }
+    #[cfg(feature = "wovenweb-cxx-test")]
+    {
+        if wovenweb_cxx_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB-CXX] native ABI platform: PASSED"));
+            qemu_test_exit_success();
+        } else {
+            serial::write_line(format_args!("[WOVENWEB-CXX] native ABI platform: FAILED"));
+            qemu_test_exit_failure();
+        }
     }
     #[cfg(feature = "wovenweb-memory-test")]
     {
