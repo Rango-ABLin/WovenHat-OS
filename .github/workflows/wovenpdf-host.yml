@@ -38,6 +38,12 @@ jobs:
           rustup toolchain install nightly-2026-07-10 --component rust-src --target x86_64-unknown-none
       - name: Compile native WovenPDF binary
         run: cargo +nightly-2026-07-10 build --manifest-path apps/woven-pdf/Cargo.toml --target x86_64-unknown-none --bin wovenhat-pdf
+      - name: Publish freestanding viewer executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-native-elf
+          path: apps/woven-pdf/target/x86_64-unknown-none/debug/wovenhat-pdf
+          if-no-files-found: error
 
   formatting:
     name: Rust formatting
