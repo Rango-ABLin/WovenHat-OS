@@ -113,8 +113,8 @@ pub fn negotiate_kernel(requested: Contract) -> Result<Contract, crate::Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode, encode, negotiate, Contract, Error, ABI_MAJOR, ABI_MINOR, DESCRIPTOR_BYTES,
-        DESCRIPTOR_VERSION,
+        ABI_MAJOR, ABI_MINOR, Contract, DESCRIPTOR_BYTES, DESCRIPTOR_VERSION, Error, decode,
+        encode, negotiate,
     };
 
     #[test]

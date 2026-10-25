@@ -22,8 +22,8 @@ pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
 }
-pub mod accessibility;
 pub mod abi;
+pub mod accessibility;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;
@@ -34,11 +34,12 @@ pub mod identity;
 pub mod installer_ipc;
 pub mod package;
 pub mod package_ipc;
+pub mod recovery;
 pub mod semantic_search;
 pub mod store;
-pub mod update_ipc;
-pub mod recovery;
 pub mod ui;
+pub mod update_ipc;
+pub mod web;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]
@@ -10160,7 +10161,13 @@ pub mod graphics {
 
     impl Vertex3Field {
         pub const fn new(x: i32, y: i32, depth: u16, source_x: i32, source_y: i32) -> Self {
-            Self { x, y, depth, source_x, source_y }
+            Self {
+                x,
+                y,
+                depth,
+                source_x,
+                source_y,
+            }
         }
     }
 
