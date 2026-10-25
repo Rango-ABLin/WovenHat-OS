@@ -10339,3 +10339,14 @@ WovenShell production default is 3D, with its 2D painters retained as the
 texture/composition source for the depth-tested renderer. Plain and
 `system-apps` kernel warning-denying Clippy passed. A 1-vCPU interactive
 `system-apps` boot reached the real desktop and its F1 launcher.
+
+## Branded boot handoff and desktop visual pass (2026-10-25)
+
+The production `system-apps` console now shows a quiet WOVENHAT / Starting
+desktop splash while boot diagnostics remain on serial. The desktop wallpaper
+and taskbar palette were softened to a restrained blue/teal desktop with a
+subtle weave, while the production 3D renderer remains the default. Interactive
+QEMU evidence reached the desktop and confirmed F1 opens the WovenShell
+launcher; screenshots are `target/updated-desktop.png` and
+`target/f1-launcher.png` (generated, ignored artifacts). This is a
+visual/QEMU pass, not native hardware or production-release qualification.

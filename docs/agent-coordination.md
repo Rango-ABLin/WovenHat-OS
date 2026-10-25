@@ -5811,6 +5811,17 @@ evidence is under
 `audit-artifacts/stage31-repeated/memory-1cpu-100boots/`. This remains a
 disposable-QEMU sample and does not claim the roadmap's thousands-of-boots
 requirement or native qualification.
+
+## Branded boot handoff and desktop visual pass (2026-10-25)
+
+The production `system-apps` console now shows a quiet WOVENHAT / Starting
+desktop splash while boot diagnostics remain on serial. The desktop wallpaper
+and taskbar palette were softened to a restrained blue/teal desktop with a
+subtle weave, while the production 3D renderer remains the default. Interactive
+QEMU evidence reached the desktop and confirmed F1 opens the WovenShell
+launcher; screenshots are `target/updated-desktop.png` and
+`target/f1-launcher.png` (generated, ignored artifacts). This is a
+visual/QEMU pass, not native hardware or production-release qualification.
 **Codex current-head release validation and firmware preflight (Codex,
 2026-10-24):** Repaired the release validator's local storage-fault argument
 plumbing. It now resolves QEMU and adjacent OVMF CODE firmware when paths are

@@ -147,24 +147,24 @@ use libwoven::{
 libwoven::entry!(main);
 
 /// Wallpaper gradient, top to bottom.
-const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
 /// The weave: `WEAVE_PITCH`-sized blocks alternately tinted light and dark,
 /// basket-weave style, with a thin highlight seam at each block boundary.
 const WEAVE: u32 = rgb(255, 255, 255);
-const WEAVE_OPACITY: u8 = 36;
+const WEAVE_OPACITY: u8 = 10;
 const WEAVE_SHADE: u32 = rgb(0, 0, 0);
-const WEAVE_TINT_OPACITY: u8 = 18;
-const WEAVE_PITCH: i32 = 32;
+const WEAVE_TINT_OPACITY: u8 = 12;
+const WEAVE_PITCH: i32 = 96;
 
 const TASKBAR_HEIGHT: i32 = 24;
-const TASKBAR: u32 = rgb(20, 24, 32);
+const TASKBAR: u32 = rgb(10, 18, 30);
 const TASKBAR_OPACITY: u8 = 216;
-const ACCENT: u32 = rgb(90, 140, 220);
+const ACCENT: u32 = rgb(76, 190, 188);
 const START_X: i32 = 4;
 const START_WIDTH: usize = 44;
 const START_HEIGHT: usize = 16;
-const START_FILL: u32 = rgb(52, 96, 180);
+const START_FILL: u32 = rgb(28, 115, 145);
 const START_LABEL: &str = "Woven";
 /// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
 /// crossing over and under. `A` is the strand that is on top, `D` the one

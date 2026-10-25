@@ -341,6 +341,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     terminal::init(buffer, info);
     let mut console = Console::new(info, 40, 40, 2);
 
+    #[cfg(feature = "system-apps")]
+    console.show_splash();
+
+    #[cfg(not(feature = "system-apps"))]
     console.clear();
 
     console.println("WOVENHAT OS");
@@ -1943,6 +1947,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if desktop_session_started {
             serial::write_line(format_args!("[BOOT] desktop-first runtime ready"));
         } else {
+            console.set_quiet(false);
             serial::write_line(format_args!(
                 "[BOOT] shell-first runtime ready; entering diagnostic shell"
             ));

@@ -31,6 +31,10 @@ pub struct Console {
     start_x: usize,
     scale: usize,
 
+    /// Production system-app boots show a branded splash while boot work is
+    /// reported to serial, then stay quiet until the desktop owns scanout.
+    quiet: bool,
+
     /// Retained compositing surface for the desktop.
     ///
     /// Allocated on first use rather than at construction, because the console
@@ -51,6 +55,7 @@ impl Console {
             cursor_y: y,
             start_x: x,
             scale,
+            quiet: cfg!(feature = "system-apps"),
             #[cfg(any(test, feature = "qemu-test"))]
             desktop_surface: None,
         }
@@ -63,6 +68,32 @@ impl Console {
 
         self.cursor_x = self.start_x;
         self.cursor_y = 40;
+    }
+
+    /// Show the short boot-loader handoff screen without exposing the
+    /// diagnostic boot transcript on the normal desktop path.
+    #[cfg(feature = "system-apps")]
+    pub fn show_splash(&mut self) {
+        let quiet = self.quiet;
+        self.quiet = false;
+        self.clear();
+        let title = "WOVENHAT";
+        let title_width = title.chars().count() * 6 * self.scale;
+        let x = self.info.width.saturating_sub(title_width) / 2;
+        let y = self.info.height.saturating_sub(9 * self.scale) / 2;
+        self.set_cursor_position(x, y);
+        self.print(title);
+        self.newline();
+        self.set_cursor_position(
+            (self.info.width / 2).saturating_sub(12 * self.scale),
+            y + 18 * self.scale,
+        );
+        self.print("Starting desktop");
+        self.quiet = quiet;
+    }
+
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
     }
 
     fn ensure_room(&mut self) {
@@ -92,6 +123,9 @@ impl Console {
     }
 
     pub fn print(&mut self, text: &str) {
+        if self.quiet {
+            return;
+        }
         for c in text.chars() {
             self.put_char(c);
         }
@@ -103,6 +137,9 @@ impl Console {
     }
 
     pub fn put_char(&mut self, character: char) {
+        if self.quiet {
+            return;
+        }
         if character == '\n' {
             self.newline();
             return;
@@ -137,6 +174,9 @@ impl Console {
     }
 
     pub fn backspace(&mut self) {
+        if self.quiet {
+            return;
+        }
         let char_width = 6 * self.scale;
 
         if self.cursor_x <= self.start_x {
