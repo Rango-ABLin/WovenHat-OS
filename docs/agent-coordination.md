@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded streaming PNG/JPEG codec reader (2026-10-25)
+
+Added `ImageStream` and a seekable chunk reader for PNG/JPEG RGBA decoding.
+Source callbacks are split into 1024-byte requests, support seek/peek/EOF,
+and preserve caller-owned pixel output. A real PNG fixture decodes through
+the callback source; host/freestanding Clippy and the 166-test suite pass.
+WebP remains whole-slice until its backend exposes incremental input.
+
 ## Codex - bounded freestanding JavaScript runtime foundation (2026-10-25)
 
 Added `libwoven::javascript::Runtime`, a no-std scalar evaluator for bounded

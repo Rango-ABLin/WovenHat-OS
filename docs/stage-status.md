@@ -1,5 +1,13 @@
 # Stage status
 
+## Bounded streaming PNG/JPEG codec reader - 2026-10-25
+
+`libwoven::codecs` now exposes a seekable `ImageStream` boundary for PNG and
+JPEG decoding. Reads are split into validated 1024-byte source requests and
+pixels remain caller-owned. The 166-test libwoven suite, host/freestanding
+Clippy, and WovenImages target lint pass. WebP remains whole-slice pending an
+incremental backend, so complete streaming media support is not yet claimed.
+
 ## Bounded freestanding JavaScript runtime foundation - 2026-10-25
 
 `libwoven::javascript::Runtime` provides a no-std fixed-capacity scalar
