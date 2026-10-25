@@ -53,6 +53,7 @@ def main():
         print("Building pager ownership probe; evidence:", out, flush=True)
         NETWORK.run_build(["cargo", "build", "--release", "--locked"], probe, app_env, out / "probe-build.log")
         env["WOVENHAT_WEB_NET_PROBE_IMAGE"] = str(probe / "target/x86_64-unknown-none/release/wovenweb-net-probe")
+        NETWORK.run_build(["cargo", "clippy", "-p", "wovenhat-kernel", "--target", "x86_64-unknown-none", "--features", "wovenweb-vm-test", "--locked", "--", "-D", "warnings"], root, env, out / "kernel-clippy.log")
         image = NETWORK.build_image(root, env, "wovenweb-vm-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")

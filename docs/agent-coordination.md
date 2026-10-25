@@ -6444,3 +6444,9 @@ Stage20.15 launcher. Their causes are unresolved; do not label full release
 accepted or weaken assertions. Existing 3D UI work is preserved. Adding explicit
 OVMF input and isolated Linux 1/2/4 CPU pager CI to continuously qualify the
 production boundary before further VM changes.
+
+Portable CI first run b5ab53bf failed before boot: standalone kernel Clippy
+lacked WOVENHAT_WEB_NET_PROBE_IMAGE. Move identical warning-denying lint into
+the fresh-build harness after building the probe and setting its real image
+path; retain its log beside kernel build/guest evidence. No test or warning
+is disabled. Requalification pending.

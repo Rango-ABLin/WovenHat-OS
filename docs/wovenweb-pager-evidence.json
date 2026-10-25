@@ -269,5 +269,17 @@
     }
   ],
   "firmware_template_after_sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e",
-  "firmware_template_unchanged": true
+  "firmware_template_unchanged": true,
+  "portable_ci_initial_failure": {
+    "revision": "b5ab53bfa6671fe26c651594664354d104ccc0fa",
+    "jobs": [
+      121243558266,
+      121243558110,
+      121243558215
+    ],
+    "reason": "standalone kernel Clippy ran before WOVENHAT_WEB_NET_PROBE_IMAGE was defined",
+    "correction": "same warning-denying lint runs inside fresh-build harness after real probe build/environment setup",
+    "local_fresh_build_requalification": "audit-artifacts/wovenweb-vm-1792950549843775100-1cpu",
+    "hosted_requalification": "pending"
+  }
 }

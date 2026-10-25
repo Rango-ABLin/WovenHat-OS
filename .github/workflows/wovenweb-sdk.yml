@@ -99,7 +99,6 @@ jobs:
           vars=/usr/share/OVMF/OVMF_VARS_4M.fd
           test -f "$code"
           test -f "$vars"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features wovenweb-vm-test --locked -- -D warnings
           python3 scripts/test-wovenweb-vm-qemu.py --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
       - uses: actions/upload-artifact@v4
         if: always()
