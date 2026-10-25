@@ -126,7 +126,18 @@ jobs:
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: rust-src,llvm-tools-preview
       - name: Install QEMU and OVMF
-        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Execute WovenPDF WAPP in Ring 3
         env:
           RUSTUP_TOOLCHAIN: nightly-2026-07-10
@@ -161,7 +172,18 @@ jobs:
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: rust-src,llvm-tools-preview
       - name: Install QEMU and OVMF
-        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Load entire graphical WovenPDF executable as signed Ring-3 process
         env:
           RUSTUP_TOOLCHAIN: nightly-2026-07-10
@@ -196,7 +218,18 @@ jobs:
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: rust-src,llvm-tools-preview
       - name: Install QEMU and OVMF
-        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+        run: |
+          set -euo pipefail
+          # The hosted image can contain an unrelated Microsoft apt source
+          # that returns HTTP 403. Disable only that source for this job.
+          for source in /etc/apt/sources.list.d/*; do
+            [ -f "$source" ] || continue
+            if grep -q 'packages.microsoft.com/ubuntu/24.04/prod' "$source"; then
+              sudo sed -i '/packages\.microsoft\.com\/ubuntu\/24\.04\/prod/s/^/# disabled for WovenPDF QEMU setup: /' "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Probe WovenPDF process and WOPN request inside WovenShell
         env:
           RUSTUP_TOOLCHAIN: nightly-2026-07-10
