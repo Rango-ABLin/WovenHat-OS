@@ -16,6 +16,7 @@ test = false
 
 [dependencies]
 libwoven = { path = "../../libwoven" }
+miniz_oxide = { version = "0.9.1", default-features = false }
 
 [profile.release]
 panic = "abort"
