@@ -1,9 +1,10 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
+use crate::terminal;
+#[cfg(not(feature = "system-apps"))]
 use crate::{
     display::{self, Damage, Surface},
     gui::Desktop,
-    terminal,
 };
 
 const BG_R: u8 = 4;
@@ -36,6 +37,7 @@ pub struct Console {
     /// is created during early boot before the heap can satisfy a
     /// screen-sized buffer. Retaining it across calls is what lets an
     /// unchanged region go uncopied.
+    #[cfg(not(feature = "system-apps"))]
     desktop_surface: Option<Surface>,
 }
 
@@ -49,6 +51,7 @@ impl Console {
             cursor_y: y,
             start_x: x,
             scale,
+            #[cfg(not(feature = "system-apps"))]
             desktop_surface: None,
         }
     }
@@ -154,6 +157,7 @@ impl Console {
     /// scanning, so every redraw could tear, and it repainted the whole screen
     /// however little moved. The surface is retained between calls so an
     /// unchanged region is never recopied.
+    #[cfg(not(feature = "system-apps"))]
     pub fn render_desktop(&mut self, desktop: &Desktop) {
         let width = self.info.width;
         let height = self.info.height;

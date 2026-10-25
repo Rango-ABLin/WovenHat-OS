@@ -65,8 +65,10 @@ mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
+#[cfg(not(feature = "system-apps"))]
 mod graphics;
 pub mod graphics_abi;
+#[cfg(not(feature = "system-apps"))]
 mod gui;
 mod hal;
 #[cfg(any(
@@ -1964,33 +1966,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             console.println("");
         }
-        let mut desktop = gui::Desktop::new(graphics::Color::DARK_BLUE);
-        let mut window = gui::Window::new(gui::Rect::new(80, 80, 480, 280), "WOVENHAT DESKTOP");
-        window.add_button(gui::Button::new(
-            gui::Rect::new(120, 180, 180, 48),
-            "ACTIVATE",
-            graphics::Color::CYAN,
-        ));
-        window.add_button(gui::Button::new(
-            gui::Rect::new(320, 180, 180, 48),
-            "SECOND",
-            graphics::Color::CYAN,
-        ));
-        desktop.add_window(window);
         let mut shell = Shell::new();
-        let mut desktop_active = false;
 
-        // This placeholder desktop and the diagnostic-shell banner below are
-        // a developer-only fallback for when WovenShell did not take the
-        // screen itself (`!session_ready`): a real user who gets this far
-        // never asked for an ACTIVATE/SECOND test window, so it is never
-        // shown once the desktop session is confirmed up. F12 still reaches
-        // the kernel's own diagnostic console either way (`woven_input`
-        // dispatches it to `session::toggle_console()` ahead of this loop).
+        // This diagnostic shell is only the explicit no-system-apps recovery
+        // path. It never fabricates a desktop or placeholder controls; the
+        // production WovenShell owns the desktop and its launcher.
         if !session_ready {
             console.println("");
             console.clear();
-            console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
+            console.println("WOVENHAT DIAGNOSTIC SHELL");
             if !session_status.is_empty() {
                 console.println(&session_status);
             }
@@ -2010,7 +1994,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 console.println("WOVENHAT DIAGNOSTIC SHELL");
                 console.println("DESKTOP SESSION ENDED");
                 shell.print_prompt(&mut console);
-                desktop_active = false;
             }
             desktop_was_presenting = desktop_presenting;
             let userspace_foreground = terminal::foreground_active();
@@ -2020,7 +2003,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 console.println("USERSPACE SESSION ENDED");
                 console.println("");
                 shell.print_prompt(&mut console);
-                desktop_active = false;
             }
             userspace_was_foreground = userspace_foreground;
 
@@ -2039,31 +2021,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                             | keyboard::Key::F12
                     ) {
                         // F2-F4 have no use in the kernel's own desktop.
-                    } else if matches!(key, keyboard::Key::F1) && !desktop_session_started {
-                        desktop_active = !desktop_active;
-                        if desktop_active {
-                            console.render_desktop(&desktop);
-                        } else {
-                            console.clear();
-                            console.println("WOVENHAT DIAGNOSTIC SHELL (F1 TO OPEN DESKTOP)");
-                            shell.print_prompt(&mut console);
-                        }
-                    } else if desktop_active {
-                        let event = match key {
-                            keyboard::Key::Char(character) => gui::InputEvent::Key(character),
-                            keyboard::Key::Enter => gui::InputEvent::Key('\n'),
-                            keyboard::Key::Backspace => gui::InputEvent::Key('\u{8}'),
-                            keyboard::Key::Tab => gui::InputEvent::Key('\t'),
-                            keyboard::Key::F1
-                            | keyboard::Key::F2
-                            | keyboard::Key::F3
-                            | keyboard::Key::F4
-                            | keyboard::Key::F12 => {
-                                unreachable!()
-                            }
-                        };
-                        desktop.handle(&event);
-                        console.render_desktop(&desktop);
                     } else {
                         shell.handle_key(key, &mut console);
                     }
@@ -2260,11 +2217,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("KEYBOARD DECODER: FAILED");
         halt();
     }
-    if gui::self_test() {
-        console.println("GUI INPUT: OK");
-    } else {
-        console.println("GUI INPUT: FAILED");
-        halt();
+    #[cfg(not(feature = "system-apps"))]
+    {
+        if gui::self_test() {
+            console.println("GUI INPUT: OK");
+        } else {
+            console.println("GUI INPUT: FAILED");
+            halt();
+        }
     }
     if ipc::self_test() && ipc::endpoint_count() == 0 {
         console.println("IPC QUEUES: VALIDATED");

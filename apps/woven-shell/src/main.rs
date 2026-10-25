@@ -1069,8 +1069,8 @@ struct Desktop {
     /// Whether the desktop renders in 3D: the wallpaper and lock screen as
     /// a receding floor, the taskbar, title bars, and every floating panel
     /// (Quick Settings, launcher, Notification Center, toast) as tilted
-    /// cards. Defaults to off until the pixel-exact 3D acceptance matrix is
-    /// complete; Quick Settings can enable it for supported sessions.
+    /// cards. Production sessions start in this mode; Quick Settings can
+    /// still switch to the flat compatibility presentation.
     three_d: bool,
     /// Accessibility: skip the window-open fade-in animation, appearing at
     /// full opacity immediately. Defaults to off, matching
@@ -1145,10 +1145,10 @@ impl Desktop {
         dnd: false,
         scale: 1,
         language: libwoven::i18n::Language::English,
-        // Keep the accepted 2D compositor path as the default. 3D is an
-        // explicit user setting until every pixel-accurate desktop gate has
-        // a matching 3D acceptance matrix.
-        three_d: false,
+        // Production presentation is 3D by default. The 3D path still calls
+        // the bounded 2D painters to populate textures before projecting
+        // them through the software depth-tested renderer.
+        three_d: true,
         reduced_motion: false,
         locked: false,
         pin: None,
