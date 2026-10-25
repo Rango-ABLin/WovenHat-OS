@@ -1,7 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 //! A deliberately narrow, allocation-free PDF text-preview engine.
-//! This is NOT a general PDF renderer: no compression, encryption, fonts,
-//! page-tree traversal, object streams, or images are supported yet.
+//! This is NOT a general PDF renderer. Selected compressed streams and page
+//! trees are supported by other modules; encryption, full font handling,
+//! object streams and image rasterization are not.
 
 pub mod content;
 pub mod document;
@@ -67,7 +68,13 @@ pub fn inspect(data: &[u8]) -> Result<DocumentInfo, Error> {
     if major != b'1' && major != b'2' {
         return Err(Error::UnsupportedVersion);
     }
-    if !data.windows(5).any(|w| w == b"%%EOF") {
+    // A valid final EOF marker must terminate the file except for PDF whitespace.
+    // An arbitrary earlier %%EOF in a stream or comment is not sufficient.
+    let mut end = data.len();
+    while end > 0 && white(data[end - 1]) {
+        end -= 1;
+    }
+    if end < 5 || data.get(end - 5..end) != Some(b"%%EOF") {
         return Err(Error::MissingEof);
     }
     Ok(DocumentInfo {
@@ -226,6 +233,12 @@ mod tests {
     fn rejects_invalid_and_truncated() {
         assert_eq!(inspect(b"not a pdf"), Err(Error::InvalidHeader));
         assert_eq!(inspect(b"%PDF-1.4\nbody"), Err(Error::MissingEof));
+    }
+    #[test]
+    fn eof_marker_must_be_final_non_whitespace_bytes() {
+        assert!(inspect(b"%PDF-1.4\n%%EOF\n\r\t ").is_ok());
+        assert_eq!(inspect(b"%PDF-1.4\n%%EOF\ntrailing payload"), Err(Error::MissingEof));
+        assert_eq!(inspect(b"%PDF-1.4\n%%EOF in content\n"), Err(Error::MissingEof));
     }
     #[test]
     fn refuses_filtered_streams() {
