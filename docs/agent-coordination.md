@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI ListBox component (2026-10-25)
+
+Added the first selectable collection control to `libwoven::ui`: a fixed-
+capacity ListBox with borrowed item labels, bounded insertion, keyboard
+selection movement, pointer row selection, focus rendering, and selection
+painting. The full libwoven host suite passed 130 tests, Settings target
+warning-denying Clippy passed, and formatting/diff checks passed. WovenUI
+remains partial; Table, Tree, Menu, Dialog, Tabs, Navigation, and broader
+application migration are still open.
+
 ## Codex - WovenTerminal shared-control migration (2026-10-25)
 
 Migrated WovenTerminal's title and Clear control to shared bounded WovenUI

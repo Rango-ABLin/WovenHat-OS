@@ -328,6 +328,121 @@ impl<const N: usize> TextField<N> {
     }
 }
 
+/// A fixed-capacity selectable list. Items are borrowed by the caller and no
+/// allocation occurs when the list is populated or navigated.
+pub struct ListBox<'a, const N: usize> {
+    items: [Option<&'a str>; N],
+    len: usize,
+    pub frame: Frame,
+    pub selected: usize,
+    pub focused: bool,
+    pub enabled: bool,
+}
+
+impl<'a, const N: usize> ListBox<'a, N> {
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            items: [None; N],
+            len: 0,
+            frame,
+            selected: 0,
+            focused: false,
+            enabled: true,
+        }
+    }
+
+    pub fn push(&mut self, item: &'a str) -> bool {
+        if self.len == N {
+            return false;
+        }
+        self.items[self.len] = Some(item);
+        self.len += 1;
+        true
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn selected_item(&self) -> Option<&'a str> {
+        self.items.get(self.selected).copied().flatten()
+    }
+
+    pub fn move_selection(&mut self, delta: i32) -> bool {
+        if !self.enabled || self.len == 0 {
+            return false;
+        }
+        let next = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        }
+        .min(self.len - 1);
+        let changed = next != self.selected;
+        self.selected = next;
+        changed
+    }
+
+    pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
+        if !self.enabled || pressed || self.len == 0 {
+            return false;
+        }
+        if x < self.frame.x
+            || y < self.frame.y
+            || x >= self.frame.x.saturating_add(self.frame.width.max(0))
+            || y >= self.frame.y.saturating_add(self.frame.height.max(0))
+        {
+            return false;
+        }
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        let row = ((y - self.frame.y) / row_height) as usize;
+        if row >= self.len {
+            return false;
+        }
+        let changed = row != self.selected;
+        self.selected = row;
+        changed
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let row_height = crate::font::HEIGHT as i32 + 4;
+        for index in 0..self.len {
+            let y = self.frame.y + index as i32 * row_height;
+            if y >= self.frame.y.saturating_add(self.frame.height.max(0)) {
+                break;
+            }
+            if index == self.selected {
+                canvas.fill_rect(
+                    self.frame.x,
+                    y,
+                    self.frame.width.max(0) as usize,
+                    row_height as usize,
+                    theme.accent,
+                );
+            }
+            if let Some(item) = self.items[index] {
+                canvas.draw_text(self.frame.x + 4, y + 2, item, theme.text);
+            }
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -351,7 +466,7 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, Checkbox, Label, TextField, Theme, stack_vertical};
+    use super::{Button, Checkbox, Label, ListBox, TextField, Theme, stack_vertical};
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
     #[test]
@@ -417,5 +532,35 @@ mod tests {
         checkbox.draw(&mut canvas, theme);
         assert!(pixels.iter().any(|pixel| *pixel == theme.focus));
         assert!(pixels.iter().any(|pixel| *pixel == theme.accent));
+    }
+
+    #[test]
+    fn list_box_is_capacity_bounded_and_navigates() {
+        let mut list = ListBox::<2>::new(Frame::new(0, 0, 80, 32));
+        assert!(list.push("One"));
+        assert!(list.push("Two"));
+        assert!(!list.push("Three"));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.selected_item(), Some("One"));
+        assert!(list.move_selection(1));
+        assert_eq!(list.selected_item(), Some("Two"));
+        assert!(!list.move_selection(1));
+        assert!(list.pointer(4, 2, false));
+        assert_eq!(list.selected_item(), Some("One"));
+        assert!(list.pointer(4, 14, false));
+        assert_eq!(list.selected_item(), Some("Two"));
+    }
+
+    #[test]
+    fn list_box_draws_selection_and_focus_markers() {
+        let mut list = ListBox::<2>::new(Frame::new(1, 1, 28, 24));
+        list.push("One");
+        list.push("Two");
+        list.focused = true;
+        let mut pixels = [0; 32 * 32];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 32, 32).unwrap();
+        list.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
     }
 }

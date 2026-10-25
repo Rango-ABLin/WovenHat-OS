@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenUI bounded ListBox component - 2026-10-25
+
+Added a fixed-capacity selectable ListBox to `libwoven::ui` with borrowed
+labels, bounded insertion, keyboard navigation, pointer row selection, focus
+rendering, and selection rendering. The full libwoven host suite passed 130
+tests, Settings warning-denying Clippy passed, and formatting/diff checks
+passed. Table, Tree, Menu, Dialog, Tabs, Navigation, and broader application
+migration remain open in this stage.
+
 ## WovenTerminal shared-control migration - 2026-10-25
 
 WovenTerminal now uses shared bounded Label and Button rendering, and its
