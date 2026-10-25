@@ -6,6 +6,7 @@
 pub mod content;
 pub mod filters;
 pub mod lexer;
+pub mod layout;
 pub mod objects;
 pub mod pages;
 pub mod streams;
