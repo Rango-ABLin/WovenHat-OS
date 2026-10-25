@@ -4219,24 +4219,6 @@ fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>
     }
 }
 
-fn json_true(bytes: &[u8], key: &[u8]) -> bool {
-    bytes
-        .windows(key.len())
-        .enumerate()
-        .any(|(offset, window)| {
-            if window != key {
-                return false;
-            }
-            let rest = bytes
-                .get(offset + key.len()..)
-                .unwrap_or_default()
-                .trim_ascii_start();
-            rest.strip_prefix(b":")
-                .map(|value| value.trim_ascii_start().starts_with(b"true"))
-                .unwrap_or(false)
-        })
-}
-
 fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     let Ok(descriptor) = libwoven::open(path) else {
         return;
@@ -4246,10 +4228,12 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     let _ = libwoven::close(descriptor);
     let Ok(length) = read else { return };
     let data = &bytes[..length.min(bytes.len())];
-    if json_true(data, b"high_contrast") {
+    let mut settings = libwoven::accessibility::Settings::new();
+    settings.apply_json(data);
+    if settings.high_contrast {
         THEME_MODE.store(1, Ordering::Relaxed);
     }
-    if json_true(data, b"reduced_motion") {
+    if settings.reduced_motion {
         desktop.reduced_motion = true;
     }
 }
