@@ -1,5 +1,15 @@
 # Stage status
 
+## WovenUpdate shared-control migration - 2026-10-25
+
+WovenUpdate now uses shared bounded Label and Button rendering, and its
+Refresh action uses the Button's release-inside contract rather than a
+hand-painted hit box. Target Clippy, target build, and formatting passed. The
+app-specific QEMU harness failed before sign-in because its default guest had
+insufficient usable memory; the proper 5 GiB desktop gate timed out during
+sign-in under this TCG run. The migration is accepted as source/build work,
+not as a passed QEMU acceptance gate.
+
 ## WovenUI keyboard/pointer action boundary - 2026-10-25
 
 Buttons now expose enabled-aware keyboard/accessibility activation, and

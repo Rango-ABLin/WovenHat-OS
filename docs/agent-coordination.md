@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenUpdate shared-control migration (2026-10-25)
+
+Migrated WovenUpdate's title, section heading, and Refresh control to the
+shared bounded WovenUI Label and Button primitives. The app passes target
+`x86_64-unknown-none` warning-denying Clippy, target build, and formatting
+checks. The app-specific desktop harness produced retained evidence but did
+not reach sign-in under its low-memory default; the proper 5 GiB desktop gate
+also timed out during sign-in under the available TCG run. No QEMU acceptance
+is claimed for this increment.
+
 ## Codex - bounded keyboard and pointer widget actions (2026-10-25)
 
 Extended `libwoven::ui` so Buttons expose an enabled-aware keyboard/accessibility
