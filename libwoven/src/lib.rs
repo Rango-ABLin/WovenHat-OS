@@ -95,6 +95,7 @@ pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
 pub mod browser;
+pub mod javascript;
 pub mod codecs;
 pub mod i18n;
 pub mod icons;

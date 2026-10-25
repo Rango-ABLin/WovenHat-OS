@@ -1,5 +1,15 @@
 # Stage status
 
+## Bounded freestanding JavaScript runtime foundation - 2026-10-25
+
+`libwoven::javascript::Runtime` provides a no-std fixed-capacity scalar
+evaluator for integer arithmetic, precedence, comments, `let` bindings,
+updates, and statement sequencing. Script length, variable count, nesting,
+and arithmetic are checked and fail closed. The 165-test libwoven suite and
+host/freestanding warning-denying Clippy pass. Full ECMAScript semantics,
+DOM bindings, promises, modules, JIT execution, and sandbox certification
+remain open.
+
 ## Scalable I/O and launcher capacity increment - 2026-10-25
 
 The safe userspace API no longer treats the kernel's per-syscall transfer

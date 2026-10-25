@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded freestanding JavaScript runtime foundation (2026-10-25)
+
+Added `libwoven::javascript::Runtime`, a no-std scalar evaluator for bounded
+integer expressions, `let` bindings, updates, comments, and statement
+sequencing. It uses fixed variable storage, checked arithmetic, a 4096-byte
+script limit, and 32-level nesting. Host and freestanding Clippy pass and the
+libwoven suite passes 165/165. ECMAScript objects, strings, functions, DOM,
+promises, modules, JIT, and sandboxing remain separate capabilities.
+
 ## Codex - browser layout substrate increment (2026-10-25)
 
 Extended `libwoven::browser` beyond the borrowed HTML parser with allocation-
