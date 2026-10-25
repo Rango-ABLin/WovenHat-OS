@@ -10,12 +10,15 @@ closed on invalid viewports, overflow, excessive depth, or capacity
 exhaustion. The paint pass emits checked renderer-neutral fill/text commands
 without coupling browser state to a display backend; the render adapter maps
 those commands to caller-owned software-canvas pixels with checked coordinates.
+Inline script text can be passed explicitly to the bounded scalar runtime via
+`libwoven::browser::execute_script`; this seam exposes no DOM or system
+capabilities.
 
 Evidence:
 
-- Full `libwoven` host suite: 170 passed.
+- Full `libwoven` host suite: 171 passed.
 - `libwoven` host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - Formatting/diff checks: passed for the increment.
 
-Network fetch, full CSS cascade, JavaScript execution, text shaping,
+Network fetch, full CSS cascade, general JavaScript execution, text shaping,
 sandboxing, and GPU composition remain separate browser-engine boundaries.

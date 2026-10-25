@@ -14,6 +14,14 @@ pub enum ParseError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptError {
+    MissingNode,
+    NotScript,
+    MissingSource,
+    Runtime(crate::javascript::Error),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Node<'a> {
     pub tag: &'a str,
     pub text: Option<&'a str>,
@@ -537,10 +545,29 @@ pub fn render<const N: usize>(
     Ok(())
 }
 
+/// Execute one inline `<script>` node with the bounded scalar runtime.
+///
+/// The runtime receives only the node's borrowed source and has no DOM,
+/// filesystem, network, or compositor capabilities. This is an explicit
+/// integration seam, not a claim of general ECMAScript support.
+pub fn execute_script<'a, const N: usize, const V: usize>(
+    document: &'a Document<'a, N>,
+    node_index: usize,
+    runtime: &mut crate::javascript::Runtime<'a, V>,
+) -> Result<crate::javascript::Value, ScriptError> {
+    let node = document.node(node_index).ok_or(ScriptError::MissingNode)?;
+    if node.tag != "script" {
+        return Err(ScriptError::NotScript);
+    }
+    let source = node.text.ok_or(ScriptError::MissingSource)?;
+    crate::javascript::eval(source, runtime).map_err(ScriptError::Runtime)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutError, PaintCommand, ParseError, Viewport, layout, paint, parse_html, render,
+        LayoutError, PaintCommand, ParseError, ScriptError, Viewport, execute_script, layout,
+        paint, parse_html, render,
     };
 
     #[test]
@@ -687,5 +714,25 @@ mod tests {
         render(&mut canvas, &commands).unwrap();
         assert_eq!(canvas.get(0, 0), Some(0x0010_2030));
         assert_eq!(canvas.get(3, 3), Some(0x0010_2030));
+    }
+
+    #[test]
+    fn executes_only_inline_script_nodes_through_bounded_runtime() {
+        let document =
+            parse_html::<4>(b"<main><script>let answer = 6 * 7; answer + 1</script></main>")
+                .unwrap();
+        let mut runtime = crate::javascript::Runtime::<2>::new();
+        assert_eq!(
+            execute_script(&document, 1, &mut runtime),
+            Ok(crate::javascript::Value::Integer(43))
+        );
+        assert_eq!(
+            runtime.get("answer"),
+            Some(crate::javascript::Value::Integer(42))
+        );
+        assert_eq!(
+            execute_script(&document, 0, &mut runtime),
+            Err(ScriptError::NotScript)
+        );
     }
 }

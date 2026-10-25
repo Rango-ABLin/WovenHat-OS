@@ -1,5 +1,14 @@
 # Stage status
 
+## Bounded browser script seam - 2026-10-25
+
+`libwoven::browser::execute_script` now connects inline `<script>` node text
+to the bounded scalar JavaScript runtime. It rejects non-script nodes and
+missing source, preserves fixed runtime capacity, and exposes no DOM or
+system capabilities. The 171-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Full ECMAScript, DOM, module, async, and browser
+sandbox gates remain open.
+
 ## Browser software-canvas renderer - 2026-10-25
 
 `libwoven::browser::render` now consumes the bounded paint list through the

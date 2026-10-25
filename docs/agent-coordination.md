@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded browser script seam (2026-10-25)
+
+Added `browser::execute_script`, which executes only borrowed inline
+`<script>` node text through the existing fixed-capacity scalar JavaScript
+runtime. Non-script nodes, missing text, and runtime failures are explicit
+errors; no DOM, filesystem, network, compositor, or general ECMAScript
+capabilities are exposed.
+
 ## Codex - browser software-canvas renderer (2026-10-25)
 
 Connected the bounded browser `PaintList` to the existing software `Canvas`.
