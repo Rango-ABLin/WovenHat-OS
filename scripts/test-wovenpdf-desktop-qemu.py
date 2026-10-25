@@ -19,6 +19,7 @@ import time
 
 START = "[WOVENPDF] process: STARTED"
 REQUEST = "[WOVENPDF] shell: OPEN_REQUEST_SENT"
+ACCEPTED = "woven-shell: window opened: WovenPDF Preview"
 
 
 def build_app(root, dirname, binary):
@@ -160,11 +161,12 @@ def main():
         try:
             while vm.poll() is None and time.monotonic() < deadline:
                 events = serial.read_text(errors="replace")
-                if START in events and REQUEST in events:
-                    # WOPN is only a request; the compositor may need several
+                if START in events and REQUEST in events and ACCEPTED in events:
+                    # Require the shell to accept WOPN before checking pixels.
+                    # The compositor may need several
                     # frames before the window becomes visible. Capture anew
                     # until page pixels appear or the bounded grace expires.
-                    grace = min(deadline, time.monotonic() + 8)
+                    grace = min(deadline, time.monotonic() + 45)
                     while vm.poll() is None and time.monotonic() < grace:
                         capture(port, screenshot, min(grace, time.monotonic() + 3))
                         try:
@@ -172,7 +174,7 @@ def main():
                                 break
                         except ValueError:
                             pass
-                        time.sleep(0.25)
+                        time.sleep(0.5)
                     break
                 time.sleep(0.2)
         finally:
@@ -180,8 +182,8 @@ def main():
                 vm.kill()
             vm.wait()
     events = serial.read_text(errors="replace")
-    if START not in events or REQUEST not in events:
-        print("FAIL: WovenPDF did not prove startup plus WOPN request.", file=sys.stderr)
+    if START not in events or REQUEST not in events or ACCEPTED not in events:
+        print("FAIL: WovenPDF startup, WOPN request, or WovenShell acceptance missing.", file=sys.stderr)
         print(events[-2500:], file=sys.stderr)
         return 1
     if not screenshot.exists() or screenshot.stat().st_size < 100:
@@ -194,9 +196,10 @@ def main():
         return 1
     if white_count < 5000:
         print(f"FAIL: only {white_count} near-white pixels; WovenPDF page surface not visible.", file=sys.stderr)
+        print(events[-2500:], file=sys.stderr)
         return 1
     print(f"Framebuffer near-white page pixels: {white_count}")
-    print(f"WovenPDF desktop probe: process and WOPN request observed ({args.cpus} CPU).")
+    print(f"WovenPDF desktop probe: process, WOPN, and shell acceptance observed ({args.cpus} CPU).")
     print(f"Screenshot: {screenshot} (visual inspection required)")
     print("NOT verified: shell WOPN acceptance, PDF page pixels, navigation or full rendering.")
     return 0
