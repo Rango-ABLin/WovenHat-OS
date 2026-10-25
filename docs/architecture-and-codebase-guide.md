@@ -4317,3 +4317,16 @@ QEMU/emulated evidence from claiming Tier 1: native failures are Tier 3,
 complete native coverage is Tier 1, and incomplete native coverage without a
 failure is Tier 2. This separates evidence collection from policy and keeps
 the release claim fail-closed until real hardware records exist.
+
+## Graphics Stage 11 motion and pacing boundary (2026-10-25)
+
+WovenShell's spring animation remains userspace-owned and advances only from
+the event-driven `FrameClock`; it does not sleep while holding compositor or
+IRQ locks. The Stage 20.7 motion oracle captures the pre-animation framebuffer
+pixel, so it is independent of the separate wallpaper/projection renderer. It
+validates monotonic alpha
+samples and final settling, then verifies input routing, client teardown, and
+display release. Stage 19.14 separately validates paced frames across integer
+display scaling changes. This is a runtime acceptance of the software motion
+and pacing boundary, not a claim of v-sync, low-power scheduling, or hardware
+GPU acceleration; those remain separate qualifications.

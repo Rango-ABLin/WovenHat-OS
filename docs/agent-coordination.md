@@ -6443,3 +6443,12 @@ non-BMP cmap12 mapping/advance, and UTF-8 editing. Full UAX #9 reordering is
 now provided by `unicode-bidi`, and IME preedit/commit/cancel is transactional
 in `TextInputState`. Script-specific glyph shaping remains a separate
 OpenType capability.
+# Codex - graphics Stage 11 motion/pacing acceptance increment (2026-10-25)
+
+Repaired the Stage 20.7 animation oracle for the current shell: it captures
+the actual pre-window pixel before validating monotonic alpha samples,
+settling, input routing and display teardown. Stage 20.7 and Stage 19.14 passed on 1/2/4 CPUs with exit
+33; warning-denying freestanding kernel Clippy passed for `stage20-7-test`.
+This accepts only the motion/pacing slice; Stage 11 screenshot/theme,
+starvation, and low-power evidence remains open. See
+`docs/graphics/stage-11-motion-evidence.md`.

@@ -9,6 +9,17 @@ passes with 182 libwoven tests and warning-denying libwoven Clippy. This is a
 code/library increment only; full Stage 11 desktop screenshot, animation
 starvation, and low-power runtime acceptance remains open.
 
+## Graphics Stage 11 motion/pacing acceptance increment - 2026-10-25
+
+Requalified the existing graphics runtime slices against the current shell.
+Stage 19.14 display scaling/frame pacing and Stage 20.7 spring animation now
+pass on 1/2/4 CPUs with exit 33. The animation oracle was repaired to use the
+actual pre-window framebuffer pixel, keeping its monotonic alpha and teardown
+checks independent of wallpaper/projection geometry. Warning-denying freestanding kernel Clippy for
+`stage20-7-test` passes. Evidence is in
+`docs/graphics/stage-11-motion-evidence.md`; full Stage 11 screenshot/theme,
+starvation, and low-power acceptance remains open.
+
 ## Graphics Stage 20.8/20.13 flat-renderer oracle repairs - 2026-10-25
 
 Updated the tiling/resize and workspace acceptance oracles to the current

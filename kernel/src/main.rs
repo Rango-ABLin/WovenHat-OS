@@ -13005,24 +13005,26 @@ fn stage20_7_self_test() -> bool {
     ) {
         return false;
     }
-    let Some((_, height)) = compositor::dimensions() else {
+    if compositor::dimensions().is_none() {
         return step("desktop geometry", false);
-    };
-    let height = height as i32;
+    }
 
     // The pixel watched: (45, 45), inside A's client area at (40, 40). Of
     // A's (focused) shadow bands, only the one offset by 4 covers it.
     let (x, y) = (45, 45);
-    let expected: alloc::vec::Vec<u32> = (0..=255u32)
-        .map(|a| {
-            let shadow = (48 * a / 255) as u8;
-            let under = blend_pixel(BLACK, wallpaper(x, y, height), shadow);
-            blend_pixel(RED, under, a as u8)
-        })
-        .collect();
     let scale = compositor::scale().unwrap_or(1) as usize;
     let (sx, sy) = (x as usize * scale, y as usize * scale);
     let start_value = screen_pixel(sx, sy);
+    let Some(background) = start_value else {
+        return step("background pixel readable", false);
+    };
+    let expected: alloc::vec::Vec<u32> = (0..=255u32)
+        .map(|a| {
+            let shadow = (48 * a / 255) as u8;
+            let under = blend_pixel(BLACK, background, shadow);
+            blend_pixel(RED, under, a as u8)
+        })
+        .collect();
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
