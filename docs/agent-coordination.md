@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenFiles shared-control migration (2026-10-25)
+
+Migrated WovenFiles' `/mnt` title and Refresh interaction to the shared
+`WovenUI::Label` and `WovenUI::Button` controls. Pointer press/release now uses
+the shared release-inside contract while preserving the existing VFS listing,
+resize, and shell window protocol. Freestanding warning-denying Clippy passes.
+
 ## Codex - bounded streaming PNG/JPEG codec reader (2026-10-25)
 
 Added `ImageStream` and a seekable chunk reader for PNG/JPEG RGBA decoding.

@@ -1,5 +1,13 @@
 # Stage status
 
+## WovenFiles shared-control migration - 2026-10-25
+
+WovenFiles now uses shared bounded Label and Button controls for its title and
+Refresh action. The existing VFS listing, resize behavior, and shell window
+protocol remain unchanged; the shared release-inside pointer contract is now
+used for activation. Freestanding warning-denying Clippy passes. Broader
+application migration remains in progress.
+
 ## Bounded streaming PNG/JPEG codec reader - 2026-10-25
 
 `libwoven::codecs` now exposes a seekable `ImageStream` boundary for PNG and
