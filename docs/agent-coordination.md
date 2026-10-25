@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded BMP row streaming (2026-10-25)
+
+Added `decode_bmp_rgba_stream` to the shared `ImageStream` boundary. BMP
+headers and each validated 24/32-bit uncompressed row are fetched through
+1024-byte source requests into caller-owned pixels; indexed/compressed and
+malformed inputs fail closed.
+
 ## Codex - bounded JavaScript boolean/comparison operators (2026-10-25)
 
 Extended the scalar runtime with `true`/`false`, checked integer comparison,

@@ -1,6 +1,6 @@
 //! Bounded pixel decoders for the image asset boundary.
 
-use crate::media::{parse_image_header, ImageError, ImageFormat, ImageMetadata, MAX_PIXELS};
+use crate::media::{ImageError, ImageFormat, ImageMetadata, MAX_PIXELS, parse_image_header};
 use alloc::vec::Vec;
 use zune_core::bytestream::{ZByteIoError, ZByteReaderTrait, ZCursor, ZSeekFrom};
 use zune_core::colorspace::ColorSpace;
@@ -143,6 +143,28 @@ impl<S: ImageStream> ZByteReaderTrait for ChunkReader<'_, S> {
     }
 }
 
+fn read_stream_exact<S: ImageStream>(
+    stream: &mut S,
+    offset: u64,
+    destination: &mut [u8],
+) -> Result<(), ImageError> {
+    let mut filled = 0usize;
+    while filled < destination.len() {
+        let request = (destination.len() - filled).min(1024);
+        let request_offset = offset
+            .checked_add(filled as u64)
+            .ok_or(ImageError::Malformed)?;
+        let count = stream
+            .read_at(request_offset, &mut destination[filled..filled + request])
+            .map_err(|_| ImageError::Truncated)?;
+        if count == 0 || count > request {
+            return Err(ImageError::Truncated);
+        }
+        filled += count;
+    }
+    Ok(())
+}
+
 fn capacity(metadata: ImageMetadata, output: &[u32]) -> Result<usize, ImageError> {
     let pixels = (metadata.width as usize)
         .checked_mul(metadata.height as usize)
@@ -264,6 +286,69 @@ pub fn decode_jpeg_rgba_stream<S: ImageStream>(
     Ok(metadata)
 }
 
+/// Decode an uncompressed 24/32-bit BMP from a chunk source one bounded row
+/// at a time. Indexed, compressed, and malformed BMPs fail closed.
+pub fn decode_bmp_rgba_stream<S: ImageStream>(
+    stream: &mut S,
+    metadata: ImageMetadata,
+    output: &mut [u32],
+) -> Result<ImageMetadata, ImageError> {
+    if metadata.format != ImageFormat::Bmp {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let pixels = capacity(metadata, output)?;
+    let mut header = [0u8; 54];
+    read_stream_exact(stream, 0, &mut header)?;
+    if !header.starts_with(b"BM") {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let dib_size = u32::from_le_bytes(header[14..18].try_into().unwrap());
+    let planes = u16::from_le_bytes([header[26], header[27]]);
+    let bits = u16::from_le_bytes([header[28], header[29]]);
+    let compression = u32::from_le_bytes(header[30..34].try_into().unwrap());
+    if dib_size < 40 || planes != 1 || (bits != 24 && bits != 32) || compression != 0 {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let width = metadata.width as usize;
+    let height = metadata.height as usize;
+    let pixel_offset = u32::from_le_bytes(header[10..14].try_into().unwrap()) as u64;
+    let row_bytes = width
+        .checked_mul(usize::from(bits / 8))
+        .and_then(|row| row.checked_add(3).map(|padded| padded & !3))
+        .ok_or(ImageError::Malformed)?;
+    let pixel_bytes = row_bytes.checked_mul(height).ok_or(ImageError::Malformed)?;
+    let end = pixel_offset
+        .checked_add(pixel_bytes as u64)
+        .ok_or(ImageError::Malformed)?;
+    if pixel_offset < 14 + u64::from(dib_size) || end > stream.len() {
+        return Err(ImageError::Truncated);
+    }
+    let source_height = i32::from_le_bytes(header[22..26].try_into().unwrap());
+    let mut row = [0u8; 32 * 1024];
+    if row_bytes > row.len() {
+        return Err(ImageError::InvalidDimensions);
+    }
+    for source_y in 0..height {
+        let row_offset = pixel_offset
+            .checked_add((source_y * row_bytes) as u64)
+            .ok_or(ImageError::Malformed)?;
+        read_stream_exact(stream, row_offset, &mut row[..row_bytes])?;
+        let destination_y = if source_height < 0 {
+            source_y
+        } else {
+            height - 1 - source_y
+        };
+        for x in 0..width {
+            let offset = x * usize::from(bits / 8);
+            let alpha = if bits == 32 { row[offset + 3] } else { 255 };
+            output[destination_y * width + x] =
+                u32::from_be_bytes([row[offset + 2], row[offset + 1], row[offset], alpha]);
+        }
+    }
+    debug_assert_eq!(pixels, width * height);
+    Ok(metadata)
+}
+
 pub fn decode_webp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata, ImageError> {
     let metadata = parse_image_header(bytes)?;
     if metadata.format != ImageFormat::WebP {
@@ -377,7 +462,8 @@ fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream, ImageStream, StreamError,
+        ImageStream, StreamError, decode_bmp_rgba_stream, decode_png_rgba_stream, decode_webp_rgba,
+        decode_webp_rgba_stream,
     };
     use crate::media::parse_image_header;
 
@@ -420,6 +506,29 @@ mod tests {
         let mut pixels = [0u32; 1];
         decode_png_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
         assert_eq!(pixels[0], 0xff1e140a);
+        assert!(stream.largest_request <= 1024);
+    }
+
+    #[test]
+    fn decodes_bmp_rows_through_bounded_chunk_reader() {
+        let mut bmp = [0u8; 62];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&2i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&(-1i32).to_le_bytes());
+        bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24u16.to_le_bytes());
+        bmp[34..38].copy_from_slice(&8u32.to_le_bytes());
+        bmp[54..62].copy_from_slice(&[0, 0, 255, 0, 255, 0, 0, 0]);
+        let metadata = parse_image_header(&bmp).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &bmp,
+            largest_request: 0,
+        };
+        let mut pixels = [0u32; 2];
+        decode_bmp_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
+        assert_eq!(pixels, [0xFF0000FF, 0x00FF00FF]);
         assert!(stream.largest_request <= 1024);
     }
 

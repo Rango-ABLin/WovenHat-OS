@@ -1,5 +1,13 @@
 # Stage status
 
+## Bounded BMP row streaming - 2026-10-25
+
+`libwoven::codecs::decode_bmp_rgba_stream` now reads BMP headers and rows via
+the shared `ImageStream` boundary with validated 1024-byte requests. It
+supports uncompressed 24/32-bit BMPs, preserves caller-owned RGBA output, and
+rejects indexed, compressed, oversized-row, and malformed inputs. The
+174-test libwoven suite and host/freestanding warning-denying Clippy pass.
+
 ## Bounded JavaScript boolean/comparison operators - 2026-10-25
 
 The scalar runtime now supports boolean literals, `!`, `==`, `!=`, integer
