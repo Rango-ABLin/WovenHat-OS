@@ -114,7 +114,7 @@ fn payloads() -> Result<(), u64> {
         for align in [1, 8, 16, 64, 256, 4096, 65536] {
             let layout = spec(73, align)?;
             let pointer = alloc(layout);
-            if pointer.is_null() || pointer as usize % align != 0 {
+            if pointer.is_null() || !(pointer as usize).is_multiple_of(align) {
                 return Err(51);
             }
             pointer.write_bytes(0xa7, layout.size());
@@ -127,7 +127,7 @@ fn payloads() -> Result<(), u64> {
         }
         pointer.write_bytes(0x5a, small.size());
         let large = realloc(pointer, small, 180000);
-        if large.is_null() || large as usize % 256 != 0 {
+        if large.is_null() || !(large as usize).is_multiple_of(256) {
             return Err(53);
         }
         if !core::slice::from_raw_parts(large, small.size())
