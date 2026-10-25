@@ -8,6 +8,7 @@ use wovenhat_pdf::{
     extract_plain_text, inspect, parse_command, Command, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES,
 };
 
+#[cfg(not(feature = "ring3-smoke"))]
 mod gui;
 
 libwoven::entry!(main);
@@ -24,12 +25,14 @@ static TEXT: TextBuffer = TextBuffer(UnsafeCell::new([0; MAX_TEXT_BYTES]));
 fn main(args: Args) -> ! {
     // A process-start diagnostic, not proof of rendered content.
     let _ = libwoven::print("[WOVENPDF] process: STARTED\n");
+    #[cfg(not(feature = "ring3-smoke"))]
     if args.get(1) == Some(b"--gui") {
         gui::run(args.get(2), args.get(3));
     }
     // Stage 20.2's experimental desktop client slot uses this argument.
     // Unlike normal --gui, its fourth argument is a fixture identifier,
     // not a PDF path. Never attempt to open it as a document.
+    #[cfg(not(feature = "ring3-smoke"))]
     if args.get(1) == Some(b"--desktop-client") {
         gui::run(args.get(2), None);
     }
