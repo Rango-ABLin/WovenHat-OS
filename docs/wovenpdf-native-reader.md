@@ -1,5 +1,21 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 continuation: object and page-tree foundations
+
+- Added `objects.rs`: cross-reference-backed indirect-object header checks,
+  dictionary /Name and /Reference getters, and explicit stream refusal.
+- Added `pages.rs`: bounded recursive traversal of /Pages and /Kids arrays,
+  with cycle, nesting-depth and output-capacity enforcement.
+- These are scaffolding for the full parser. They are not yet connected to the
+  WovenPDF CLI or to a page renderer. Classic-xref parsing, object streams,
+  stream-length resolution, decompression, color, font decoding, pixel
+  rendering and WovenShell GUI remain incomplete.
+- Rust compiler, Clippy, and QEMU are unavailable in this execution environment,
+  so the new source has **not been compile-tested or acceptance-tested**.
+- Do not merge PR #122 or claim support for arbitrary PDF documents before
+  the full release gates are run on a configured development machine.
+
+
 Status: initial inspection, bounded lexical scanner, strict classic xref-table parsing, and narrow text-preview application only; **not a complete reader**.
 
 ## Source and rights
