@@ -48,22 +48,30 @@ pub fn ascii_hex(input: &[u8], output: &mut [u8]) -> Result<usize, FilterError> 
             terminated = true;
             break;
         }
-        if whitespace(c) { continue; }
+        if whitespace(c) {
+            continue;
+        }
         let digit = hex(c).ok_or(FilterError::InvalidByte)?;
         if let Some(high) = half.take() {
-            if used >= output.len() { return Err(FilterError::OutputFull); }
+            if used >= output.len() {
+                return Err(FilterError::OutputFull);
+            }
             output[used] = (high << 4) | digit;
             used += 1;
         } else {
             half = Some(digit);
         }
     }
-    if !terminated { return Err(FilterError::MissingTerminator); }
+    if !terminated {
+        return Err(FilterError::MissingTerminator);
+    }
     if input[i..].iter().any(|b| !whitespace(*b)) {
         return Err(FilterError::InvalidByte);
     }
     if let Some(high) = half {
-        if used >= output.len() { return Err(FilterError::OutputFull); }
+        if used >= output.len() {
+            return Err(FilterError::OutputFull);
+        }
         output[used] = high << 4;
         used += 1;
     }
@@ -79,13 +87,20 @@ pub fn run_length(input: &[u8], output: &mut [u8]) -> Result<usize, FilterError>
         let control = *input.get(read).ok_or(FilterError::MissingTerminator)?;
         read += 1;
         if control == 128 {
-            if read != input.len() { return Err(FilterError::InvalidByte); }
+            if read != input.len() {
+                return Err(FilterError::InvalidByte);
+            }
             return Ok(written);
         }
-        let length = if control < 128 { control as usize + 1 }
-            else { 257 - control as usize };
+        let length = if control < 128 {
+            control as usize + 1
+        } else {
+            257 - control as usize
+        };
         let end = written.checked_add(length).ok_or(FilterError::OutputFull)?;
-        if end > output.len() { return Err(FilterError::OutputFull); }
+        if end > output.len() {
+            return Err(FilterError::OutputFull);
+        }
         if control < 128 {
             let last = read.checked_add(length).ok_or(FilterError::Truncated)?;
             let bytes = input.get(read..last).ok_or(FilterError::Truncated)?;
@@ -103,15 +118,21 @@ pub fn run_length(input: &[u8], output: &mut [u8]) -> Result<usize, FilterError>
 pub fn decode(filter: Filter, input: &[u8], output: &mut [u8]) -> Result<usize, FilterError> {
     match filter {
         Filter::Identity => {
-            if input.len() > output.len() { return Err(FilterError::OutputFull); }
+            if input.len() > output.len() {
+                return Err(FilterError::OutputFull);
+            }
             output[..input.len()].copy_from_slice(input);
             Ok(input.len())
         }
         Filter::AsciiHex => ascii_hex(input, output),
         Filter::RunLength => run_length(input, output),
         Filter::Flate => miniz_oxide::inflate::decompress_slice_iter_to_slice(
-            output, core::iter::once(input), true, false
-        ).map_err(|_| FilterError::InvalidByte),
+            output,
+            core::iter::once(input),
+            true,
+            false,
+        )
+        .map_err(|_| FilterError::InvalidByte),
         Filter::Unsupported => Err(FilterError::Unsupported),
     }
 }
@@ -131,18 +152,29 @@ mod tests {
     fn hex_rejects_invalid_and_short_buffers() {
         let mut out = [0; 0];
         assert_eq!(ascii_hex(b"4F>", &mut out), Err(FilterError::OutputFull));
-        assert_eq!(ascii_hex(b"4X>", &mut [0; 4]), Err(FilterError::InvalidByte));
-        assert_eq!(ascii_hex(b"41", &mut [0; 4]), Err(FilterError::MissingTerminator));
+        assert_eq!(
+            ascii_hex(b"4X>", &mut [0; 4]),
+            Err(FilterError::InvalidByte)
+        );
+        assert_eq!(
+            ascii_hex(b"41", &mut [0; 4]),
+            Err(FilterError::MissingTerminator)
+        );
     }
     #[test]
     fn run_length_literal_and_repeat() {
         let mut out = [0; 10];
-        assert_eq!(run_length(&[2, b'A', b'B', b'C', 254, b'!', 128], &mut out), Ok(6));
+        assert_eq!(
+            run_length(&[2, b'A', b'B', b'C', 254, b'!', 128], &mut out),
+            Ok(6)
+        );
         assert_eq!(&out[..6], b"ABC!!!");
     }
     #[test]
     fn flate_zlib_checksum_and_bounds() {
-        const ZLIB: &[u8] = &[120,156,243,72,205,201,201,215,81,168,202,201,76,82,4,0,27,101,4,19];
+        const ZLIB: &[u8] = &[
+            120, 156, 243, 72, 205, 201, 201, 215, 81, 168, 202, 201, 76, 82, 4, 0, 27, 101, 4, 19,
+        ];
         let mut out = [0u8; 64];
         assert_eq!(decode(Filter::Flate, ZLIB, &mut out), Ok(12));
         assert_eq!(&out[..12], b"Hello, zlib!");
@@ -155,8 +187,17 @@ mod tests {
     #[test]
     fn run_length_malformed_rejected() {
         assert_eq!(run_length(&[0], &mut [0; 5]), Err(FilterError::Truncated));
-        assert_eq!(run_length(&[129, b'A'], &mut [0; 5]), Err(FilterError::OutputFull));
-        assert_eq!(run_length(&[128, 0], &mut [0; 5]), Err(FilterError::InvalidByte));
-        assert_eq!(run_length(&[], &mut [0; 5]), Err(FilterError::MissingTerminator));
+        assert_eq!(
+            run_length(&[129, b'A'], &mut [0; 5]),
+            Err(FilterError::OutputFull)
+        );
+        assert_eq!(
+            run_length(&[128, 0], &mut [0; 5]),
+            Err(FilterError::InvalidByte)
+        );
+        assert_eq!(
+            run_length(&[], &mut [0; 5]),
+            Err(FilterError::MissingTerminator)
+        );
     }
 }

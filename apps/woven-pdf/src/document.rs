@@ -15,13 +15,19 @@ pub enum DocumentError {
     NotFound,
 }
 impl From<ObjectError> for DocumentError {
-    fn from(value: ObjectError) -> Self { Self::Object(value) }
+    fn from(value: ObjectError) -> Self {
+        Self::Object(value)
+    }
 }
 impl From<XrefError> for DocumentError {
-    fn from(value: XrefError) -> Self { Self::Xref(value) }
+    fn from(value: XrefError) -> Self {
+        Self::Xref(value)
+    }
 }
 impl From<PageError> for DocumentError {
-    fn from(value: PageError) -> Self { Self::Pages(value) }
+    fn from(value: PageError) -> Self {
+        Self::Pages(value)
+    }
 }
 fn number(token: Option<Token<'_>>) -> Result<u32, DocumentError> {
     match token {
@@ -53,20 +59,31 @@ pub fn trailer_root(data: &[u8]) -> Result<Reference, DocumentError> {
         match token {
             Token::DictionaryStart | Token::ArrayStart => {
                 depth += 1;
-                if depth > 32 { return Err(DocumentError::Malformed); }
+                if depth > 32 {
+                    return Err(DocumentError::Malformed);
+                }
             }
             Token::DictionaryEnd | Token::ArrayEnd => {
                 depth = depth.checked_sub(1).ok_or(DocumentError::Malformed)?;
-                if depth == 0 { break; }
+                if depth == 0 {
+                    break;
+                }
             }
             Token::Name(name) if depth == 1 && name == b"Root" => {
                 let object = number(lex.next_token().map_err(|_| DocumentError::Malformed)?)?;
                 let generation = u16::try_from(number(
-                    lex.next_token().map_err(|_| DocumentError::Malformed)?
-                )?).map_err(|_| DocumentError::Malformed)?;
+                    lex.next_token().map_err(|_| DocumentError::Malformed)?,
+                )?)
+                .map_err(|_| DocumentError::Malformed)?;
                 if lex.next_token().map_err(|_| DocumentError::Malformed)?
-                    != Some(Token::Keyword(b"R")) { return Err(DocumentError::Malformed); }
-                return Ok(Reference { number: object, generation });
+                    != Some(Token::Keyword(b"R"))
+                {
+                    return Err(DocumentError::Malformed);
+                }
+                return Ok(Reference {
+                    number: object,
+                    generation,
+                });
             }
             _ => {}
         }
@@ -89,7 +106,9 @@ pub fn page_content(
     }
     let pages_root = resolver.dictionary_reference(catalog, b"Pages")?;
     let page_count = collect_pages(&resolver, pages_root, page_buffer)?;
-    let page = *page_buffer.get(index).filter(|_| index < page_count)
+    let page = *page_buffer
+        .get(index)
+        .filter(|_| index < page_count)
         .ok_or(DocumentError::NotFound)?;
     if resolver.dictionary_name(page, b"Type")? != b"Page" {
         return Err(DocumentError::Malformed);
@@ -120,16 +139,29 @@ mod tests {
         for off in offsets.iter().skip(1) {
             pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
         }
-        pdf.extend_from_slice(format!(
-            "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n"
-        ).as_bytes());
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n").as_bytes(),
+        );
         let mut entries = [Entry::default(); 8];
         let count = crate::xref::read_table(&pdf, &mut entries).unwrap();
-        let mut pages = [Reference { number: 0, generation: 0 }; 4];
-        assert_eq!(page_content(&pdf, &entries[..count], 0, &mut pages),
-            Ok((Reference { number: 4, generation: 0 }, 1)));
-        assert_eq!(page_content(&pdf, &entries[..count], 1, &mut pages),
-            Err(DocumentError::NotFound));
+        let mut pages = [Reference {
+            number: 0,
+            generation: 0,
+        }; 4];
+        assert_eq!(
+            page_content(&pdf, &entries[..count], 0, &mut pages),
+            Ok((
+                Reference {
+                    number: 4,
+                    generation: 0
+                },
+                1
+            ))
+        );
+        assert_eq!(
+            page_content(&pdf, &entries[..count], 1, &mut pages),
+            Err(DocumentError::NotFound)
+        );
     }
     #[test]
     fn selects_requested_page_not_first_stream() {
@@ -151,16 +183,34 @@ mod tests {
         for off in offsets.iter().skip(1) {
             pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
         }
-        pdf.extend_from_slice(format!(
-            "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n"
-        ).as_bytes());
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n").as_bytes(),
+        );
         let mut entries = [Entry::default(); 8];
         let count = crate::xref::read_table(&pdf, &mut entries).unwrap();
-        let mut pages = [Reference { number: 0, generation: 0 }; 4];
-        assert_eq!(page_content(&pdf, &entries[..count], 0, &mut pages),
-            Ok((Reference { number: 4, generation: 0 }, 2)));
-        assert_eq!(page_content(&pdf, &entries[..count], 1, &mut pages),
-            Ok((Reference { number: 6, generation: 0 }, 2)));
+        let mut pages = [Reference {
+            number: 0,
+            generation: 0,
+        }; 4];
+        assert_eq!(
+            page_content(&pdf, &entries[..count], 0, &mut pages),
+            Ok((
+                Reference {
+                    number: 4,
+                    generation: 0
+                },
+                2
+            ))
+        );
+        assert_eq!(
+            page_content(&pdf, &entries[..count], 1, &mut pages),
+            Ok((
+                Reference {
+                    number: 6,
+                    generation: 0
+                },
+                2
+            ))
+        );
     }
-
 }

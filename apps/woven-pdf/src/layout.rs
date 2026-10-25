@@ -38,7 +38,10 @@ pub fn layout<'a>(
     let mut count = 0usize;
     interpret(content, |operation| {
         match operation {
-            Operation::BeginText => { x = 0.0; y = 0.0; }
+            Operation::BeginText => {
+                x = 0.0;
+                y = 0.0;
+            }
             Operation::SetFont { size, .. } => {
                 if !size.is_finite() || size <= 0.0 || size > 1024.0 {
                     return Err(ContentError::Malformed);
@@ -58,13 +61,18 @@ pub fn layout<'a>(
                     return Err(ContentError::Unsupported);
                 }
                 emit(GlyphRun {
-                    bytes, x, y: page_height - y, font_size,
-                }).map_err(|_| ContentError::Malformed)?;
+                    bytes,
+                    x,
+                    y: page_height - y,
+                    font_size,
+                })
+                .map_err(|_| ContentError::Malformed)?;
             }
             _ => {}
         }
         Ok(())
-    }).map_err(LayoutError::Content)
+    })
+    .map_err(LayoutError::Content)
 }
 
 #[cfg(test)]
@@ -73,19 +81,26 @@ mod tests {
     #[test]
     fn translates_simple_text_run() {
         let mut count = 0;
-        assert_eq!(layout(b"BT /F1 12 Tf 10 20 Td (Hello) Tj ET", 600.0, |run| {
-            count += 1;
-            assert_eq!(run.bytes, b"Hello");
-            assert_eq!((run.x, run.y, run.font_size), (10.0, 580.0, 12.0));
+        assert_eq!(
+            layout(b"BT /F1 12 Tf 10 20 Td (Hello) Tj ET", 600.0, |run| {
+                count += 1;
+                assert_eq!(run.bytes, b"Hello");
+                assert_eq!((run.x, run.y, run.font_size), (10.0, 580.0, 12.0));
+                Ok(())
+            }),
             Ok(())
-        }), Ok(()));
+        );
         assert_eq!(count, 1);
     }
     #[test]
     fn refuses_unsupported_and_invalid_input() {
-        assert_eq!(layout(b"0 0 m", 600.0, |_| Ok(())),
-            Err(LayoutError::Content(ContentError::Unsupported)));
-        assert_eq!(layout(b"", 0.0, |_| Ok(())),
-            Err(LayoutError::InvalidCoordinate));
+        assert_eq!(
+            layout(b"0 0 m", 600.0, |_| Ok(())),
+            Err(LayoutError::Content(ContentError::Unsupported))
+        );
+        assert_eq!(
+            layout(b"", 0.0, |_| Ok(())),
+            Err(LayoutError::InvalidCoordinate)
+        );
     }
 }

@@ -4,7 +4,9 @@
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 use libwoven::Args;
-use wovenhat_pdf::{extract_plain_text, inspect, parse_command, Command, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES};
+use wovenhat_pdf::{
+    extract_plain_text, inspect, parse_command, Command, MAX_DOCUMENT_BYTES, MAX_TEXT_BYTES,
+};
 
 mod gui;
 
@@ -37,7 +39,8 @@ fn run(command: Command<'_>) -> u64 {
     match command {
         Command::Help => {
             let _ = libwoven::print("WovenPDF 0.1: --info PATH | --text PATH\n");
-            let _ = libwoven::print("Only basic uncompressed PDF literal-text preview is supported.\n");
+            let _ =
+                libwoven::print("Only basic uncompressed PDF literal-text preview is supported.\n");
             0
         }
         Command::Invalid => {
@@ -45,7 +48,9 @@ fn run(command: Command<'_>) -> u64 {
             2
         }
         Command::Info(path) | Command::Text(path) => {
-            let Ok(name) = core::str::from_utf8(path) else { return 2 };
+            let Ok(name) = core::str::from_utf8(path) else {
+                return 2;
+            };
             let Ok(fd) = libwoven::open(name) else {
                 let _ = libwoven::print("WovenPDF: cannot open document\n");
                 return 2;
@@ -91,7 +96,9 @@ fn run(command: Command<'_>) -> u64 {
                     0
                 }
                 Err(_) => {
-                    let _ = libwoven::print("WovenPDF: text not available in supported uncompressed Tj subset\n");
+                    let _ = libwoven::print(
+                        "WovenPDF: text not available in supported uncompressed Tj subset\n",
+                    );
                     4
                 }
             }

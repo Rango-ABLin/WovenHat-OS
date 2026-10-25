@@ -6,8 +6,8 @@
 pub mod content;
 pub mod document;
 pub mod filters;
-pub mod lexer;
 pub mod layout;
+pub mod lexer;
 pub mod objects;
 pub mod pages;
 pub mod paint;
@@ -81,7 +81,11 @@ fn white(c: u8) -> bool {
     matches!(c, 0 | 9 | 10 | 12 | 13 | 32)
 }
 fn delimiter(c: u8) -> bool {
-    white(c) || matches!(c, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+    white(c)
+        || matches!(
+            c,
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
 }
 fn token_at(data: &[u8], pos: usize, token: &[u8]) -> bool {
     let end = pos.saturating_add(token.len());
@@ -124,8 +128,7 @@ pub fn extract_plain_text(data: &[u8], out: &mut [u8]) -> Result<usize, Error> {
         let is_unfiltered = match (dict_start, dict_end) {
             (Some(s), Some(e)) if s < e => {
                 let dict = &data[s..e];
-                !dict.windows(7).any(|w| w == b"/Filter")
-                    && !dict.windows(4).any(|w| w == b"/F  ")
+                !dict.windows(7).any(|w| w == b"/Filter") && !dict.windows(4).any(|w| w == b"/F  ")
             }
             _ => false,
         };
@@ -144,7 +147,9 @@ pub fn extract_plain_text(data: &[u8], out: &mut [u8]) -> Result<usize, Error> {
                     let c = data[j];
                     if c == b'\\' {
                         j += 1;
-                        if j >= end { break; }
+                        if j >= end {
+                            break;
+                        }
                         let mapped = match data[j] {
                             b'n' => b'\n',
                             b'r' => b'\r',
@@ -153,13 +158,22 @@ pub fn extract_plain_text(data: &[u8], out: &mut [u8]) -> Result<usize, Error> {
                             b'f' => 12,
                             x => x,
                         };
-                        if n < scratch.len() { scratch[n] = mapped; n += 1; }
+                        if n < scratch.len() {
+                            scratch[n] = mapped;
+                            n += 1;
+                        }
                     } else if c == b'(' {
                         level += 1;
-                        if n < scratch.len() { scratch[n] = c; n += 1; }
+                        if n < scratch.len() {
+                            scratch[n] = c;
+                            n += 1;
+                        }
                     } else if c == b')' {
                         level -= 1;
-                        if level > 0 && n < scratch.len() { scratch[n] = c; n += 1; }
+                        if level > 0 && n < scratch.len() {
+                            scratch[n] = c;
+                            n += 1;
+                        }
                     } else if n < scratch.len() {
                         scratch[n] = c;
                         n += 1;
@@ -167,9 +181,13 @@ pub fn extract_plain_text(data: &[u8], out: &mut [u8]) -> Result<usize, Error> {
                     j += 1;
                 }
                 if level == 0 {
-                    while j < end && white(data[j]) { j += 1; }
+                    while j < end && white(data[j]) {
+                        j += 1;
+                    }
                     if token_at(&data[start..end], j - start, b"Tj") && n > 0 {
-                        if used + n + 1 > out.len() { return Err(Error::OutputFull); }
+                        if used + n + 1 > out.len() {
+                            return Err(Error::OutputFull);
+                        }
                         out[used..used + n].copy_from_slice(&scratch[..n]);
                         used += n;
                         out[used] = b'\n';
@@ -181,7 +199,11 @@ pub fn extract_plain_text(data: &[u8], out: &mut [u8]) -> Result<usize, Error> {
         }
         pos = end + 9;
     }
-    if used == 0 { Err(Error::NoText) } else { Ok(used) }
+    if used == 0 {
+        Err(Error::NoText)
+    } else {
+        Ok(used)
+    }
 }
 
 #[cfg(test)]
@@ -218,7 +240,10 @@ mod tests {
     }
     #[test]
     fn commands_are_bounded() {
-        assert_eq!(parse_command(&[b"--text", b"/mnt/a.pdf"]), Command::Text(b"/mnt/a.pdf"));
+        assert_eq!(
+            parse_command(&[b"--text", b"/mnt/a.pdf"]),
+            Command::Text(b"/mnt/a.pdf")
+        );
         assert_eq!(parse_command(&[b"--text", &[b'x'; 256]]), Command::Invalid);
     }
 }

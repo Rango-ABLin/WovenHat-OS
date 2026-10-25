@@ -37,20 +37,30 @@ fn whitespace(b: u8) -> bool {
     matches!(b, 0 | 9 | 10 | 12 | 13 | 32)
 }
 fn delimiter(b: u8) -> bool {
-    whitespace(b) || matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+    whitespace(b)
+        || matches!(
+            b,
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
 }
 fn number_like(s: &[u8]) -> bool {
     !s.is_empty() && matches!(s[0], b'+' | b'-' | b'.' | b'0'..=b'9')
 }
 fn valid_real(s: &[u8]) -> bool {
     let mut i = 0;
-    if matches!(s.first(), Some(b'+' | b'-')) { i += 1; }
+    if matches!(s.first(), Some(b'+' | b'-')) {
+        i += 1;
+    }
     let mut digits = 0usize;
     let mut points = 0usize;
     for &b in &s[i..] {
-        if b.is_ascii_digit() { digits += 1; }
-        else if b == b'.' { points += 1; }
-        else { return false; }
+        if b.is_ascii_digit() {
+            digits += 1;
+        } else if b == b'.' {
+            points += 1;
+        } else {
+            return false;
+        }
     }
     digits > 0 && points <= 1
 }
@@ -60,7 +70,9 @@ impl<'a> Lexer<'a> {
         Self { input, offset: 0 }
     }
 
-    pub fn position(&self) -> usize { self.offset }
+    pub fn position(&self) -> usize {
+        self.offset
+    }
 
     fn skip_space(&mut self) {
         while self.offset < self.input.len() {
@@ -81,7 +93,9 @@ impl<'a> Lexer<'a> {
     fn scan_regular(&mut self, start: usize) -> Result<&'a [u8], LexError> {
         while self.offset < self.input.len() && !delimiter(self.input[self.offset]) {
             self.offset += 1;
-            if self.offset - start > MAX_TOKEN { return Err(LexError::TokenTooLong); }
+            if self.offset - start > MAX_TOKEN {
+                return Err(LexError::TokenTooLong);
+            }
         }
         Ok(&self.input[start..self.offset])
     }
@@ -89,7 +103,9 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Result<Option<Token<'a>>, LexError> {
         self.skip_space();
         let start = self.offset;
-        let Some(&b) = self.input.get(start) else { return Ok(None); };
+        let Some(&b) = self.input.get(start) else {
+            return Ok(None);
+        };
         self.offset += 1;
         let token = match b {
             b'[' => Token::ArrayStart,
@@ -105,10 +121,14 @@ impl<'a> Lexer<'a> {
             b'<' => {
                 let begin = self.offset;
                 while self.offset < self.input.len() && self.input[self.offset] != b'>' {
-                    if self.offset - begin > MAX_TOKEN { return Err(LexError::TokenTooLong); }
+                    if self.offset - begin > MAX_TOKEN {
+                        return Err(LexError::TokenTooLong);
+                    }
                     self.offset += 1;
                 }
-                if self.offset == self.input.len() { return Err(LexError::UnterminatedHex); }
+                if self.offset == self.input.len() {
+                    return Err(LexError::UnterminatedHex);
+                }
                 let bytes = &self.input[begin..self.offset];
                 self.offset += 1;
                 Token::HexString(bytes)
@@ -119,19 +139,25 @@ impl<'a> Lexer<'a> {
                 while self.offset < self.input.len() {
                     let c = self.input[self.offset];
                     self.offset += 1;
-                    if self.offset - begin > MAX_TOKEN { return Err(LexError::TokenTooLong); }
+                    if self.offset - begin > MAX_TOKEN {
+                        return Err(LexError::TokenTooLong);
+                    }
                     if c == b'\\' {
                         // Escape consumes the following raw character; escaped newlines
                         // and octal strings are decoded by a later semantic pass.
-                        if self.offset < self.input.len() { self.offset += 1; }
+                        if self.offset < self.input.len() {
+                            self.offset += 1;
+                        }
                     } else if c == b'(' {
                         nesting += 1;
-                        if nesting > MAX_NESTING { return Err(LexError::NestingLimit); }
+                        if nesting > MAX_NESTING {
+                            return Err(LexError::NestingLimit);
+                        }
                     } else if c == b')' {
                         nesting -= 1;
                         if nesting == 0 {
                             return Ok(Some(Token::LiteralString(
-                                &self.input[begin..self.offset - 1]
+                                &self.input[begin..self.offset - 1],
                             )));
                         }
                     }
@@ -150,7 +176,9 @@ impl<'a> Lexer<'a> {
                     self.offset += 1;
                     Token::Keyword(&self.input[start..self.offset])
                 } else if number_like(bytes) {
-                    if !valid_real(bytes) { return Err(LexError::InvalidNumber); }
+                    if !valid_real(bytes) {
+                        return Err(LexError::InvalidNumber);
+                    }
                     if !bytes.contains(&b'.') {
                         if let Ok(text) = str::from_utf8(bytes) {
                             if let Ok(n) = text.parse::<i64>() {
@@ -195,7 +223,10 @@ mod tests {
     #[test]
     fn retains_nested_and_escaped_literal_raw_bytes() {
         let mut lex = Lexer::new(br"(hello (world) \) end)");
-        assert_eq!(lex.next_token(), Ok(Some(Token::LiteralString(br"hello (world) \) end"))));
+        assert_eq!(
+            lex.next_token(),
+            Ok(Some(Token::LiteralString(br"hello (world) \) end")))
+        );
     }
 
     #[test]
@@ -207,9 +238,18 @@ mod tests {
 
     #[test]
     fn rejects_unterminated_or_invalid() {
-        assert_eq!(Lexer::new(b"(broken").next_token(), Err(LexError::UnterminatedString));
-        assert_eq!(Lexer::new(b"<A1").next_token(), Err(LexError::UnterminatedHex));
-        assert_eq!(Lexer::new(b"12a").next_token(), Err(LexError::InvalidNumber));
+        assert_eq!(
+            Lexer::new(b"(broken").next_token(),
+            Err(LexError::UnterminatedString)
+        );
+        assert_eq!(
+            Lexer::new(b"<A1").next_token(),
+            Err(LexError::UnterminatedHex)
+        );
+        assert_eq!(
+            Lexer::new(b"12a").next_token(),
+            Err(LexError::InvalidNumber)
+        );
     }
 
     #[test]

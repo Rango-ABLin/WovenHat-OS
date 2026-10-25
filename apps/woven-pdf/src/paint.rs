@@ -33,7 +33,9 @@ pub fn paint_text_preview<'a>(
     }
     let mut rejected = None;
     let result = layout(decoded_content, page_height, |run| {
-        if rejected.is_some() { return Err(LayoutError::InvalidCoordinate); }
+        if rejected.is_some() {
+            return Err(LayoutError::InvalidCoordinate);
+        }
         if !run.bytes.iter().all(|b| matches!(b, 0x20..=0x7e)) {
             rejected = Some(PaintError::NonAscii);
             return Err(LayoutError::InvalidCoordinate);
@@ -44,18 +46,29 @@ pub fn paint_text_preview<'a>(
         };
         let px = run.x * scale;
         let py = run.y * scale;
-        if !px.is_finite() || !py.is_finite() || px < 0.0 || py < 0.0
-            || px >= viewport_width as f32 || py >= viewport_height as f32 {
+        if !px.is_finite()
+            || !py.is_finite()
+            || px < 0.0
+            || py < 0.0
+            || px >= viewport_width as f32
+            || py >= viewport_height as f32
+        {
             rejected = Some(PaintError::OutsideViewport);
             return Err(LayoutError::InvalidCoordinate);
         }
-        if let Err(e) = draw(DrawText { text, x: px as i32, y: py as i32 }) {
+        if let Err(e) = draw(DrawText {
+            text,
+            x: px as i32,
+            y: py as i32,
+        }) {
             rejected = Some(e);
             return Err(LayoutError::InvalidCoordinate);
         }
         Ok(())
     });
-    if let Some(e) = rejected { return Err(e); }
+    if let Some(e) = rejected {
+        return Err(e);
+    }
     result.map_err(|_| PaintError::Layout)
 }
 
@@ -65,22 +78,29 @@ mod tests {
     #[test]
     fn produces_canvas_coordinates() {
         let mut rendered = 0;
-        assert_eq!(paint_text_preview(
-            b"BT /F1 12 Tf 10 20 Td (Hello) Tj ET",
-            100.0, 2.0, 300, 300,
-            |item| {
-                assert_eq!(item.text, "Hello");
-                assert_eq!((item.x, item.y), (20, 160));
-                rendered += 1;
-                Ok(())
-            },
-        ), Ok(()));
+        assert_eq!(
+            paint_text_preview(
+                b"BT /F1 12 Tf 10 20 Td (Hello) Tj ET",
+                100.0,
+                2.0,
+                300,
+                300,
+                |item| {
+                    assert_eq!(item.text, "Hello");
+                    assert_eq!((item.x, item.y), (20, 160));
+                    rendered += 1;
+                    Ok(())
+                },
+            ),
+            Ok(())
+        );
         assert_eq!(rendered, 1);
     }
     #[test]
     fn fails_closed_on_unsupported_bytes() {
-        assert_eq!(paint_text_preview(
-            b"BT (\xFF) Tj ET", 100.0, 1.0, 300, 300, |_| Ok(())
-        ), Err(PaintError::NonAscii));
+        assert_eq!(
+            paint_text_preview(b"BT (\xFF) Tj ET", 100.0, 1.0, 300, 300, |_| Ok(())),
+            Err(PaintError::NonAscii)
+        );
     }
 }

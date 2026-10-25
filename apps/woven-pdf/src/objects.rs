@@ -14,7 +14,9 @@ pub enum ObjectError {
 }
 
 impl From<LexError> for ObjectError {
-    fn from(value: LexError) -> Self { Self::Lex(value) }
+    fn from(value: LexError) -> Self {
+        Self::Lex(value)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,10 +47,17 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn resolve(&self, reference: Reference) -> Result<&'a [u8], ObjectError> {
-        let entry = self.entries.iter().find(|e| e.in_use
-            && e.object == reference.number && e.generation == reference.generation)
+        let entry = self
+            .entries
+            .iter()
+            .find(|e| {
+                e.in_use && e.object == reference.number && e.generation == reference.generation
+            })
             .ok_or(ObjectError::NotFound)?;
-        let slice = self.bytes.get(entry.offset..).ok_or(ObjectError::BadOffset)?;
+        let slice = self
+            .bytes
+            .get(entry.offset..)
+            .ok_or(ObjectError::BadOffset)?;
         let mut lexer = Lexer::new(slice);
         if unsigned(next(&mut lexer)?)? != reference.number
             || unsigned(next(&mut lexer)?)? != u32::from(reference.generation)
@@ -89,11 +98,15 @@ impl<'a> Resolver<'a> {
             match token {
                 Token::DictionaryStart | Token::ArrayStart => {
                     depth = depth.checked_add(1).ok_or(ObjectError::Unsupported)?;
-                    if depth > 32 { return Err(ObjectError::Unsupported); }
+                    if depth > 32 {
+                        return Err(ObjectError::Unsupported);
+                    }
                 }
                 Token::DictionaryEnd | Token::ArrayEnd => {
                     depth = depth.checked_sub(1).ok_or(ObjectError::InvalidHeader)?;
-                    if depth == 0 { break; }
+                    if depth == 0 {
+                        break;
+                    }
                 }
                 Token::Name(name) if depth == 1 && name == key => {
                     let number = unsigned(next(&mut lexer)?)?;
@@ -128,11 +141,15 @@ impl<'a> Resolver<'a> {
             match token {
                 Token::DictionaryStart | Token::ArrayStart => {
                     depth = depth.checked_add(1).ok_or(ObjectError::Unsupported)?;
-                    if depth > 32 { return Err(ObjectError::Unsupported); }
+                    if depth > 32 {
+                        return Err(ObjectError::Unsupported);
+                    }
                 }
                 Token::DictionaryEnd | Token::ArrayEnd => {
                     depth = depth.checked_sub(1).ok_or(ObjectError::InvalidHeader)?;
-                    if depth == 0 { break; }
+                    if depth == 0 {
+                        break;
+                    }
                 }
                 Token::Name(name) if depth == 1 && name == key => {
                     return match next(&mut lexer)? {
@@ -154,8 +171,20 @@ mod tests {
     const BODY: &[u8] = b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Extra << /Pages 99 0 R >> >>\nendobj\n2 0 obj\n<< /Type /Pages >>\nendobj\n";
 
     static ENTRIES: [Entry; 2] = [
-        Entry { object: 1, generation: 0, offset: 0, in_use: true },
-        Entry { object: 2, generation: 0, offset: b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Extra << /Pages 99 0 R >> >>\nendobj\n".len(), in_use: true },
+        Entry {
+            object: 1,
+            generation: 0,
+            offset: 0,
+            in_use: true,
+        },
+        Entry {
+            object: 2,
+            generation: 0,
+            offset:
+                b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Extra << /Pages 99 0 R >> >>\nendobj\n"
+                    .len(),
+            in_use: true,
+        },
     ];
 
     fn resolver() -> Resolver<'static> {
@@ -165,28 +194,60 @@ mod tests {
     #[test]
     fn resolves_catalog_reference() {
         let r = resolver();
-        let root = Reference { number: 1, generation: 0 };
+        let root = Reference {
+            number: 1,
+            generation: 0,
+        };
         assert_eq!(r.dictionary_name(root, b"Type"), Ok(&b"Catalog"[..]));
-        assert_eq!(r.dictionary_reference(root, b"Pages"),
-            Ok(Reference { number: 2, generation: 0 }));
+        assert_eq!(
+            r.dictionary_reference(root, b"Pages"),
+            Ok(Reference {
+                number: 2,
+                generation: 0
+            })
+        );
     }
 
     #[test]
     fn rejects_missing_object_and_bad_header() {
         let r = resolver();
-        assert!(matches!(r.resolve(Reference { number: 7, generation: 0 }),
-            Err(ObjectError::NotFound)));
-        let entries = [Entry { object: 1, generation: 0, offset: 3, in_use: true }];
+        assert!(matches!(
+            r.resolve(Reference {
+                number: 7,
+                generation: 0
+            }),
+            Err(ObjectError::NotFound)
+        ));
+        let entries = [Entry {
+            object: 1,
+            generation: 0,
+            offset: 3,
+            in_use: true,
+        }];
         let corrupt = Resolver::new(BODY, &entries);
-        assert!(corrupt.resolve(Reference { number: 1, generation: 0 }).is_err());
+        assert!(corrupt
+            .resolve(Reference {
+                number: 1,
+                generation: 0
+            })
+            .is_err());
     }
 
     #[test]
     fn embedded_endobj_string_is_not_terminator() {
         let data = b"1 0 obj (endobj) /Title (ok) endobj";
-        let entries = [Entry { object: 1, generation: 0, offset: 0, in_use: true }];
+        let entries = [Entry {
+            object: 1,
+            generation: 0,
+            offset: 0,
+            in_use: true,
+        }];
         let resolved = Resolver::new(data, &entries)
-            .resolve(Reference { number: 1, generation: 0 }).unwrap();
+            .resolve(Reference {
+                number: 1,
+                generation: 0,
+            })
+            .unwrap();
         assert!(resolved.ends_with(b"(ok)"));
     }
 }

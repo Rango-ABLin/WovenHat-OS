@@ -49,15 +49,23 @@ pub fn interpret<'a>(
             let action = match op {
                 b"q" if count == 0 => {
                     state_depth += 1;
-                    if state_depth > 16 { return Err(ContentError::Unsupported); }
+                    if state_depth > 16 {
+                        return Err(ContentError::Unsupported);
+                    }
                     Some(Operation::Save)
                 }
                 b"Q" if count == 0 && state_depth > 0 => {
                     state_depth -= 1;
                     Some(Operation::Restore)
                 }
-                b"BT" if count == 0 && !text => { text = true; Some(Operation::BeginText) }
-                b"ET" if count == 0 && text => { text = false; Some(Operation::EndText) }
+                b"BT" if count == 0 && !text => {
+                    text = true;
+                    Some(Operation::BeginText)
+                }
+                b"ET" if count == 0 && text => {
+                    text = false;
+                    Some(Operation::EndText)
+                }
                 b"Tf" if count == 2 && text => {
                     let name = match operands[0] {
                         Some(Token::Name(name)) => name,
@@ -79,15 +87,21 @@ pub fn interpret<'a>(
                 }
                 _ => return Err(ContentError::Unsupported),
             };
-            if let Some(action) = action { emit(action)?; }
+            if let Some(action) = action {
+                emit(action)?;
+            }
             count = 0;
         } else {
-            if count == operands.len() { return Err(ContentError::TooManyOperands); }
+            if count == operands.len() {
+                return Err(ContentError::TooManyOperands);
+            }
             operands[count] = Some(token);
             count += 1;
         }
     }
-    if count != 0 || text || state_depth != 0 { return Err(ContentError::Malformed); }
+    if count != 0 || text || state_depth != 0 {
+        return Err(ContentError::Malformed);
+    }
     Ok(())
 }
 
@@ -98,7 +112,9 @@ mod tests {
     fn reads_simple_text_instructions() {
         let mut seen = 0;
         let result = interpret(b"q BT /F1 12 Tf 10 20 Td (Hello) Tj ET Q", |op| {
-            if let Operation::ShowText(b"Hello") = op { seen += 1; }
+            if let Operation::ShowText(b"Hello") = op {
+                seen += 1;
+            }
             Ok(())
         });
         assert_eq!(result, Ok(()));
@@ -106,8 +122,14 @@ mod tests {
     }
     #[test]
     fn refuses_unimplemented_graphics_and_unbalanced_state() {
-        assert_eq!(interpret(b"10 10 m", |_| Ok(())), Err(ContentError::Unsupported));
-        assert_eq!(interpret(b"BT (hello) Tj", |_| Ok(())), Err(ContentError::Malformed));
+        assert_eq!(
+            interpret(b"10 10 m", |_| Ok(())),
+            Err(ContentError::Unsupported)
+        );
+        assert_eq!(
+            interpret(b"BT (hello) Tj", |_| Ok(())),
+            Err(ContentError::Malformed)
+        );
         assert_eq!(interpret(b"Q", |_| Ok(())), Err(ContentError::Unsupported));
     }
 }

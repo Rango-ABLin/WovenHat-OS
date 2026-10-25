@@ -12,7 +12,9 @@ pub enum PageError {
     Cycle,
 }
 impl From<ObjectError> for PageError {
-    fn from(e: ObjectError) -> Self { Self::Object(e) }
+    fn from(e: ObjectError) -> Self {
+        Self::Object(e)
+    }
 }
 const MAX_DEPTH: usize = 24;
 
@@ -31,17 +33,25 @@ pub fn collect_pages(
         stack: &mut [Reference; MAX_DEPTH],
         depth: usize,
     ) -> Result<(), PageError> {
-        if depth == MAX_DEPTH { return Err(PageError::Depth); }
-        if stack[..depth].contains(&node) { return Err(PageError::Cycle); }
+        if depth == MAX_DEPTH {
+            return Err(PageError::Depth);
+        }
+        if stack[..depth].contains(&node) {
+            return Err(PageError::Cycle);
+        }
         stack[depth] = node;
         let typ = resolver.dictionary_name(node, b"Type")?;
         if typ == b"Page" {
-            if *count >= output.len() { return Err(PageError::Capacity); }
+            if *count >= output.len() {
+                return Err(PageError::Capacity);
+            }
             output[*count] = node;
             *count += 1;
             return Ok(());
         }
-        if typ != b"Pages" { return Err(PageError::Malformed); }
+        if typ != b"Pages" {
+            return Err(PageError::Malformed);
+        }
         let body = resolver.resolve(node)?;
         let mut lex = Lexer::new(body);
         if lex.next_token().map_err(ObjectError::from)? != Some(Token::DictionaryStart) {
@@ -53,11 +63,15 @@ pub fn collect_pages(
             match tok {
                 Token::DictionaryStart | Token::ArrayStart => {
                     nesting += 1;
-                    if nesting > MAX_DEPTH { return Err(PageError::Depth); }
+                    if nesting > MAX_DEPTH {
+                        return Err(PageError::Depth);
+                    }
                 }
                 Token::DictionaryEnd | Token::ArrayEnd => {
                     nesting = nesting.checked_sub(1).ok_or(PageError::Malformed)?;
-                    if nesting == 0 { break; }
+                    if nesting == 0 {
+                        break;
+                    }
                 }
                 Token::Name(name) if nesting == 1 && name == b"Kids" => {
                     if lex.next_token().map_err(ObjectError::from)? != Some(Token::ArrayStart) {
@@ -69,24 +83,43 @@ pub fn collect_pages(
                 _ => {}
             }
         }
-        let Some(start) = kids else { return Err(PageError::Malformed) };
+        let Some(start) = kids else {
+            return Err(PageError::Malformed);
+        };
         let mut children = Lexer::new(&body[start..]);
         loop {
             let next = children.next_token().map_err(ObjectError::from)?;
-            if next == Some(Token::ArrayEnd) { break; }
-            let Some(Token::Integer(num)) = next else { return Err(PageError::Malformed) };
+            if next == Some(Token::ArrayEnd) {
+                break;
+            }
+            let Some(Token::Integer(num)) = next else {
+                return Err(PageError::Malformed);
+            };
             let Some(Token::Integer(generation)) =
-                children.next_token().map_err(ObjectError::from)? else { return Err(PageError::Malformed) };
+                children.next_token().map_err(ObjectError::from)?
+            else {
+                return Err(PageError::Malformed);
+            };
             if children.next_token().map_err(ObjectError::from)? != Some(Token::Keyword(b"R")) {
                 return Err(PageError::Malformed);
             }
             let number = u32::try_from(num).map_err(|_| PageError::Malformed)?;
             let generation = u16::try_from(generation).map_err(|_| PageError::Malformed)?;
-            walk(resolver, Reference { number, generation }, output, count, stack, depth + 1)?;
+            walk(
+                resolver,
+                Reference { number, generation },
+                output,
+                count,
+                stack,
+                depth + 1,
+            )?;
         }
         Ok(())
     }
-    let mut stack = [Reference { number: 0, generation: 0 }; MAX_DEPTH];
+    let mut stack = [Reference {
+        number: 0,
+        generation: 0,
+    }; MAX_DEPTH];
     let mut count = 0;
     walk(resolver, pages_root, output, &mut count, &mut stack, 0)?;
     Ok(count)
@@ -107,13 +140,41 @@ mod tests {
         data.extend_from_slice(obj2);
         data.extend_from_slice(obj3);
         let entries = [
-            Entry { object: 1, generation: 0, offset: 0, in_use: true },
-            Entry { object: 2, generation: 0, offset: obj1.len(), in_use: true },
-            Entry { object: 3, generation: 0, offset: obj1.len() + obj2.len(), in_use: true },
+            Entry {
+                object: 1,
+                generation: 0,
+                offset: 0,
+                in_use: true,
+            },
+            Entry {
+                object: 2,
+                generation: 0,
+                offset: obj1.len(),
+                in_use: true,
+            },
+            Entry {
+                object: 3,
+                generation: 0,
+                offset: obj1.len() + obj2.len(),
+                in_use: true,
+            },
         ];
         let resolver = Resolver::new(&data, &entries);
-        let mut pages = [Reference { number: 0, generation: 0 }; 4];
-        assert_eq!(collect_pages(&resolver, Reference { number: 1, generation: 0 }, &mut pages), Ok(2));
+        let mut pages = [Reference {
+            number: 0,
+            generation: 0,
+        }; 4];
+        assert_eq!(
+            collect_pages(
+                &resolver,
+                Reference {
+                    number: 1,
+                    generation: 0
+                },
+                &mut pages
+            ),
+            Ok(2)
+        );
         assert_eq!(pages[0].number, 2);
         assert_eq!(pages[1].number, 3);
     }
@@ -121,10 +182,27 @@ mod tests {
     #[test]
     fn detects_cycle() {
         let data = b"1 0 obj << /Type /Pages /Kids [1 0 R] /Count 1 >> endobj";
-        let entries = [Entry { object: 1, generation: 0, offset: 0, in_use: true }];
+        let entries = [Entry {
+            object: 1,
+            generation: 0,
+            offset: 0,
+            in_use: true,
+        }];
         let resolver = Resolver::new(data, &entries);
-        let mut pages = [Reference { number: 0, generation: 0 }; 2];
-        assert_eq!(collect_pages(&resolver, Reference { number: 1, generation: 0 }, &mut pages),
-            Err(PageError::Cycle));
+        let mut pages = [Reference {
+            number: 0,
+            generation: 0,
+        }; 2];
+        assert_eq!(
+            collect_pages(
+                &resolver,
+                Reference {
+                    number: 1,
+                    generation: 0
+                },
+                &mut pages
+            ),
+            Err(PageError::Cycle)
+        );
     }
 }
