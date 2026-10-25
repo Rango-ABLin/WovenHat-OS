@@ -246,6 +246,127 @@ pub enum ImageError {
     Malformed,
 }
 
+/// Validated PCM WAVE metadata. The data range points into the caller's
+/// encoded buffer; no sample storage is allocated or retained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WavMetadata {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub data_offset: u32,
+    pub data_len: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WavError {
+    Truncated,
+    Unsupported,
+    Malformed,
+}
+
+/// Parse a RIFF/WAVE PCM container without decoding or copying its samples.
+///
+/// Every chunk length is checked against both the RIFF extent and the input
+/// slice. Only integer PCM with byte-aligned 8/16/24/32-bit samples is
+/// accepted, and the data chunk must contain complete interleaved frames.
+pub fn parse_wav_pcm(bytes: &[u8]) -> Result<WavMetadata, WavError> {
+    if bytes.len() < 12 {
+        return Err(WavError::Truncated);
+    }
+    if &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(WavError::Unsupported);
+    }
+    let riff_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let riff_end = 8usize.checked_add(riff_len).ok_or(WavError::Malformed)?;
+    if riff_end > bytes.len() || riff_end < 12 {
+        return Err(WavError::Truncated);
+    }
+    let mut cursor = 12usize;
+    let mut format = None;
+    let mut data = None;
+    while cursor < riff_end {
+        if riff_end - cursor < 8 {
+            return Err(WavError::Truncated);
+        }
+        let chunk_len =
+            u32::from_le_bytes(bytes[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
+        let chunk_start = cursor.checked_add(8).ok_or(WavError::Malformed)?;
+        let chunk_end = chunk_start
+            .checked_add(chunk_len)
+            .ok_or(WavError::Malformed)?;
+        if chunk_end > riff_end {
+            return Err(WavError::Truncated);
+        }
+        match &bytes[cursor..cursor + 4] {
+            b"fmt " => {
+                if chunk_len < 16 || format.is_some() {
+                    return Err(WavError::Malformed);
+                }
+                let audio_format =
+                    u16::from_le_bytes(bytes[chunk_start..chunk_start + 2].try_into().unwrap());
+                if audio_format != 1 {
+                    return Err(WavError::Unsupported);
+                }
+                let channels =
+                    u16::from_le_bytes(bytes[chunk_start + 2..chunk_start + 4].try_into().unwrap());
+                let sample_rate =
+                    u32::from_le_bytes(bytes[chunk_start + 4..chunk_start + 8].try_into().unwrap());
+                let byte_rate = u32::from_le_bytes(
+                    bytes[chunk_start + 8..chunk_start + 12].try_into().unwrap(),
+                );
+                let block_align = u16::from_le_bytes(
+                    bytes[chunk_start + 12..chunk_start + 14]
+                        .try_into()
+                        .unwrap(),
+                );
+                let bits_per_sample = u16::from_le_bytes(
+                    bytes[chunk_start + 14..chunk_start + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                if channels == 0
+                    || sample_rate == 0
+                    || !matches!(bits_per_sample, 8 | 16 | 24 | 32)
+                    || bits_per_sample % 8 != 0
+                {
+                    return Err(WavError::Malformed);
+                }
+                let expected_align = channels
+                    .checked_mul(bits_per_sample / 8)
+                    .ok_or(WavError::Malformed)?;
+                let expected_rate = sample_rate
+                    .checked_mul(u32::from(expected_align))
+                    .ok_or(WavError::Malformed)?;
+                if block_align != expected_align || byte_rate != expected_rate {
+                    return Err(WavError::Malformed);
+                }
+                format = Some((sample_rate, channels, bits_per_sample, block_align));
+            }
+            b"data" if data.is_none() => {
+                data = Some((chunk_start, chunk_len));
+            }
+            _ => {}
+        }
+        cursor = chunk_end + (chunk_len & 1);
+        if cursor > riff_end {
+            return Err(WavError::Truncated);
+        }
+    }
+    let (sample_rate, channels, bits_per_sample, block_align) =
+        format.ok_or(WavError::Malformed)?;
+    let (data_offset, data_len) = data.ok_or(WavError::Malformed)?;
+    if data_len == 0 || data_len % usize::from(block_align) != 0 {
+        return Err(WavError::Malformed);
+    }
+    Ok(WavMetadata {
+        sample_rate,
+        channels,
+        bits_per_sample,
+        data_offset: u32::try_from(data_offset).map_err(|_| WavError::Malformed)?,
+        data_len: u32::try_from(data_len).map_err(|_| WavError::Malformed)?,
+    })
+}
+
 const MAX_DIMENSION: u32 = 8192;
 pub const MAX_PIXELS: usize = 16 * 1024 * 1024;
 
@@ -741,8 +862,8 @@ pub fn decode_gif_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, decode_bmp_rgba,
-        decode_gif_rgba, parse_image_header,
+        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, WavError,
+        decode_bmp_rgba, decode_gif_rgba, parse_image_header, parse_wav_pcm,
     };
 
     #[test]
@@ -761,6 +882,43 @@ mod tests {
         bmp[18..22].copy_from_slice(&32i32.to_le_bytes());
         bmp[22..26].copy_from_slice(&(-24i32).to_le_bytes());
         assert_eq!(parse_image_header(&bmp).unwrap().height, 24);
+    }
+
+    #[test]
+    fn parses_aligned_pcm_wave_chunks_without_copying_samples() {
+        let mut wav = [0u8; 48];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[4..8].copy_from_slice(&40u32.to_le_bytes());
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[20..22].copy_from_slice(&1u16.to_le_bytes());
+        wav[22..24].copy_from_slice(&2u16.to_le_bytes());
+        wav[24..28].copy_from_slice(&48_000u32.to_le_bytes());
+        wav[28..32].copy_from_slice(&192_000u32.to_le_bytes());
+        wav[32..34].copy_from_slice(&4u16.to_le_bytes());
+        wav[34..36].copy_from_slice(&16u16.to_le_bytes());
+        wav[36..40].copy_from_slice(b"data");
+        wav[40..44].copy_from_slice(&4u32.to_le_bytes());
+        wav[44..48].copy_from_slice(&[0, 0, 0, 0]);
+        let metadata = parse_wav_pcm(&wav).unwrap();
+        assert_eq!(metadata.sample_rate, 48_000);
+        assert_eq!(metadata.channels, 2);
+        assert_eq!(metadata.data_offset, 44);
+        assert_eq!(metadata.data_len, 4);
+    }
+
+    #[test]
+    fn rejects_wave_format_mismatch_and_truncated_chunks() {
+        assert_eq!(parse_wav_pcm(b"RIFFxxxxWAVE"), Err(WavError::Truncated));
+        let mut wav = [0u8; 44];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[4..8].copy_from_slice(&36u32.to_le_bytes());
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[20..22].copy_from_slice(&3u16.to_le_bytes());
+        assert_eq!(parse_wav_pcm(&wav), Err(WavError::Unsupported));
     }
 
     #[test]
