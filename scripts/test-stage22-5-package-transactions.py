@@ -60,25 +60,55 @@ def main() -> int:
         env=build_env,
         check=True,
     )
+    # Keep host packager artifacts isolated from the WAPP producer, and
+    # preserve stderr plus return code when the native executable crashes.
+    package_env = dict(build_env)
+    package_env["CARGO_TARGET_DIR"] = str(root / "target" / "wpkg-packager")
+    package_env["RUST_BACKTRACE"] = "full"
+    manifest = str(root / "tools" / "wpkg-packager" / "Cargo.toml")
     subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--manifest-path",
-            str(root / "tools" / "wpkg-packager" / "Cargo.toml"),
-            "--",
-            str(elf),
-            str(fixture),
-            "--name",
-            "fixture",
-            "--version",
-            "1",
-        ],
+        ["cargo", "build", "--manifest-path", manifest],
         cwd=root,
-        env=build_env,
+        env=package_env,
         check=True,
     )
+    host_binary = Path(package_env["CARGO_TARGET_DIR"]) / "debug" / (
+        "wovenhat-wpkg-packager.exe" if os.name == "nt" else "wovenhat-wpkg-packager"
+    )
+    packager_command = [
+        str(host_binary),
+        str(elf),
+        str(fixture),
+        "--name",
+        "fixture",
+        "--version",
+        "1",
+    ]
+    diagnostic_dir = root / "audit-artifacts" / "stage22.5-packager"
+    diagnostic_dir.mkdir(parents=True, exist_ok=True)
+    with (diagnostic_dir / "packager.log").open("w") as log:
+        packager = subprocess.run(
+            packager_command,
+            cwd=root,
+            env=package_env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    if packager.returncode != 0:
+        print(
+            f"WPKG packager exited {packager.returncode}. "
+            f"Diagnostic log: {diagnostic_dir / 'packager.log'}",
+            file=sys.stderr,
+        )
+        print(
+            (diagnostic_dir / "packager.log").read_text(errors="replace")[-8000:],
+            file=sys.stderr,
+        )
+        return 1
+    if not fixture.is_file() or fixture.stat().st_size == 0:
+        print("WPKG packager returned success without a fixture", file=sys.stderr)
+        return 1
     build_env["WOVENHAT_PACKAGE_IMAGE"] = str(broker_image)
     build_env["WOVENHAT_PACKAGE_FIXTURE"] = str(fixture)
     image = Path(
