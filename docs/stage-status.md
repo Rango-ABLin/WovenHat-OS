@@ -15,6 +15,9 @@ The existing guest font-coverage gate passed at 1/2/4 CPUs with evidence in
 close the Stage 05 multilingual/high-DPI acceptance gate.
 The host typography suite also includes deterministic 4x outline raster
 coverage and non-BMP cmap12 assertions.
+An OFL Noto Sans variable-font fixture is bundled and its Latin/Greek/Cyrillic
+cmap and metrics validate; complex variable outlines remain outside the
+bounded raster decoder, so Stage 05 is still not accepted.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 

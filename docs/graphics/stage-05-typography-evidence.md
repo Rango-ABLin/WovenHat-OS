@@ -20,6 +20,13 @@ bounds. The cmap12 fixture verifies a non-BMP scalar maps to a glyph and keeps
 its advance metric; GSUB/GPOS, RTL, wrapping, fallback, and outline-render
 tests remain in the same suite.
 
+`assets/fonts/NotoSans[wdth,wght].ttf` is bundled under the SIL Open Font
+License with `assets/fonts/OFL.txt`. The real font validates through the
+TrueType boundary and confirms Latin, Greek, and Cyrillic cmap/advance
+coverage. Its variable-font outlines are not yet accepted by the bounded
+outline decoder for raster output, so this does not claim bundled-font
+rasterization.
+
 `libwoven::graphics::TextInputState` is the bounded input contract for
 controls: it stores at most 512 UTF-8 bytes, keeps caret and selection offsets
 on scalar boundaries, and supports insertion, deletion, backspace, and
@@ -27,7 +34,7 @@ selection-aware left/right movement without allocation.
 
 Validation completed:
 
-- `cargo test -p libwoven --quiet`: 148 passed, including the high-DPI raster
+- `cargo test -p libwoven --quiet`: 149 passed, including the high-DPI raster
   and non-BMP cmap fixtures.
 - `cargo clippy -p libwoven --all-targets -- -D warnings`: passed.
 - `cargo fmt --package libwoven -- --check`: passed.

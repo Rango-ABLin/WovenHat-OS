@@ -15330,6 +15330,37 @@ mod tests {
     }
 
     #[test]
+    fn wovengraphics_bundled_ofl_font_renders_multilingual_high_dpi_text() {
+        use crate::graphics::TrueTypeFace;
+
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../assets/fonts/NotoSans[wdth,wght].ttf"
+        ));
+        let face = TrueTypeFace::from_bytes(bytes).expect("bundled OFL font must validate");
+        for character in "WovenHat Ελληνικά Кириллица".chars() {
+            if !character.is_whitespace() {
+                assert!(
+                    face.glyph_index(character).is_some(),
+                    "missing {character:?}"
+                );
+                assert!(
+                    face.advance_width(character).is_some(),
+                    "no advance {character:?}"
+                );
+            }
+        }
+        assert!(bytes.len() > 1_000_000);
+        assert!(face.units_per_em() >= 1_000);
+        assert!(face.glyph_index('W').is_some());
+        assert!(face.glyph_index('Ω').is_some());
+        assert!(face.glyph_index('Ж').is_some());
+        assert!(face.advance_width('W').is_some());
+        assert!(face.advance_width('Ω').is_some());
+        assert!(face.advance_width('Ж').is_some());
+    }
+
+    #[test]
     fn wovengraphics_gsub_alternate_subtable_selects_first_bounded_alternate() {
         let mut bytes = [0u8; 26];
         let put16 = |bytes: &mut [u8], offset: usize, value: u16| {
