@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "identity": "WovenHat OS",
+  "spacing_px": [
+    0,
+    4,
+    8,
+    12,
+    16,
+    24,
+    32,
+    48,
+    64
+  ],
+  "radii_px": {
+    "sm": 6,
+    "md": 10,
+    "lg": 16,
+    "window": 18
+  },
+  "type_scale_px": {
+    "caption": 12,
+    "body": 14,
+    "subtitle": 18,
+    "heading": 24,
+    "display": 34
+  },
+  "motion_ms": {
+    "fast": 100,
+    "normal": 180,
+    "slow": 280
+  },
+  "themes": {
+    "dark": {
+      "background": "#101722",
+      "surface": "#1A2635",
+      "raised": "#253449",
+      "text": "#F1F6FC",
+      "muted": "#A8B9CE",
+      "accent": "#60B9E8",
+      "border": "#344860",
+      "danger": "#F27878"
+    },
+    "light": {
+      "background": "#EDF2F7",
+      "surface": "#FFFFFF",
+      "raised": "#E4EDF6",
+      "text": "#172331",
+      "muted": "#52667B",
+      "accent": "#136F9F",
+      "border": "#CCD8E4",
+      "danger": "#B62E3B"
+    }
+  }
+}
