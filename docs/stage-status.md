@@ -13,6 +13,8 @@ QEMU evidence, and complete bidi/script and IME integration. See
 The existing guest font-coverage gate passed at 1/2/4 CPUs with evidence in
 `audit-artifacts/stage17.1-{1,2,4}cpu-*`; that gate is ASCII-only and does not
 close the Stage 05 multilingual/high-DPI acceptance gate.
+The host typography suite also includes deterministic 4x outline raster
+coverage and non-BMP cmap12 assertions.
 
 ## Graphics roadmap Stage 04 raster/vector acceptance - 2026-10-25
 

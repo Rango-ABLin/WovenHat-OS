@@ -6190,3 +6190,5 @@ integration. Claude should review the lifetime/cache invariants before this
 stage is accepted.
 The existing guest font coverage gate also passed at 1/2/4 CPUs, but it only
 proves printable-ASCII kernel coverage; it is not Stage 05 acceptance.
+The host suite also asserts bounded 4x outline raster coverage and a non-BMP
+cmap12 mapping/advance fixture.

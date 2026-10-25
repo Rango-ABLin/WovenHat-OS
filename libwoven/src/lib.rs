@@ -15139,6 +15139,24 @@ mod tests {
             );
         }
         assert!(pixels.iter().any(|pixel| *pixel != 0));
+        let mut high_dpi_pixels = [0u32; 80 * 80];
+        {
+            let mut canvas = Canvas::new(&mut high_dpi_pixels, 0, 0, 80, 80).unwrap();
+            let mut renderer = crate::graphics::Renderer::new(&mut canvas);
+            assert_eq!(
+                face.render_glyph(
+                    'A',
+                    crate::graphics::Point::new(8, 72),
+                    400,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+        }
+        let high_dpi_coverage = high_dpi_pixels.iter().filter(|pixel| **pixel != 0).count();
+        assert!(high_dpi_coverage > 100 && high_dpi_coverage < 2_500);
         let mut placements = [crate::graphics::GlyphPlacement {
             character: '\0',
             origin: crate::graphics::Point::new(0, 0),
