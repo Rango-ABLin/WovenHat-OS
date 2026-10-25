@@ -31,6 +31,7 @@ pub mod ai_monitor;
 pub mod ai_provider;
 pub mod browser;
 pub mod i18n;
+pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
 pub mod media;
