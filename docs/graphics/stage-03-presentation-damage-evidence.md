@@ -1,6 +1,6 @@
 # Buffered presentation and damage tracking — Stage 03 evidence
 
-Status: **PARTIAL / SUB-GATE GREEN**  
+Status: **ACCEPTED for software/UEFI/QEMU scope**
 Date: 2026-10-25
 
 `kernel/src/display.rs` provides bounded off-screen surfaces, checked geometry,
@@ -20,8 +20,13 @@ mailbox registration, compositor sleep-on-damage, damage-only copy,
 undeclared-region protection, clean exits, and lease release. The full desktop
 qualification also passed at 1/2/4 CPUs in the Stage 00 evidence directories.
 
-The ownership, bounds, damage, and SMP sub-gates are green. Stage 03 remains
-**partial** until dedicated frame-pacing, repeated-buffer-reuse, overflow, and
-flicker/stress evidence is recorded. No triple-buffering or physical scanout
-guarantee is claimed.
+The ownership, bounds, damage, and SMP sub-gates passed. The real QEMU
+scaling/pacing gate also passed serially at 1/2/4 CPUs:
+
+- `target/hello-gui-scaled-1cpu`
+- `target/hello-gui-scaled-2cpu`
+- `target/hello-gui-scaled-4cpu`
+
+Stage 03 is **accepted for the software/UEFI/QEMU scope**. No triple-buffering
+or physical scanout guarantee is claimed.
 

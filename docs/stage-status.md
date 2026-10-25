@@ -1,5 +1,11 @@
 # Stage status
 
+## Graphics roadmap Stage 03 accepted - 2026-10-25
+
+Stage 03 is accepted for software/UEFI/QEMU scope. Damage/ownership and
+scaling/frame-pacing gates passed at 1/2/4 CPUs; evidence is recorded in
+`docs/graphics/stage-03-presentation-damage-evidence.md`.
+
 ## Graphics roadmap Stage 02 accepted - 2026-10-25
 
 The supported-QEMU Stage 02 gate is accepted in

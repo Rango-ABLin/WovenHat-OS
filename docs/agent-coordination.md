@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 03 accepted for software/QEMU scope (2026-10-25)
+
+Damage/ownership acceptance and the real QEMU scaling/frame-pacing gate passed
+serially at 1/2/4 CPUs. Stage 03 is accepted for the current software,
+UEFI-framebuffer, and QEMU scope; physical scanout and triple-buffering are not
+claimed.
+
 ## Codex - graphics roadmap Stage 02 accepted for supported QEMU modes (2026-10-25)
 
 The VirtIO single-output and two-head scanout matrices passed at 1/2/4 CPUs.
