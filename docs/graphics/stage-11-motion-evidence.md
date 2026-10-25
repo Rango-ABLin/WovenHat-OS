@@ -30,6 +30,11 @@ Stage 20.7 observed monotonic opacity sequences including
 exit 33. Warning-denying freestanding kernel Clippy passed for the affected
 `stage20-7-test` feature.
 
+The animation gate also injects neutral PS/2 pointer packets throughout the
+fade. It delivered 108, 114, and 135 packets on the 4-, 2-, and 1-CPU runs
+respectively while still observing multiple intermediate opacities and a
+fully settled frame.
+
 Evidence is retained under:
 
 - `target/hello-gui-scaled-{1,2,4}cpu`
@@ -49,7 +54,6 @@ pass.
 ## Boundary
 
 This accepts the motion/pacing and Quick Settings accessibility runtime slices
-only. A complete Stage 11 claim
-still requires the desktop screenshot/theme matrix, reduced-motion interaction
-coverage through the production settings path, animation-starvation coverage
-under sustained input, and low-power runtime evidence.
+only. A complete Stage 11 claim still requires the desktop screenshot/theme
+matrix and low-power runtime evidence; the sustained-input starvation slice is
+now covered by the Stage 20.7 matrix above.

@@ -51,7 +51,7 @@ the next mandatory stage is accepted.
 | 08 | Secure userspace graphics surfaces and IPC | PARTIAL | Graphics ABI and userspace graphics boundaries exist; full roadmap isolation and IPC acceptance is not current. |
 | 09 | Compositor and scheduler | PARTIAL | `kernel/src/compositor.rs` exists; complete scheduling, damage, latency, and stress evidence is missing. |
 | 10 | Window manager, input, accessibility | PARTIAL | Shell/input and bounded UI controls exist; full window management and accessibility acceptance is not complete. |
-| 11 | Tokens, theming, motion | PARTIAL | `libwoven::ui::Theme`/`DesignTokens` exist; Stage 19.14 pacing, Stage 20.7 spring animation, and Stage 20.10 Quick Settings accessibility slices now pass on 1/2/4 CPUs. Screenshot/theme, starvation, and low-power qualification remain open. |
+| 11 | Tokens, theming, motion | PARTIAL | `libwoven::ui::Theme`/`DesignTokens` exist; Stage 19.14 pacing, Stage 20.7 spring animation with sustained-input coverage, and Stage 20.10 Quick Settings accessibility slices now pass on 1/2/4 CPUs. Desktop screenshot/theme and low-power qualification remain open. |
 | 12 | Widget framework and responsive layouts | PARTIAL | Shared bounded controls are implemented and tested on host; full responsive layout and QEMU acceptance is not complete. |
 | 13 | Desktop shell and boot-to-desktop | PARTIAL | `kernel/src/shell.rs` and desktop harnesses exist; current desktop qualification timeout prevents acceptance. |
 | 14 | VirtIO GPU 2D/QEMU | PARTIAL | `kernel/src/virtio_gpu.rs` exists; current end-to-end VirtIO GPU runtime acceptance is not green. |

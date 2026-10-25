@@ -6462,6 +6462,13 @@ CPUs with exit 33; warning-denying freestanding kernel Clippy passed for
 `stage20-10-test`. Full Stage 11 screenshot/theme, starvation, and low-power
 evidence remains open.
 
+# Codex - graphics Stage 11 animation starvation slice (2026-10-25)
+
+Strengthened Stage 20.7 with sustained neutral PS/2 pointer traffic during the
+spring fade. The gate passed on 1/2/4 CPUs with monotonic intermediate samples,
+settling, and teardown; warning-denying freestanding kernel Clippy passed.
+Screenshot/theme and low-power evidence remain open.
+
 # Codex - graphics Stage 11 Reduced Motion interaction closure (2026-10-25)
 
 Strengthened Stage 20.10 so it clicks the production Reduced Motion row and

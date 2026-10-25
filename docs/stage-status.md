@@ -20,6 +20,10 @@ checks independent of wallpaper/projection geometry. Warning-denying freestandin
 `docs/graphics/stage-11-motion-evidence.md`; full Stage 11 screenshot/theme,
 starvation, and low-power acceptance remains open.
 
+The Stage 20.7 matrix now also injects neutral pointer packets throughout the
+fade and passes its sustained-input starvation check on 1/2/4 CPUs. Full Stage
+11 screenshot/theme and low-power acceptance remains open.
+
 ## Graphics Stage 11 shared-theme visual regression - 2026-10-25
 
 Added allocation-free golden pixel signatures for a representative focused

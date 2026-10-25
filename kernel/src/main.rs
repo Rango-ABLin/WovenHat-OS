@@ -13062,8 +13062,17 @@ fn stage20_7_self_test() -> bool {
 
     // Sample until the pixel is fully opaque, recording each new value.
     let mut samples: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    let mut pointer_packets = 0usize;
     let started = timer::ticks();
     loop {
+        // Keep the input path busy with neutral PS/2 motion packets while
+        // the shell's animation must continue to receive frame deadlines.
+        for byte in [0x08, 0, 0] {
+            if !mouse::loopback(byte) {
+                return step("pointer input remains available during animation", false);
+            }
+        }
+        pointer_packets += 1;
         let Some(value) = screen_pixel(sx, sy) else {
             return step("pixel readable", false);
         };
@@ -13094,14 +13103,18 @@ fn stage20_7_self_test() -> bool {
     }
     let intermediate = opacities.iter().filter(|&&a| a > 0 && a < 255).count();
     serial::write_line(format_args!(
-        "[S20.7] {} distinct samples over {} ticks; opacities {:?}",
+        "[S20.7] {} distinct samples over {} ticks; pointer packets={}; opacities {:?}",
         samples.len(),
         duration,
+        pointer_packets,
         opacities
     ));
     if !step(
         "every sample is the window blended at some opacity, never decreasing",
         consistent,
+    ) || !step(
+        "animation advances under sustained pointer input",
+        pointer_packets >= 3 && opacities.len() >= 3,
     ) || !step(
         "the window passes through at least three intermediate opacities",
         intermediate >= 3,
