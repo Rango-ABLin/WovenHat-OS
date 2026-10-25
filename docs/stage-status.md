@@ -24,6 +24,12 @@ The Stage 20.7 matrix now also injects neutral pointer packets throughout the
 fade and passes its sustained-input starvation check on 1/2/4 CPUs. Full Stage
 11 screenshot/theme and low-power acceptance remains open.
 
+The full desktop screenshot qualification was attempted on 1 CPU but did not
+reach the session: production system-app catalog installation failed during
+boot before any frame capture. Evidence is preserved under
+`audit-artifacts/desktop-qualification-1792950550125532300`; no screenshot
+acceptance claim is made from that run.
+
 ## Graphics Stage 11 shared-theme visual regression - 2026-10-25
 
 Added allocation-free golden pixel signatures for a representative focused

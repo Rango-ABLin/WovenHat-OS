@@ -6469,6 +6469,14 @@ spring fade. The gate passed on 1/2/4 CPUs with monotonic intermediate samples,
 settling, and teardown; warning-denying freestanding kernel Clippy passed.
 Screenshot/theme and low-power evidence remain open.
 
+# Codex - graphics desktop screenshot qualification attempt (2026-10-25)
+
+The 1-CPU full desktop screenshot harness was run, but boot stopped at
+production system-app catalog installation before the WovenShell session or
+any screenshot. Preserved evidence is
+`audit-artifacts/desktop-qualification-1792950550125532300`; this is an
+incomplete gate and no screenshot acceptance is claimed.
+
 # Codex - graphics Stage 11 Reduced Motion interaction closure (2026-10-25)
 
 Strengthened Stage 20.10 so it clicks the production Reduced Motion row and
