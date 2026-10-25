@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenTerminal shared-control migration (2026-10-25)
+
+Migrated WovenTerminal's title and Clear control to shared bounded WovenUI
+Label and Button primitives. The Clear action now uses the Button
+release-inside contract while preserving bounded command input behavior.
+Target warning-denying Clippy, target build, formatting, and diff checks
+passed. No QEMU client acceptance is claimed for this increment.
+
 ## Codex - WovenStore shared-control migration (2026-10-25)
 
 Migrated WovenStore's title, catalog heading, and Refresh control to shared
