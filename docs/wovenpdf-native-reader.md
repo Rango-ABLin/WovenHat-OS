@@ -1,5 +1,20 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 graphical preview increment
+
+- `apps/woven-pdf/src/gui.rs` adds a WovenShell shared GraphicsSurface
+  window and renders the existing **text-preview** output using Canvas.
+- The entry point accepts `--gui SHELL_PID [PDF_PATH]`. Supported text is
+  drawn in a bounded page-like panel; top/bottom bar clicks scroll text.
+- This is not PDF page rendering. Font programs, text matrices, graphics paths,
+  raster images, colorspaces, zoom, real pagination and faithful PDF layout are
+  not implemented. The preview must not be advertised as full PDF support.
+- This graphical path has NOT been compiled or run in QEMU in this session.
+  A real desktop test plus 1/2/4 CPU matrix is required before merging.
+- The shell is not automatically modified to launch WovenPDF, and file
+  associations are intentionally not registered.
+
+
 ## 2026-10-25 continuation: object and page-tree foundations
 
 - Added `objects.rs`: cross-reference-backed indirect-object header checks,
