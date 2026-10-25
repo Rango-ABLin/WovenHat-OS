@@ -113,7 +113,12 @@ pub fn stream_with_filter<'a>(
     } else {
         suffix
     };
-    if !suffix.starts_with(b"endstream") {
+    // Do not accept an "endstream" prefix inside a longer identifier.
+    // PDF keywords must be token-delimited; a malformed terminator fails closed.
+    let tail = suffix
+        .strip_prefix(b"endstream")
+        .ok_or(StreamError::InvalidTerminator)?;
+    if !matches!(tail.first(), Some(b' ' | b'\t' | b'\r' | b'\n' | 0 | 12)) {
         return Err(StreamError::InvalidTerminator);
     }
     Ok((bytes, filter))
@@ -196,6 +201,22 @@ mod tests {
             Err(StreamError::UnsupportedFilter)
         );
     }
+    #[test]
+    fn rejects_undelimited_endstream_keyword() {
+        const SUFFIXED: &[u8] =
+            b"1 0 obj << /Length 3 >>\nstream\nabc\nendstreaming\nendobj";
+        const JOINED: &[u8] =
+            b"1 0 obj << /Length 3 >>\nstream\nabc\nendstreamendobj";
+        assert_eq!(
+            raw_stream(SUFFIXED, &ENTRY, REF),
+            Err(StreamError::InvalidTerminator)
+        );
+        assert_eq!(
+            raw_stream(JOINED, &ENTRY, REF),
+            Err(StreamError::InvalidTerminator)
+        );
+    }
+
     #[test]
     fn rejects_incorrect_lengths() {
         const BAD: &[u8] = b"1 0 obj << /Length 2 >>\nstream\nabc\nendstream\nendobj";
