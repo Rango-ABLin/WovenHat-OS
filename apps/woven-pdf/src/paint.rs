@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn fails_closed_on_unsupported_bytes() {
         assert_eq!(paint_text_preview(
-            b"BT (\377) Tj ET", 100.0, 1.0, 300, 300, |_| Ok(())
+            b"BT (\xFF) Tj ET", 100.0, 1.0, 300, 300, |_| Ok(())
         ), Err(PaintError::NonAscii));
     }
 }
