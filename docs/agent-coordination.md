@@ -1178,7 +1178,7 @@ fail-closed reset/reinstall admission results. The 1/2/4-CPU QEMU gates,
 recovery app Clippy, recovery-feature kernel Clippy, workspace all-target
 Clippy, and 115 libwoven host tests pass. Reset/reinstall remain explicitly
 unimplemented and do not write storage. Evidence is in
-`docs/audit-stage27-5-recovery-environment-2026-10-22.md`.
+`docs/audit-stages-consolidated.md`.
 
 The recovery acceptance uses a deterministic user-region PIE bias because
 QEMU test builds intentionally make the ASLR draw zero; this preserves the
@@ -1262,7 +1262,7 @@ warning-denying kernel/libwoven Clippy and 113 libwoven host tests pass. The
 4 KiB WovenFS file bound is enforced fail-closed, so production-sized block
 slot storage, daemon IPC loop, bootloader handoff, power-loss recovery, and
 physical USB qualification are still open. Evidence is in
-`docs/audit-stage27-5-update-service-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 27.4 bounded update IPC contract (2026-10-21)
 
@@ -1271,7 +1271,7 @@ the future privileged update daemon. It validates operation-specific
 generation/slot fields and confines candidate paths to `/updates/`; image bytes
 never cross IPC. Focused libwoven tests (113 total), Clippy, formatting, and
 diff checks pass. See
-`docs/audit-stage27-4-update-ipc-contract-2026-10-21.md`. This is only a
+`docs/audit-stages-consolidated.md`. This is only a
 protocol contract; syscall/capability integration, daemon lifecycle, durable
 slot installation, boot handoff, power-loss recovery, and physical USB
 qualification remain open.
@@ -1283,7 +1283,7 @@ It signs the immutable generation/length/digest manifest and exact image,
 requires matching explicit release key material, and rejects invalid bounds.
 Tool tests, warning-denying Clippy, release-key boundary checks, and Stage
 27.1 activation/rollback QEMU passed on 1/2/4 CPUs. See
-`docs/audit-stage27-3-update-package-producer-2026-10-21.md`. This is only the
+`docs/audit-stages-consolidated.md`. This is only the
 producer boundary; the privileged update daemon, IPC/syscall lifecycle,
 boot-slot installation, power-loss recovery, and physical USB qualification
 remain open.
@@ -1387,7 +1387,7 @@ read-only discovery with `PowerControl` authority and validated user-copy; it
 does not implement suspend/resume or claim physical power-management
 qualification. Signed production-kernel Clippy, `libwoven` Clippy/tests, and
 signed system-apps QEMU boots on 1/2/4 CPUs passed. See
-`docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.2 CPU idle capability boundary (2026-10-21)
 
@@ -1416,7 +1416,7 @@ and rolls back in reverse order on refusal. The power layer returns a private
 preparation token and supports explicit abort/resume. This is not S3 entry:
 `SLP_EN`, wake vectors, CPU resume coordination, wake-source policy, and a
 suspend syscall remain unimplemented. See
-`docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.5 ACPI FACS wake-capability boundary (2026-10-21)
 
@@ -1425,7 +1425,7 @@ S3/FACS/waking-vector readiness through syscall 238 and the `libwoven`
 wrapper. Firmware addresses are not exposed and no FACS, PM1, CPU, or wake
 state is modified. Wake-trampoline allocation, vector installation, CPU
 save/restore, S3 entry, and physical firmware qualification remain open. See
-`docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.6 low-memory wake-page reservation (2026-10-21)
 
@@ -1435,7 +1435,7 @@ the general allocator. Suspend preparation requires and retains that page's
 physical address. No trampoline bytes or FACS vector are written yet; CPU
 state save/restore, secondary-CPU coordination, S3 entry, and firmware wake
 remain open. See
-`docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.7 wake-trampoline staging (2026-10-21)
 
@@ -1445,7 +1445,7 @@ stack, and transactional page-table ownership. The guarded QEMU self-test
 passes on 1/2/4 CPUs and performs no S3 or FACS write. CPU/register-state
 restore, secondary-CPU coordination, vector installation, S3 entry, and
 physical suspend qualification remain open. See
-`docs/audit-stage25-7-wake-trampoline-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.8 CPU resume-context capture (2026-10-21)
 
@@ -1454,7 +1454,7 @@ and GDT/IDT descriptors in kernel-owned suspend preparation state. The guarded
 QEMU self-test passes on 1/2/4 CPUs. Register restoration, secondary-CPU
 coordination, FACS vector installation, S3 entry, and physical qualification
 remain open. See
-`docs/audit-stage25-8-cpu-resume-context-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.9 transactional FACS wake-vector installation (2026-10-21)
 
@@ -1463,7 +1463,7 @@ validated FACS waking-vector fields and retains the original values for
 transactional abort. The guarded byte-level transaction self-test passes on
 1/2/4 CPUs. No suspend action, PM1 S3 write, secondary-CPU handoff, or
 physical wake claim is made. See
-`docs/audit-stage25-9-facs-wake-vector-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.10 secondary-CPU suspend barrier (2026-10-21)
 
@@ -1472,7 +1472,7 @@ the accepted scheduler/hotplug checkpoint path, retains the exact online mask,
 and restores the completed set in reverse order on rollback. The guarded
 barrier gate passes on 1/2/4 CPUs. CPU register restore, PM1 S3 entry,
 firmware wake, and physical qualification remain open. See
-`docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.11 PM1 S3 request boundary (2026-10-21)
 
@@ -1482,7 +1482,7 @@ preparation commits, and rolls back explicitly if firmware leaves the machine
 running. The QEMU gate tests encoding only and passes on 1/2/4 CPUs; it does
 not issue a destructive sleep request. CPU restoration, firmware wake, and
 physical qualification remain open. See
-`docs/audit-stage25-11-pm1-s3-request-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.12 CPU resume-context restoration primitive (2026-10-21)
 
@@ -1491,7 +1491,7 @@ RFLAGS in a non-returning assembly path before jumping to a kernel
 continuation. The live-context self-test passes on 1/2/4 CPUs. Firmware-wake
 record ownership, driver restoration after S3, and physical qualification
 remain open. See
-`docs/audit-stage25-12-cpu-context-restore-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 25.13 persistent firmware-wake record integration (2026-10-21)
 
@@ -1501,7 +1501,7 @@ context, and routes the low-memory wake entry through context restoration into
 owned vector/trampoline/CPU/driver rollback. The non-destructive integration
 gate passes on 1/2/4 CPUs. Actual firmware wake and physical qualification
 remain open. See
-`docs/audit-stage25-13-wake-record-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Codex - Stage 24.60 release-key provisioning (2026-10-21)
 
@@ -1510,7 +1510,7 @@ public-key environment inputs; the deterministic development seed is available
 only outside production mode. The catalog/package-service launchers propagate
 the mode, and the negative/positive packager test, warning-denying packager
 Clippy, and explicit-key production packaging pass. Evidence is in
-`docs/audit-stage24-60-release-key-provisioning-2026-10-21.md`. Real secret
+`docs/audit-stages-consolidated.md`. Real secret
 custody and physical TPM/USB qualification remain open.
 
 ## Codex - production account provisioning implementation (2026-10-21)
@@ -1761,7 +1761,7 @@ durable filesystem mount attempt and before WovenShell startup. The release
 application trust root is used; absent, malformed, or tampered records leave
 hardware credentials disabled without blocking the desktop. Static gates,
 executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
-is in `docs/audit-stage24-38-boot-tpm-policy-loader-2026-10-21.md`; USB remains
+is in `docs/audit-stages-consolidated.md`; USB remains
 untouched. Live TPM execution, credential decisions, recovery, and physical
 qualification remain open.
 
@@ -1771,7 +1771,7 @@ Added the fail-closed `authorize_quote` integration: signed expected Name,
 validated ReadPublic identity, quote nonce/PCR binding, signature framing,
 and RSA/ECC cryptographic verification must all succeed. Static gates,
 executable QEMU, and signed system-apps 1/2/4-CPU acceptance pass. Evidence
-is in `docs/audit-stage24-37-quote-authorization-integration-2026-10-21.md`;
+is in `docs/audit-stages-consolidated.md`;
 USB remains untouched. Boot loading, live TPM execution, credential
 authorization, recovery, and physical qualification remain open.
 
@@ -1781,7 +1781,7 @@ Added journal-backed WovenFS persistence/read APIs for the signed TAN1 TPM
 Name policy. Writes verify before mutation; reads enforce length and verify
 again. Static gates, executable QEMU policy self-test, and signed system-apps
 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-36-durable-attestation-name-policy-2026-10-21.md`; USB
+`docs/audit-stages-consolidated.md`; USB
 remains untouched. Physical provisioning, boot loading, live TPM trust, quote
 authorization, recovery, and hardware qualification remain open.
 
@@ -1791,7 +1791,7 @@ Added the bounded TAN1 Ed25519-signed expected TPM Name policy. Header,
 algorithm, signature, and Name checks fail closed, and the result feeds the
 existing Name-binding boundary. Executable QEMU self-test, host tests,
 affected Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass.
-Evidence is in `docs/audit-stage24-35-signed-attestation-name-policy-2026-10-21.md`;
+Evidence is in `docs/audit-stages-consolidated.md`;
 USB remains untouched. Durable storage, live retrieval, quote authorization,
 recovery, and physical TPM qualification remain open.
 
@@ -1801,7 +1801,7 @@ Added TPM Name recomputation and exact returned-Name validation for the
 `ReadPublic` attestation-key boundary, plus fail-closed comparison with a
 provisioned expected Name. Executable QEMU self-test, host tests, affected
 Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
-in `docs/audit-stage24-34-tpm-name-binding-2026-10-21.md`; USB remains
+in `docs/audit-stages-consolidated.md`; USB remains
 untouched. Live retrieval, identity provisioning, quote authorization,
 recovery, and physical TPM qualification remain open.
 
@@ -1812,7 +1812,7 @@ validation. Only SHA-256-named fixed/restricted signing objects are accepted;
 RSA sizes and P-256 points are validated, with exact response bounds.
 Executable QEMU self-test, host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-33-tpm-read-public-boundary-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. Live TPM execution, object-name binding, persistence, recovery, and
 physical TPM qualification remain open.
 
@@ -1822,7 +1822,7 @@ Added bounded ECDSA/P-256 SHA-256 quote verification from uncompressed TPM
 affine coordinates and canonical 32-byte signature components. Invalid points
 and tampering fail closed. Host tests, affected Clippy gates, executable QEMU,
 and signed system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-32-ecc-p256-quote-verification-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. Live TPM key retrieval/validation, quote-key binding, recovery, and
 physical TPM qualification remain open.
 
@@ -1833,7 +1833,7 @@ validated 2048-4096-bit TPM public-key shape, including exponent-zero default
 handling. The exact quote bytes are verified and tampering fails closed.
 Executable QEMU self-test, host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-31-rsa-quote-verification-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. ECC verification, live key retrieval/validation, recovery, and
 physical TPM qualification remain open.
 
@@ -1843,7 +1843,7 @@ Added bounded TPM2 quote-signature framing for SHA-256 RSASSA, RSAPSS, and
 ECDSA schemes with exact component bounds and consumed-length reporting.
 Executable QEMU self-test, host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-30-quote-signature-shape-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. Public-key/signature verification, recovery, and physical TPM
 qualification remain open.
 
@@ -1854,7 +1854,7 @@ quote type, qualifying nonce, one SHA-256 PCR selection, and exact PCR digest
 to caller expectations while retaining no secret material. Executable QEMU
 self-test, host tests, affected Clippy gates, and signed system-apps 1/2/4-
 CPU acceptance pass. Evidence is in
-`docs/audit-stage24-29-quote-attestation-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. Quote-key/signature verification, recovery, and physical TPM
 qualification remain open.
 
@@ -1866,7 +1866,7 @@ of the expected and returned 32-byte root; mismatch returns a dedicated
 credential error and no value is retained. Executable QEMU self-test, host
 tests, affected Clippy gates, and signed system-apps 1/2/4-CPU acceptance
 pass. Evidence is in
-`docs/audit-stage24-28-credential-root-readback-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. Live TPM trust, quote verification, and recovery remain open.
 
 ## Codex - Stage 24.27 (2026-10-21)
@@ -1876,7 +1876,7 @@ fixed 32-byte credential-root value. The decoder validates sessions status,
 parameter size, bounded data, and response authorization framing. Executable
 QEMU self-test, host tests, affected Clippy gates, and signed system-apps
 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-27-nv-read-policy-2026-10-21.md`; USB remains untouched.
+`docs/audit-stages-consolidated.md`; USB remains untouched.
 No live TPM read, quote verification, recovery, or physical qualification has
 occurred.
 
@@ -1887,7 +1887,7 @@ credential-root index. It encodes the password-session authorization,
 SHA-256 policy, exact attributes, and 32-byte data size without persisting
 the owner authorization. Executable QEMU self-test, host tests, affected
 Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
-in `docs/audit-stage24-26-nv-define-space-2026-10-21.md`; USB remains
+in `docs/audit-stages-consolidated.md`; USB remains
 untouched. No live TPM provisioning, quote verification, recovery, or
 physical qualification has occurred.
 
@@ -1899,7 +1899,7 @@ binds the session and NV index, enforces zero offset, bounded caller nonce,
 continue-session, and empty policy-session HMAC fields. Executable QEMU
 self-test, host tests, affected Clippy gates, and signed system-apps 1/2/4-
 CPU acceptance pass. Evidence is in
-`docs/audit-stage24-25-nv-write-policy-2026-10-21.md`; USB remains untouched.
+`docs/audit-stages-consolidated.md`; USB remains untouched.
 No live NV write, quote verification, recovery, or physical TPM qualification
 has occurred.
 
@@ -1909,7 +1909,7 @@ Added bounded TPM2 `PolicyPCR` command framing and exact success-response
 validation for one PCR and one SHA-256 digest. The executable QEMU self-test,
 host tests, affected Clippy gates, and signed system-apps 1/2/4-CPU
 acceptance pass. Evidence is in
-`docs/audit-stage24-24-policy-pcr-2026-10-21.md`; USB remains untouched.
+`docs/audit-stages-consolidated.md`; USB remains untouched.
 Live authorization, NV provisioning, quote verification, recovery, and
 physical TPM qualification remain open.
 
@@ -1920,7 +1920,7 @@ validation, including caller nonce bounds, null salt/bind/symmetric fields,
 SHA-256 policy hashing, nonzero session handle, and exact TPM nonce framing.
 The executable QEMU self-test, host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-23-policy-session-2026-10-21.md`; USB remains untouched.
+`docs/audit-stages-consolidated.md`; USB remains untouched.
 NV authorization, policy-command transcripts, sealed-root provisioning,
 quote verification, recovery, and physical TPM qualification remain open.
 
@@ -1931,7 +1931,7 @@ boundary checks the expected index, SHA-256 name algorithm, 32-byte data size,
 32-byte PCR policy, policy-authorized writes, and rejects owner/object writes
 and policy deletion. Host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-22-credential-root-policy-2026-10-21.md`; USB remains
+`docs/audit-stages-consolidated.md`; USB remains
 untouched. NV creation, authorization sessions, credential writes, quote
 verification, recovery, and physical TPM qualification remain open.
 
@@ -1942,7 +1942,7 @@ validates response status and lengths, public-area structure, authorization
 policy bounds, data size, and exact trailing Name framing; it returns only
 non-secret metadata. Host tests, affected Clippy gates, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-21-nv-public-metadata-2026-10-21.md`; the attached USB
+`docs/audit-stages-consolidated.md`; the attached USB
 was not modified. Live NV authorization, writes, sealed-root provisioning,
 recovery, quote verification, and physical TPM qualification remain open.
 
@@ -1952,7 +1952,7 @@ Added a fixed-size signed `TPP1` PCR policy envelope. It binds one PCR index
 and SHA-256 digest, verifies the caller-provisioned Ed25519 policy key, and
 rejects malformed, tampered, or mismatched PCR evidence. Host tests, affected
 Clippy gates, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-20-signed-pcr-policy-2026-10-21.md`; USB was not modified.
+`docs/audit-stages-consolidated.md`; USB was not modified.
 Policy provisioning, TPM quotes/attestation-key verification, sealed identity
 roots, recovery, and physical TPM qualification remain open.
 
@@ -1963,7 +1963,7 @@ boot PCR7 inventory probe. Response code, size, selection, algorithm, digest
 count, and 32-byte digest bounds are checked; the digest is wiped after the
 short inventory prefix is logged. Host tests, all-targets and affected
 feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass. Evidence is
-in `docs/audit-stage24-19-pcr-evidence-2026-10-21.md`; USB was not modified.
+in `docs/audit-stages-consolidated.md`; USB was not modified.
 PCR evidence is not authentication: policy provisioning, signed quotes,
 attestation-key validation, sealed-root provisioning, recovery, and physical
 TPM qualification remain open.
@@ -1975,7 +1975,7 @@ ACPI descriptor. It serializes one transaction, validates interface and
 buffer registers, rejects fatal/bad/timeout responses, uses a fixed poll bound
 before timer IRQs exist, and wipes probe bytes. Host tests, all-targets and
 affected feature Clippy, and signed system-apps 1/2/4-CPU acceptance pass.
-Evidence is in `docs/audit-stage24-18-tpm2-crb-probe-2026-10-21.md`; USB was
+Evidence is in `docs/audit-stages-consolidated.md`; USB was
 not modified. This is not hardware-backed identity: authenticated
 attestation/PCR verification, sealed-root provisioning, recovery, and physical
 TPM qualification remain open.
@@ -1987,7 +1987,7 @@ firmware table shape and non-zero control-area address, records the advertised
 start method, self-tests malformed/zero-address rejection, and logs explicit
 TPM availability at boot. The signed 1/2/4-CPU system-app gates, host tests,
 all-targets Clippy, and production system-apps Clippy pass. Evidence is in
-`docs/audit-stage24-17-tpm2-platform-inventory-2026-10-21.md`; USB was not
+`docs/audit-stages-consolidated.md`; USB was not
 modified. This does not claim hardware-backed credentials: CRB transport,
 attestation/PCR verification, sealed-root provisioning, and physical TPM
 qualification remain the next work.
@@ -2002,7 +2002,7 @@ snapshots persist the policy in the existing reserved header byte. Runtime
 authentication applies it while retaining the bounded five-second cooldown.
 89 host tests, affected Clippy gates, focused UI QEMU, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is in
-`docs/audit-stage24-16-durable-lockout-policy-2026-10-21.md`; USB was not
+`docs/audit-stages-consolidated.md`; USB was not
 modified. Next work is hardware credentials, malformed telemetry,
 release-key provisioning, and physical qualification.
 
@@ -2015,7 +2015,7 @@ the owner-bound elevated identity session remains the authorization boundary.
 The no-disk hardware-demo path has an explicit volatile-only fallback;
 production durable publication remains fail-closed. Host tests, all Clippy
 gates, focused mutation QEMU, and signed system-apps 1/2/4-CPU acceptance
-pass. Evidence is in `docs/audit-stage24-15-admin-mutation-ui-2026-10-21.md`;
+pass. Evidence is in `docs/audit-stages-consolidated.md`;
 the USB device was not modified. Next work is durable/configurable lockout,
 then hardware credentials, malformed telemetry, release-key provisioning, and
 physical qualification.
@@ -2027,14 +2027,14 @@ WovenSecurity directory UI. Syscall 231 and audit action 36 expose only fixed,
 non-secret user/group records to an elevated owner-bound administrator
 session. Host tests, all Clippy gates, focused WovenSecurity QEMU, and signed
 system-apps 1/2/4-CPU acceptance pass. Evidence is recorded in
-`docs/audit-stage24-14-admin-query-ui-2026-10-21.md`; the USB device was not
+`docs/audit-stages-consolidated.md`; the USB device was not
 modified. Next work is mutation-management UI followed by configurable
 lockout, hardware credentials, malformed telemetry, release-key provisioning,
 and physical qualification.
 
 ## Codex - Stage 24.13 (2026-10-21)
 
-Implemented bounded elevated-admin supplementary group membership mutation: syscalls 229-230, audit actions 34-35, duplicate/full/unknown checks, primary-group protection, WID2 persistence, and live rollback. Host tests, host and production Clippy, diff check, and signed system-apps 1/2/4-CPU acceptance pass. Evidence and limits are recorded in `docs/audit-stage24-13-group-membership-2026-10-21.md`; physical USB was not modified. Next work is administration UI/query integration and remaining release qualification blockers.
+Implemented bounded elevated-admin supplementary group membership mutation: syscalls 229-230, audit actions 34-35, duplicate/full/unknown checks, primary-group protection, WID2 persistence, and live rollback. Host tests, host and production Clippy, diff check, and signed system-apps 1/2/4-CPU acceptance pass. Evidence and limits are recorded in `docs/audit-stages-consolidated.md`; physical USB was not modified. Next work is administration UI/query integration and remaining release qualification blockers.
 
 **Codex: Stage 24.12 durable identity administration accepted (2026-10-20):**
 
@@ -2266,7 +2266,7 @@ and discovery syscalls (211–214), with bounded copied service names and typed
 `libwoven` wrappers. The existing owner/lifetime/rights/namespace registry
 probe is exposed through a dedicated Stage 22.1 acceptance gate. Host tests,
 warning-denying host/freestanding Clippy, and QEMU passed on 1/2/4 CPUs.
-Evidence is in `docs/audit-stage22-1-userspace-service-ipc-2026-10-20.md` and
+Evidence is in `docs/audit-stages-consolidated.md` and
 the `audit-artifacts/stage21.22-*` directories. A long-lived WovenPackage
 broker/client fixture and physical USB qualification remain open. No physical
 USB write was performed.
@@ -2382,7 +2382,7 @@ sequence/CRC boundary, keeps the known-good slot active until a post-boot
 health result, and rolls back after three failed attempts. Host
 tests, host/freestanding warning-denying Clippy, and dedicated Stage 27.1
 QEMU gates passed on 1/2/4 CPUs. See
-`docs/audit-stage27-1-update-ab-state-2026-10-20.md`. This is not yet a
+`docs/audit-stages-consolidated.md`. This is not yet a
 durable update service or physical qualification.
 
 **Codex: durable update records (2026-10-20):** Stage 27.2 now commits exact-
@@ -2402,7 +2402,7 @@ symbol scope, and TPOFF64 relocation are in the working tree. Standard and
 compiler-fixture Stage 11.5 acceptance passes on 1/2/4 CPUs. Toolchain TLS
 symbols are recognized by `STT_TLS` with a non-undefined section index, and
 the per-task kernel stack reservation is 256 KiB. See
-`docs/audit-stage11-library-tls-2026-10-20.md` for exact evidence.
+`docs/audit-stages-consolidated.md` for exact evidence.
 
 Read-only physical preflight on 2026-10-20 found the attached target as a
 15,726,400,000-byte VendorCo ProductCode USB disk with no partitions, separate
@@ -2471,7 +2471,7 @@ Ring-3 constructor/destructor teardown. The accepted evidence is
 `audit-artifacts/stage11.5-1cpu-1792507060371452000`,
 `stage11.5-2cpu-1792507334555453100` and
 `stage11.5-4cpu-1792507351184297200`; lazy binding/library TLS remain open. See
-`docs/audit-stage11-lifecycle-2026-10-20.md`. Claude should avoid the
+`docs/audit-stages-consolidated.md`. Claude should avoid the
 lifecycle loader/task/ELF files until the remaining serialized gates finish.
 
 **Claude Code: diagnostic shell no longer overwrites a slow-starting
@@ -4373,7 +4373,7 @@ physical radio qualification: firmware loading, ALIVE proof, queue ownership,
 scan/association and end-to-end network evidence remain open.
 
 **Codex release and AX201 increment (2026-10-17):** the supplied Stage 10.7
-transcript was preserved in `docs/audit-stage10-7-acceptance-2026-10-17.md`.
+transcript was preserved in `docs/audit-stages-consolidated.md`.
 The serialized `python scripts/test-release.py` chain then exited 0 with all
 release checks passed, including host tests/lints, debug and release 1/2/4-CPU
 memory/storage/network, shell smoke, application lints, system-app tests and
@@ -4910,7 +4910,7 @@ and a retained report before it can close a production gap.
 are implemented for definitions and imports. The 31 ELF tests, workspace
 tests, warning-denying kernel/host Clippy and signed Ring-3 runtime fixture
 passed on 1/2/4 CPUs, including teardown. Audit:
-`docs/audit-stage11-symbol-versioning-2026-10-20.md`. Constructors/destructors,
+`docs/audit-stages-consolidated.md`. Constructors/destructors,
 lazy binding and library TLS remain open.
 
 **Weak symbol binding increment (2026-10-20):** the bounded ELF scope now
@@ -4918,7 +4918,7 @@ accepts default-visible `STB_WEAK` definitions as fallbacks, prefers strong
 definitions for interposition, and resolves undefined weak imports to zero.
 Thirty ELF tests, kernel check, warning-denying host/freestanding Clippy and
 the signed weak-import Ring-3 fixture passed on 1/2/4 CPUs. Audit:
-`docs/audit-stage11-weak-symbols-2026-10-20.md`. Versioned symbol tables,
+`docs/audit-stages-consolidated.md`. Versioned symbol tables,
 constructors/destructors, lazy binding and library TLS remain open.
 
 **Eager PLT REL increment (2026-10-20):** legacy `DT_JMPREL` encoded as
@@ -4926,7 +4926,7 @@ constructors/destructors, lazy binding and library TLS remain open.
 addends with writable/NX target validation. The 28 ELF tests, kernel check,
 warning-denying host/freestanding Clippy and dedicated Stage 11.5 runtime
 fixture passed on 1/2/4 CPUs, including Ring-3 execution and teardown.
-Audit: `docs/audit-stage11-plt-rel-2026-10-20.md`. Versioned/weak symbols,
+Audit: `docs/audit-stages-consolidated.md`. Versioned/weak symbols,
 constructors/destructors, lazy binding and library TLS remain open.
 
 **Bounded DT_REL increment (2026-10-20):** ordinary `DT_REL` tables now have
@@ -4934,7 +4934,7 @@ checked parser metadata, file-backed target validation and eager loader
 application using the signed addend read from the mapped private target. The
 27 ELF tests, kernel check, warning-denying Clippy and Stage 11.5 QEMU gates
 with dedicated DT_REL relocation, Ring-3 execution and teardown markers passed
-on 1/2/4 CPUs. Audit: `docs/audit-stage11-rel-2026-10-20.md`. PLT REL,
+on 1/2/4 CPUs. Audit: `docs/audit-stages-consolidated.md`. PLT REL,
 symbol versioning/weak binding, constructors/destructors, lazy binding and
 library TLS.
 
@@ -4943,7 +4943,7 @@ accept and eagerly apply bounded file-backed `DT_JMPREL` RELA entries,
 including `R_X86_64_JUMP_SLOT`, with writable-target and fail-closed metadata
 validation. The 25 ELF tests, host/freestanding warning-denying Clippy and
 Stage 11.5 QEMU gates on 1/2/4 CPUs passed. Audit:
-`docs/audit-stage11-plt-rela-2026-10-20.md`. Legacy `DT_REL`, symbol
+`docs/audit-stages-consolidated.md`. Legacy `DT_REL`, symbol
 versioning/weak binding, constructors/destructors, lazy binding and library
 TLS remain open.
 
@@ -5039,7 +5039,7 @@ before advancing compiler TLS. No frozen source was edited for this review.
 **Thread status ABI follow-up:** `Ok(exit) => exit as u64` in `ThreadJoin`
 collides with libwoven's error/would-block sentinels for successful statuses
 `-1` and `-2`. The source counterexample and required natural-exit/cancellation
-host + Ring-3 tests are in `audit-stage11-thread-exit-encoding-2026-10-15.md`.
+host + Ring-3 tests are in `docs/audit-stages-consolidated.md`.
 Resolve after the current generation/earlier IPC gates, before compiler TLS.
 No source was changed or competing test run started for this finding. High-bit
 thread IDs themselves do not collide with the exact sentinels; preserve their ABI.
@@ -5134,7 +5134,7 @@ No preparation or hardware write occurs on rejection. Physical S3
 qualification remains explicitly pending.
 
 Stage 25.14 focused acceptance passed on 1/2/4 CPUs. Evidence is recorded in
-`docs/audit-stage25-14-suspend-admission-2026-10-21.md` and the three
+`docs/audit-stages-consolidated.md` and the three
 `audit-artifacts/stage25.14-*` directories. The stage remains a fail-closed
 ABI boundary; physical S3 and userspace return-path qualification are not
 claimed.
@@ -5147,7 +5147,7 @@ focused verification chain passes.
 
 Stage 25.15 passed the required freestanding build, warning-denying Clippy,
 offline host Clippy/tests, and sequential 1/2/4-CPU QEMU gates. Evidence is in
-`docs/audit-stage25-15-userspace-resume-target-2026-10-21.md` and the three
+`docs/audit-stages-consolidated.md` and the three
 retained `audit-artifacts/stage25.15-*` directories. Physical S3 wake remains
 unqualified.
 
@@ -5493,7 +5493,7 @@ capacities. The supported Stage 31 memory, storage, network, security, and
 shell suites now pass on 1/2/4/8/16 CPUs. Codex scaled only the explicit SMP
 diagnostic/preemption budgets and the 16-CPU shell harness wait; no guest
 assertions or workload rounds were removed. Acceptance details and preserved
-evidence are in `docs/audit-stage31-scalability-2026-10-22.md`.
+evidence are in `docs/audit-stages-consolidated.md`.
 
 Claude-owned in-progress edits remain uncommitted in
 `apps/woven-shell/src/main.rs` and `libwoven/src/lib.rs`; Codex did not stage
@@ -5531,13 +5531,13 @@ invokes the existing Stage 27.5 durable-recovery gate and snapshots its
 evidence per iteration. Two sequential 1-CPU runs passed with exit 0. This
 proves repeatable execution of that recovery boundary, not a generic crash
 supervisor, automatic restart, physical power-loss qualification, or driver
-restart. Details are in `docs/audit-stage31-service-lifecycle-2026-10-22.md`.
+restart. Details are in `docs/audit-stages-consolidated.md`.
 
 **Codex signed update-service lifecycle slice (Codex, 2026-10-22):** The
 same repeated runner now invokes the signed Stage 27.5 `woven-update
 --service` gate. Two sequential 1-CPU runs passed, plus one-run profiles at
 2 and 4 CPUs. Evidence and limits are recorded in
-`docs/audit-stage31-update-service-lifecycle-2026-10-22.md`; this is orderly
+`docs/audit-stages-consolidated.md`; this is orderly
 service teardown evidence, not automatic crash restart, driver restart,
 sudden-shutdown recovery, or native qualification.
 
@@ -5554,13 +5554,13 @@ two-sector write returns `NoSpace` without a partial commit or inconsistent
 remount. `cargo test --test wovenfs_crash` passes all 16 tests. This covers
 filesystem disk-full atomicity only; whole-kernel low-RAM, device-fault, and
 physical-media exhaustion remain open. Details are in
-`docs/audit-stage31-low-resource-2026-10-22.md`.
+`docs/audit-stages-consolidated.md`.
 
 **Codex low-resource ATA/WovenFS device slice (Codex, 2026-10-22):** The
 existing Stage 15.2 QEMU gate passed with disposable 4 MiB scratch images at
 1 and 4 CPUs, exercising the real emulated ATA path through format, remount,
 VFS authorization/isolation, and unlink. Evidence is recorded in
-`docs/audit-stage31-low-resource-device-2026-10-22.md`. This does not qualify
+`docs/audit-stages-consolidated.md`. This does not qualify
 physical media exhaustion, block-device fault injection, or whole-kernel
 low-RAM behavior.
 
@@ -5864,3 +5864,12 @@ software/QEMU evidence only; the laptop was inspected read-only and no
 reboot, disk write, firmware change, TPM provisioning, or native hardware
 claim was made. The physical and trust-boundary items listed in the mandate
 remain open until their required evidence exists.
+
+## Consolidated audit and hash records (2026-10-25)
+
+The 341 standalone stage-audit records were merged into
+`docs/audit-stages-consolidated.md` with source paths retained. The 28 legacy
+SHA256 manifests were merged into
+`docs/sha256-stage-manifests-consolidated.txt`. All 74 stage run scripts remain
+separate and executable. A fresh repository-wide SHA-256 inventory is recorded
+in `docs/repository-sha256-2026-10-25.txt`.

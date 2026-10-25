@@ -1,4 +1,4 @@
-> SUPERSEDED by `AUDIT-STAGE7.6-SCHEDULER-SEMANTICS-FIX.md`. The `has_started` policy described below regressed the validated Stage 7.4 explicit affinity path.
+> SUPERSEDED by `docs/audit-stages-consolidated.md`. The `has_started` policy described below regressed the validated Stage 7.4 explicit affinity path.
 
 WovenHat OS Stage 7.6 — corrected integrated multicore userspace candidate
 

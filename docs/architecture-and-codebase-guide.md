@@ -1,4 +1,4 @@
-﻿# WovenHat OS Architecture & Codebase Guide
+# WovenHat OS Architecture & Codebase Guide
 
 ## Software architecture mandate S00 inventory
 
@@ -2311,7 +2311,7 @@ remain explicit.
 
 The live WovenGuard transport/path suite passes on 1/2/4 CPUs, including
 DHCP, DNS, ICMP, host-verified UDP/TCP round trips, and SMP/TLB checks. The
-evidence is recorded in the [Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+evidence is recorded in the [Stage 14.5D revalidation audit](docs/audit-stages-consolidated.md).
 It qualifies the QEMU virtio boundary only; native NIC/radio and physical-link
 behavior remain hardware work.
 
@@ -2502,7 +2502,7 @@ Neither stops the boot. Ready drivers are added to the device registry
 
 The ordered AHCI/SATA, xHCI core, USB HID, and WovenInput software gates pass
 on 1/2/4 CPUs in the current tree. Their evidence is recorded in the
-[Stage 13.4â€“13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+[Stage 13.4â€“13.7 validation audit](docs/audit-stages-consolidated.md).
 The QEMU fixtures validate bounded ownership and protocol contracts; they do
 not substitute for native-controller or physical USB interoperability. USB
 mouse report decoding is still outside the accepted keyboard-only fixture.
@@ -2667,19 +2667,19 @@ acceptance fixture covers relocation, Ring-3 execution and owner teardown on
 strong definitions win interposition, and undefined weak imports resolve to
 zero. `DT_JMPREL` is accepted as bounded file-backed RELA or legacy REL
 and is applied eagerly before W^X/RELRO; see
-`audit-stage11-plt-rela-2026-10-20.md` and
-`audit-stage11-plt-rel-2026-10-20.md`. Weak definitions and SysV versioned
+`docs/audit-stages-consolidated.md` and
+`docs/audit-stages-consolidated.md`. Weak definitions and SysV versioned
 symbol tables (`DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED`) are bounded and
 resolved by exact requested version; see
-`audit-stage11-symbol-versioning-2026-10-20.md`. Lifecycle metadata
+`docs/audit-stages-consolidated.md`. Lifecycle metadata
 (`DT_INIT`, `DT_FINI`, and both array forms) is bounded and executable-range
 validated. Constructors run before initial Ring-3 entry, while destructors
 run in reverse dependency order through a mapped RX trampoline; teardown uses
 a prebuilt stack return chain and transactional process-table/paging lock
 ordering. Writable PLT `JUMP_SLOT` entries use bounded loader-generated RX
 resolver stubs and a checked kernel first-call patch path; RELRO slots remain
-eager. See `audit-stage11-lifecycle-2026-10-20.md` and
-`audit-stage11-lazy-binding-2026-10-20.md`. The loader now constructs a
+eager. See `docs/audit-stages-consolidated.md` and
+`docs/audit-stages-consolidated.md`. The loader now constructs a
 combined immutable PT_TLS template for the main image and shared libraries,
 then gives each process a fresh mutable TLS/TCB copy and resolves shared TLS
 relocations. The compiler-fixture gate remains open pending its preserved
@@ -2722,7 +2722,7 @@ binding state publication succeeds. Interrupt-active bindings cannot suspend.
 This is a software ownership and configuration-state boundary. Device reset,
 D3cold, platform wake signaling, and physical device suspend/resume still
 require device-specific drivers and hardware qualification. See the
-[Stage 13.2 suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+[Stage 13.2 suspend/resume audit](docs/audit-stages-consolidated.md).
 
 The PCI hotplug coordinator compares both BDF and the full driver-relevant
 identity (vendor/device, revision, class, subclass, and programming
@@ -2730,7 +2730,7 @@ interface). A same-slot replacement detected before old-owner quiescence fails
 closed before any teardown configuration write; a platform hotplug boundary
 must establish ordering before the replacement can be processed. Unbound
 persistent BAR reservations are released before topology invalidation;
-release failures leave the removal retryable. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+release failures leave the removal retryable. See the [hotplug insertion audit](docs/audit-stages-consolidated.md).
 
 ## Stage 13.2 PCI BAR admission lifetime (2026-10-13)
 
@@ -2738,7 +2738,7 @@ Persistent BAR reservation state is released only after BAR clear/read-back,
 published-inventory refresh, and bridge-window rerouting succeed. The binding
 remains in `Unbinding` when any phase fails, so no allocator range can be reused
 while hardware or forwarding state is uncertain. See the [automatic BAR
-admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+admission audit](docs/audit-stages-consolidated.md).
 
 ## Stage 13.2 verified MSI activation (2026-10-13)
 
@@ -2750,7 +2750,7 @@ lease remains retained for ordered teardown. Disablement likewise verifies the
 final disabled header before releasing mode and vector ownership. Physical
 APIC delivery still requires hardware qualification. MSI-X activation follows
 the same ownership boundary, asserting Function Mask before table MMIO and
-retaining the lease if cleanup fails. See the [MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md).
+retaining the lease if cleanup fails. See the [MSI rollback audit](docs/audit-stages-consolidated.md).
 
 The Stage 13.2 preservation probe keeps hardware qualification conditional:
 it scans the discovered QEMU fixtures without creating shared mappings, and
@@ -2772,7 +2772,7 @@ keeps failed discovery from leaking DMA memory or leaving bus mastering active.
 The accepted gate is limited to the disposable QEMU controller and synchronous
 polling I/O. Interrupt completion, controller reset/recovery, hotplug removal,
 multi-namespace policy, and physical NVMe qualification remain open. See the
-[Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+[Stage 13.3 NVMe audit](docs/audit-stages-consolidated.md).
 
 ## Stage 13.8 HDA register addressing (2026-10-13)
 
@@ -2782,7 +2782,7 @@ command-ring, codec, stream, and mixer registers; mapping a page without
 adding the offset silently aliases every register to the BAR base. The QEMU
 HDA codec/topology/stream gate now passes on 1/2/4 CPUs. Physical codec and
 interrupt/DMA recovery qualification remain open. See the
-[HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+[HDA MMIO audit](docs/audit-stages-consolidated.md).
 
 ## Stage 14 later-feature lint coverage (2026-10-13)
 
@@ -2790,7 +2790,7 @@ PCI persistent BAR admission diagnostics are guarded across the complete later
 feature family, not only the Stage 13 feature set. This keeps `-D warnings`
 meaningful when Stage 14â€“20 code compiles the shared PCI module. The live
 Stage 14.1â€“14.5D network matrices pass on 1/2/4 CPUs; hardware NIC and radio
-qualification remains separate. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
+qualification remains separate. See the [Stage 14 feature-gate audit](docs/audit-stages-consolidated.md).
 
 ## TCP close/drain repair (2026-09-24)
 
@@ -3080,7 +3080,7 @@ mapping succeeds. A rank-free, IRQ-enabled caller can grow synchronously on
 allocation failure. BSP idle maintains mapped headroom when free space falls
 below 1 MiB so guarded callers usually stay on the allocation-only path.
 The growth window remains in the P4 slot already shared by user address
-spaces. See the [growth audit](audit-stage6-heap-growth-2026-09-17.md).
+spaces. See the [growth audit](docs/audit-stages-consolidated.md).
 The rank-40 physical-frame allocator stores one allocation bitmap in reserved
 pages at the start of each usable RAM range. Returned frames beyond its 4,096
 entry hot cache remain reusable through a bitmap scan; the bit also rejects
@@ -3779,7 +3779,7 @@ array before registration, uses task wakeups rather than polling, and clears
 registrations on every return path. Manual-reset events support four bounded
 task waiters and broadcast wakeups; one-shot timers retain one consuming task
 waiter so expiry is not duplicated. See [the ABI contract](wait-any-objects-abi.md)
-and [the Stage 19.8 audit](audit-stage19-8-timer-event-wait-2026-10-15.md).
+and [the Stage 19.8 audit](docs/audit-stages-consolidated.md).
 
 ## Stage 25.1 ACPI power capability boundary
 

@@ -1039,7 +1039,7 @@ fresh owner transaction, tears it down again, verifies zero remaining BAR
 leases, and completes generation-safe rescan. The 1-CPU gate passed with exit
 33. This is explicit driver rebind/teardown qualification, not automatic
 crash supervision or native hardware certification. Details are in
-`docs/audit-stage31-driver-restart-2026-10-22.md`.
+`docs/audit-stages-consolidated.md`.
 
 The Stage 31 torture planner now records driver-crash coverage as
 `partial-stage13-2-explicit-rebind`: explicit rebind and teardown are covered,
@@ -1054,7 +1054,7 @@ and tears it down again. The 1-CPU QEMU gate passed with exit 33 and emitted
 `[S27.5] IPC daemon restart/republication: PASSED`. This is service-restart
 qualification only; generic supervision, driver restart, sudden shutdown,
 randomized full-stack faults, and native hardware certification remain open.
-Details are in `docs/audit-stage31-service-restart-2026-10-22.md`.
+Details are in `docs/audit-stages-consolidated.md`.
 
 ## Input queue reliability slice - 2026-10-22
 
@@ -1094,7 +1094,7 @@ an unmapped user address; the kernel records the user fault, terminates only
 that process, and returns `-11` to the waiter. The gate passed on 1/2/4 CPUs
 with exit 33. Evidence is retained under
 `target/stage31-process-crash-{1,2,4}cpu`; the detailed audit is
-`docs/audit-stage31-process-crash-2026-10-22.md`. Driver crashes, service
+`docs/audit-stages-consolidated.md`. Driver crashes, service
 restart, packet corruption, sudden shutdown, and native hardware faults remain
 open.
 
@@ -1107,7 +1107,7 @@ it, while preserving proportional sizing below that threshold and bounded
 runtime growth. The complete Stage 24.59 QEMU gate passed on 1 CPU, including
 sign-in, Change-PIN rotation, durable-record checks, relock, old-PIN rejection,
 and new-PIN unlock. Evidence and limits are recorded in
-`docs/audit-stage24-59-low-memory-2026-10-22.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Stage 31 repeated recovery-service lifecycle slice - 2026-10-22
 
@@ -1271,7 +1271,7 @@ The 16-CPU shell gate initially exposed fixed preemption-test budgets; those
 budgets now scale with the bounded online topology and the rerun passes. A
 300-second shell harness window and a 900-second storage diagnostic window are
 host-emulation accommodations, not guest pass overrides. See
-`docs/audit-stage31-scalability-2026-10-22.md` for the exact commands and
+`docs/audit-stages-consolidated.md` for the exact commands and
 preserved evidence.
 
 ## Stage 31 memory and storage suite execution - 2026-10-22
@@ -1833,7 +1833,7 @@ The 1/2/4-CPU QEMU gates pass with exit 33. Recovery app Clippy, kernel
 feature Clippy, workspace all-target warning-denying Clippy, and 115 libwoven
 host tests pass. Evidence is retained in
 `audit-artifacts/stage27.5-recovery-{1,2,4}cpu` and documented in
-`docs/audit-stage27-5-recovery-environment-2026-10-22.md`.
+`docs/audit-stages-consolidated.md`.
 
 This closes only the bounded recovery-environment foundation. Destructive
 reset/reinstall execution, production update-slot sizing, bootloader handoff,
@@ -1852,7 +1852,7 @@ parser bound and oversized transport requests fail closed.
 
 Host app tests, freestanding app Clippy, stage27-5 kernel Clippy, and
 workspace all-target warning-denying Clippy pass. Evidence is recorded in
-`docs/audit-stage27-5-update-ipc-2026-10-22.md` and the retained
+`docs/audit-stages-consolidated.md` and the retained
 `audit-artifacts/stage27.5-{1,2,4}cpu` directories.
 
 This closes the daemon IPC exchange gate only. Production-sized block-device
@@ -2004,7 +2004,7 @@ production `system-apps` boot path now verifies and starts both
 `woven-package` and `woven-update` with the bounded IPC, file, and storage
 capability set. The shell QEMU gate passed on 1/2/4 CPUs with both service
 publication markers; evidence is in
-`docs/audit-stage27-5-update-service-process-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 The dedicated Stage 27.5 gate now proves the client/server exchange. This is
 not full update/recovery acceptance: production-sized block-device slots,
@@ -2035,7 +2035,7 @@ future privileged update service. It validates operation-specific generation,
 slot, and `/updates/` candidate-path rules while keeping image bytes outside
 IPC. The focused library tests now pass 113 cases and warning-denying Clippy
 passes. Evidence is in
-`docs/audit-stage27-4-update-ipc-contract-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This is not service acceptance: syscall dispatch, capability issuance, signed
 candidate staging, durable image-slot writes, bootloader handoff, and
@@ -2049,7 +2049,7 @@ limits, hashes the exact image, signs the immutable manifest and payload with
 Ed25519, and requires matching explicit signing/trusted-key inputs in release
 mode. Tool tests, warning-denying Clippy, release-key boundary checks, and the
 prior Stage 27.1 activation/rollback QEMU gate passed on 1/2/4 CPUs. Evidence
-is in `docs/audit-stage27-3-update-package-producer-2026-10-21.md`.
+is in `docs/audit-stages-consolidated.md`.
 
 This does not yet install images, own the durable A/B state, expose an
 update-service IPC/syscall protocol, perform bootloader slot handoff, recover
@@ -2066,7 +2066,7 @@ uses bounded English/Chichewa catalogs for its lock-screen strings.
 The i18n boundary also resolves bounded strong-direction runs for common
 Latin/Hebrew/Arabic text and numbers; it does not claim full UAX#9.
 Focused and full workspace host gates are recorded in
-`docs/audit-stage26-5-i18n-foundation-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This is not full internationalization: complete Unicode normalization and
 property data, full RTL/bidi ordering, script shaping, keyboard layouts, IMEs, and wiring
@@ -2140,7 +2140,7 @@ context through the Stage 25.12 restore primitive and transfers to a
 continuation that restores the FACS vector, trampoline, secondary CPUs, and
 drivers. The guarded integration gate passed on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-13-wake-record-2026-10-21.md` and the
+Evidence is in `docs/audit-stages-consolidated.md` and the
 retained `audit-artifacts/stage25.13-*` directories.
 
 The QEMU gate validates record ownership and continuation wiring without
@@ -2154,7 +2154,7 @@ CR3, CR4, EFER, GDT, IDT, RSP, and RFLAGS, then transfers to a
 kernel-provided continuation. The self-test restores the current context and
 continues to a QEMU success marker on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-12-cpu-context-restore-2026-10-21.md` and
+Evidence is in `docs/audit-stages-consolidated.md` and
 the retained `audit-artifacts/stage25.12-*` directories.
 
 This proves the architectural restore primitive, not a complete firmware S3
@@ -2170,7 +2170,7 @@ machine remains running, vector, trampoline, secondary-CPU, and driver state
 are rolled back before returning. The guarded encoding self-test passed on
 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-11-pm1-s3-request-2026-10-21.md` and the
+Evidence is in `docs/audit-stages-consolidated.md` and the
 retained `audit-artifacts/stage25.11-*` directories.
 
 The test does not issue a destructive S3 request. This stage does not claim
@@ -2185,7 +2185,7 @@ original online mask. A failed partial barrier restores the completed prefix;
 rollback re-onlines every parked CPU in reverse order and verifies the exact
 mask. The guarded barrier self-test passed on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-10-secondary-cpu-barrier-2026-10-21.md` and
+Evidence is in `docs/audit-stages-consolidated.md` and
 the retained `audit-artifacts/stage25.10-*` directories.
 
 This does not claim CPU register restoration, PM1 S3 entry, firmware wake, or
@@ -2199,7 +2199,7 @@ private preparation token. Abort restores both firmware fields before
 releasing the trampoline and resuming drivers. The guarded transaction
 self-test passed on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-9-facs-wake-vector-2026-10-21.md` and the
+Evidence is in `docs/audit-stages-consolidated.md` and the
 retained `audit-artifacts/stage25.9-*` directories.
 
 This does not claim secondary-CPU coordination, CPU register restoration,
@@ -2213,7 +2213,7 @@ descriptors. The capture is validated for long-mode paging, canonical pointers,
 aligned CR3, descriptor limits, and required RFLAGS state before preparation
 can succeed. The guarded self-test passed on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-8-cpu-resume-context-2026-10-21.md` and the
+Evidence is in `docs/audit-stages-consolidated.md` and the
 retained `audit-artifacts/stage25.8-*` directories.
 
 This does not claim register restoration, secondary-CPU coordination, FACS
@@ -2227,7 +2227,7 @@ page with a private identity-mapped root, dedicated wake stack, and entry
 point. Page-table ownership is transactional: abort releases the image and
 restores drivers. The guarded stage25-7 QEMU test passed on 1/2/4 CPUs.
 
-Evidence is in `docs/audit-stage25-7-wake-trampoline-2026-10-21.md` and the
+Evidence is in `docs/audit-stages-consolidated.md` and the
 retained `audit-artifacts/stage25.7-*` directories.
 
 This does not claim FACS vector installation, CPU-state save/restore,
@@ -2243,7 +2243,7 @@ page is unavailable and carries its physical address internally.
 
 The page is reserved only; no code is written and no FACS waking vector is
 modified. Evidence and limits are recorded in
-`docs/audit-stage25-6-low-wake-page-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 ## Stage 25.5 - ACPI FACS wake-capability boundary (2026-10-21)
 
@@ -2256,7 +2256,7 @@ state.
 Default and `system-apps` production-kernel Clippy, host all-targets Clippy,
 the full `cargo test --all` suite, and signed system-apps QEMU acceptance on
 1/2/4 CPUs passed. Evidence is in
-`docs/audit-stage25-5-facs-wake-capabilities-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This does not claim wake-trampoline allocation, FACS vector installation,
 CPU-state save/restore, S3 entry, firmware wake, or physical qualification.
@@ -2270,7 +2270,7 @@ private preparation token; abort restores drivers in reverse order.
 
 Production-kernel and host warning-denying Clippy, the full `cargo test --all`
 suite, and signed system-apps QEMU acceptance on 1/2/4 CPUs passed. Evidence
-is in `docs/audit-stage25-4-suspend-preparation-2026-10-21.md`.
+is in `docs/audit-stages-consolidated.md`.
 
 This does not claim S3 entry, wake-vector/CPU-resume handling, wake-source
 policy, a suspend syscall, device-specific save/restore, or physical
@@ -2286,7 +2286,7 @@ It returns an explicit unavailable result when firmware omits the leaf.
 
 Signed production-kernel Clippy, `libwoven` Clippy/tests, and signed
 system-apps QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
-`docs/audit-stage25-3-cpu-frequency-inventory-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This does not claim frequency scaling, governor policy, thermal throttling, or
 physical frequency validation.
@@ -2340,7 +2340,7 @@ CPU state. The scheduler continues to use only its existing interrupt-safe
 
 Production-kernel Clippy, `libwoven` Clippy/tests, and signed system-apps
 QEMU acceptance on 1/2/4 CPUs pass. Evidence is in
-`docs/audit-stage25-2-cpu-idle-capabilities-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This does not claim MWAIT execution, frequency scaling, deep C-state policy,
 per-CPU residency accounting, or suspend/resume.
@@ -2356,7 +2356,7 @@ transition.
 
 Signed production-kernel Clippy, `libwoven` warning-denying Clippy and tests
 (95 tests), and signed system-apps QEMU boots on 1/2/4 CPUs pass. Evidence is
-in `docs/audit-stage25-1-acpi-power-capabilities-2026-10-21.md`. The ACPI
+in `docs/audit-stages-consolidated.md`. The ACPI
 structural self-test also directly covers a synthetic `_S3` AML package and
 unsupported-state rejection.
 
@@ -2371,7 +2371,7 @@ public-key inputs; only non-production/test packaging may use the deterministic
 development key. The production catalog and package-service launchers propagate
 the fail-closed mode. Negative and positive packager tests, packager Clippy,
 and explicit production catalog/service packaging pass. Evidence is in
-`docs/audit-stage24-60-release-key-provisioning-2026-10-21.md`.
+`docs/audit-stages-consolidated.md`.
 
 This does not claim custody of a real release secret or physical release
 qualification.
@@ -2406,7 +2406,7 @@ host tests, Stage 7.5/7.6 preservation, networking, and all preserved Stage
 `no space on device` failure; after disposable build cleanup, the isolated
 Stage 10.7 TCP gate passed on 1/2/4 CPUs with two TX exchanges, RX, and
 FIN/EOF. This was a validation-only rerun with no source changes. Evidence is
-under `docs/audit-stage10-7-release-rerun-2026-10-21.md` and the preserved
+under `docs/audit-stages-consolidated.md` and the preserved
 serial logs in `target/stage10-7-regression-{1,2,4}-debug`.
 
 ## Stage 20.16 — standalone textured-3D-chrome proof of concept (2026-10-21)
@@ -3686,7 +3686,7 @@ dedicated QEMU gate passed on 1/2/4 CPUs. The first attempt is preserved as
 new marker because the feature did not inherit the required WovenFS gate, so
 the feature graph and inherited self-test guards were corrected before the
 accepted rerun. Accepted evidence is recorded in
-`docs/audit-stage22-1-userspace-service-ipc-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 This increment proves the kernel registry and syscall/library ABI boundary;
 it does not yet claim a long-lived Ring-3 WovenPackage broker/client,
@@ -5889,7 +5889,7 @@ cyclic dependencies fail without committing a partial catalog, while the
 existing capability policy, monotonic update, dependent-removal, and explicit
 rollback rules remain active. Host tests, warning-denying Clippy, and QEMU
 acceptance passed on 1/2/4 CPUs. Evidence is recorded in
-`docs/audit-stage21-4-wovenstore-batches-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 Persistent WovenFS publication, power-loss recovery, service/IPC authority,
 and physical USB qualification remain open.
@@ -5901,7 +5901,7 @@ It round-trips capability policy, package versions, application digests, and
 dependency metadata, and rejects corruption, malformed lengths, invalid names,
 duplicates, and invalid dependency fields. Host tests, warning-denying Clippy,
 and QEMU acceptance passed on 1/2/4 CPUs. Evidence is recorded in
-`docs/audit-stage21-5-wovenstore-records-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 The record is not yet wired to native WovenFS publication; crash/power-loss
 service integration, IPC authority, and physical USB qualification remain open.
@@ -5925,7 +5925,7 @@ resource payloads as bounded, versioned WovenFS chunks and commits the WSTC
 catalog only after the chunks are durable. A failed chunk/catalog write cleans
 up chunks created by that attempt. The disposable ATA QEMU gate passed on
 1/2/4 CPUs; host/freestanding warning-denying Clippy passed. Evidence is
-recorded in `docs/audit-stage21-7-package-publication-2026-10-20.md`.
+recorded in `docs/audit-stages-consolidated.md`.
 
 This is not yet a complete package manager: multi-package crash recovery,
 persistent update/removal transactions, package-service userspace IPC, and
@@ -5938,7 +5938,7 @@ around payload publication. Recovery reconciles the intent with the WSTC
 catalog and removes orphaned application/resource chunks from interrupted
 prepared installs. The disposable ATA QEMU recovery gate passed on 1/2/4 CPUs;
 host/freestanding warning-denying Clippy passed. Evidence is recorded in
-`docs/audit-stage21-8-package-recovery-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 Multi-package recovery, persistent update/removal transactions, full power-loss
 injection, userspace package-service IPC, and physical USB qualification remain
@@ -6474,7 +6474,7 @@ device, or scan, association, security and physical network tests.
 ## Stage 10.7/release and AX201 identity increment — 2026-10-17
 
 The supplied Stage 10.7 transcript is recorded in
-[the Stage 10.7 audit](audit-stage10-7-acceptance-2026-10-17.md). The full
+[the Stage 10.7 audit](docs/audit-stages-consolidated.md). The full
 serialized release validator exited 0; its report is
 `target/release-validation/results.json` and includes host lint/tests, debug
 and release 1/2/4-CPU memory/storage/network, shell, application, system-app
@@ -6632,7 +6632,7 @@ the kernel console.
   pass.
 - The release gate passes.
 
-See the [audit](audit-stage20-15-desktop-session-2026-10-15.md).
+See the [audit](docs/audit-stages-consolidated.md).
 
 ## Stage 13.20 — ACPI power-off and reset (2026-10-15)
 
@@ -6648,7 +6648,7 @@ See the [audit](audit-stage20-15-desktop-session-2026-10-15.md).
   were caught.
 - The release gate passes 102/102.
 
-See the [audit](audit-stage13-20-power-off-and-reset-2026-10-15.md).
+See the [audit](docs/audit-stages-consolidated.md).
 
 ## Stages 13.17–13.19 — live hardware testing (2026-10-15)
 
@@ -6678,7 +6678,7 @@ Regression passes for 13.3–13.6, 13.12–13.14, 13.16, storage, 20.1,
 20.14b and the release gate (100/100).
 
 See the
-[audit](audit-stage13-17-to-19-live-hardware-testing-2026-10-15.md).
+[audit](docs/audit-stages-consolidated.md).
 
 ## Stage 1–19 production closure review — 2026-10-15
 
@@ -6775,7 +6775,7 @@ allows only monotonic version updates, protects dependencies from removal, and
 provides explicit commit/rollback snapshots. Host tests, host/freestanding
 warning-denying Clippy, and the Stage 21.3 QEMU gate passed on 1/2/4 CPUs.
 Evidence is recorded in
-`docs/audit-stage21-3-wovenstore-transactions-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 The core is not yet persistent: WovenFS publication, payload/catalog atomicity
 across reboot, package service ownership/IPC, and physical USB qualification
@@ -6841,7 +6841,7 @@ Roadmap Stage 18.9, Multi-monitor Desktop.
   pass on 1/2/4 CPUs.
 
 See the
-[Stage 20.14b audit](audit-stage20-14b-desktop-monitors-2026-10-15.md).
+[Stage 20.14b audit](docs/audit-stages-consolidated.md).
 
 **Stage 18 is complete in software.** Roadmap 18.1–18.9 are Stages 20.1
 to 20.14b.
@@ -6880,7 +6880,7 @@ Roadmap Stage 18.9, first part.
   1/2/4 CPUs.
 - **Negative controls:** all four failed the gate as intended.
 
-See the [Stage 20.14a audit](audit-stage20-14a-monitors-2026-10-15.md).
+See the [Stage 20.14a audit](docs/audit-stages-consolidated.md).
 
 **Next: 20.14b.** The compositor will present the desktop across the
 heads, and the shell will use the second monitor.
@@ -6971,7 +6971,7 @@ HID devices that describe their own reports now work.
   harness gap was closed.
 - **Regression:** 13.5, 13.6, 13.7, 13.13 and 19.12 pass on 1/2/4 CPUs.
 
-See the [Stage 13.16 audit](audit-stage13-16-hid-reports-2026-10-14.md).
+See the [Stage 13.16 audit](docs/audit-stages-consolidated.md).
 
 **Open.** Multi-application devices, a virtio-input driver, and physical
 qualification of digitizers and controllers.
@@ -6994,7 +6994,7 @@ Applications can now play sound.
 - **Negative controls:** all five failed the gate as intended.
 - **Regression:** 13.8, 15.3, 15.4 and 15.8 pass on 1/2/4 CPUs.
 
-See the [Stage 13.15 audit](audit-stage13-15-audio-2026-10-14.md).
+See the [Stage 13.15 audit](docs/audit-stages-consolidated.md).
 
 **Open.** Streaming and mixing, other sample formats, recording through
 `Microphone`, and physical codecs.
@@ -7018,7 +7018,7 @@ A machine with no ATA disk now mounts its NVMe or AHCI disk at `/mnt`.
 - **Regression:** the ATA storage regression, the WovenFS device gate, and
   1-5, 10.8, 12.1, 13.3 and 13.4 pass on 1/2/4 CPUs.
 
-See the [Stage 13.14 audit](audit-stage13-14-storage-2026-10-14.md).
+See the [Stage 13.14 audit](docs/audit-stages-consolidated.md).
 
 **Open.** WovenFS on NVMe or AHCI, multiple volumes, interrupt-driven
 NVMe and AHCI I/O, and physical-device qualification.
@@ -7046,7 +7046,7 @@ worker sleeping between them.
 - **Regression:** 13.12 in all modes, and 13.2, 13.5, 13.6, 13.7, 13.9 and
   13.10, pass on 1/2/4 CPUs.
 
-See the [Stage 13.13 audit](audit-stage13-13-usb-input-2026-10-14.md).
+See the [Stage 13.13 audit](docs/audit-stages-consolidated.md).
 
 **Open.** Report-protocol HID devices (touchpads; Stage 13.16), USB
 hotplug, a fuller keymap, and physical-device qualification.
@@ -7075,7 +7075,7 @@ the device registry as `nvme0`, `ahci0`, `xhci0` and `hda0`.
 - **Prior gates:** 13.1–13.10 pass on 1/2/4 CPUs.
 
 See the
-[Stage 13.12 audit](audit-stage13-12-driver-bring-up-2026-10-14.md).
+[Stage 13.12 audit](docs/audit-stages-consolidated.md).
 
 **Stage 13 is not closed by this.** Still to do:
 - mount storage from NVMe or AHCI;
@@ -7095,28 +7095,28 @@ acceptance; see their individual audits. The remaining roadmap applications,
 catalog, and multi-package boot-image installation are now covered by the
 ten-application release chain. WovenFiles now adds a read-only bounded
 directory/file browser; see the
-[WovenFiles audit](audit-stage19-files-2026-10-14.md).
+[WovenFiles audit](docs/audit-stages-consolidated.md).
 WovenMonitor adds bounded read-only clock, display, and storage diagnostics
 and passes signed 1/2/4-CPU execution; see the
-[WovenMonitor audit](audit-stage19-monitor-2026-10-14.md).
+[WovenMonitor audit](docs/audit-stages-consolidated.md).
 WovenSettings adds bounded read-only identity, clock, and display-policy
 diagnostics and passes signed 1/2/4-CPU execution; see the
-[WovenSettings audit](audit-stage19-settings-2026-10-14.md).
+[WovenSettings audit](docs/audit-stages-consolidated.md).
 WovenSecurity adds bounded read-only identity and security-ledger reporting and
 passes signed 1/2/4-CPU execution; see the
-[WovenSecurity audit](audit-stage19-security-2026-10-14.md).
+[WovenSecurity audit](docs/audit-stages-consolidated.md).
 WovenEditor adds bounded text preview and capability-enforced note writing and
 passes signed 1/2/4-CPU execution; see the
-[WovenEditor audit](audit-stage19-editor-2026-10-14.md).
+[WovenEditor audit](docs/audit-stages-consolidated.md).
 WovenImages adds bounded image inventory and header inspection and passes
 signed 1/2/4-CPU execution; see the
-[WovenImages audit](audit-stage19-images-2026-10-14.md).
+[WovenImages audit](docs/audit-stages-consolidated.md).
 WovenUpdate adds bounded read-only update preflight and passes signed 1/2/4-CPU
 execution; see the
-[WovenUpdate audit](audit-stage19-update-2026-10-14.md).
+[WovenUpdate audit](docs/audit-stages-consolidated.md).
 WovenStore adds bounded read-only installed-catalog browsing and passes signed
 1/2/4-CPU execution; see the
-[WovenStore audit](audit-stage19-store-2026-10-14.md).
+[WovenStore audit](docs/audit-stages-consolidated.md).
 
 The complete `scripts/test-release.py` chain now passes on the current tree.
 The debug QEMU exit path was corrected to issue the `isa-debug-exit` byte-width
@@ -7142,27 +7142,27 @@ acceptance harness supplies the test key only for QEMU. The 4-CPU shell gate
 confirmed installation before shell startup. Persistent media updates,
 power-loss rollback, key rotation/revocation, and native hardware
 qualification remain open. See the
-[production system-app boot audit](audit-stage19-production-system-app-boot-2026-10-14.md).
+[production system-app boot audit](docs/audit-stages-consolidated.md).
 
 Stage 14.5D was rerun on 1/2/4 CPUs. DHCP, DNS, ICMP, host-verified UDP/TCP,
 SMP/TLB, and firewall transport/path checks passed with exit 33. See the
-[Stage 14.5D revalidation audit](audit-stage14-5d-revalidation-2026-10-14.md).
+[Stage 14.5D revalidation audit](docs/audit-stages-consolidated.md).
 The evidence remains QEMU virtio-only and does not claim native NIC/radio
 qualification.
 
 Stages 13.4, 13.5, 13.6, and 13.7 were independently rerun on 1/2/4 CPUs
 and all passed with exit 33. See the
-[Stage 13.4–13.7 validation audit](audit-stage13-4-7-validation-2026-10-14.md).
+[Stage 13.4–13.7 validation audit](docs/audit-stages-consolidated.md).
 These QEMU gates validate software and protocol contracts, not native-device
 interoperability. The Stage 13.6 fixture exercises USB HID keyboard support;
 The bounded boot-mouse report decoder is now self-tested, but live xHCI mouse
 polling/publication and physical USB mouse interoperability remain open. See
-the [USB mouse decoder audit](audit-stage13-6-usb-mouse-decoder-2026-10-14.md).
+the [USB mouse decoder audit](docs/audit-stages-consolidated.md).
 
 Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs
 after the remote-termination cleanup change; all emitted their required pass
 markers and exit 33. See
-[the revalidation audit](audit-stage17-19-revalidation-2026-10-14.md).
+[the revalidation audit](docs/audit-stages-consolidated.md).
 
 The complete Stage 12 acceptance chain was independently rerun on the current
 accepted tree. Stages 12.1 through 12.5 all passed on 1/2/4 CPUs with exit 33;
@@ -7187,7 +7187,7 @@ The ELF dynamic metadata boundary was hardened before shared-library work.
 dependency-bearing images until dependency mapping, cross-image symbol scope,
 dynamic TLS, and shared-image teardown exist. The Stage 11.3–11.5 1/2/4-CPU
 matrix passed again with the new parser self-test; see the
-[dynamic dependency metadata audit](audit-stage11-needed-metadata-2026-10-14.md).
+[dynamic dependency metadata audit](docs/audit-stages-consolidated.md).
 
 ## Host-test boundary repair — 2026-10-14
 
@@ -8235,7 +8235,7 @@ Gate `[S19.13] translucency and shadows: PASSED`:
   both processes exit.
 
 Local 1/2/4-CPU evidence is recorded in the
-[Stage 19.13 transparency audit](audit-stage19-13-transparency-2026-10-13.md).
+[Stage 19.13 transparency audit](docs/audit-stages-consolidated.md).
 
 Negative control: with `blend` copying opaquely, the compositor fails its
 region check (exit 167) and the gate fails. Evidence is in
@@ -8369,7 +8369,7 @@ Open (remaining roadmap Stage 17 items after the accepted Stage 19 gates):
 Pointer-driven focus is closed by Stage 19.12: IRQ12 mouse packets and
 IRQ1 keyboard input reach the event-driven window manager, clicks raise and
 focus the selected window, and keys route only to that client. See the
-[Stage 19.12 pointer audit](audit-stage19-12-pointer-2026-10-13.md).
+[Stage 19.12 pointer audit](docs/audit-stages-consolidated.md).
 
 ## Stage 19.10 — compositor follows the framebuffer; one framebuffer writer (2026-10-12)
 
@@ -8938,7 +8938,7 @@ The marker is `[S16.1] out-of-kernel application: PASSED`, with per-step markers
 for WAPP verification, tamper refusal, unsigned-external-image refusal, loader
 acceptance, filesystem install, read-back, load, spawn, completion and exit
 status. The dedicated application harness now passes on 1, 2 and 4 CPUs; see
-the [Stage 16.1 audit](audit-stage16-1-out-of-kernel-application-2026-10-14.md).
+the [Stage 16.1 audit](docs/audit-stages-consolidated.md).
 
 The original Stage 16.1 boundary remains intentionally single-package and
 VFS-backed; the release-level Stage 19 catalog/production-image gates now cover
@@ -8957,7 +8957,7 @@ It consumes all ten signed packages, rejects tampered copies, verifies VFS
 byte-for-byte read-back and normal ELF loading, and publishes matching catalog
 descriptors. The normal-boot production image gate confirms installation
 before shell startup. See the
-[Stage 19 system-app catalog audit](audit-stage19-system-app-catalog-2026-10-14.md).
+[Stage 19 system-app catalog audit](docs/audit-stages-consolidated.md).
 Persistent-media installation, power-loss rollback, and deployment-key
 rotation/revocation remain separate production requirements.
 
@@ -9007,7 +9007,7 @@ visited-inode tracking; oversized files fail closed at the VFS capacity
 boundary. `Volume::check()` validates the complete reachable tree and rejects
 cycles, duplicate references, malformed names, and orphaned live inodes.
 Mounted-system policy remains open. See the [Stage 15
-VFS write-through audit](audit-stage15-wfs-vfs-write-through-2026-10-14.md).
+VFS write-through audit](docs/audit-stages-consolidated.md).
 
 Crash recovery is proven by fault injection, not actual power loss on a device.
 Physical qualification remains incomplete: the inserted USB flash disk was
@@ -9016,7 +9016,7 @@ elevation and explicit authorization to erase it.
 
 The complete Stage 12 acceptance chain was revalidated on 2026-10-13: all
 Stages 12.1–12.5 passed on 1/2/4 CPUs with exit 33. See the
-[revalidation audit](audit-stage12-acceptance-2026-10-13.md). This confirms the
+[revalidation audit](docs/audit-stages-consolidated.md). This confirms the
 bounded gates only; the integration and physical limits above remain open.
 
 ## Stage 15.3 — runtime permission broker (2026-10-13)
@@ -9026,7 +9026,7 @@ revoke operations through the userspace ABI. Decisions require `TaskControl`
 and successful changes pass through WovenGuard grant/revoke lineage checks;
 security-ledger events record each request and decision. The 1/2/4-CPU gate,
 freestanding Clippy, and all-target Clippy pass. See the
-[Stage 15.3 permission-broker audit](audit-stage15-3-permission-broker-2026-10-13.md).
+[Stage 15.3 permission-broker audit](docs/audit-stages-consolidated.md).
 Graphical prompts, signed application identity, persistent consent, secure or
 measured boot, and WovenVault remain open Stage 15 work.
 
@@ -9035,7 +9035,7 @@ measured boot, and WovenVault remain open Stage 15 work.
 The pure-Rust `no_std` Ed25519 verifier and bounded versioned WAPP envelope
 now reject malformed and tampered payloads. The exact 1/2/4-CPU gate and
 warning-denying freestanding Clippy pass; see the
-[Stage 15.4 audit](audit-stage15-4-signed-applications-2026-10-13.md).
+[Stage 15.4 audit](docs/audit-stages-consolidated.md).
 Release builds now require `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX`; the RFC
 self-test remains pinned to the development vector. Signed package
 installation now has a real external-application path through
@@ -9046,7 +9046,7 @@ rotation/revocation and firmware/installer-owned key slots remain open. User
 `exec`/`spawn` now reject raw external ELF; only the finite kernel-owned system
 image allowlist retains the explicit internal-image path.
 Stage 15.5 software signed-kernel handoff is accepted with the exact 1/2/4-CPU
-gate; see the [secure-boot audit](audit-stage15-5-secure-boot-2026-10-13.md).
+gate; see the [secure-boot audit](docs/audit-stages-consolidated.md).
 Firmware UEFI Secure Boot state, TPM/event logs, release-key provisioning,
 rollback/revocation, and signed-initrd enforcement remain hardware/platform
 work and are not claimed complete.
@@ -9057,7 +9057,7 @@ WovenVault now provides generation-safe per-owner secret handles with bounded
 storage, validated copy-in/copy-out, zeroizing revoke, and owner teardown.
 The `Secrets` capability is not granted by default. The 1/2/4-CPU gate and
 warning-denying freestanding kernel Clippy pass. See the
-[Stage 15.7 WovenVault audit](audit-stage15-7-wovenvault-handles-2026-10-13.md).
+[Stage 15.7 WovenVault audit](docs/audit-stages-consolidated.md).
 The Stage 15.6 software measurement audit records the separate 1/2/4-CPU
 kernel measurement gate; TPM PCR extension, event logs, and firmware Secure
 Boot state remain hardware-dependent.
@@ -9071,7 +9071,7 @@ The security ledger now has a bounded newest-relative read syscall authorized
 by `TaskInspect`, with validated userspace copies and a fixed 48-byte record
 decoded by typed `libwoven` wrappers. The 1/2/4-CPU gate, build, and
 warning-denying freestanding kernel Clippy pass. See the
-[Stage 15.8 security-ledger audit](audit-stage15-8-security-ledger-2026-10-13.md).
+[Stage 15.8 security-ledger audit](docs/audit-stages-consolidated.md).
 This is an ABI boundary, not a complete security-center product: durable
 retention/export, signed identity, graphical review, and secure/measured boot
 remain open.
@@ -9081,7 +9081,7 @@ remain open.
 The existing ASLR, W^X, and user-stack guard-page checks are now joined by a
 scheduler-validated canary on each static kernel task stack. The dedicated
 1/2/4-CPU gate and warning-denying freestanding kernel Clippy pass. See the
-[Stage 15.9 exploit-mitigation audit](audit-stage15-9-exploit-mitigations-2026-10-13.md).
+[Stage 15.9 exploit-mitigation audit](docs/audit-stages-consolidated.md).
 This closes the verified software-hardening subset only: true unmapped kernel
 stack guards, SMEP/SMAP enablement and hardware qualification, shared-library
 RELRO/TLS support, and scheduler-backed user threads remain open.
@@ -9097,7 +9097,7 @@ single-file format and metadata ABIs remain readable. Kernel
 build/check, warning-denying kernel Clippy, and the existing storage gate
 passed on 1/2/4 CPUs, including two-file commit/readback and prepared,
 partial-commit, and complete-commit recovery exercises. See the
-[batch-journal audit](audit-stage1-5-batch-journal-2026-10-06.md).
+[batch-journal audit](docs/audit-stages-consolidated.md).
 
 Physical storage/DMA qualification, unclean-shutdown hardware testing,
 metadata transactions, and arbitrary-size transactions remain open.
@@ -9112,7 +9112,7 @@ pages available to the current boot's VFS; the original error is preserved and
 a failed rollback remains recoverable from the durable journal. Direct FAT32
 and MBR/GPT-partitioned paths are covered. The 1/2/4-CPU disposable storage
 gates, host crash tests, and warning-denying Clippy passed. See the
-[immediate-rollback audit](audit-stage1-5-immediate-rollback-2026-10-13.md).
+[immediate-rollback audit](docs/audit-stages-consolidated.md).
 
 This is a bounded hardening increment, not full Stage 1–5 completion. The
 follow-up metadata transaction increment below closes metadata rollback within
@@ -9120,7 +9120,7 @@ this bounded format; arbitrary-size/full-volume rollback, physical storage/DMA
 qualification, and unclean-shutdown hardware evidence remain open.
 
 The WDJ2 capacity extension was revalidated on 1/2/4 CPUs after increasing the
-bounded batch maximum from four to sixteen entries; see the [capacity audit](audit-stage1-5-wdj2-capacity-2026-10-14.md).
+bounded batch maximum from four to sixteen entries; see the [capacity audit](docs/audit-stages-consolidated.md).
 
 ## Stage 1–5 bounded metadata transactions — 2026-10-14
 
@@ -9129,7 +9129,7 @@ version 1 recovery compatibility. Prepared and incomplete committed batches
 restore both bytes and prior metadata; committed recovery retires the journal
 only after bytes and new metadata match. The live FAT32 recovery fixture and
 storage/SMP QEMU gates passed on 1/2/4 CPUs. See the [metadata transaction
-audit](audit-stage1-5-metadata-transactions-2026-10-14.md).
+audit](docs/audit-stages-consolidated.md).
 
 This closes bounded metadata transactions, not arbitrary-size/full-volume
 rollback or physical unclean-shutdown qualification.
@@ -9161,7 +9161,7 @@ pages. The `BlockDevice` ABI is unchanged.
 
 The Stage 13.3/13.4 freestanding Clippy gates, host Clippy, and the complete
 host test suite passed after this change. The NVMe and AHCI QEMU controller
-gates also passed on 1/2/4 CPUs with exit 33. See the [DMA allocation audit](audit-stage1-5-dma-allocation-2026-10-14.md)
+gates also passed on 1/2/4 CPUs with exit 33. See the [DMA allocation audit](docs/audit-stages-consolidated.md)
 for the six evidence directories.
 This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
 flash qualification, IOMMU isolation, interrupt completion, torn-sector and
@@ -9183,7 +9183,7 @@ exercises these exact operations and requires `[S14.2A]` and `[S14.2B]`
 markers. This remains a deterministic foundation boundary: ICMPv6 Neighbor
 Discovery packets, Duplicate Address Detection, router discovery, DHCPv6,
 live IPv6 sockets, and physical IPv6 qualification remain open. See the
-[Stage 14.2B audit](audit-stage14-2b-ipv6-neighbor-foundation-2026-10-06.md).
+[Stage 14.2B audit](docs/audit-stages-consolidated.md).
 
 The bounded parser now accepts only ICMPv6 Router/Neighbor Solicitation and
 Advertisement envelopes with code zero, valid fixed bodies, non-multicast
@@ -9193,7 +9193,7 @@ messages. IPv6 pseudo-header checksum verification, Duplicate Address
 Detection, router state, DHCPv6, live IPv6 sockets, and physical IPv6
 qualification remain open.
 
-See the [Stage 14.2C audit](audit-stage14-2c-icmpv6-neighbor-parser-2026-10-06.md).
+See the [Stage 14.2C audit](docs/audit-stages-consolidated.md).
 
 The parser now has a checked entry point that authenticates the ICMPv6
 pseudo-header using the IPv6 source/destination, payload length, next-header
@@ -9201,7 +9201,7 @@ value, and packet checksum. Tampered packets are rejected before Neighbor
 Discovery parsing. Router state, Duplicate Address Detection, DHCPv6, live
 IPv6 sockets, and physical IPv6 qualification remain open.
 
-See the [Stage 14.2E audit](audit-stage14-2e-icmpv6-checksum-2026-10-06.md).
+See the [Stage 14.2E audit](docs/audit-stages-consolidated.md).
 
 ## Stage 14.2F — Neighbor cache and DAD state (2026-10-06)
 
@@ -9211,7 +9211,7 @@ explicit Duplicate Address Detection pending/unique/duplicate outcomes. It
 does not yet transmit probes or integrate live interface state. DHCPv6, live
 IPv6 sockets, and physical IPv6 qualification remain open.
 
-See the [Stage 14.2F audit](audit-stage14-2f-neighbor-state-2026-10-06.md).
+See the [Stage 14.2F audit](docs/audit-stages-consolidated.md).
 
 Next: connect Neighbor Discovery state to bounded live IPv6 interface traffic.
 
@@ -9244,7 +9244,7 @@ bounded interface state. It emits explicit events for accepted traffic, DAD
 conflicts, and rejected packets. No packet slice is retained and no physical
 NIC activation is claimed.
 
-See the [Stage 14.2J audit](audit-stage14-2j-ipv6-interface-ingress-2026-10-06.md).
+See the [Stage 14.2J audit](docs/audit-stages-consolidated.md).
 
 Next: bounded IPv6 interface address configuration and controlled egress.
 
@@ -9257,7 +9257,7 @@ existing owner/generation socket lifecycle remains unchanged. This is an API
 boundary; live IPv6 sockets, routing policy, and physical NIC qualification
 remain open.
 
-See the [Stage 14.3 audit](audit-stage14-3-socket-api-2026-10-06.md).
+See the [Stage 14.3 audit](docs/audit-stages-consolidated.md).
 
 Next: bounded routing-table ownership above the accepted socket API.
 
@@ -9269,7 +9269,7 @@ metric then generation tie-breaking. Removal requires the exact route handle,
 so stale removal cannot delete a replacement. Live route installation into the
 network interface and physical NIC qualification remain open.
 
-See the [Stage 14.4 audit](audit-stage14-4-routing-table-2026-10-06.md).
+See the [Stage 14.4 audit](docs/audit-stages-consolidated.md).
 
 ## Stage 14.5A — WovenGuard firewall policy foundation (2026-10-07)
 
@@ -9336,7 +9336,7 @@ name before selecting an 8.3 alias. Existing long-name files are overwritten
 through their existing directory entry, and attempts to create a directory or
 rename another file onto that name fail closed. The strengthened FAT32
 self-test and complete Stage 1–5 QEMU gate passed on 1/2/4 CPUs with exit 33.
-See [the hardening audit](audit-stage1-5-long-name-collision-2026-10-01.md).
+See [the hardening audit](docs/audit-stages-consolidated.md).
 
 This is a bounded software hardening increment, not a claim that the remaining
 hardware qualification, DMA storage completion, or full data rollback gaps are
@@ -9348,7 +9348,7 @@ FAT32 persistence now uses a bounded on-volume prepared/committed data journal
 to recover interrupted single-file replacements, including restoration of the
 previous bytes or removal of a newly-created target. Payload tampering fails
 checksum validation. The journal self-test and 1/2/4-CPU QEMU gate passed.
-See [the data-journal audit](audit-stage1-5-data-journal-2026-10-01.md).
+See [the data-journal audit](docs/audit-stages-consolidated.md).
 
 Multi-file atomicity, larger-than-VFS files, and physical power-loss testing
 remain open.
@@ -9366,7 +9366,7 @@ versioned WMD3 extension in eight additional reserved sectors when the volume
 geometry permits it. Capacity increases from 84 to 252 records without
 relocating or rewriting legacy metadata. The strengthened self-test and
 1/2/4-CPU QEMU gate passed with exit 33. See the
-[metadata-capacity audit](audit-stage1-5-metadata-capacity-2026-10-01.md).
+[metadata-capacity audit](docs/audit-stages-consolidated.md).
 
 The table remains intentionally bounded; a dynamically growing metadata
 format and full multi-operation transaction log are still future work.
@@ -9452,7 +9452,7 @@ acceptance; it does not establish production completion of Stage 13.
 The continuation corrected feature boundaries, a misplaced audio check in
 USB HID's error branch, and a nested Cargo release-build artifact-lock
 conflict in the shell harness. Failed/interrupted attempts remain preserved.
-See [the continuation audit](audit-stage13-10ac-continuation-2026-09-23.md)
+See [the continuation audit](docs/audit-stages-consolidated.md)
 for exact evidence directories and validation scope.
 
 Next prerequisites remain production Wi-Fi worker/lifecycle integration,
@@ -9465,7 +9465,7 @@ stage or treat these synthetic Wi-Fi results as working physical Wi-Fi.
 The bounded SMP foundation passed the complete release matrix: warning-denying
 kernel/host Clippy, all Rust host tests, 1/2/4-CPU memory/storage/network
 gates, legacy PIC fallback, 4-CPU release gates, and shell/SMP smoke. See
-[the Stage 6 audit](audit-stage6-2026-09-16.md).
+[the Stage 6 audit](docs/audit-stages-consolidated.md).
 
 General multicore userspace, unrestricted concurrent device/filesystem service
 throughput, multi-node NUMA page-placement qualification, non-contiguous
@@ -9477,16 +9477,16 @@ implemented; bounded contiguous-prefix AP offline/re-online control is also
 implemented; interrupt-safe scheduler, IPC, WovenGuard, teardown, and worker
 locks now enforce bounded rank and nesting
 checks, and VirtIO network DMA uses an allocator-reserved physically
-contiguous arena; see the [NUMA/x2APIC audit](audit-stage6-numa-2026-09-16.md),
-[hotplug audit](audit-stage6-hotplug-2026-09-16.md), and
-[lock-order audit](audit-stage6-lock-order-2026-09-16.md) and
-[DMA audit](audit-stage6-dma-2026-09-16.md).
+contiguous arena; see the [NUMA/x2APIC audit](docs/audit-stages-consolidated.md),
+[hotplug audit](docs/audit-stages-consolidated.md), and
+[lock-order audit](docs/audit-stages-consolidated.md) and
+[DMA audit](docs/audit-stages-consolidated.md).
 
 The CPU lifecycle follow-up supports a non-contiguous online mask in QEMU:
 CPU 1 can park while CPU 3 continues scheduling work and acknowledging TLB
 shootdowns, then rejoin its stable slot. Offline preparation validates every
 task move before committing any; draining CPUs reject new placement. See the
-[non-contiguous hotplug audit](audit-stage6-noncontiguous-hotplug-2026-09-17.md).
+[non-contiguous hotplug audit](docs/audit-stages-consolidated.md).
 Physical non-contiguous hotplug, high APIC-ID, and multi-node NUMA hardware
 qualification remain open.
 The final source passed the complete release matrix and dedicated twice-cycled
@@ -9504,7 +9504,7 @@ read and materialization paths now release registry/open-description guards
 for disk I/O and revalidate node identity, version, backing, and shared seek
 position before committing results. Both VFS tables now use ranked IRQ-safe
 locks. See the
-[lock-order audit](audit-stage6-lock-order-2026-09-16.md). The full release
+[lock-order audit](docs/audit-stages-consolidated.md). The full release
 matrix and twice-cycled 2/4-CPU hotplug gates passed after these changes.
 The pipe follow-up also uses scheduler-latched wakeups and rejects full waiter
 tables, closing a lost-wakeup window under concurrent readers and writers.
@@ -9514,14 +9514,14 @@ hotplug gates passed. The follow-up makes boot capacity RAM-scaled from
 256 KiB to 8 MiB, raises live-allocation metadata to 2,048 entries, recovers
 alignment padding, and coalesces freed intervals. A partial kernel map now
 rolls back. Runtime growth beyond the eager mapping remains open.
-See the [Stage 6 heap audit](audit-stage6-heap-2026-09-17.md).
+See the [Stage 6 heap audit](docs/audit-stages-consolidated.md).
 The final heap change passed the full release matrix and twice-cycled 2/4-CPU
 hotplug gates.
 The heap metadata follow-up replaces the fixed live-object and free-interval
 tables with per-span headers and an in-place coalescing free list. Host tests
 and a 4,096-object QEMU probe cover the former 2,048-object ceiling; mapped
 runtime growth and broad allocator throughput remain open. See the
-[heap metadata audit](audit-stage6-heap-metadata-2026-09-17.md).
+[heap metadata audit](docs/audit-stages-consolidated.md).
 The final metadata source passed the full 33-check release matrix and the
 twice-cycled 2/4-CPU hotplug gates.
 Runtime heap growth now maps and publishes 256 KiB chunks outside the heap
@@ -9529,13 +9529,13 @@ guard. Rank-free, IRQ-enabled allocations can grow on failure; BSP idle maps
 ahead for guarded callers when free space is low. QEMU exercises growth after
 SMP startup and reserve maintenance. Sudden large guarded allocations,
 low-memory behavior, and multicore throughput still need qualification; see
-the [heap growth audit](audit-stage6-heap-growth-2026-09-17.md).
+the [heap growth audit](docs/audit-stages-consolidated.md).
 The final growth source passed the complete 33-check release matrix and
 twice-cycled 2/4-CPU hotplug gates.
 The frame allocator now reserves a bitmap in each usable physical range and
 uses it to track allocations, reject double frees, and recover returned
 frames beyond its 4,096-entry hot cache. See the
-[frame reclamation audit](audit-stage6-frame-reclamation-2026-09-17.md).
+[frame reclamation audit](docs/audit-stages-consolidated.md).
 The QEMU memory gate exercises 4,352 returned frames; physical high-RAM and
 NUMA latency qualification remains open.
 The final frame-reclamation source passed the full 33-check release matrix
@@ -9606,14 +9606,14 @@ harness tests passed. Final host tests include waiter notification and port quot
 Full transcript: `audit-artifacts/acceptance-20260916-085314-575/acceptance-output.txt`.
 Focused serial evidence is retained in timestamped `audit-artifacts/stage10.8-*`
 directories. See [ABI contract](completion-port-abi.md) and
-[audit](audit-stage10-8-2026-09-16.md).
+[audit](docs/audit-stages-consolidated.md).
 
 ## Stage 10.9 — accepted on 2026-09-16
 
 Timers, deadlines, asynchronous event objects, cancellation and sleep-until
 are implemented under bounded process ownership. The 1/2/4-CPU QEMU gate,
 build, warning-denying Clippy and Rust regressions passed. See
-[audit](audit-stage10-9-2026-09-16.md).
+[audit](docs/audit-stages-consolidated.md).
 
 ## Stage 10.10 — accepted on 2026-09-16
 
@@ -9625,7 +9625,7 @@ exit 33 and retained serial evidence. Stage 10 is closed; Stage 11 follows.
 
 PID lifecycle, parent/child ownership, exit status, wait semantics, process
 groups, isolated resources and teardown passed build, Clippy, host tests, and
-1/2/4-CPU QEMU validation. See [audit](audit-stage11-1-2026-09-16.md).
+1/2/4-CPU QEMU validation. See [audit](docs/audit-stages-consolidated.md).
 
 Next: Stage 11.2 per-process threads and join/TLS semantics.
 
@@ -9633,7 +9633,7 @@ Next: Stage 11.2 per-process threads and join/TLS semantics.
 
 Generation-safe thread IDs, owner-checked join, termination status, TLS and
 thread-local errno state passed build, Clippy, host tests, and 1/2/4-CPU QEMU
-validation. See [audit](audit-stage11-2-2026-09-16.md).
+validation. See [audit](docs/audit-stages-consolidated.md).
 
 Next: Stage 11.3 structured notifications and lifecycle events.
 
@@ -9643,7 +9643,7 @@ The bounded scheduler-backed user-thread path now has an end-to-end Ring-3
 create/exit/join acceptance. It uses private NX stacks, copied initial-exec
 TLS, stable process ownership, generation-safe IDs, and post-switch resource
 reclamation. Build, warning-denying Clippy, host tests, and 1/2/4-CPU QEMU
-passed; see [audit](audit-stage11-2-scheduler-threads-2026-10-14.md).
+passed; see [audit](docs/audit-stages-consolidated.md).
 
 The 2026-10-15 cancellation follow-up adds ABI 136 for owned sibling-thread
 cancellation. Ready/blocked and running targets both remain joinable, wake the
@@ -9663,7 +9663,7 @@ with an unjoined sibling.
 
 Structured notifications, the `libwoven` userspace API boundary, and hardened
 ELF/W^X loader validation passed their individual 1/2/4-CPU QEMU gates,
-freestanding Clippy, and host tests. See [audit](audit-stage11-3-5-2026-09-16.md).
+freestanding Clippy, and host tests. See [audit](docs/audit-stages-consolidated.md).
 
 The follow-up ASLR pass now randomizes production ELF, stack and mmap bases
 with a deterministic `qemu-test` switch; see [audit](audit-aslr-2026-09-16.md).
@@ -9673,7 +9673,7 @@ The 2026-10-05 loader-boundary follow-up rejected `PT_INTERP`, `PT_DYNAMIC`,
 binaries whose dynamic-linking, TLS, or RELRO semantics were not implemented
 at that point. This was a fail-closed production-safety boundary; later
 follow-ups narrow the remaining unsupported surface.
-See [audit](audit-stage11-loader-boundary-2026-10-05.md).
+See [audit](docs/audit-stages-consolidated.md).
 
 The 2026-10-14 RELRO follow-up closes the static RELRO permission transition:
 a single validated `PT_GNU_RELRO` range is protected read-only after loading,
@@ -9681,14 +9681,14 @@ ASLR relocation carries the range, and COW write-fault bookkeeping refuses to
 reattach write authority to it. Valid/invalid parser cases and the complete
 Stage 11.5 1/2/4-CPU gate passed. Shared libraries, symbol-based relocation,
 and physical/hardware qualification remain open. See
-the [RELRO audit](audit-stage11-relro-2026-10-14.md).
+the [RELRO audit](docs/audit-stages-consolidated.md).
 
 The 2026-10-14 static TLS follow-up adds a bounded initial-exec `PT_TLS`
 contract: the loader validates and maps one initial TLS image, task context
 switches install its FS base, and fork/exec preserve the ownership and COW
 rules. Shared-library TLS, TLS module IDs, multi-thread TLS semantics, and
 physical/hardware qualification remain open. See the
-[static TLS audit](audit-stage11-static-tls-2026-10-14.md).
+[static TLS audit](docs/audit-stages-consolidated.md).
 
 The 2026-10-14 dynamic-relocation follow-up accepts bounded self-contained
 ET_DYN images with R_X86_64_RELATIVE plus locally defined symbol RELA entries.
@@ -9697,7 +9697,7 @@ applied before W^X and RELRO finalization. The inherited 1/2/4-CPU Stage
 11.3–11.5 matrix passed with an end-to-end mapped-image local-symbol
 relocation self-test. Shared-library dependency mapping, cross-image symbol
 resolution, versioning, lazy binding, and dynamic TLS remain fail-closed. See
-the [dynamic relocation audit](audit-stage11-dynamic-relocations-2026-10-14.md).
+the [dynamic relocation audit](docs/audit-stages-consolidated.md).
 
 The 2026-10-15 scope groundwork adds an immutable, bounded exact-name
 cross-image symbol-scope contract with duplicate/capacity/unknown-name
@@ -9705,7 +9705,7 @@ negative checks. It is not yet connected to dependency mapping or relocation;
 the loader remains fail-closed for `DT_NEEDED`. Neighboring Stage 11.3/11.4
 regression matrices pass, while the final 11.5 2/4-CPU rerun remains pending
 after QEMU contention in the initial report; those final reruns subsequently
-passed as recorded in the [symbol-scope audit](audit-stage11-symbol-scope-2026-10-15.md).
+passed as recorded in the [symbol-scope audit](docs/audit-stages-consolidated.md).
 
 The symbol-scope review found ASLR address-validation, export-visibility,
 dependency-order and dependency-index defects that the zero-bias fixture had
@@ -9720,7 +9720,7 @@ and complete private-page-table reclamation. The new gate executes a Ring-3
 import call returning 42 and requires exact frame reclamation, along with
 signature, namespace and rollback negatives. Final acceptance and inherited
 regression results are tracked in the
-[shared-library audit](audit-stage11-shared-libraries-2026-10-15.md).
+[shared-library audit](docs/audit-stages-consolidated.md).
 Versioning, legacy PLT/REL tables, constructors/destructors, dynamic library
 TLS, runtime loading and broader qualification remain open.
 
@@ -9728,7 +9728,7 @@ TLS, runtime loading and broader qualification remain open.
 
 The VFS 2.0 typed interface and SystemVfs adapter passed build, freestanding
 Clippy, and QEMU validation on 1/2/4 CPUs. See
-[audit](audit-stage12-1-2026-09-16.md).
+[audit](docs/audit-stages-consolidated.md).
 
 Next: Stage 12.2 WovenFS metadata and crash-consistency design.
 
@@ -9736,7 +9736,7 @@ Next: Stage 12.2 WovenFS metadata and crash-consistency design.
 
 The WovenDriver manager passed device matching, binding, suspend/resume,
 build, freestanding Clippy, and 1/2/4-CPU QEMU validation. See
-[audit](audit-stage13-1-2026-09-16.md).
+[audit](docs/audit-stages-consolidated.md).
 
 ## Stage 13.2 — topology/ownership increment implemented; full acceptance open (2026-09-27)
 
@@ -9759,7 +9759,7 @@ The WovenDriver integration item now has a bounded acceptance probe. The
 Stage 13.2 gate claims one discovered function for a synthetic feature-gated
 owner, retains its programmed MMIO BAR leases, and releases subordinate
 resources before function ownership. The 1/2/4-CPU preservation gate passed;
-see [the lifecycle audit](audit-stage13-2-driver-lifecycle-2026-10-13.md).
+see [the lifecycle audit](docs/audit-stages-consolidated.md).
 This does not close the remaining physical rebalance, hardware interrupt
 qualification, hotplug, or MMIO mapping-revoke requirements.
 
@@ -9781,7 +9781,7 @@ Initial PCI discovery now has the same admission boundary: `hal::init` uses
 discover-and-route, bridge-bearing generations are not driver-admissible until
 the rollback-capable bridge transaction succeeds, and routing/discovery failure
 rejects later driver claims fail-closed. The 1/2/4-CPU preservation gate passed;
-see the [admission-routing audit](audit-stage13-2-admission-routing-2026-10-13.md).
+see the [admission-routing audit](docs/audit-stages-consolidated.md).
 This validates ordering and failure policy, not physical bridge-window
 interoperability on hardware absent from QEMU.
 
@@ -9789,7 +9789,7 @@ The ECAM configuration path now applies the mapped page offset for both reads
 and writes. Before this repair, live ECAM discovery repeated the vendor/device
 dword at every offset, masking real class, BAR, and capability behavior. The
 corrected path is covered by the 1/2/4-CPU gate and the
-[ECAM offset audit](audit-stage13-2-ecam-offset-2026-10-13.md).
+[ECAM offset audit](docs/audit-stages-consolidated.md).
 
 The reconciliation boundary also clears admission before publishing a
 refreshed inventory, eliminating the interval where a concurrent bind could
@@ -9800,7 +9800,7 @@ The firmware BAR rebalance path now retains successful reservations in bounded
 persistent PCI resource state, rejects duplicate function admission, clears
 and verifies BAR registers before releasing reservations, and refreshes the
 published device state. The focused freestanding check and warning-denying
-Clippy pass; see the [persistent BAR audit](audit-stage13-2-bar-resources-2026-10-13.md).
+Clippy pass; see the [persistent BAR audit](docs/audit-stages-consolidated.md).
 
 Persistent BAR teardown now verifies PCI command-space decoding is disabled,
 clears the assigned BARs, refreshes inventory, and reroutes bridge windows
@@ -9812,7 +9812,7 @@ Normal PCI driver admission now invokes the BAR allocator for the safe
 all-unassigned case, refreshes the published BAR view before leasing, rejects
 mixed layouts fail-closed, and checkpoints persistent ownership through
 unbind. Successful rebalance also reroutes the bridge hierarchy before any
-MMIO lease is published. See the [automatic BAR admission audit](audit-stage13-2-bar-admission-2026-10-13.md).
+MMIO lease is published. See the [automatic BAR admission audit](docs/audit-stages-consolidated.md).
 QEMU still lacks a valid physical unassigned-BAR fixture, so the positive
 hardware allocation path remains unqualified.
 
@@ -9823,26 +9823,26 @@ before old-owner quiescence, the entire batch fails closed before any teardown
 configuration write. Persistent BAR reservations are released before unbound
 generations are invalidated, and new functions are verified after topology
 publication and bridge routing before being returned to driver matching;
-unknown hardware is never auto-bound. See the [hotplug insertion audit](audit-stage13-2-hotplug-insertion-2026-10-13.md).
+unknown hardware is never auto-bound. See the [hotplug insertion audit](docs/audit-stages-consolidated.md).
 Physical PCIe link/power hotplug remains hardware-dependent.
 
 The driver manager now provides bounded PCI identity matching and an explicit
 match-then-bind API for insertion reports. Empty matchers are rejected and
-unknown hardware remains unclaimed. See the [driver-matching audit](audit-stage13-driver-matching-2026-10-13.md).
+unknown hardware remains unclaimed. See the [driver-matching audit](docs/audit-stages-consolidated.md).
 Device-specific drivers, initialization policies, and physical PCIe
 interoperability remain later qualification work.
 
 The driver layer now exposes generic interrupt selection: MSI-X is attempted
 when capability and retained BAR authority permit it, clean failures fall back
 to MSI, and activation-retained leases never fall back or lose ownership. See
-the [interrupt-selection audit](audit-stage13-2-interrupt-selection-2026-10-13.md).
+the [interrupt-selection audit](docs/audit-stages-consolidated.md).
 Physical vector delivery remains unqualified on QEMU.
 
 PCI driver suspend/resume now owner-checks the function, disables and verifies
 command decoding, and, when the PCI Power Management capability is present,
 checkpoints PMCSR, enters D3hot, restores D0, and restores the exact command
 checkpoint before resuming. Missing checkpoints and failed transitions fail
-closed. See the [PCI suspend/resume audit](audit-stage13-2-suspend-resume-2026-10-13.md).
+closed. See the [PCI suspend/resume audit](docs/audit-stages-consolidated.md).
 Device-specific reset, D3cold, wake signaling, and physical power-management
 qualification remain open.
 
@@ -9854,7 +9854,7 @@ verified. Vector and interrupt-mode ownership remain retained until successful
 quiescence. Corrected ECAM offset handling now decodes live PCI classes and
 capabilities correctly; the QEMU SATA fixture exercised generic MSI activation
 and ordered teardown on the 1/2/4-CPU preservation matrix. See the
-[MSI rollback audit](audit-stage13-2-msi-rollback-2026-10-13.md). Physical
+[MSI rollback audit](docs/audit-stages-consolidated.md). Physical
 MSI qualification beyond this QEMU fixture and MSI-X table/vector delivery
 remain hardware-dependent.
 
@@ -9867,20 +9867,20 @@ Stage 13.2 probe now also scans disposable QEMU PCI fixtures, activates a real
 MSI-X lease when its table BAR is admissible, and verifies the bounded
 high-MMIO fallback mapping; the 1/2/4-CPU preservation matrix passed with
 those fixtures present. See the
-[MSI-X mapping audit](audit-stage13-2-msix-mapping-2026-10-13.md). Physical
+[MSI-X mapping audit](docs/audit-stages-consolidated.md). Physical
 MSI-X delivery, PCIe hotplug, and physical device lifecycle remain
 unqualified because QEMU does not provide those physical conditions.
 
 High 64-bit BAR pages no longer depend on the low fixed virtual alias. The
 bounded high-MMIO window retains each mapping's virtual address and uses that
 address for revocation/release; see the
-[high-MMIO audit](audit-stage13-2-high-mmio-2026-10-13.md).
+[high-MMIO audit](docs/audit-stages-consolidated.md).
 
 Stage 13.3 NVMe now passes its ordered 1/2/4-CPU QEMU acceptance gate. The
 driver identifies a namespace, creates admin and I/O queues, performs
 write/read/flush against a disposable image, returns owned DMA pages on failed
 initialization, and restores the original PCI command after bounded controller
-quiescence. See the [Stage 13.3 NVMe audit](audit-stage13-3-nvme-2026-10-13.md).
+quiescence. See the [Stage 13.3 NVMe audit](docs/audit-stages-consolidated.md).
 This closes the emulated synchronous foundation only; interrupt-backed
 completion, reset/recovery, hotplug removal, multi-namespace policy, and
 physical NVMe qualification remain open.
@@ -9888,19 +9888,19 @@ physical NVMe qualification remain open.
 Stage 13.8 HDA/WovenAudio now passes its ordered 1/2/4-CPU QEMU gate after
 correcting register page-offset handling in all HDA MMIO helpers. The gate
 covers codec discovery, topology, playback/capture streams, mixer state, and
-the WovenAudio API boundary. See the [HDA MMIO audit](audit-stage13-8-hda-mmio-2026-10-13.md).
+the WovenAudio API boundary. See the [HDA MMIO audit](docs/audit-stages-consolidated.md).
 Physical codec interoperability and interrupt/DMA fault recovery remain open.
 
 The local Stage 14.1–14.5D feature gates now pass build/lint and live network
 acceptance on 1/2/4 CPUs. A shared PCI `expect(dead_code)` guard was extended
 through the later feature family after Stage 14.1 exposed that it could not
-compile cleanly under warning denial. See the [Stage 14 feature-gate audit](audit-stage14-feature-gates-2026-10-13.md).
+compile cleanly under warning denial. See the [Stage 14 feature-gate audit](docs/audit-stages-consolidated.md).
 
 ## Stages 12.2–12.5 — accepted on 2026-09-16
 
 WovenFS metadata/integrity, volume-integrity envelope boundaries, snapshots,
 and storage-management inventory each passed their 1/2/4-CPU gates. See
-[audit](audit-stage12-2-5-2026-09-16.md). Production AEAD now passes the
+[audit](docs/audit-stages-consolidated.md). Production AEAD now passes the
 isolated 1/2/4-CPU gate with a bounded revocable key vault; see
 [audit](audit-volume-crypto-2026-09-16.md). The follow-up integration now
 covers measured provisioning, authenticated persistent wrapped keys,
@@ -9913,12 +9913,12 @@ policy remain open.
 The scheduler/pager watchdog and termination lifecycle gate passed in full:
 50 one-CPU memory runs, 100 two-CPU runs, 50 four-CPU runs, and live
 DHCP/DNS/ICMP plus host-verified UDP/TCP at 1/2/4 CPUs. See
-audit-stage7-1-5-timeout-2026-09-16.md for the bounded lifecycle handoff
+docs/audit-stages-consolidated.md for the bounded lifecycle handoff
 correction and retained serial evidence.
 
 ## Roadmap Stage 13.10A — Bluetooth HCI core accepted on 2026-09-30
 
-The hardware-independent Bluetooth HCI foundation is accepted. Bounded command encoding, Command Complete parsing, controller command-credit state, opcode/status validation, and deterministic self-tests passed the dedicated 1/2/4-CPU QEMU gate with exit 33 in GitHub Actions run 36718370038. See [acceptance audit](../AUDIT-STAGE13.10A-BLUETOOTH-HCI-ACCEPTANCE.md).
+The hardware-independent Bluetooth HCI foundation is accepted. Bounded command encoding, Command Complete parsing, controller command-credit state, opcode/status validation, and deterministic self-tests passed the dedicated 1/2/4-CPU QEMU gate with exit 33 in GitHub Actions run 36718370038. See [acceptance audit](docs/audit-stages-consolidated.md).
 
 Historical Wi-Fi labels 13.10A–AC are Stage 13.9 AX200/WovenWiFi extensions; roadmap Stage 13.10 is Bluetooth. Stage 13.10A does not claim USB transport or physical Bluetooth hardware support.
 
@@ -10178,7 +10178,7 @@ rollback and malformed or unsigned/tampered candidates, keeps the known-good
 slot active until a health check succeeds, and rolls back after three failed
 boot attempts. Host tests, host/freestanding warning-denying Clippy, and
 dedicated QEMU acceptance passed on 1/2/4 CPUs. Evidence is in
-`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 This does not yet implement privileged service ownership, durable A/B records,
 power-loss recovery, or installation.
@@ -10193,7 +10193,7 @@ through native WovenFS on a disposable ATA-backed scratch image. It remounts,
 reads both copies, selects the newest valid sequence, and falls back to the
 older copy after checksum corruption. The dedicated QEMU gate passed on 1/2/4
 CPUs; evidence is in
-`docs/audit-stage27-1-update-ab-state-2026-10-20.md`.
+`docs/audit-stages-consolidated.md`.
 
 Long-lived service lifecycle, power-loss injection/recovery, installer and
 boot-slot integration, and physical qualification remain open.
@@ -10212,7 +10212,7 @@ length mismatch, invalid names, and excessive dependencies before returning
 borrowed payload slices. Host workspace tests, host `-D warnings` Clippy,
 freestanding kernel `stage21-1-test` `-D warnings` Clippy, and the dedicated
 QEMU gate passed on 1/2/4 CPUs. Evidence is recorded in
-`docs/audit-stage21-1-wovenpackages-2026-10-20.md` and the corresponding
+`docs/audit-stages-consolidated.md` and the corresponding
 `audit-artifacts/stage21.1-*` directories.
 
 This is a parser/format foundation only. Signature authentication, package
@@ -10227,7 +10227,7 @@ signature covers a domain-separated SHA-256 digest of the immutable envelope;
 the kernel verifier checks it against the provisioned application trust root
 and rejects payload tampering. Tool tests/Clippy, kernel warning-denying
 Clippy, and the dedicated QEMU gate passed on 1/2/4 CPUs. Evidence is recorded
-in `docs/audit-stage21-2-wpkg-authentication-2026-10-20.md`.
+in `docs/audit-stages-consolidated.md`.
 
 Persistent WovenStore installation, update/removal transactions, rollback,
 sandbox declaration enforcement, service/IPC ownership, and physical USB
@@ -10380,3 +10380,12 @@ foreground bar flat and crisp, restoring readable Woven, account, workspace,
 and clock labels. Evidence was captured in
 `target/hardware-demo-login-final.png` and
 `target/hardware-demo-desktop-final2.png`.
+
+## Consolidated audit and hash records (2026-10-25)
+
+The 341 standalone stage-audit records were merged into
+`docs/audit-stages-consolidated.md` with source paths retained. The 28 legacy
+SHA256 manifests were merged into
+`docs/sha256-stage-manifests-consolidated.txt`. All 74 stage run scripts remain
+separate and executable. A fresh repository-wide SHA-256 inventory is recorded
+in `docs/repository-sha256-2026-10-25.txt`.
