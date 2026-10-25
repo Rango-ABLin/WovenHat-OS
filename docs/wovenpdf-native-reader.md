@@ -1,5 +1,20 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 CI repair and layout bridge
+
+- CI job 40190219694 compiled the parser and ran 29 tests: 28 passed,
+  one failed on expected trailing whitespace in an object-body fixture.
+- Corrected the test assertion to match the lexer's object-body span.
+  Latest follow-up CI remains queued; no green gate is claimed.
+- Introduced `src/layout.rs`, transforming supported BT/Tf/Td/Tj operations
+  into bounded positioned text runs, with bottom-left PDF Y inversion.
+  This is not yet connected to graphical Canvas rendering and does not
+  implement PDF font encodings, matrices, shaping, or vector graphics.
+- Next step is to connect verified page traversal and decoded content
+  streams to this layout bridge, then WovenRender. Real QEMU acceptance
+  remains outstanding.
+
+
 ## 2026-10-25 content-operator interpreter increment
 
 - Added `src/content.rs` with a bounded interpreter for a deliberately narrow
