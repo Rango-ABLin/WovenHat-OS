@@ -7801,6 +7801,26 @@ fn stage07_webp_self_test() -> bool {
         serial::write_line(format_args!("[S07] signed WAPP package refused"));
         return false;
     }
+    let Some(verified) = signed_app::verify_package(EXTERNAL_APPLICATION).ok() else {
+        return false;
+    };
+    if let Ok(parsed) = elf::parse(verified.bytes()) {
+        serial::write_line(format_args!(
+            "[S07] decoder ELF entry {:#x} segments {}",
+            parsed.entry,
+            parsed.segment_count()
+        ));
+        for segment in parsed.segments() {
+            serial::write_line(format_args!(
+                "[S07] segment va={:#x} mem={} file={} writable={} executable={}",
+                segment.virtual_address,
+                segment.mapping_size,
+                segment.file_size,
+                segment.writable,
+                segment.executable
+            ));
+        }
+    }
     let Some(program) = userspace::load_elf_with_argv_verified(
         EXTERNAL_APPLICATION,
         &["/bin/wovenhat-images-self-test"],

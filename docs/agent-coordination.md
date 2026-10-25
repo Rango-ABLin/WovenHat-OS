@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 07 freestanding WebP completion (2026-10-25)
+
+Pinned `zenwebp 0.3.2` behind the `target_os = "none"` codec boundary and
+kept OxideAV for host builds. WebP header parsing now covers VP8, VP8L, and
+VP8X/ALPH; host fixtures cover lossless and extended lossy-alpha decoding.
+Added a dedicated signed Ring-3 `--self-test` path and QEMU harness gate.
+The 1/2/4-CPU guest matrix passed. The loader now relocates its lifecycle and
+lazy-binding trampolines after a larger image when the historical fixed slot
+would overlap, preserving the existing mmap geometry. `zenwebp 0.3.2` is
+AGPL-3.0-or-later and remains an explicit distribution-license gate.
+
 ## Codex - scalable I/O and launcher capacity increment (2026-10-25)
 
 The kernel retains per-call validation limits for memory safety, but libwoven

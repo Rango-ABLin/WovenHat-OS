@@ -21,9 +21,12 @@ ownership and capacity explicit. The guest helper reads in 1024-byte chunks to
 match the kernel syscall cap. The production kernel embeds the manifest-listed
 CC0-1.0 wallpaper and installs it read-only in the boot VFS at
 `/share/wallpapers/wovenhat-gradient.bmp`; WovenImages decodes that asset and
-renders its bounded thumbnail. WebP pixel decoding is currently host-target
-only because its VP8 dependency is not no-std; the freestanding path fails
-closed until a suitable backend is integrated.
+renders its bounded thumbnail. WebP pixel decoding uses host OxideAV and the
+pinned alloc-only `zenwebp 0.3.2` backend on freestanding targets. The shared
+header parser and capacity checks cover VP8, VP8L, and VP8X/ALPH images; the
+guest acceptance runs the signed WovenImages decoder in Ring 3. `zenwebp`
+is AGPL-3.0-or-later, so production distribution requires license compliance
+or a commercial replacement.
 
 ## Graphics roadmap Stage 06 iconography (2026-10-25)
 
