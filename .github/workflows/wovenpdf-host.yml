@@ -46,6 +46,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - name: Install pinned rustfmt
         run: rustup toolchain install nightly-2026-07-10 --component rustfmt
       - name: Format source for review
@@ -71,4 +73,4 @@ jobs:
             git push origin HEAD:"$BRANCH"
           fi
       - name: Check formatting
-        run: git diff --exit-code -- apps/woven-pdf
+        run: cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all -- --check
