@@ -331,6 +331,7 @@ struct Style {
     height: Option<u32>,
     margin: u32,
     display: DisplayMode,
+    flex_direction: FlexDirection,
     gap: u32,
     grid_columns: usize,
     background: Option<u32>,
@@ -343,6 +344,12 @@ enum DisplayMode {
     Block,
     Flex,
     Grid,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FlexDirection {
+    Row,
+    Column,
 }
 
 fn css_color(value: &str) -> Option<u32> {
@@ -363,6 +370,7 @@ fn style(node: Node<'_>) -> Style {
         } else {
             DisplayMode::Block
         },
+        flex_direction: FlexDirection::Row,
         gap: 0,
         grid_columns: 1,
         background: None,
@@ -395,6 +403,12 @@ fn style(node: Node<'_>) -> Style {
                 "grid" => DisplayMode::Grid,
                 _ => DisplayMode::Block,
             };
+        } else if name.eq_ignore_ascii_case("flex-direction") {
+            if value == "column" {
+                result.flex_direction = FlexDirection::Column;
+            } else if value == "row" {
+                result.flex_direction = FlexDirection::Row;
+            }
         } else if name.eq_ignore_ascii_case("gap") {
             result.gap = parse_px().unwrap_or(0);
         } else if name.eq_ignore_ascii_case("grid-template-columns") {
@@ -478,29 +492,49 @@ fn layout_subtree<const N: usize>(
             content_height = content_height.saturating_sub(node_style.gap);
         }
         DisplayMode::Flex => {
-            let gap_total = node_style
-                .gap
-                .checked_mul(child_count.saturating_sub(1) as u32)
-                .ok_or(LayoutError::Overflow)?;
-            let child_width = width.saturating_sub(gap_total) / child_count.max(1) as u32;
-            let mut cursor_x = content_x;
-            let mut row_height = 0u32;
-            for &child_index in &children[..child_count] {
-                let child_height = layout_subtree(
-                    context,
-                    child_index,
-                    cursor_x,
-                    content_y,
-                    child_width,
-                    depth + 1,
-                )?;
-                cursor_x = cursor_x
-                    .checked_add(child_width)
-                    .and_then(|value| value.checked_add(node_style.gap))
+            if node_style.flex_direction == FlexDirection::Column {
+                for &child_index in &children[..child_count] {
+                    let child_height = layout_subtree(
+                        context,
+                        child_index,
+                        content_x,
+                        cursor_y,
+                        width,
+                        depth + 1,
+                    )?;
+                    cursor_y = cursor_y
+                        .checked_add(child_height)
+                        .and_then(|value| value.checked_add(node_style.gap))
+                        .ok_or(LayoutError::Overflow)?;
+                }
+                content_height = cursor_y
+                    .saturating_sub(content_y)
+                    .saturating_sub(node_style.gap);
+            } else {
+                let gap_total = node_style
+                    .gap
+                    .checked_mul(child_count.saturating_sub(1) as u32)
                     .ok_or(LayoutError::Overflow)?;
-                row_height = row_height.max(child_height);
+                let child_width = width.saturating_sub(gap_total) / child_count.max(1) as u32;
+                let mut cursor_x = content_x;
+                let mut row_height = 0u32;
+                for &child_index in &children[..child_count] {
+                    let child_height = layout_subtree(
+                        context,
+                        child_index,
+                        cursor_x,
+                        content_y,
+                        child_width,
+                        depth + 1,
+                    )?;
+                    cursor_x = cursor_x
+                        .checked_add(child_width)
+                        .and_then(|value| value.checked_add(node_style.gap))
+                        .ok_or(LayoutError::Overflow)?;
+                    row_height = row_height.max(child_height);
+                }
+                content_height = row_height;
             }
-            content_height = row_height;
         }
         DisplayMode::Grid => {
             let columns = node_style.grid_columns.max(1).min(child_count.max(1));
@@ -746,6 +780,21 @@ mod tests {
         let second = flex_layout.get(1).unwrap();
         assert_eq!((first.rect.x, first.rect.width), (0, 48));
         assert_eq!((second.rect.x, second.rect.width), (52, 48));
+
+        let column = parse_html::<4>(
+            br#"<main style="display:flex;flex-direction:column;gap:3px"><p style="height:10px"/><p style="height:20px"/></main>"#,
+        )
+        .unwrap();
+        let column_layout = layout(
+            &column,
+            Viewport {
+                width: 100,
+                height: 100,
+            },
+        )
+        .unwrap();
+        assert_eq!(column_layout.get(0).unwrap().rect.y, 0);
+        assert_eq!(column_layout.get(1).unwrap().rect.y, 13);
 
         let grid = parse_html::<5>(
             br#"<main style="display:grid;gap:2px;grid-template-columns:1fr 1fr"><p style="height:10px"/><p style="height:20px"/><p style="height:12px"/></main>"#,
