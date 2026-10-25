@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 11 persisted accessibility profile handoff (2026-10-25)
+
+The installer settings JSON now carries conservative `high_contrast:false` and
+`reduced_motion:false` defaults. Production system-apps boot imports a bounded
+mounted settings file, passes its path to WovenShell, and the shell applies
+recognized true values before entering the desktop loop. The no-file path is
+unchanged. Kernel `system-apps` and shell target Clippy pass; production
+system-apps desktop boots pass on 1/2/4 CPUs. This remains a bounded startup
+handoff; settings UI write-back and compositor-wide persistence are still open.
+
 ## Graphics shell high-contrast launch mode - 2026-10-25
 
 Codex added WovenShell's explicit `--high-contrast` mode and routed the major

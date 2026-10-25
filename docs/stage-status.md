@@ -1,5 +1,16 @@
 # Stage status
 
+## Graphics persisted accessibility profile handoff - 2026-10-25
+
+The installer now emits bounded `high_contrast` and `reduced_motion` keys in
+`/etc/wovenhat/settings.json`. Production system-apps boot imports that file
+from the mounted installation, passes it to WovenShell, and the shell applies
+only recognized `true` values with a fixed 512-byte read bound. The no-file
+path remains unchanged. Warning-denying target Clippy passes for WovenShell
+and the kernel `system-apps` feature; the production desktop boot gate passes
+on 1/2/4 CPUs. Settings UI write-back and compositor-wide persistence remain
+open.
+
 ## Graphics shell high-contrast launch mode - 2026-10-25
 
 WovenShell now accepts `--high-contrast` and routes wallpaper, taskbar,

@@ -72,8 +72,11 @@ the updated application.
 
 WovenShell also accepts an explicit `--high-contrast` launch mode covering its
 desktop palette. The default shell desktop gate remains green at 1/2/4 CPUs;
-the mode is application-scoped and does not yet provide persisted,
-compositor-wide accessibility settings.
+the mode is application-scoped. The production system-apps session now also
+imports the bounded installer settings profile when present and passes it to
+WovenShell; recognized `high_contrast` and `reduced_motion` true values are
+applied before the desktop loop starts. Settings UI write-back and
+compositor-wide persistence remain open.
 
 The signed WovenSettings QEMU gate remains green at 1/2/4 CPUs; evidence is
 retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
