@@ -448,6 +448,10 @@ pub(super) fn run() -> bool {
         drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY*3]);
         crate::heap::maintain_capacity();
         let frames = crate::memory::stats().allocated_frames;
+        let graph_ready = prepare(&main, 0).is_some();
+        if !step("valid signed dependency graph prepared", graph_ready) {
+            return None;
+        }
         let program = match load(&main, &["shared-test"]) {
             Some(program) => program,
             None => {
