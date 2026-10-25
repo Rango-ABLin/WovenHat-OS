@@ -24,6 +24,7 @@ the next holder's default scale.
 | Stage 19.14 display scaling and frame pacing | PASS | PASS | PASS |
 | Stage 20.7 spring animation | PASS | PASS | PASS |
 | Stage 20.10 Quick Settings accessibility/motion path | PASS | PASS | PASS |
+| Stage 20.9 notification center | PASS | PASS | PASS |
 
 | Stage 20.11 lock screen and PIN isolation | PASS | PASS | PASS |
 | Stage 20.12 sign-in and identity-bound lock/unlock | PASS | PASS | PASS |

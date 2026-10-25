@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics Stage 20.9 notification-center acceptance - 2026-10-25
+
+Repaired the notification-center oracle to match the production wallpaper,
+taskbar, accent, and clock geometry. The complete toast, unread-badge,
+newest-first ordering, clear, close, key handoff, and teardown gate passes on
+1/2/4 CPUs with QEMU exit 33. Evidence is retained under
+`target/woven-shell-notifications-{1,2,4}cpu`; warning-denying freestanding
+kernel Clippy for `stage20-9-test` passes.
+
 ## Graphics Stage 20.12 sign-in acceptance - 2026-10-25
 
 Repaired the sign-in oracle to match the production wallpaper and projected

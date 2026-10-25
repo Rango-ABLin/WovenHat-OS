@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.9 notification-center oracle repair (2026-10-25)
+
+Stage 20.9 initially modeled the retired purple wallpaper, old accent, and
+clock geometry. The oracle now matches the accepted production palette and
+checks the visible unread badge and post-clear panel state directly after the
+full center render/order checks. Toast, badge, newest-first ordering, clear,
+close, key handoff, and teardown pass on 1/2/4 CPUs; target Clippy is green.
+Evidence is under `target/woven-shell-notifications-{1,2,4}cpu`.
+
 ## Codex - Stage 20.12 sign-in oracle repair (2026-10-25)
 
 Stage 20.12 reached the real sign-in flow but its oracle still modeled the

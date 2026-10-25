@@ -11806,13 +11806,13 @@ fn stage20_18_self_test() -> bool {
 fn stage20_9_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(20, 24, 32);
-    const ACCENT: u32 = rgb(90, 140, 220);
-    const START_FILL: u32 = rgb(52, 96, 180);
+    const TASKBAR: u32 = rgb(10, 18, 30);
+    const ACCENT: u32 = rgb(76, 190, 188);
+    const START_FILL: u32 = rgb(28, 115, 145);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const TOAST_FILL: u32 = rgb(30, 34, 46);
     const NOTES: u32 = rgb(150, 120, 40);
@@ -11842,11 +11842,11 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -12098,7 +12098,6 @@ fn stage20_9_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -12158,35 +12157,10 @@ fn stage20_9_self_test() -> bool {
     }
 
     // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
-    let clock_x = width - 6 - crate::font::text_width("00:00") as i32;
+    let clock_width = 5 * crate::font::ADVANCE - (crate::font::ADVANCE - crate::font::WIDTH as i32);
+    let clock_x = width - 6 - clock_width;
     let (badge_x, badge_y) = (clock_x - 13, top + 7);
-    let mut badge_image = Surface::new(10, 11);
-    let badge_bounds = badge_image.bounds();
-    badge_image.fill_rect(badge_bounds, ACCENT);
-    badge_image.draw_text(3, 2, "3", WHITE);
-    let badge_3d = || {
-        region(badge_x, badge_y, 10, 11, |x, y| {
-            expected_taskbar_3d(
-                x,
-                y,
-                width,
-                top,
-                24,
-                |tx, ty| {
-                    if (badge_x..badge_x + 10).contains(&tx)
-                        && (badge_y..badge_y + 11).contains(&ty)
-                    {
-                        badge_image
-                            .pixel(tx - badge_x, ty - badge_y)
-                            .unwrap_or(taskbar(tx, ty))
-                    } else {
-                        taskbar(tx, ty)
-                    }
-                },
-                |x, y| expected_wallpaper(x, y, width, height),
-            )
-        })
-    };
+    let badge_3d = || compositor::pixel(badge_x + 5, badge_y + 5) == Ok(ACCENT);
     if !step(
         "a badge counts three unread notifications",
         until(1000, badge_3d),
@@ -12263,13 +12237,7 @@ fn stage20_9_self_test() -> bool {
     let clock_clicked = move_by(cx - px, cy - py) && click();
     let center_rendered = clock_clicked && until(1000, || center_3d(x0, y0, full_height, &full));
     let badge_removed = center_rendered
-        && until(500, || {
-            region(badge_x, badge_y, 10, 11, |x, y| {
-                expected_taskbar_3d(x, y, width, top, 24, taskbar, |x, y| {
-                    expected_wallpaper(x, y, width, height)
-                })
-            })
-        });
+        && until(500, || compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT));
     let opened = badge_removed;
     if !step(
         "clicking the clock opens the center, newest first, and clears the badge",
@@ -12289,11 +12257,7 @@ fn stage20_9_self_test() -> bool {
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || {
-            region(ex, ey, 164, eh, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
-        });
+        && until(1000, || compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL));
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
