@@ -147,6 +147,8 @@ stage5-font-test = ["qemu-test"]
 stage18-1-test = ["qemu-test"]
 # Graphics roadmap Stage 08 secure userspace surface/IPC qualification.
 stage08-graphics-test = ["qemu-test"]
+# Graphics roadmap Stage 09 damage, stacking, and composition qualification.
+stage09-compositor-test = ["qemu-test"]
 # A userspace app that drives the graphics syscalls end-to-end.
 stage18-2-test = ["qemu-test"]
 # Kernel-held compositor surface and screen blit syscalls.

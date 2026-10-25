@@ -1,8 +1,16 @@
 # WovenHat Graphics Current-State Audit
 
 Audit date: 2026-10-25  
-Audited commit: `a57f007617811792ad5d1fcb48cbe7647414b8f7`  
+Audited commit: `9ced7c7`  
 Branch: `master`
+
+## Latest accepted graphics gate
+
+Graphics roadmap Stage 09 (compositor and composition scheduler) passed on
+1/2/4 CPUs with QEMU exit 33. The accepted evidence covers damage-only
+composition, overlap and z-order, raise/focus, input routing, lease cleanup,
+and owner teardown. Stage 20.8 is the complementary resize/tiling/killed
+window recovery gate. See `docs/graphics/stage-09-compositor-evidence.md`.
 
 This is an evidence-based baseline for the graphics modernization mandate. It
 does not promote any phase to complete merely because a source module exists.

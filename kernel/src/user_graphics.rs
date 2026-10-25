@@ -723,7 +723,7 @@ pub fn sharing_self_test() -> bool {
 }
 
 /// Damage rules for the Stage 19.9 gate.
-#[cfg(feature = "stage19-9-test")]
+#[cfg(any(feature = "stage19-9-test", feature = "stage09-compositor-test"))]
 pub fn damage_self_test() -> bool {
     use crate::display::rgb;
     let (owner, grantee) = (601u64, 602u64);

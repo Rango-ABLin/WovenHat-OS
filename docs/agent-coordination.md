@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics Stage 09 compositor and composition scheduler (2026-10-25)
+
+Added the roadmap-native `stage09-compositor-test` feature. Its 1/2/4-CPU
+QEMU gate passed with exit 33 and verifies damage-only copying, compositor
+sleep/wake, overlapping-window stacking and raise/focus, exact key routing,
+capability/lease teardown, and fixture cleanup. Stage 20.8 remains the
+complementary accepted gate for resize, tiling, and killed-window recovery.
+Target/freestanding warning-denying Clippy passed. Host all-targets Clippy
+continues to be blocked by the pre-existing host linkage conflict between the
+freestanding kernel panic/allocator handlers and `std` pulled by host-only
+WebP dependencies; no assertions were weakened.
+
 ## Codex - graphics Stage 08 secure surfaces and IPC (2026-10-25)
 
 Added the roadmap-native `stage08-graphics-test` feature and acceptance marker
