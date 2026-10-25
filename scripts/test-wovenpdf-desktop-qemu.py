@@ -3,8 +3,9 @@
 Uses the existing Stage 20.2 desktop app slot with WovenPDF as the test
 client. This deliberately does NOT claim Stage 20.2's original hello-gui
 pixel-golden test will pass: the client and its pixels are different.
-Success requires WovenPDF's own window request and a captured framebuffer.
-The screenshot must still be inspected; no complete-PDF rendering claim.
+Success requires the shell's window acceptance and WovenPDF's distinctive
+page, chrome and accent colors in the framebuffer. This is not proof of
+PDF document text rendering; the Stage 20.2 client has no document path.
 """
 import argparse
 import json
@@ -63,8 +64,8 @@ def capture(port, screenshot, deadline):
 
 
 
-def page_surface_pixels(path):
-    """Count near-white RGB pixels in a bounded QEMU P6 framebuffer capture."""
+def framebuffer_palette(path):
+    """Count near-white pixels and WovenPDF's exact GUI palette in QEMU P6."""
     with path.open("rb") as stream:
         def token():
             while True:
@@ -93,10 +94,19 @@ def page_surface_pixels(path):
         pixels = stream.read()
         if len(pixels) != width * height * 3:
             raise ValueError("truncated or oversized screenshot payload")
-        return sum(
-            r >= 235 and g >= 235 and b >= 235
-            for r, g, b in zip(pixels[::3], pixels[1::3], pixels[2::3])
-        )
+        near_white = page = chrome = accent = 0
+        for r, g, b in zip(pixels[::3], pixels[1::3], pixels[2::3]):
+            near_white += r >= 235 and g >= 235 and b >= 235
+            page += (r, g, b) == (248, 249, 253)
+            chrome += (r, g, b) == (22, 29, 44)
+            accent += (r, g, b) == (88, 210, 176)
+        return near_white, page, chrome, accent
+
+
+def wovenpdf_window_visible(counts):
+    # A bright desktop alone must not pass. Require the actual GUI palette.
+    near_white, page, chrome, accent = counts
+    return near_white >= 5000 and page >= 5000 and chrome >= 2000 and accent >= 30
 
 
 def main():
@@ -170,7 +180,7 @@ def main():
                     while vm.poll() is None and time.monotonic() < grace:
                         capture(port, screenshot, min(grace, time.monotonic() + 3))
                         try:
-                            if page_surface_pixels(screenshot) >= 5000:
+                            if wovenpdf_window_visible(framebuffer_palette(screenshot)):
                                 break
                         except ValueError:
                             pass
@@ -190,18 +200,18 @@ def main():
         print("FAIL: no captured framebuffer.", file=sys.stderr)
         return 1
     try:
-        white_count = page_surface_pixels(screenshot)
+        palette = framebuffer_palette(screenshot)
     except ValueError as error:
         print(f"FAIL: invalid framebuffer: {error}", file=sys.stderr)
         return 1
-    if white_count < 5000:
-        print(f"FAIL: only {white_count} near-white pixels; WovenPDF page surface not visible.", file=sys.stderr)
+    if not wovenpdf_window_visible(palette):
+        print(f"FAIL: WovenPDF page/chrome/accent palette missing: {palette}", file=sys.stderr)
         print(events[-2500:], file=sys.stderr)
         return 1
-    print(f"Framebuffer near-white page pixels: {white_count}")
+    print(f"Framebuffer near-white/page/chrome/accent pixels: {palette}")
     print(f"WovenPDF desktop probe: process, WOPN, and shell acceptance observed ({args.cpus} CPU).")
     print(f"Screenshot: {screenshot} (visual inspection required)")
-    print("NOT verified: shell WOPN acceptance, PDF page pixels, navigation or full rendering.")
+    print("NOT verified: PDF document text pixels, navigation or full rendering.")
     return 0
 
 
