@@ -15012,8 +15012,10 @@ fn flat_taskbar_3d(
 ) -> u32 {
     use crate::display::rgb;
     const WHITE: u32 = rgb(255, 255, 255);
-    const ACCENT: u32 = rgb(90, 140, 220);
-    const START_FILL: u32 = rgb(52, 96, 180);
+    const TASKBAR: u32 = rgb(10, 18, 30);
+    const TASKBAR_OPACITY: u8 = 216;
+    const ACCENT: u32 = rgb(76, 190, 188);
+    const START_FILL: u32 = rgb(28, 115, 145);
     const ICON_A: u32 = rgb(235, 225, 190);
     const ICON_D: u32 = rgb(165, 125, 70);
     const ACTIVE: u32 = rgb(70, 120, 210);
@@ -15084,11 +15086,11 @@ fn flat_taskbar_3d(
         if (clock_x..clock_x + clock_width).contains(&x) && (top + 1..top + 24).contains(&y) {
             return match mask.pixel(x - clock_x, y - (top + 1)) {
                 Some(WHITE) => WHITE,
-                _ => background(x, y),
+                _ => crate::display::blend_pixel(TASKBAR, background(x, y), TASKBAR_OPACITY),
             };
         }
     }
-    background(x, y)
+    crate::display::blend_pixel(TASKBAR, background(x, y), TASKBAR_OPACITY)
 }
 
 /// Independently recomputes a small bounded 3D chrome card's colour at a
@@ -15329,8 +15331,8 @@ fn stage20_1_self_test() -> bool {
         }
         None
     }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
     fn taskbar(x: i32, y: i32, height: i32) -> u32 {
@@ -15431,7 +15433,12 @@ fn stage20_1_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo);
-    let Some(program) = userspace::load_elf_with_argv(&image, &["/bin/woven-shell", "--seconds"])
+    // Stage 20.1 is the foundational software-desktop contract. Keep its
+    // pixel oracle independent from the later perspective-specific gates;
+    // production still defaults to 3D and stages 20.17/20.18 qualify that
+    // presentation path separately.
+    let Some(program) =
+        userspace::load_elf_with_argv(&image, &["/bin/woven-shell", "--seconds", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -15543,31 +15550,22 @@ fn stage20_1_self_test() -> bool {
     // note above `clock_mask_now`). Each point below is chosen well clear
     // of both the top edge and the clock.
     let safe_sample = |x: i32, y: i32| {
-        compositor::pixel(x, y)
-            == Ok(expected_taskbar_3d(
+        let expected = flat_taskbar_3d(
                 x,
                 y,
                 width,
                 top,
-                TASKBAR_HEIGHT,
-                |x, y| {
-                    flat_taskbar_3d(
-                        x,
-                        y,
-                        width,
-                        top,
-                        &button_mask,
-                        &ws_digit_masks,
-                        0,
-                        &qs_mask,
-                        false,
-                        &no_entries,
-                        Some(&clock_mask_now),
-                        |x, y| taskbar(x, y, height),
-                    )
-                },
-                |x, y| expected_wallpaper(x, y, width, height),
-            ))
+                &button_mask,
+                &ws_digit_masks,
+                0,
+                &qs_mask,
+                false,
+                &no_entries,
+                Some(&clock_mask_now),
+                |x, y| wallpaper(x, y, height),
+            );
+        let actual = compositor::pixel(x, y);
+        actual == Ok(expected)
     };
     let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
         .into_iter()

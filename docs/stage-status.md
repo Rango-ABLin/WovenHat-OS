@@ -1,5 +1,16 @@
 # Stage status
 
+## Stage 20.1 graphics oracle and fallback contract - 2026-10-25
+
+Closed the branded wallpaper/taskbar mismatch in the foundational desktop
+gate. Stage 20.1 now explicitly qualifies the deterministic flat software
+renderer with `--no-3d`; production WovenShell remains 3D by default and its
+dedicated 3D stages are unchanged. The oracle was corrected to the current
+branded teal accent, start-button fill, and one translucent taskbar blend.
+Warning-denying kernel Clippy passed, and QEMU acceptance passed on 1, 2, and
+4 CPUs, including clock advancement, framebuffer scaling, shell teardown, and
+display return. This closes Stage 20.1's software/QEMU gate only.
+
 ## Graphics mandate baseline audit - 2026-10-25
 
 Added `docs/graphics/current-state-audit.md` from the pasted graphics

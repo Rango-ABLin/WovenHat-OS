@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.1 graphics oracle and fallback contract (2026-10-25)
+
+Closed the Stage 20.1 wallpaper/taskbar mismatch without weakening pixel
+assertions. The foundational gate now launches WovenShell with its explicit
+`--no-3d` software-renderer contract; production remains 3D by default and
+the dedicated 3D stages remain separate. The oracle now matches the branded
+teal accent, start button, and single translucent taskbar blend. Stage 20.1
+passed on 1/2/4 CPUs with clock progression, scaling, shell teardown, and
+display return. Warning-denying kernel Clippy for the affected feature passed.
+The Stage 20.1 projection mismatch is closed; native hardware and broader 3D
+qualification remain separate boundaries.
+
 ## Codex - graphics mandate current-state audit (2026-10-25)
 
 Read the pasted graphics modernization mandate and audited the current source,

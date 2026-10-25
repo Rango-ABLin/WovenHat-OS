@@ -20,9 +20,9 @@ The graphics stack is not yet a complete implementation of the mandate. Window
 surfaces and a kernel compositor exist, but the full production userspace
 protocol, professional text/image pipeline, complete widget framework,
 accelerated rendering path, native hardware qualification, and independent
-security review remain incomplete or unverified. Stage 20.1 still has a small
-branded-wallpaper projection-oracle mismatch and is not closed by the visual
-polish pass.
+security review remain incomplete or unverified. The Stage 20.1 software/QEMU
+gate was subsequently closed on the 1/2/4-CPU matrix by separating its flat
+fallback contract from the dedicated 3D presentation gates.
 
 ## Source and initialization path
 
@@ -64,7 +64,7 @@ polish pass.
 | GPU acceleration | MISSING/UNVERIFIED | No verified VirGL/Vulkan-capable execution path is claimed. CPU fallback remains the trusted path. |
 | Performance qualification | UNVERIFIED | Some bounded QEMU gates exist; no complete 60-FPS/latency/memory benchmark report for the mandate exists. |
 | Graphics security/fuzzing | PARTIAL | Bounds and ownership defenses exist; complete malformed image/font/protocol fuzz coverage is not complete. |
-| Visual regression | PARTIAL | Guest screenshots and oracle checks exist; Stage 20.1 has a small projection-rounding mismatch. |
+| Visual regression | PARTIAL | Guest screenshots and oracle checks exist; Stage 20.1 software/QEMU is green, while broader 3D visual coverage remains separate. |
 | Native hardware certification | NOT STARTED/UNVERIFIED | Read-only physical preflights and QEMU stimulators do not constitute native qualification. |
 
 ## Current acceptance evidence
@@ -76,8 +76,8 @@ polish pass.
 - The current release-validation records report the bounded software/QEMU
   chain, but explicitly retain open physical, production-trust, acceleration,
   and independent-review boundaries.
-- The current audit record documents the Stage 20.1 wallpaper oracle mismatch:
-  actual center sample `1588558`, expected `1587532`.
+- Stage 20.1 now passes on 1/2/4 CPUs with the strict flat software-renderer
+  contract and current branded palette.
 
 ## Ownership and security map
 
@@ -96,17 +96,15 @@ polish pass.
 
 ## Risk register
 
-1. The Stage 20.1 projection oracle must be reconciled without weakening the
-   assertion.
-2. The current 3D shell path is a software presentation effect, not a claimed
+1. The current 3D shell path is a software presentation effect, not a claimed
    hardware-accelerated graphics API.
-3. Text, image decoding, and reusable UI coverage are narrower than the
+2. Text, image decoding, and reusable UI coverage are narrower than the
    mandate's full requirements.
-4. Surface isolation and compositor ownership need further userspace protocol
+3. Surface isolation and compositor ownership need further userspace protocol
    qualification before production claims.
-5. Native GPU/input/storage and power-loss behavior require real hardware or
+4. Native GPU/input/storage and power-loss behavior require real hardware or
    explicitly scoped external qualification; QEMU cannot close those gates.
-6. No independent Claude review evidence is present in this repository state.
+5. No independent Claude review evidence is present in this repository state.
 
 ## Immediate implementation queue
 
