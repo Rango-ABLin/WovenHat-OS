@@ -100,6 +100,7 @@ def main():
     serial = out / "serial.log"
     serial.write_text("")
     screenshot = out / "desktop.ppm"
+    screenshot.unlink(missing_ok=True)  # Never accept a capture from an earlier run.
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
