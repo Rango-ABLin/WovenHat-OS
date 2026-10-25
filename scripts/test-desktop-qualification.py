@@ -121,7 +121,12 @@ def parse_ppm(path: Path) -> tuple[int, int, bytes]:
         raise ValueError(f"non-numeric PPM dimensions in {path}") from error
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid PPM dimensions in {path}: {width}x{height}")
-    index = _skip_space_and_comments(data, index)
+    # The max-value token is followed by one required whitespace delimiter.
+    # Do not skip an arbitrary run here: the first RGB byte is binary payload
+    # and may itself be classified as ASCII whitespace (for example 0x0c).
+    if index >= len(data) or not data[index:index + 1].isspace():
+        raise ValueError(f"missing PPM payload delimiter in {path}")
+    index += 1
     expected = width * height * 3
     pixels = data[index:]
     if len(pixels) != expected:
@@ -201,7 +206,15 @@ class Qmp:
                 return reply["return"]
 
     def key(self, code: str, hold_ms: int = 100) -> None:
-        self.command("send-key", {"keys": [{"type": "qcode", "data": code}], "hold-time": hold_ms})
+        # `send-key` is a monitor convenience command.  Explicit key events
+        # exercise the same input device path as an interactive QEMU window
+        # and remain reliable when the guest is headless (`-display none`).
+        self.command("input-send-event", {"events": [
+            {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": code}}},
+            {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": code}}},
+        ]})
+        if hold_ms > 0:
+            time.sleep(hold_ms / 1000.0)
 
     def relative_mouse(self, dx: int, dy: int) -> None:
         events = []

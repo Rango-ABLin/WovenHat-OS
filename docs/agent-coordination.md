@@ -4,10 +4,10 @@
 
 Audited the complete supplied graphics roadmap against the current tree and
 runtime evidence. The detailed ledger is in
-`docs/graphics/roadmap-2026-10-25-stage-00-audit.md`. Stage 00 is not accepted:
-the current 1-CPU desktop qualification reached the memory floor but timed out
-waiting for the shell sign-in marker. No later graphics stage is accepted by
-this audit.
+`docs/graphics/roadmap-2026-10-25-stage-00-audit.md`. The initial sign-in
+timeout was fixed in the headless QMP input and binary PPM parsing paths; the
+corrected real-QEMU desktop gate then passed serially at 1/2/4 CPUs. Stage 00
+is accepted; the later graphics stages remain open.
 
 ## Codex - bounded HTTP(S) WebView network boundary (2026-10-25)
 

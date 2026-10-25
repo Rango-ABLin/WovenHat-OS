@@ -299,7 +299,11 @@ def main():
                         # after its first frame before injecting the PIN.
                         time.sleep(1)
                         for key in ['1', '2', '3', '4', 'ret']:
-                            execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
+                            execute('input-send-event', {'events': [
+                                {'type': 'key', 'data': {'down': True, 'key': {'type': 'qcode', 'data': key}}},
+                                {'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': key}}},
+                            ]})
+                            time.sleep(0.08)
                             time.sleep(0.12)
                         deadline = time.monotonic() + 15
                         while 'woven-shell: signed in: ada' not in serial.read_text(errors='replace'):

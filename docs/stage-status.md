@@ -1,13 +1,14 @@
 # Stage status
 
-## Graphics roadmap Stage 00 live audit - 2026-10-25
+## Graphics roadmap Stage 00 baseline acceptance - 2026-10-25
 
 The complete graphics Stage 00-24 roadmap was audited against the current
 repository and preserved runtime evidence. The detailed ledger is
-`docs/graphics/roadmap-2026-10-25-stage-00-audit.md`. Stage 00 is **not
-accepted**: the current 1-CPU desktop qualification reached the 5 GiB guest
-memory floor but timed out waiting for `woven-shell: signed in: ada`. No later
-graphics stage is accepted by this audit.
+`docs/graphics/roadmap-2026-10-25-stage-00-audit.md`. The initial sign-in
+timeout was fixed in the headless QMP input and PPM harness paths; the corrected
+real-QEMU desktop qualification passed serially at 1/2/4 CPUs with 5 GiB
+configured RAM and the 4 GiB usable-memory floor. Stage 00 is accepted. No
+later graphics stage is accepted by this entry.
 
 ## Bounded WebView HTTP(S) network boundary - 2026-10-25
 

@@ -23,10 +23,14 @@ the next mandatory stage is accepted.
   `cargo clippy --manifest-path apps/woven-settings/Cargo.toml --target x86_64-unknown-none -- -D warnings`.
 - Rust formatting and `git diff --check` passed for the affected graphics,
   media, web, and UI sources.
-- Current QEMU desktop qualification is not green: the 1-CPU desktop run
-  reached the 5 GiB guest memory floor but timed out waiting for the
-  `woven-shell: signed in: ada` marker. Evidence is preserved under
-  `audit-artifacts/desktop-qualification-1792917927956661700`.
+- The initial QEMU desktop qualification reached the 5 GiB guest memory floor
+  but timed out waiting for `woven-shell: signed in: ada`. The harness was
+  corrected to use explicit headless-QEMU key press/release events and to
+  preserve whitespace-valued first pixels in binary PPM frames. The corrected
+  gate passed serially at 1, 2, and 4 CPUs. Evidence is preserved under
+  `audit-artifacts/desktop-qualification-1792921718604134100`,
+  `audit-artifacts/desktop-qualification-1792921848678156500`, and
+  `audit-artifacts/desktop-qualification-1792921970674483800`.
 - A lower-memory app run was correctly rejected at the 4 GiB floor; evidence
   is preserved under `audit-artifacts/update-desktop-1cpu-1792917732442264000`.
 - No physical GPU, hardware display, codec, TLS, JavaScript, or native
@@ -36,7 +40,7 @@ the next mandatory stage is accepted.
 
 | Stage | Requirement | Live classification | Evidence / gap |
 |---:|---|---|---|
-| 00 | Audit, baseline, evidence | **INCOMPLETE** | Repository and host baseline are recorded here; current 1-CPU desktop qualification timed out, so the 1/2/4-CPU acceptance matrix is not green. |
+| 00 | Audit, baseline, evidence | **ACCEPTED** | Live repository audit is recorded here; corrected real-QEMU desktop qualification passed serially at 1/2/4 CPUs with 5 GiB configured RAM and preserved evidence. |
 | 01 | Safety and graphics architecture contracts | PARTIAL | Existing kernel graphics ABI/compositor and architecture documentation exist; roadmap-specific contracts and acceptance evidence are not consolidated. |
 | 02 | Display HAL and modesetting | PARTIAL | `kernel/src/graphics.rs`, `graphics_abi.rs`, and shell graphics paths exist; physical display/HAL qualification is unverified. |
 | 03 | Buffered presentation and damage | PARTIAL | Compositor and framebuffer paths exist; complete damage/presentation runtime evidence is not current. |
@@ -64,13 +68,12 @@ the next mandatory stage is accepted.
 
 ## Stage 00 gate decision
 
-**Not accepted.** The audit artifacts and host tests establish a useful baseline,
-but the current live desktop qualification failure means the required runtime
-baseline is not passing. The correct next engineering action is to diagnose the
-desktop sign-in/boot qualification failure, then rerun the baseline serially
-on 1, 2, and 4 CPUs with the prescribed memory floor. Stages 01–24 remain
-eligible for implementation work only where doing so does not falsely advance a
-mandatory gate; no later stage is recorded as accepted by this document.
+**Accepted.** The initial sign-in timeout was reproduced, diagnosed as a
+headless QMP injection plus binary-frame parsing defect, corrected in the
+qualification harness, and rerun successfully. The 1/2/4-CPU matrix passed
+serially with the prescribed 5 GiB configuration and at least 4 GiB usable
+guest memory. This acceptance covers the baseline only; it does not promote
+Stages 01–24 or claim physical hardware certification.
 
 ## Safety limits
 
