@@ -131,4 +131,36 @@ mod tests {
         assert_eq!(page_content(&pdf, &entries[..count], 1, &mut pages),
             Err(DocumentError::NotFound));
     }
+    #[test]
+    fn selects_requested_page_not_first_stream() {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = [0usize; 7];
+        for (id, body) in [
+            (1, "<< /Type /Catalog /Pages 2 0 R >>"),
+            (2, "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>"),
+            (3, "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>"),
+            (4, "<< /Length 0 >>\nstream\n\nendstream"),
+            (5, "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>"),
+            (6, "<< /Length 0 >>\nstream\n\nendstream"),
+        ] {
+            offsets[id] = pdf.len();
+            pdf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let xref_at = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
+        for off in offsets.iter().skip(1) {
+            pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(format!(
+            "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n"
+        ).as_bytes());
+        let mut entries = [Entry::default(); 8];
+        let count = crate::xref::read_table(&pdf, &mut entries).unwrap();
+        let mut pages = [Reference { number: 0, generation: 0 }; 4];
+        assert_eq!(page_content(&pdf, &entries[..count], 0, &mut pages),
+            Ok((Reference { number: 4, generation: 0 }, 2)));
+        assert_eq!(page_content(&pdf, &entries[..count], 1, &mut pages),
+            Ok((Reference { number: 6, generation: 0 }, 2)));
+    }
+
 }
