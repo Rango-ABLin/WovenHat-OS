@@ -1,7 +1,7 @@
 # WovenHat Graphics Current-State Audit
 
 Audit date: 2026-10-25  
-Audited commit: `9ced7c7`  
+Audited commit: `25cc1adb`
 Branch: `master`
 
 ## Latest accepted graphics gate
