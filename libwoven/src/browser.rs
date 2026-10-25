@@ -330,9 +330,19 @@ struct Style {
     width: Option<u32>,
     height: Option<u32>,
     margin: u32,
-    display: bool,
+    display: DisplayMode,
+    gap: u32,
+    grid_columns: usize,
     background: Option<u32>,
     color: Option<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DisplayMode {
+    None,
+    Block,
+    Flex,
+    Grid,
 }
 
 fn css_color(value: &str) -> Option<u32> {
@@ -348,7 +358,13 @@ fn style(node: Node<'_>) -> Style {
         width: None,
         height: None,
         margin: 0,
-        display: !matches!(node.tag, "script" | "style" | "head"),
+        display: if matches!(node.tag, "script" | "style" | "head") {
+            DisplayMode::None
+        } else {
+            DisplayMode::Block
+        },
+        gap: 0,
+        grid_columns: 1,
         background: None,
         color: None,
     };
@@ -373,7 +389,22 @@ fn style(node: Node<'_>) -> Style {
         } else if name.eq_ignore_ascii_case("margin") {
             result.margin = parse_px().unwrap_or(0);
         } else if name.eq_ignore_ascii_case("display") {
-            result.display = value != "none";
+            result.display = match value {
+                "none" => DisplayMode::None,
+                "flex" => DisplayMode::Flex,
+                "grid" => DisplayMode::Grid,
+                _ => DisplayMode::Block,
+            };
+        } else if name.eq_ignore_ascii_case("gap") {
+            result.gap = parse_px().unwrap_or(0);
+        } else if name.eq_ignore_ascii_case("grid-template-columns") {
+            let columns = value
+                .split_ascii_whitespace()
+                .filter(|column| !column.is_empty())
+                .count();
+            if columns > 0 {
+                result.grid_columns = columns;
+            }
         } else if name.eq_ignore_ascii_case("background-color") {
             result.background = css_color(value);
         } else if name.eq_ignore_ascii_case("color") {
@@ -405,7 +436,7 @@ fn layout_subtree<const N: usize>(
         .node(node_index)
         .ok_or(LayoutError::Overflow)?;
     let node_style = style(node);
-    if !node_style.display {
+    if node_style.display == DisplayMode::None {
         return Ok(0);
     }
     let margin = node_style.margin;
@@ -414,7 +445,7 @@ fn layout_subtree<const N: usize>(
         .unwrap_or(available_width.saturating_sub(margin.saturating_mul(2)));
     let content_x = x.checked_add(margin).ok_or(LayoutError::Overflow)?;
     let content_y = y.checked_add(margin).ok_or(LayoutError::Overflow)?;
-    let mut cursor_y = content_y;
+    let mut children = [0usize; 16];
     let mut child_count = 0usize;
     for child_index in 0..context.document.len() {
         if context
@@ -425,17 +456,98 @@ fn layout_subtree<const N: usize>(
         {
             continue;
         }
-        let child_height =
-            layout_subtree(context, child_index, content_x, cursor_y, width, depth + 1)?;
-        cursor_y = cursor_y
-            .checked_add(child_height)
-            .ok_or(LayoutError::Overflow)?;
+        if child_count == children.len() {
+            return Err(LayoutError::Overflow);
+        }
+        children[child_count] = child_index;
         child_count += 1;
     }
-    let content_height = node_style
-        .height
-        .or_else(|| (child_count > 0).then_some(cursor_y.saturating_sub(content_y)))
-        .unwrap_or(24);
+    let mut cursor_y = content_y;
+    let mut content_height = 0u32;
+    match node_style.display {
+        DisplayMode::Block => {
+            for &child_index in &children[..child_count] {
+                let child_height =
+                    layout_subtree(context, child_index, content_x, cursor_y, width, depth + 1)?;
+                cursor_y = cursor_y
+                    .checked_add(child_height)
+                    .and_then(|value| value.checked_add(node_style.gap))
+                    .ok_or(LayoutError::Overflow)?;
+                content_height = cursor_y.saturating_sub(content_y);
+            }
+            content_height = content_height.saturating_sub(node_style.gap);
+        }
+        DisplayMode::Flex => {
+            let gap_total = node_style
+                .gap
+                .checked_mul(child_count.saturating_sub(1) as u32)
+                .ok_or(LayoutError::Overflow)?;
+            let child_width = width.saturating_sub(gap_total) / child_count.max(1) as u32;
+            let mut cursor_x = content_x;
+            let mut row_height = 0u32;
+            for &child_index in &children[..child_count] {
+                let child_height = layout_subtree(
+                    context,
+                    child_index,
+                    cursor_x,
+                    content_y,
+                    child_width,
+                    depth + 1,
+                )?;
+                cursor_x = cursor_x
+                    .checked_add(child_width)
+                    .and_then(|value| value.checked_add(node_style.gap))
+                    .ok_or(LayoutError::Overflow)?;
+                row_height = row_height.max(child_height);
+            }
+            content_height = row_height;
+        }
+        DisplayMode::Grid => {
+            let columns = node_style.grid_columns.max(1).min(child_count.max(1));
+            let gap_total = node_style
+                .gap
+                .checked_mul(columns.saturating_sub(1) as u32)
+                .ok_or(LayoutError::Overflow)?;
+            let child_width = width.saturating_sub(gap_total) / columns as u32;
+            let mut row_heights = [0u32; 16];
+            let rows = child_count.div_ceil(columns);
+            if rows > row_heights.len() {
+                return Err(LayoutError::Overflow);
+            }
+            for (position, &child_index) in children[..child_count].iter().enumerate() {
+                let row = position / columns;
+                let column = position % columns;
+                let x = content_x
+                    .checked_add((child_width + node_style.gap).saturating_mul(column as u32))
+                    .ok_or(LayoutError::Overflow)?;
+                let y = content_y
+                    .checked_add(
+                        row_heights[..row]
+                            .iter()
+                            .try_fold(0u32, |sum, height| {
+                                sum.checked_add(*height)?.checked_add(node_style.gap)
+                            })
+                            .ok_or(LayoutError::Overflow)?,
+                    )
+                    .ok_or(LayoutError::Overflow)?;
+                let child_height =
+                    layout_subtree(context, child_index, x, y, child_width, depth + 1)?;
+                row_heights[row] = row_heights[row].max(child_height);
+            }
+            content_height = row_heights[..rows]
+                .iter()
+                .try_fold(0u32, |sum, height| {
+                    sum.checked_add(*height)?.checked_add(node_style.gap)
+                })
+                .ok_or(LayoutError::Overflow)?
+                .saturating_sub(node_style.gap);
+        }
+        DisplayMode::None => unreachable!(),
+    }
+    let content_height =
+        node_style
+            .height
+            .unwrap_or(if child_count > 0 { content_height } else { 24 });
     let height = content_height
         .checked_add(margin.saturating_mul(2))
         .ok_or(LayoutError::Overflow)?;
@@ -614,6 +726,43 @@ mod tests {
         assert_eq!(layout.get(0).unwrap().node, 1);
         assert_eq!(layout.get(1).unwrap().node, 0);
         assert_eq!(layout.get(0).unwrap().rect.height, 20);
+    }
+
+    #[test]
+    fn lays_out_bounded_flex_rows_and_grid_columns() {
+        let flex = parse_html::<4>(
+            br#"<main style="display:flex;gap:4px"><p style="height:10px"/><p style="height:20px"/></main>"#,
+        )
+        .unwrap();
+        let flex_layout = layout(
+            &flex,
+            Viewport {
+                width: 100,
+                height: 100,
+            },
+        )
+        .unwrap();
+        let first = flex_layout.get(0).unwrap();
+        let second = flex_layout.get(1).unwrap();
+        assert_eq!((first.rect.x, first.rect.width), (0, 48));
+        assert_eq!((second.rect.x, second.rect.width), (52, 48));
+
+        let grid = parse_html::<5>(
+            br#"<main style="display:grid;gap:2px;grid-template-columns:1fr 1fr"><p style="height:10px"/><p style="height:20px"/><p style="height:12px"/></main>"#,
+        )
+        .unwrap();
+        let grid_layout = layout(
+            &grid,
+            Viewport {
+                width: 100,
+                height: 100,
+            },
+        )
+        .unwrap();
+        let third = grid_layout.get(2).unwrap();
+        assert_eq!(third.rect.x, 0);
+        assert_eq!(third.rect.y, 22);
+        assert_eq!(third.rect.width, 49);
     }
 
     #[test]
