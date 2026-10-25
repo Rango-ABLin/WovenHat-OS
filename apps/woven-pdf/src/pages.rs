@@ -59,7 +59,7 @@ pub fn collect_pages(
                     nesting = nesting.checked_sub(1).ok_or(PageError::Malformed)?;
                     if nesting == 0 { break; }
                 }
-                Token::Name(b"Kids") if nesting == 1 => {
+                Token::Name(name) if nesting == 1 && name == b"Kids" => {
                     if lex.next_token().map_err(ObjectError::from)? != Some(Token::ArrayStart) {
                         return Err(PageError::Malformed);
                     }
