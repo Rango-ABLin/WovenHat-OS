@@ -50,7 +50,8 @@ def main():
     parser.add_argument('--timeout', type=float, default=300)
     parser.add_argument('--generic-only', action='store_true',
                         help='diagnose generic kernel stage without claiming WovenPDF execution')
-    parser.add_argument('--full-gui-image', action='store_true',\n                        help='load full GUI ELF without opening a window (tests large static mappings)')
+    parser.add_argument('--full-gui-image', action='store_true',
+                        help='load full GUI ELF without opening a window (tests large static mappings)')
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
