@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - userspace stack qualification for streamed codecs (2026-10-25)
+
+The guest GIF stream self-test exposed the historical 16-KiB userspace stack
+boundary even after LZW tables moved to bounded heap storage. Increased
+`UserStack::SIZE` to 64 KiB while retaining the guard page. Host/freestanding
+lint passed and the corrected WovenImages 1/2/4-CPU guest matrix passed with
+WebP, BMP, and interlaced GIF markers.
+
 ## Codex - memory-bounded interlaced GIF rows (2026-10-25)
 
 Enabled the GIF four-pass interlace row mapping in the source-driven decoder.

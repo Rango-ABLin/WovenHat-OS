@@ -466,6 +466,17 @@ struct GifPixelWriter<'a> {
     interlaced: bool,
 }
 
+fn boxed_zeroed<T>() -> alloc::boxed::Box<T> {
+    let layout = core::alloc::Layout::new::<T>();
+    let pointer = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    if pointer.is_null() {
+        alloc::alloc::handle_alloc_error(layout);
+    }
+    // SAFETY: `alloc_zeroed` returned a pointer allocated with `layout`, and
+    // the zero bit pattern is valid for the integer-array callers below.
+    unsafe { alloc::boxed::Box::from_raw(pointer.cast::<T>()) }
+}
+
 impl GifPixelWriter<'_> {
     fn row_for_sequence(sequence: usize, height: usize, interlaced: bool) -> usize {
         let row = sequence;
@@ -611,9 +622,9 @@ pub fn decode_gif_rgba_stream<S: ImageStream>(
                 let end = clear + 1;
                 let mut code_size = min_code_size + 1;
                 let mut next_code = end + 1;
-                let mut prefix = [0u16; 4096];
-                let mut suffix = [0u8; 4096];
-                let mut stack = [0u8; 4096];
+                let mut prefix = boxed_zeroed::<[u16; 4096]>();
+                let mut suffix = boxed_zeroed::<[u8; 4096]>();
+                let mut stack = boxed_zeroed::<[u8; 4096]>();
                 let mut old = None;
                 let mut first = 0u8;
                 let expected = width.checked_mul(height).ok_or(ImageError::Malformed)?;

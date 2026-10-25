@@ -1,7 +1,7 @@
 use libwoven::layout::Frame;
 use libwoven::media::ThumbnailCache;
 use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::{rgb, Canvas, GraphicsSurface};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -40,12 +40,14 @@ static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
 
 struct WallpaperBytes(core::cell::UnsafeCell<[u8; WALLPAPER_BYTES]>);
 unsafe impl Sync for WallpaperBytes {}
-static WALLPAPER_DATA: WallpaperBytes = WallpaperBytes(core::cell::UnsafeCell::new([0; WALLPAPER_BYTES]));
+static WALLPAPER_DATA: WallpaperBytes =
+    WallpaperBytes(core::cell::UnsafeCell::new([0; WALLPAPER_BYTES]));
 
 struct WallpaperPixels(core::cell::UnsafeCell<[u32; WALLPAPER_WIDTH * WALLPAPER_HEIGHT]>);
 unsafe impl Sync for WallpaperPixels {}
-static WALLPAPER_PIXELS: WallpaperPixels =
-    WallpaperPixels(core::cell::UnsafeCell::new([0; WALLPAPER_WIDTH * WALLPAPER_HEIGHT]));
+static WALLPAPER_PIXELS: WallpaperPixels = WallpaperPixels(core::cell::UnsafeCell::new(
+    [0; WALLPAPER_WIDTH * WALLPAPER_HEIGHT],
+));
 
 struct WallpaperThumbnailCache(core::cell::UnsafeCell<ThumbnailCache<1>>);
 unsafe impl Sync for WallpaperThumbnailCache {}
@@ -78,8 +80,7 @@ fn image_count() -> usize {
 }
 
 fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
-    let cache: &'static mut ThumbnailCache<1> =
-        unsafe { &mut *WALLPAPER_THUMBNAILS.0.get() };
+    let cache: &'static mut ThumbnailCache<1> = unsafe { &mut *WALLPAPER_THUMBNAILS.0.get() };
     if cache.get(WALLPAPER_CACHE_KEY).is_some() {
         let thumbnail = cache.get(WALLPAPER_CACHE_KEY)?;
         return Some((
@@ -90,28 +91,26 @@ fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
     }
     let bytes = unsafe { &mut *WALLPAPER_DATA.0.get() };
     let pixels = unsafe { &mut *WALLPAPER_PIXELS.0.get() };
-    let (length, metadata) = match libwoven::media::load_vfs_asset(
-        "/share/wallpapers/wovenhat-gradient.bmp",
-        bytes,
-    ) {
-        Ok(asset) => asset,
-        Err(libwoven::media::VfsAssetError::Open) => {
-            let _ = libwoven::print("WovenImages: wallpaper open denied\n");
-            return None;
-        }
-        Err(libwoven::media::VfsAssetError::Read) => {
-            let _ = libwoven::print("WovenImages: wallpaper read failed\n");
-            return None;
-        }
-        Err(libwoven::media::VfsAssetError::TooLarge) => {
-            let _ = libwoven::print("WovenImages: wallpaper too large\n");
-            return None;
-        }
-        Err(libwoven::media::VfsAssetError::InvalidImage(_)) => {
-            let _ = libwoven::print("WovenImages: wallpaper header invalid\n");
-            return None;
-        }
-    };
+    let (length, metadata) =
+        match libwoven::media::load_vfs_asset("/share/wallpapers/wovenhat-gradient.bmp", bytes) {
+            Ok(asset) => asset,
+            Err(libwoven::media::VfsAssetError::Open) => {
+                let _ = libwoven::print("WovenImages: wallpaper open denied\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::Read) => {
+                let _ = libwoven::print("WovenImages: wallpaper read failed\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::TooLarge) => {
+                let _ = libwoven::print("WovenImages: wallpaper too large\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::InvalidImage(_)) => {
+                let _ = libwoven::print("WovenImages: wallpaper header invalid\n");
+                return None;
+            }
+        };
     if metadata.width as usize != WALLPAPER_WIDTH || metadata.height as usize != WALLPAPER_HEIGHT {
         return None;
     }
@@ -155,7 +154,11 @@ fn draw_thumbnail(canvas: &mut Canvas<'_>, image: Option<(&[u32], usize, usize)>
         let source_y = y * height / target_height;
         for x in 0..target_width {
             let source_x = x * width / target_width;
-            canvas.set(x0 + x as i32, y0 + y as i32, pixels[source_y * width + source_x]);
+            canvas.set(
+                x0 + x as i32,
+                y0 + y as i32,
+                pixels[source_y * width + source_x],
+            );
         }
     }
 }

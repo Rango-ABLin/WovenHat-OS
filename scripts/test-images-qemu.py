@@ -71,7 +71,13 @@ def main() -> int:
         print(f'QEMU timeout; evidence: {out}')
         return 1
     text = serial.read_text(errors='replace') if serial.exists() else ''
-    if code != 33 or '[S07] freestanding WebP decode: PASSED' not in text or '[WEBP] freestanding decode: PASSED 2x2' not in text:
+    required_markers = (
+        '[S07] freestanding WebP decode: PASSED',
+        '[WEBP] freestanding decode: PASSED 2x2',
+        '[BMP] stream decode: PASSED 2x1',
+        '[GIF] interlaced stream decode: PASSED 1x1',
+    )
+    if code != 33 or any(marker not in text for marker in required_markers):
         print(f'WovenImages failed (exit {code}); evidence: {out}')
         return 1
     print(f'WovenImages: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')

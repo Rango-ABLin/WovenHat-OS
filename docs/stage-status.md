@@ -1,5 +1,14 @@
 # Stage status
 
+## Userspace stack qualification for streamed codecs - 2026-10-25
+
+The WovenImages Ring-3 self-test exposed a stack fault while entering the
+streamed GIF path under the previous 16-KiB stack. LZW tables are heap-backed
+with fixed sizes, and `UserStack::SIZE` is now 64 KiB plus its guard page to
+provide bounded codec/browser/compositor headroom. Host/freestanding lint and
+the corrected 1/2/4-CPU guest matrix pass; serial evidence is retained under
+`audit-artifacts/woven-images-{1,2,4}cpu`.
+
 ## Memory-bounded interlaced GIF rows - 2026-10-25
 
 The source-driven GIF decoder now supports the four-pass interlace mapping
