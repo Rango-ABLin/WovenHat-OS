@@ -448,7 +448,13 @@ pub(super) fn run() -> bool {
         drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY*3]);
         crate::heap::maintain_capacity();
         let frames = crate::memory::stats().allocated_frames;
-        let program = load(&main, &["shared-test"])?;
+        let program = match load(&main, &["shared-test"]) {
+            Some(program) => program,
+            None => {
+                step("valid signed transitive graph load", false);
+                return None;
+            }
+        };
         let mut address = [0; 8];
         paging::read_user_bytes_in(
             program.address_space.paging,
