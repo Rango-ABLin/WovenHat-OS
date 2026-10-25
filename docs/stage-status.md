@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenUI bounded WebView host boundary - 2026-10-25
+
+Added a fail-closed WebView host boundary with bounded HTTP(S) URI
+validation, control-character rejection, explicit loading completion state,
+focus rendering, and unsupported-content presentation. The full libwoven host
+suite passed 141 tests, Settings warning-denying Clippy passed, and
+formatting/diff checks passed. A browser engine, network stack, JavaScript
+runtime, and security certification are not claimed.
+
 ## WovenInstaller shared-control migration - 2026-10-25
 
 WovenInstaller now uses shared bounded Label and Button rendering for its

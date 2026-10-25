@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI WebView host boundary (2026-10-25)
+
+Added a fail-closed WebView host boundary with bounded HTTP(S) URI
+validation, control-character rejection, explicit loading completion state,
+focus rendering, and an unsupported-content host presentation. The full
+libwoven host suite passed 141 tests, Settings target warning-denying Clippy
+passed, and formatting/diff checks passed. This is not a browser engine,
+network stack, JavaScript runtime, or security certification claim.
+
 ## Codex - WovenInstaller shared-control migration (2026-10-25)
 
 Migrated WovenInstaller's title and Close control to shared bounded WovenUI

@@ -1195,6 +1195,78 @@ impl<'a> VideoView<'a> {
     }
 }
 
+/// A bounded WebView host boundary. URI validation and presentation state are
+/// local and allocation-free; an external browser engine must provide content.
+pub struct WebView<'a> {
+    pub frame: Frame,
+    pub uri: Option<&'a str>,
+    pub focused: bool,
+    pub loading: bool,
+}
+
+impl<'a> WebView<'a> {
+    pub const MAX_URI_BYTES: usize = 256;
+
+    pub const fn new(frame: Frame) -> Self {
+        Self {
+            frame,
+            uri: None,
+            focused: false,
+            loading: false,
+        }
+    }
+
+    pub fn navigate(&mut self, uri: &'a str) -> bool {
+        if uri.len() > Self::MAX_URI_BYTES
+            || !(uri.starts_with("https://") || uri.starts_with("http://"))
+            || uri.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+        {
+            return false;
+        }
+        self.uri = Some(uri);
+        self.loading = true;
+        true
+    }
+
+    pub fn finish_load(&mut self) -> bool {
+        if !self.loading {
+            return false;
+        }
+        self.loading = false;
+        true
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>, theme: Theme) {
+        canvas.fill_rect(
+            self.frame.x,
+            self.frame.y,
+            self.frame.width.max(0) as usize,
+            self.frame.height.max(0) as usize,
+            theme.surface,
+        );
+        let status = if self.loading {
+            "Loading web content..."
+        } else if self.uri.is_some() {
+            "Web content host ready"
+        } else {
+            "No web page loaded"
+        };
+        canvas.draw_text(self.frame.x + 6, self.frame.y + 6, status, theme.text);
+        if let Some(uri) = self.uri {
+            canvas.draw_text(self.frame.x + 6, self.frame.y + 22, uri, theme.text);
+        }
+        if self.focused {
+            canvas.fill_rect(
+                self.frame.x,
+                self.frame.y,
+                self.frame.width.max(0) as usize,
+                1,
+                theme.focus,
+            );
+        }
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -1220,7 +1292,7 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 mod tests {
     use super::{
         Button, Checkbox, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table, Tabs,
-        TextField, Theme, Tree, VideoView, stack_vertical,
+        TextField, Theme, Tree, VideoView, WebView, stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -1450,5 +1522,30 @@ mod tests {
         let mut canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
         video.draw(&mut canvas);
         assert!(pixels.iter().all(|pixel| *pixel == source[0]));
+    }
+
+    #[test]
+    fn web_view_rejects_unsafe_or_oversized_uris() {
+        let mut view = WebView::new(Frame::new(0, 0, 80, 40));
+        assert!(!view.navigate("javascript:alert(1)"));
+        assert!(!view.navigate("https://bad\nuri"));
+        let oversized = "https://".to_owned() + &"a".repeat(WebView::MAX_URI_BYTES);
+        assert!(!view.navigate(&oversized));
+        assert!(view.navigate("https://wovenhat.invalid"));
+        assert!(view.loading);
+        assert!(view.finish_load());
+        assert!(!view.finish_load());
+    }
+
+    #[test]
+    fn web_view_draws_bounded_host_state() {
+        let mut view = WebView::new(Frame::new(1, 1, 30, 20));
+        view.navigate("https://wovenhat.invalid");
+        view.focused = true;
+        let mut pixels = [0; 40 * 32];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 40, 32).unwrap();
+        view.draw(&mut canvas, Theme::DARK);
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+        assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.surface));
     }
 }
