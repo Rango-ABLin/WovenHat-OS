@@ -61,6 +61,43 @@ def capture(port, screenshot, deadline):
     raise RuntimeError("QMP unavailable before timeout")
 
 
+
+def page_surface_pixels(path):
+    """Count near-white RGB pixels in a bounded QEMU P6 framebuffer capture."""
+    with path.open("rb") as stream:
+        def token():
+            while True:
+                char = stream.read(1)
+                if not char:
+                    raise ValueError("truncated PPM header")
+                if char == b"#":
+                    stream.readline()
+                    continue
+                if not char.isspace():
+                    break
+            result = bytearray(char)
+            while True:
+                char = stream.read(1)
+                if not char or char.isspace():
+                    return bytes(result)
+                result.extend(char)
+                if len(result) > 32:
+                    raise ValueError("oversized PPM token")
+
+        if token() != b"P6":
+            raise ValueError("expected binary P6 screenshot")
+        width, height, maximum = int(token()), int(token()), int(token())
+        if not (320 <= width <= 4096 and 200 <= height <= 2160 and maximum == 255):
+            raise ValueError("invalid screenshot dimensions or channel range")
+        pixels = stream.read()
+        if len(pixels) != width * height * 3:
+            raise ValueError("truncated or oversized screenshot payload")
+        return sum(
+            r >= 235 and g >= 235 and b >= 235
+            for r, g, b in zip(pixels[::3], pixels[1::3], pixels[2::3])
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
@@ -139,6 +176,15 @@ def main():
     if not screenshot.exists() or screenshot.stat().st_size < 100:
         print("FAIL: no captured framebuffer.", file=sys.stderr)
         return 1
+    try:
+        white_count = page_surface_pixels(screenshot)
+    except ValueError as error:
+        print(f"FAIL: invalid framebuffer: {error}", file=sys.stderr)
+        return 1
+    if white_count < 5000:
+        print(f"FAIL: only {white_count} near-white pixels; WovenPDF page surface not visible.", file=sys.stderr)
+        return 1
+    print(f"Framebuffer near-white page pixels: {white_count}")
     print(f"WovenPDF desktop probe: process and WOPN request observed ({args.cpus} CPU).")
     print(f"Screenshot: {screenshot} (visual inspection required)")
     print("NOT verified: shell WOPN acceptance, PDF page pixels, navigation or full rendering.")
