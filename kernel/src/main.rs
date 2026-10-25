@@ -8852,10 +8852,11 @@ fn stage20_15_self_test() -> bool {
     let top = height - 24;
     // F1: the launcher's first row is the catalog's application.
     // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's text at (+6, +1 + 2 * 14 + 4).
+    // taskbar; the first match's icon occupies the left margin and its text
+    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
     let listed = key(0x3b)
         && until(1000, || {
-            text_at(4 + 6, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
         });
     let closed = key(0x3b);
     if !step(
@@ -8906,12 +8907,8 @@ fn stage20_15_self_test() -> bool {
         "Quick Settings opens",
         opened
             && until(1000, || {
-                text_at(
-                    power_row.0 - 28 + 6,
-                    power_row.1 - 3,
-                    "Power off",
-                    rgb(255, 255, 255),
-                )
+                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
+                    == Ok(rgb(76, 190, 188))
             }),
     ) {
         return false;

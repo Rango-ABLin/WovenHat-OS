@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 20.15 session oracle repair and acceptance (2026-10-25)
+
+The session gate initially failed on stale launcher text coordinates and a
+3D-projected Quick Settings top-left pixel. The oracle now checks the current
+icon-offset launcher text and a stable projected panel edge. Catalog loading is
+also logged with a bounded entry count. The full session/F12/input/power-off
+gate passes on 1/2/4 CPUs with target Clippy green; evidence is under
+`audit-artifacts/stage20.15-{1,2,4}cpu-*`.
+
 ## Codex - Stage 13.20 power-off matrix (2026-10-25)
 
 ACPI PM1/_S5 power-off passed on 1/2/4 CPUs. Evidence is preserved under

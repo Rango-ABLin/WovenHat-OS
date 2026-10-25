@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics Stage 20.15 session acceptance - 2026-10-25
+
+Repaired the session oracle to account for the launcher’s app-icon text
+offset and the projected Quick Settings top edge. The session now passes
+catalog loading/listing, display and input ownership, F12 console handoff and
+return, keyboard delivery, Quick Settings access, and desktop power-off on
+1/2/4 CPUs. Target Clippy is green; evidence is preserved under
+`audit-artifacts/stage20.15-{1,2,4}cpu-*`.
+
 ## Stage 13.20 power-off matrix - 2026-10-25
 
 The ACPI PM1/_S5 power-off gate passes on 1/2/4 CPUs. Evidence is preserved

@@ -3728,6 +3728,9 @@ fn main(args: Args) -> ! {
     desktop.locked = desktop.accounts.iter().any(Option::is_some);
     desktop.pointer = (width / 2, height / 2);
     desktop.app_count = load_catalog(&mut desktop.apps);
+    let mut catalog_digits = [0u8; 20];
+    let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_digits);
+    log(&[b"woven-shell: catalog entries=", catalog_count]);
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
