@@ -5,7 +5,9 @@ toolchain produced. Every userspace program before it was `global_asm!` inside
 `kernel/src/userspace.rs`, wrapped in a synthetic ELF at runtime, so there was
 no way to write a program without editing the kernel.
 
-The CLI-only 'ring3-smoke' build excludes large GUI statics to fit Stage 16.1.\nThe graphical executable remains separately validated and must pass its own load gate.\nThe application is a separate crate with its own linker script and link flags,
+The CLI-only 'ring3-smoke' build excludes large GUI statics to fit Stage 16.1.
+The graphical executable remains separately validated and must pass its own load gate.
+The application is a separate crate with its own linker script and link flags,
 excluded from the kernel workspace. Its path is handed to the kernel build
 through WOVENHAT_APP_IMAGE, the kernel installs it into the filesystem, reads
 it back, and loads those filesystem bytes through the same ELF loader that
@@ -61,7 +63,8 @@ def main():
     # A separate cargo invocation on purpose: this crate has its own workspace
     # root, target directory, linker script and code model, none of which the
     # kernel build shares.
-    build = subprocess.run(['cargo', 'build', '--release'], cwd=app_dir, env=app_build_env(app_dir))
+    build = subprocess.run(['cargo', 'build', '--release', '--features', 'ring3-smoke'],
+                           cwd=app_dir, env=app_build_env(app_dir))
     if build.returncode != 0:
         print('Application build failed.', file=sys.stderr)
         return 1
