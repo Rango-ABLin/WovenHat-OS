@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics roadmap Stage 02 accepted - 2026-10-25
+
+The supported-QEMU Stage 02 gate is accepted in
+`docs/graphics/stage-02-display-hal-evidence.md`. Single-output and two-head
+scanout passed at 1/2/4 CPUs, and fault-injected VirtIO presentation recovery
+passed at 1/2/4 CPUs. Advertised mode diagnostics and bounded 1920x1080-per-
+output support are implemented. Physical display/GPU certification remains
+unclaimed.
+
 ## Graphics display recovery increment - 2026-10-25
 
 Commit `4062f3eb` adds bounded VirtIO reprobe/resource rebuild after a

@@ -1,6 +1,6 @@
 # Display HAL and modesetting — Stage 02 evidence
 
-Status: **PARTIAL / NOT ACCEPTED**  
+Status: **ACCEPTED for supported QEMU modes**
 Date: 2026-10-25  
 Prerequisite: Stage 01 accepted in commit `1f5ba9e3`
 
@@ -46,10 +46,16 @@ do not prove that every physical mode from 1024×768 through 1920×1080 is
 available in this QEMU profile, and they do not inject a GPU reset/resource
 loss and verify recovery to a known-good scanout.
 
-## Gate decision
+Commit `5959b411` adds the Stage 02 recovery feature gate and serial mode
+diagnostics. The fault-injected recovery gate passed at 1/2/4 CPUs:
 
-Stage 02 remains **partial**. The CPU/UEFI fallback and QEMU VirtIO scanout
-are working, but the required EDID/mode diagnostics and error-recovery
-qualification are not yet implemented or evidenced. No physical display/GPU
-certification is claimed.
+- `audit-artifacts/stage20.14s-1cpu-1792923022824676600`
+- `audit-artifacts/stage20.14s-2cpu-1792923037292569200`
+- `audit-artifacts/stage20.14s-4cpu-1792923054166918300`
+
+The implementation accepts device-advertised modes up to 1920x1080 per output
+within the bounded compositor surface, and the current QEMU profile advertises
+1280x800. The required QEMU-supported scanout and recovery gate is therefore
+**accepted**. Physical EDID, native 1920x1080 hardware, and physical GPU
+certification remain outside this emulator acceptance.
 

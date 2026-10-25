@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - graphics roadmap Stage 02 accepted for supported QEMU modes (2026-10-25)
+
+The VirtIO single-output and two-head scanout matrices passed at 1/2/4 CPUs.
+The new fault-injected presentation recovery matrix also passed at 1/2/4
+CPUs. The driver now logs advertised modes and supports up to 1920x1080 per
+output within bounded compositor limits. Stage 02 is accepted for supported
+QEMU modes; physical EDID/GPU qualification remains separate.
+
 ## Codex - bounded VirtIO recovery and lint repair (2026-10-25)
 
 Added one-shot VirtIO reprobe/resource rebuild after presentation failure with
