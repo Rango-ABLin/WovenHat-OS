@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded WovenUI ImageView and VideoView components (2026-10-25)
+
+Added caller-owned, allocation-free ImageView and VideoView controls. ImageView
+performs bounded nearest-neighbor scaling with source-length validation;
+VideoView adds deterministic playback state and delegates current-frame
+rendering to the bounded image path. The full libwoven host suite passed 139
+tests, Settings target warning-denying Clippy passed, and formatting/diff
+checks passed. These are media-surface primitives, not codec or browser-engine
+claims.
+
 ## Codex - bounded WovenUI Navigation component (2026-10-25)
 
 Added a fixed-capacity vertical Navigation control to `libwoven::ui` with

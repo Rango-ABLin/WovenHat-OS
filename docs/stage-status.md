@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenUI bounded ImageView and VideoView components - 2026-10-25
+
+Added caller-owned, allocation-free ImageView and VideoView controls.
+ImageView validates source bounds and performs bounded nearest-neighbor
+scaling; VideoView provides deterministic playback state and current-frame
+rendering. The full libwoven host suite passed 139 tests, Settings
+warning-denying Clippy passed, and formatting/diff checks passed. Codec and
+browser-engine functionality are not claimed by these primitives.
+
 ## WovenUI bounded Navigation component - 2026-10-25
 
 Added a fixed-capacity vertical Navigation control to `libwoven::ui` with

@@ -1115,6 +1115,86 @@ impl<'a> Dialog<'a> {
     }
 }
 
+/// A bounded nearest-neighbor image surface backed by caller-owned pixels.
+pub struct ImageView<'a> {
+    pub frame: Frame,
+    pub pixels: &'a [u32],
+    pub width: usize,
+    pub height: usize,
+}
+
+impl<'a> ImageView<'a> {
+    pub const fn new(frame: Frame, pixels: &'a [u32], width: usize, height: usize) -> Self {
+        Self {
+            frame,
+            pixels,
+            width,
+            height,
+        }
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>) {
+        let frame_width = self.frame.width.max(0) as usize;
+        let frame_height = self.frame.height.max(0) as usize;
+        if self.width == 0
+            || self.height == 0
+            || self.pixels.len() < self.width.saturating_mul(self.height)
+        {
+            return;
+        }
+        for y in 0..frame_height {
+            let source_y = y.saturating_mul(self.height) / frame_height.max(1);
+            for x in 0..frame_width {
+                let source_x = x.saturating_mul(self.width) / frame_width.max(1);
+                let source = self.pixels[source_y * self.width + source_x];
+                canvas.fill_rect(
+                    self.frame.x + x as i32,
+                    self.frame.y + y as i32,
+                    1,
+                    1,
+                    source,
+                );
+            }
+        }
+    }
+}
+
+/// A bounded video surface. Decoding is owned by the caller; this control
+/// provides deterministic playback state and renders the current frame.
+pub struct VideoView<'a> {
+    pub frame: Frame,
+    pub pixels: &'a [u32],
+    pub width: usize,
+    pub height: usize,
+    pub frame_index: u64,
+    pub playing: bool,
+}
+
+impl<'a> VideoView<'a> {
+    pub const fn new(frame: Frame, pixels: &'a [u32], width: usize, height: usize) -> Self {
+        Self {
+            frame,
+            pixels,
+            width,
+            height,
+            frame_index: 0,
+            playing: false,
+        }
+    }
+
+    pub fn tick(&mut self) -> bool {
+        if !self.playing {
+            return false;
+        }
+        self.frame_index = self.frame_index.wrapping_add(1);
+        true
+    }
+
+    pub fn draw(&self, canvas: &mut Canvas<'_>) {
+        ImageView::new(self.frame, self.pixels, self.width, self.height).draw(canvas);
+    }
+}
+
 /// Place `count` equal-height controls vertically inside `area`.
 pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usize) {
     let count = count.min(16);
@@ -1139,8 +1219,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, Checkbox, Dialog, Label, ListBox, Menu, Navigation, Table, Tabs, TextField, Theme,
-        Tree, stack_vertical,
+        Button, Checkbox, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table, Tabs,
+        TextField, Theme, Tree, VideoView, stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -1339,5 +1419,36 @@ mod tests {
         navigation.draw(&mut canvas, Theme::DARK);
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.accent));
         assert!(pixels.iter().any(|pixel| *pixel == Theme::DARK.focus));
+    }
+
+    #[test]
+    fn image_view_clips_and_scales_bounded_pixels() {
+        let source = [
+            crate::rgb(255, 0, 0),
+            crate::rgb(0, 255, 0),
+            crate::rgb(0, 0, 255),
+            crate::rgb(255, 255, 0),
+        ];
+        let image = ImageView::new(Frame::new(1, 1, 4, 4), &source, 2, 2);
+        let mut pixels = [0; 8 * 8];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 8, 8).unwrap();
+        image.draw(&mut canvas);
+        assert_eq!(pixels[1 + 8], source[0]);
+        assert_eq!(pixels[2 + 8], source[0]);
+        assert_eq!(pixels[4 + 4 * 8], source[3]);
+    }
+
+    #[test]
+    fn video_view_tick_is_deterministic_and_bounded() {
+        let source = [crate::rgb(10, 20, 30)];
+        let mut video = VideoView::new(Frame::new(0, 0, 2, 2), &source, 1, 1);
+        assert!(!video.tick());
+        video.playing = true;
+        assert!(video.tick());
+        assert_eq!(video.frame_index, 1);
+        let mut pixels = [0; 2 * 2];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 2, 2).unwrap();
+        video.draw(&mut canvas);
+        assert!(pixels.iter().all(|pixel| *pixel == source[0]));
     }
 }
