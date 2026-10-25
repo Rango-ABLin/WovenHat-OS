@@ -1,5 +1,19 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 page navigation increment
+
+- Added WovenShell graphical page navigation: clicking the left or right side
+  of the viewer toolbar attempts to load previous or next actual page.
+- A page is selected only if its direct /Contents reference decodes and passes
+  the limited text-paint validation; unsupported pages are not marked loaded.
+- Page counter displays the selected page and total discovered pages.
+- Current limitations remain severe: navigation has no scroll/zoom,
+  fixed page size, no /Contents arrays or inherited resources, and no
+  faithful embedded font/image/vector rendering.
+- The new GUI code needs freestanding target compilation and QEMU runtime
+  checks, in addition to the host parser tests.
+
+
 ## 2026-10-25 page-content selection increment
 
 - Added `document.rs`: reads the classic trailer `/Root`, validates
