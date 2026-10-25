@@ -16,6 +16,15 @@ class TestPackIcons(unittest.TestCase):
         with self.assertRaises(ValueError):validate_svg(b'<svg xmlns="http://www.w3.org/2000/svg"><use href="https://example.org"/></svg>')
     def test_doctype(self):
         with self.assertRaises(ValueError):validate_svg(b'<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>')
+    def test_stylesheet_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_svg(b'<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://example.org/a.css)</style></svg>')
+    def test_embedded_data_url_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_svg(b'<svg xmlns="http://www.w3.org/2000/svg"><rect fill="data:image/png;base64,AA=="/></svg>')
+    def test_event_handler_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_svg(b'<svg xmlns="http://www.w3.org/2000/svg"><rect onclick="alert(1)"/></svg>')
     def test_empty(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ValueError):build(d,Path(d)/"out")
