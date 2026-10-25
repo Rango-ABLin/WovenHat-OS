@@ -1,5 +1,12 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenWeb host integration - 2026-10-25
+
+`integrations/wovenweb` contains a pinned Ladybird source patch, preparation
+script and Tor-configured host launcher. This is separate from the native
+bounded browser/WebView substrate; no native application, ABI or VPN is added.
+See [the integration audit](wovenweb-integration.md) for dependencies and tests.
+
 ## Graphics roadmap Stage 07 image/asset increment (2026-10-25)
 
 `libwoven::media` owns the first bounded image decode boundary. It rejects

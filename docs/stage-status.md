@@ -1,5 +1,12 @@
 # Stage status
 
+## WovenWeb host foundation - 2026-10-25
+
+Experimental host source integration is recorded in
+[wovenweb-integration.md](wovenweb-integration.md). Launcher tests pass; native
+browser, Tor leak acceptance, VPN and guest installation are not accepted.
+The existing graphics roadmap status is unchanged.
+
 ## Graphics roadmap Stage 07 image/asset increment - 2026-10-25
 
 Stage 07 has started but is not accepted. `libwoven::media` now has bounded
