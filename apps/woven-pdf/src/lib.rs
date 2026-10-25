@@ -15,7 +15,8 @@ pub mod paint;
 pub mod streams;
 pub mod xref;
 
-pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
+// Temporary conservative cap while the kernel user-image mapping is bounded.
+pub const MAX_DOCUMENT_BYTES: usize = 128 * 1024;
 pub const MAX_TEXT_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
