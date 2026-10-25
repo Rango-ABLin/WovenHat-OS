@@ -4412,3 +4412,17 @@ heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
 kernel lints pass. Hosted current-head qualification is pending; full VM journal,
 wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
 open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.
+
+## Queued pager page-state qualification (2026-10-25)
+
+Worker execution now refreshes canonical owner/root/file binding and publishes
+only a single completed page delta, preserving unrelated page metadata. Already
+resident queued duplicates complete without a second map. The old snapshot
+overwrite is reproduced with one resident for two completed disjoint faults;
+new disjoint/duplicate fixtures and metadata checks pass with exact cleanup on
+1/2/4 CPUs. Heap/network/C++/legacy GUI regressions and selected lints also pass.
+830d8886 hosted guest/SDK/CodeQL/core-foundation checks succeeded; this expanded
+source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
+fast fault/eviction/cancellation recovery and complete VM journal admission
+remain open, as do browser/runtime/Tor and full release acceptance. See
+wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.

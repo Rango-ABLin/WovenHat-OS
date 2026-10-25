@@ -2757,25 +2757,57 @@ fn pager_task() -> ! {
     loop {
         let work = pager_wait_for_request();
         let request = work.payload;
-        let mut mapping = request.mapping;
-        let succeeded = userspace::populate_file_page(
-            request.space,
-            &mut mapping,
-            request.address,
-            request.write,
-        );
-        if succeeded {
-            let mut processes = process_table_lock();
-            if let Some(process) = processes
-                .iter_mut()
+        // Admission snapshots can be stale by the time this single worker
+        // reaches a second fault from the same mapping. Refresh under the
+        // canonical owner lock, then perform all page I/O outside that lock.
+        let current = {
+            let table = process_table_lock();
+            table
+                .iter()
                 .flatten()
-                // A fault may come from any sibling, not only the process leader.
-                // The retained queue owner is the canonical process identity.
-                .find(|p| p.id.as_u64() == work.key.owner)
-            {
-                process.memory_mappings[request.slot] = Some(mapping);
+                .find(|p| {
+                    p.id.as_u64() == work.key.owner
+                        && p.address_space.is_some_and(|space| {
+                            space.root_address() == request.space.root_address()
+                        })
+                })
+                .and_then(|p| p.memory_mappings[request.slot])
+                .filter(|mapping| mapping.same_file_binding(&request.mapping))
+        };
+        let succeeded = if let Some(mut mapping) = current {
+            if mapping.file_page_resident(request.address, request.write) {
+                // Another queued fault already installed this page. Completing
+                // this requester requires neither a second map nor publication.
+                true
+            } else {
+                let before = mapping;
+                if userspace::populate_file_page(
+                    request.space,
+                    &mut mapping,
+                    request.address,
+                    request.write,
+                ) {
+                    let mut table = process_table_lock();
+                    table
+                        .iter_mut()
+                        .flatten()
+                        .find(|p| {
+                            p.id.as_u64() == work.key.owner
+                                && p.address_space.is_some_and(|space| {
+                                    space.root_address() == request.space.root_address()
+                                })
+                        })
+                        .and_then(|p| p.memory_mappings[request.slot].as_mut())
+                        .is_some_and(|current| {
+                            current.publish_file_page(before, mapping, request.address)
+                        })
+                } else {
+                    false
+                }
             }
-        }
+        } else {
+            false
+        };
         // No page access follows completion: releasing active work permits a
         // quiesced owner to be reaped. Stale completion keys cannot drop a pin.
         let recorded = PAGER.lock().finish(work.key, succeeded);
@@ -6948,6 +6980,128 @@ pub fn vm_handoff_reaping_self_test() -> bool {
     }
     crate::serial::write_line(format_args!(
         "[WOVENWEB-VM] physical handoff reaping guard: PASSED"
+    ));
+    true
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_queued_publication_self_test(image: &[u8]) -> bool {
+    const PATH: &str = "/tmp/wovenweb-queued-pager";
+    for (mode, expected) in [("--vm-queued", 2), ("--vm-duplicate", 1)] {
+        let _ = crate::file_frames::reclaim_unused();
+        let frames = crate::memory::stats().allocated_frames;
+        let mappings = anonymous_mapping_count();
+        let processes = process_count();
+        let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+        let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+        if crate::vfs::create_read_only(PATH, &[0x71; 8192]).is_err() {
+            return false;
+        }
+        let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", mode])
+        else {
+            return false;
+        };
+        if PAGER_REAP_TEST_PAUSED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+        struct Pause;
+        impl Drop for Pause {
+            fn drop(&mut self) {
+                PAGER_REAP_TEST_PAUSED.store(false, Ordering::Release);
+            }
+        }
+        let pause = Pause;
+        let Ok((pid, _)) = spawn_user_process_with_sandbox(
+            "queued-pager-publication",
+            program,
+            wovenguard::SandboxProfile::new(
+                0x575c,
+                CapabilitySet::only(Capability::Console).with(Capability::FileRead),
+            ),
+        ) else {
+            return false;
+        };
+        let start = timer::ticks();
+        while PAGER_REQUESTS.load(Ordering::Relaxed) < requests + 2 {
+            if timer::ticks().wrapping_sub(start) > 200 {
+                return false;
+            }
+            yield_now();
+        }
+        let resident = |id| {
+            let table = process_table_lock();
+            table.iter().flatten().find(|p| p.id == id).map(|child| {
+                child
+                    .memory_mappings
+                    .iter()
+                    .flatten()
+                    .map(userspace::AnonymousMapping::file_resident_pages)
+                    .sum::<u32>()
+            })
+        };
+        if resident(pid) != Some(0) || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions {
+            return false;
+        }
+        drop(pause);
+        let Some(pager) = *PAGER_TASK.lock() else {
+            return false;
+        };
+        let _ = wake_task(pager);
+        let start = timer::ticks();
+        while !process_exited(pid) {
+            if timer::ticks().wrapping_sub(start) > 200 {
+                return false;
+            }
+            yield_now();
+        }
+        let observed = resident(pid);
+        crate::serial::write_line(format_args!(
+            "[WOVENWEB-VM] queued mode={} resident={:?} expected={} requests={} completed={}",
+            mode,
+            observed,
+            expected,
+            PAGER_REQUESTS.load(Ordering::Relaxed) - requests,
+            PAGER_COMPLETIONS.load(Ordering::Relaxed) - completions
+        ));
+        let delta_ok = {
+            let table = process_table_lock();
+            table
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .and_then(|p| {
+                    p.memory_mappings
+                        .iter()
+                        .flatten()
+                        .find(|m| m.file_resident_pages() != 0)
+                        .copied()
+                })
+                .is_some_and(userspace::file_page_delta_self_test)
+        };
+        if !delta_ok
+            || observed != Some(expected)
+            || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 2
+            || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 2
+            || wait_process(pid.as_u64()) != Ok(0)
+        {
+            return false;
+        }
+        if crate::vfs::remove(PATH).is_err() {
+            return false;
+        }
+        let _ = crate::file_frames::reclaim_unused();
+        if crate::memory::stats().allocated_frames != frames
+            || anonymous_mapping_count() != mappings
+            || process_count() != processes
+        {
+            return false;
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] queued sibling page deltas + duplicate coalescing + exact cleanup: PASSED"
     ));
     true
 }

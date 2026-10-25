@@ -81,6 +81,7 @@ def main():
                "[WOVENWEB-VM] queued + active pager work retains zombie address space: PASSED",
                "[WOVENWEB-VM] completion owner cleanup + exact reaping baseline: PASSED",
                "[WOVENWEB-VM] sibling-thread lazy faults + canonical publication + exact cleanup: PASSED",
+               "[WOVENWEB-VM] queued sibling page deltas + duplicate coalescing + exact cleanup: PASSED",
                "[WOVENWEB-VM] pager owner lifetime: PASSED"]
     faults = re.search(r"\[PAGER\] Ring-3 faults queued=(\d+) completed=(\d+): PASSED", text)
     counts = tuple(map(int, faults.groups())) if faults else (0, 0)

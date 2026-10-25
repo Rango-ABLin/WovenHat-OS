@@ -4526,6 +4526,56 @@ pub struct AnonymousMapping {
     swap_slots: [Option<crate::swap::Handle>; USER_MMAP_PAGES],
 }
 
+impl AnonymousMapping {
+    /// Binding identity excludes mutable per-page residency/dirty/swap state.
+    /// This is not a mapping-generation token: same-file remap ABA still needs
+    /// the pending production VM journal integration.
+    pub(crate) fn same_file_binding(&self, other: &Self) -> bool {
+        self.lazy.is_some()
+            && self.address == other.address
+            && self.size == other.size
+            && self.writable == other.writable
+            && self.lazy == other.lazy
+    }
+    fn file_page_index(&self, address: u64, write: bool) -> Option<usize> {
+        self.lazy?;
+        if write && !self.writable {
+            return None;
+        }
+        let offset = address.checked_sub(self.address)?;
+        if offset >= self.size as u64 {
+            return None;
+        }
+        let index = (offset / 4096) as usize;
+        (index < USER_MMAP_PAGES).then_some(index)
+    }
+    pub(crate) fn file_page_resident(&self, address: u64, write: bool) -> bool {
+        self.file_page_index(address, write)
+            .is_some_and(|index| self.resident & (1 << index) != 0)
+    }
+    /// Publish only the completed page. Never overwrite another page's newer
+    /// metadata with an admission-time snapshot. Caller holds PROCESS_TABLE.
+    pub(crate) fn publish_file_page(&mut self, before: Self, after: Self, address: u64) -> bool {
+        if !self.same_file_binding(&before) || !after.same_file_binding(&before) {
+            return false;
+        }
+        let Some(index) = before.file_page_index(address, false) else {
+            return false;
+        };
+        let bit = 1 << index;
+        if (self.resident ^ before.resident) & bit != 0
+            || (self.dirty ^ before.dirty) & bit != 0
+            || self.swap_slots[index] != before.swap_slots[index]
+        {
+            return false;
+        }
+        self.resident = (self.resident & !bit) | (after.resident & bit);
+        self.dirty = (self.dirty & !bit) | (after.dirty & bit);
+        self.swap_slots[index] = after.swap_slots[index];
+        true
+    }
+}
+
 #[cfg(feature = "wovenweb-vm-test")]
 impl AnonymousMapping {
     pub(crate) fn file_resident_pages(&self) -> u32 {
@@ -4537,7 +4587,7 @@ impl AnonymousMapping {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct LazyFile {
     shared: bool,
     file: crate::vfs::OpenFileId,
@@ -4545,6 +4595,53 @@ struct LazyFile {
     offset: usize,
     length: usize,
 }
+#[cfg(feature = "wovenweb-vm-test")]
+pub(crate) fn file_page_delta_self_test(mapping: AnonymousMapping) -> bool {
+    if mapping.lazy.is_none() || mapping.size < 8192 {
+        return false;
+    }
+    let mut before = mapping;
+    before.resident = 0;
+    before.dirty = 0;
+    before.swap_slots = [None; USER_MMAP_PAGES];
+    let mut after = before;
+    after.resident = 1;
+    after.dirty = 1;
+    let mut canonical = before;
+    canonical.resident = 2;
+    canonical.dirty = 2;
+    if !canonical.publish_file_page(before, after, before.address)
+        || canonical.resident != 3
+        || canonical.dirty != 3
+    {
+        return false;
+    }
+    let unchanged = canonical;
+    if canonical.publish_file_page(before, after, before.address)
+        || canonical.resident != unchanged.resident
+        || canonical.dirty != unchanged.dirty
+    {
+        return false;
+    }
+    let mut wrong = before;
+    let Some(backing) = wrong.lazy.as_mut() else {
+        return false;
+    };
+    let Some(offset) = backing.offset.checked_add(4096) else {
+        return false;
+    };
+    backing.offset = offset;
+    if canonical.publish_file_page(wrong, after, before.address)
+        || canonical.resident != 3
+        || canonical.dirty != 3
+    {
+        return false;
+    }
+    !canonical.file_page_resident(u64::MAX, false)
+        && !canonical.file_page_resident(before.address.wrapping_sub(1), false)
+        && (mapping.writable || !canonical.file_page_resident(before.address, true))
+}
+
 #[derive(Clone, Copy)]
 struct UserMapping {
     // Image windows are page-aligned and bounded by the loader. Store page

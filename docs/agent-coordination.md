@@ -6512,3 +6512,28 @@ heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
 kernel lints pass. Hosted current-head qualification is pending; full VM journal,
 wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
 open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.
+
+## Queued pager canonical updates (2026-10-25)
+
+Claiming a narrow production pager metadata transaction follow-up. 830d8886
+hosted pager1/2/4, SDK, CodeQL and core-foundation checks succeeded. Two sibling
+faults admitted while the worker is paused can carry the same stale mapping
+snapshot, and serial completion can overwrite the first resident bit with the
+second result. Add a real two-thread queued-fault fixture (plus duplicate-page
+case), preserve its negative result, then refresh validated canonical state and
+publish only the affected page delta. Root/backing identity checks are defense
+in depth, not full exec/unmap/fork lifetime or mapping-generation integration.
+
+## Queued pager page-state qualification (2026-10-25)
+
+Worker execution now refreshes canonical owner/root/file binding and publishes
+only a single completed page delta, preserving unrelated page metadata. Already
+resident queued duplicates complete without a second map. The old snapshot
+overwrite is reproduced with one resident for two completed disjoint faults;
+new disjoint/duplicate fixtures and metadata checks pass with exact cleanup on
+1/2/4 CPUs. Heap/network/C++/legacy GUI regressions and selected lints also pass.
+830d8886 hosted guest/SDK/CodeQL/core-foundation checks succeeded; this expanded
+source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
+fast fault/eviction/cancellation recovery and complete VM journal admission
+remain open, as do browser/runtime/Tor and full release acceptance. See
+wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.

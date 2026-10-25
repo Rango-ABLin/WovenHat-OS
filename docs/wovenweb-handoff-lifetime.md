@@ -39,7 +39,8 @@ Qualification and hashes are recorded in wovenweb-handoff-evidence.json. The
 current-source handoff/pager/sibling guest gate, heap, TCP/SOCKS, C++ ABI and
 legacy GUI matrices pass on 1/2/4 CPUs. Default kernel and all four affected
 WovenWeb feature Clippy gates pass with -D warnings. Six exact-module host tests
-pass. Hosted tests/lint and expanded guest checks await this revision. Root host
+pass. Hosted SDK/ownership checks, all three guest jobs, PR CodeQL and core-foundation
+succeeded on 830d8886. Later page-publication changes are qualified separately. Root host
 checks remain signing-policy blocked and were not retried. Focused validation
 never substitutes for the unresolved full release gates.
 

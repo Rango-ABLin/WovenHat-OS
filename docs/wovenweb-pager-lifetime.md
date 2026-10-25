@@ -97,3 +97,12 @@ exit observer checks that acknowledgement before reporting completion; pager dra
 remains separate. See [handoff scope and qualification](wovenweb-handoff-lifetime.md).
 This replaces the earlier reliance on metadata-only scheduler quiescence for this
 reaping boundary, without claiming all VM/CPU lifecycle races are repaired.
+
+## Queued canonical page updates
+
+Queued sibling faults now refresh canonical owner/root/file binding metadata,
+coalesce resident duplicate pages, and publish only the affected page delta.
+The original worker fails a real two-thread disjoint-page fixture with one
+resident despite two completions; the corrected worker passes disjoint and
+duplicate cases with exact cleanup on 1/2/4 CPUs. This does not establish full
+VM generation/lifetime safety. See wovenweb-page-publication.md and its evidence.

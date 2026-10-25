@@ -114,7 +114,18 @@
     "codeql_check": 121252250458,
     "conclusion": "all succeeded; historical evidence only for this new source"
   },
-  "hosted_current": "pending publication",
+  "hosted_current": {
+    "revision": "830d8886f99cfed0a380b018b60bc677fa5fc0df",
+    "pager_jobs": [
+      121261447116,
+      121261447409,
+      121261447693
+    ],
+    "sdk_job": 121261447468,
+    "codeql_check": 121261598747,
+    "core_foundation_job": 121261446933,
+    "conclusion": "all success; later page-publication changes are qualified separately"
+  },
   "regressions": [
     {
       "path": "audit-artifacts/wovenweb-memory-1792954435464074200-1cpu",

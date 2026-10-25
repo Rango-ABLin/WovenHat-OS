@@ -125,7 +125,67 @@ fn pager_thread_probe() -> ! {
         96
     })
 }
+libwoven::thread_entry!(queued_first_entry, queued_first);
+libwoven::thread_entry!(queued_second_entry, queued_second);
+libwoven::thread_entry!(queued_duplicate_entry, queued_first);
+extern "C" fn queued_first() -> ! {
+    queued_read(0)
+}
+extern "C" fn queued_second() -> ! {
+    queued_read(4096)
+}
+fn queued_read(offset: u64) -> ! {
+    let base = PAGER_THREAD_ADDRESS.load(core::sync::atomic::Ordering::Acquire);
+    // SAFETY: the leader retains an 8192-byte read-only mapping until both joins.
+    let passed = unsafe {
+        core::ptr::with_exposed_provenance::<u8>((base + offset) as usize).read_volatile() == 0x71
+    };
+    // SAFETY: integer-only native thread exit ABI.
+    unsafe { libwoven::syscall::thread_exit(if passed { 0 } else { 97 }) }
+}
+fn queued_pager_probe(duplicate: bool) -> ! {
+    let Ok(file) = libwoven::open("/tmp/wovenweb-queued-pager") else {
+        libwoven::exit(92)
+    };
+    // SAFETY: bounded integer-only native lazy mapping request.
+    let base = unsafe { libwoven::syscall::invoke(60, file, 8192, 0) };
+    if libwoven::close(file).is_err() || base == 0 || base >= libwoven::syscall::WOULD_BLOCK {
+        libwoven::exit(93)
+    }
+    PAGER_THREAD_ADDRESS.store(base, core::sync::atomic::Ordering::Release);
+    let second = if duplicate {
+        queued_duplicate_entry as *const () as u64
+    } else {
+        queued_second_entry as *const () as u64
+    };
+    let mut threads = [0; 2];
+    for (slot, entry) in threads
+        .iter_mut()
+        .zip([queued_first_entry as *const () as u64, second])
+    {
+        // SAFETY: executable raw entry establishes the native C call frame.
+        *slot = unsafe { libwoven::syscall::thread_create(entry, 16384) };
+        if *slot >= libwoven::syscall::WOULD_BLOCK {
+            libwoven::exit(95)
+        }
+    }
+    for id in threads {
+        // SAFETY: owned generation-tagged handles returned by thread_create.
+        if unsafe { libwoven::syscall::thread_join(libwoven::thread::Id(id)) }
+            != libwoven::thread::Join::Exited(0)
+        {
+            libwoven::exit(96)
+        }
+    }
+    libwoven::exit(0)
+}
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--vm-queued") {
+        queued_pager_probe(false)
+    }
+    if args.get(1) == Some(b"--vm-duplicate") {
+        queued_pager_probe(true)
+    }
     if args.get(1) == Some(b"--vm-thread") {
         pager_thread_probe()
     }
