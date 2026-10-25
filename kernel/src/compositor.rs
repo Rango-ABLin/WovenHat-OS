@@ -269,7 +269,24 @@ fn present_state(state: &mut State) -> Result<usize, Error> {
         feature = "stage20-14b-test"
     ))]
     if state.gpu.is_some() {
-        return present_gpu(state);
+        // A transient device/queue failure must not strand the desktop with
+        // an owned but unusable scanout. Reprobe and rebuild the bounded
+        // resources once, then retry the same damage without clearing it.
+        return match present_gpu(state) {
+            Ok(written) => Ok(written),
+            Err(_) => {
+                match recover_gpu_outputs_in_state(state) {
+                    Ok(()) => present_gpu(state),
+                    Err(_) => {
+                        // Keep the desktop visible if the device cannot be
+                        // reprobed: the UEFI framebuffer remains the
+                        // authoritative CPU fallback.
+                        state.gpu = None;
+                        present_framebuffer(state)
+                    }
+                }
+            }
+        };
     }
     present_framebuffer(state)
 }
@@ -356,17 +373,12 @@ fn present_gpu(state: &mut State) -> Result<usize, Error> {
     Ok(written)
 }
 
-/// Use a virtio-gpu as the display, with multiple heads side by side at
-/// head 0's mode (at most 1280x800), or with one head at the GPU's native
-/// mode. A single-output GPU is a valid production display device; the boot
-/// framebuffer remains the fallback when probing or mode setup fails.
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage20-14-test",
     feature = "stage20-14b-test"
 ))]
-pub fn attach_gpu_outputs() -> Result<usize, Error> {
-    let mut gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+fn configured_gpu_outputs(mut gpu: crate::virtio_gpu::Gpu) -> Result<GpuOutputs, Error> {
     if gpu.scanouts == 0 {
         return Err(Error::NoDisplay);
     }
@@ -380,19 +392,53 @@ pub fn attach_gpu_outputs() -> Result<usize, Error> {
     let heads = (gpu.scanouts as usize)
         .min(MAX_OUTPUTS)
         .min((MAX_WIDTH / width) as usize);
+    if heads == 0 {
+        return Err(Error::NoDisplay);
+    }
     for head in 0..heads {
         gpu.set_mode(head, width, height)
             .map_err(|_| Error::NoDisplay)?;
     }
+    Ok(GpuOutputs {
+        gpu,
+        heads,
+        width,
+        height,
+    })
+}
+
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+fn recover_gpu_outputs_in_state(state: &mut State) -> Result<(), Error> {
+    // Drop the failed transport and all resource backing before probing. The
+    // next device instance owns fresh queues and fresh generation state.
+    state.gpu = None;
+    let gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+    state.gpu = Some(configured_gpu_outputs(gpu)?);
+    state.damage.add(state.surface.bounds());
+    Ok(())
+}
+
+/// Use a virtio-gpu as the display, with multiple heads side by side at
+/// head 0's mode (at most 1280x800), or with one head at the GPU's native
+/// mode. A single-output GPU is a valid production display device; the boot
+/// framebuffer remains the fallback when probing or mode setup fails.
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+pub fn attach_gpu_outputs() -> Result<usize, Error> {
+    let gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+    let outputs = configured_gpu_outputs(gpu)?;
+    let heads = outputs.heads;
     let scale = {
         let mut guard = STATE.lock();
         let state = guard.as_mut().ok_or(Error::NotReady)?;
-        state.gpu = Some(GpuOutputs {
-            gpu,
-            heads,
-            width,
-            height,
-        });
+        state.gpu = Some(outputs);
         state.scale
     };
     rescale_to(scale, None)?;
@@ -415,7 +461,10 @@ pub fn single_output_self_test() -> bool {
         ok
     }
 
-    let already_attached = STATE.lock().as_ref().is_some_and(|state| state.gpu.is_some());
+    let already_attached = STATE
+        .lock()
+        .as_ref()
+        .is_some_and(|state| state.gpu.is_some());
     if !already_attached {
         if let Err(error) = attach_gpu_outputs() {
             crate::serial::write_line(format_args!(

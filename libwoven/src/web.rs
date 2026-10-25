@@ -105,9 +105,7 @@ pub fn parse_response_head(bytes: &[u8]) -> Option<ResponseHead> {
         if header.is_empty() {
             break;
         }
-        let Some(separator) = header.iter().position(|byte| *byte == b':') else {
-            return None;
-        };
+        let separator = header.iter().position(|byte| *byte == b':')?;
         let name = &header[..separator];
         let value = &header[separator + 1..];
         if name.eq_ignore_ascii_case(b"content-length") {

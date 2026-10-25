@@ -37,6 +37,10 @@ impl<'a, const N: usize> Document<'a, N> {
         self.len
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn node(&self, index: usize) -> Option<Node<'a>> {
         self.nodes.get(index).copied().flatten()
     }
@@ -69,15 +73,13 @@ pub fn parse_html<'a, const N: usize>(input: &'a [u8]) -> Result<Document<'a, N>
         if let Some(open) = rest.find('<') {
             if open > 0 {
                 let text = &rest[..open];
-                if !text.trim_ascii().is_empty() {
-                    if let Some(parent) = depth
+                if !text.trim_ascii().is_empty()
+                    && let Some(parent) = depth
                         .checked_sub(1)
                         .and_then(|index| stack.get(index).copied())
-                    {
-                        if let Some(node) = &mut document.nodes[parent] {
-                            node.text = Some(text);
-                        }
-                    }
+                    && let Some(node) = &mut document.nodes[parent]
+                {
+                    node.text = Some(text);
                 }
             }
             let tag_start = cursor + open + 1;
@@ -127,15 +129,13 @@ pub fn parse_html<'a, const N: usize>(input: &'a [u8]) -> Result<Document<'a, N>
             cursor = tag_end + 1;
         } else {
             let text = rest;
-            if !text.trim_ascii().is_empty() {
-                if let Some(parent) = depth
+            if !text.trim_ascii().is_empty()
+                && let Some(parent) = depth
                     .checked_sub(1)
                     .and_then(|index| stack.get(index).copied())
-                {
-                    if let Some(node) = &mut document.nodes[parent] {
-                        node.text = Some(text);
-                    }
-                }
+                && let Some(node) = &mut document.nodes[parent]
+            {
+                node.text = Some(text);
             }
             cursor = source.len();
         }

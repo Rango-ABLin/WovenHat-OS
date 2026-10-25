@@ -364,6 +364,10 @@ impl<'a, const N: usize> ListBox<'a, N> {
         self.len
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn selected_item(&self) -> Option<&'a str> {
         self.items.get(self.selected).copied().flatten()
     }
@@ -727,6 +731,10 @@ impl<'a, const N: usize> Tree<'a, N> {
         self.len
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn toggle_selected(&mut self) -> bool {
         if !self.enabled || self.selected >= self.len {
             return false;
@@ -1072,13 +1080,12 @@ impl<'a> Dialog<'a> {
     }
 
     pub fn activate_cancel(&mut self) -> bool {
-        if self.open {
-            if let Some(cancel) = &mut self.cancel {
-                if cancel.activate() {
-                    self.close();
-                    return true;
-                }
-            }
+        if self.open
+            && let Some(cancel) = &mut self.cancel
+            && cancel.activate()
+        {
+            self.close();
+            return true;
         }
         false
     }
@@ -1276,14 +1283,14 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
     }
     let total_gap = gap.max(0).saturating_mul(count.saturating_sub(1) as i32);
     let height = (area.height.saturating_sub(total_gap) / count as i32).max(0);
-    for index in 0..count {
+    for (index, frame) in frames.iter_mut().enumerate().take(count) {
         let y = area.y + index as i32 * (height + gap.max(0));
         let actual_height = if index + 1 == count {
             area.y + area.height - y
         } else {
             height
         };
-        frames[index] = Frame::new(area.x, y, area.width, actual_height.max(0));
+        *frame = Frame::new(area.x, y, area.width, actual_height.max(0));
     }
     (frames, count)
 }
