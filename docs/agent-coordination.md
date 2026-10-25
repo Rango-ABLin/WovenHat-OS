@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - GIF incremental-delivery boundary (2026-10-25)
+
+Added `decode_gif_rgba_stream`, which feeds GIF bytes through validated
+1024-byte `ImageStream` requests before invoking the bounded single-frame
+decoder. Allocation failure and source truncation fail closed; the current GIF
+backend retains the encoded payload, so memory-bounded GIF streaming is not
+claimed.
+
 ## Codex - bounded BMP row streaming (2026-10-25)
 
 Added `decode_bmp_rgba_stream` to the shared `ImageStream` boundary. BMP

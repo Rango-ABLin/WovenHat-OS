@@ -349,6 +349,44 @@ pub fn decode_bmp_rgba_stream<S: ImageStream>(
     Ok(metadata)
 }
 
+/// Deliver GIF input through bounded source requests before invoking the
+/// single-frame decoder. The current GIF backend retains the encoded payload
+/// internally, so this is incremental delivery rather than memory-bounded GIF
+/// decoding.
+pub fn decode_gif_rgba_stream<S: ImageStream>(
+    stream: &mut S,
+    metadata: ImageMetadata,
+    output: &mut [u32],
+) -> Result<ImageMetadata, ImageError> {
+    if metadata.format != ImageFormat::Gif {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let length = usize::try_from(stream.len()).map_err(|_| ImageError::Malformed)?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| ImageError::OutputTooSmall)?;
+    let mut offset = 0u64;
+    let mut chunk = [0u8; 1024];
+    while offset < stream.len() {
+        let count = stream
+            .read_at(offset, &mut chunk)
+            .map_err(|_| ImageError::Truncated)?;
+        if count == 0 || count > chunk.len() {
+            return Err(ImageError::Truncated);
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        offset = offset
+            .checked_add(count as u64)
+            .ok_or(ImageError::Malformed)?;
+    }
+    let decoded = crate::media::decode_gif_rgba(&bytes, output)?;
+    if decoded.width != metadata.width || decoded.height != metadata.height {
+        return Err(ImageError::Malformed);
+    }
+    Ok(metadata)
+}
+
 pub fn decode_webp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata, ImageError> {
     let metadata = parse_image_header(bytes)?;
     if metadata.format != ImageFormat::WebP {
@@ -462,8 +500,8 @@ fn bytemuck_slice(output: &mut [u32]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageStream, StreamError, decode_bmp_rgba_stream, decode_png_rgba_stream, decode_webp_rgba,
-        decode_webp_rgba_stream,
+        ImageStream, StreamError, decode_bmp_rgba_stream, decode_gif_rgba_stream,
+        decode_png_rgba_stream, decode_webp_rgba, decode_webp_rgba_stream,
     };
     use crate::media::parse_image_header;
 
@@ -529,6 +567,23 @@ mod tests {
         let mut pixels = [0u32; 2];
         decode_bmp_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
         assert_eq!(pixels, [0xFF0000FF, 0x00FF00FF]);
+        assert!(stream.largest_request <= 1024);
+    }
+
+    #[test]
+    fn delivers_gif_through_bounded_chunk_reader() {
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3b,
+        ];
+        let metadata = parse_image_header(&gif).unwrap();
+        let mut stream = MemoryStream {
+            bytes: &gif,
+            largest_request: 0,
+        };
+        let mut pixels = [0u32; 1];
+        decode_gif_rgba_stream(&mut stream, metadata, &mut pixels).unwrap();
+        assert_eq!(pixels[0], 0x000000ff);
         assert!(stream.largest_request <= 1024);
     }
 

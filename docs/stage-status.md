@@ -1,5 +1,14 @@
 # Stage status
 
+## GIF incremental-delivery boundary - 2026-10-25
+
+`libwoven::codecs::decode_gif_rgba_stream` now consumes GIF sources through
+validated 1024-byte requests and hands the checked payload to the bounded
+single-frame GIF decoder. Source truncation, allocation failure, and metadata
+mismatch fail closed. The 175-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Memory-bounded GIF decoding and animation remain
+open.
+
 ## Bounded BMP row streaming - 2026-10-25
 
 `libwoven::codecs::decode_bmp_rgba_stream` now reads BMP headers and rows via

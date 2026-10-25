@@ -9,12 +9,13 @@ uses the same boundary to fetch its header and each validated 24/32-bit row
 without assembling the encoded file in a caller buffer.
 
 WebP has incremental delivery through `StreamingDecoder`, but that backend
-retains the encoded RIFF payload until final decode. GIF currently has a
-bounded whole-slice single-frame decoder; animated GIF and streaming GIF are
-not claimed.
+retains the encoded RIFF payload until final decode. GIF now has a chunk-fed
+single-frame entry point, but its backend also retains the encoded payload
+before rasterization. Animated GIF and memory-bounded GIF streaming are not
+claimed.
 
 Evidence:
 
-- Full `libwoven` host suite: 174 passed.
+- Full `libwoven` host suite: 175 passed.
 - Host and `x86_64-unknown-none` warning-denying Clippy: passed.
 - WovenImages freestanding target Clippy: passed.
