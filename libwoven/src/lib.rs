@@ -38,6 +38,7 @@ pub mod semantic_search;
 pub mod store;
 pub mod update_ipc;
 pub mod recovery;
+pub mod ui;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]

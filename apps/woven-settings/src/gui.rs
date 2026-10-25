@@ -1,4 +1,6 @@
-use libwoven::{rgb, Canvas, GraphicsSurface};
+use libwoven::layout::Frame;
+use libwoven::ui::{Button, Theme};
+use libwoven::{Canvas, GraphicsSurface, rgb};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
@@ -25,8 +27,9 @@ struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_
 // SAFETY: the GUI process is single-threaded and takes this buffer once.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
+));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenSettings: failure\n");
@@ -66,8 +69,22 @@ fn draw_clock(
     draw_number(canvas, x + 100, y, "Month ", u64::from(time.month), digits);
     draw_number(canvas, x + 210, y, "Day ", u64::from(time.day), digits);
     draw_number(canvas, x, y + 16, "Hour ", u64::from(time.hour), digits);
-    draw_number(canvas, x + 100, y + 16, "Min ", u64::from(time.minute), digits);
-    draw_number(canvas, x + 210, y + 16, "Sec ", u64::from(time.second), digits);
+    draw_number(
+        canvas,
+        x + 100,
+        y + 16,
+        "Min ",
+        u64::from(time.minute),
+        digits,
+    );
+    draw_number(
+        canvas,
+        x + 210,
+        y + 16,
+        "Sec ",
+        u64::from(time.second),
+        digits,
+    );
 }
 
 fn draw_settings(
@@ -144,16 +161,34 @@ fn draw_settings(
         u64::from(refresh_count),
         &mut refresh_digits,
     );
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
+    let mut refresh = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Refresh",
     );
-    canvas.draw_text(BUTTON_X + 12, BUTTON_Y + 7, "Refresh", TEXT);
+    refresh.pressed = pressed;
+    refresh.draw(
+        canvas,
+        Theme {
+            surface: BUTTON,
+            accent: ACCENT,
+            text: TEXT,
+            disabled: BUTTON,
+            focus: ACCENT,
+        },
+    );
     if let Some((x, y)) = pointer {
-        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(2),
+            i32::from(y).saturating_sub(2),
+            5,
+            5,
+            if pressed { TEXT } else { POINTER_MARKER },
+        );
     }
 }
 
@@ -226,8 +261,10 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 break;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
-                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
-                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
+                    .min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]]))
+                    .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
                         if render(&resized, pointer, pointer_pressed, refresh_count) {
@@ -242,8 +279,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     }
                 }
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
-                pointer = Some((u16::from_le_bytes([message[4], message[5]]), u16::from_le_bytes([message[6], message[7]])));
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                pointer = Some((
+                    u16::from_le_bytes([message[4], message[5]]),
+                    u16::from_le_bytes([message[6], message[7]]),
+                ));
+                if !render(&window, pointer, pointer_pressed, refresh_count) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
@@ -259,7 +301,9 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSettings: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                if !render(&window, pointer, pointer_pressed, refresh_count) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
             }
         }
@@ -277,7 +321,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         if !digit.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }
