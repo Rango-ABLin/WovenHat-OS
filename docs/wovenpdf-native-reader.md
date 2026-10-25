@@ -1,5 +1,18 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 content-operator interpreter increment
+
+- Added `src/content.rs` with a bounded interpreter for a deliberately narrow
+  operator set: q/Q, BT/ET, Tf, Td, and literal-string Tj. It emits typed
+  operations to a caller-provided callback instead of executing untrusted code.
+- Unsupported operators fail explicitly. Output is **not yet routed to
+  WovenRender**; font mappings and text positioning remain unresolved.
+- Added source tests for a basic operator sequence and refusal cases.
+- WovenPDF CI has shown a prior E0515 object-test fixture lifetime failure;
+  the fixture was corrected in an earlier commit. New head CI is pending.
+- This is not a functioning end-to-end PDF page renderer; don't merge it as one.
+
+
 ## 2026-10-25 FlateDecode increment
 
 - Added `miniz_oxide` 0.9.1 with default features disabled to retain
