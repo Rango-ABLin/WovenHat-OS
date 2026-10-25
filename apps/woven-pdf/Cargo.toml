@@ -14,6 +14,11 @@ name = "wovenhat-pdf"
 path = "src/main.rs"
 test = false
 
+[features]
+# Small CLI-only binary for the Stage 16.1 signed Ring-3 smoke gate.
+# GUI builds continue to use the default feature set.
+ring3-smoke = []
+
 [dependencies]
 libwoven = { path = "../../libwoven" }
 miniz_oxide = { version = "0.9.1", default-features = false }
