@@ -247,6 +247,7 @@ mod tests {
         // SAFETY: the kept allocation remains owned throughout failed growth.
         unsafe {
             let kept = heap.alloc(small);
+            assert!(!kept.is_null());
             kept.write_bytes(0x55, 32);
             assert!(
                 heap.alloc(Layout::from_size_align(3 * REGION_BYTES, 16).unwrap())

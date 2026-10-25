@@ -6321,3 +6321,30 @@ run remains historical. Full runtime stage remains open. Workspace Clang is at
 work/toolchains/clang23/ucrt64/bin/clang.exe; host dependency DLLs require the
 existing MSYS2 UCRT64 bin on the child environment PATH. Explicitly select
 Program Files QEMU, because the MSYS2 QEMU lacks the expected firmware path.
+
+## VM cancellation journal prerequisite (2026-10-25)
+
+Review found a prerequisite to production leases: a token held only on a task
+stack can be lost at forced retirement. Adding a bounded per-space journal that
+retains leases and recovery metadata independently of executor stacks, refuses
+late/foreign completion and requires confirmed executor quiescence before cleanup.
+Host qualification first; no production mapping repair is claimed by this model.
+
+Heartbeat review: three CodeQL invalid-pointer alerts are reported on heap test
+writes (prior revision lines 221/250/297). Added the missing explicit non-null
+assertion before the OOM test's kept-pointer write; this is not a claim that all
+three alerts are resolved. The other writes already check non-null. Detailed
+source paths were unavailable via the connector; browser inspection was stopped
+by the URL-verification safety check, so do not retry that blocked UI path.
+Windows event 3077 independently confirms the TLS test was blocked by enterprise
+signing policy. No policy change, renamed executable or test suppression was used.
+Journal adds cleanup-worker handoff and exhaustion coverage; production remains
+unchanged and needs durable operation ownership before any lease integration.
+
+Cancellation journal final host checks: 16 lease/journal tests, 177 SDK unit tests
+and three compile-fail tests pass. SDK all-feature/all-target Clippy -D warnings
+passes. Formatting/diff checks pass. Evidence is wovenweb-vm-journal-evidence.json.
+No native guest behavior was changed, so prior heap/network/C++ guest evidence
+is historical; this is not a production VM integration or full runtime gate.
+The three high CodeQL pointer alerts are still open pending analyzer-path review
+and a fresh scan; none was dismissed or suppressed.

@@ -10754,3 +10754,12 @@ initialization, aligned virtual objects and destructors; selected Clippy gates
 pass. This is a controlled ABI fixture, not libc++, an engine build or full
 runtime acceptance. Production VM integration remains open. Evidence and limits:
 [Native C++ ABI fixture](wovenweb-cxx-acceptance.md).
+
+## VM cancellation journal model (2026-10-25)
+
+The host-only lease model now has a bounded cancellation journal retaining
+operation intent across executor and cleanup-worker death. It rejects stale
+completions and quarantines uncertain cleanup. Production mapping/pager/lifecycle
+integration remains open. See [VM ownership](wovenweb-vm-transactions.md).
+Three CodeQL heap-test pointer alerts remain under review; a missing null
+assertion in one test has been added without suppressing the remaining alerts.

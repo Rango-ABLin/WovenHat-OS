@@ -49,3 +49,34 @@ ABA refusal, owner-generation mismatch, sequence exhaustion, snapshot exclusion,
 retirement with in-flight operations, quarantine and 512 two-operation schedules.
 These are host model tests, not an SMP kernel or page-table proof. Preserve the
 existing 64 KiB/16-slot ceiling until integrated guest tests cover these paths.
+
+## Cancellation journal prerequisite
+
+`kernel/src/vm_journal.rs` adds a bounded per-address-space operation journal,
+compiled with the lease model by `tests/vm_lease.rs`. It remains host-only.
+The journal owns each non-Copy lease; executors receive opaque generation-tagged
+tickets. Losing a task stack therefore does not discard lease/cleanup intent.
+Full capacity and sequence exhaustion refuse admission without creating a lease.
+Late and foreign tickets cannot mutate a replacement operation.
+
+A scheduler-confirmed quiescence boundary is required before cleanup can claim
+an operation. A cancellation request or Dead state without remote CPU handoff
+and deferred IO completion is insufficient. Recovery descriptors retain original
+intent and the optional recorded application result. If a cleanup worker dies,
+its confirmed quiescence permits a new worker to claim a new cleanup generation;
+the old worker's completion is stale. Uncertain cleanup quarantines its slots.
+Cleanup sequence exhaustion retains ownership and blocks destruction.
+
+The journal does not inspect real page tables or pin backing-file objects. Its
+caller must retain those resources, validate actual executor identity/liveness,
+and serialize journal plus canonical mapping occupancy under the same lock.
+Recovery must compare authoritative mapping generations: an executor can die
+after physical mapping or canonical publication but before recording that step.
+A missing applied marker is never permission to blindly unmap. Current host
+coverage includes 128 crash/publication/cleanup-handoff schedules.
+
+Production integration still needs a registry stored independently of Copy
+Process snapshots, pre-operation durable intent, canonical mapping generations,
+real scheduler/pager quiescence witnesses, backing-resource retention, event-driven
+drain, idempotent page cleanup, and thread/fork/exec/exit/reap gates. The existing
+production mapping race is not repaired by adding this host model.
