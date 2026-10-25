@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 APP = 'wovenhat-pdf'
-MARKER = '[S16.1] out-of-kernel application: PASSED'\n# This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
+MARKER = '[S16.1] out-of-kernel application: PASSED'\nAPP_MARKER = '[WOVENPDF] runtime: PASSED'\n# This generic kernel stage may not launch WovenPDF itself. Do not assert that it does.
 
 def app_build_env(app_dir):
     """Build environment for an application crate.
@@ -43,7 +43,7 @@ def main():
     parser.add_argument('--firmware-vars', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--timeout', type=float, default=300)
-    args = parser.parse_args()
+    parser.add_argument('--generic-only', action='store_true',\n                        help='diagnose generic kernel stage without claiming WovenPDF execution')\n    args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -135,7 +135,7 @@ def main():
         print(f'FAILED (exit {code}). Evidence: {out}', file=sys.stderr)
         print(text[-3000:], file=sys.stderr)
         return 1
-    print(f'Generic Ring-3 kernel stage: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')
+    print(f'Generic Ring-3 kernel stage: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')\n    if not args.generic_only and APP_MARKER not in text:\n        print('WovenPDF-specific execution proof absent; runtime acceptance FAILS CLOSED.', file=sys.stderr)\n        print('Integrate an actual WovenPDF launch and emit a verified app-specific marker.', file=sys.stderr)\n        return 1\n    if not args.generic_only:\n        print(f'WovenPDF process marker: PRESENT ({args.cpus} CPU).')
     print('WARNING: This stage may execute its built-in hello fixture instead of WovenPDF.')\n    print('No WovenPDF execution, --gui, WovenShell IPC, PDF drawing or navigation is certified.')
     return 0
 
