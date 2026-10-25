@@ -425,8 +425,8 @@ impl<const N: usize> Default for LayoutDocument<N> {
 
 #[derive(Clone, Copy)]
 struct Style {
-    width: Option<u32>,
-    height: Option<u32>,
+    width: Option<Length>,
+    height: Option<Length>,
     margin: u32,
     display: DisplayMode,
     flex_direction: FlexDirection,
@@ -434,6 +434,12 @@ struct Style {
     grid_columns: usize,
     background: Option<u32>,
     color: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+enum Length {
+    Pixels(u32),
+    Percent(u8),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -458,6 +464,14 @@ fn css_color(value: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
+fn css_length(value: &str) -> Option<Length> {
+    if let Some(px) = value.strip_suffix("px") {
+        return px.parse::<u32>().ok().map(Length::Pixels);
+    }
+    let percent = value.strip_suffix('%')?.parse::<u8>().ok()?;
+    (percent <= 100).then_some(Length::Percent(percent))
+}
+
 fn apply_declarations(result: &mut Style, source: &str) {
     for declaration in source.split(';') {
         let Some((name, value)) = declaration.split_once(':') else {
@@ -471,9 +485,9 @@ fn apply_declarations(result: &mut Style, source: &str) {
         };
         let name = name.trim_ascii();
         if name.eq_ignore_ascii_case("width") {
-            result.width = parse_px();
+            result.width = css_length(value);
         } else if name.eq_ignore_ascii_case("height") {
-            result.height = parse_px();
+            result.height = css_length(value);
         } else if name.eq_ignore_ascii_case("margin") {
             result.margin = parse_px().unwrap_or(0);
         } else if name.eq_ignore_ascii_case("display") {
@@ -504,6 +518,15 @@ fn apply_declarations(result: &mut Style, source: &str) {
         } else if name.eq_ignore_ascii_case("color") {
             result.color = css_color(value);
         }
+    }
+}
+
+fn resolve_length(length: Length, base: u32) -> Option<u32> {
+    match length {
+        Length::Pixels(value) => Some(value),
+        Length::Percent(percent) => base
+            .checked_mul(u32::from(percent))
+            .map(|value| value / 100),
     }
 }
 
@@ -595,6 +618,7 @@ fn layout_subtree<const N: usize, const R: usize>(
     let margin = node_style.margin;
     let width = node_style
         .width
+        .and_then(|length| resolve_length(length, available_width))
         .unwrap_or(available_width.saturating_sub(margin.saturating_mul(2)));
     let content_x = x.checked_add(margin).ok_or(LayoutError::Overflow)?;
     let content_y = y.checked_add(margin).ok_or(LayoutError::Overflow)?;
@@ -717,10 +741,10 @@ fn layout_subtree<const N: usize, const R: usize>(
         }
         DisplayMode::None => unreachable!(),
     }
-    let content_height =
-        node_style
-            .height
-            .unwrap_or(if child_count > 0 { content_height } else { 24 });
+    let content_height = node_style
+        .height
+        .and_then(|length| resolve_length(length, context.viewport_height))
+        .unwrap_or(if child_count > 0 { content_height } else { 24 });
     let height = content_height
         .checked_add(margin.saturating_mul(2))
         .ok_or(LayoutError::Overflow)?;
@@ -997,6 +1021,26 @@ mod tests {
         assert_eq!(layout.get(0).unwrap().rect.height, 12);
         assert_eq!(layout.get(1).unwrap().rect.width, 100);
         assert_eq!(layout.get(1).unwrap().rect.height, 40);
+    }
+
+    #[test]
+    fn resolves_bounded_percentage_lengths_against_container_and_viewport() {
+        let document = parse_html::<3>(
+            br#"<main style="width:50%;height:25%"><p style="width:50%;height:10px"/></main>"#,
+        )
+        .unwrap();
+        let layout = layout(
+            &document,
+            Viewport {
+                width: 200,
+                height: 120,
+            },
+        )
+        .unwrap();
+        assert_eq!(layout.get(0).unwrap().rect.width, 50);
+        assert_eq!(layout.get(1).unwrap().rect.width, 100);
+        assert_eq!(layout.get(0).unwrap().rect.height, 10);
+        assert_eq!(layout.get(1).unwrap().rect.height, 30);
     }
 
     #[test]
