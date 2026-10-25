@@ -277,7 +277,8 @@ const PANEL_TITLE: &str = "WovenStart";
 /// so the desktop feels useful before the launcher is opened. The catalog
 /// remains the source of truth: these names are resolved against it at click
 /// time, so a missing package simply leaves the shortcut inert.
-const DESKTOP_ICON_NAMES: [&str; 3] = ["Files", "Terminal", "Store"];
+const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
+const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
 const DESKTOP_ICON_X: i32 = 24;
 const DESKTOP_ICON_Y: i32 = 52;
 const DESKTOP_ICON_STEP: i32 = 76;
@@ -300,16 +301,16 @@ enum AppIcon {
 
 fn app_icon(name: &[u8]) -> AppIcon {
     match name {
-        b"Files" => AppIcon::Files,
-        b"Terminal" => AppIcon::Terminal,
-        b"Store" => AppIcon::Store,
-        b"Settings" => AppIcon::Settings,
-        b"Security" => AppIcon::Security,
-        b"Images" => AppIcon::Images,
-        b"Calculator" => AppIcon::Calculator,
-        b"Editor" => AppIcon::Editor,
-        b"Update" => AppIcon::Update,
-        b"AI" => AppIcon::Ai,
+        b"Files" | b"WovenFiles" => AppIcon::Files,
+        b"Terminal" | b"WovenTerminal" => AppIcon::Terminal,
+        b"Store" | b"WovenStore" => AppIcon::Store,
+        b"Settings" | b"WovenSettings" => AppIcon::Settings,
+        b"Security" | b"WovenSecurity" => AppIcon::Security,
+        b"Images" | b"WovenImages" => AppIcon::Images,
+        b"Calculator" | b"WovenCalculator" => AppIcon::Calculator,
+        b"Editor" | b"WovenEditor" => AppIcon::Editor,
+        b"Update" | b"WovenUpdate" => AppIcon::Update,
+        b"AI" | b"WovenAI" => AppIcon::Ai,
         _ => AppIcon::Generic,
     }
 }
@@ -1788,7 +1789,7 @@ impl Desktop {
     /// so open applications retain normal z-order and the shortcuts remain
     /// useful on an otherwise empty desktop.
     fn paint_desktop_icons(&self, canvas: &mut Canvas<'_>) {
-        for (index, name) in DESKTOP_ICON_NAMES.iter().enumerate() {
+        for (index, name) in DESKTOP_ICON_LABELS.iter().enumerate() {
             let area = self.desktop_icon_area(index);
             let Some(app_index) = self.desktop_icon_app(index) else { continue };
             let Some(app) = self.apps[app_index] else { continue };

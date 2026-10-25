@@ -15224,11 +15224,11 @@ fn stage20_1_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
     use bootloader_api::info::PixelFormat;
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(20, 24, 32);
+    const TASKBAR: u32 = rgb(10, 18, 30);
     const TASKBAR_HEIGHT: i32 = 24;
     /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
     const UNSET: u32 = 0x0100_0000;
@@ -15245,11 +15245,11 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -15490,6 +15490,18 @@ fn stage20_1_self_test() -> bool {
         })
         && region(width - 40, top - 40, 40, 40, |x, y| expected_wallpaper(x, y, width, height));
     if !step("wallpaper matches its formula", wall) {
+        'wall_debug: for (x0, y0, label) in [(0, 0, "corner"), (width / 2 - 20, height / 2 - 20, "center"), (width - 40, top - 40, "lower-right")] {
+            for y in y0..y0 + 40 {
+                for x in x0..x0 + 40 {
+                    let actual = compositor::pixel(x, y);
+                    let expected = expected_wallpaper(x, y, width, height);
+                    if actual != Ok(expected) {
+                        serial::write_line(format_args!("[S20.1] wallpaper debug {} {:?} {:?} at {},{}", label, actual, expected, x, y));
+                        break 'wall_debug;
+                    }
+                }
+            }
+        }
         return false;
     }
     // The Quick Settings button (Stage 20.10) sits left of the tray's four
