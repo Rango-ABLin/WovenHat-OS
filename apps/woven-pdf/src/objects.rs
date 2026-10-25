@@ -187,6 +187,6 @@ mod tests {
         let entries = [Entry { object: 1, generation: 0, offset: 0, in_use: true }];
         let resolved = Resolver::new(data, &entries)
             .resolve(Reference { number: 1, generation: 0 }).unwrap();
-        assert!(resolved.ends_with(b"(ok) "));
+        assert!(resolved.ends_with(b"(ok)"));
     }
 }
