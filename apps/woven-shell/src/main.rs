@@ -3437,6 +3437,11 @@ fn main(args: Args) -> ! {
     while let Some(argument) = args.get(index) {
         match argument {
             b"--seconds" => desktop.seconds = true,
+            // The Stage 20.5 contract isolates the flat compositor's window
+            // depth/shadow behavior. Production remains 3D by default; this
+            // explicit switch keeps that acceptance independent of the later
+            // 3D presentation stages.
+            b"--no-3d" => desktop.three_d = false,
             b"--pin" => {
                 index += 1;
                 match args.get(index) {

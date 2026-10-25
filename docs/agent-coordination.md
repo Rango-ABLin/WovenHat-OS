@@ -1,5 +1,20 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - CI blocker repair (2026-10-25)
+
+Repaired the three blockers reproduced from the red CI audit. The Stage 13.12
+driver harness now accepts `--firmware-vars`, validates it, copies a private
+VARS store per run, and attaches it as writable pflash unit 1 while keeping
+OVMF CODE read-only. The Stage 20.5 oracle now matches the current branded
+WovenShell wallpaper/taskbar palette and starts the shell with `--no-3d` so
+the flat window-depth contract is independent of the later 3D presentation
+stages; no assertion was weakened. Focused QEMU acceptance passed Stage 20.5
+and live FAT32 storage at 1/2/4 CPUs, and Stage 13.12 driver restart passed at
+1/2/4 CPUs. The five obsolete Stage 10 patch archives remain intentionally
+deleted and are included in the cleanup commit; the repository hash inventory
+is regenerated after this change. No physical disk, firmware, reboot, or
+native hardware was used.
+
 ## Codex - production desktop fallback cleanup (2026-10-25)
 
 The interactive QEMU run exposed the old no-`system-apps` fallback: a kernel

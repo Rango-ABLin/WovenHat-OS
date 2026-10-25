@@ -1,5 +1,16 @@
 # Stage status
 
+## CI blocker repair - 2026-10-25
+
+Closed the locally reproduced red CI defects: Stage 13.12 now has a complete
+OVMF VARS argument/copy/attachment path; Stage 20.5's independent oracle is
+aligned with the current branded shell palette and explicitly exercises the
+flat depth compositor; and live FAT32 batch persistence passes the focused
+storage gate. The 1/2/4-CPU focused QEMU results are green for Stage 20.5,
+storage, and driver restart. This closes the software/QEMU blockers only; it
+does not change the separate physical/native qualification or production trust
+boundaries.
+
 ## Release Completion Mandate M00 baseline - 2026-10-24
 
 Completed the mandate's inventory/closure baseline at commit `3eee80b8`.
