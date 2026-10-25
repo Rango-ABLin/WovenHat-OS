@@ -107,3 +107,38 @@ jobs:
         run: |
           cargo +nightly-2026-07-10 fmt --manifest-path apps/woven-pdf/Cargo.toml --all
           git diff --exit-code -- apps/woven-pdf
+
+  ring3:
+    name: WovenPDF Ring-3 QEMU execution (1 CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Execute WovenPDF WAPP in Ring 3
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-07-10
+        run: |
+          set -euo pipefail
+          ovmf=
+          for file in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [ -f "$file" ]; then ovmf="$file"; break; fi
+          done
+          test -n "$ovmf"
+          python3 scripts/test-wovenpdf-qemu.py --cpus 1 --timeout 240 \
+            --qemu /usr/bin/qemu-system-x86_64 --firmware "$ovmf"
+      - name: Preserve QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wovenpdf-ring3-qemu-evidence
+          if-no-files-found: ignore
+          path: audit-artifacts/wovenpdf-ring3-1cpu/
