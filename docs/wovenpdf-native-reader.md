@@ -1,5 +1,19 @@
 # WovenPDF native PDF reader — development increment
 
+## 2026-10-25 stream-to-filter integration
+
+- The classic stream reader now exposes `stream_with_filter`, preserving
+  the exact direct `/Length` extraction contract and identifying a single
+  `/ASCIIHexDecode` or `/RunLengthDecode` filter (including PDF aliases).
+- `decoded_stream` decodes these streams into a caller-provided bounded
+  output slice. `raw_stream` still rejects any filter rather than
+  silently presenting compressed data as uncompressed bytes.
+- Unsupported filters and filter arrays reject explicitly. FlateDecode,
+  PNG predictors, object streams, indirect `/Length`, page content
+  execution, embedded fonts and faithful rendering remain incomplete.
+- Unit tests were added but not run; no compiler was available here.
+
+
 ## 2026-10-25 bounded filter increment
 
 - Added `src/filters.rs`: independent fixed-capacity ASCIIHexDecode and
