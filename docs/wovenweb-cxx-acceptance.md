@@ -54,8 +54,9 @@ The guard shims are private to this single-thread, no-exceptions fixture. They d
 not qualify recursive initialization, cancellation, fork recovery or concurrent
 mixed-width atomic guards. Class allocation knows the exact Widget layout;
 unexpected global delete exits with failure. No general new/delete, libc++, libc,
-exception unwinding, RTTI, dynamic TLS/TLS destructors, floating-point ABI, global initializer/finalizer
-arrays or compiler runtime beyond this fixture is qualified. The bounded heap
+exception unwinding, RTTI, dynamic TLS/TLS destructors, floating-point ABI,
+general global initializer/finalizer arrays or compiler runtime beyond this
+fixture is qualified. The bounded heap
 still has the existing sixteen 64 KiB mapping slots. Production VM ownership,
 capacity and pager/thread/fork/exec/teardown integration remain open before a
 larger runtime or engine port. See [VM ownership](wovenweb-vm-transactions.md).
@@ -70,15 +71,21 @@ lints and complete Rust/PR CodeQL checks pass with no new alerts and zero PR
 annotations. Dynamic TLS/destructors and concurrent static guards remain open.
 See wovenweb-cxx-static-tls.md and its evidence JSON.
 
-## Global lifecycle follow-up (unqualified)
+## Global lifecycle follow-up
 
 The current source retains one C++ `.init_array` entry with linker bounds and
 executes it from the fixture's main task after its TLS workers join. Its global
 object must register one destructor through a fixed four-entry private
 `__cxa_atexit` registry; teardown then invokes that callback in reverse order
 and checks both C++ markers. The harness requires a dedicated serial marker and
-source provenance includes the new translation unit. Seventeen Python
-contracts pass and Clang 23.1.3 compiles that unit with the guest flags, but no
-hosted guest/lint result exists yet. This is not loader-owned lifecycle support,
-a general atexit runtime, concurrent initialization, failure unwinding, shared
-library lifecycle, or browser-runtime acceptance.
+source provenance includes the new translation unit. Hosted Linux native jobs on
+1/2/4 CPUs at `99fa46dc762321a46055899c18f9b4cc349c5284` pass with QEMU exit
+33, all prior cleanup checks, and the new lifecycle marker. The SDK job reports
+179 tests and three compile-fail tests passing; queue, handoff, generation and
+selected lints pass. The PR CodeQL summary has no new alerts and zero PR
+annotations. The immutable job/artifact/source/compiler/image/serial evidence is
+recorded in [the lifecycle evidence index](wovenweb-cxx-global-lifecycle-evidence.json).
+
+This is not loader-owned lifecycle support, a general atexit runtime, concurrent
+initialization, failure unwinding, shared-library lifecycle, or browser-runtime
+acceptance.

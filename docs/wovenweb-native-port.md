@@ -242,7 +242,9 @@ neutral summary is treated as clean. Full runtime/browser boundaries remain.
 
 The C++ probe now retains one `.init_array` constructor and checks its single
 registered destructor through a bounded private `__cxa_atexit` adapter, after
-its static TLS worker join. Seventeen local Python contracts and direct C++
-compilation pass; hosted Linux 1/2/4-CPU guest/lint acceptance is pending.
-This does not exercise the kernel dynamic-image lifecycle path or qualify a
-general C++ runtime. See [global lifecycle scope](wovenweb-cxx-global-lifecycle.md).
+its static TLS worker join. Hosted Linux guest/lint acceptance at
+`99fa46dc762321a46055899c18f9b4cc349c5284` passes on 1/2/4 CPUs. Immutable
+canonical-source, compiler, image and serial evidence is archived with the
+workflow artifacts. This does not exercise the kernel dynamic-image lifecycle
+path or qualify a general C++ runtime. See [global lifecycle scope](wovenweb-cxx-global-lifecycle.md)
+and its [evidence](wovenweb-cxx-global-lifecycle-evidence.json).

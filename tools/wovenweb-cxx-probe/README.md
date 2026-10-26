@@ -27,10 +27,10 @@ no NIC, host filesystem mount or production catalog entry is added.
 Coverage: eight-integer SysV calls including stack arguments, aggregate layout
 and return, zero/static data, guarded local static initialization, stack RAII,
 512 class-specific aligned allocations, virtual dispatch and deletion, destructor
-counts, native heap cleanup, child exit and exact kernel resource baselines. The
-current source also adds one retained global C++ initializer and its registered
-destructor through a bounded private `__cxa_atexit` fixture adapter; hosted guest
-qualification for that extension is still pending.
+counts, native heap cleanup, child exit and exact kernel resource baselines. One
+retained global C++ initializer and its registered destructor run through a
+bounded private `__cxa_atexit` fixture adapter; hosted Linux guest qualification
+passed on 1/2/4 CPUs. See [the global-lifecycle evidence](../../docs/wovenweb-cxx-global-lifecycle-evidence.json).
 
 Limits: this is a small ABI fixture. Class allocation/deallocation knows the
 exact Widget layout; global delete deliberately fails if unexpectedly reached.
