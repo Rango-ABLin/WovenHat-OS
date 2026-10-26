@@ -247,5 +247,6 @@ its static TLS worker join. Hosted Linux guest/lint acceptance at
 canonical-source, compiler, image and serial evidence is archived with the
 workflow artifacts. This does not exercise the kernel dynamic-image lifecycle
 path or qualify a general C++ runtime. See [global lifecycle scope](wovenweb-cxx-global-lifecycle.md)
-and its [evidence](wovenweb-cxx-global-lifecycle-evidence.json). A two-object
-ordering extension is source-integrated but awaits a fresh hosted matrix.
+and its [evidence](wovenweb-cxx-global-lifecycle-evidence.json). The two-object
+ordering extension now also passes a fresh hosted 1/2/4-CPU matrix; see its
+[ordering evidence](wovenweb-cxx-global-lifecycle-ordering-evidence.json).

@@ -90,6 +90,7 @@ This is not loader-owned lifecycle support, a general atexit runtime, concurrent
 initialization, failure unwinding, shared-library lifecycle, or browser-runtime
 acceptance.
 
-The current two-object ordering extension is source-integrated only and awaits
-a fresh hosted 1/2/4-CPU and lint matrix; see
-[the lifecycle scope](wovenweb-cxx-global-lifecycle.md).
+The two-object ordering extension passes its fresh hosted 1/2/4-CPU and lint
+matrix at `fbc761b86b1d19ab0c8d023604bda1971239812b`; see
+[the lifecycle scope](wovenweb-cxx-global-lifecycle.md) and its
+[ordering evidence](wovenweb-cxx-global-lifecycle-ordering-evidence.json).

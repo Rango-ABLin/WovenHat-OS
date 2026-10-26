@@ -21,15 +21,20 @@ Seventeen Python harness/parser contracts and direct compilation also pass
 locally. Windows Application Control still prevents the fresh local Cargo
 build/lint chain; no policy bypass was attempted.
 
-## Two-object ordering follow-up (unqualified)
+## Two-object ordering follow-up
 
 The evidence revision above covers the initial one-object fixture. The current
 source extends it to two independently compiled global objects with Clang
 `init_priority(200)` and `init_priority(300)`. The linker sorts their two
 `.init_array` entries; the adapter demands exactly two registrations and checks
 late-constructor/late-destructor-before-early-destructor ordering through a
-single phase value. Local static contracts and direct C++ compilation pass.
-Hosted Linux 1/2/4-CPU guest and warning-denying lint qualification is pending.
+single phase value. Hosted Linux native regressions pass on 1/2/4 CPUs at
+`fbc761b86b1d19ab0c8d023604bda1971239812b`, including the QEMU C++ fixture,
+cleanup checks and warning-denying lints. SDK, pager and generation checks also
+pass. The original 2-CPU matrix cancellation occurred before its guest command,
+then its isolated rerun passed; no assertion or timeout changed. Artifact IDs
+and immutable archive digests are recorded in
+[the ordering evidence index](wovenweb-cxx-global-lifecycle-ordering-evidence.json).
 
 The scope is intentionally narrow: the kernel's dynamic-image lifecycle path is
 not exercised by this fixed ET_EXEC fixture, and this does not qualify general
