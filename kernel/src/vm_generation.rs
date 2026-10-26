@@ -19,7 +19,7 @@ impl Issuer {
     pub fn issue(&self) -> Option<NonZeroU64> {
         let value = self
             .next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
             })
             .ok()?;

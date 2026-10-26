@@ -6,7 +6,7 @@
   },
   "issuer_rust_tests": "4 defined; not locally executed because new build-script application-policy blocks are confirmed",
   "source_sha256": {
-    "kernel/src/vm_generation.rs": "49a44055a79208208b177940171ec4e80424832185e3644be44057adf2153e62",
+    "kernel/src/vm_generation.rs": "832713654cc0409acb1bb96b687389e5b101e0fdaea3545d3a9c06d48aeeb13d",
     "kernel/src/userspace.rs": "ebf9b73a0d79836989be84ef9756a2c196482fce775f922cfd885e35d3e49473",
     "kernel/src/task.rs": "916ad61eb9e218a73b69ce71339a1b7dde3a49d4626497831736b6ecaccd8af5",
     "tools/wovenweb-net-probe/src/main.rs": "e7338743bfbdb150eb21135904a41d415678752d1d379f0ded0c51fefc4fa0cf"
@@ -29,5 +29,15 @@
   ],
   "negative_control": "Linux detached checkout; remove one lineage comparison only; unchanged guest assertion must fail specifically with stale acceptance, not build/unrelated failure",
   "hosted_current": "pending publication",
-  "limits": "Tags are copied lineage and require owner/root identity. They do not pin active work, serialize all mapping operations, or integrate the VM journal."
+  "limits": "Tags are copied lineage and require owner/root identity. They do not pin active work, serialize all mapping operations, or integrate the VM journal.",
+  "initial_hosted_compile_failure": {
+    "revision": "eb702f5b7406baa6817fcc670e8a899256a4995b",
+    "jobs": [
+      121447007101,
+      121447006501,
+      121447006995
+    ],
+    "reason": "Pinned nightly deprecates AtomicU64::fetch_update in favor of try_update; -D warnings correctly stopped builds before guest execution",
+    "correction": "Use try_update with the same checked closure and orderings; pinned core source confirms identical signature. No warning suppression."
+  }
 }

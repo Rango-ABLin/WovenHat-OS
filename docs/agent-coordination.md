@@ -6574,3 +6574,9 @@ a reproduced stale fault. Current negative control must show precise acceptance
 with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
 work lifetime and full VM journal integration remain open. See
 wovenweb-mapping-generations.md and its evidence JSON.
+
+Hosted eb702f5b failed before boot at warning-denying Clippy: pinned nightly
+renamed AtomicU64::fetch_update to try_update. Verified the pinned core source
+signature and changed only that call name. No warning suppression or weakened
+assertions. SDK179+3 passed before kernel compilation stopped; generation tests
+and remap proof remain pending. Negative gate correctly refused a build failure.
