@@ -2,6 +2,7 @@
 #![no_main]
 use core::{
     alloc::{GlobalAlloc, Layout},
+    cell::UnsafeCell,
     sync::atomic::{AtomicU64, Ordering},
 };
 use libwoven::Args;
@@ -12,6 +13,12 @@ unsafe extern "C" {
     fn woven_tls_zero() -> u64;
     fn woven_tls_store(first: u64, second: u64);
     fn woven_tls_address() -> u64;
+    fn woven_global_constructed() -> u64;
+    fn woven_global_destroyed() -> u64;
+    fn woven_global_constructed_marker() -> u64;
+    fn woven_global_destroyed_marker() -> u64;
+    static __init_array_start: u8;
+    static __init_array_end: u8;
 }
 
 #[repr(C)]
@@ -102,6 +109,110 @@ pub unsafe extern "C" fn __cxa_guard_release(pointer: *mut AtomicU64) {
 pub unsafe extern "C" fn __cxa_guard_abort(pointer: *mut AtomicU64) {
     // SAFETY: same guard contract as acquire; allow a subsequent initialization.
     unsafe { &*pointer }.store(0, Ordering::Release);
+}
+
+type AtExitCallback = unsafe extern "C" fn(*mut u8);
+const MAX_ATEXIT_CALLBACKS: usize = 4;
+#[derive(Clone, Copy)]
+struct AtExitCallbackEntry {
+    callback: Option<AtExitCallback>,
+    argument: *mut u8,
+    dso: *mut u8,
+}
+const EMPTY_ATEXIT_CALLBACK: AtExitCallbackEntry = AtExitCallbackEntry {
+    callback: None,
+    argument: core::ptr::null_mut(),
+    dso: core::ptr::null_mut(),
+};
+struct AtExitCallbacks {
+    entries: UnsafeCell<[AtExitCallbackEntry; MAX_ATEXIT_CALLBACKS]>,
+    count: AtomicU64,
+}
+// The fixture invokes global constructors/destructors only from its main task,
+// after sibling TLS workers have joined. This local registry is deliberately
+// not a general concurrent C++ runtime facility.
+unsafe impl Sync for AtExitCallbacks {}
+static ATEXIT_CALLBACKS: AtExitCallbacks = AtExitCallbacks {
+    entries: UnsafeCell::new([EMPTY_ATEXIT_CALLBACK; MAX_ATEXIT_CALLBACKS]),
+    count: AtomicU64::new(0),
+};
+#[unsafe(no_mangle)]
+static __dso_handle: u8 = 0;
+
+/// # Safety
+/// The C++ global-initializer path supplies one valid callback and its opaque
+/// argument while the fixture's single main task owns this bounded registry.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __cxa_atexit(
+    callback: AtExitCallback,
+    argument: *mut u8,
+    dso: *mut u8,
+) -> i32 {
+    let count = ATEXIT_CALLBACKS.count.load(Ordering::Relaxed) as usize;
+    if count == MAX_ATEXIT_CALLBACKS {
+        return -1;
+    }
+    // SAFETY: the fixture serializes registration before any finalization and
+    // bounds count against the fixed array capacity above.
+    unsafe {
+        (*ATEXIT_CALLBACKS.entries.get())[count] = AtExitCallbackEntry {
+            callback: Some(callback),
+            argument,
+            dso,
+        };
+    }
+    ATEXIT_CALLBACKS
+        .count
+        .store((count + 1) as u64, Ordering::Release);
+    0
+}
+
+fn run_global_initializers() -> bool {
+    // SAFETY: linker-defined bounds bracket the retained, eight-byte-aligned
+    // C++ .init_array entries in this fixed ET_EXEC image.
+    let (start, end) = unsafe {
+        (
+            core::ptr::addr_of!(__init_array_start) as usize,
+            core::ptr::addr_of!(__init_array_end) as usize,
+        )
+    };
+    let entry_size = core::mem::size_of::<AtExitCallback>();
+    if start >= end || (end - start) % entry_size != 0 || (end - start) / entry_size != 1 {
+        return false;
+    }
+    // SAFETY: range validation above proves exactly one linker-retained
+    // initializer pointer; its C++ ABI takes no arguments and returns void.
+    let initializer = unsafe { (start as *const unsafe extern "C" fn()).read() };
+    unsafe { initializer() };
+    unsafe {
+        woven_global_constructed() == woven_global_constructed_marker()
+            && woven_global_destroyed() == 0
+            && ATEXIT_CALLBACKS.count.load(Ordering::Acquire) == 1
+    }
+}
+
+fn run_global_destructors() -> bool {
+    let count = ATEXIT_CALLBACKS.count.swap(0, Ordering::AcqRel) as usize;
+    if count != 1 {
+        return false;
+    }
+    for index in (0..count).rev() {
+        // SAFETY: this task exclusively owns the registry and each successful
+        // registration stores a callback before publishing the count.
+        let entry = unsafe { (*ATEXIT_CALLBACKS.entries.get())[index] };
+        let Some(callback) = entry.callback else {
+            return false;
+        };
+        let _ = entry.dso;
+        // SAFETY: the stored callback/argument are exactly those supplied by
+        // Clang's global-object registration for this live image.
+        unsafe { callback(entry.argument) };
+    }
+    unsafe {
+        woven_global_constructed() == woven_global_constructed_marker()
+            && woven_global_destroyed() == woven_global_destroyed_marker()
+            && ATEXIT_CALLBACKS.count.load(Ordering::Acquire) == 0
+    }
 }
 const TLS_INITIAL: u64 = 0x1122_3344_5566_7788;
 static TLS_READY: AtomicU64 = AtomicU64::new(0);
@@ -194,6 +305,9 @@ fn main(_: Args) -> ! {
         1,
         b"[WOVENWEB-CXX] static TLS template + zeroing + 2-thread isolation + FS restore: PASSED\n",
     );
+    if !run_global_initializers() {
+        libwoven::exit(63);
+    }
     let before = libwoven::heap::runtime_stats();
     // SAFETY: linked header-free C++ fixture obeys the SysV ABI and owns all of
     // its objects. It returns after deleting every dynamically allocated object.
@@ -206,6 +320,13 @@ fn main(_: Args) -> ! {
         let _ = libwoven::write(1, b"[WOVENWEB-CXX] ABI fixture: FAILED\n");
         libwoven::exit(if code == 0 { 40 } else { code });
     }
+    if !run_global_destructors() {
+        libwoven::exit(64);
+    }
+    let _ = libwoven::write(
+        1,
+        b"[WOVENWEB-CXX] global init-array constructor + reverse registered destructor: PASSED\n",
+    );
     let _ = libwoven::write(
         1,
         b"[WOVENWEB-CXX] SysV calls + data + guarded static: PASSED\n",

@@ -69,3 +69,16 @@ joins. All prior ABI/object/heap and exact kernel cleanup checks remain. Selecte
 lints and complete Rust/PR CodeQL checks pass with no new alerts and zero PR
 annotations. Dynamic TLS/destructors and concurrent static guards remain open.
 See wovenweb-cxx-static-tls.md and its evidence JSON.
+
+## Global lifecycle follow-up (unqualified)
+
+The current source retains one C++ `.init_array` entry with linker bounds and
+executes it from the fixture's main task after its TLS workers join. Its global
+object must register one destructor through a fixed four-entry private
+`__cxa_atexit` registry; teardown then invokes that callback in reverse order
+and checks both C++ markers. The harness requires a dedicated serial marker and
+source provenance includes the new translation unit. Seventeen Python
+contracts pass and Clang 23.1.3 compiles that unit with the guest flags, but no
+hosted guest/lint result exists yet. This is not loader-owned lifecycle support,
+a general atexit runtime, concurrent initialization, failure unwinding, shared
+library lifecycle, or browser-runtime acceptance.

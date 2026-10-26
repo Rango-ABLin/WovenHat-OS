@@ -237,3 +237,12 @@ Static-thread-local fixture scan collected: complete Rust analysis and PR
 CodeQL on 92328129 succeeded, no new alerts in changed code and zero PR
 annotations. Publishing the held qualification/evidence update now; no pending
 neutral summary is treated as clean. Full runtime/browser boundaries remain.
+
+## Controlled C++ global lifecycle source follow-up (2026-10-26)
+
+The C++ probe now retains one `.init_array` constructor and checks its single
+registered destructor through a bounded private `__cxa_atexit` adapter, after
+its static TLS worker join. Seventeen local Python contracts and direct C++
+compilation pass; hosted Linux 1/2/4-CPU guest/lint acceptance is pending.
+This does not exercise the kernel dynamic-image lifecycle path or qualify a
+general C++ runtime. See [global lifecycle scope](wovenweb-cxx-global-lifecycle.md).

@@ -27,15 +27,18 @@ no NIC, host filesystem mount or production catalog entry is added.
 Coverage: eight-integer SysV calls including stack arguments, aggregate layout
 and return, zero/static data, guarded local static initialization, stack RAII,
 512 class-specific aligned allocations, virtual dispatch and deletion, destructor
-counts, native heap cleanup, child exit and exact kernel resource baselines.
+counts, native heap cleanup, child exit and exact kernel resource baselines. The
+current source also adds one retained global C++ initializer and its registered
+destructor through a bounded private `__cxa_atexit` fixture adapter; hosted guest
+qualification for that extension is still pending.
 
 Limits: this is a small ABI fixture. Class allocation/deallocation knows the
 exact Widget layout; global delete deliberately fails if unexpectedly reached.
 Guard/static-object shims remain private to the single-thread, no-exceptions
 part of this fixture. No general
 new/delete ABI, libc++, exception unwinding, RTTI, multithreaded static guards,
-dynamic TLS/TLS destructors, floating-point ABI, global constructor/destructor
-arrays or Ladybird engine
+dynamic TLS/TLS destructors, floating-point ABI, general global
+constructor/destructor arrays or Ladybird engine
 is qualified here. Production VM transactions remain a separate prerequisite.
 
 Static compiler thread-local storage is qualified by the hosted 92328129 matrix
