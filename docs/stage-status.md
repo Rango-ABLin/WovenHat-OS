@@ -9956,6 +9956,30 @@ This closes a software allocation-leak path only. Physical AHCI/NVMe and USB
 flash qualification, IOMMU isolation, interrupt completion, torn-sector and
 power-loss evidence, and arbitrary-size rollback remain open.
 
+## Stage 14.1 — accepted on 2026-10-06
+
+WovenNet's live IPv4 core — bounded sockets, an ephemeral-port allocator,
+DHCP client transitions, and generation-tagged DNS query/cancellation exposed
+through the userspace syscall ABI — passed its dedicated 1/2/4-CPU QEMU gate.
+The series also hardened DNS/socket lifecycle teardown and repaired a socket-
+stress uniqueness/allocation-order defect found during gating. No dedicated
+`AUDIT-STAGE14.1*.md` file exists for this stage; this entry is sourced from
+the `Stage 14.1:` commit sequence culminating in "Docs: close Stage 14.1
+WovenNet IPv4 core" (`9466afe`, 2026-10-06). IPv6, routing, firewall policy,
+and physical network-hardware qualification remain later work (Stages
+14.2–14.5).
+
+## Stage 14.2A — IPv6 address foundation (2026-10-06)
+
+The IPv6 foundation adds production-reusable address/prefix primitives —
+prefix containment, link-local/multicast classification, and RFC 4291
+solicited-node multicast derivation — gated by a dedicated `[S14.2A]` marker
+on the 1/2/4-CPU QEMU harness, with a link-local test-vector fix landing
+during gating (`a0d04cd`). No dedicated `AUDIT-STAGE14.2A*.md` file exists;
+this entry is sourced from git history. This is the foundation the later
+Stage 14.2B–14.2J Neighbor Discovery/SLAAC/DHCPv6 work (documented below)
+builds on.
+
 ## Stage 14.2D — Router Advertisement state (2026-10-06)
 
 Router Advertisement state now tracks a link-local router, bounded lifetimes,
@@ -10037,6 +10061,10 @@ See the [Stage 14.2J audit](docs/audit-stages-consolidated.md).
 
 Next: bounded IPv6 interface address configuration and controlled egress.
 
+A follow-up fix (Stage 14.2K, `9579d93`) corrected a conditional-compilation
+IPv6 import for the non-test build; it is a Clippy/build correction over this
+boundary, not a new feature increment, and has no dedicated audit file.
+
 ## Stage 14.3 — WovenNet socket API boundary (2026-10-06)
 
 Socket endpoint admission now rejects zero-port, unspecified, and IPv4
@@ -10117,6 +10145,18 @@ commit `b81b3a76`.
 
 Next: complete firewall transport/path coverage and parser hardening before
 adding stateful connection tracking.
+
+## Stage 14.5D — WovenGuard firewall hardening (2026-10-09)
+
+Stage 14.5D hardens the firewall IP parser and extends live enforcement to
+the Wi-Fi adapter transport path (not only virtio), filtering Wi-Fi transport
+ingress before it reaches WovenNet. A dedicated parser-hardening acceptance
+gate and a firewall-hardening CI gate were added, requiring a dedicated
+hardening marker, and a Clippy fix for enum variant naming landed as the
+final commit on the series (`b81a777`). No dedicated `AUDIT-STAGE14.5D*.md`
+file exists for this stage; this entry is sourced from the `Stage 14.5D:`
+commit sequence. Stateful connection tracking and transport coverage beyond
+virtio/Wi-Fi remain open.
 
 ## Stage 1–5 long-name mutation hardening — 2026-10-01
 
@@ -10685,6 +10725,169 @@ acceptance on 1/2/4 CPUs. A shared PCI `expect(dead_code)` guard was extended
 through the later feature family after Stage 14.1 exposed that it could not
 compile cleanly under warning denial. See the [Stage 14 feature-gate audit](docs/audit-stages-consolidated.md).
 
+## Stage 13.3 — accepted on 2026-09-30
+
+The first native NVMe block path lands on the accepted Stage 13.2 PCI/PCIe
+foundation: discovery of class 01h/08h/02h controllers, BAR MMIO mapping,
+DMA-backed admin/I/O queue pairs, controller/namespace-1 identification, and
+a 512-byte namespace exposed through the existing `BlockDevice` contract.
+ATA and VirtIO storage paths are preserved as independent backends.
+
+The dedicated gate requires build, warning-denying freestanding Clippy, and
+isolated 1/2/4-CPU QEMU boots against a 16 MiB QEMU NVMe namespace, each
+performing a write/flush/read round trip and restoring the original sector.
+Accepted at commit `b8bafb3a44c1ae0461304f982ffc970fdc62a92e` by GitHub
+Actions run `36703337710`. See
+[the candidate audit](../AUDIT-STAGE13.3-NVME-CANDIDATE.md).
+
+Polling-based bring-up, MSI/MSI-X, interrupt-driven completion, multi-queue
+scaling, multiple namespaces/controllers, larger transfers, reset recovery,
+power management, hotplug, and broad physical-hardware qualification remain
+later production work.
+
+## Stage 13.4 — accepted on 2026-09-30
+
+A native AHCI/SATA block backend lands on the accepted Stage 13.2/13.3
+foundations: discovery of class 01h/06h/01h controllers, command-list/
+received-FIS DMA bases, IDENTIFY DEVICE with required 48-bit LBA support, and
+READ/WRITE/FLUSH DMA EXT through the existing `BlockDevice` contract. Legacy
+ATA PIO and NVMe remain independent, preserved backends.
+
+The dedicated gate requires build, warning-denying freestanding Clippy, and
+isolated 1/2/4-CPU QEMU boots against a 16 MiB SATA disk on an ICH9 AHCI
+controller, each performing a write/flush/read round trip and restoring
+sector zero. Accepted at commit `a4c00388187f63cc801716979b21e4841dd0945f`
+by GitHub Actions run `36704495845`. See
+[the candidate audit](../AUDIT-STAGE13.4-AHCI-SATA-CANDIDATE.md).
+
+One command slot and bounded polling are used for synchronous completion.
+Interrupt-driven completion, NCQ/multi-slot scaling, ATAPI, hotplug, staggered
+spin-up, controller reset recovery, multiple disks/controllers, TRIM/DSM, and
+broad physical-hardware qualification remain later production work.
+
+## Stage 13.5 — accepted on 2026-09-30
+
+WovenHat's first native USB host-controller foundation discovers class
+0Ch/03h/30h xHCI controllers, maps the controller BAR, performs halt/reset/
+start sequencing, configures DCBAA/command ring/event ring, discovers and
+resets a connected root-hub port, and submits/validates Enable Slot. An R2
+correction fixed event-ordering: the port-reset path queues a Port Status
+Change Event before the later Command Completion Event, which the original
+`enable_slot` incorrectly treated as the completion; R2 now consumes
+unrelated events while waiting for the matching Command Completion TRB.
+
+The dedicated gate requires build, warning-denying freestanding Clippy, and
+isolated 1/2/4-CPU QEMU boots against a QEMU xHCI controller plus a USB
+keyboard. Accepted at commit `e8ed974b2166f4f4afb01c44034443e5819fb50d` by
+GitHub Actions run `36705547487`. See
+[the candidate audit](../AUDIT-STAGE13.5-USB-CORE-CANDIDATE.md).
+
+Address Device, endpoint-context programming, EP0 control transfers,
+descriptor parsing, hubs, HID class support, mass storage, hotplug,
+suspend/resume, MSI/MSI-X interrupt delivery, and broad physical-hardware
+qualification remain later work (continued in Stage 13.6).
+
+## Stage 13.6 — accepted on 2026-09-30
+
+A bounded USB HID class path builds on the accepted Stage 13.5 xHCI core:
+device addressing, EP0 control transfers, USB device/configuration/
+interface/endpoint descriptor parsing, HID boot-protocol selection,
+interrupt-IN endpoint configuration, and boot-report reception. The QEMU
+harness attaches `qemu-xhci` plus `usb-kbd` and the kernel must enumerate the
+HID keyboard and complete a real interrupt-IN transfer.
+
+Accepted at commit `36ead75ccad4323867ba9e25526c64ae6695fe85` by GitHub
+Actions run `36707350992` on 1/2/4 CPUs. See
+[the candidate audit](../AUDIT-STAGE13.6-USB-HID-CANDIDATE.md).
+
+Hub support, arbitrary HID report-descriptor parsing, hot-unplug recovery,
+multiple simultaneous HID devices, interrupt-driven xHCI completion, and a
+unified input event service remain open (the last is Stage 13.7).
+
+## Stage 13.7 — accepted on 2026-09-30
+
+The device-independent WovenInput event layer is introduced: a bounded
+unified input event queue, device-independent keyboard/pointer/touch/pen/
+game-controller event types, and the existing PS/2 keyboard path routed
+through it while preserving the foreground-terminal single-consumer rule and
+compatibility with existing kernel shell/userspace stdin APIs.
+
+Accepted at commit `7be1916e7feb661b7e29a247ad6e682e4406f68e` by GitHub
+Actions run `36708518537` on 1/2/4 CPUs. See
+[the candidate audit](../AUDIT-STAGE13.7-INPUT-FRAMEWORK-CANDIDATE.md).
+
+This is the framework foundation only: USB HID report producers remain in
+the Stage 13.6 xHCI layer until their runtime service path is moved into the
+common driver/event pipeline.
+
+## Stage 13.8 — accepted on 2026-09-30
+
+WovenAudio / Intel HDA bring-up adds controller discovery/reset, a 256-entry
+CORB/RIRB codec command transport (with a polling-window correction after
+RINTCNT=1 stopped further CORB consumption), codec/widget topology
+discovery, PCM DMA playback and capture slices (with R4/R5 corrections for
+stream-tag scoping and codec converter-format programming), and a
+hardware-independent WovenAudio façade exposing playback/capture, mixer
+state, and a stable 48 kHz/16-bit/stereo format.
+
+Accepted at commit `e78a349da6353f0f3d3e4721f787742d6fbeb19f` by GitHub
+Actions run `36710786817` on 1/2/4 CPUs, plus a 9-boot (3×1/2/4-CPU)
+hardening matrix, all passing with debug-exit code 33. See
+[the candidate audit](../AUDIT-STAGE13.8-WOVENAUDIO-CANDIDATE.md).
+
+HDA-specific verbs/DMA remain internal to `hda.rs`; a general asynchronous
+userspace audio server and arbitrary-format streaming remain later work.
+
+## Stage 13.9 — accepted on 2026-09-30
+
+The integrated synthetic WovenWiFi contract is validated end to end: PCI
+classification, IEEE 802.11 frame/IE handling, scanning, Open System
+authentication and association, RSN/EAPOL foundations, WPA2 cryptography and
+the four-way handshake, GTK/group-key rekey lifecycle, CCMP protected data
+paths, WovenNet integration, backend lifecycle, entropy boundaries, session
+handoff, RX integration, a smoltcp transport adapter, and selectable
+transport integration. This was built incrementally across lettered
+sub-stages 13.9B–13.9Z (protocol core → scan engine → auth/association →
+WPA2/RSN/EAPOL foundation → cryptographic foundation → 4-way handshake → GTK
+key-data handling → CCMP data path → WovenNet integration → transport
+backend → reliability hardening → integration closure → security lifecycle
+→ entropy/SNonce boundary → live GTK/KRACK integration → association/RSN
+integration → entropy/randomness split → session key handoff → RX/CCMP
+Ethernet integration → smoltcp adapter → selectable transport → secure
+activation → group-addressed CCMP → reconnect/rekey hardening → live
+group-key rekey).
+
+The runtime harness requires the complete Stage 13.9 marker set (A–V plus
+X/Y/Z), rejects panic/failure/timeout markers, and requires QEMU debug exit
+33. Accepted at commit `f245e67083cb61a51d4bf3e8876b6c8cfb140358` by GitHub
+Actions run `36713418548` on 1/2/4 CPUs. See
+[the full-contract audit](../AUDIT-STAGE13.9-WOVENWIFI-ACCEPTANCE.md).
+
+This acceptance does not claim physical Intel AX200 hardware qualification;
+it is a deterministic software contract. Physical firmware loading,
+device-specific transport behavior, RF/association behavior, and real
+access-point interoperability remain separate hardware-qualification work.
+
+**Historical label note:** git history separately uses "13.10A"–"13.10AC"
+for AX200 physical-hardware exploration that extends this Stage 13.9 work
+(the master roadmap's Stage 13.10 is Bluetooth; see the roadmap-label note
+further below). That physical exploration remains **incomplete and not
+accepted**: firmware-container TLV parsing was corrected against a real
+`iwlwifi-cc-a0-77.ucode` image, a this-machine AX201 preflight found no
+usable passthrough/boot route and explicitly did not run a native test, PCI
+MSI programming and an Intel RX notification/DMA/interrupt-service boundary
+were added as a bounded synthetic (not hardware-driving) service layer, and
+a TCP close/drain race (sockets dropped mid-FIN-exchange) found during that
+work was fixed by deferring transport retirement until async references
+drain. See
+[the firmware-loader audit](audit-ax200-runtime-loader-2026-09-24.md),
+[the this-machine AX201 audit](audit-ax201-machine-2026-09-24.md),
+[the physical preflight audit](audit-physical-wifi-preflight-2026-09-24.md),
+[the physical-inventory tooling audit](audit-physical-inventory-2026-10-01.md),
+[the 13.10AC handoff audit](audit-stage13-10ac-2026-09-23.md),
+[the 13.10AC remediation audit](audit-stage13-10ac-remediation-2026-09-23.md),
+and [the TCP close/drain fix audit](audit-tcp-close-drain-2026-09-24.md).
+
 ## Stages 12.2–12.5 — accepted on 2026-09-16
 
 WovenFS metadata/integrity, volume-integrity envelope boundaries, snapshots,
@@ -10696,6 +10899,32 @@ covers measured provisioning, authenticated persistent wrapped keys,
 successor-generation rotation, and encrypted mount-record I/O. A TPM/firmware
 measured-root backend, physical power-loss evidence, and deployment key-slot
 policy remain open.
+
+## Stage 12.3 — accepted on 2026-09-29
+
+Stage 12.3 closes the measured key provisioning, persistent key storage,
+rotation, and encrypted-volume mount integration gaps noted above. Production
+volume encryption adds authenticated persistent wrapped-key records whose
+associated data binds volume identity and generation, an explicit
+measured/authenticated provisioning-evidence gate, successor-only
+overflow-checked rotation plans that retain the old generation until durable
+metadata advancement, and encrypted mount-record I/O that authenticates
+volume, generation, and mount identity. The adversarial gate rejects
+untrusted measurement evidence, tampered wrapped records, cross-volume or
+skipped-generation rotation, tampered mounted-record tags, and revoked/stale
+mount authority; authentication failure leaves mounted ciphertext untouched.
+
+GitHub Actions run 614 (run id `36577792537`) passed release validation at
+commit `54c7dd938faad567c97de74fb45ec0d2d64286c5`, including lint, host
+regressions, the 1/2/4-core boot matrix, and validation-evidence
+preservation. See the production-completion section of
+[the volume-crypto audit](audit-volume-crypto-2026-09-16.md).
+
+Stage 12.3 is production-complete at the kernel integration boundary.
+Physical hardware still needs a TPM/firmware measured-root backend to
+produce the trusted evidence this boundary consumes; best-effort kernel
+entropy is explicitly not accepted as a substitute for that hardware trust
+source.
 
 ## Stage 7.1.5 - accepted on 2026-09-16
 
@@ -10841,6 +11070,27 @@ The bounded stress gate executes 32 connect/subscribe/notify/teardown cycles, al
 This acceptance remains deterministic software validation. Physical Bluetooth controller/radio recovery, transport fault injection, BLE SMP/bonding/LTK security, persistent protected keys, radio interoperability and conformance certification remain outside this boundary.
 
 
+## Roadmap Stage 13.10M — BLE bond persistence (2026-10-01)
+
+BLE bonds are now persisted across reconnects: `Stage 13.10M: add BLE bond persistence and reconnect validation` stores bonded peer material and validates it against a subsequent reconnect, with `Stage 13.10M: gate BLE bond persistence in QEMU acceptance` adding a dedicated 1/2/4-CPU QEMU marker for the behavior. No dedicated `AUDIT-STAGE13.10M*.md` file exists; this entry is sourced from git history (`2ec1f04`, `47e0379`).
+
+## Roadmap Stage 13.10N — BLE bonded encryption restoration (2026-10-01)
+
+Building on 13.10M, a reconnecting peer can now restore link encryption from its persisted bond instead of repeating full pairing: `Stage 13.10N: restore BLE encryption from persisted bonds`, gated by `Stage 13.10N: gate BLE bonded encryption restoration`. No dedicated audit file exists; sourced from git history (`1292bc6`, `44d8fbd`).
+
+## Roadmap Stage 13.10O — BLE encrypted session tracking (2026-10-01)
+
+Bonded encrypted sessions are now tracked as explicit controller state: `Stage 13.10O: track bonded BLE encrypted sessions`, gated by `Stage 13.10O: gate BLE encrypted session state`. No dedicated audit file exists; sourced from git history (`dcf3aad`, `d6e6c67`).
+
+## Roadmap Stage 13.10P — BLE ATT security policy enforcement (2026-10-01)
+
+ATT/GATT operations are now authorized against the tracked encrypted-session state from 13.10O: `Stage 13.10P: enforce BLE ATT security policies`, gated by `Stage 13.10P: gate BLE ATT security authorization`. No dedicated audit file exists; sourced from git history (`36ec31f`, `7d813c8`).
+
+## Roadmap Stage 13.10Q — secured BLE notifications and indications (2026-10-01)
+
+Outbound GATT notifications and indications are now subject to the same session security authorization as inbound ATT requests: `Stage 13.10Q: secure BLE notifications and indications`, gated by `Stage 13.10Q: gate secure BLE notifications`, with a follow-up Clippy fix to the secured-emission API (`efbc37f`). No dedicated audit file exists; sourced from git history (`75032a2`, `a8ce56b`). This closes the bonding/session-security chain consumed by the later Stage 13.10R secure-session identity binding below.
+
+
 ## Roadmap Stage 13.10R — BLE secure-session identity binding accepted on 2026-10-01
 
 Protected LE ATT/GATT operations now require the transient secure session to
@@ -10899,6 +11149,34 @@ confirmation UX, authenticated key-derivation integration, bonding
 persistence, controller transport and physical BLE qualification remain open.
 
 
+## Stage 13.11D — BLE SMP AES-128 cryptographic backend — 2026-10-05
+
+SMP's AES-128 primitive moves from the original `no_std` crate dependency to
+a portable in-tree backend (`Stage 13.11D: add no_std AES-128 dependency`,
+`...add production AES-128 SMP backend`, `...remove incompatible AES crate
+backend`, `...use portable AES-128 backend`) after the first dependency proved
+incompatible with the freestanding target. A dedicated acceptance gate
+(`...gate production SMP AES-128`, `...add dedicated AES acceptance gate`)
+covers it. No dedicated `AUDIT-STAGE13.11D*.md` file exists; this entry is
+sourced from git history (`155237f`, `0c62da3`, `d712203`, `a841a17`,
+`3c82110`, `4fabd68`).
+
+This is the cryptographic primitive consumed by confirm/random verification
+(13.11C) and encryption/session authority (13.11F); it does not itself claim
+protocol-level or physical BLE qualification.
+
+## Stage 13.11E — BLE SMP MITM authentication policy — 2026-10-05
+
+An explicit man-in-the-middle (MITM) authentication policy is added to the
+SMP pairing flow (`Stage 13.11E: add SMP MITM authentication policy`), with a
+dedicated runtime gate (`...add MITM policy runtime gate`). No dedicated
+audit file exists; sourced from git history (`3d1a955`, `01ffcd9`).
+
+User-interaction/numeric-comparison UX, bonding persistence, controller
+transport, and physical BLE qualification remain outside this policy
+boundary.
+
+
 ## Stage 13.11F — BLE controller encryption/session authority — 2026-10-05
 
 The SMP flow now owns the LE Start Encryption command boundary and binds
@@ -10921,6 +11199,20 @@ gate passes locally; GitHub acceptance for the pushed tip remains required.
 
 Physical privacy-list behavior, SMP interoperability, persistent protected keys
 and hardware qualification remain outside this deterministic foundation.
+
+
+## Stage 13.11H — BLE SMP lifecycle hardening — 2026-10-05
+
+SMP state across pairing, bonding, encryption and identity (13.11A–G) is
+unified behind a single lifecycle dispatcher (`Stage 13.11H: add unified SMP
+lifecycle hardening`), with a dedicated runtime gate and CI gate
+(`...add lifecycle hardening runtime gate`, `...add dedicated lifecycle
+hardening CI gate`) and a Clippy fix to the dispatcher's return handling
+(`...satisfy strict Clippy dispatcher return`). No dedicated audit file
+exists; sourced from git history (`f8e6da0`, `eec7b2f`, `14e2362`,
+`cbf6aa7`). This closes the BLE SMP A–H series; physical BLE
+controller/radio qualification and conformance certification remain outside
+this deterministic software boundary.
 
 
 ## Stage 13.10S closure hardening — 2026-10-05
