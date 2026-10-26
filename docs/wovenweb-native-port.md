@@ -33,6 +33,17 @@ The upstream vcpkg manifest pins OpenSSL/curl, ICU, HarfBuzz, compression and im
 libraries, FFmpeg, Skia and other dependencies. Cross-build those dependencies;
 changing a platform macro or renaming namespaces does not make them work.
 
+## Process ABI audit
+
+The current Ring-3 `SPAWN_COMMAND` ABI copies only a bounded ASCII command line,
+splits it on whitespace, resolves a bare executable under `/bin`, and requires
+`FileRead` plus `ProcessCreate`. It carries neither quoted/structured argv,
+environment variables, working directory nor descriptor actions. Do not present
+this shell-oriented convenience syscall as a LibCore Process backend: a browser
+helper/renderer port needs an explicit bounded argv/environment/FD-action ABI,
+ownership-aware child handles and cancellation/owner-death tests before one can
+be introduced.
+
 ## Memory blockers found in source
 
 At the audited revision, config.rs limits anonymous mappings to 16 and shared
