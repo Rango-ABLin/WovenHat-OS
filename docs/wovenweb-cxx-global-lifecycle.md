@@ -1,13 +1,13 @@
 # Controlled C++ global lifecycle fixture
 
-The WovenWeb C++ ABI probe now has one header-free C++ global object. Clang
-emits its initializer in `.init_array`; the fixture linker retains that section
-and exposes explicit start/end symbols. After its controlled static TLS workers
-have joined, the Rust adapter validates that the array contains exactly one
-entry, invokes it, and confirms the object registered one destructor through a
-fixed four-entry private `__cxa_atexit` registry. It invokes the registered
-callback in reverse order after the existing C++ ABI and heap checks, then
-verifies the destructor marker.
+The WovenWeb C++ ABI probe has two header-free C++ global objects in separate
+translation units. Clang emits their initializers in `.init_array`; the fixture
+linker retains that section and exposes explicit start/end symbols. After its
+controlled static TLS workers have joined, the Rust adapter validates the array,
+invokes its callbacks, and confirms the objects registered destructors through a
+fixed four-entry private `__cxa_atexit` registry. It invokes registered callbacks
+in reverse order after the existing C++ ABI and heap checks, then verifies the
+destructor marker.
 
 Hosted Linux native jobs at `99fa46dc762321a46055899c18f9b4cc349c5284` pass on
 1/2/4 CPUs with QEMU exit 33, every established ABI/heap/cleanup marker, and
@@ -20,6 +20,16 @@ serial hashes are recorded in [the lifecycle evidence index](wovenweb-cxx-global
 Seventeen Python harness/parser contracts and direct compilation also pass
 locally. Windows Application Control still prevents the fresh local Cargo
 build/lint chain; no policy bypass was attempted.
+
+## Two-object ordering follow-up (unqualified)
+
+The evidence revision above covers the initial one-object fixture. The current
+source extends it to two independently compiled global objects with Clang
+`init_priority(200)` and `init_priority(300)`. The linker sorts their two
+`.init_array` entries; the adapter demands exactly two registrations and checks
+late-constructor/late-destructor-before-early-destructor ordering through a
+single phase value. Local static contracts and direct C++ compilation pass.
+Hosted Linux 1/2/4-CPU guest and warning-denying lint qualification is pending.
 
 The scope is intentionally narrow: the kernel's dynamic-image lifecycle path is
 not exercised by this fixed ET_EXEC fixture, and this does not qualify general

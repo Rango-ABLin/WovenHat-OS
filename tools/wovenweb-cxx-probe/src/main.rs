@@ -16,6 +16,7 @@ unsafe extern "C" {
     fn woven_global_constructed() -> u64;
     fn woven_global_destroyed() -> u64;
     fn woven_global_constructed_marker() -> u64;
+    fn woven_global_finalized_marker() -> u64;
     fn woven_global_destroyed_marker() -> u64;
     static __init_array_start: u8;
     static __init_array_end: u8;
@@ -140,8 +141,8 @@ static ATEXIT_CALLBACKS: AtExitCallbacks = AtExitCallbacks {
 static __dso_handle: u8 = 0;
 
 /// # Safety
-/// The C++ global-initializer path supplies one valid callback and its opaque
-/// argument while the fixture's single main task owns this bounded registry.
+/// The C++ global-initializer path supplies two valid callbacks and their opaque
+/// arguments while the fixture's single main task owns this bounded registry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __cxa_atexit(
     callback: AtExitCallback,
@@ -174,24 +175,26 @@ fn run_global_initializers() -> bool {
     let start = core::ptr::addr_of!(__init_array_start) as usize;
     let end = core::ptr::addr_of!(__init_array_end) as usize;
     let entry_size = core::mem::size_of::<AtExitCallback>();
-    if start >= end || !(end - start).is_multiple_of(entry_size) || (end - start) / entry_size != 1
+    if start >= end || !(end - start).is_multiple_of(entry_size) || (end - start) / entry_size != 2
     {
         return false;
     }
-    // SAFETY: range validation above proves exactly one linker-retained
-    // initializer pointer; its C++ ABI takes no arguments and returns void.
-    let initializer = unsafe { (start as *const unsafe extern "C" fn()).read() };
-    unsafe { initializer() };
+    for index in 0..2 {
+        // SAFETY: range validation above proves two linker-retained initializer
+        // pointers; each C++ ABI callback takes no arguments and returns void.
+        let initializer = unsafe { (start as *const unsafe extern "C" fn()).add(index).read() };
+        unsafe { initializer() };
+    }
     unsafe {
         woven_global_constructed() == woven_global_constructed_marker()
             && woven_global_destroyed() == 0
-            && ATEXIT_CALLBACKS.count.load(Ordering::Acquire) == 1
+            && ATEXIT_CALLBACKS.count.load(Ordering::Acquire) == 2
     }
 }
 
 fn run_global_destructors() -> bool {
     let count = ATEXIT_CALLBACKS.count.swap(0, Ordering::AcqRel) as usize;
-    if count != 1 {
+    if count != 2 {
         return false;
     }
     for index in (0..count).rev() {
@@ -207,7 +210,7 @@ fn run_global_destructors() -> bool {
         unsafe { callback(entry.argument) };
     }
     unsafe {
-        woven_global_constructed() == woven_global_constructed_marker()
+        woven_global_constructed() == woven_global_finalized_marker()
             && woven_global_destroyed() == woven_global_destroyed_marker()
             && ATEXIT_CALLBACKS.count.load(Ordering::Acquire) == 0
     }

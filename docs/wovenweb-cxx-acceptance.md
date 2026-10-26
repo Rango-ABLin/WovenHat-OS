@@ -73,7 +73,7 @@ See wovenweb-cxx-static-tls.md and its evidence JSON.
 
 ## Global lifecycle follow-up
 
-The current source retains one C++ `.init_array` entry with linker bounds and
+The qualified source retains one C++ `.init_array` entry with linker bounds and
 executes it from the fixture's main task after its TLS workers join. Its global
 object must register one destructor through a fixed four-entry private
 `__cxa_atexit` registry; teardown then invokes that callback in reverse order
@@ -89,3 +89,7 @@ recorded in [the lifecycle evidence index](wovenweb-cxx-global-lifecycle-evidenc
 This is not loader-owned lifecycle support, a general atexit runtime, concurrent
 initialization, failure unwinding, shared-library lifecycle, or browser-runtime
 acceptance.
+
+The current two-object ordering extension is source-integrated only and awaits
+a fresh hosted 1/2/4-CPU and lint matrix; see
+[the lifecycle scope](wovenweb-cxx-global-lifecycle.md).
