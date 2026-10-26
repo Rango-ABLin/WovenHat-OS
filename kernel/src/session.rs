@@ -48,12 +48,12 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     if let Some(path) = accounts {
         crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
     }
-    #[cfg(feature = "system-apps")]
+    #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
     let settings = crate::vfs::stat("/etc/wovenhat/settings.json")
         .ok()
         .filter(|stat| stat.kind == crate::vfs::NodeKind::File)
         .map(|_| "/etc/wovenhat/settings.json");
-    #[cfg(not(feature = "system-apps"))]
+    #[cfg(not(any(feature = "system-apps", feature = "stage20-15-test")))]
     let settings: Option<&str> = None;
     let program = match (accounts, settings) {
         (Some(path), Some(settings)) => crate::userspace::load_elf_with_argv(

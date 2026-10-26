@@ -8869,6 +8869,17 @@ fn stage20_15_self_test() -> bool {
         })
     }
 
+    let settings = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
+        && (vfs::stat("/etc/wovenhat").is_ok()
+            || vfs::mkdir("/etc/wovenhat").is_ok())
+        && vfs::create_read_only(
+            "/etc/wovenhat/settings.json",
+            br#"{"schema":"stage20-15-test","high_contrast":true}"#,
+        )
+        .is_ok();
+    if !step("the session settings profile is installed", settings) {
+        return false;
+    }
     let catalog = (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
         && (vfs::stat("/share/applications").is_ok() || vfs::mkdir("/share/applications").is_ok())
         && vfs::create_read_only(
@@ -8955,7 +8966,7 @@ fn stage20_15_self_test() -> bool {
         opened
             && until(1000, || {
                 compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(76, 190, 188))
+                    == Ok(rgb(255, 255, 0))
             }),
     ) {
         return false;
