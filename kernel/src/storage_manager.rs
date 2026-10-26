@@ -22,6 +22,17 @@ pub fn mount(start_lba: u64, sectors: u64, removable: bool) -> Option<u64> {
         return None;
     }
     let mut m = MOUNTS.lock();
+    // A volume must not be writable through two mount records at once.
+    // Reject all overlapping ranges, including exact duplicates.
+    let end = start_lba.checked_add(sectors)?;
+    if m.iter().flatten().any(|existing| {
+        let Some(existing_end) = existing.start_lba.checked_add(existing.sectors) else {
+            return true;
+        };
+        start_lba < existing_end && existing.start_lba < end
+    }) {
+        return None;
+    }
     let i = m.iter_mut().position(|x| x.is_none())?;
     let id = i as u64 + 1;
     m[i] = Some(Mount {
@@ -182,6 +193,24 @@ pub fn encrypted_mount_self_test() -> bool {
         return false;
     }
     unmount(id)
+}
+
+/// Verify exclusive mount ranges and overflow refusal without touching disks.
+#[cfg(feature = "stage12-5-test")]
+pub fn mount_exclusivity_self_test() -> bool {
+    let Some(first) = mount(50_000, 100, false) else {
+        return false;
+    };
+    let rejected = mount(50_000, 100, false).is_none()
+        && mount(50_050, 100, false).is_none()
+        && mount(49_950, 100, false).is_none()
+        && mount(u64::MAX - 1, 10, false).is_none();
+    let adjacent = mount(50_100, 100, false);
+    let cleaned = unmount(first);
+    let adjacent_cleaned = adjacent.is_some_and(unmount);
+    let remount = mount(50_000, 100, false);
+    let remount_cleaned = remount.is_some_and(unmount);
+    rejected && cleaned && adjacent_cleaned && remount_cleaned
 }
 
 #[cfg(feature = "stage12-5-test")]
