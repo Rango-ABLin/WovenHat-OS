@@ -54,8 +54,18 @@ The guard shims are private to this single-thread, no-exceptions fixture. They d
 not qualify recursive initialization, cancellation, fork recovery or concurrent
 mixed-width atomic guards. Class allocation knows the exact Widget layout;
 unexpected global delete exits with failure. No general new/delete, libc++, libc,
-exception unwinding, RTTI, TLS, floating-point ABI, global initializer/finalizer
+exception unwinding, RTTI, dynamic TLS/TLS destructors, floating-point ABI, global initializer/finalizer
 arrays or compiler runtime beyond this fixture is qualified. The bounded heap
 still has the existing sixteen 64 KiB mapping slots. Production VM ownership,
 capacity and pager/thread/fork/exec/teardown integration remain open before a
 larger runtime or engine port. See [VM ownership](wovenweb-vm-transactions.md).
+
+## Static thread-local storage follow-up
+
+92328129 additionally passes controlled C++ static local-exec thread-local
+storage on hosted Linux 1/2/4 CPUs: PT_TLS template/zeroing/alignment, two
+sibling templates/addresses, values across yields and main FS restoration after
+joins. All prior ABI/object/heap and exact kernel cleanup checks remain. Selected
+lints and complete Rust/PR CodeQL checks pass with no new alerts and zero PR
+annotations. Dynamic TLS/destructors and concurrent static guards remain open.
+See wovenweb-cxx-static-tls.md and its evidence JSON.

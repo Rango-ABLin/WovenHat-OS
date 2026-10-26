@@ -31,15 +31,20 @@ counts, native heap cleanup, child exit and exact kernel resource baselines.
 
 Limits: this is a small ABI fixture. Class allocation/deallocation knows the
 exact Widget layout; global delete deliberately fails if unexpectedly reached.
-Guard shims are private to a single-thread no-exceptions fixture. No general
+Guard/static-object shims remain private to the single-thread, no-exceptions
+part of this fixture. No general
 new/delete ABI, libc++, exception unwinding, RTTI, multithreaded static guards,
-TLS, floating-point ABI, global constructor/destructor arrays or Ladybird engine
+dynamic TLS/TLS destructors, floating-point ABI, global constructor/destructor
+arrays or Ladybird engine
 is qualified here. Production VM transactions remain a separate prerequisite.
 
-Static TLS source experiment: the new PT_TLS/local-exec fixture checks initialized
-and zero storage, alignment, two sibling templates/addresses, values across
-yields and main-task FS restoration after joins. It awaits hosted qualification;
-the earlier pass does not qualify these additions. The guarded static/object
-fixture remains single-threaded. Dynamic TLS and TLS destructors remain open.
-Explicit --firmware/--firmware-vars now support Linux and use private VARS copies.
-See ../../docs/wovenweb-cxx-static-tls.md.
+Static compiler thread-local storage is qualified by the hosted 92328129 matrix
+on 1/2/4 CPUs: initialized/zero words, 64-byte alignment, two sibling immutable
+templates and distinct addresses, 64 yields each, and main FS/value restoration
+after joins. Guard/object checks still run single-threaded after those joins.
+The compile uses static local-exec TLS and PT_TLS; there is no dynamic TLS or
+thread-local destructor support. This is unrelated to HTTPS transport security.
+All existing ABI/object/heap checks and exact kernel cleanup remain. Kernel/probe
+lints and complete Rust/PR CodeQL pass (no new alerts, zero PR annotations).
+Explicit --firmware/--firmware-vars support Linux with private VARS copies.
+See ../../docs/wovenweb-cxx-static-tls.md and its evidence JSON.

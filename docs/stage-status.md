@@ -10875,3 +10875,21 @@ main FS restoration. All prior C++/cleanup assertions remain. This extension is
 UNQUALIFIED pending hosted compilation/guest checks; fourteen local Python
 checks pass only. Console-only authority, ABI and VM limits remain unchanged.
 See wovenweb-cxx-static-tls.md; general runtime and browser/Tor work stay open.
+
+## Controlled static compiler TLS qualification (2026-10-26)
+
+92328129 hosted C++ static thread-local-storage (not HTTPS TLS) checks pass on
+1/2/4 CPUs: initialized/zero words, alignment, two sibling templates/addresses,
+values across 64 yields each and main FS/value restoration after joins. Existing
+ABI/guard/512-object/destructor/heap and exact kernel cleanup checks remain.
+Heap/network/Stage19.2 GUI and selected lints also pass; SDK/pager gates pass.
+Canonical source/serial/compiler evidence is archived. New CodeQL summary is
+neutral; holding this documentation update locally until full scan collection
+to avoid repeatedly cancelling it. No dynamic TLS/destructors, concurrent
+guards, cross-CPU migration, FP or general runtime/browser acceptance follows.
+See wovenweb-cxx-static-tls.md and its evidence JSON.
+
+Static-thread-local fixture scan collected: complete Rust analysis and PR
+CodeQL on 92328129 succeeded, no new alerts in changed code and zero PR
+annotations. Publishing the held qualification/evidence update now; no pending
+neutral summary is treated as clean. Full runtime/browser boundaries remain.
