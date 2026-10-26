@@ -168,14 +168,11 @@ pub unsafe extern "C" fn __cxa_atexit(
 }
 
 fn run_global_initializers() -> bool {
-    // SAFETY: linker-defined bounds bracket the retained, eight-byte-aligned
-    // C++ .init_array entries in this fixed ET_EXEC image.
-    let (start, end) = unsafe {
-        (
-            core::ptr::addr_of!(__init_array_start) as usize,
-            core::ptr::addr_of!(__init_array_end) as usize,
-        )
-    };
+    // The linker-defined bounds bracket the retained, eight-byte-aligned C++
+    // .init_array entries in this fixed ET_EXEC image; taking their addresses
+    // does not read foreign storage.
+    let start = core::ptr::addr_of!(__init_array_start) as usize;
+    let end = core::ptr::addr_of!(__init_array_end) as usize;
     let entry_size = core::mem::size_of::<AtExitCallback>();
     if start >= end || (end - start) % entry_size != 0 || (end - start) / entry_size != 1 {
         return false;
