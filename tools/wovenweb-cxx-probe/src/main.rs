@@ -174,7 +174,8 @@ fn run_global_initializers() -> bool {
     let start = core::ptr::addr_of!(__init_array_start) as usize;
     let end = core::ptr::addr_of!(__init_array_end) as usize;
     let entry_size = core::mem::size_of::<AtExitCallback>();
-    if start >= end || (end - start) % entry_size != 0 || (end - start) / entry_size != 1 {
+    if start >= end || !(end - start).is_multiple_of(entry_size) || (end - start) / entry_size != 1
+    {
         return false;
     }
     // SAFETY: range validation above proves exactly one linker-retained
