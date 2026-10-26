@@ -26,6 +26,8 @@ class CxxLifecycleContracts(unittest.TestCase):
     def test_global_object_registers_and_runs_its_destructor(self):
         self.assertIn("GlobalEarly lifecycle __attribute__((init_priority(200)));", self.lifecycle)
         self.assertIn("GlobalLate lifecycle_second __attribute__((init_priority(300)));", self.lifecycle_second)
+        self.assertIn("phase = phase == 1 ? constructed_marker : 0;", self.lifecycle)
+        self.assertIn("phase = phase == constructed_marker ? finalized_marker : 0;", self.lifecycle)
         self.assertIn("__cxa_atexit", self.main)
         self.assertIn("for index in (0..count).rev()", self.main)
         self.assertIn("woven_global_destroyed() == woven_global_destroyed_marker()", self.main)
