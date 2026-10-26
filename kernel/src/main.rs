@@ -20,6 +20,7 @@ mod physical_probe;
 
 mod pager_queue;
 mod vm_handoff;
+mod vm_generation;
 mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
@@ -5846,6 +5847,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         if !task::pager_queued_publication_self_test(IMAGE) {
             serial::write_line(format_args!("[WOVENWEB-VM] queued publication: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !task::pager_remap_lifetime_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] remap generation: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: PASSED"));

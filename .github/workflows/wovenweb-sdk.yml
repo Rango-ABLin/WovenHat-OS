@@ -16,6 +16,10 @@ on:
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
       - 'tests/vm_handoff.rs'
+      - 'tests/vm_generation.rs'
+      - 'kernel/src/vm_generation.rs'
+      - 'scripts/test-wovenweb-generation-baseline.py'
+      - 'tests/test_wovenweb_generation_baseline.py'
       - 'kernel/src/vm_handoff.rs'
       - 'tools/wovenweb-*/**'
   pull_request:
@@ -33,6 +37,10 @@ on:
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
       - 'tests/vm_handoff.rs'
+      - 'tests/vm_generation.rs'
+      - 'kernel/src/vm_generation.rs'
+      - 'scripts/test-wovenweb-generation-baseline.py'
+      - 'tests/test_wovenweb_generation_baseline.py'
       - 'kernel/src/vm_handoff.rs'
       - 'tools/wovenweb-*/**'
   workflow_dispatch:
@@ -65,12 +73,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
+      - name: Negative-control evidence parser checks
+        run: python3 -m unittest discover -s tests -p test_wovenweb_generation_baseline.py
       - name: Pager queue and physical handoff ownership checks
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --test pager_queue --test vm_handoff --locked 2>&1 | tee pager-queue-tests.log
-          cargo clippy --test pager_queue --test vm_handoff --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
+          cargo test --test pager_queue --test vm_handoff --test vm_generation --locked 2>&1 | tee pager-queue-tests.log
+          cargo clippy --test pager_queue --test vm_handoff --test vm_generation --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -111,3 +121,23 @@ jobs:
         with:
           name: wovenweb-pager-${{ matrix.cpus }}cpu
           path: audit-artifacts/wovenweb-vm-*/
+
+  generation-negative-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Reproduce stale remap with only tag comparison removed
+        run: python3 scripts/test-wovenweb-generation-baseline.py --qemu /usr/bin/qemu-system-x86_64 --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-generation-negative
+          path: audit-artifacts/wovenweb-generation-negative-*/

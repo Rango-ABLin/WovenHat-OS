@@ -6537,3 +6537,40 @@ source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
 fast fault/eviction/cancellation recovery and complete VM journal admission
 remain open, as do browser/runtime/Tor and full release acceptance. See
 wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.
+
+## Mapping lifetime generation prerequisite (2026-10-25)
+
+Claiming immutable mapping-instance tags and a paused-worker real remap fixture.
+51cb731f hosted pager1/2/4, SDK, CodeQL and core-foundation succeeded. Current
+root/file binding checks cannot distinguish unmap/remap of the same file at the
+same slot while an old fault waits. First reproduce accepted stale work using
+a real sibling mmap/munmap and file-based test handshake, then add checked
+nonzero monotonic mapping tags at both constructors before page/ref side effects.
+Copies/fork retain lineage tags; owner/root plus tag distinguish pager requests.
+This does not pin active work against exec/unmap or integrate the VM journal.
+Only the test child gains FileWrite for its bounded acknowledgement file; no
+production capability, ABI or limit changes.
+
+New external blocker on 2026-10-26: Windows Application Control now rejects
+clippy-driver.exe (4551) before kernel lint. A distinct ordinary build also
+failed because dependency build scripts (quote/libm/etc) were blocked. Neither
+will be retried or renamed. Preserve logs wovenweb-vm-1792998577954413000-1cpu
+and wovenweb-generation-build-1792998668755770200. Move fresh qualification to
+existing Linux CI. Initial three-file remap fixture failed before releasing the
+worker; reduced its handshake footprint to the existing writable acknowledgement
+file (r/x), preserving all assertions/deadlines. Cause of the three-file failure
+was not established. This revised fixture still needs a real negative run.
+
+## Mapping lineage source integration (2026-10-26)
+
+Fresh mapping constructors now issue checked nonzero lineage IDs, included in
+pager binding validation with existing owner/root identity. A real same-file
+unmap/remap fixture and isolated Linux mutation control are added. This source
+is NOT qualified yet: four Python parser checks pass; Rust and guest checks
+await hosted CI because Windows now blocks clippy-driver and dependency build
+scripts (4551). No policy bypass or repeated blocked invocation is attempted.
+Initial fixture failures before worker release are retained without claiming
+a reproduced stale fault. Current negative control must show precise acceptance
+with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
+work lifetime and full VM journal integration remain open. See
+wovenweb-mapping-generations.md and its evidence JSON.

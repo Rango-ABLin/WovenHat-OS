@@ -1,0 +1,33 @@
+{
+  "status": "unqualified source integration; awaiting hosted compilation/tests and positive/negative guest evidence",
+  "python_parser_tests": {
+    "passed": 4,
+    "command": "python -m unittest discover -s tests -p test_wovenweb_generation_baseline.py"
+  },
+  "issuer_rust_tests": "4 defined; not locally executed because new build-script application-policy blocks are confirmed",
+  "source_sha256": {
+    "kernel/src/vm_generation.rs": "49a44055a79208208b177940171ec4e80424832185e3644be44057adf2153e62",
+    "kernel/src/userspace.rs": "ebf9b73a0d79836989be84ef9756a2c196482fce775f922cfd885e35d3e49473",
+    "kernel/src/task.rs": "916ad61eb9e218a73b69ce71339a1b7dde3a49d4626497831736b6ecaccd8af5",
+    "tools/wovenweb-net-probe/src/main.rs": "e7338743bfbdb150eb21135904a41d415678752d1d379f0ded0c51fefc4fa0cf"
+  },
+  "initial_fixture_failures": [
+    "audit-artifacts/wovenweb-vm-1792961533066487700-1cpu",
+    "audit-artifacts/wovenweb-vm-1792961696297136500-1cpu"
+  ],
+  "windows_blockers": [
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792998577954413000-1cpu/kernel-clippy.log",
+      "sha256": "3d4b4994e1152fc78eab6640cb354df3b0ff6f9768064ab8f2acb4d0ad1d97d3",
+      "reason": "clippy-driver.exe blocked before execution, 4551"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-generation-build-1792998668755770200/kernel-build.log",
+      "sha256": "aa349d74dd83d3943f79b2efbc8c426d6d7b017597e49a24f63001f01ade35df",
+      "reason": "normal build blocked at quote/libm/etc dependency build-script execution, 4551"
+    }
+  ],
+  "negative_control": "Linux detached checkout; remove one lineage comparison only; unchanged guest assertion must fail specifically with stale acceptance, not build/unrelated failure",
+  "hosted_current": "pending publication",
+  "limits": "Tags are copied lineage and require owner/root identity. They do not pin active work, serialize all mapping operations, or integrate the VM journal."
+}

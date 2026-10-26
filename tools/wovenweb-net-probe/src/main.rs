@@ -179,7 +179,62 @@ fn queued_pager_probe(duplicate: bool) -> ! {
     }
     libwoven::exit(0)
 }
+fn remap_pager_probe() -> ! {
+    let Ok(file) = libwoven::open("/tmp/wovenweb-remap-pager") else {
+        libwoven::exit(92)
+    };
+    // SAFETY: bounded integer-only native lazy file mmap ABI.
+    let base = unsafe { libwoven::syscall::invoke(60, file, 8192, 0) };
+    if base == 0 || base >= libwoven::syscall::WOULD_BLOCK {
+        libwoven::exit(93)
+    }
+    PAGER_THREAD_ADDRESS.store(base, core::sync::atomic::Ordering::Release);
+    // SAFETY: executable raw entry and a bounded private stack.
+    let thread =
+        unsafe { libwoven::syscall::thread_create(queued_first_entry as *const () as u64, 16384) };
+    if thread >= libwoven::syscall::WOULD_BLOCK {
+        libwoven::exit(95)
+    }
+    // Test coordinator publishes readiness only once the old fault is queued.
+    loop {
+        if let Ok(ready) = libwoven::open("/tmp/wovenweb-remap-done") {
+            let mut byte = [0];
+            let read = libwoven::read(ready, &mut byte);
+            if libwoven::close(ready).is_err() {
+                libwoven::exit(98)
+            }
+            if read == Ok(1) && byte == *b"r" {
+                break;
+            }
+        }
+        libwoven::yield_now();
+    }
+    // SAFETY: exact live mapping is unmapped, then recreated using the same
+    // still-open descriptor, length, offset and rights. The worker is paused.
+    let removed = unsafe { libwoven::syscall::invoke(9, base, 8192, 0) };
+    let replacement = unsafe { libwoven::syscall::invoke(60, file, 8192, 0) };
+    if removed != 0 || replacement != base || libwoven::close(file).is_err() {
+        libwoven::exit(98)
+    }
+    let Ok(done) = libwoven::open("/tmp/wovenweb-remap-done") else {
+        libwoven::exit(99)
+    };
+    if libwoven::write_file(done, b"x") != Ok(1) || libwoven::close(done).is_err() {
+        libwoven::exit(99)
+    }
+    // SAFETY: owned generation-tagged sibling handle. Correct stale-fault
+    // rejection kills this process with the existing page-fault status (-11).
+    if unsafe { libwoven::syscall::thread_join(libwoven::thread::Id(thread)) }
+        != libwoven::thread::Join::Exited(0)
+    {
+        libwoven::exit(96)
+    }
+    libwoven::exit(0)
+}
 fn main(args: Args) -> ! {
+    if args.get(1) == Some(b"--vm-remap") {
+        remap_pager_probe()
+    }
     if args.get(1) == Some(b"--vm-queued") {
         queued_pager_probe(false)
     }

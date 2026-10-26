@@ -7105,3 +7105,178 @@ pub fn pager_queued_publication_self_test(image: &[u8]) -> bool {
     ));
     true
 }
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_remap_lifetime_self_test(image: &[u8]) -> bool {
+    const FILE: &str = "/tmp/wovenweb-remap-pager";
+    const DONE: &str = "/tmp/wovenweb-remap-done";
+    let _ = crate::file_frames::reclaim_unused();
+    let frames = crate::memory::stats().allocated_frames;
+    let mappings = anonymous_mapping_count();
+    let processes = process_count();
+    let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+    let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+    if crate::vfs::create_read_only(FILE, &[0x71; 8192]).is_err()
+        || crate::vfs::write_file(DONE, &[]).is_err()
+    {
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", "--vm-remap"])
+    else {
+        return false;
+    };
+    if PAGER_REAP_TEST_PAUSED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    struct Pause;
+    impl Drop for Pause {
+        fn drop(&mut self) {
+            PAGER_REAP_TEST_PAUSED.store(false, Ordering::Release);
+        }
+    }
+    let pause = Pause;
+    let Ok((pid, _)) = spawn_user_process_with_sandbox(
+        "pager-remap-lifetime",
+        program,
+        wovenguard::SandboxProfile::new(
+            0x575d,
+            CapabilitySet::only(Capability::Console)
+                .with(Capability::FileRead)
+                .with(Capability::FileWrite),
+        ),
+    ) else {
+        return false;
+    };
+    let start = timer::ticks();
+    while PAGER_REQUESTS.load(Ordering::Relaxed) < requests + 1 {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    crate::serial::write_line(format_args!("[WOVENWEB-VM] remap phase=old-fault-queued"));
+    let old = {
+        let table = process_table_lock();
+        let Some(mapping) = table.iter().flatten().find(|p| p.id == pid).and_then(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .find(|m| m.size == 8192)
+                .copied()
+        }) else {
+            return false;
+        };
+        mapping
+    };
+    if old.file_resident_pages() != 0
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions
+        || crate::vfs::write_file(DONE, b"r").is_err()
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] remap phase=ready-file-published"
+    ));
+    let start = timer::ticks();
+    while {
+        let mut byte = [0];
+        crate::vfs::read_all(DONE, &mut byte) != Ok(1) || byte != *b"x"
+    } {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            let child = process_table_lock()
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .map(|p| (p.state == ProcessState::Exited, p.exit_code));
+            crate::serial::write_line(format_args!(
+                "[WOVENWEB-VM] remap done timeout child={:?}",
+                child
+            ));
+            return false;
+        }
+        yield_now();
+    }
+    let replacement = {
+        let table = process_table_lock();
+        let Some(mapping) = table.iter().flatten().find(|p| p.id == pid).and_then(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .find(|m| m.address == old.address)
+                .copied()
+        }) else {
+            return false;
+        };
+        mapping
+    };
+    if replacement.size != old.size
+        || replacement.writable != old.writable
+        || replacement.file_resident_pages() != 0
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] remap lifetimes old={} new={}",
+        old.lifetime_id(),
+        replacement.lifetime_id()
+    ));
+    if old.lifetime_id() == replacement.lifetime_id() {
+        return false;
+    }
+    drop(pause);
+    let Some(pager) = *PAGER_TASK.lock() else {
+        return false;
+    };
+    let _ = wake_task(pager);
+    let start = timer::ticks();
+    while !process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    let resident = {
+        let table = process_table_lock();
+        table.iter().flatten().find(|p| p.id == pid).map(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .map(userspace::AnonymousMapping::file_resident_pages)
+                .sum::<u32>()
+        })
+    };
+    let status = wait_process(pid.as_u64());
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] stale queued remap exit={:?} resident={:?} expected=-11/0 requests={} completed={}",
+        status.ok(),
+        resident,
+        PAGER_REQUESTS.load(Ordering::Relaxed) - requests,
+        PAGER_COMPLETIONS.load(Ordering::Relaxed) - completions
+    ));
+    if status != Ok(-11)
+        || resident != Some(0)
+        || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 1
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 1
+    {
+        return false;
+    }
+    for path in [FILE, DONE] {
+        if crate::vfs::remove(path).is_err() {
+            return false;
+        }
+    }
+    let _ = crate::file_frames::reclaim_unused();
+    if crate::memory::stats().allocated_frames != frames
+        || anonymous_mapping_count() != mappings
+        || process_count() != processes
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] same-file remap generation refusal + exact cleanup: PASSED"
+    ));
+    true
+}

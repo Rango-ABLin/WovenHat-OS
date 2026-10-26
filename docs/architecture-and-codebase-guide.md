@@ -4426,3 +4426,17 @@ source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
 fast fault/eviction/cancellation recovery and complete VM journal admission
 remain open, as do browser/runtime/Tor and full release acceptance. See
 wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.
+
+## Mapping lineage source integration (2026-10-26)
+
+Fresh mapping constructors now issue checked nonzero lineage IDs, included in
+pager binding validation with existing owner/root identity. A real same-file
+unmap/remap fixture and isolated Linux mutation control are added. This source
+is NOT qualified yet: four Python parser checks pass; Rust and guest checks
+await hosted CI because Windows now blocks clippy-driver and dependency build
+scripts (4551). No policy bypass or repeated blocked invocation is attempted.
+Initial fixture failures before worker release are retained without claiming
+a reproduced stale fault. Current negative control must show precise acceptance
+with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
+work lifetime and full VM journal integration remain open. See
+wovenweb-mapping-generations.md and its evidence JSON.

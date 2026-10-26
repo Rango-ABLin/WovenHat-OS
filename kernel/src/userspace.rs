@@ -4515,8 +4515,11 @@ fn release_mapping_swap_slots(mapping: AnonymousMapping) {
         let _ = crate::swap::release_page(slot);
     }
 }
+static MAPPING_LIFETIMES: crate::vm_generation::Issuer = crate::vm_generation::Issuer::new();
+
 #[derive(Clone, Copy)]
 pub struct AnonymousMapping {
+    lifetime: core::num::NonZeroU64,
     pub address: u64,
     pub size: usize,
     pub writable: bool,
@@ -4527,11 +4530,11 @@ pub struct AnonymousMapping {
 }
 
 impl AnonymousMapping {
-    /// Binding identity excludes mutable per-page residency/dirty/swap state.
-    /// This is not a mapping-generation token: same-file remap ABA still needs
-    /// the pending production VM journal integration.
+    /// Lifetime lineage plus immutable file binding; owner/root are checked
+    /// by the caller. This tag does not reserve or pin an active mapping.
     pub(crate) fn same_file_binding(&self, other: &Self) -> bool {
         self.lazy.is_some()
+            && self.lifetime == other.lifetime
             && self.address == other.address
             && self.size == other.size
             && self.writable == other.writable
@@ -4578,6 +4581,9 @@ impl AnonymousMapping {
 
 #[cfg(feature = "wovenweb-vm-test")]
 impl AnonymousMapping {
+    pub(crate) fn lifetime_id(&self) -> u64 {
+        self.lifetime.get()
+    }
     pub(crate) fn file_resident_pages(&self) -> u32 {
         if self.lazy.is_some() {
             self.resident.count_ones()
@@ -5552,6 +5558,7 @@ pub fn map_anonymous(
     let address = address_space
         .mmap_base
         .checked_add((slot as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+    let lifetime = MAPPING_LIFETIMES.issue()?;
     if paging::map_user_range_in(address_space.paging, address, size, writable, false).is_err() {
         return None;
     }
@@ -5560,6 +5567,7 @@ pub fn map_anonymous(
         return None;
     }
     Some(AnonymousMapping {
+        lifetime,
         address,
         size,
         writable,
@@ -5674,8 +5682,10 @@ pub fn map_file_lazy(
         return None;
     }
     let generation = crate::vfs::file_generation(file).ok()?;
+    let lifetime = MAPPING_LIFETIMES.issue()?;
     let file = crate::vfs::clone_open_file(file).ok()?;
     Some(AnonymousMapping {
+        lifetime,
         address,
         size,
         writable,
