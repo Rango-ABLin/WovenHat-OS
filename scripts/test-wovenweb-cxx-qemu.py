@@ -28,7 +28,9 @@ def main():
     parser.add_argument("--image", type=Path)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
+    NETWORK.add_firmware_arguments(parser)
     args = parser.parse_args()
+    qemu, firmware = NETWORK.resolve_firmware(args)
     root = Path(__file__).resolve().parents[1]
     out = root / "audit-artifacts" / f"wovenweb-cxx-{time.time_ns()}-{args.cpus}cpu"
     out.mkdir(parents=True)
@@ -54,17 +56,16 @@ def main():
         image = NETWORK.build_image(root, env, "wovenweb-cxx-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")
-    sources = ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
+    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
     provenance = {"image_sha256": sha(image), "source_sha256": {file: sha(root / file) for file in sources}}
     provenance["compiler"] = compiler
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
     (out / "image.txt").write_text(str(image.resolve()))
-    qemu = Path(args.qemu)
-    firmware = qemu.parent / "share/edk2-x86_64-code.fd"
+    pflash = NETWORK.firmware_drives(firmware, args.firmware_vars, out)
     serial = out / "serial.log"
     command = [str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "256M", "-smp", str(args.cpus),
                "-display", "none", "-serial", f"file:{serial}", "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-               "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
+               *pflash,
                "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}", "-device", "virtio-blk-pci,drive=boot,bootindex=1"]
     with (out / "qemu.log").open("w") as log:
         result = subprocess.run(command, cwd=root, stdout=log, stderr=log, timeout=args.timeout,

@@ -4440,3 +4440,15 @@ a reproduced stale fault. Current negative control must show precise acceptance
 with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
 work lifetime and full VM journal integration remain open. See
 wovenweb-mapping-generations.md and its evidence JSON.
+
+## Focused mapping generation qualification (2026-10-26)
+
+5a710a1f hosted positive remap/cleanup checks pass on 1/2/4 CPUs. The isolated
+negative control reproduces exit0/resident1 with only the tag comparison removed;
+production gives -11/resident0 with exact cleanup. Four issuer tests, SDK179+3,
+queue7, handoff6 and their lints pass. Artifacts are archived; hosted source
+hashes match canonical Git LF blobs (local CRLF differences are documented).
+This qualifies the lineage boundary only. CodeQL summary is currently neutral.
+Linux portable heap/network/C++ and legacy GUI matrices plus selected lints
+are added pending qualification because Windows builds remain policy-blocked.
+Fourteen local Python checks pass. See mapping generation docs/evidence.

@@ -146,13 +146,39 @@ def build_image(root, env, feature, log):
     return image_from_cargo(output)
 
 
+def add_firmware_arguments(parser):
+    parser.add_argument("--firmware", type=Path, help="explicit OVMF CODE image")
+    parser.add_argument("--firmware-vars", type=Path, help="OVMF VARS template copied per run")
+
+
+def resolve_firmware(args):
+    qemu = Path(args.qemu)
+    firmware = args.firmware or qemu.parent / "share/edk2-x86_64-code.fd"
+    if not qemu.is_file() or not firmware.is_file():
+        raise FileNotFoundError("QEMU/OVMF CODE missing; supply --qemu and --firmware")
+    if args.firmware_vars is not None and not args.firmware_vars.is_file():
+        raise FileNotFoundError("OVMF VARS template is missing")
+    return qemu, firmware
+
+
+def firmware_drives(firmware, template, output):
+    drives = ["-drive", f"if=pflash,format=raw,readonly=on,file={firmware}"]
+    if template is not None:
+        copy = output / "OVMF_VARS.fd"
+        shutil.copyfile(template, copy)
+        drives += ["-drive", f"if=pflash,unit=1,format=raw,file={copy}"]
+    return drives
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--image", type=Path, help="reuse an already built probe boot image")
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
+    add_firmware_arguments(parser)
     args = parser.parse_args()
+    qemu, firmware = resolve_firmware(args)
     root = Path(__file__).resolve().parents[1]
     out = root / "audit-artifacts" / f"wovenweb-network-{time.time_ns()}-{args.cpus}cpu"
     out.mkdir(parents=True)
@@ -178,11 +204,10 @@ def main():
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 value.update(block)
         return value.hexdigest()
-    sources = ["libwoven/src/net.rs", "libwoven/src/socks5.rs", "kernel/src/wovenweb_net_gate.rs", "tools/wovenweb-net-probe/src/main.rs"]
+    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/net.rs", "libwoven/src/socks5.rs", "kernel/src/wovenweb_net_gate.rs", "tools/wovenweb-net-probe/src/main.rs"]
     provenance = {"image_sha256": digest(image), "source_sha256": {name: digest(root / name) for name in sources}}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
-    qemu = Path(args.qemu)
-    firmware = qemu.parent / "share/edk2-x86_64-code.fd"
+    pflash = firmware_drives(firmware, args.firmware_vars, out)
     serial = out / "serial.log"
     capture = out / "network.pcap"
     errors, events = [], []
@@ -194,7 +219,7 @@ def main():
     server.start()
     command = [str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "256M", "-smp", str(args.cpus),
                "-display", "none", "-serial", f"file:{serial}", "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-               "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
+               *pflash,
                "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}", "-device", "virtio-blk-pci,drive=boot,bootindex=1",
                "-device", "virtio-net-pci,netdev=net0,disable-modern=on", "-netdev", "user,id=net0",
                "-object", f"filter-dump,id=webcapture,netdev=net0,file={capture}"]

@@ -57,7 +57,7 @@ def main():
         image = NETWORK.build_image(root, env, "wovenweb-vm-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")
-    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/pager_queue.rs", "kernel/src/vm_handoff.rs", "kernel/src/main.rs", "kernel/Cargo.toml", "tools/wovenweb-net-probe/src/main.rs"]
+    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/pager_queue.rs", "kernel/src/vm_handoff.rs", "kernel/src/vm_generation.rs", "kernel/src/main.rs", "kernel/Cargo.toml", "tools/wovenweb-net-probe/src/main.rs"]
     provenance = {"image_sha256": sha(image), "source_sha256": {file: sha(root / file) for file in sources}}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
     (out / "image.txt").write_text(str(image.resolve()))

@@ -12,6 +12,9 @@ on:
       - 'kernel/src/userspace.rs'
       - 'scripts/test-wovenweb-vm-qemu.py'
       - 'scripts/test-wovenweb-network-qemu.py'
+      - 'scripts/test-wovenweb-memory-qemu.py'
+      - 'scripts/test-wovenweb-cxx-qemu.py'
+      - 'tests/test_wovenweb_firmware.py'
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
@@ -33,6 +36,9 @@ on:
       - 'kernel/src/userspace.rs'
       - 'scripts/test-wovenweb-vm-qemu.py'
       - 'scripts/test-wovenweb-network-qemu.py'
+      - 'scripts/test-wovenweb-memory-qemu.py'
+      - 'scripts/test-wovenweb-cxx-qemu.py'
+      - 'tests/test_wovenweb_firmware.py'
       - 'kernel/src/pager_queue.rs'
       - 'kernel/src/task.rs'
       - 'tests/pager_queue.rs'
@@ -74,7 +80,7 @@ jobs:
           set -euo pipefail
           cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
       - name: Negative-control evidence parser checks
-        run: python3 -m unittest discover -s tests -p test_wovenweb_generation_baseline.py
+        run: python3 -m unittest discover -s tests -p 'test_wovenweb_*.py'
       - name: Pager queue and physical handoff ownership checks
         shell: bash
         run: |
@@ -141,3 +147,51 @@ jobs:
         with:
           name: wovenweb-generation-negative
           path: audit-artifacts/wovenweb-generation-negative-*/
+
+  native-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    env:
+      WOVENWEB_CLANG: /usr/bin/clang
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest and C++ compiler dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang
+      - name: Heap, networking, C++ ABI and legacy GUI regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=/usr/share/OVMF/OVMF_CODE_4M.fd
+          vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          for fixture in memory network cxx; do
+            python3 "scripts/test-wovenweb-${fixture}-qemu.py" --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+          done
+          python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.2 --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+          export WOVENHAT_WEB_NET_PROBE_IMAGE="$PWD/tools/wovenweb-net-probe/target/x86_64-unknown-none/release/wovenweb-net-probe"
+          export WOVENHAT_WEB_CXX_PROBE_IMAGE="$PWD/tools/wovenweb-cxx-probe/target/x86_64-unknown-none/release/wovenweb-cxx-probe"
+          export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --locked -- -D warnings
+          for feature in wovenweb-memory-test wovenweb-net-test wovenweb-cxx-test stage19-2-test; do
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" --locked -- -D warnings
+          done
+          for probe in wovenweb-net-probe wovenweb-cxx-probe; do
+            (cd "tools/$probe" && env -u CARGO_BUILD_BUILD_DIR CARGO_TARGET_DIR="$PWD/target" cargo clippy --release --locked -- -D warnings)
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-native-${{ matrix.cpus }}cpu
+          path: |
+            audit-artifacts/wovenweb-memory-*/
+            audit-artifacts/wovenweb-network-*/
+            audit-artifacts/wovenweb-cxx-*/
+            target/hello-gui-compositor-*/

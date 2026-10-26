@@ -1,4 +1,4 @@
-# Mapping-lifetime lineage tags (qualification pending)
+# Mapping-lifetime lineage tags
 
 Fresh anonymous and lazy-file constructors issue a checked NonZeroU64 lineage
 tag from one boot-wide atomic authority. The tag is obtained before the leaf
@@ -34,10 +34,12 @@ checkout is hashed before/after and never mutated. Source mutation and serial lo
 are retained. This is a counterfactual guard test, not a byte-identical old build.
 
 Four Rust issuer tests cover sequential allocation, 4096 IDs across eight host
-threads, sticky exhaustion and racing exhaustion. These await hosted execution.
-Four Python checks of the negative-evidence parser pass locally; syntax and diff
-checks pass. Native generation qualification and its negative control are still
-pending. Earlier three-file fixture runs failed before releasing the worker; their
+threads, sticky exhaustion and racing exhaustion. All four pass on hosted Linux.
+Four negative-evidence parser checks pass locally; the expanded packet/parser/
+firmware set has 14 passing checks. Syntax and diff checks pass. Hosted qualification passed on 5a710a1f: positive 1/2/4-CPU remap cases return
+-11 with zero replacement residents. The isolated comparison mutation admits
+the stale request (exit 0, one resident). Archived mutation/primary source hashes
+confirm isolation. Earlier three-file fixture runs failed before releasing the worker; their
 cause was not established and they are not evidence of stale-work acceptance.
 
 Windows Application Control now blocks clippy-driver.exe and dependency build
@@ -46,3 +48,11 @@ compilation/guest qualification is delegated to Linux CI, not claimed locally.
 Full journal/owner retirement, active-work lifetime, fork/exec/unmap/cancellation,
 thread-stack/wake/migration and larger capacity remain open. Native browser,
 libc/C++ runtime, LibCore, dependencies/TLS, engine, UI, Tor and VPN are unfinished.
+
+Hosted SDK/ownership checks also passed 179 SDK units, three compile-fail checks,
+seven queue tests, six handoff tests and warning-denying lints. New Linux
+1/2/4-CPU heap/network/C++/legacy-GUI regressions and selected runtime lints
+await qualification. CODE is read-only; each run writes a private VARS copy.
+Hosted source hashes match canonical Git LF blobs; Windows working-tree CRLF
+is not treated as a source difference. Artifact byte hashes remain unchanged.
+The current CodeQL summary is neutral, not a completed clean scan.

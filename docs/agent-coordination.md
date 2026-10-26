@@ -6580,3 +6580,24 @@ renamed AtomicU64::fetch_update to try_update. Verified the pinned core source
 signature and changed only that call name. No warning suppression or weakened
 assertions. SDK179+3 passed before kernel compilation stopped; generation tests
 and remap proof remain pending. Negative gate correctly refused a build failure.
+
+While generation CI runs, porting the existing native heap/network/C++ harnesses
+to explicit OVMF CODE/VARS options with per-run private VARS copies. Windows
+policy stays intact; local Python packet/parser/firmware checks pass (14). Add
+a Linux 1/2/4 matrix for these fixtures, existing Stage19.2 GUI and selected
+warning-denying lints with real fixture images. Existing broader Stage20 pixel
+assertions remain unchanged; this does not reclassify those failures as passed.
+Negative generation mutation control on 5a710a1f has now succeeded; collect all
+positive guest/issuer results before promoting source status.
+
+## Focused mapping generation qualification (2026-10-26)
+
+5a710a1f hosted positive remap/cleanup checks pass on 1/2/4 CPUs. The isolated
+negative control reproduces exit0/resident1 with only the tag comparison removed;
+production gives -11/resident0 with exact cleanup. Four issuer tests, SDK179+3,
+queue7, handoff6 and their lints pass. Artifacts are archived; hosted source
+hashes match canonical Git LF blobs (local CRLF differences are documented).
+This qualifies the lineage boundary only. CodeQL summary is currently neutral.
+Linux portable heap/network/C++ and legacy GUI matrices plus selected lints
+are added pending qualification because Windows builds remain policy-blocked.
+Fourteen local Python checks pass. See mapping generation docs/evidence.
