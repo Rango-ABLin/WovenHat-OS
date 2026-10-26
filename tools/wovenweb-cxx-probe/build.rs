@@ -4,7 +4,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WOVENWEB_CLANG");
     let compiler = env::var_os("WOVENWEB_CLANG").expect("set WOVENWEB_CLANG to a Clang executable");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
-    for name in ["fixture", "dispatch"] {
+    for name in ["fixture", "dispatch", "tls"] {
         let source = format!("src/{name}.cpp");
         println!("cargo:rerun-if-changed={source}");
         let object = out.join(format!("{name}.o"));
@@ -22,6 +22,7 @@ fn main() {
                 "-fno-pic",
                 "-fno-pie",
                 "-fno-lto",
+                "-ftls-model=local-exec",
                 "-mcmodel=large",
                 "-mno-red-zone",
                 "-fno-stack-protector",

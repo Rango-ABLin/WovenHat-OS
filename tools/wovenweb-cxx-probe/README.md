@@ -35,3 +35,11 @@ Guard shims are private to a single-thread no-exceptions fixture. No general
 new/delete ABI, libc++, exception unwinding, RTTI, multithreaded static guards,
 TLS, floating-point ABI, global constructor/destructor arrays or Ladybird engine
 is qualified here. Production VM transactions remain a separate prerequisite.
+
+Static TLS source experiment: the new PT_TLS/local-exec fixture checks initialized
+and zero storage, alignment, two sibling templates/addresses, values across
+yields and main-task FS restoration after joins. It awaits hosted qualification;
+the earlier pass does not qualify these additions. The guarded static/object
+fixture remains single-threaded. Dynamic TLS and TLS destructors remain open.
+Explicit --firmware/--firmware-vars now support Linux and use private VARS copies.
+See ../../docs/wovenweb-cxx-static-tls.md.

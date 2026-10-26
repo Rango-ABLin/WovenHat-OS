@@ -8,6 +8,10 @@ use libwoven::Args;
 libwoven::entry!(main);
 unsafe extern "C" {
     fn woven_cxx_run() -> u64;
+    fn woven_tls_word() -> u64;
+    fn woven_tls_zero() -> u64;
+    fn woven_tls_store(first: u64, second: u64);
+    fn woven_tls_address() -> u64;
 }
 
 #[repr(C)]
@@ -99,7 +103,97 @@ pub unsafe extern "C" fn __cxa_guard_abort(pointer: *mut AtomicU64) {
     // SAFETY: same guard contract as acquire; allow a subsequent initialization.
     unsafe { &*pointer }.store(0, Ordering::Release);
 }
+const TLS_INITIAL: u64 = 0x1122_3344_5566_7788;
+static TLS_READY: AtomicU64 = AtomicU64::new(0);
+static TLS_ADDRESSES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+libwoven::thread_entry!(tls_first_entry, tls_first);
+libwoven::thread_entry!(tls_second_entry, tls_second);
+extern "C" fn tls_first() -> ! {
+    tls_worker(0)
+}
+extern "C" fn tls_second() -> ! {
+    tls_worker(1)
+}
+fn tls_state() -> (u64, u64, u64) {
+    // SAFETY: the kernel initializes this ELF's static PT_TLS block for every
+    // executing native task, and these C++ accessors touch only its own block.
+    unsafe { (woven_tls_word(), woven_tls_zero(), woven_tls_address()) }
+}
+fn store_tls(first: u64, second: u64) {
+    // SAFETY: same thread-private static TLS contract, with integer payloads.
+    unsafe {
+        woven_tls_store(first, second);
+    }
+}
+fn exit_tls_thread(status: i32) -> ! {
+    // SAFETY: called only by native sibling bodies terminating themselves.
+    unsafe { libwoven::syscall::thread_exit(status) }
+}
+fn tls_worker(index: usize) -> ! {
+    let (initial, zero, address) = tls_state();
+    if initial != TLS_INITIAL || zero != 0 {
+        exit_tls_thread(61);
+    }
+    let first = 0xaabb_0000 + index as u64;
+    let second = 0xccdd_0000 + index as u64;
+    store_tls(first, second);
+    TLS_ADDRESSES[index].store(address, Ordering::Release);
+    TLS_READY.fetch_add(1, Ordering::AcqRel);
+    while TLS_READY.load(Ordering::Acquire) != 2 {
+        libwoven::yield_now();
+    }
+    for _ in 0..64 {
+        libwoven::yield_now();
+        if tls_state() != (first, second, address) {
+            exit_tls_thread(62);
+        }
+    }
+    exit_tls_thread(0)
+}
+fn check_static_tls() -> bool {
+    let (initial, zero, main_address) = tls_state();
+    if initial != TLS_INITIAL || zero != 0 {
+        return false;
+    }
+    store_tls(0x1234, 0x5678);
+    let mut threads = [0; 2];
+    for (slot, entry) in threads.iter_mut().zip([
+        tls_first_entry as *const () as u64,
+        tls_second_entry as *const () as u64,
+    ]) {
+        // SAFETY: raw trampolines establish C frame alignment; stack is bounded.
+        *slot = unsafe { libwoven::syscall::thread_create(entry, 16384) };
+        if *slot == 0 || *slot >= libwoven::syscall::WOULD_BLOCK {
+            return false;
+        }
+    }
+    for id in threads {
+        // SAFETY: owned generation-tagged handles returned by thread_create.
+        if unsafe { libwoven::syscall::thread_join(libwoven::thread::Id(id)) }
+            != libwoven::thread::Join::Exited(0)
+        {
+            return false;
+        }
+    }
+    let first = TLS_ADDRESSES[0].load(Ordering::Acquire);
+    let second = TLS_ADDRESSES[1].load(Ordering::Acquire);
+    let main_intact = tls_state() == (0x1234, 0x5678, main_address);
+    main_intact
+        && first != 0
+        && second != 0
+        && first != second
+        && first != main_address
+        && second != main_address
+        && (first | second | main_address) & 63 == 0
+}
 fn main(_: Args) -> ! {
+    if !check_static_tls() {
+        libwoven::exit(60);
+    }
+    let _ = libwoven::write(
+        1,
+        b"[WOVENWEB-CXX] static TLS template + zeroing + 2-thread isolation + FS restore: PASSED\n",
+    );
     let before = libwoven::heap::runtime_stats();
     // SAFETY: linked header-free C++ fixture obeys the SysV ABI and owns all of
     // its objects. It returns after deleting every dynamically allocated object.

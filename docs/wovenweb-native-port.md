@@ -206,3 +206,16 @@ This qualifies the lineage boundary only. CodeQL summary is currently neutral.
 Linux portable heap/network/C++ and legacy GUI matrices plus selected lints
 are added pending qualification because Windows builds remain policy-blocked.
 Fourteen local Python checks pass. See mapping generation docs/evidence.
+
+## Linux runtime baseline and static TLS experiment (2026-10-26)
+
+58938b7e Linux heap/network/C++/legacy Stage19.2 GUI matrices and default/selected
+kernel plus probe lints pass on 1/2/4 CPUs. SDK/pager/generation mutation gates
+and PR CodeQL succeed (no new alerts, zero annotations). Artifacts match Git LF
+blobs; compiler/serial/image evidence is archived in wovenweb-linux-native-evidence.json.
+Next, the controlled C++ fixture adds PT_TLS/local-exec initialized/zero words,
+64-byte alignment, two sibling templates/isolated values across yields, and
+main FS restoration. All prior C++/cleanup assertions remain. This extension is
+UNQUALIFIED pending hosted compilation/guest checks; fourteen local Python
+checks pass only. Console-only authority, ABI and VM limits remain unchanged.
+See wovenweb-cxx-static-tls.md; general runtime and browser/Tor work stay open.
