@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 32.9 GDB debug serial port QEMU gate - 2026-10-27 — ACCEPTED
+
+COM2 (0x2F8) dedicated transport for the GDB Remote Serial Protocol stub.
+`gdb-serial = []` production feature; `stage32-9-test = ["qemu-test",
+"gdb-serial", "gdb-stub"]` QEMU gate. New module `kernel/src/gdb_serial.rs`:
+- `init()` — initialize COM2 at 115 200 baud, 8N1, FIFO enabled.
+- `write_bytes(bytes)` — poll-until-THR-empty then write each byte; gives up
+  after `POLL_LIMIT`=4096 polls per byte so a wedged port cannot stall the kernel.
+- `read_byte() -> Option<u8>` — non-blocking; polls LSR up to `POLL_LIMIT`
+  times and returns `None` when no data arrives within the limit.
+- `self_test()` — enables UART loopback mode (MCR bit 4), sends `b"W"` and
+  verifies the round-trip byte, then encodes a GDB RSP `?` packet via
+  `gdb_stub::encode`, writes it through COM2, reads each byte back through the
+  loopback FIFO, decodes with `gdb_stub::decode`, and confirms data == `b"?"`.
+  Restores MCR to normal operating mode on all return paths.
+`serial::inb` and `serial::outb` promoted to `pub(crate)` so gdb_serial.rs
+can reuse the existing I/O-port primitives without duplication.
+Test harness passes `-serial null` for COM2 so QEMU instantiates a second
+16550 register block (required for loopback; default q35 only creates COM1).
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-9-gdb-serial-{1,2,4}cpu/serial.log`.
+Next: Stage 32.10 — GDB register context and command dispatch (`?`/`g`/`m`).
+
 ## Stage 32.8 GDB RSP packet framing QEMU gate - 2026-10-27 — ACCEPTED
 
 Wire-level GDB Remote Serial Protocol packet framing: pure functions over byte

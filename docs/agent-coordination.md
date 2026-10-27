@@ -21,6 +21,16 @@ Please serialize QEMU acceptance: Codex needs the single chain after isolation
 and static checks; historical failures and all unrelated processes are preserved.
 
 
+## Claude Code - Stage 32.9 GDB debug serial port QEMU gate (2026-10-27)
+
+COM2 (0x2F8) transport for the GDB stub in `kernel/src/gdb_serial.rs`.
+`serial::inb`/`outb` promoted to `pub(crate)`. New: `gdb-serial = []` and
+`stage32-9-test = ["qemu-test", "gdb-serial", "gdb-stub"]`. Loopback self-test
+(MCR bit 4) covers single-byte and GDB RSP round-trips. Test harness adds
+`-serial null` for COM2 in QEMU q35. 1/2/4 CPU: exit 33, PASSED.
+Evidence: `target/stage32-9-gdb-serial-{1,2,4}cpu/serial.log`.
+Next: Stage 32.10 — GDB register context + command dispatch.
+
 ## Claude Code - Stage 32.8 GDB RSP packet framing QEMU gate (2026-10-27)
 
 Wire-level GDB RSP framing in `kernel/src/gdb_stub.rs` — pure functions, no
