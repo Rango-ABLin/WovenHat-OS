@@ -2160,3 +2160,31 @@ fn check_refuses_two_directory_entries_naming_the_same_inode() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `read_file` must succeed for an empty file created by `create`.
+///
+/// `stage_create` initialises the inode with `Inode::empty()`, leaving
+/// `data_checksum = 0`.  The FNV-1a hash of an empty slice is
+/// `0xcbf29ce484222325`, not 0, so checking `fnv1a(&out[..0]) !=
+/// data_checksum` unconditionally would reject every freshly-created empty
+/// file — before any write has ever touched it.  `check()` already documents
+/// and skips the checksum for `size == 0`; `read_file` must do the same.
+#[test]
+fn read_file_succeeds_for_an_empty_file() {
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.create(1, "empty.txt", 0o644, 1).expect("create")
+    };
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let mut buf = [0u8; wfs::MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(inode, &mut buf),
+        Ok(0),
+        "read_file must return Ok(0) for a freshly-created empty file"
+    );
+    // check() must also pass: a freshly-created empty file is structurally
+    // consistent — it has no blocks, so no block or checksum checks apply.
+    assert_eq!(volume.check(), Ok(()), "empty file must not make check() fail");
+}

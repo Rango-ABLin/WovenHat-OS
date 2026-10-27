@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS: read_file() spuriously rejects empty files
+
+Branch: `auto/wovenhat-development` (base `4929ee81`). Working tree was clean.
+
+### Defect
+
+`stage_create` initialises a new empty file inode with `Inode::empty()`, which
+leaves `data_checksum = 0`.  `read_file` computed `fnv1a(&out[..size])` for the
+checksum comparison unconditionally, including when `size == 0`.  The FNV-1a
+hash of an empty byte slice is the seed value `0xcbf29ce484222325`, not 0, so
+every freshly-created empty file (before any `write_file` call) would fail the
+comparison `fnv1a(&out[..0]) != 0` and return `Err(Corrupt)`.
+
+`check()` already documents and correctly skips the checksum for `size == 0`
+files, noting that `stage_create` uses a zeroed checksum field by design.
+`read_file` diverged from this invariant.
+
+This is a runtime defect, not a test-only gap: any caller that created an empty
+file with `create()` and then read it back before writing would receive a
+spurious Corrupt error.  `mount_ata_into_vfs` silently skips files that fail
+`read_file`, so empty WovenFS files would be silently dropped during import.
+
+### Change
+
+- `kernel/src/wfs.rs` `read_file()`: added `size > 0 &&` guard before the
+  FNV-1a checksum comparison, matching `check()`'s documented behaviour.  A
+  three-line comment explains the invariant.
+
+- `tests/wovenfs_crash.rs`: added `read_file_succeeds_for_an_empty_file`.
+  Creates an empty file with `create()`, reads it back with `read_file()`, and
+  asserts `Ok(0)`.  Also asserts `check()` passes on the same volume.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **44 passed / 0 failed** (was 43; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse two directory entries naming the same inode
 
 Branch: `auto/wovenhat-development` (base `81b70ce4`). Working tree was clean.

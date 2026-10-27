@@ -1236,7 +1236,10 @@ impl<D: BlockDevice> Volume<D> {
             out[copied..copied + take].copy_from_slice(&sector[..take]);
             copied += take;
         }
-        if fnv1a(&out[..size]) != node.data_checksum {
+        // An empty file is created by `stage_create` with `data_checksum = 0`,
+        // not the FNV-1a initial value; the checksum has no meaning until the
+        // first write. `check()` documents and respects the same invariant.
+        if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
             return Err(Error::Corrupt);
         }
         Ok(size)
