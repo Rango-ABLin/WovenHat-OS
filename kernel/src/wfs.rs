@@ -1375,6 +1375,13 @@ impl<D: BlockDevice> Volume<D> {
             if entry.name[..name_len].contains(&b'/') {
                 return Err(Error::Corrupt);
             }
+            // `checked_native_name` also rejects backslash ('\\').  An entry
+            // whose name bytes include '\\' can never be reached by lookup or
+            // unlink for the same reason, making it permanently orphaned
+            // corruption.
+            if entry.name[..name_len].contains(&b'\\') {
+                return Err(Error::Corrupt);
+            }
         }
         Ok(())
     }
