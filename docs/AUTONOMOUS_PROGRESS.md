@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with zero first direct block
+
+Branch: `auto/wovenhat-development` (base `04f7e9d1`). Working tree was clean.
+
+### Defect
+
+`format()` always sets `root.direct[0]` to the directory data block and zeroes
+`direct[1..DIRECT_BLOCKS]` via `Inode::empty()`.  No runtime path (`stage_create`,
+`stage_unlink`) ever modifies a directory inode's `direct` array.  Two invariants
+therefore hold for every valid root directory inode:
+
+1. `direct[0] != 0` — there is always exactly one directory data block.
+2. `direct[1..DIRECT_BLOCKS]` are all 0 — no extra blocks beyond the first.
+
+`check()` verified the root's `size`, `links` and `data_checksum` fields (added in
+the previous series) but never checked its `direct` pointers.  If `direct[0] == 0`,
+`dir_entries` silently skips every slot and returns an empty `DirectoryView`; the
+orphan check at the end of `check()` would then flag every live file inode as having
+no directory entry, but only if the root_block is still in the bitmap.  An image
+where `direct[0]` was zeroed AND the bitmap bit for root_block was also cleared would
+pass the bitmap orphan scan and then call `dir_entries` on an inode with no blocks,
+returning an empty view and hiding all orphaned file inodes.  A non-zero `direct[1]`
+is an extra block the runtime never allocates for a directory; `dir_entries` would
+read it as a second directory data page.
+
+Neither condition is surfaced by any earlier check in `check()`.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the existing `root.size != SECTOR_SIZE` guard,
+  added a `root.direct[0] == 0` guard and a `for slot in 1..DIRECT_BLOCKS` guard,
+  each returning `Err(Error::Corrupt)`.  An eleven-line comment explains the
+  `format()` invariant and why `dir_entries` cannot surface either inconsistency.
+
+- `tests/wovenfs_crash.rs`: added two helper functions:
+  - `read_inode_direct0` — reads the `direct[0]` field from an on-disk inode without
+    mounting a Volume.
+  - `clear_bitmap_block` — clears a bitmap bit directly in the image, allowing tests
+    to suppress the bitmap orphan scan so a downstream guard becomes the first error.
+  
+  Added test `check_refuses_root_directory_inode_with_zero_first_direct_block`:
+  formats a volume, reads `root_block` from inode 1's `direct[0]`, forks the image,
+  clears the bitmap bit for `root_block` (so the orphan-block scan does not fire
+  first), patches `direct[0]` to 0 via `reseal_inode_direct`, and asserts `check()`
+  returns `Err(Corrupt)`.  Also asserts `check()` does not modify the image, and
+  the unpatched volume passes.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **50 passed / 0 failed** (was 49; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The `direct[1..] != 0` guard is present in `check()` as defense-in-depth but has
+  no standalone test: in all normal scenarios the per-inode block range/bitmap check
+  in the first loop of `check()` catches it before the root section runs.  A test
+  would require manually setting a bitmap bit for an otherwise-free block.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Only the root directory is checked; the root's `direct` block count is now
+  verified, but the exact content of the directory data block (beyond what
+  `dir_entries` already validates via the entry-level checks) is not independently
+  hashed.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong size
 
 Branch: `auto/wovenhat-development` (base `64395463`). Working tree was clean.

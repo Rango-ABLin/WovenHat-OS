@@ -1343,6 +1343,33 @@ fn reseal_inode_links(image: &CrashDisk, inode: u64, links: u32) {
     raw[120..128].copy_from_slice(&checksum.to_le_bytes());
 }
 
+/// Read `direct[0]` from an on-disk inode.
+fn read_inode_direct0(image: &CrashDisk, inode: u64) -> u64 {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let sectors = image.image.borrow();
+    u64::from_le_bytes(sectors[lba][offset + 40..offset + 48].try_into().unwrap())
+}
+
+/// Clear the bitmap bit for `block` directly in the image, without updating
+/// any inode or checksum.  Use this to suppress the orphan-block scan so a
+/// specific downstream check in `check()` becomes the first error path.
+fn clear_bitmap_block(image: &CrashDisk, block: u64) {
+    let bitmap_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().bitmap_start
+    };
+    let bits_per_sector = SECTOR_SIZE * 8;
+    let lba = (bitmap_start + block / bits_per_sector as u64) as usize;
+    let within = (block % bits_per_sector as u64) as usize;
+    image.image.borrow_mut()[lba][within / 8] &= !(1u8 << (within % 8));
+}
+
 #[test]
 fn unlink_refuses_a_file_whose_link_count_is_not_one() {
     let (base, _, _) = two_file_root();
@@ -2420,6 +2447,44 @@ fn check_refuses_root_directory_inode_with_wrong_size() {
             "check() must not modify the image"
         );
     }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+/// `check()` must refuse the root directory inode when `direct[0]` is zero
+/// (no directory data block).
+///
+/// `format()` always sets `root.direct[0]` to the directory data block and
+/// zeroes `direct[1..]` via `Inode::empty()`.  No runtime path ever modifies
+/// a directory inode's `direct` array.  A zero `direct[0]` means the directory
+/// has no data block: `dir_entries` skips the slot and returns an empty view,
+/// hiding every orphaned file inode.  Any such state is corruption the runtime
+/// cannot have produced.
+///
+/// The bitmap bit for the original `root_block` is cleared before the check so
+/// that the orphan-block bitmap scan does not fire before the `direct[0]` guard
+/// in `check()`'s root section, letting the test prove that guard specifically.
+#[test]
+fn check_refuses_root_directory_inode_with_zero_first_direct_block() {
+    let base = formatted();
+    let root_block = read_inode_direct0(&base, 1);
+
+    let corrupt = base.fork(None);
+    // Clear the bitmap bit so the orphan-block scan does not fire first.
+    clear_bitmap_block(&corrupt, root_block);
+    // Patch direct[0] to 0.
+    reseal_inode_direct(&corrupt, 1, 0, 0);
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse root directory inode with direct[0] == 0"
+    );
+    assert!(corrupt.sectors() == before, "check() must not modify the image");
 
     // Control: the unpatched volume passes check().
     let mut clean = Volume::mount(base).expect("mount clean");

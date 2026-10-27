@@ -1448,6 +1448,22 @@ impl<D: BlockDevice> Volume<D> {
         if root.size != SECTOR_SIZE as u64 {
             return Err(Error::Corrupt);
         }
+        // `format()` sets `root.direct[0]` to the directory data block and
+        // zeroes `direct[1..DIRECT_BLOCKS]` via `Inode::empty()`.  No runtime
+        // path ever modifies a directory inode's `direct` array.  A missing
+        // first block (`direct[0] == 0`) means `dir_entries` silently skips
+        // every slot and returns an empty view, hiding all orphaned file inodes.
+        // Any non-zero slot beyond index 0 is an extra block the runtime never
+        // allocates for a directory and that `dir_entries` would read as a
+        // second directory data block.
+        if root.direct[0] == 0 {
+            return Err(Error::Corrupt);
+        }
+        for slot in 1..DIRECT_BLOCKS {
+            if root.direct[slot] != 0 {
+                return Err(Error::Corrupt);
+            }
+        }
         let view = self.dir_entries(&txn, &root)?;
         for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
             if entry.inode > u64::from(sb.inode_count) {
