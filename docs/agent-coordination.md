@@ -6859,3 +6859,4 @@ Final-source sweep interrupted after Stage20.6 failed on 1/4 CPUs; task-owned pr
 
 Stronger completed-frame Stage20.6 PASS 1/2/4 CPUs; affected/default/lower-stage feature lints, host Clippy and tests PASS. Continuing final matrix with 36 unaffected passing runs from a84ae4eb; exclude every old20.6 result. Reuse requires byte-for-byte equality outside the Stage20.6 fixture and the explicit between_frames cfg extension, plus identical hashes for all other tracked build inputs. All remaining 51 cases run on the corrected source; evidence retains source revisions and prior failures.
 
+Final software graphics acceptance CLOSED: 87/87 matrix cases and strict clean-source GFX-07 9/9 PASS at cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7. All static/host requirements pass; native/accelerated certification remains separate. Closure docs updated with source reuse proof and preserved failures. User explicitly authorized normal master push; verifying remote before publishing.

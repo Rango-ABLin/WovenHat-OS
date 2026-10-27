@@ -6,6 +6,12 @@ Branch: `master`
 
 ## Latest accepted graphics gate
 
+Software desktop repair accepted and closed on 2026-10-27 at `cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`:
+87/87 required cases plus strict clean-source GFX-07 9/9, all on 1/2/4 CPUs.
+See [desktop acceptance](desktop-acceptance-2026-10-27.md). Earlier pixel defects
+and the close-time repaint race are resolved with preserved failure evidence.
+This adds no native hardware, GPU acceleration or GFX-08 certification claim.
+
 Graphics roadmap Stage 09 (compositor and composition scheduler) passed on
 1/2/4 CPUs with QEMU exit 33. The accepted evidence covers damage-only
 composition, overlap and z-order, raise/focus, input routing, lease cleanup,
@@ -123,8 +129,7 @@ stale palette/start-mode fixtures were repaired.
 
 ## Immediate implementation queue
 
-The next eligible work is to close the current graphics acceptance defect with
-an evidence-preserving renderer/oracle fix, then add the smallest missing
+The software desktop acceptance repair is closed. Continue the smallest missing
 reusable graphics abstractions and tests in roadmap order. Each increment must
 retain the 1/2/4-CPU gates and remain explicitly marked partial or blocked when
 the environment cannot provide hardware evidence.

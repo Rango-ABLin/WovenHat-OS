@@ -1,61 +1,101 @@
-# Desktop software graphics acceptance ? 2026-10-27
+# Desktop software graphics acceptance - 2026-10-27
 
-Status: final matrix in progress; not yet accepted or closed.
+Status: ACCEPTED AND CLOSED for the software/QEMU desktop scope.
+Accepted source: `cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`. Closure documentation is a separate commit.
 
 ## Boundary
 
-This gate covers the existing software desktop, secure compositor, input,
-window management, emulated VirtIO GPU scanout/recovery, and interactive demo
-paths. It does not certify native GPUs, native HID, GPU-accelerated 3D, or the
-complete graphics modernization mandate. WHPX accelerates the guest CPU.
+This closes the reported desktop graphics errors and the software regression
+acceptance gate. It covers secure compositor surfaces, desktop behavior,
+software 3D presentation, emulated VirtIO GPU scanout/recovery, monitor layout,
+session behavior, and real QEMU desktop input/performance on 1/2/4 CPUs.
+It does not certify native GPUs, native HID, GPU-accelerated 3D, GFX-08,
+or the complete graphics modernization mandate. WHPX accelerates the CPU.
+No next modernization stage is promoted by this repair.
 
-## Corrections
+## Repairs
 
-| Gate | Correction and retained/strengthened assertion |
-| --- | --- |
-| 20.2 | Explicit flat application contract; current wallpaper/taskbar palette; exact taskbar pixels and actual toast border, text and translucency replace background-only tolerance. |
-| 20.3 | Explicit flat launcher contract; independent version-1 generic icon masks; the entire panel, including icons, selection, header and border, is compared. Failed launches require the exact notification text. |
-| 20.4 | Flat drag/close contract and matching independent background formula; drag and client teardown assertions retained. |
-| 20.6 | Flat translucency contract and current panel-derived toast colour; window/overlay/pointer comparisons retained. |
-| 20.8 | Flat resize/tiling contract and matching cleanup background; geometry, protocol and owner teardown assertions retained. |
-| 20.9 | Flat notifications contract and current toast colour; complete Notification Center panels replace partial interior sampling. |
-| 20.13 | Flat workspace contract and matching exposed background; switching, moving, focus and cleanup assertions retained. |
-| 20.18 | Existing perspective title-bar checks retained; added an independent full-pixel projected-toast comparison and a visible-text requirement. The old blank-toast claim cannot pass this assertion. |
+- Stages 20.2/3/4/6/8/9/13 explicitly select their flat behavior contract and
+  use the current independent wallpaper/taskbar/panel palette. Dedicated
+  Stage 20.17/18 software 3D tests remain enabled and pass.
+- Launcher tests compare the complete panel and independent generic icon
+  masks. Taskbar, failed-launch notifications and Notification Center retain
+  exact border/text/translucency checks; background-only toast tolerance is gone.
+- Stage 20.18 compares every projected notification pixel and requires visible
+  text, in addition to its existing title-bar geometry assertions.
+- Stage 20.14b uses the current flat contract and checks the whole secondary
+  taskbar strip remains wallpaper, plus cross-monitor drag, host captures,
+  presentation and teardown.
+- Stage 20.6 now compares a 19x44 completed-frame strip over the window body
+  and shadow. It checks the opaque header, border and translucent body. Its
+  old three-sample assertion incorrectly expected translucency in the opaque
+  header and could pass a partially painted frame. Exact diagnostics exposed
+  that defect; the original limit is unchanged.
+- Repaint handles a client releasing its shared surface after liveness checks:
+  it confirms disappearance, invokes existing window/capture/focus teardown,
+  then rebuilds before presentation. Each retry removes a window and is bounded
+  by MAX_WINDOWS. Unexpected errors on valid surfaces remain fatal and logged;
+  the existing bounded resize replacement grace is preserved.
+- Normal-boot host fixtures require the signed-app licensed-wallpaper readback
+  marker and explicitly reject the obsolete shorter marker.
 
-The flat behavior gates are separate from the dedicated 3D gates. Unused local
-projection calculations were removed from the flat fixtures; the independent
-3D oracle remains active. No feature prerequisites, capabilities, production
-ABI, timeouts, stress counts or warning policies were relaxed. Runtime code is
-unchanged by the fixture repairs. A stale positive normal-boot serial fixture
-was also corrected; a new regression rejects the obsolete marker that lacks
-licensed-wallpaper VFS readback evidence.
+The responsiveness/input fixes use bounded event batches, separate cursor and
+close damage, absolute tablet coordinates, cleared dead-window pointer capture,
+retained shortcuts, empty initial Calculator input, and speed-optimized shell
+builds. The demo selects flat composition and reduced motion; RUN-DESKTOP.ps1
+uses WHPX by default, supports TCG, and snapshots its read-only boot image.
 
-## Planned validation
+No ABI, capability, credential work factor, warning policy, stress count,
+assertion, or timeout was relaxed. No new kernel object, unsafe code, lock,
+asynchronous pointer or blocking operation was added. The between_frames
+helper uses explicit cfg(any(stage20-6-test, stage20-14b-test)) guards; feature
+graphs are unchanged. Existing owner/generation checks remain authoritative.
 
-All QEMU cases run sequentially on 1, 2 and 4 CPUs.
+## Source changes
 
-| Coverage | Existing runner | Cases per CPU |
-| --- | --- | --- |
-| Secure surfaces/compositor and prior input/rendering contracts | `scripts/test-hello-gui-compositor-qemu.py` | 08, 09, 19.12, 19.13, 19.14, 20.16 |
-| Desktop behavior and dedicated 3D | `scripts/test-woven-shell-qemu.py` | 20.1?20.13, 20.17, 20.18, 24.59 |
-| GPU scanout and recovery | `scripts/test-stage20-14-single-output.py` | default and `--recovery` |
-| Two GPU heads | `scripts/test-stage20-14-monitors.py` | default |
-| Desktop across monitors | `scripts/test-stage20-14b-desktop.py` | default |
-| Session/focus/console/power-off | `scripts/test-stage20-15-session.py` | default |
-| Real desktop screenshots/input/performance | `scripts/test-desktop-qualification.py` | default TCG and `--accelerator whpx` |
+This closure changes `kernel/src/main.rs` (independent acceptance fixtures),
+`kernel/src/compositor.rs` (test-only completed-frame helper guards),
+`apps/woven-shell/src/main.rs` (bounded released-surface recovery), and
+`tests/test_normal_boot_serial_safety.py` (strict installation-marker fixtures).
+Launcher/qualification changes and the earlier responsiveness fixes are retained
+in the integrated history. Architecture, status, roadmap and audit records are
+updated here; there are no syscall or application-protocol changes.
 
-Total planned: 87 runs, all using the runners' existing assertions and limits.
-Kernel build, warning-denying host/kernel/app Clippy, Rust host tests and the
-full Python suite are required as well. On this Windows host, creating real
-symbolic-link fixtures requires an elevated test process; those security tests
-are run with the needed OS privilege, not mocked, skipped or weakened.
+## Acceptance results
 
-## Evidence
+- 87/87 required QEMU cases PASS on 1/2/4 CPUs: Stages 08, 09, 19.12/13/14,
+  20.1-13, 20.16/17/18, 24.59, GPU single-output/recovery/two-head scanout,
+  multi-monitor desktop, session, and TCG/WHPX real desktop qualification.
+- Strict clean-source GFX-07 checker: 9/9 PASS, unchanged fatal-marker detector.
+- Kernel build; warning-denying host/kernel/app Clippy; Rust host tests PASS.
+  Initial static sweep covers 29 kernel configurations; affected/default/lower
+  features and host checks were rerun after the test-only helper guard repair.
+  Final shell release build and warning-denying target Clippy PASS.
+- Full Python host suite: 205 tests PASS, no skips. Windows elevation was needed
+  solely to create real symbolic-link security fixtures. Earlier privilege
+  failures remain preserved; no security test was mocked or weakened.
 
-- Static checks: `audit-artifacts/graphics-close-static-20261027-163001/`.
-- Focused repairs and strengthened 3D-toast check: `audit-artifacts/graphics-close-focus-*`.
-- Full matrix: `audit-artifacts/graphics-close-matrix-20261027-164141/manifest.json`.
-- Previous failures remain in the earlier `desktop-ux-*` and `graphics-close-focus-*` evidence.
+## Evidence and provenance
 
-Final results, accepted source revision and commit/push information will be
-recorded after the gates complete.
+Final matrix: `audit-artifacts/graphics-close-final-20261027-175843/manifest.json`.
+Strict checker: `audit-artifacts/graphics-close-gfx07-final-20261027/manifest.json`.
+Static checks: `audit-artifacts/graphics-close-static-20261027-163001/`, including
+`python-host-tests-elevated.log` and its exit-0 result. Multi-monitor repair:
+`audit-artifacts/graphics-close-multi-20261027-173040/`. Completed-frame fixture:
+`audit-artifacts/graphics-close-translucency-20261027-175506/`.
+
+The final matrix contains 51 newly run cases and 36 unaffected passing cases
+from source a84ae4eb. Before reuse, the runner verified every other build-input
+hash and byte-for-byte equality outside the Stage20.6 fixture and its test-only
+helper cfg extension. Every old Stage20.6 result was excluded. Commands, source
+revisions, log hashes, exact exits and this proof are in the manifest; final
+source hashes remained unchanged throughout the resumed chain.
+
+The initial 84/87 sweep, strict-checker close-race failure, interrupted sweep,
+and exact header-pixel diagnostic are retained under graphics-close-matrix-*,
+graphics-close-gfx07-20261027-1734, and graphics-close-translucency-*.
+Only the recorded task-owned interrupted process tree was stopped. Historical
+failures and unrelated QEMU processes were not deleted or terminated.
+
+Native hardware, full text/image/widget coverage, accelerated graphics and
+independent production review remain separate roadmap prerequisites.

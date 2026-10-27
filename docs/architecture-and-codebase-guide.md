@@ -4391,3 +4391,25 @@ The interactive launcher snapshots the chosen image into its unique run director
 and passes it read-only to QEMU, preventing later Cargo builds from changing the
 boot disk of newly launched VMs. Desktop composition remains software rendering;
 WHPX accelerates guest CPU execution, not the graphics pipeline.
+
+
+## Desktop graphics acceptance and repaint lifetime recovery - 2026-10-27
+
+Flat functional contracts explicitly select --no-3d; dedicated 20.17/20.18
+retain independent projected geometry and exact visible-toast checks. Stage
+20.6 reads its header/body/shadow strip only between completed frames through
+an explicitly feature-guarded compositor helper. It neither sleeps nor switches
+tasks while the compositor lock is held.
+
+Shell repaint may race client surface release after check_clients. A rejected
+region blit now triggers a second liveness check. A vanished surface goes
+through existing close teardown, clearing capture/drag and updating focus,
+stack/workspace and tiling. Repaint restarts over the full screen before present
+to repair all exposed state. At most MAX_WINDOWS removals and one final attempt
+are possible; no new window is created in this single-threaded loop. A still-live
+surface error remains logged and fatal. Existing resize replacement deadlines
+remain intact. Kernel ownership/generation validation and all ABIs are unchanged;
+there are no new locks, objects, unsafe blocks or asynchronous pointers.
+
+Software acceptance and native/accelerated limitations are recorded in
+[the acceptance audit](graphics/desktop-acceptance-2026-10-27.md).

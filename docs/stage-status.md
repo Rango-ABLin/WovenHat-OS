@@ -1,5 +1,22 @@
 # Stage status
 
+## Desktop software graphics acceptance closed - 2026-10-27
+
+ACCEPTED AND CLOSED for the reported software/QEMU desktop repair at source
+`cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`. This supersedes the open desktop pixel failures in the historical records;
+those historical failed artifacts remain preserved. All 87 required matrix
+cases pass on 1/2/4 CPUs, including TCG/WHPX keyboard/mouse/performance,
+software 3D, GPU recovery, two monitors and session behavior. The strict
+clean-source GFX-07 checker passes 9/9 with its fatal detector unchanged.
+Build, warning-denying lints, Rust tests and all 205 Python tests pass.
+
+See [the acceptance record](graphics/desktop-acceptance-2026-10-27.md) for exact
+source/evidence provenance, stronger completed-frame pixel assertions,
+close-time repaint recovery, and validation limits. This closes software
+desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
+graphics mandate or the full historical Windows acceptance chain.
+
+
 ## Stage 20 reported-gate revalidation - 2026-10-27 — ACCEPTED
 
 Revalidated the seven gates previously reported as failing after the current
