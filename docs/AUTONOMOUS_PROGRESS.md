@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse directory entries whose name is "." or ".."
+
+Branch: `auto/wovenhat-development` (base `8cac36e2`). Working tree was clean.
+
+### Defect
+
+`check()` validated null bytes, `/`, and `\\` in name bytes (previous sessions)
+but did not reject the reserved directory-navigation names `"."` and `".."`.
+`checked_native_name` explicitly rejects both: they can never be created through
+the normal path. A corrupted entry whose name is `"."` (name\_len=1) or `".."`
+(name\_len=2) would become permanently unreachable by `lookup` or `unlink` — any
+attempt to look up either name as a file fails because `checked_native_name` would
+refuse the lookup name first — but `check()` would call that image clean.
+Same oracle-vs-runtime inconsistency pattern as the preceding sessions.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the backslash check, added a test for
+  `entry.name[..name_len] == b"."[..] || entry.name[..name_len] == b".."[..]`.
+  A live entry whose name is `"."` or `".."` now returns `Err(Corrupt)`.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_directory_entry_whose_name_is_dot_or_dotdot`. Uses
+  `two_file_root()`, overwrites `a.txt`'s `name_len` (entry offset 8) and name
+  bytes (entry offset 16) to produce `"."` and `".."` in turn, then asserts
+  `check()` returns `Err(Corrupt)`, the image is unmodified, and `b.txt` remains
+  readable. Control: the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **38 passed / 0 failed** (was 37; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
+Each entry is one bounded checkpoint. Entries record exactly what was run.
+Nothing here claims production readiness; completion requires independent
+human review.
+
 ## 2026-10-27 — WovenFS check(): refuse directory entries whose name contains a backslash
 
 Branch: `auto/wovenhat-development` (base `f8ed3b64`). Working tree was clean.

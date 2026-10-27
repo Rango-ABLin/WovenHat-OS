@@ -1382,6 +1382,13 @@ impl<D: BlockDevice> Volume<D> {
             if entry.name[..name_len].contains(&b'\\') {
                 return Err(Error::Corrupt);
             }
+            // `checked_native_name` rejects "." and ".." as directory-navigation
+            // names that are never valid file names.  A stored entry with either
+            // name can never be created through the normal path; any such entry
+            // is corruption.
+            if entry.name[..name_len] == b"."[..] || entry.name[..name_len] == b".."[..] {
+                return Err(Error::Corrupt);
+            }
         }
         Ok(())
     }

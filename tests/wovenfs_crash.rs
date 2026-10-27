@@ -1828,3 +1828,45 @@ fn check_refuses_a_directory_entry_whose_name_contains_a_backslash() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+#[test]
+fn check_refuses_a_directory_entry_whose_name_is_dot_or_dotdot() {
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // Overwrite a.txt's name_len and leading name bytes to produce "." or "..".
+    // name_len lives at entry offset 8 (u16, little-endian); name bytes start at 16.
+    let cases: &[(&str, &[u8], &[u8])] = &[(".", &[1u8, 0u8], b"."), ("..", &[2u8, 0u8], b"..")];
+
+    for &(label, name_len_bytes, name_bytes) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, index, 8, name_len_bytes);
+        patch_dir_entry(&image, block, index, 16, name_bytes);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a directory entry with name {label:?}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (name {label:?})"
+        );
+        let mut buf = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(b_inode, &mut buf),
+            Ok(5),
+            "b.txt must remain readable (name {label:?})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
