@@ -1349,10 +1349,10 @@ impl<D: BlockDevice> Volume<D> {
                 return Err(Error::Corrupt);
             }
             let node = self.inode(entry.inode)?;
-            // Every entry must name a live file inode. A directory entry naming
-            // a directory inode (e.g. the root) is corrupt: only `stage_create`
-            // ever places entries, and it always writes `KIND_FILE` inodes.
-            if !node.is_used() || node.kind != KIND_FILE {
+            // Every entry must name a live file inode and carry KIND_FILE in its
+            // own kind field. `stage_create` always writes KIND_FILE for both,
+            // so any deviation is corruption.
+            if !node.is_used() || node.kind != KIND_FILE || entry.kind != KIND_FILE {
                 return Err(Error::Corrupt);
             }
         }

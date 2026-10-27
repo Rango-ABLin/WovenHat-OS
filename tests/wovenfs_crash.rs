@@ -1578,3 +1578,54 @@ fn check_refuses_a_directory_entry_naming_a_directory_inode() {
     let mut clean = Volume::mount(base.clone()).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a directory entry whose `kind` field does not match
+/// the KIND_FILE invariant, even if the entry's inode is a valid live file.
+///
+/// `stage_create` always writes `kind = KIND_FILE` in both the inode and the
+/// directory entry. A mismatch is corrupt. Before the fix, `check()` only
+/// tested the referenced inode's kind; a directory entry whose own `kind`
+/// field was `KIND_DIR` while the underlying inode remained `KIND_FILE` would
+/// pass `check()` but be rejected by the VFS adapter (`wfs_open` tests
+/// `entry.kind == KIND_FILE`), creating a silent inconsistency.
+#[test]
+fn check_refuses_a_directory_entry_with_wrong_kind() {
+    use wfs::KIND_DIR;
+
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // Patch a.txt's directory entry `kind` field (bytes 10–11) to KIND_DIR.
+    // The inode a.txt names remains a valid, live KIND_FILE inode — only the
+    // entry's own kind field is wrong.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 10, &KIND_DIR.to_le_bytes());
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a directory entry with kind != KIND_FILE"
+    );
+    // check() must not modify the image.
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+    // Other files must remain accessible.
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(b_inode, &mut buf),
+        Ok(5),
+        "b.txt must still be readable"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base.clone()).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

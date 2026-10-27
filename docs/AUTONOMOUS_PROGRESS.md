@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse directory entries with wrong kind field
+
+Branch: `auto/wovenhat-development` (base `f5b07a1f`). Working tree was clean.
+
+### Defect
+
+`check()` verified that every live directory entry named a `KIND_FILE` inode
+(added in the previous session), but did not verify that the directory entry's
+own `kind` field also equalled `KIND_FILE`. `stage_create` always writes
+`kind = KIND_FILE` in both the inode and the directory entry, so a mismatch is
+corruption. A crafted or corrupted image could carry an entry whose inode is a
+valid `KIND_FILE` inode but whose own `entry.kind` is `KIND_DIR`; `check()`
+would call that image clean while the VFS adapter (`wfs_open`) would reject it
+because it tests `entry.kind == KIND_FILE`. The inconsistency was between the
+oracle (`check()`) and the run-time behaviour of `wfs_open`.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: extended the directory-entry loop condition
+  from `!node.is_used() || node.kind != KIND_FILE` to also include
+  `|| entry.kind != KIND_FILE`. Updated the accompanying comment.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_directory_entry_with_wrong_kind`. Uses `two_file_root()`,
+  patches `a.txt`'s directory-entry `kind` field (byte offset 10) to
+  `KIND_DIR`, then asserts `check()` returns `Err(Corrupt)`, the image is
+  unmodified, and `b.txt` remains readable. Control: the unpatched image passes
+  `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+Using the default `target` directory (project-local `.cargo-build` is blocked
+by Windows Application Control on this host — pre-existing environment issue):
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **33 passed / 0 failed** (was 32; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter (`read_dir`, `lookup`, `check`) covers only
+  the root directory; nested directories and rename remain unimplemented.
+
 Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
