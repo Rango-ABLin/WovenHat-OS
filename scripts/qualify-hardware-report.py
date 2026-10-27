@@ -37,7 +37,7 @@ def _repository_relative_evidence_path(evidence: str) -> bool:
     UNC paths. Evidence uses repository-relative POSIX separators only.
     This is syntactic validation; consumers must still prevent symlink escapes.
     """
-    if not evidence or "\\\\" in evidence or "\\x00" in evidence:
+    if not evidence or "\\" in evidence or "\x00" in evidence:
         return False
     posix = PurePosixPath(evidence)
     windows = PureWindowsPath(evidence)
