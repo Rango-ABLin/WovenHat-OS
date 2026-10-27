@@ -1,5 +1,61 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse size-0 file inode with non-zero data_checksum
+
+Branch: `auto/wovenhat-development` (base `4e27ff79`). Working tree was clean.
+
+### Defect
+
+`check()` validated file content checksums only when `node.size > 0`, matching
+`read_file`'s own skip for empty files (added in a prior session).  Neither path
+verified the converse: a `size == 0` file inode **must** have `data_checksum == 0`.
+
+`stage_create` always initialises new files with `Inode::empty()`, which sets
+`data_checksum = 0`.  `stage_write` sets `data_checksum` to `fnv1a(data)` only
+when content is written.  No runtime path can produce a file inode with
+`size == 0` and `data_checksum != 0`.
+
+Without this check, a corrupted image (e.g. direct disk manipulation or a
+hypothetical incomplete journal replay that cleared `size` but not
+`data_checksum`) would pass `check()` silently.  `read_file` would return
+`Ok(0)` without verifying the field, and neither the structural nor the
+block-range checks touch `data_checksum` for zero-size files.  This is the same
+oracle-vs-runtime gap family as the recent `links` and orphan-inode series.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the existing `links != 1` guard for
+  `KIND_FILE` inodes, added a `size == 0 && data_checksum != 0` guard returning
+  `Err(Error::Corrupt)`.  A nine-line comment explains the `stage_create`
+  invariant and why the earlier checks do not surface this inconsistency.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_zero_size_file_with_nonzero_data_checksum`.
+  Creates a volume, calls `create()` to produce an empty file, forks the image,
+  patches `data_checksum` to `fnv1a(b"corrupt")` via `reseal_inode_data_checksum`
+  (which also reseals the inode's structural checksum so `mount()` accepts it),
+  and asserts `check()` returns `Err(Corrupt)`.  Also asserts `check()` does not
+  modify the image and the unpatched image passes.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **47 passed / 0 failed** (was 46; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong link count
 
 Branch: `auto/wovenhat-development` (base `a7ad1c2a`). Working tree was clean.

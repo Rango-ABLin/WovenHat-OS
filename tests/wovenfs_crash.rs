@@ -2286,3 +2286,43 @@ fn check_refuses_a_root_directory_inode_with_wrong_link_count() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a file inode with `size == 0` but `data_checksum != 0`.
+///
+/// `stage_create` initialises every new file via `Inode::empty()`, which sets
+/// `data_checksum = 0`.  That field is only updated by `stage_write` after the
+/// first write.  A zero-size file with a non-zero `data_checksum` cannot be
+/// produced by any runtime path.  `read_file` skips the checksum comparison for
+/// zero-size files (there are no bytes to hash), so neither the read path nor the
+/// earlier structural checks surface this inconsistency; only an explicit guard in
+/// `check()` catches it.
+#[test]
+fn check_refuses_a_zero_size_file_with_nonzero_data_checksum() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.create(1, "empty.txt", 0o600, 1).expect("create empty file")
+    };
+
+    let corrupt = base.fork(None);
+    // Set data_checksum to fnv1a(b"corrupt") — a non-zero value — while leaving
+    // size == 0 intact.  reseal_inode_data_checksum updates the inode's own
+    // structural checksum so mount() and inode() accept the sector.
+    reseal_inode_data_checksum(&corrupt, file_inode, b"corrupt");
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a size-0 file inode with non-zero data_checksum"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched empty file passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

@@ -1319,6 +1319,16 @@ impl<D: BlockDevice> Volume<D> {
             if node.kind == KIND_FILE && node.links != 1 {
                 return Err(Error::Corrupt);
             }
+            // `stage_create` initialises every new file with `data_checksum = 0`
+            // (via `Inode::empty()`).  The field is only updated by `stage_write`
+            // after the first write.  A size-zero file with a non-zero
+            // `data_checksum` is impossible to produce through any runtime path;
+            // `read_file` silently skips the checksum comparison for size-zero
+            // files, so neither the read path nor the earlier structural checks
+            // would surface this inconsistency without an explicit guard here.
+            if node.kind == KIND_FILE && node.size == 0 && node.data_checksum != 0 {
+                return Err(Error::Corrupt);
+            }
             // `stage_write` allocates exactly one block per sector of content
             // and zeroes every slot beyond the last.  A missing block makes the
             // file unreadable (`read_file` returns Corrupt on a zero slot); an
