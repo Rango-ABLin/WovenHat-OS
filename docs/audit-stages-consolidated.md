@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 20.8 resize-surface diagnostic cleanup - 2026-10-27
+
+The WovenShell repaint path previously logged expected shared-surface blit
+failures while a client was between the old and replacement surfaces during
+`WSIZ`/`WRSZ`. The path now uses the existing bounded resize grace deadline;
+post-deadline failures remain observable. Stage 20.8 passed at 1/2/4 CPUs,
+with target and host warning-denying Clippy plus host tests passing.
+
 ## Stage 20 reported-gate revalidation - 2026-10-27
 
 The seven gates reported red by the desktop UX sweep were rerun against

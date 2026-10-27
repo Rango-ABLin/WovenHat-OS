@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenShell resize surface handoff (2026-10-27)
+
+The shell's `WSIZ`/`WRSZ` protocol permits an owner to release the old shared
+surface before publishing its replacement. During this bounded handoff,
+repaint blits may fail transiently; the shell suppresses only those expected
+errors until the existing resize grace deadline. Client liveness handling and
+post-deadline ownership failures remain unchanged and fail closed.
+
 ## Stage 20 desktop acceptance revalidation (2026-10-27)
 
 The current WovenShell desktop uses the bounded flat compatibility renderer
