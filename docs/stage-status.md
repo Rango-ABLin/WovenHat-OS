@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 32.3 tracing span API - 2026-10-27 — ACCEPTED
+
+Zero-cost kernel tracing span API built on the diagnostics primitive.
+`tracing = []` production feature; `stage32-3-test = ["qemu-test", "tracing"]`
+QEMU gate. New module `kernel/src/tracing.rs`:
+- `span_begin(subsystem, name) -> (id, tsc_start)` — emits `span_begin` record.
+- `span_end(subsystem, name, id, tsc_start)` — emits `span_end | tsc=<cycles>`.
+- `SpanGuard::enter(subsystem, name)` — RAII guard; `Drop` emits `span_end`.
+- When `tracing` feature is disabled (default), all three are `#[inline(always)]`
+  no-ops; the compiler eliminates them entirely (`SpanGuard` is a ZST).
+- `self_test()` verifies monotone span-ID counter and non-decreasing TSC.
+Passes on 1/2/4 CPUs, exit 33. Serial shows span records with non-zero TSC
+deltas (e.g. `TRACE tracing: span_end | name=self_test | id=3 | tsc=4885175`).
+Evidence: `target/stage32-3-tracing-{1,2,4}cpu/serial.log`.
+
 ## Stage 32.1 structured-diagnostics QEMU gate - 2026-10-27 — ACCEPTED
 
 Boot-time QEMU acceptance for the structured-diagnostics primitive.

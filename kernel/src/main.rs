@@ -173,6 +173,7 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
+mod tracing;
 mod tpm2;
 #[allow(dead_code)]
 mod ttf;
@@ -5110,6 +5111,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.2] structured panic dump: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-3-test")]
+    {
+        if !tracing::self_test() {
+            serial::write_line(format_args!("[S32.3] tracing span API: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.3] tracing span API: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

@@ -130,6 +130,10 @@ stage31-process-crash-test = ["qemu-test"]
 stage32-1-test = ["qemu-test"]
 # Stage 32 WovenDev diagnostics: structured panic crash-dump emission path.
 stage32-2-test = ["qemu-test"]
+# Enable zero-cost kernel tracing spans built on the diagnostics primitive.
+tracing = []
+# Stage 32 WovenDev tracing: span-begin/end and SpanGuard QEMU gate.
+stage32-3-test = ["qemu-test", "tracing"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
