@@ -6785,3 +6785,15 @@ trailers, overflow, truncation, and output capacity fail closed. The 191-test
 libwoven suite and freestanding target warning-denying Clippy pass. Transport,
 TLS, policy, and network imagery remain open.
 
+
+## Codex - Stage 32.4 manual image build (2026-10-27)
+
+Preparing an isolated target/stage32-4-image output directory and invoking the older existing wovenhat-os-3ee677f1fa6df38e build-script binary against the current stage32-4 kernel. Image creation only; no stage acceptance claim. No kernel sources or acceptance harnesses are being edited.
+
+Completed: older builder exited 0; target/stage32-4-image/wovenhat-os-uefi.img created (66,125,824 bytes). Kernel SHA-256 matches wovenhat_kernel-6fd041dbbb3dd9ab, whose fingerprint enables profiler/qemu-test/stage32-4-test/tracing. Build log and image hash preserved alongside image. QEMU and full acceptance were not run in this image-only task.
+
+Codex is launching the existing Stage 32.4 image in visible QEMU for user interaction, with unique logs under C:\Users\banda\WovenHat-OS\target\stage32-4-interactive-20261027-143052-410. No acceptance chain or source edits. The debug-exit device is omitted to keep the test result visible; this does not provide a desktop or change the self-test kernel.
+
+## Codex - interactive desktop launch (2026-10-27)
+User requests a usable desktop after Stage 32.4 test completed. Building the established hardware-demo/system-apps desktop using the existing desktop qualification build helper; unique build/boot logs under target/interactive-desktop. No kernel source changes or acceptance claim.
+Desktop build blocked: dependencies downloaded after approved network retry, but Windows Code Integrity events 3077/3033 explicitly reject apps/woven-shell/target/release/deps/thiserror_impl-53109cbdf5dede2f.dll under enterprise policy 0283ac0f-fff1-49ae-ada1-8a933130cad6. WovenShell cannot compile; no interactive desktop image produced or launched. Logs retained in target/interactive-desktop. Requires an administrator-approved build environment or an existing trusted desktop image; security policy was not changed.
