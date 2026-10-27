@@ -4,6 +4,74 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-27 — Resume + validate uncommitted UEFI installer prototype
+
+Branch: `auto/wovenhat-development` (base `8139336`). The working tree already
+held an unfinished, uncommitted Stage 28 installer prototype (an earlier
+session's work): `tools/woven-installer/` (safe-Rust UEFI app + host-testable
+GPT/authority library), `scripts/build-installer.py`,
+`scripts/test-installer-qemu.py`, `docs/installer.md`,
+`docs/audit-installer-prototype-2026-10-25.md`, and edits to
+`docs/stage-status.md` / `docs/architecture-and-codebase-guide.md`. Per the
+resume rule, I did not discard or overwrite it; I inspected the diff,
+re-validated what I could on this host, and recorded the results before
+committing the checkpoint. This is **not** full Stage 28/29 acceptance.
+
+### Inspection
+
+- `tools/woven-installer/src/lib.rs` (223 lines): `#![no_std]` + `alloc`,
+  host-testable device-path authority (`disk_path`, `source_disk`), `crc32`,
+  and canonical GPT validation/relocation (`plan`). Three `#[cfg(test)]` unit
+  tests.
+- `tools/woven-installer/src/firmware.rs` (217 lines): UEFI-only
+  (`cfg(target_os = "uefi")`), uses the `uefi` crate's safe API — scoped
+  `open_protocol_exclusive` handles dropped before the next open,
+  event-driven keyboard waits (`wait_for_event`), synchronous `BlockIO`,
+  source-media exclusion, typed `ERASE N` confirmation, post-confirmation
+  revalidation of path/media-id/geometry/alignment/writability, aligned
+  (`repr(align(4096))`) write buffer, `flush_blocks`, and byte-for-byte
+  readback compare.
+- `grep` confirms **no `unsafe` and no `asm!`** anywhere in
+  `tools/woven-installer/src/`.
+- `scripts/build-installer.py` / `test-installer-qemu.py` contain no physical
+  host-disk access (the only `physical` match is QEMU's
+  `physical_block_size` device flag); QEMU targets are disposable file-backed
+  disks.
+
+### Results (independently re-run on this host, 2026-10-27)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`,
+`CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo test --offline --manifest-path tools/woven-installer/Cargo.toml --lib` | COMPILES CLEAN, but test-binary **execution blocked** by Windows Application Control (`os error 4551`). Not re-confirmable by execution on this host. |
+| `cargo clippy --offline --manifest-path tools/woven-installer/Cargo.toml --all-targets -- -D warnings` | PASS |
+| `cargo clippy --offline --manifest-path tools/woven-installer/Cargo.toml --target x86_64-unknown-uefi --release -- -D warnings` (with `WOVENHAT_INSTALL_IMAGE` set to the retained `wovenhat-system.img`) | PASS |
+
+The blocked test binary's hash (`woven_installer-0c566a530a0b06ed.exe`) is
+identical to the one in the retained evidence log
+`audit-artifacts/installer-20261025-final/installer-host-tests.log`, which
+recorded **3 passed / 0 failed** on 2026-10-25. The same binary is now blocked
+by host policy; this is the environmental Application Control block already
+documented in the audit (also affects the main repo binary test executable). I
+did not and must not modify Windows configuration, so I could not re-execute it
+this session. **No independent execution-time PASS is claimed for the host
+tests** — only a clean compile plus the retained prior-run evidence.
+
+### Limits / open
+
+- Host unit-test execution remains blocked by Windows Application Control
+  (`os error 4551`); unresolved and outside this session's allowed changes.
+- Full Stage 28 (graphical installer, accounts, timezone/keyboard/network
+  setup, progress UX, durable system root, session startup) and Stage 29
+  (physical hardware qualification) remain open. No physical disk was written.
+- The 1/2/4-CPU installer QEMU matrix from the 2026-10-25 session is retained
+  under `audit-artifacts/installer-qemu-20261025-final/` but was **not** re-run
+  this session (one acceptance chain at a time; host-port/output constraints).
+- This commit records the prototype and its validation state only; it does not
+  close Stage 28.
+
 ## 2026-10-16 — WovenFS: create refuses a free inode that an entry still names
 
 Branch: `auto/wovenhat-development` (base `8c29d64`). The working tree was

@@ -1,5 +1,34 @@
 # Stage status
 
+## Stage 28 installer prototype — 2026-10-25 (not full acceptance)
+
+The user explicitly prioritized a bootable physical-machine installer ahead of
+the remaining roadmap sequence. An independent `tools/woven-installer` UEFI
+application and USB image builder now implement replacement installation of
+the normal development boot image. Kernel sources, ABI and stage feature
+dependencies are unchanged.
+
+The prototype discovers firmware disks, excludes its source media, requires an
+explicit selected-disk erase phrase, revalidates media identity and geometry,
+relocates the backup GPT to the actual target end, flushes writes, and compares
+all written bytes on readback. See [operating instructions](installer.md).
+It boots the diagnostic shell; persistent system root and desktop/session
+startup are not implemented by this change.
+
+This is not acceptance of Stage 28's graphical installer, accounts, timezone,
+keyboard/network setup or progress UX, nor Stage 29 hardware qualification.
+The full host gate also remains incomplete because Windows Application Control
+blocks the `wovenhat-os` binary test executable (error 4551). All 138 tests in
+the 22 integration executables that ran passed. Independent installer host
+tests and warning-denying host/kernel/installer Clippy checks pass. See the
+[installer audit](audit-installer-prototype-2026-10-25.md) for retained evidence,
+QEMU results, failures and prerequisites. No physical disk was written.
+
+The final installer VM matrix passes on 1/2/4 CPUs: cancellation, source and
+unselected-disk preservation, GPT relocation/readback, boot without the USB,
+and keyboard-driven SMP regression. Read-only, undersized and 4Kn targets are
+also rejected without writes. Evidence: `audit-artifacts/installer-qemu-20261025-final/`.
+
 ## 2026-10-14 revalidation
 
 Stage 16.1, 17.1, 18.1, 19.1, 19.3, and 19.10 were rerun on 1/2/4 CPUs

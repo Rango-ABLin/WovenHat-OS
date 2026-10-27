@@ -1,5 +1,29 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Experimental firmware installer (2026-10-25)
+
+`tools/woven-installer` is an independent UEFI application, outside the kernel
+workspace and stage feature graph. `src/lib.rs` contains safe, host-testable
+device-path authority and canonical GPT validation/relocation. `src/firmware.rs`
+uses scoped firmware protocols, event-driven keyboard input and synchronous
+Block I/O. It embeds the default development boot disk, excludes its own media,
+requires typed erase confirmation, revalidates the selected disk, writes through
+aligned buffers, flushes and reads back every written region. No project unsafe
+code, assembly or kernel ABI changes are added.
+
+`scripts/build-installer.py` builds the normal kernel image and the UEFI
+installer, then creates a GPT/FAT16 USB image with the fallback executable at
+`EFI/BOOT/BOOTX64.EFI`, a hash manifest and ZIP distribution. It never accesses
+physical disks. `scripts/test-installer-qemu.py` uses disposable disks, isolated
+firmware variables and retained per-VM logs to test installation and subsequent
+boot without the source USB on 1/2/4 CPUs.
+
+The user prioritized this prototype ahead of the remaining roadmap; full Stage
+28 acceptance remains open. Runtime storage support, a persistent system root,
+desktop autostart, account/setup UX and physical qualification are separate
+prerequisites. See [installer instructions](installer.md) and the
+[audit](audit-installer-prototype-2026-10-25.md).
+
 ## Stage 15 bounded WovenFS VFS write-through (2026-10-14)
 
 The `/wfs/<name>` namespace has one production mutation authority:
