@@ -1412,6 +1412,13 @@ impl<D: BlockDevice> Volume<D> {
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
         }
+        // `format()` sets the root directory's link count to 2 (one from the
+        // filesystem root, one from "." inside it). No runtime operation ever
+        // modifies a directory's link count, so any value other than 2 is
+        // corruption that `format()` cannot have produced.
+        if root.links != 2 {
+            return Err(Error::Corrupt);
+        }
         let view = self.dir_entries(&txn, &root)?;
         for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
             if entry.inode > u64::from(sb.inode_count) {

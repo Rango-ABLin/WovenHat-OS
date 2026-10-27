@@ -1,5 +1,61 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong link count
+
+Branch: `auto/wovenhat-development` (base `a7ad1c2a`). Working tree was clean.
+
+### Defect
+
+`check()` enforces `links == 1` for every live `KIND_FILE` inode but never
+validated the root directory inode's `links` field. `format()` always writes
+`root.links = 2` (one link from the filesystem root, one from "." inside it),
+and no runtime operation (`create`, `write`, `unlink`) ever modifies a
+directory inode's link count. Any value other than 2 therefore represents
+corruption that `format()` cannot have produced.
+
+Without this check, `check()` called a volume clean even when the root
+directory inode carried `links = 0`, `links = 1`, or any other wrong value —
+an oracle-vs-runtime gap in the same family as the `links == 1` gap already
+fixed for file inodes.
+
+The pattern is exactly parallel: `unlink` already requires `links == 1` before
+touching a file inode; `check()` already enforces `links == 1` for all live
+file inodes. The root dir's `links == 2` invariant was the one matching gap.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the existing `root.kind != KIND_DIR`
+  guard, added a `root.links != 2` guard returning `Err(Error::Corrupt)`.
+  A six-line comment explains the format invariant and why any other value
+  is corruption.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_root_directory_inode_with_wrong_link_count`.
+  Formats a volume, reads `root_inode` from the superblock, and for each of
+  `links` in `[0, 1, 3, u32::MAX]` forks the image, patches the root inode's
+  `links` field via `reseal_inode_links`, and asserts `check()` returns
+  `Err(Corrupt)`. Also asserts `check()` does not modify the image, and that
+  the unpatched image passes.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **46 passed / 0 failed** (was 45; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and the bitmap→inode scan are O(n²); acceptable for a
+  consistency check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse live file inode not named by any directory entry
 
 Branch: `auto/wovenhat-development` (base `0fcb65a6`). Working tree was clean.

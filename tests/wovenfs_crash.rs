@@ -2249,3 +2249,40 @@ fn check_refuses_a_live_file_inode_not_named_by_any_directory_entry() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+/// `check()` must refuse a root directory inode whose `links` field is not 2.
+///
+/// `format()` always writes `links = 2` for the root directory (one link from
+/// the filesystem root, one from "." inside it). No runtime operation ever
+/// modifies a directory's link count, so any value other than 2 means the
+/// image was written incorrectly or corrupted after the fact. Without this
+/// check, `check()` would call such a volume clean despite the format-invariant
+/// violation.
+#[test]
+fn check_refuses_a_root_directory_inode_with_wrong_link_count() {
+    let base = formatted();
+    let root_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .super_block()
+        .root_inode;
+    assert_eq!(root_inode, 1, "sanity: root inode is always 1");
+
+    for links in [0u32, 1, 3, u32::MAX] {
+        let image = base.fork(None);
+        reseal_inode_links(&image, root_inode, links);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "links = {links}: check() must refuse the root directory with wrong link count"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
