@@ -4379,6 +4379,8 @@ impl UserStack {
 pub const MAX_ARGV: usize = 8;
 /// Maximum total bytes for all argv string data (including NULs).
 pub const MAX_ARGV_BYTES: usize = 512;
+/// Maximum environment strings placed on an initial user stack.
+pub const MAX_ENV: usize = 8;
 
 /// Minimal crt0 contract expected by the kernel stack layout:
 ///
@@ -4416,11 +4418,29 @@ pub fn setup_argv_stack(
     stack: UserStack,
     args: &[&str],
 ) -> Option<u64> {
-    if args.len() > MAX_ARGV {
+    setup_argv_env_stack(address_space, stack, args, &[])
+}
+
+/// Build a System V-style initial stack with bounded argv and envp vectors.
+///
+/// This is a loader primitive only. Existing process and syscall entry points
+/// continue to call [`setup_argv_stack`] and therefore receive an empty envp.
+/// Callers that opt into `env` must supply complete `KEY=VALUE` strings; this
+/// routine neither inherits the parent's environment nor interprets names.
+pub fn setup_argv_env_stack(
+    address_space: paging::AddressSpace,
+    stack: UserStack,
+    args: &[&str],
+    env: &[&str],
+) -> Option<u64> {
+    if args.len() > MAX_ARGV || env.len() > MAX_ENV {
         return None;
     }
     let mut string_bytes = 0usize;
-    for arg in args {
+    for arg in args.iter().chain(env.iter()) {
+        if !arg.is_ascii() || arg.as_bytes().contains(&0) {
+            return None;
+        }
         string_bytes = string_bytes.checked_add(arg.len().checked_add(1)?)?;
     }
     if string_bytes > MAX_ARGV_BYTES {
@@ -4433,9 +4453,9 @@ pub fn setup_argv_stack(
     }
 
     let mut cursor = strings_start;
-    let mut argv_ptrs = [0u64; MAX_ARGV];
-    for (i, arg) in args.iter().enumerate() {
-        argv_ptrs[i] = cursor;
+    let mut pointers = [0u64; MAX_ARGV + MAX_ENV];
+    for (index, arg) in args.iter().chain(env.iter()).enumerate() {
+        pointers[index] = cursor;
         let mut buf = [0u8; 256];
         if arg.len() >= buf.len() {
             return None;
@@ -4445,9 +4465,9 @@ pub fn setup_argv_stack(
         cursor = cursor.checked_add(arg.len() as u64 + 1)?;
     }
 
-    // argc + argv... + NULL + envp NULL
+    // argc + argv... + NULL + envp... + NULL
     let argc = args.len() as u64;
-    let pointer_words = 1 + args.len() + 1 + 1;
+    let pointer_words = 1 + args.len() + 1 + env.len() + 1;
     let pointer_bytes = pointer_words * 8;
     let mut rsp = strings_start.checked_sub(pointer_bytes as u64)?;
     rsp &= !0xfu64;
@@ -4456,13 +4476,18 @@ pub fn setup_argv_stack(
     }
 
     paging::write_user_bytes(address_space, rsp, &argc.to_le_bytes()).ok()?;
-    for (i, pointer) in argv_ptrs.iter().enumerate().take(args.len()) {
+    for (i, pointer) in pointers.iter().enumerate().take(args.len()) {
         let addr = rsp + 8 + (i as u64) * 8;
         paging::write_user_bytes(address_space, addr, &pointer.to_le_bytes()).ok()?;
     }
     let argv_null = rsp + 8 + (args.len() as u64) * 8;
     paging::write_user_bytes(address_space, argv_null, &0u64.to_le_bytes()).ok()?;
-    let envp_null = argv_null + 8;
+    let envp = argv_null + 8;
+    for (index, pointer) in pointers.iter().skip(args.len()).take(env.len()).enumerate() {
+        let addr = envp + (index as u64) * 8;
+        paging::write_user_bytes(address_space, addr, &pointer.to_le_bytes()).ok()?;
+    }
+    let envp_null = envp + (env.len() as u64) * 8;
     paging::write_user_bytes(address_space, envp_null, &0u64.to_le_bytes()).ok()?;
 
     Some(rsp)

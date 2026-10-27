@@ -44,6 +44,14 @@ helper/renderer port needs an explicit bounded argv/environment/FD-action ABI,
 ownership-aware child handles and cancellation/owner-death tests before one can
 be introduced.
 
+The loader now has a separate bounded `argv`/`envp` stack primitive: up to eight
+ASCII environment strings share the existing 512-byte string budget, are copied
+after argv strings, and are terminated after argv's NULL. Existing loader paths
+continue to invoke the old wrapper and therefore receive an empty environment;
+there is no inherited environment, user syscall, descriptor action or LibCore
+Process acceptance yet. This source integration awaits hosted Linux compilation
+and guest validation.
+
 ## Memory blockers found in source
 
 At the audited revision, config.rs limits anonymous mappings to 16 and shared
