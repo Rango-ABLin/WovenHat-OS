@@ -32,6 +32,11 @@ retained global C++ initializer and its registered destructor run through a
 bounded private `__cxa_atexit` fixture adapter; hosted Linux guest qualification
 passed on 1/2/4 CPUs. See [the global-lifecycle evidence](../../docs/wovenweb-cxx-global-lifecycle-evidence.json).
 
+The same target-qualified Clang invocation also compiles one header-free C23
+object. It makes eight-argument and aggregate-return calls into Rust, checks
+initialized/BSS data and returns an explicit status. It has no C startup object,
+headers, allocator or libc calls; passing it is C ABI evidence only.
+
 Limits: this is a small ABI fixture. Class allocation/deallocation knows the
 exact Widget layout; global delete deliberately fails if unexpectedly reached.
 Guard/static-object shims remain private to the single-thread, no-exceptions

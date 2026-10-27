@@ -56,7 +56,7 @@ def main():
         image = NETWORK.build_image(root, env, "wovenweb-cxx-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")
-    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/src/tls.cpp", "tools/wovenweb-cxx-probe/src/lifecycle.cpp", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
+    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/src/tls.cpp", "tools/wovenweb-cxx-probe/src/lifecycle.cpp", "tools/wovenweb-cxx-probe/src/c_abi.c", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
     provenance = {"image_sha256": sha(image), "source_sha256": {file: sha(root / file) for file in sources}}
     provenance["compiler"] = compiler
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
@@ -76,6 +76,7 @@ def main():
                "[WOVENWEB-CXX] static TLS template + zeroing + 2-thread isolation + FS restore: PASSED",
                "[WOVENWEB-CXX] global init-array constructor + reverse registered destructor: PASSED",
                "[WOVENWEB-CXX] 512 aligned virtual objects + destructors + heap cleanup: PASSED",
+               "[WOVENWEB-CXX] freestanding C ABI + aggregate return + data: PASSED",
                "[WOVENWEB-CXX] native ABI platform: PASSED"]
     passed = result.returncode == 33 and all(marker in text for marker in markers)
     (out / "result.json").write_text(json.dumps({"passed": passed, "cpus": args.cpus, "exit": result.returncode}, indent=2))

@@ -9,6 +9,7 @@ use libwoven::Args;
 libwoven::entry!(main);
 unsafe extern "C" {
     fn woven_cxx_run() -> u64;
+    fn woven_c_abi_run() -> u64;
     fn woven_tls_word() -> u64;
     fn woven_tls_zero() -> u64;
     fn woven_tls_store(first: u64, second: u64);
@@ -321,6 +322,12 @@ fn main(_: Args) -> ! {
         let _ = libwoven::write(1, b"[WOVENWEB-CXX] ABI fixture: FAILED\n");
         libwoven::exit(if code == 0 { 40 } else { code });
     }
+    // SAFETY: the linked freestanding C object has no runtime dependencies and
+    // returns an explicit status after its C-to-Rust ABI checks.
+    if unsafe { woven_c_abi_run() } != 0 {
+        let _ = libwoven::write(1, b"[WOVENWEB-CXX] C ABI fixture: FAILED\n");
+        libwoven::exit(74);
+    }
     if !run_global_destructors() {
         libwoven::exit(64);
     }
@@ -331,6 +338,10 @@ fn main(_: Args) -> ! {
     let _ = libwoven::write(
         1,
         b"[WOVENWEB-CXX] SysV calls + data + guarded static: PASSED\n",
+    );
+    let _ = libwoven::write(
+        1,
+        b"[WOVENWEB-CXX] freestanding C ABI + aggregate return + data: PASSED\n",
     );
     let _ = libwoven::write(
         1,

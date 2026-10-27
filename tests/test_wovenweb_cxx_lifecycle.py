@@ -13,6 +13,7 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.linker = (ROOT / "tools/wovenweb-cxx-probe/link.x").read_text()
         self.lifecycle = (ROOT / "tools/wovenweb-cxx-probe/src/lifecycle.cpp").read_text()
         self.lifecycle_second = (ROOT / "tools/wovenweb-cxx-probe/src/lifecycle_second.cpp").read_text()
+        self.c_abi = (ROOT / "tools/wovenweb-cxx-probe/src/c_abi.c").read_text()
         self.harness = (ROOT / "scripts/test-wovenweb-cxx-qemu.py").read_text()
 
     def test_init_array_is_retained_and_bounded_by_linker_symbols(self):
@@ -34,6 +35,15 @@ class CxxLifecycleContracts(unittest.TestCase):
 
     def test_guest_marker_is_required_by_the_qemu_harness(self):
         marker = "global init-array constructor + reverse registered destructor: PASSED"
+        self.assertIn(marker, self.main)
+        self.assertIn(marker, self.harness)
+
+    def test_freestanding_c_abi_fixture_has_no_hosted_runtime_dependency(self):
+        self.assertIn('"-std=c23"', self.build)
+        self.assertIn('"-ffreestanding"', self.build)
+        self.assertIn("extern wh_u64 woven_mix", self.c_abi)
+        self.assertIn("extern struct wh_pair woven_pair", self.c_abi)
+        marker = "freestanding C ABI + aggregate return + data: PASSED"
         self.assertIn(marker, self.main)
         self.assertIn(marker, self.harness)
 
