@@ -12713,17 +12713,29 @@ fn stage20_6_self_test() -> bool {
         }
         value
     };
+    // The right-hand strip is clear of text/icons and spans both A's body
+    // and its shadow. The title row is opaque; only the rows below blend.
+    // Check completed frames so a not-yet-painted header cannot pass.
+    let panel_pixel = |x: i32, y: i32| {
+        if x == 163 || y == panel_y || y == panel_y + panel_height - 1 {
+            ACCENT
+        } else if y < panel_y + 15 {
+            rgb(28, 115, 145)
+        } else {
+            blend_pixel(PANEL_FILL, beneath(x, y), 216)
+        }
+    };
     let panel = mouse::keyboard_loopback(0x3b)
         && until(1000, || {
-            let samples = [
-                (150, panel_y + 5),
-                (150, panel_y + 19),
-                (150, panel_y + 33),
-            ];
-            samples.into_iter().all(|(x, y)| {
-                compositor::pixel(x, y) == Ok(blend_pixel(PANEL_FILL, beneath(x, y), 216))
-            })
+            compositor::between_frames(|pixel| {
+                (panel_y..panel_y + panel_height).all(|y| {
+                    (145..164).all(|x| pixel(x, y) == Some(panel_pixel(x, y)))
+                })
+            }) == Some(true)
         });
+    if !panel {
+        report_graphics_mismatch("translucent launcher strip", 145, panel_y, 19, panel_height, panel_pixel);
+    }
     if !step(
         "the launcher panel is translucent over a window and its shadow",
         panel,

@@ -586,7 +586,7 @@ pub fn presented() -> bool {
 /// Evaluate `check` against the surface only between frames: when everything
 /// drawn has been presented, read under the same lock so a frame the holder
 /// is still drawing cannot be seen. `None` mid-frame.
-#[cfg(feature = "stage20-14b-test")]
+#[cfg(any(feature = "stage20-6-test", feature = "stage20-14b-test"))]
 pub fn between_frames(check: impl Fn(&dyn Fn(i32, i32) -> Option<u32>) -> bool) -> Option<bool> {
     let guard = STATE.lock();
     let state = guard.as_ref()?;
