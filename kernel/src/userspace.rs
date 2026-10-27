@@ -5564,7 +5564,7 @@ pub fn compiler_loader_self_test() -> bool {
 
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    linker::load(bytes, args)
+    load_elf_with_argv_env(bytes, args, &[])
 }
 
 /// Load an ELF with an explicit bounded argv and initial environment.

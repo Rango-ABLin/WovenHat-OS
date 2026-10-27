@@ -28,7 +28,8 @@ class ProcessAbiContracts(unittest.TestCase):
     def test_only_an_explicit_loader_api_can_opt_into_environment_delivery(self):
         self.assertIn("pub fn load_elf_with_argv_env(", self.userspace)
         self.assertIn("linker::load_with_env(bytes, args, env)", self.userspace)
-        self.assertIn("load_with_env(bytes, args, &[])", self.linker)
+        self.assertIn("if env.is_empty()", self.linker)
+        self.assertIn("setup_argv_stack(page_table, stack, args)?", self.linker)
         self.assertIn("setup_argv_env_stack(page_table, stack, args, env)", self.linker)
 
 
