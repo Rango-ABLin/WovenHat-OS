@@ -1,5 +1,64 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with non-zero data_checksum
+
+Branch: `auto/wovenhat-development` (base `4bac909a`). Working tree was clean.
+
+### Defect
+
+`check()` enforced that a `KIND_FILE` inode with `size == 0` must have
+`data_checksum == 0` (added in the previous session), but the parallel invariant
+for the root directory inode was never checked.
+
+`format()` calls `Inode::empty()` first, which zeroes all fields including
+`data_checksum`.  The `data_checksum` field is then only updated by `stage_write`,
+and only for `KIND_FILE` inodes.  No runtime path (`stage_create`, `stage_write`,
+`stage_unlink`) ever assigns a non-zero `data_checksum` to a `KIND_DIR` inode.
+Therefore any root directory inode with `data_checksum != 0` represents corruption
+that the runtime cannot have produced.
+
+`dir_entries` reads directory blocks entirely by block address and ignores
+`data_checksum`, so without an explicit guard in `check()` this inconsistency
+passes silently.  The inode structural checksum (validated by `Inode::decode`)
+would catch raw bit-flip corruption, but a logically resealed inode (one where
+the structural checksum was updated after corrupting `data_checksum`) would not
+be caught — the same oracle-vs-runtime gap family as the recent `size-0 file`
+and `links` series.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the existing `root.links != 2` guard,
+  added a `root.data_checksum != 0` guard returning `Err(Error::Corrupt)`.  A
+  five-line comment explains the `Inode::empty()` invariant and why `dir_entries`
+  cannot surface this inconsistency.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_root_directory_inode_with_nonzero_data_checksum`.
+  Formats a volume, reads `root_inode` from the superblock, forks the image,
+  patches the root inode's `data_checksum` to `fnv1a(b"corrupt")` via
+  `reseal_inode_data_checksum` (which reseals the structural checksum so
+  `mount()` accepts it), and asserts `check()` returns `Err(Corrupt)`.
+  Also asserts `check()` does not modify the image and the unpatched volume passes.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **48 passed / 0 failed** (was 47; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse size-0 file inode with non-zero data_checksum
 
 Branch: `auto/wovenhat-development` (base `4e27ff79`). Working tree was clean.

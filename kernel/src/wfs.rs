@@ -1429,6 +1429,15 @@ impl<D: BlockDevice> Volume<D> {
         if root.links != 2 {
             return Err(Error::Corrupt);
         }
+        // `Inode::empty()` zeroes `data_checksum` for every new inode.
+        // `stage_write` updates `data_checksum` only for KIND_FILE inodes, and no
+        // runtime path ever assigns a non-zero `data_checksum` to a directory
+        // inode.  Any non-zero value here is corruption that `format()` cannot
+        // have produced and that `dir_entries` would never surface, because it
+        // reads entries by block address, not by checksum.
+        if root.data_checksum != 0 {
+            return Err(Error::Corrupt);
+        }
         let view = self.dir_entries(&txn, &root)?;
         for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
             if entry.inode > u64::from(sb.inode_count) {
