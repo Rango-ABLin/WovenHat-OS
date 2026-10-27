@@ -49,8 +49,9 @@ ASCII environment strings share the existing 512-byte string budget, are copied
 after argv strings, and are terminated after argv's NULL. Existing loader paths
 continue to invoke the old wrapper and therefore receive an empty environment;
 there is no inherited environment, user syscall, descriptor action or LibCore
-Process acceptance yet. This source integration awaits hosted Linux compilation
-and guest validation.
+Process acceptance yet. Hosted Linux SDK and core-foundation compilation pass
+at `afe1c19265c2518da1eea047906f079bbc8c7776`; no guest program consumes a
+non-empty envp yet, so this is not environment delivery acceptance.
 
 ## Memory blockers found in source
 
