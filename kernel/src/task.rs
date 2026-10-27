@@ -1535,6 +1535,28 @@ pub fn spawn_user_process_with_sandbox(
     program: userspace::UserProgram,
     sandbox_profile: wovenguard::SandboxProfile,
 ) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    spawn_user_process_with_sandbox_and_capabilities(
+        name,
+        program,
+        sandbox_profile,
+        CapabilitySet::userspace(),
+    )
+}
+
+/// Publish a user task with its effective capability set already installed.
+///
+/// The scheduler may run a Ready task on another CPU as soon as the scheduler
+/// lock is released. Package launches therefore must not initialize with the
+/// ordinary user ceiling and narrow the task in a second critical section: a
+/// short-lived task could otherwise issue a privileged syscall before the
+/// package declaration is installed. Callers must derive `sandbox_profile`
+/// from `capabilities` before invoking this helper.
+fn spawn_user_process_with_sandbox_and_capabilities(
+    name: &'static str,
+    program: userspace::UserProgram,
+    sandbox_profile: wovenguard::SandboxProfile,
+    capabilities: CapabilitySet,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
     if !program.image.is_valid() {
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
@@ -1592,6 +1614,8 @@ pub fn spawn_user_process_with_sandbox(
         program.address_space.paging(),
     );
     scheduler.tasks[task_slot].process_id = process_id;
+    scheduler.tasks[task_slot].capabilities = capabilities;
+    scheduler.tasks[task_slot].capability_lineages = [None; Capability::COUNT];
     scheduler.tasks[task_slot].sandbox_profile = sandbox_profile;
     scheduler.task_count += 1;
     processes[process_slot] = Some(process);
@@ -1621,20 +1645,7 @@ pub fn spawn_user_process_with_package_capabilities(
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
     };
-    let result = spawn_user_process_with_sandbox(name, program, profile);
-    if let Ok((process_id, context)) = result {
-        let mut scheduler = SCHEDULER.lock();
-        if let Some(task) = scheduler
-            .tasks
-            .iter_mut()
-            .find(|task| task.process_id == process_id)
-        {
-            task.capabilities = capabilities;
-            return Ok((process_id, context));
-        }
-        return Err(ProcessError::Full);
-    }
-    result
+    spawn_user_process_with_sandbox_and_capabilities(name, program, profile, capabilities)
 }
 
 /// Redirect one normal user exit through the image destructors. The callback
