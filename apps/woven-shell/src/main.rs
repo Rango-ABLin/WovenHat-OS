@@ -1873,8 +1873,8 @@ impl Desktop {
         if target >= WORKSPACES || target == self.workspace {
             return Area::new(0, 0, 0, 0);
         }
+        self.cancel_pointer_gesture();
         let _ = self.close_panels();
-        self.drag = None;
         self.saved[self.workspace] = (self.stack, self.stacked);
         (self.stack, self.stacked) = self.saved[target];
         self.workspace = target;
@@ -2403,6 +2403,7 @@ impl Desktop {
                 return self.screen();
             }
         }
+        self.cancel_pointer_gesture();
         self.locked = true;
         self.mode = LockMode::Lock;
         self.forget_entry();
@@ -4040,6 +4041,17 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            // Tab is shell-owned outside the sign-in/launcher paths. Cycle
+            // the bounded workspace stack without requiring a pointer.
+            InputEvent::Key(Key::Tab) => {
+                self.cancel_pointer_gesture();
+                let panels = self.close_panels();
+                let focused = self.stack[..self.stacked]
+                    .first()
+                    .copied()
+                    .map_or(empty, |slot| self.focus(slot));
+                panels.union(focused)
+            }
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
             InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
@@ -4088,18 +4100,36 @@ impl Desktop {
         moved
     }
 
-    /// Forward a pointer move to the topmost client under the pointer. Shell
-    /// chrome, title bars and window drags remain shell-owned.
+    /// End the current gesture before hiding its workspace or locking.
+    /// Deliver exactly one release while the owner is still visible; a later
+    /// physical release must not reach a hidden client or a reused slot.
+    fn cancel_pointer_gesture(&mut self) {
+        if let Some(slot) = self.pointer_capture.take() {
+            self.forward_pointer_button(slot, false);
+        }
+        self.drag = None;
+    }
+
+    /// Captured motion stays with its owner even outside the window. Without
+    /// capture, the topmost frame (including chrome) blocks windows below.
     fn forward_pointer_move(&self) {
         let (x, y) = self.pointer;
-        let Some(slot) = self.stack[..self.stacked]
-            .iter()
-            .rev()
-            .copied()
-            .find(|&slot| self.windows[slot].is_some_and(|window| window.body().contains(x, y)))
-        else {
-            return;
+        let captured = self.pointer_capture.filter(|&slot| {
+            self.windows[slot].is_some_and(|window| window.workspace == self.workspace)
+        });
+        let slot = if let Some(slot) = captured {
+            Some(slot)
+        } else if self.panel_area().contains(x, y)
+            || self.qs_area().contains(x, y)
+            || self.center_area().contains(x, y)
+        {
+            None
+        } else {
+            self.stack[..self.stacked].iter().rev().copied()
+                .find(|&slot| self.windows[slot].is_some_and(|window| window.frame().contains(x, y)))
+                .filter(|&slot| self.windows[slot].is_some_and(|window| window.body().contains(x, y)))
         };
+        let Some(slot) = slot else { return };
         let Some(window) = self.windows[slot] else {
             return;
         };

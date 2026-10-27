@@ -163,6 +163,7 @@ pub fn handle_interrupt() {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-17-test",
@@ -189,6 +190,7 @@ pub fn loopback(byte: u8) -> bool {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage24-59-test"
@@ -212,6 +214,7 @@ pub fn keyboard_loopback(byte: u8) -> bool {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-17-test",

@@ -134,11 +134,11 @@ reusable graphics abstractions and tests in roadmap order. Each increment must
 retain the 1/2/4-CPU gates and remain explicitly marked partial or blocked when
 the environment cannot provide hardware evidence.
 
-# Current graphics increment - Stage 08 secure userspace surfaces
+# Current graphics increment - window/input reliability
 
-Stage 08 is now accepted for the secure userspace surface/IPC and QEMU scope.
-The dedicated 1/2/4-CPU gate verifies owner/generation checks, explicit
-sharing, unauthorized private-surface refusal, pixel composition, and
-surface/grant teardown across two independent Ring-3 processes. Physical
-hardware display/input qualification remains outside this gate.
-
+The accepted Stage 08/09 surface and compositor boundaries and the software
+desktop closure remain the prerequisite baseline. The sequential follow-up
+starts with capture/drag cancellation, occluded-client input isolation and
+keyboard-only window focus, verified through an independent Ring-3 input probe.
+This increment is in progress. Persistent settings, performance qualification
+and native-device work follow only after its acceptance gate passes.
