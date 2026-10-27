@@ -4,6 +4,60 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-27 — WovenFS lookup(): refuse stale entry naming a free inode
+
+Branch: `auto/wovenhat-development` (base `dbe30e1e`). Working tree was clean.
+
+### Defect
+
+`lookup()` returned any directory entry matching the requested name, including
+stale entries whose inode was subsequently freed. `check()` flags such entries
+as corrupt, and `create` refuses to reallocate an inode that a stale entry
+names, but `lookup` had no equivalent guard. A caller receiving a stale entry
+from `lookup` would then call `read_file` or `write_file` on the free inode
+number, which returned `NotFound` — an incorrect error for what is actually a
+corrupt on-disk state. The open item in the 2026-10-16 entry ("lookup still
+returns an entry naming a free inode") is addressed here.
+
+### Change
+
+- `kernel/src/wfs.rs` `lookup()`: after locating a name-matching entry, reads
+  the referenced inode and returns `Err(Error::Corrupt)` if the entry's inode
+  number is out of range or the inode's `mode` is 0 (`!is_used()`). This
+  mirrors the check `check()` performs at lines 1319–1324 and makes `lookup`
+  fail-closed on corrupt images, consistent with all other mutation paths.
+- `tests/wovenfs_crash.rs`: added
+  `lookup_refuses_a_stale_entry_naming_a_free_inode`. Patches `a.txt`'s
+  directory entry to name a free inode, then asserts `lookup` returns
+  `Err(Corrupt)`, `b.txt` stays accessible, and `read_file(b)` still returns
+  its contents. Control: the unpatched image resolves `a.txt` normally.
+- `tests/wovenfs_crash.rs` `read_file_refuses_a_directory_inode`: updated the
+  third sub-case, which previously expected `lookup` to succeed on a stale
+  entry and then tested `read_file`'s response. Now that `lookup` catches it,
+  the sub-case asserts `Err(Corrupt)` directly from `lookup`.
+
+### Results (run on this host, 2026-10-27)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`, `CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **30 passed / 0 failed** (was 29; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | 138 tests in 22 executables pass; 3 targets (`wovenhat-os` binary, `async_runtime`, `pci_bridge_transaction`) blocked by Windows Application Control (`os error 4551`) — pre-existing environment issue, not a regression |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `lookup` only checks the direct-match entry; callers that iterate `read_dir`
+  directly still receive stale entries (inode == 0 entries are filtered by
+  `live()` already, but non-zero free inodes are not).
+- No repair (fsck) path — `check()` detects but cannot fix stale entries.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-27 — WovenFS check(): fix alias detection beyond 64 blocks
 
 Branch: `auto/wovenhat-development` (base `8139336a`). Uncommitted changes

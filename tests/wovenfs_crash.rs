@@ -1279,11 +1279,14 @@ fn read_file_refuses_a_directory_inode() {
         "an entry naming a directory must not read as a file"
     );
 
-    // An entry naming a free inode reads as absent.
+    // An entry naming a free inode is now refused by lookup itself.
     patch_dir_entry(&base, block, index, 0, &u64::from(INODES).to_le_bytes());
     let mut volume = Volume::mount(base.clone()).expect("mount");
-    let target = volume.lookup(1, "a.txt").expect("a.txt").inode;
-    assert_eq!(volume.read_file(target, &mut out), Err(Error::NotFound));
+    assert_eq!(
+        volume.lookup(1, "a.txt"),
+        Err(Error::Corrupt),
+        "an entry naming a free inode must be refused by lookup"
+    );
 
     // Control: an untouched file still reads.
     let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
@@ -1411,4 +1414,66 @@ fn create_refuses_a_free_inode_that_an_entry_still_names() {
         Ok(next)
     );
     mount_consistent(&image, "after a valid create");
+}
+
+#[test]
+fn lookup_refuses_a_stale_entry_naming_a_free_inode() {
+    let (base, block, index) = two_file_root();
+    let (a, b, free_inode) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        let free_inode = (2..=u64::from(INODES))
+            .find(|n| !volume.inode(*n).expect("inode").is_used())
+            .expect("a free inode");
+        (a, b, free_inode)
+    };
+
+    // Patch a.txt's directory entry to name a free inode.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &free_inode.to_le_bytes());
+
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must flag an entry naming a free inode"
+    );
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "a.txt"),
+        Err(Error::Corrupt),
+        "lookup must refuse a stale entry whose inode is free"
+    );
+
+    // b.txt is unmodified and must still resolve to its original inode.
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "b.txt")
+            .map(|e| e.inode),
+        Ok(b),
+        "unaffected entry must still resolve correctly"
+    );
+
+    // b.txt must remain fully readable.
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .read_file(b, &mut buf),
+        Ok(5),
+        "other files must stay readable"
+    );
+
+    // Control: on the unpatched image, looking up a.txt succeeds and returns a.
+    assert_eq!(
+        Volume::mount(base.clone())
+            .expect("mount")
+            .lookup(1, "a.txt")
+            .map(|e| e.inode),
+        Ok(a),
+        "unpatched image: a.txt lookup must succeed"
+    );
+    let _ = free_inode;
 }

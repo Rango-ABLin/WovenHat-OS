@@ -966,11 +966,21 @@ impl<D: BlockDevice> Volume<D> {
             return Err(Error::NotADirectory);
         }
         let view = self.dir_entries(&txn, &dir)?;
-        view.entries
+        let entry = view
+            .entries
             .iter()
             .find(|entry| entry.matches(name))
             .copied()
-            .ok_or(Error::NotFound)
+            .ok_or(Error::NotFound)?;
+        // A stale entry may name a free inode (e.g. after a crash before the
+        // directory entry was cleared). `check()` flags this as corrupt; refuse
+        // it here so callers never operate on a freed inode.
+        if entry.inode > u64::from(self.super_block.inode_count)
+            || !self.inode(entry.inode)?.is_used()
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(entry)
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
