@@ -38,6 +38,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--image", type=Path)
+    parser.add_argument("--runtime-c-output", type=Path,
+                        help="directory for the standalone C ELF (for follow-up lint builds)")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     NETWORK.add_firmware_arguments(parser)
@@ -67,8 +69,10 @@ def main():
         env["WOVENHAT_WEB_CXX_PROBE_IMAGE"] = str(probe / "target/x86_64-unknown-none/release/wovenweb-cxx-probe")
         c_fixture = root / "tools/runtime-fixtures/c-abi.c"
         c_linker = root / "tools/runtime-fixtures/link.x"
-        c_object = out / "runtime-c-abi.o"
-        c_image = out / "runtime-c-abi"
+        runtime_c_output = args.runtime_c_output or out
+        runtime_c_output.mkdir(parents=True, exist_ok=True)
+        c_object = runtime_c_output / "runtime-c-abi.o"
+        c_image = runtime_c_output / "runtime-c-abi"
         bundled_lld = rust_lld()
         print("Building standalone C ABI fixture; evidence:", out, flush=True)
         NETWORK.run_build([

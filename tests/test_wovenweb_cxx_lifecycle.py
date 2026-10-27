@@ -17,6 +17,7 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.runtime_c_abi = (ROOT / "tools/runtime-fixtures/c-abi.c").read_text()
         self.runtime_c_linker = (ROOT / "tools/runtime-fixtures/link.x").read_text()
         self.harness = (ROOT / "scripts/test-wovenweb-cxx-qemu.py").read_text()
+        self.workflow = (ROOT / ".github/workflows/wovenweb-sdk.yml").read_text()
 
     def test_init_array_is_retained_and_bounded_by_linker_symbols(self):
         self.assertIn("PROVIDE_HIDDEN(__init_array_start = .);", self.linker)
@@ -55,7 +56,10 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.assertIn("ENTRY(_start)", self.runtime_c_linker)
         self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.harness)
         self.assertIn("rust_lld()", self.harness)
+        self.assertIn("--runtime-c-output", self.harness)
         self.assertIn('"-flavor",', self.harness)
+        self.assertIn("runtime_c_dir", self.workflow)
+        self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.workflow)
         marker = "freestanding C _start + exit ABI: PASSED"
         self.assertIn(marker, self.harness)
 

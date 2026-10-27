@@ -180,13 +180,19 @@ jobs:
           set -euo pipefail
           code=/usr/share/OVMF/OVMF_CODE_4M.fd
           vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          runtime_c_dir="$PWD/target/wovenweb-runtime-c"
           for fixture in memory network cxx; do
-            python3 "scripts/test-wovenweb-${fixture}-qemu.py" --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+            runtime_c_args=()
+            if [[ "$fixture" == cxx ]]; then
+              runtime_c_args=(--runtime-c-output "$runtime_c_dir")
+            fi
+            python3 "scripts/test-wovenweb-${fixture}-qemu.py" --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars" "${runtime_c_args[@]}"
           done
           python3 scripts/test-stage10-runtime.py --stage 11.5 --cpus ${{ matrix.cpus }} --timeout 180 --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
           python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.2 --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
           export WOVENHAT_WEB_NET_PROBE_IMAGE="$PWD/tools/wovenweb-net-probe/target/x86_64-unknown-none/release/wovenweb-net-probe"
           export WOVENHAT_WEB_CXX_PROBE_IMAGE="$PWD/tools/wovenweb-cxx-probe/target/x86_64-unknown-none/release/wovenweb-cxx-probe"
+          export WOVENHAT_RUNTIME_C_ABI_ELF="$runtime_c_dir/runtime-c-abi"
           export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --locked -- -D warnings
           for feature in wovenweb-memory-test wovenweb-net-test wovenweb-cxx-test stage11-5-test stage19-2-test; do
