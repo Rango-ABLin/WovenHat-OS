@@ -16168,3 +16168,17 @@ Full inherited preservation remains required. This correction is **not accepted*
 from focused passes. Keep all
 failed evidence, run warning-denying host/kernel/affected-feature checks and
 the unchanged Stage 10.7/10.8â€“11.5 preservation gates before accepting it.
+
+## Stage 32 production build repair (2026-10-27; focused regression pass)
+
+The desktop build exposed private instrumentation APIs and unconditional
+optional state/test helpers as dead code under warnings-denied production
+compilation. Exported the intended Rust APIs and gated optional state and
+self-tests without changing record formats, syscall ABI, locks, allocations,
+or object lifetime behavior. No warning suppressions or feature prerequisites
+were added. Warning-denying default, tracing, profiler, and Stage 32.1-32.4
+kernel Clippy plus host all-target Clippy and host all-target tests pass.
+Stage 32.1, 32.2, 32.3 and 32.4 QEMU gates each pass on 1/2/4 CPUs (exit 33).
+Prior evidence was copied under target/stage32-production-fix/prior-evidence-*
+before rerunning the established harnesses. This focused repair is not full
+Stage 32 or full historical Windows-chain acceptance.

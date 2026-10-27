@@ -21,6 +21,7 @@
 //!   different keys. This is intentional — it prevents linear string scans on
 //!   every `span_end` call.
 
+#[cfg(all(feature = "profiler", not(test)))]
 use crate::irq_lock::IrqMutex;
 
 /// Maximum number of distinct `(subsystem, name)` pairs the profiler tracks.
@@ -28,6 +29,7 @@ pub const MAX_SLOTS: usize = 64;
 
 // ── Internal data ─────────────────────────────────────────────────────────────
 
+#[cfg(any(test, feature = "profiler"))]
 #[derive(Clone, Copy)]
 struct SlotData {
     subsystem: &'static str,
@@ -38,6 +40,7 @@ struct SlotData {
     max_tsc: u64,
 }
 
+#[cfg(any(test, feature = "profiler"))]
 impl SlotData {
     const EMPTY: Self = Self {
         subsystem: "",
@@ -49,11 +52,13 @@ impl SlotData {
     };
 }
 
+#[cfg(any(test, feature = "profiler"))]
 struct Table {
     slots: [SlotData; MAX_SLOTS],
     used: usize,
 }
 
+#[cfg(any(test, feature = "profiler"))]
 impl Table {
     const fn new() -> Self {
         Self {
@@ -104,6 +109,7 @@ impl Table {
 // Rank 3: the profiler holds no other locks, so any rank above 0 is safe.
 // Benchmark holds rank 10; we stay lower so the profiler can be called from
 // code that later acquires the benchmark lock without inverting the order.
+#[cfg(all(feature = "profiler", not(test)))]
 static PROFILER: IrqMutex<Table> = IrqMutex::with_rank(Table::new(), 3);
 
 // ── Active (profiler feature enabled) implementation ──────────────────────────
@@ -170,6 +176,7 @@ pub fn report() {}
 /// Boot-time self-test. Verifies accumulation arithmetic, slot allocation,
 /// and min/max/avg computation. Returns `true` on pass. When the `profiler`
 /// feature is disabled, trivially returns `true`.
+#[cfg(any(test, feature = "stage32-4-test"))]
 pub fn self_test() -> bool {
     // Use the inner Table directly so the test is cfg-independent and does
     // not rely on the IrqMutex or serial (no #[cfg(not(test))] needed).

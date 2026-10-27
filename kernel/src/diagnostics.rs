@@ -228,6 +228,7 @@ pub fn emit(level: Level, subsystem: &str, message: &str, fields: &[Field<'_>]) 
 /// and buffer-overflow truncation all behave as documented. Intended to be
 /// wired behind a `stage32-*` feature once a QEMU gate is available; it is also
 /// exercised directly by the host unit tests below.
+#[cfg(any(test, feature = "stage32-1-test"))]
 pub fn self_test() -> bool {
     let mut buf = [0u8; 128];
 
@@ -272,6 +273,7 @@ pub fn self_test() -> bool {
     true
 }
 
+#[cfg(any(test, feature = "stage32-1-test"))]
 fn ends_with_marker(bytes: &[u8]) -> bool {
     let marker = TRUNCATION_MARKER.as_bytes();
     bytes.len() >= marker.len() && &bytes[bytes.len() - marker.len()..] == marker
@@ -304,6 +306,7 @@ pub fn emit_panic_dump(rip: u64, rsp: u64, cr2: u64) {
 /// Boot-time self-test for the structured-panic-dump path. Returns `true` when
 /// the exact record format that [`emit_panic_dump`] would write is produced
 /// correctly. Exercised by the stage32-2 QEMU gate.
+#[cfg(any(test, feature = "stage32-2-test"))]
 pub fn self_test_panic_dump() -> bool {
     let mut buf = [0u8; 256];
     let f = format_record(

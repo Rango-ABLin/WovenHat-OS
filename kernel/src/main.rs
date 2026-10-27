@@ -45,7 +45,8 @@ mod config;
 mod console;
 mod deadline;
 mod device;
-mod diagnostics;
+// Public kernel instrumentation API; does not expose userspace authority.
+pub mod diagnostics;
 mod display;
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
@@ -113,7 +114,8 @@ mod page_permissions;
 mod paging;
 mod panic;
 mod partition;
-mod profiler;
+// Public kernel instrumentation API; does not expose userspace authority.
+pub mod profiler;
 mod permission;
 mod pic;
 mod pipe;
@@ -174,7 +176,8 @@ mod terminal;
 #[allow(dead_code)]
 mod thread;
 mod timer;
-mod tracing;
+// Public kernel instrumentation API; does not expose userspace authority.
+pub mod tracing;
 mod tpm2;
 #[allow(dead_code)]
 mod ttf;

@@ -4340,3 +4340,14 @@ pointer path while the same gate checks bounded panel composition over both
 wallpaper and a tiled client, scale changes, and teardown. The gate uses the
 flat compatibility presentation so those checks remain independent of the
 separate 3D projection path.
+
+## Stage 32 production instrumentation compilation repair (2026-10-27)
+
+The kernel entry crate exports the diagnostics, tracing, and profiler Rust
+modules as instrumentation APIs; this adds no syscall or userspace authority.
+Tracing counters/TSC helpers and profiler tables are compiled only for their
+feature or host tests, and the profiler IRQ mutex only for active kernel
+profiling. Boot self-test definitions have their own Stage 32 feature guards
+(or host-test guards), matching the existing guarded call sites. Disabled
+public operations retain their no-op behavior; production panic output and
+all accepted record formats remain unchanged. No lint allowances were added.

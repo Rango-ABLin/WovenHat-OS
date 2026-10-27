@@ -11226,3 +11226,14 @@ Removed obsolete stage-only README files and legacy Stage 6–9, Stage 10.8–10
 and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
 `RUN-STAGE10.7.ps1`, `run-release.ps1`, the root README, and app/tool/vendor
 READMEs remain because they are active instructions or package documentation.
+
+## Stage 32 production compilation repair - 2026-10-27
+
+Default production instrumentation compiles with warnings denied after API
+visibility and optional-state/self-test cfg repairs. Kernel Clippy passes for
+default, tracing, profiler, and Stage 32.1-32.4; host all-target Clippy and
+tests pass. All four Stage 32 QEMU gates pass on 1/2/4 CPUs, exit 33.
+Evidence: target/stage32-{1-diagnostics,2-panic-dump,3-tracing,4-profiler}-*cpu;
+build/host logs and archived prior evidence: target/stage32-production-fix.
+This is a focused build/regression repair, not full Stage 32 acceptance.
+Release hardware-demo UEFI build and hardware-demo target Clippy also pass. Visible 2-CPU QEMU reaches WovenShell desktop-ready and catalog entries=11; interactive boot logs are under C:\Users\banda\WovenHat-OS\target\desktop-interactive-20261027-145808-379. Full historical Windows acceptance was not rerun.

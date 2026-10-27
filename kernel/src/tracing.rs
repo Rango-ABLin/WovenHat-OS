@@ -20,15 +20,19 @@
 //! * **Zero-cost when disabled.** Every call site compiles to nothing without
 //!   the feature.
 
+#[cfg(any(test, feature = "tracing"))]
 use core::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(all(feature = "tracing", not(test)))]
 use crate::diagnostics::{Field, Level, Value};
 
 /// Monotone span-ID counter. Starts at 1 so that id=0 is always invalid.
+#[cfg(any(test, feature = "tracing"))]
 static SPAN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ── TSC read (available on x86_64 regardless of privilege level) ─────────────
 
+#[cfg(any(test, feature = "tracing"))]
 fn rdtsc() -> u64 {
     // SAFETY: RDTSC is unprivileged on x86_64 and does not access memory or
     // modify any register except the outputs.
@@ -153,6 +157,7 @@ impl Drop for SpanGuard {
 /// TSC reads are non-zero and non-decreasing. When the `tracing` feature is
 /// disabled this always returns `true` immediately. Intended to be wired
 /// behind `stage32-3-test`.
+#[cfg(any(test, feature = "stage32-3-test"))]
 pub fn self_test() -> bool {
     // Span counter must increment monotonically.
     let before = SPAN_COUNTER.load(Ordering::Relaxed);
