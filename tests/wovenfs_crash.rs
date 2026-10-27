@@ -1294,6 +1294,23 @@ fn read_file_refuses_a_directory_inode() {
     assert_eq!(&out[..5], b"bravo");
 }
 
+/// Set one `direct[slot]` entry of an on-disk inode, re-sealing the inode checksum.
+fn reseal_inode_direct(image: &CrashDisk, inode: u64, slot: usize, block: u64) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    let at = 40 + slot * 8;
+    raw[at..at + 8].copy_from_slice(&block.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
 /// Set an on-disk inode's `links` field, re-sealing the inode checksum.
 fn reseal_inode_links(image: &CrashDisk, inode: u64, links: u32) {
     let inode_start = {
@@ -1921,6 +1938,98 @@ fn check_refuses_duplicate_directory_entry_names() {
         volume.read_file(a_inode, &mut buf),
         Ok(5),
         "a.txt must remain readable after corrupt-image check"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
+
+/// `check()` must refuse a live file inode whose allocated blocks are
+/// inconsistent with its `size` field.
+///
+/// `stage_write` always allocates exactly `size.div_ceil(SECTOR_SIZE)` blocks
+/// and zeroes every direct slot beyond the last.  Two deviations are corruption:
+///
+/// 1. A required block slot (slot < size.div_ceil(SECTOR_SIZE)) is zero: the
+///    file appears to have content but `read_file` returns Err(Corrupt) on the
+///    empty slot.  `check()` used to skip zero blocks and call such an image
+///    clean, an oracle-vs-runtime inconsistency.
+///
+/// 2. A slot beyond what size requires (slot >= size.div_ceil(SECTOR_SIZE)) is
+///    non-zero: the file has an extra allocated block that `read_file` never
+///    touches and `unlink` would free, but `check()` must flag it as corruption.
+#[test]
+fn check_refuses_a_file_inode_whose_blocks_are_inconsistent_with_its_size() {
+    let (base, _, _) = two_file_root();
+    let (a_inode, b_inode) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        (a, b)
+    };
+    let a_block = {
+        let mut vol = Volume::mount(base.clone()).expect("mount");
+        vol.inode(a_inode).expect("inode").direct[0]
+    };
+
+    // Case 1: size=5 (one block required) but direct[0] zeroed.
+    // read_file would return Err(Corrupt) on the empty slot; check() must too.
+    let image = base.fork(None);
+    reseal_inode_direct(&image, a_inode, 0, 0);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode with size>0 but direct[0]=0"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image (case 1)"
+    );
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(b_inode, &mut buf),
+        Ok(5),
+        "b.txt must remain readable after corrupt-image check (case 1)"
+    );
+
+    // Case 2: patch the inode to size=0 while keeping direct[0]=a_block,
+    // so the file has an extra block beyond what its size requires.
+    let image2 = base.fork(None);
+    {
+        let inode_start = {
+            let vol = Volume::mount(image2.clone()).expect("mount");
+            vol.super_block().inode_start
+        };
+        let index = a_inode - 1;
+        let lba = (inode_start + index / 4) as usize;
+        let offset = (index % 4) as usize * 128;
+        let mut sectors = image2.image.borrow_mut();
+        let raw = &mut sectors[lba][offset..offset + 128];
+        raw[8..16].copy_from_slice(&0u64.to_le_bytes()); // size = 0
+        raw[40..48].copy_from_slice(&a_block.to_le_bytes()); // direct[0] still set
+        let checksum = test_fnv1a(&raw[..120]);
+        raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+    }
+    let before2 = image2.sectors();
+
+    let mut volume2 = Volume::mount(image2.clone()).expect("mount2");
+    assert_eq!(
+        volume2.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode with size=0 but direct[0] non-zero"
+    );
+    assert!(
+        image2.sectors() == before2,
+        "check() must not modify the image (case 2)"
+    );
+    assert_eq!(
+        volume2.read_file(b_inode, &mut buf),
+        Ok(5),
+        "b.txt must remain readable after corrupt-image check (case 2)"
     );
 
     // Control: the unpatched image passes check().

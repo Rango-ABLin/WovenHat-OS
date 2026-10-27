@@ -1,5 +1,71 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse files whose block allocation is inconsistent with size
+
+Branch: `auto/wovenhat-development` (base `a25016b3`). Working tree was clean.
+
+### Defect
+
+`check()` validated all per-entry and per-inode constraints but did not verify
+the relationship between a file inode's `size` field and its `direct[]` block
+pointers. `stage_write` enforces the invariant that `direct[i] != 0` for every
+slot `i < size.div_ceil(SECTOR_SIZE)` and `direct[i] == 0` for every slot at
+or beyond that index. Two deviations from this invariant are possible through
+disk corruption:
+
+1. **Size > 0, required block missing**: `direct[i] == 0` for some `i` where
+   `i * SECTOR_SIZE < size`. `read_file` returns `Err(Corrupt)` when it hits
+   the empty slot, but `check()` silently skipped zero blocks (via `continue`)
+   and called the image clean — an oracle-vs-runtime inconsistency.
+
+2. **Extra block beyond size**: `direct[i] != 0` for some `i >= size.div_ceil(SECTOR_SIZE)`.
+   `read_file` never accesses that slot and `unlink` would free it correctly,
+   but `check()` did not flag the orphaned block.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the per-inode `links` check, added a
+  size-vs-blocks consistency check for `KIND_FILE` inodes. Computes
+  `needed = (node.size as usize).div_ceil(SECTOR_SIZE)` and for each slot
+  `0..DIRECT_BLOCKS` returns `Err(Corrupt)` if `(node.direct[slot] != 0) !=
+  (slot < needed)`.
+
+- `tests/wovenfs_crash.rs`:
+  - Added `reseal_inode_direct(image, inode, slot, block)` helper that patches
+    one `direct[]` entry in the raw inode sector and reseals the inode checksum,
+    analogous to the existing `reseal_inode_links` helper.
+  - Added `check_refuses_a_file_inode_whose_blocks_are_inconsistent_with_its_size`
+    covering both directions:
+    - Case 1: zeroes `direct[0]` of `a.txt` (size=5) → `Err(Corrupt)`.
+    - Case 2: patches the inode to `size=0` while keeping `direct[0]` non-zero
+      → `Err(Corrupt)`.
+    - Both cases: image is unmodified, `b.txt` remains readable.
+    - Control: unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **40 passed / 0 failed** (was 39; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+- The bitmap-leak direction (block allocated in bitmap but not named by any live
+  inode) is not yet verified by `check()`.
+
+Each entry is one bounded checkpoint. Entries record exactly what was run.
+Nothing here claims production readiness; completion requires independent
+human review.
+
 ## 2026-10-27 — WovenFS check(): refuse duplicate directory entry names
 
 Branch: `auto/wovenhat-development` (base `63641dce`). Working tree was clean.

@@ -1316,6 +1316,20 @@ impl<D: BlockDevice> Volume<D> {
             if node.kind == KIND_FILE && node.links != 1 {
                 return Err(Error::Corrupt);
             }
+            // `stage_write` allocates exactly one block per sector of content
+            // and zeroes every slot beyond the last.  A missing block makes the
+            // file unreadable (`read_file` returns Corrupt on a zero slot); an
+            // extra block beyond the file size is a resource leak that no
+            // runtime path reclaims.  Both are inconsistent with the write
+            // invariant, so flag them here.
+            if node.kind == KIND_FILE {
+                let needed = (node.size as usize).div_ceil(SECTOR_SIZE);
+                for slot in 0..DIRECT_BLOCKS {
+                    if (node.direct[slot] != 0) != (slot < needed) {
+                        return Err(Error::Corrupt);
+                    }
+                }
+            }
             for slot in 0..DIRECT_BLOCKS {
                 let block = node.direct[slot];
                 if block == 0 {
