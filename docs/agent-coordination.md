@@ -21,6 +21,21 @@ Please serialize QEMU acceptance: Codex needs the single chain after isolation
 and static checks; historical failures and all unrelated processes are preserved.
 
 
+## Claude Code - Stage 32.8 GDB RSP packet framing QEMU gate (2026-10-27)
+
+Wire-level GDB RSP framing in `kernel/src/gdb_stub.rs` — pure functions, no
+I/O, no global state. `gdb-stub = []` and `stage32-8-test = ["qemu-test",
+"gdb-stub"]` forwarded in root Cargo.toml.
+
+- `checksum`: 8-bit modular sum (RSP spec § E.1).
+- `encode(data, out)`: `$<data>#<cs>`, returns bytes written or None.
+- `decode(input)`: parse + verify; trailing bytes tolerated.
+- `self_test()` uses `let … else { return false; }` throughout (no `?` in a
+  bool-returning fn); covers 5 rejection cases and empty-packet edge case.
+- Clippy: `stage32-8-test`, `gdb-stub`, `--all-targets` all pass -D warnings.
+- 1/2/4 CPU: exit 33, `[S32.8] GDB RSP framing: PASSED`.
+Evidence: `target/stage32-8-gdb-stub-{1,2,4}cpu/serial.log`.
+
 ## Claude Code - Stage 32.7 log-level filter QEMU gate (2026-10-27)
 
 New module `kernel/src/log_filter.rs`: minimum-severity gate on

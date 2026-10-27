@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 32.8 GDB RSP packet framing QEMU gate - 2026-10-27 — ACCEPTED
+
+Wire-level GDB Remote Serial Protocol packet framing: pure functions over byte
+slices, no I/O, no allocation, no global state. `gdb-stub = []` production
+feature; `stage32-8-test = ["qemu-test", "gdb-stub"]` QEMU gate. New module
+`kernel/src/gdb_stub.rs`:
+- `checksum(data) -> u8` — 8-bit modular sum (RSP spec § E.1).
+- `encode(data, out) -> Option<usize>` — writes `$<data>#<cs_hi><cs_lo>`.
+- `decode(input) -> Option<Packet>` — parses and checksum-verifies a packet;
+  extra trailing bytes are ignored.
+- `Packet::data() -> &[u8]` / `as_str() -> Option<&str>` — accessor pair.
+- `self_test()` covers: known checksum values (including wrap-around), encode
+  output for `?`/`OK`/empty, encode/decode round-trip, trailing-byte
+  tolerance, and five rejection cases (wrong start byte, checksum mismatch,
+  too short, invalid hex, no `#`).
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-8-gdb-stub-{1,2,4}cpu/serial.log`.
+Next: Stage 32.9 — GDB debug serial port (second COM port I/O).
+
 ## Stage 32.7 log-level filter QEMU gate - 2026-10-27 — ACCEPTED
 
 Minimum-severity gate on `diagnostics::emit()` using a lock-free `AtomicU8`.
