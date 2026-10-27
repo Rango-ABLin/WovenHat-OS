@@ -6644,3 +6644,15 @@ Static-thread-local fixture scan collected: complete Rust analysis and PR
 CodeQL on 92328129 succeeded, no new alerts in changed code and zero PR
 annotations. Publishing the held qualification/evidence update now; no pending
 neutral summary is treated as clean. Full runtime/browser boundaries remain.
+
+## Codex - bounded initial environment loader qualification (2026-10-27)
+
+Added the opt-in internal ELF loader path for bounded argv/envp delivery while
+preserving the existing empty-environment API path. The Stage 11.5 acceptance
+reads the mapped stack (argc/argv/NULL/envp/NULL and strings), rejects
+over-count/non-ASCII input with exact frame rollback, and now runs in the
+WovenWeb Linux native 1/2/4-CPU matrix. Hosted source
+f3ed3054d7763c33c92657bd945244195752dd9b passed SDK, core-foundation, all
+native matrices and CodeQL; desktop-userspace and drivers-radio remain unrelated
+pre-existing failed checks. This is not a process syscall, environment
+inheritance, descriptor-action, LibCore, libc, or browser completion claim.

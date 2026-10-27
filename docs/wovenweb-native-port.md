@@ -48,10 +48,15 @@ The loader now has a separate bounded `argv`/`envp` stack primitive: up to eight
 ASCII environment strings share the existing 512-byte string budget, are copied
 after argv strings, and are terminated after argv's NULL. Existing loader paths
 continue to invoke the old wrapper and therefore receive an empty environment;
-there is no inherited environment, user syscall, descriptor action or LibCore
-Process acceptance yet. Hosted Linux SDK and core-foundation compilation pass
-at `afe1c19265c2518da1eea047906f079bbc8c7776`; no guest program consumes a
-non-empty envp yet, so this is not environment delivery acceptance.
+the explicit kernel loader API is the only path that opts into a non-empty
+environment. Hosted Linux acceptance at
+`f3ed3054d7763c33c92657bd945244195752dd9b` passed the actual mapped-stack
+layout and rollback gate on 1/2/4 CPUs (workflow `40481475589`, jobs
+`122112582179`, `122112581419`, and `122112581481`): argc, argv, the argv NULL,
+envp, its NULL, all copied strings, too-many-environment rollback, non-ASCII
+rejection, and exact frame cleanup are checked. This is loader delivery only.
+There is still no inherited environment, user syscall, descriptor action,
+guest crt0 consumer, or LibCore Process acceptance.
 
 ## Memory blockers found in source
 
@@ -270,3 +275,14 @@ path or qualify a general C++ runtime. See [global lifecycle scope](wovenweb-cxx
 and its [evidence](wovenweb-cxx-global-lifecycle-evidence.json). The two-object
 ordering extension now also passes a fresh hosted 1/2/4-CPU matrix; see its
 [ordering evidence](wovenweb-cxx-global-lifecycle-ordering-evidence.json).
+
+## Bounded initial environment loader qualification (2026-10-27)
+
+The initial stack can now carry an explicitly supplied, bounded envp vector
+through the internal ELF loader while every existing loader path stays on its
+empty-environment wrapper. The hosted 1/2/4-CPU acceptance maps and reads back
+argc, argv, argv NULL, envp, envp NULL and copied strings, and proves cleanup
+after count/non-ASCII rejection. The WovenWeb native matrix now runs this gate
+for future loader changes. This does not provide a userspace environment API,
+inheritance, descriptor actions, LibCore Process backend, libc startup, or a
+browser helper process.
