@@ -12912,6 +12912,16 @@ fn stage20_6_self_test() -> bool {
                 compositor::pixel(x, y) == Ok(blend_pixel(PANEL_FILL, beneath(x, y), 216))
             })
         });
+    if !panel {
+        for (x, y) in [(150, panel_y + 5), (150, panel_y + 19), (150, panel_y + 33)] {
+            let actual = compositor::pixel(x, y).unwrap_or(0);
+            let expected = blend_pixel(PANEL_FILL, beneath(x, y), 216);
+            serial::write_line(format_args!(
+                "[S20.6] panel sample x={} y={} actual={:#08x} expected={:#08x} beneath={:#08x}",
+                x, y, actual, expected, beneath(x, y)
+            ));
+        }
+    }
     if !step(
         "the launcher panel is translucent over a window and its shadow",
         panel,
