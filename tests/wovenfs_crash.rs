@@ -757,6 +757,85 @@ fn a_block_named_by_two_inodes_is_not_rewritten_or_freed() {
     }
 }
 
+/// Write a used, single-link file inode directly into the image with `blocks`
+/// as its direct pointers, re-sealing its checksum. `check()` never reads file
+/// data, so the data checksum is left zero.
+fn craft_file_inode(image: &CrashDisk, sb: &wfs::SuperBlock, inode: u64, blocks: &[u64]) {
+    assert!(blocks.len() <= wfs::DIRECT_BLOCKS);
+    let index = inode - 1;
+    let lba = (sb.inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw.fill(0);
+    raw[0..4].copy_from_slice(&0o644u32.to_le_bytes()); // mode (non-zero => used)
+    raw[4..8].copy_from_slice(&1u32.to_le_bytes()); // one link
+    raw[8..16].copy_from_slice(&((blocks.len() * SECTOR_SIZE) as u64).to_le_bytes()); // size
+    for (i, block) in blocks.iter().enumerate() {
+        raw[40 + i * 8..48 + i * 8].copy_from_slice(&block.to_le_bytes());
+    }
+    raw[104..106].copy_from_slice(&1u16.to_le_bytes()); // KIND_FILE
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+/// Set `block`'s allocation bit in the bitmap.
+fn mark_allocated(image: &CrashDisk, sb: &wfs::SuperBlock, block: u64) {
+    let bits = SECTOR_SIZE as u64 * 8;
+    let within = (block % bits) as usize;
+    let mut sectors = image.image.borrow_mut();
+    sectors[(sb.bitmap_start + block / bits) as usize][within / 8] |= 1u8 << (within % 8);
+}
+
+#[test]
+fn check_detects_an_alias_beyond_the_first_sixty_four_blocks() {
+    let base = formatted();
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+
+    // The alias must land past the 64th distinct block, so the image needs
+    // more than 65 data blocks and enough inodes to name them. A smaller image
+    // would never reach the former fixed-size set's bound.
+    let data_blocks = sb.total_blocks - sb.data_start;
+    assert!(data_blocks > 65, "image too small for this test");
+    assert!(sb.inode_count >= 11, "too few inodes for this test");
+
+    // Inodes 2..=9 each own eight distinct data blocks (64 in all); with the
+    // root block that is 65 distinct blocks seen before the alias, filling and
+    // overflowing the old 64-entry set. The root block (data_start) is left to
+    // the root inode.
+    let mut next = sb.data_start + 1;
+    for inode in 2..=9u64 {
+        let mut blocks = Vec::new();
+        for _ in 0..8 {
+            blocks.push(next);
+            next += 1;
+        }
+        for &block in &blocks {
+            mark_allocated(&base, &sb, block);
+        }
+        craft_file_inode(&base, &sb, inode, &blocks);
+    }
+
+    // Inodes 10 and 11 both name one further block. It first appears only
+    // after the 64 earlier blocks, so the former set never recorded it and the
+    // alias went unseen — the verifier would call this corrupt image clean.
+    let shared = next;
+    mark_allocated(&base, &sb, shared);
+    craft_file_inode(&base, &sb, 10, &[shared]);
+    craft_file_inode(&base, &sb, 11, &[shared]);
+
+    let before = base.sectors();
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see an alias past the first 64 blocks"
+    );
+    assert!(
+        base.sectors() == before,
+        "check() must not modify the image"
+    );
+}
+
 /// Directory-entry rewrites of the root: create (empty and with contents) and
 /// unlink of a file whose own blocks are sound.
 const DIR_ENTRY_ATTEMPTS: [(&str, Attempt); 3] = [

@@ -4,6 +4,53 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-27 — WovenFS check(): fix alias detection beyond 64 blocks
+
+Branch: `auto/wovenhat-development` (base `8139336a`). Uncommitted changes
+in `kernel/src/wfs.rs` and `tests/wovenfs_crash.rs` were present from a prior
+session; per the resume rule I inspected, validated, and committed them.
+
+### Defect
+
+`check()` tracked seen data blocks in a fixed `[u64; 64]` array that stopped
+recording after 64 distinct blocks. Any cross-inode alias involving a block
+first seen after the 64th entry was never detected: the verifier would call a
+corrupt image clean. The write path's `refuse_shared_blocks` has no such bound,
+so the inconsistency was between `check()` and every mutation path.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: removed the `seen`/`seen_len` fixed array and
+  its per-block inline test. The loop body now calls
+  `self.refuse_shared_blocks(&txn, number, &node.direct)` instead, which scans
+  every other live inode for any shared block. This reuses the exact same rule
+  already applied on all write paths and has no bound on the number of blocks.
+- `tests/wovenfs_crash.rs`: added
+  `check_detects_an_alias_beyond_the_first_sixty_four_blocks`. The test crafts
+  an image with 8 inodes each owning 8 blocks (64 total, filling the old set),
+  then two further inodes that both name the same 65th block. Expects
+  `check()` to return `Err(Corrupt)` and leave the image byte-identical.
+
+### Results (run on this host, 2026-10-27)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`, `CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **29 passed / 0 failed** (was 28; new test added) |
+| `cargo test --test wovenfs_crash check_detects_an_alias` | PASS, 1 passed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+Negative control not re-run interactively, but the new test directly proves the
+old behavior was broken: without the fix, the crafted image (two inodes sharing
+a block past position 64) would pass `check()` with `Ok(())` instead of
+returning `Err(Corrupt)`.
+
+QEMU Stage 15.1/15.2 were not re-run this session (one chain at a time rule);
+prior passing results remain valid and unchanged. No prior tests regressed.
+
 ## 2026-10-27 — Resume + validate uncommitted UEFI installer prototype
 
 Branch: `auto/wovenhat-development` (base `8139336`). The working tree already

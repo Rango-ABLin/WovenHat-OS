@@ -1278,8 +1278,6 @@ impl<D: BlockDevice> Volume<D> {
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
-        let mut seen = [0u64; 64];
-        let mut seen_len = 0usize;
 
         for number in 1..=u64::from(sb.inode_count) {
             let node = self.inode(number)?;
@@ -1300,14 +1298,16 @@ impl<D: BlockDevice> Volume<D> {
                 if !self.bitmap_get(&txn, block)? {
                     return Err(Error::Corrupt);
                 }
-                if seen[..seen_len].contains(&block) {
-                    return Err(Error::Corrupt);
-                }
-                if seen_len < seen.len() {
-                    seen[seen_len] = block;
-                    seen_len += 1;
-                }
             }
+            // No other live inode may name any of this inode's blocks. A block
+            // repeated within one inode is already refused by `checked_inode`
+            // (via `self.inode` above); here we reuse the write path's
+            // `refuse_shared_blocks` so the verifier shares one definition of
+            // the cross-inode rule. The former fixed-size `seen` set stopped
+            // recording after 64 distinct blocks, so an alias involving any
+            // later block went unseen and this verifier could call a corrupt
+            // image clean; this scan has no such bound.
+            self.refuse_shared_blocks(&txn, number, &node.direct)?;
         }
 
         let root = self.inode(sb.root_inode)?;
