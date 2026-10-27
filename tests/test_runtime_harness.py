@@ -84,6 +84,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertTrue(any('constructors/destructors Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('tampered signature rejected' in marker for marker in required))
         self.assertTrue(any('argv failure rollback' in marker for marker in required))
+        self.assertTrue(any('bounded initial argv/envp delivery and rollback' in marker for marker in required))
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)
