@@ -1,5 +1,34 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 32 (WovenDev) structured diagnostics increment (2026-10-27)
+
+First Stage 32 increment: a bounded, allocation-free structured-record
+primitive that logging, crash dumps and tracing can build on. It does NOT
+touch the accepted `serial`/`panic` output (QEMU oracles depend on those), so
+it is additive and low-risk.
+
+- New: `kernel/src/diagnostics.rs` (`mod diagnostics;` declared in `main.rs`).
+  `format_record(buf, level, subsystem, message, fields) -> Formatted` renders
+  `"<LEVEL> <subsystem>: <message>[ | key=value ...]"` into a caller buffer:
+  no allocation, fail-closed, truncates whole fields with a `...` marker, never
+  writes out of bounds or splits UTF-8. `Level`, `Value` (Str/U64/I64/Hex/Bool),
+  `Field`, and a `self_test()`. A `#[cfg(not(test))] emit()` writes one line via
+  `serial::write_bytes`.
+- Tests: `tests/diagnostics.rs` `#[path]`-includes the module (project
+  convention, since the kernel bin is `test = false`). 7 tests pass. Because
+  this host's Application Control policy blocks the heavy workspace test binary
+  from launching (os error 4551), the tests were also executed against the real
+  source via a zero-dependency scratch crate: 7/7 pass. Running the tests caught
+  and fixed a real defect (a partial field could be left when the buffer filled
+  mid-field; now rolled back to the field boundary).
+- Verified: warning-denying kernel-target Clippy and host `--all-targets`
+  Clippy pass.
+- NOT done (next increments, each needs a QEMU gate): wiring a structured boot
+  banner / a `stage32-*` feature self-test into boot, emitting a structured
+  crash-dump record from the panic handler, and a tracing-span API. The module
+  is marked `#![allow(dead_code)]` until wired. No full Stage 32 acceptance is
+  claimed.
+
 ## Claude Code - trust/runtime tooling setup (2026-10-27)
 
 Installed/verified the host prerequisites the S02 and virtual-trust gates were

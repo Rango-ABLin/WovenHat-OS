@@ -45,6 +45,7 @@ mod config;
 mod console;
 mod deadline;
 mod device;
+mod diagnostics;
 mod display;
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
