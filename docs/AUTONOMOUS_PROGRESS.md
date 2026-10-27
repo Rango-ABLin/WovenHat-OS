@@ -1,5 +1,58 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse directory entries with out-of-range name_len
+
+Branch: `auto/wovenhat-development` (base `c85a8df7`). Working tree was clean.
+
+### Defect
+
+`check()` verified that every live directory entry named a `KIND_FILE` inode and
+carried `KIND_FILE` in its own `kind` field (added in the previous session), but
+did not verify that the entry's `name_len` field was in the valid range
+`1..=MAX_NAME`. `stage_create` always sets `name_len` to the actual name length,
+which `checked_vfs_name` bounds to `1..=MAX_NAME`. A value of 0 (empty name in a
+live entry) or above MAX_NAME (overflow) is corruption. `matches()` already
+silently rejects such entries (comparing `usize::from(self.name_len) == name.len()`
+which can never be true for `name_len > MAX_NAME` against any valid argument), so
+`lookup` would never surface the entry — but `check()` would call such an image
+clean. This is the same oracle-vs-runtime inconsistency pattern fixed in the
+preceding sessions.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: added `entry.name_len == 0 ||
+  usize::from(entry.name_len) > MAX_NAME` as an additional rejection in the
+  directory-entry loop. A live entry with a zero or oversized `name_len` now
+  returns `Err(Corrupt)`.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_directory_entry_with_out_of_range_name_len`. Uses
+  `two_file_root()`, patches `a.txt`'s `name_len` (byte offset 8 in the entry)
+  to each of 0, MAX_NAME+1, and 255, then asserts `check()` returns
+  `Err(Corrupt)`, the image is unmodified, and `b.txt` remains readable. Control:
+  the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **34 passed / 0 failed** (was 33; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
+Each entry is one bounded checkpoint. Entries record exactly what was run.
+Nothing here claims production readiness; completion requires independent
+human review.
+
 ## 2026-10-27 — WovenFS check(): refuse directory entries with wrong kind field
 
 Branch: `auto/wovenhat-development` (base `f5b07a1f`). Working tree was clean.

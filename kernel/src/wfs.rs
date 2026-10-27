@@ -1355,6 +1355,12 @@ impl<D: BlockDevice> Volume<D> {
             if !node.is_used() || node.kind != KIND_FILE || entry.kind != KIND_FILE {
                 return Err(Error::Corrupt);
             }
+            // `stage_create` always sets name_len to the actual name length, which
+            // `checked_vfs_name` bounds to 1..=MAX_NAME. Zero or any value above
+            // MAX_NAME is corruption; `matches()` would silently skip the entry.
+            if entry.name_len == 0 || usize::from(entry.name_len) > MAX_NAME {
+                return Err(Error::Corrupt);
+            }
         }
         Ok(())
     }

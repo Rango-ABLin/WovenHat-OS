@@ -1629,3 +1629,57 @@ fn check_refuses_a_directory_entry_with_wrong_kind() {
     let mut clean = Volume::mount(base.clone()).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a directory entry whose `name_len` is outside the
+/// valid range `1..=MAX_NAME`. `stage_create` always sets `name_len` to the
+/// actual name length, validated by `checked_vfs_name` to be non-empty and
+/// at most MAX_NAME bytes. A value of 0 or above MAX_NAME in a live entry is
+/// corruption. `matches()` already silently rejects such entries (returning
+/// false), so `lookup` would never surface them — but without this check,
+/// `check()` would call such an image clean, an inconsistency between the
+/// oracle and the run-time behaviour.
+#[test]
+fn check_refuses_a_directory_entry_with_out_of_range_name_len() {
+    use wfs::MAX_NAME;
+
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    let cases: &[(u16, &str)] = &[
+        (0, "name_len = 0"),
+        ((MAX_NAME as u16) + 1, "name_len = MAX_NAME + 1"),
+        (255, "name_len = 255"),
+    ];
+
+    for &(bad_len, label) in cases {
+        let image = base.fork(None);
+        // name_len is at byte offset 8 within the directory entry.
+        patch_dir_entry(&image, block, index, 8, &bad_len.to_le_bytes());
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a directory entry with {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+        let mut buf = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(b_inode, &mut buf),
+            Ok(5),
+            "b.txt must remain readable ({label})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
