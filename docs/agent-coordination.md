@@ -1,5 +1,22 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 32.4 performance profiler QEMU gate (2026-10-27)
+
+Stage 32.4 QEMU acceptance for the allocation-free performance profiler. The
+kernel module (`kernel/src/profiler.rs`) and boot gate (`main.rs`) were already
+implemented. This session ran the full 1/2/4-CPU acceptance matrix:
+
+- `stage32-4-test = ["qemu-test", "tracing", "profiler"]` feature gate.
+- Harness: `scripts/test-stage32-4-profiler.py` (validates
+  `[S32.4] performance profiler: PASSED`, exit 33, 1/2/4 CPUs).
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage32-4-test -- -D warnings`: PASS.
+- `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features profiler -- -D warnings`: PASS.
+- `cargo clippy --all-targets -- -D warnings`: PASS.
+- 1 CPU: exit 33, `[S32.4] performance profiler: PASSED`.
+- 2 CPU: exit 33, `[S32.4] performance profiler: PASSED`.
+- 4 CPU: exit 33, `[S32.4] performance profiler: PASSED`.
+Evidence: `target/stage32-4-profiler-{1,2,4}cpu/serial.log`.
+
 ## Claude Code - Stage 32 (WovenDev) structured diagnostics increment (2026-10-27)
 
 First Stage 32 increment: a bounded, allocation-free structured-record
@@ -6860,3 +6877,6 @@ Final-source sweep interrupted after Stage20.6 failed on 1/4 CPUs; task-owned pr
 Stronger completed-frame Stage20.6 PASS 1/2/4 CPUs; affected/default/lower-stage feature lints, host Clippy and tests PASS. Continuing final matrix with 36 unaffected passing runs from a84ae4eb; exclude every old20.6 result. Reuse requires byte-for-byte equality outside the Stage20.6 fixture and the explicit between_frames cfg extension, plus identical hashes for all other tracked build inputs. All remaining 51 cases run on the corrected source; evidence retains source revisions and prior failures.
 
 Final software graphics acceptance CLOSED: 87/87 matrix cases and strict clean-source GFX-07 9/9 PASS at cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7. All static/host requirements pass; native/accelerated certification remains separate. Closure docs updated with source reuse proof and preserved failures. User explicitly authorized normal master push; verifying remote before publishing.
+
+## Codex - sequential desktop reliability/settings/performance/native work (2026-10-27)
+User authorizes implementing the four recommended areas in order, with separate acceptance/commits. Starting with roadmap reconciliation and window/input/accessibility reliability. No delegation requested. Preserve accepted graphics source, existing ABI/authority and historical logs; do not advance beyond an unpassed current gate. Native qualification will require real device evidence and cannot be inferred from QEMU.

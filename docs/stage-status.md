@@ -1,5 +1,25 @@
 # Stage status
 
+## Stage 32.4 performance profiler QEMU gate - 2026-10-27 — ACCEPTED
+
+Allocation-free kernel performance profiler built on the tracing and diagnostics
+primitives. `profiler = []` production feature; `stage32-4-test = ["qemu-test",
+"tracing", "profiler"]` QEMU gate. Module `kernel/src/profiler.rs`:
+- `record(subsystem, name, tsc_delta)` — accumulates per-`(subsystem, name)`
+  count/sum/min/max TSC-cycle statistics into a fixed-capacity static table; key
+  lookup by `&'static str` pointer equality avoids byte-by-byte comparison.
+- `report()` — emits all accumulated slots as structured diagnostics records:
+  `INFO profiler: slot | sub=… | name=… | count=… | avg_tsc=… | min_tsc=… | max_tsc=…`.
+- `reset()` — clears all accumulated samples.
+- When both `tracing` and `profiler` features are enabled, `tracing::span_end`
+  automatically calls `record`; no call-site instrumentation is needed.
+- When `profiler` is disabled (default), all three are `#[inline(always)]`
+  no-ops that the compiler eliminates entirely.
+- `self_test()` verifies accumulation arithmetic, slot allocation, min/max/avg
+  computation, and `reset()` behavior without touching the static IrqMutex.
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-4-profiler-{1,2,4}cpu/serial.log`.
+
 ## Desktop software graphics acceptance closed - 2026-10-27
 
 ACCEPTED AND CLOSED for the reported software/QEMU desktop repair at source
