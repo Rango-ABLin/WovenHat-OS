@@ -53,10 +53,42 @@ def main():
         print("Building C++ ABI probe; evidence:", out, flush=True)
         NETWORK.run_build(["cargo", "build", "--release", "--locked"], probe, app_env, out / "probe-build.log")
         env["WOVENHAT_WEB_CXX_PROBE_IMAGE"] = str(probe / "target/x86_64-unknown-none/release/wovenweb-cxx-probe")
+        c_fixture = root / "tools/runtime-fixtures/c-abi.c"
+        c_linker = root / "tools/runtime-fixtures/link.x"
+        c_image = out / "runtime-c-abi"
+        print("Building standalone C ABI fixture; evidence:", out, flush=True)
+        NETWORK.run_build([
+            compiler_path,
+            "--target=x86_64-unknown-none-elf",
+            "-std=c23",
+            "-O2",
+            "-ffreestanding",
+            "-fno-pic",
+            "-fno-pie",
+            "-fno-lto",
+            "-mcmodel=large",
+            "-mno-red-zone",
+            "-fno-stack-protector",
+            "-fno-asynchronous-unwind-tables",
+            "-fno-unwind-tables",
+            "-nostdlib",
+            "-fuse-ld=lld",
+            "-Wl,-T," + str(c_linker),
+            "-Wl,-e,_start",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-Wconversion",
+            "-Wsign-conversion",
+            str(c_fixture),
+            "-o",
+            str(c_image),
+        ], root, env, out / "runtime-c-build.log")
+        env["WOVENHAT_RUNTIME_C_ABI_ELF"] = str(c_image)
         image = NETWORK.build_image(root, env, "wovenweb-cxx-test", out / "kernel-build.log")
     if not image.is_file():
         raise RuntimeError("boot image does not exist")
-    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/src/tls.cpp", "tools/wovenweb-cxx-probe/src/lifecycle.cpp", "tools/wovenweb-cxx-probe/src/c_abi.c", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
+    sources = ["kernel/src/task.rs", "kernel/src/userspace.rs", "kernel/src/vm_generation.rs", "kernel/src/vm_handoff.rs"] + ["libwoven/src/lib.rs", "libwoven/src/heap.rs", "libwoven/src/heap_allocator.rs", "kernel/src/wovenweb_cxx_gate.rs", "tools/runtime-fixtures/c-abi.c", "tools/runtime-fixtures/link.x", "tools/wovenweb-cxx-probe/src/main.rs", "tools/wovenweb-cxx-probe/src/fixture.hpp", "tools/wovenweb-cxx-probe/src/fixture.cpp", "tools/wovenweb-cxx-probe/src/dispatch.cpp", "tools/wovenweb-cxx-probe/src/tls.cpp", "tools/wovenweb-cxx-probe/src/lifecycle.cpp", "tools/wovenweb-cxx-probe/src/c_abi.c", "tools/wovenweb-cxx-probe/build.rs", "tools/wovenweb-cxx-probe/link.x", "tools/wovenweb-cxx-probe/Cargo.toml"]
     provenance = {"image_sha256": sha(image), "source_sha256": {file: sha(root / file) for file in sources}}
     provenance["compiler"] = compiler
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2))
@@ -72,6 +104,7 @@ def main():
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     text = serial.read_text(errors="replace") if serial.exists() else ""
     markers = [f"[SMP] online={args.cpus} expected={args.cpus}",
+               "[WOVENWEB-C] freestanding C _start + exit ABI: PASSED",
                "[WOVENWEB-CXX] SysV calls + data + guarded static: PASSED",
                "[WOVENWEB-CXX] static TLS template + zeroing + 2-thread isolation + FS restore: PASSED",
                "[WOVENWEB-CXX] global init-array constructor + reverse registered destructor: PASSED",

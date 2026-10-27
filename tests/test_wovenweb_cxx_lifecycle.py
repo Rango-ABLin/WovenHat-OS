@@ -14,6 +14,8 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.lifecycle = (ROOT / "tools/wovenweb-cxx-probe/src/lifecycle.cpp").read_text()
         self.lifecycle_second = (ROOT / "tools/wovenweb-cxx-probe/src/lifecycle_second.cpp").read_text()
         self.c_abi = (ROOT / "tools/wovenweb-cxx-probe/src/c_abi.c").read_text()
+        self.runtime_c_abi = (ROOT / "tools/runtime-fixtures/c-abi.c").read_text()
+        self.runtime_c_linker = (ROOT / "tools/runtime-fixtures/link.x").read_text()
         self.harness = (ROOT / "scripts/test-wovenweb-cxx-qemu.py").read_text()
 
     def test_init_array_is_retained_and_bounded_by_linker_symbols(self):
@@ -45,6 +47,14 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.assertIn("extern struct wh_pair woven_pair", self.c_abi)
         marker = "freestanding C ABI + aggregate return + data: PASSED"
         self.assertIn(marker, self.main)
+        self.assertIn(marker, self.harness)
+
+    def test_standalone_c_fixture_uses_its_own_entry_and_is_required_by_qemu(self):
+        self.assertIn("void _start", self.runtime_c_abi)
+        self.assertIn("int $0x80", self.runtime_c_abi)
+        self.assertIn("ENTRY(_start)", self.runtime_c_linker)
+        self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.harness)
+        marker = "freestanding C _start + exit ABI: PASSED"
         self.assertIn(marker, self.harness)
 
 
