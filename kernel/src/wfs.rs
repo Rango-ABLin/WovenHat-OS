@@ -1361,6 +1361,13 @@ impl<D: BlockDevice> Volume<D> {
             if entry.name_len == 0 || usize::from(entry.name_len) > MAX_NAME {
                 return Err(Error::Corrupt);
             }
+            // `checked_native_name` rejects names with null bytes; Rust `&str`
+            // cannot carry them, so a stored null byte makes the entry permanently
+            // unlookupable. Any null byte within name[0..name_len] is corruption.
+            let name_len = usize::from(entry.name_len);
+            if entry.name[..name_len].contains(&0u8) {
+                return Err(Error::Corrupt);
+            }
         }
         Ok(())
     }
