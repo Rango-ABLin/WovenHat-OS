@@ -54,6 +54,8 @@ class CxxLifecycleContracts(unittest.TestCase):
         self.assertIn("int $0x80", self.runtime_c_abi)
         self.assertIn("ENTRY(_start)", self.runtime_c_linker)
         self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.harness)
+        self.assertIn("rust_lld()", self.harness)
+        self.assertIn('"-flavor",', self.harness)
         marker = "freestanding C _start + exit ABI: PASSED"
         self.assertIn(marker, self.harness)
 

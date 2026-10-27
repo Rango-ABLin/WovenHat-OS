@@ -22,6 +22,18 @@ def sha(path):
     return result.hexdigest()
 
 
+def rust_lld():
+    version = subprocess.check_output(["rustc", "-vV"], text=True)
+    host = next(line.removeprefix("host: ") for line in version.splitlines()
+                if line.startswith("host: "))
+    sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
+    suffix = ".exe" if os.name == "nt" else ""
+    linker = sysroot / "lib" / "rustlib" / host / "bin" / f"rust-lld{suffix}"
+    if not linker.is_file():
+        raise RuntimeError(f"missing Rust-bundled linker: {linker}")
+    return linker
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
@@ -55,7 +67,9 @@ def main():
         env["WOVENHAT_WEB_CXX_PROBE_IMAGE"] = str(probe / "target/x86_64-unknown-none/release/wovenweb-cxx-probe")
         c_fixture = root / "tools/runtime-fixtures/c-abi.c"
         c_linker = root / "tools/runtime-fixtures/link.x"
+        c_object = out / "runtime-c-abi.o"
         c_image = out / "runtime-c-abi"
+        bundled_lld = rust_lld()
         print("Building standalone C ABI fixture; evidence:", out, flush=True)
         NETWORK.run_build([
             compiler_path,
@@ -71,19 +85,28 @@ def main():
             "-fno-stack-protector",
             "-fno-asynchronous-unwind-tables",
             "-fno-unwind-tables",
-            "-nostdlib",
-            "-fuse-ld=lld",
-            "-Wl,-T," + str(c_linker),
-            "-Wl,-e,_start",
             "-Wall",
             "-Wextra",
             "-Werror",
             "-Wconversion",
             "-Wsign-conversion",
+            "-c",
             str(c_fixture),
             "-o",
-            str(c_image),
-        ], root, env, out / "runtime-c-build.log")
+            str(c_object),
+        ], root, env, out / "runtime-c-compile.log")
+        NETWORK.run_build([
+            bundled_lld,
+            "-flavor",
+            "gnu",
+            "-T",
+            c_linker,
+            "-e",
+            "_start",
+            "-o",
+            c_image,
+            c_object,
+        ], root, env, out / "runtime-c-link.log")
         env["WOVENHAT_RUNTIME_C_ABI_ELF"] = str(c_image)
         image = NETWORK.build_image(root, env, "wovenweb-cxx-test", out / "kernel-build.log")
     if not image.is_file():
