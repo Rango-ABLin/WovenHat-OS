@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse bitmap-allocated block named by no inode
+
+Branch: `auto/wovenhat-development` (base `22681df3`). Uncommitted changes found
+in `kernel/src/wfs.rs` and `tests/wovenfs_crash.rs`; resumed and completed that
+checkpoint.
+
+### Defect
+
+`check()` verified the inode→bitmap direction (every block named by a live inode
+must have its bitmap bit set) but not the reverse. A data block whose bitmap bit
+was set but no live inode named it represented a leaked sector: the allocator
+could never hand it out again, making the space permanently unavailable. The
+previous session noted this as open: "The bitmap-leak direction (block allocated
+in bitmap but not named by any live inode) is not yet verified by `check()`."
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the per-inode cross-alias scan, added a
+  loop over every data block (`sb.data_start..sb.total_blocks`). For each block
+  the bitmap marks allocated, it scans all live inodes. If none names that block,
+  `check()` returns `Err(Error::Corrupt)`. Uses `.contains(&block)` per Clippy's
+  `manual_contains` lint.
+
+- `tests/wovenfs_crash.rs`: Added
+  `check_refuses_a_bitmap_allocated_block_named_by_no_inode`. Formats a fresh
+  volume, calls `mark_allocated` on `data_start + 1` (a free block), verifies
+  `check()` returns `Err(Corrupt)`, verifies the image is unchanged, and verifies
+  a clean image still passes. Removed three trailing blank lines between earlier
+  test functions (cosmetic, pre-existing).
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **41 passed / 0 failed** (was 40; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphaned-block scan is O(data_blocks × inode_count); acceptable for a
+  consistency-check function but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
 ## 2026-10-27 — WovenFS check(): refuse files whose block allocation is inconsistent with size
 
 Branch: `auto/wovenhat-development` (base `a25016b3`). Working tree was clean.

@@ -1845,7 +1845,6 @@ fn check_refuses_a_directory_entry_whose_name_contains_a_backslash() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
-
 #[test]
 fn check_refuses_a_directory_entry_whose_name_is_dot_or_dotdot() {
     let (base, block, index) = two_file_root();
@@ -1887,7 +1886,6 @@ fn check_refuses_a_directory_entry_whose_name_is_dot_or_dotdot() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
-
 #[test]
 fn check_refuses_duplicate_directory_entry_names() {
     use wfs::DIR_ENTRIES_PER_BLOCK;
@@ -1944,7 +1942,6 @@ fn check_refuses_duplicate_directory_entry_names() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
-
 /// `check()` must refuse a live file inode whose allocated blocks are
 /// inconsistent with its `size` field.
 ///
@@ -2035,4 +2032,37 @@ fn check_refuses_a_file_inode_whose_blocks_are_inconsistent_with_its_size() {
     // Control: the unpatched image passes check().
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
+
+/// `check()` must refuse a volume where the bitmap marks a data block allocated
+/// but no live inode names it — an orphaned (leaked) block.
+#[test]
+fn check_refuses_a_bitmap_allocated_block_named_by_no_inode() {
+    let base = formatted();
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+
+    // After format, data_start holds the root directory. data_start + 1 is free.
+    // Mark it allocated without naming it in any inode.
+    let orphan = sb.data_start + 1;
+    assert!(
+        orphan < sb.total_blocks,
+        "image must have at least two data blocks"
+    );
+
+    mark_allocated(&base, &sb, orphan);
+
+    let before = base.sectors();
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a block the bitmap marks allocated but no inode names"
+    );
+    assert!(
+        base.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unmodified image passes check().
+    let mut clean_vol = Volume::mount(formatted()).expect("mount clean");
+    assert_eq!(clean_vol.check(), Ok(()), "clean image must pass check()");
 }

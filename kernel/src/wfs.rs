@@ -1353,6 +1353,29 @@ impl<D: BlockDevice> Volume<D> {
             self.refuse_shared_blocks(&txn, number, &node.direct)?;
         }
 
+        // Every data block the bitmap marks allocated must be named by exactly
+        // one live inode.  The per-inode loop above already checks the converse:
+        // every inode-named block has its bitmap bit set.  A block the bitmap
+        // calls allocated that no live inode names is a leaked resource — the
+        // allocator will never hand it out again, so the space is permanently
+        // lost and the bitmap disagrees with the inode table.
+        for block in sb.data_start..sb.total_blocks {
+            if !self.bitmap_get(&txn, block)? {
+                continue;
+            }
+            let mut named = false;
+            'search: for number in 1..=u64::from(sb.inode_count) {
+                let node = self.inode(number)?;
+                if node.is_used() && node.direct.contains(&block) {
+                    named = true;
+                    break 'search;
+                }
+            }
+            if !named {
+                return Err(Error::Corrupt);
+            }
+        }
+
         let root = self.inode(sb.root_inode)?;
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
