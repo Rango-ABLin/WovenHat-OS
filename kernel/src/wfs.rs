@@ -1368,6 +1368,13 @@ impl<D: BlockDevice> Volume<D> {
             if entry.name[..name_len].contains(&0u8) {
                 return Err(Error::Corrupt);
             }
+            // `stage_create` rejects names containing '/'; all VFS paths go
+            // through `checked_native_name` which also rejects it. An entry
+            // whose name bytes include '/' can never be reached by lookup or
+            // unlink, making it permanently orphaned corruption.
+            if entry.name[..name_len].contains(&b'/') {
+                return Err(Error::Corrupt);
+            }
         }
         Ok(())
     }

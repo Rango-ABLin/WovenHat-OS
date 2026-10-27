@@ -1684,9 +1684,58 @@ fn check_refuses_a_directory_entry_with_out_of_range_name_len() {
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
 
+/// `stage_create` rejects names containing `'/'`, and every VFS path goes
+/// through `checked_native_name` which also rejects it.  An on-disk entry
+/// whose name bytes include `'/'` can therefore never be reached by `lookup`
+/// or `unlink`, so `check()` must flag it as corrupt — the same
+/// oracle-vs-runtime inconsistency pattern fixed in preceding sessions.
+#[test]
+fn check_refuses_a_directory_entry_whose_name_contains_a_slash() {
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // a.txt has name_len = 5; its name bytes live at offset 16 within the entry.
+    // Patch each position 0..5 to b'/' in turn.
+    let cases: &[(usize, &str)] = &[
+        (16, "slash at name[0]"),
+        (18, "slash at name[2] (middle)"),
+        (20, "slash at name[4] (last)"),
+    ];
+
+    for &(byte_offset, label) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, index, byte_offset, b"/");
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a directory entry where {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+        let mut buf = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(b_inode, &mut buf),
+            Ok(5),
+            "b.txt must remain readable ({label})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
+
 #[test]
 fn check_refuses_a_directory_entry_whose_name_contains_a_null_byte() {
-
     let (base, block, index) = two_file_root();
     let b_inode = Volume::mount(base.clone())
         .expect("mount")

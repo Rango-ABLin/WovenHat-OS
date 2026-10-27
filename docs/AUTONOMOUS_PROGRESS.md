@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse directory entries whose name contains a slash
+
+Branch: `auto/wovenhat-development` (base `35068e87`). Working tree was clean.
+
+### Defect
+
+`check()` validated `name_len` and null bytes in name bytes (previous sessions),
+but did not inspect the name bytes for `'/'`. `stage_create` explicitly rejects
+names with `name.contains('/')`. Every VFS path also goes through
+`checked_native_name`, which rejects `/`. A corrupted entry whose name bytes
+include `'/'` can therefore never be reached by `lookup` or `unlink` — it
+becomes permanently orphaned — but `check()` would call that image clean. Same
+oracle-vs-runtime inconsistency pattern as the preceding sessions.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the null-byte check, added
+  `entry.name[..name_len].contains(&b'/')` as an additional rejection. A live
+  entry whose name bytes include any `/` now returns `Err(Corrupt)`.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_directory_entry_whose_name_contains_a_slash`. Uses
+  `two_file_root()`, patches `a.txt`'s name bytes (offset 16, 18, and 20
+  within the entry — first, middle, and last positions within `name_len=5`) to
+  `b'/'` in turn, then asserts `check()` returns `Err(Corrupt)`, the image is
+  unmodified, and `b.txt` remains readable. Control: the unpatched image passes
+  `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **36 passed / 0 failed** (was 35; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
+Each entry is one bounded checkpoint. Entries record exactly what was run.
+Nothing here claims production readiness; completion requires independent
+human review.
+
 ## 2026-10-27 — WovenFS check(): refuse directory entries with null bytes in name
 
 Branch: `auto/wovenhat-development` (base `ac733d65`). Working tree was clean.
