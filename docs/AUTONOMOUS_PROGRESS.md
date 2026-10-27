@@ -4,6 +4,61 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-27 — WovenFS check(): refuse directory entries naming directory inodes
+
+Branch: `auto/wovenhat-development` (base `90a5110b`). Working tree was clean.
+
+### Defect
+
+`check()` verified that every non-empty directory entry named an in-range,
+`is_used()` inode, but did not verify that the inode's `kind` was `KIND_FILE`.
+In a valid filesystem every directory entry names a file inode, because
+`stage_create` — the only path that writes directory entries — always writes
+`KIND_FILE` inodes. The only `KIND_DIR` inode is the root (inode 1). A crafted
+or corrupted image could have an entry naming the root, and `check()` would
+call it clean. The write paths are unaffected: `unlink` already refuses an
+entry whose inode equals `dir_inode`, and `read_file`/`write_file` refuse a
+directory-kind inode with `NotADirectory`. The inconsistency was between the
+oracle (`check()`) and the invariant maintained by all write paths.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: collapsed the two separate checks for the
+  directory-entry loop (`inode <= inode_count`, then `is_used()`) into one
+  `inode()` read, and added `node.kind != KIND_FILE` as an additional
+  rejection. A directory entry that names a directory inode now returns
+  `Err(Corrupt)`.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_directory_entry_naming_a_directory_inode`. Uses
+  `two_file_root()`, patches `a.txt`'s directory entry to name inode 1 (the
+  root, `KIND_DIR`), then asserts that `check()` returns `Err(Corrupt)`, that
+  the image is unmodified, and that `b.txt` remains readable. Control: on the
+  unpatched image `check()` returns `Ok(())`.
+
+### Results (run on this host, 2026-10-27)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`, `CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **32 passed / 0 failed** (was 31; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `check()` still does not verify that directory entries' `kind` field matches
+  the referenced inode's kind (i.e. a `KIND_FILE` entry naming a `KIND_DIR`
+  inode would now be caught by the inode kind check, but an entry with
+  `kind = KIND_DIR` that names a file inode is not yet flagged by `check()`).
+  In practice entry kind has no operational effect, since all paths use the
+  inode's kind.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-27 — WovenFS read_dir(): filter stale entries naming free inodes
 
 Branch: `auto/wovenhat-development` (base `0c529636`). Working tree was clean.

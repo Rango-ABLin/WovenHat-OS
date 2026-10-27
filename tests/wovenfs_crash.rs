@@ -1532,3 +1532,49 @@ fn read_dir_live_filters_a_stale_entry_naming_a_free_inode() {
 
     let _ = (a, b, free_inode);
 }
+
+/// `check()` must refuse a directory entry that names a directory-kind inode.
+///
+/// `stage_create` always writes `KIND_FILE` entries, so any directory entry
+/// naming an inode whose `kind` is `KIND_DIR` is corrupt. Before the fix,
+/// `check()` verified only `is_used()`; it never read the inode's `kind` field,
+/// so the root inode (the only `KIND_DIR` inode) could appear in a directory
+/// entry and `check()` would call the image clean.
+#[test]
+fn check_refuses_a_directory_entry_naming_a_directory_inode() {
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // Patch a.txt's directory entry to name inode 1 (the root, KIND_DIR).
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &1u64.to_le_bytes());
+    // Snapshot after patching: check() must not write anything.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a directory entry naming a directory inode"
+    );
+    // The image must be unchanged by check().
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+    // Other files must remain accessible.
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(b_inode, &mut buf),
+        Ok(5),
+        "b.txt must still be readable"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base.clone()).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

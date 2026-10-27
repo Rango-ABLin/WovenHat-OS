@@ -1348,7 +1348,11 @@ impl<D: BlockDevice> Volume<D> {
             if entry.inode > u64::from(sb.inode_count) {
                 return Err(Error::Corrupt);
             }
-            if !self.inode(entry.inode)?.is_used() {
+            let node = self.inode(entry.inode)?;
+            // Every entry must name a live file inode. A directory entry naming
+            // a directory inode (e.g. the root) is corrupt: only `stage_create`
+            // ever places entries, and it always writes `KIND_FILE` inodes.
+            if !node.is_used() || node.kind != KIND_FILE {
                 return Err(Error::Corrupt);
             }
         }
