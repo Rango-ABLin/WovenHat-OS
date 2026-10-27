@@ -448,6 +448,78 @@ pub(super) fn run() -> bool {
         drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY*3]);
         crate::heap::maintain_capacity();
         let frames = crate::memory::stats().allocated_frames;
+        let env_program =
+            load_with_env(&main, &["shared-test", "--private"], &["LANG=C", "TZ=UTC"])?;
+        let mut stack_words = [0_u8; 56];
+        let mut first_argument = [0_u8; 12];
+        let mut second_argument = [0_u8; 10];
+        let mut first_environment = [0_u8; 7];
+        let mut second_environment = [0_u8; 7];
+        let environment_stack_ok = (|| -> Option<bool> {
+            paging::read_user_bytes_in(
+                env_program.address_space.paging,
+                env_program.image.stack_top,
+                &mut stack_words,
+            )
+            .ok()?;
+            let argc = u64::from_le_bytes(stack_words[0..8].try_into().ok()?);
+            let first_argument_pointer = u64::from_le_bytes(stack_words[8..16].try_into().ok()?);
+            let second_argument_pointer = u64::from_le_bytes(stack_words[16..24].try_into().ok()?);
+            let argv_null = u64::from_le_bytes(stack_words[24..32].try_into().ok()?);
+            let first_environment_pointer =
+                u64::from_le_bytes(stack_words[32..40].try_into().ok()?);
+            let second_environment_pointer =
+                u64::from_le_bytes(stack_words[40..48].try_into().ok()?);
+            let envp_null = u64::from_le_bytes(stack_words[48..56].try_into().ok()?);
+            paging::read_user_bytes_in(
+                env_program.address_space.paging,
+                first_argument_pointer,
+                &mut first_argument,
+            )
+            .ok()?;
+            paging::read_user_bytes_in(
+                env_program.address_space.paging,
+                second_argument_pointer,
+                &mut second_argument,
+            )
+            .ok()?;
+            paging::read_user_bytes_in(
+                env_program.address_space.paging,
+                first_environment_pointer,
+                &mut first_environment,
+            )
+            .ok()?;
+            paging::read_user_bytes_in(
+                env_program.address_space.paging,
+                second_environment_pointer,
+                &mut second_environment,
+            )
+            .ok()?;
+            Some(
+                argc == 2
+                    && argv_null == 0
+                    && envp_null == 0
+                    && first_argument == *b"shared-test\0"
+                    && second_argument == *b"--private\0"
+                    && first_environment == *b"LANG=C\0"
+                    && second_environment == *b"TZ=UTC\0",
+            )
+        })()
+        .unwrap_or(false);
+        let environment_cleaned = destroy(env_program.address_space);
+        let too_many_environment = [
+            "A=0", "B=1", "C=2", "D=3", "E=4", "F=5", "G=6", "H=7", "I=8",
+        ];
+        let environment_rollback = load_with_env(&main, &["shared-test"], &too_many_environment)
+            .is_none()
+            && load_with_env(&main, &["shared-test"], &["\u{80}"]).is_none()
+            && crate::memory::stats().allocated_frames == frames;
+        if !step(
+            "bounded initial argv/envp delivery and rollback",
+            environment_stack_ok && environment_cleaned && environment_rollback,
+        ) {
+            return None;
+        }
         let program = load(&main, &["shared-test"])?;
         let mut address = [0; 8];
         paging::read_user_bytes_in(

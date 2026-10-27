@@ -282,7 +282,15 @@ impl Drop for Pending {
 }
 
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    load_with_candidate_bias(bytes, args, aslr_image_delta())
+    load_with_env(bytes, args, &[])
+}
+
+/// Load an image with a caller-provided, bounded initial environment.
+///
+/// Existing loaders deliberately continue through [`load`] so their process
+/// contract remains an empty environment until they opt in explicitly.
+pub(super) fn load_with_env(bytes: &[u8], args: &[&str], env: &[&str]) -> Option<UserProgram> {
+    load_with_candidate_bias_env(bytes, args, env, aslr_image_delta())
 }
 
 pub(super) fn load_with_candidate_bias(
@@ -290,9 +298,19 @@ pub(super) fn load_with_candidate_bias(
     args: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
-    load_with_geometry(
+    load_with_candidate_bias_env(bytes, args, &[], candidate_bias)
+}
+
+fn load_with_candidate_bias_env(
+    bytes: &[u8],
+    args: &[&str],
+    env: &[&str],
+    candidate_bias: u64,
+) -> Option<UserProgram> {
+    load_with_geometry_env(
         bytes,
         args,
+        env,
         candidate_bias,
         aslr_stack_base()?,
         aslr_mmap_base()?,
@@ -304,6 +322,17 @@ pub(super) fn load_with_candidate_bias(
 pub(super) fn load_with_geometry(
     bytes: &[u8],
     args: &[&str],
+    candidate_bias: u64,
+    stack_base: u64,
+    mmap_base: u64,
+) -> Option<UserProgram> {
+    load_with_geometry_env(bytes, args, &[], candidate_bias, stack_base, mmap_base)
+}
+
+fn load_with_geometry_env(
+    bytes: &[u8],
+    args: &[&str],
+    env: &[&str],
     candidate_bias: u64,
     stack_base: u64,
     mmap_base: u64,
@@ -551,7 +580,7 @@ pub(super) fn load_with_geometry(
     {
         return None;
     }
-    let stack_top = setup_argv_stack(page_table, stack, args)?;
+    let stack_top = setup_argv_env_stack(page_table, stack, args, env)?;
     let (initial_entry, initial_stack) = setup_lifecycle_stack(
         page_table,
         stack,

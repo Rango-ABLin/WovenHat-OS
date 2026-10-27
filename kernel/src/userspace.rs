@@ -5567,6 +5567,14 @@ pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     linker::load(bytes, args)
 }
 
+/// Load an ELF with an explicit bounded argv and initial environment.
+///
+/// This remains a kernel loader API only. The process syscalls do not expose
+/// environment inheritance or arbitrary environment injection.
+pub fn load_elf_with_argv_env(bytes: &[u8], args: &[&str], env: &[&str]) -> Option<UserProgram> {
+    linker::load_with_env(bytes, args, env)
+}
+
 pub fn map_anonymous(
     address_space: AddressSpace,
     slot: usize,
