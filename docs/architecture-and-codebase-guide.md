@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 20 desktop acceptance revalidation (2026-10-27)
+
+The current WovenShell desktop uses the bounded flat compatibility renderer
+for the Stage 20 software interaction gates. The launcher, window movement
+and teardown, translucent overlays, tiling, notification center, and
+workspace transitions were revalidated against independent kernel pixel and
+input oracles on 1/2/4 CPUs. The production 3D path remains separately
+qualified by its dedicated gates; this revalidation does not replace native
+hardware or full roadmap-stage qualification.
+
 ## Scalable userspace I/O contract (2026-10-25)
 
 Kernel read/write syscalls continue to validate each pointer and cap one

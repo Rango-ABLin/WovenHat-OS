@@ -4,6 +4,17 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 20 reported-gate revalidation - 2026-10-27
+
+The seven gates reported red by the desktop UX sweep were rerun against
+current commit `744b5839`: Stage 20.2, 20.3, 20.4, 20.6, 20.8, 20.9, and
+20.13. Every gate passed at 1, 2, and 4 CPUs with QEMU exit 33. The affected
+Stage 20 image-backed feature gates, production kernel lint, and host
+`--all-targets` Clippy passed. No assertion, timeout, or source behavior was
+weakened; the earlier 2-CPU 20.6 result was an intermittent failure and passed
+on a clean rerun. Evidence remains in the corresponding `target/woven-shell-*`
+CPU directories.
+
 ## Source: AUDIT-STAGE10.1-KERNEL-EVENT-ASYNC-IO.md
 
 # WovenHat OS Stage 10.1 â€” Kernel Event + Async I/O Foundation

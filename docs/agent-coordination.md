@@ -6830,4 +6830,15 @@ start a fresh desktop session; no replacement window was forced open.
 
 ## Codex - close failed desktop graphics gates and push (2026-10-27)
 User explicitly authorizes fixing all reported graphics gate errors, closing acceptance after passing validation, committing and pushing. Owning kernel graphics oracles plus any real shell/renderer defects exposed. Scope is the reported Stage20 software desktop gates and required regressions; physical GPU/native-hardware claims must remain evidence-based. Existing dirty files are prior-turn changes to preserve and include where relevant. No subagents requested.
-Closure candidate: all seven failed desktop stages now pass focused 1-CPU checks with explicit flat contracts, current palette, exact icon masks, and stronger full-panel/notification checks. Stage20.18 now verifies every projected toast pixel plus visible text, resolving the old blank-toast note. Build, all Stage20 feature lints, lower-stage guard lints, and Rust host tests pass. Python host suite passes with Windows elevation required solely by real symbolic-link fixtures; assertions were not bypassed. Starting the complete graphics matrix on 1/2/4 CPUs, preserving all prior artifacts. No acceptance/closure claim yet.
+
+Revalidated the reported Stage 20.2/20.3/20.4/20.6/20.8/20.9/20.13 gates
+against current commit `744b5839`. All passed at 1/2/4 CPUs with exit 33;
+the image-backed Stage 20 lint sweep, production lint, and host all-targets
+Clippy passed. The first 2-CPU 20.6 run was intermittent; a clean rerun
+passed after removing a temporary diagnostic-only probe. No source behavior,
+assertion, or timeout was changed. Acceptance evidence is under the matching
+`target/woven-shell-*-{1,2,4}cpu` directories. This closes the reported
+regression set but does not claim full Stage 20/32 or native qualification.
+Earlier closure-candidate note is superseded by the complete 1/2/4-CPU
+revalidation recorded above; no acceptance claim is made beyond the seven
+reported gates explicitly listed there.
