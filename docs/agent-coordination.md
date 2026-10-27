@@ -23,11 +23,36 @@ it is additive and low-risk.
   mid-field; now rolled back to the field boundary).
 - Verified: warning-denying kernel-target Clippy and host `--all-targets`
   Clippy pass.
-- NOT done (next increments, each needs a QEMU gate): wiring a structured boot
-  banner / a `stage32-*` feature self-test into boot, emitting a structured
-  crash-dump record from the panic handler, and a tracing-span API. The module
-  is marked `#![allow(dead_code)]` until wired. No full Stage 32 acceptance is
-  claimed.
+- Wired: see the Stage 32.1 and 32.2 QEMU gate entries below.
+- Remaining: tracing-span API, promoting the panic dump to unconditional
+  production code, full QEMU acceptance on 1/2/4 CPUs (QEMU unavailable in
+  this session).
+
+## Claude Code - Stage 32.1/32.2 QEMU gates (2026-10-27)
+
+Two QEMU acceptance gates wiring the diagnostics primitive into the kernel boot
+sequence and the panic handler.
+
+**Stage 32.1** (`stage32-1-test = ["qemu-test"]`):
+- Calls `diagnostics::self_test()` from the boot sequence under the feature guard.
+- Harness: `scripts/test-stage32-1-diagnostics.py` (validates
+  `[S32.1] structured diagnostics: PASSED`, exit 33, 1/2/4 CPUs).
+- Warning-denying kernel-target Clippy passes.
+
+**Stage 32.2** (`stage32-2-test = ["qemu-test"]`):
+- Adds `diagnostics::emit_panic_dump(rip, rsp, cr2)` to `diagnostics.rs`:
+  formats and emits `ERROR panic: kernel panic | rip=0x… | rsp=0x… | cr2=0x…`
+  to serial (cfg(not(test))).
+- Adds `diagnostics::self_test_panic_dump() -> bool`: verifies the exact record
+  the panic handler will emit using known inputs; no real panic triggered (a
+  real kernel panic would put "KERNEL PANIC" in the serial log and fail the
+  standard `validation_errors` check).
+- Wires `emit_panic_dump()` into `panic::kernel_panic()` under the feature guard.
+- Calls `self_test_panic_dump()` from the boot sequence.
+- Harness: `scripts/test-stage32-2-panic-dump.py`.
+- QEMU acceptance pending (QEMU not available in this session). Promoting the
+  structured dump from feature-gated to unconditional production code is the
+  next Stage 32 increment.
 
 ## Claude Code - trust/runtime tooling setup (2026-10-27)
 

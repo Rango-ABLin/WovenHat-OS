@@ -126,6 +126,10 @@ stage27-5-recovery-test = ["qemu-test"]
 stage28-installer-test = ["qemu-test"]
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
+# Stage 32 WovenDev diagnostics primitive: structured-record boot self-test.
+stage32-1-test = ["qemu-test"]
+# Stage 32 WovenDev diagnostics: structured panic crash-dump emission path.
+stage32-2-test = ["qemu-test"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

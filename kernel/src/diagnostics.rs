@@ -27,7 +27,9 @@
 //! their own QEMU acceptance (the accepted `serial`/`panic` output is left
 //! unchanged here).
 
-#![allow(dead_code)] // Foundation API; boot/panic wiring lands in a later increment.
+// Dead-code lint suppressed only for items not yet called outside this module;
+// the public API is exercised by the stage32-1 and stage32-2 boot gates.
+#![allow(dead_code)]
 
 use core::fmt::{self, Write};
 
@@ -276,6 +278,54 @@ pub fn self_test() -> bool {
 fn ends_with_marker(bytes: &[u8]) -> bool {
     let marker = TRUNCATION_MARKER.as_bytes();
     bytes.len() >= marker.len() && &bytes[bytes.len() - marker.len()..] == marker
+}
+
+/// Emit a structured crash-dump record to serial with the key fault registers.
+///
+/// Called from the panic handler alongside the human-readable register dump so
+/// a machine-readable crash parser can extract the fault context without
+/// parsing the freeform text block.
+#[cfg(not(test))]
+pub fn emit_panic_dump(rip: u64, rsp: u64, cr2: u64) {
+    const PANIC_DUMP_BYTES: usize = 256;
+    let mut buf = [0u8; PANIC_DUMP_BYTES];
+    let f = format_record(
+        &mut buf,
+        Level::Error,
+        "panic",
+        "kernel panic",
+        &[
+            Field::new("rip", Value::Hex(rip)),
+            Field::new("rsp", Value::Hex(rsp)),
+            Field::new("cr2", Value::Hex(cr2)),
+        ],
+    );
+    crate::serial::write_bytes(&buf[..f.written]);
+    crate::serial::write_bytes(b"\n");
+}
+
+/// Boot-time self-test for the structured-panic-dump path. Returns `true` when
+/// the exact record format that [`emit_panic_dump`] would write is produced
+/// correctly. Exercised by the stage32-2 QEMU gate.
+pub fn self_test_panic_dump() -> bool {
+    let mut buf = [0u8; 256];
+    let f = format_record(
+        &mut buf,
+        Level::Error,
+        "panic",
+        "kernel panic",
+        &[
+            Field::new("rip", Value::Hex(0x0000_ffff_dead_c0de)),
+            Field::new("rsp", Value::Hex(0xffff_c000_0000_0000)),
+            Field::new("cr2", Value::Hex(0x0000_0000_0000_0000)),
+        ],
+    );
+    if f.truncated {
+        return false;
+    }
+    let expected =
+        b"ERROR panic: kernel panic | rip=0xffffdeadc0de | rsp=0xffffc00000000000 | cr2=0x0";
+    &buf[..f.written] == expected
 }
 
 #[cfg(test)]
