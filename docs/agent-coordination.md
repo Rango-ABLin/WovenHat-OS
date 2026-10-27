@@ -6656,3 +6656,20 @@ f3ed3054d7763c33c92657bd945244195752dd9b passed SDK, core-foundation, all
 native matrices and CodeQL; desktop-userspace and drivers-radio remain unrelated
 pre-existing failed checks. This is not a process syscall, environment
 inheritance, descriptor-action, LibCore, libc, or browser completion claim.
+
+## Codex - freestanding C ABI and atomic package-capability qualification (2026-10-27)
+
+The WovenWeb native C++ probe now links a header-free target-qualified C23
+object and verifies C-to-Rust eight-integer calls, two-word aggregate returns,
+initialized/BSS data, explicit status, and the existing cleanup baselines.
+Hosted Linux QEMU passed the full native fixture on 1/2/4 CPUs at
+`d7c59d7f56bd9bce1615b1351de6db5f7e7169dc` (workflow `40503977639`, jobs
+`122188464467`, `122188464330`, `122188464202`); SDK, core-foundation and
+CodeQL passed. This is not libc or browser acceptance.
+
+The same revalidation repaired a real SMP package-launch ordering bug: a
+Ready task could run with the default user capability set before its declared
+package capabilities were installed. The cloud provider needs `Secrets` for
+its first syscall, so it could exit before service publication on 4 CPUs.
+Capability and lineage state now publish atomically under the initial scheduler
+lock, with a focused regression contract. No authority was broadened.

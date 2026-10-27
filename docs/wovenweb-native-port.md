@@ -58,6 +58,35 @@ rejection, and exact frame cleanup are checked. This is loader delivery only.
 There is still no inherited environment, user syscall, descriptor action,
 guest crt0 consumer, or LibCore Process acceptance.
 
+## Controlled freestanding C ABI qualification
+
+The native C++ probe now links one separate header-free C23 object compiled by
+target-qualified Clang. The object makes an eight-integer C-to-Rust call,
+checks a two-word aggregate return, and verifies initialized and BSS storage
+before reporting its explicit status to the Rust entry adapter. Hosted Linux
+QEMU acceptance at `d7c59d7f56bd9bce1615b1351de6db5f7e7169dc` passed the
+complete C++/C fixture and cleanup baselines on 1, 2 and 4 CPUs (workflow
+`40503977639`, jobs `122188464467`, `122188464330`, and `122188464202`); SDK,
+core-foundation and CodeQL also passed.
+
+This is compiler/ABI evidence only. The fixture has no C startup object,
+headers, allocator, libc, POSIX, threads, dynamic linking, floating point, or
+TLS-runtime coverage, and it is not a LibCore, LibWeb, Tor, VPN, or browser
+completion claim.
+
+## Atomic package-capability publication
+
+The 4-CPU baseline exposed a real package-spawn race: a newly Ready task began
+with the normal user capability set, then received its package declaration in a
+second scheduler acquisition. A cloud-provider fixture can issue its first
+`Secrets` syscall during that gap and exit before publishing its service. The
+effective package capability set and empty lineage array are now installed
+while the original scheduler lock still protects the new task, before that
+lock is released. The focused source contract and the hosted
+1/2/4-CPU core-foundation revalidation at the same revision pass. This fixes
+one launch-authorization ordering bug; it does not create a general process
+API, change the package authority model, or establish browser sandboxing.
+
 ## Memory blockers found in source
 
 At the audited revision, config.rs limits anonymous mappings to 16 and shared

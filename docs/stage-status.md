@@ -1,5 +1,17 @@
 # Stage status
 
+## WovenWeb freestanding C ABI and package-spawn ordering - 2026-10-27
+
+The controlled native C++ probe now includes a header-free C23 translation
+unit that verifies C-to-Rust integer and aggregate ABI behavior plus static/BSS
+data. Hosted QEMU passed the complete fixture on 1/2/4 CPUs at
+`d7c59d7f56bd9bce1615b1351de6db5f7e7169dc`; SDK, core-foundation, and CodeQL
+also passed. A 4-CPU cloud-provider failure exposed a package-capability
+publication race, now repaired by installing declared capabilities before a
+new task is schedulable. This is a bounded runtime increment only: libc,
+LibCore, TLS, engine, UI, Tor, VPN, native installation and browser completion
+remain unimplemented.
+
 ## WovenWeb native network platform - 2026-10-25
 
 Owned native SDK TCP/SOCKS5 transport passes host, Clippy and real QEMU 1/2/4-CPU
