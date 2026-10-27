@@ -410,7 +410,8 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
     serial = output / "serial.log"
     qmp_port = free_port()
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", args.memory,
+        str(qemu), "-accel", "whpx" if args.accelerator == "whpx" else "tcg,tb-size=128",
+        "-machine", "pc", "-m", args.memory,
         "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
@@ -611,6 +612,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qemu", type=Path, default=Path(DEFAULT_QEMU))
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--accelerator", choices=("tcg", "whpx"), default="tcg",
+                        help="QEMU accelerator; assertions and timing limits are identical")
     parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G configured to leave 4 GiB usable after firmware reservations)")
     parser.add_argument("--timeout", type=float, default=180.0)
     # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
@@ -636,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
         "qemu": str(qemu),
         "firmware": str(firmware.resolve()),
         "cpus": args.cpus,
+        "accelerator": args.accelerator,
         "physical_hardware_touched": False,
         "reboot_requested": False,
         "output": str(output),

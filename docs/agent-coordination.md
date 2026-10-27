@@ -6811,3 +6811,22 @@ Repair complete: default/tracing/profiler/Stage32.1-32.4 and hardware-demo kerne
 User requests overall experience, mouse/keyboard reliability, and performance improvements. Owning focused WovenShell event scheduling/damage, calculator initial text rendering and interactive QEMU launch configuration. Will preserve kernel input ABI, existing 3D features, ownership and prior acceptance. No other agent work requested.
 Demo responsiveness measurements still showed seconds of input delay in the software 3D path. Extending the focused fix to session argv assembly: hardware-demo explicitly selects existing --no-3d plus new --reduced-motion CLI option; other boot profiles and 3D functionality remain unchanged. argv stays bounded to seven borrowed strings, no authority or lifetime changes.
 Desktop profiling found release opt-level=s amplified the fixed 100,000-round KDF cost under TCG; shell release now uses opt-level=2, retaining LTO/stripping (ELF 147,448 bytes, within existing VFS bound). No hash iteration/format/auth policy changes. Stage4CPU sign-in measurement fell from 6,076ms (flat size-optimized intermediate) to 2,798ms including scripted key delays. 1CPU size-optimized timing failures retained at desktop-ux-regression-20261027-151800 and desktop-ux-final-20261027-152146; final speed-profile 1/2CPU reruns remain required.
+Broader Stage20 checks: 20.1, 20.5, 20.7 currently pass all 1/2/4 CPUs. 20.2 fails its taskbar entry oracle (expected_taskbar_3d versus the flat foreground already present in pre-change f7273ba9); 20.3 launcher and 20.4 cleanup checks also fail. 20.6 explicitly starts --no-3d yet compares the toast backdrop with projected expected_wallpaper; 20.8 resize/snap/input succeed but final cleanup pixels fail. All evidence is retained under audit-artifacts/desktop-ux-final-20261027-152146. Pre-change shell built separately as wovenhat-woven-shell-before-ux for comparison; no oracle or assertion edits have been made. These are failed gates, not acceptance.
+Interactive acceleration success: WHPX preflight works outside the restricted process environment (headless paused VM exited 0 via QMP). RUN-DESKTOP now defaults to whpx with explicit -Accelerator tcg fallback. Visible QEMU PID 17040, logs target/desktop-interactive-20261027-154331-443, booted with 2 CPUs/5GiB and USB tablet (mice=1). Verified PS/2 typing 12-3, absolute tablet movement and Evaluate click; captured result 9. Measured sign-in sequence 766ms including injected key delays; click delivery 186ms including QMP button delay. Window is left running for user interaction. Broader legacy gate failures are still being collected, not hidden.
+
+Final UX verification: WHPX desktop 1/2/4 CPU qualification PASS, unchanged
+assertions/time limits. TCG Stage20.1/5/7/10/11/12/15/17/18 all PASS 1/2/4;
+Stage20.2/3/4/6/8/9/13 pixel gates FAIL all 1/2/4. Before-UX shell f7273ba9
+reproduces 20.2 and 20.6 failures unchanged on 1 CPU; other failures remain
+open. Stage20.15 rerun passes after using project-local Cargo settings and
+approved network access. See docs/stage-status.md for artifact directories.
+User's WHPX desktop PID 17040 remains running; do not terminate it as cleanup.
+No full graphics/stage acceptance claim or warning/assertion suppression.
+
+Final inspection: QEMU PID 17040 is no longer present and its QMP endpoint
+is unreachable. It was not terminated by this task. Do not treat earlier
+"left running" notes as current process state. The verified launcher can
+start a fresh desktop session; no replacement window was forced open.
+
+## Codex - close failed desktop graphics gates and push (2026-10-27)
+User explicitly authorizes fixing all reported graphics gate errors, closing acceptance after passing validation, committing and pushing. Owning kernel graphics oracles plus any real shell/renderer defects exposed. Scope is the reported Stage20 software desktop gates and required regressions; physical GPU/native-hardware claims must remain evidence-based. Existing dirty files are prior-turn changes to preserve and include where relevant. No subagents requested.

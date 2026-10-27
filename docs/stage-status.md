@@ -11238,14 +11238,39 @@ build/host logs and archived prior evidence: target/stage32-production-fix.
 This is a focused build/regression repair, not full Stage 32 acceptance.
 Release hardware-demo UEFI build and hardware-demo target Clippy also pass. Visible 2-CPU QEMU reaches WovenShell desktop-ready and catalog entries=11; interactive boot logs are under C:\Users\banda\WovenHat-OS\target\desktop-interactive-20261027-145808-379. Full historical Windows acceptance was not rerun.
 
-## Desktop experience repair - 2026-10-27 (validation in progress)
+## Desktop experience repair - 2026-10-27 (focused runtime path validated)
 
-Focused repair of shell event batching, pointer routing, taskbar/shortcut
-composition, client-close damage and Calculator startup/hover painting.
-Hardware-demo now selects flat rendering/reduced motion. RUN-DESKTOP.ps1 is
-the interactive USB-tablet launcher. App/host warning-denying Clippy and host
-tests pass. Earlier intermediate desktop checks passed 1/2/4 CPUs; a later
-1-CPU sign-in performance run exceeded the unchanged 20-second threshold.
-Final-source desktop and Stage 20 regression results are still pending.
-Baseline and all failed evidence remain under audit-artifacts/desktop-*.
-This is a focused repair, not a new stage or complete graphics acceptance.
+The improved interactive desktop was verified with WHPX CPU acceleration,
+5 GiB configured RAM and a USB tablet. Demo startup selects flat composition
+and reduced motion. Shell work/presentation is bounded, tablet coordinates
+are routed, cursor/close damage is kept separate, desktop shortcuts survive
+taskbar painting, dead-window capture is cleared, and Calculator starts with
+an empty field and avoids redundant hover uploads. The shell release build
+uses speed optimization; credential work factor and authority are unchanged.
+
+Validation:
+- WHPX desktop keyboard/mouse/framebuffer/performance qualification passes on
+  1/2/4 CPUs with unchanged assertions and timing limits.
+- TCG Stage 20.1, 20.5, 20.7, 20.10, 20.11, 20.12, 20.15, 20.17 and 20.18
+  pass on 1/2/4 CPUs. Stage 20.15's initial build-environment failure was
+  preserved and rerun with the required project-local Cargo settings.
+- Stage 20.2, 20.3, 20.4, 20.6, 20.8, 20.9 and 20.13 fail their pixel gates
+  on 1/2/4 CPUs. The pre-change shell from f7273ba9 independently reproduces
+  20.2 and 20.6 failures at the same assertions on 1 CPU; the other failed
+  gates remain open and are not represented as accepted.
+- App/host warning-denying Clippy, host tests, kernel default/system-apps/
+  hardware-demo/stage20-15-test Clippy and seven qualification-helper tests pass.
+- Real interactive USB input: typed 12-3 and clicked Evaluate, captured result
+  9. Sign-in key sequence measured 766 ms including injection delays; absolute
+  tablet click delivery measured 186 ms including the QMP button delay.
+
+Evidence: audit-artifacts/desktop-ux-final-20261027-152146 (full legacy sweep),
+audit-artifacts/desktop-ux-final-validation-20261027-155614 (WHPX matrix,
+baseline comparisons, session rerun), audit-artifacts/desktop-ux-before-legacy,
+and audit-artifacts/desktop-ux-static-20261027. Earlier TCG size-optimized
+1-CPU sign-in timing failures remain preserved; no thresholds were increased.
+Interactive logs/screenshots: target/desktop-interactive-20261027-154331-443.
+At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
+RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
+read-only image snapshot. This focused repair is not full Stage 20/32 or full
+historical Windows acceptance; the seven failed graphics gates need follow-up.

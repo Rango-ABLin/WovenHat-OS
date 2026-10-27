@@ -85,7 +85,9 @@ For an interactive desktop with the signed demo apps and a USB tablet:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\RUN-DESKTOP.ps1
 ```
 
-The demo uses flat composition and reduced motion for software emulation.
+The launcher defaults to Windows hypervisor acceleration (`whpx`); use
+`-Accelerator tcg` where WHPX is unavailable. The demo uses flat composition
+and reduced motion to keep the desktop responsive.
 Sign in as Ada with PIN `1234`. The launcher keeps each run's serial/QEMU
 logs under a unique `target/desktop-interactive-*` directory. Use `-Image`
 to boot an already-built desktop image; self-test images stop after testing.

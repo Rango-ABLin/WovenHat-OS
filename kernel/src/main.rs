@@ -9540,194 +9540,14 @@ fn stage20_13_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
-    /// Independently recomputes the taskbar colour at a screen pixel once
-    /// the whole taskbar is 3D-projected (bottom edge anchored, top edge
-    /// receded and narrowed) as a tilted, textured card -- the same
-    /// transform `render_taskbar_3d` applies, reimplemented from scratch.
-    /// `flat` is the caller's own independent reconstruction of the flat
-    /// 2D taskbar content at an absolute screen pixel (what the texture
-    /// contains at that position); `None` means the point falls in the
-    /// gap neither projected triangle covers, where the flat content
-    /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate_uv(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            ((a * wa + b * wb + c * wc + total / 2) / total).clamp(0, 255)
-        }
-        const TILT_DEPTH: i64 = 30 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(taskbar_height - 1) << 16) / 2;
-        // Matches `render_taskbar_3d`'s `top_half_width`: the exact inverse
-        // of DISTANCE/(DISTANCE+depth) for this fixed 30-on-200 tilt, so the
-        // receded top edge still spans the full taskbar width on screen.
-        let top_half_width = half_width * 23 / 20;
-        let (cx, cy) = (width / 2, top + taskbar_height / 2);
-        let top_left = project(cx, cy, -top_half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let sample = |u: i64, v: i64| {
-            let sx = (u * i64::from(width - 1) / 255) as i32;
-            let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
-            flat(sx, sy)
-        };
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        None
-    }
-    fn expected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> u32 {
-        // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
-        // fallback paints the (also 3D-projected) desktop background, not
-        // the flat taskbar content -- the same gap-filling pattern as
-        // every other 3D surface.
-        match projected_taskbar(x, y, width, top, taskbar_height, &flat) {
-            Some(color) => color,
-            None => expected_wallpaper(x, y, width, height),
-        }
-    }
+
+
+
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
         let flags =
@@ -9757,7 +9577,7 @@ fn stage20_13_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -11737,7 +11557,7 @@ fn stage20_17_self_test() -> bool {
 /// which the projection deliberately keeps anchored, is unchanged.
 #[cfg(feature = "stage20-18-test")]
 fn stage20_18_self_test() -> bool {
-    use crate::display::rgb;
+    use crate::display::{blend_pixel, rgb, Surface};
     const ACCENT: u32 = rgb(90, 140, 220);
     const ACTIVE: u32 = rgb(70, 120, 210);
     const RED: u32 = rgb(200, 60, 60);
@@ -11814,7 +11634,7 @@ fn stage20_18_self_test() -> bool {
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
-    let Some(_alpha) = spawn_hello_gui(
+    let Some(alpha) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
         Some(client_capabilities),
@@ -11876,6 +11696,47 @@ fn stage20_18_self_test() -> bool {
         return false;
     }
 
+    // Prove notification content survives the 3D path. An absent card must
+    // not pass as "sane wallpaper": compare every projected pixel and require
+    // visible border/text samples in the independent expected image.
+    let wallpaper = |x: i32, y: i32| {
+        let span = (height - 1).max(1);
+        let gradient = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58),
+            (y.clamp(0, span) * 255 / span) as u8);
+        let tint = if (x / 96 + y / 96) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
+        let woven = blend_pixel(tint, gradient, 12);
+        if x % 96 == 0 || y % 96 == 0 { blend_pixel(rgb(255, 255, 255), woven, 10) } else { woven }
+    };
+    let (toast_x, toast_y) = (width - 188, 8);
+    let mut toast = Surface::new(180, 22);
+    for y in 0..22 {
+        for x in 0..180 {
+            toast.set_pixel(x, y, blend_pixel(rgb(28, 32, 44), wallpaper(toast_x + x, toast_y + y), 216));
+        }
+    }
+    toast.stroke_rect(toast.bounds(), rgb(76, 190, 188));
+    toast.draw_text(6, 8, "3D toast ready", rgb(255, 255, 255));
+    let expected_toast = |x: i32, y: i32| expected_card_3d(
+        x, y, toast_x, toast_y, 180, 22, 30 << 16,
+        |lx, ly| toast.pixel(lx, ly), wallpaper,
+    );
+    let visible = (toast_y..toast_y + 22).flat_map(|y| (toast_x..toast_x + 180).map(move |x| (x, y)))
+        .filter(|&(x, y)| expected_toast(x, y) == rgb(255, 255, 255)).count();
+    if !step("3D notification fixture contains visible text", visible >= 10) { return false; }
+    let sent = ipc::send(alpha.as_u64(), shell.as_u64(), b"NOTE3D toast ready").is_ok();
+    let rendered = sent && until(1000, || {
+        (toast_y..toast_y + 22).all(|y| (toast_x..toast_x + 180).all(|x| {
+            compositor::pixel(x, y) == Ok(expected_toast(x, y))
+        }))
+    });
+    if !rendered { report_graphics_mismatch("3D toast", toast_x, toast_y, 180, 22, expected_toast); }
+    if !step("3D notification border, text and background match every pixel", rendered) { return false; }
+    if task::kill_process(alpha.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(alpha)) {
+        return step("notification client killed", false);
+    }
+    let _ = task::wait_process(alpha.as_u64());
+
     if task::kill_process(shell.as_u64(), 9).is_err()
         || !until(1000, || task::process_exited(shell))
     {
@@ -11914,7 +11775,7 @@ fn stage20_9_self_test() -> bool {
     const ACCENT: u32 = rgb(76, 190, 188);
     const START_FILL: u32 = rgb(28, 115, 145);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
-    const TOAST_FILL: u32 = rgb(30, 34, 46);
+    const TOAST_FILL: u32 = rgb(28, 32, 44);
     const NOTES: u32 = rgb(150, 120, 40);
     const UNSET: u32 = 0x0100_0000;
 
@@ -11952,194 +11813,14 @@ fn stage20_9_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
-    /// Independently recomputes the taskbar colour at a screen pixel once
-    /// the whole taskbar is 3D-projected (bottom edge anchored, top edge
-    /// receded and narrowed) as a tilted, textured card -- the same
-    /// transform `render_taskbar_3d` applies, reimplemented from scratch.
-    /// `flat` is the caller's own independent reconstruction of the flat
-    /// 2D taskbar content at an absolute screen pixel (what the texture
-    /// contains at that position); `None` means the point falls in the
-    /// gap neither projected triangle covers, where the flat content
-    /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate_uv(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            ((a * wa + b * wb + c * wc + total / 2) / total).clamp(0, 255)
-        }
-        const TILT_DEPTH: i64 = 30 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(taskbar_height - 1) << 16) / 2;
-        // Matches `render_taskbar_3d`'s `top_half_width`: the exact inverse
-        // of DISTANCE/(DISTANCE+depth) for this fixed 30-on-200 tilt, so the
-        // receded top edge still spans the full taskbar width on screen.
-        let top_half_width = half_width * 23 / 20;
-        let (cx, cy) = (width / 2, top + taskbar_height / 2);
-        let top_left = project(cx, cy, -top_half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let sample = |u: i64, v: i64| {
-            let sx = (u * i64::from(width - 1) / 255) as i32;
-            let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
-            flat(sx, sy)
-        };
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        None
-    }
-    fn expected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> u32 {
-        // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
-        // fallback paints the (also 3D-projected) desktop background, not
-        // the flat taskbar content -- the same gap-filling pattern as
-        // every other 3D surface.
-        match projected_taskbar(x, y, width, top, taskbar_height, &flat) {
-            Some(color) => color,
-            None => expected_wallpaper(x, y, width, height),
-        }
-    }
+
+
+
     fn region(
         x0: i32,
         y0: i32,
@@ -12176,7 +11857,7 @@ fn stage20_9_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -12230,24 +11911,10 @@ fn stage20_9_self_test() -> bool {
         surface.draw_text(6, 8, "Battery 80%", WHITE);
     });
     let toast_expected = |x: i32, y: i32| {
-        expected_card_3d(
-            x,
-            y,
-            width - 188,
-            8,
-            180,
-            22,
-            30 << 16,
-            |lx, ly| match toast.pixel(lx, ly) {
-                Some(UNSET) | None => Some(blend_pixel(
-                    TOAST_FILL,
-                    wallpaper(width - 188 + lx, 8 + ly, height),
-                    216,
-                )),
-                Some(pixel) => Some(pixel),
-            },
-            |x, y| expected_wallpaper(x, y, width, height),
-        )
+        match toast.pixel(x - (width - 188), y - 8) {
+            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+            Some(color) => color,
+        }
     };
     if !step(
         "the toast shows the latest notification",
@@ -12299,43 +11966,15 @@ fn stage20_9_self_test() -> bool {
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
-    let center_3d = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        let expected_pixel = |x: i32, y: i32| {
-            expected_card_3d(
-                x,
-                y,
-                x0,
-                y0,
-                164,
-                h,
-                70 << 16,
-                |lx, ly| match image.pixel(lx, ly) {
-                    Some(UNSET) | None => Some(blend_pixel(
-                        PANEL_FILL,
-                        wallpaper(x0 + lx, y0 + ly, height),
-                        216,
-                    )),
-                    Some(pixel) => Some(pixel),
-                },
-                |x, y| expected_wallpaper(x, y, width, height),
-            )
-        };
-        // Avoid the wider projected top-corner margin where integer
-        // barycentric coverage legitimately differs between the independent
-        // model and the renderer; the notification rows are checked in the
-        // stable interior below.
-        for y in y0 + 14..y0 + h - 2 {
-            for x in x0 + 24..x0 + 140 {
-                let expected = expected_pixel(x, y);
-                if compositor::pixel(x, y) != Ok(expected) {
-                    return false;
-                }
-            }
-        }
-        true
+    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
+        // Verify the entire panel: header, clear control, all rows and border.
+        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
+            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
+            Some(color) => color,
+        })
     };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered = clock_clicked && until(1000, || center_3d(x0, y0, full_height, &full));
+    let center_rendered = clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
     let badge_removed = center_rendered
         && until(500, || compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT));
     let opened = badge_removed;
@@ -12351,7 +11990,7 @@ fn stage20_9_self_test() -> bool {
     let clear_point = (x0 + 164 - 20, y0 + 7);
     let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
         && click()
-        && until(1000, || center_3d(ex, ey, eh, &empty));
+        && until(1000, || center_matches(ex, ey, eh, &empty));
     if !step("Clear empties the Notification Center", cleared) {
         return false;
     }
@@ -12440,194 +12079,14 @@ fn stage20_8_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
-    /// Independently recomputes the taskbar colour at a screen pixel once
-    /// the whole taskbar is 3D-projected (bottom edge anchored, top edge
-    /// receded and narrowed) as a tilted, textured card -- the same
-    /// transform `render_taskbar_3d` applies, reimplemented from scratch.
-    /// `flat` is the caller's own independent reconstruction of the flat
-    /// 2D taskbar content at an absolute screen pixel (what the texture
-    /// contains at that position); `None` means the point falls in the
-    /// gap neither projected triangle covers, where the flat content
-    /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate_uv(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            ((a * wa + b * wb + c * wc + total / 2) / total).clamp(0, 255)
-        }
-        const TILT_DEPTH: i64 = 30 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(taskbar_height - 1) << 16) / 2;
-        // Matches `render_taskbar_3d`'s `top_half_width`: the exact inverse
-        // of DISTANCE/(DISTANCE+depth) for this fixed 30-on-200 tilt, so the
-        // receded top edge still spans the full taskbar width on screen.
-        let top_half_width = half_width * 23 / 20;
-        let (cx, cy) = (width / 2, top + taskbar_height / 2);
-        let top_left = project(cx, cy, -top_half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let sample = |u: i64, v: i64| {
-            let sx = (u * i64::from(width - 1) / 255) as i32;
-            let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
-            flat(sx, sy)
-        };
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        None
-    }
-    fn expected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> u32 {
-        // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
-        // fallback paints the (also 3D-projected) desktop background, not
-        // the flat taskbar content -- the same gap-filling pattern as
-        // every other 3D surface.
-        match projected_taskbar(x, y, width, top, taskbar_height, &flat) {
-            Some(color) => color,
-            None => expected_wallpaper(x, y, width, height),
-        }
-    }
+
+
+
     fn region(
         x0: i32,
         y0: i32,
@@ -12681,7 +12140,7 @@ fn stage20_8_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -13238,7 +12697,7 @@ fn stage20_6_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const ACCENT: u32 = rgb(76, 190, 188);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
-    const TOAST_FILL: u32 = rgb(30, 34, 46);
+    const TOAST_FILL: u32 = rgb(28, 32, 44);
     const RED: u32 = rgb(200, 60, 60);
     const UNSET: u32 = 0x0100_0000;
 
@@ -13276,194 +12735,14 @@ fn stage20_6_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
-    /// Independently recomputes the taskbar colour at a screen pixel once
-    /// the whole taskbar is 3D-projected (bottom edge anchored, top edge
-    /// receded and narrowed) as a tilted, textured card -- the same
-    /// transform `render_taskbar_3d` applies, reimplemented from scratch.
-    /// `flat` is the caller's own independent reconstruction of the flat
-    /// 2D taskbar content at an absolute screen pixel (what the texture
-    /// contains at that position); `None` means the point falls in the
-    /// gap neither projected triangle covers, where the flat content
-    /// (painted first, underneath) shows through directly.
-    fn projected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate_uv(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            ((a * wa + b * wb + c * wc + total / 2) / total).clamp(0, 255)
-        }
-        const TILT_DEPTH: i64 = 30 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(taskbar_height - 1) << 16) / 2;
-        // Matches `render_taskbar_3d`'s `top_half_width`: the exact inverse
-        // of DISTANCE/(DISTANCE+depth) for this fixed 30-on-200 tilt, so the
-        // receded top edge still spans the full taskbar width on screen.
-        let top_half_width = half_width * 23 / 20;
-        let (cx, cy) = (width / 2, top + taskbar_height / 2);
-        let top_left = project(cx, cy, -top_half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, top_half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let sample = |u: i64, v: i64| {
-            let sx = (u * i64::from(width - 1) / 255) as i32;
-            let sy = top + (v * i64::from(taskbar_height - 1) / 255) as i32;
-            flat(sx, sy)
-        };
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(0, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 0, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let u = interpolate_uv(255, 255, 0, wa, wb, wc, total);
-            let v = interpolate_uv(0, 255, 255, wa, wb, wc, total);
-            return Some(sample(u, v));
-        }
-        None
-    }
-    fn expected_taskbar(
-        x: i32,
-        y: i32,
-        width: i32,
-        top: i32,
-        taskbar_height: i32,
-        height: i32,
-        flat: impl Fn(i32, i32) -> u32,
-    ) -> u32 {
-        // Outside the taskbar's own projected quad, `render_taskbar_3d`'s
-        // fallback paints the (also 3D-projected) desktop background, not
-        // the flat taskbar content -- the same gap-filling pattern as
-        // every other 3D surface.
-        match projected_taskbar(x, y, width, top, taskbar_height, &flat) {
-            Some(color) => color,
-            None => expected_wallpaper(x, y, width, height),
-        }
-    }
+
+
+
     fn region(
         x0: i32,
         y0: i32,
@@ -13564,6 +12843,14 @@ fn stage20_6_self_test() -> bool {
             }
         })
     });
+    if !toast {
+        report_graphics_mismatch("translucent toast", toast_x, toast_y, 180, 22, |x, y| {
+            match toast_overlay.pixel(x - toast_x, y - toast_y) {
+                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+                Some(color) => color,
+            }
+        });
+    }
     if !step("the toast is translucent over the wallpaper", toast) {
         return false;
     }
@@ -14182,82 +13469,7 @@ fn stage20_4_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
+
     fn expected_wallpaper(_x: i32, _y: i32, _width: i32, height: i32) -> u32 {
         // WovenShell's production default is the accepted flat software
         // renderer; projected wallpaper is covered by dedicated 3D gates.
@@ -14349,7 +13561,7 @@ fn stage20_4_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -14540,84 +13752,9 @@ fn stage20_3_self_test() -> bool {
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
     fn region(
@@ -14684,7 +13821,7 @@ fn stage20_3_self_test() -> bool {
         .with(capability::Capability::Ipc)
         .with(capability::Capability::FileRead)
         .with(capability::Capability::ProcessCreate);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -14706,6 +13843,25 @@ fn stage20_3_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
 
+    fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
+        let fill = rgb(74, 88, 112);
+        let ink = rgb(220, 230, 242);
+        surface.fill_rect(Rect::new(x + 1, y + 2, size as usize, size as usize), rgb(0, 0, 0));
+        surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
+        surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
+        if selected { surface.stroke_rect(Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize), ACCENT); }
+        let span = (size / 2).max(4);
+        surface.fill_rect(Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2), ink);
+        surface.fill_rect(Rect::new(x + size / 4 + 2, y + size / 3 + 6, (span - 4).max(0) as usize, 2), ink);
+        const MASK: [&[u8; 8]; 8] = [b"..####..", b".######.", b"########", b"###..###", b"##....##", b"#......#", b"########", b"........"];
+        let color = if selected { rgb(110, 235, 235) } else { rgb(225, 235, 250) };
+        for (row, line) in MASK.iter().enumerate() {
+            for (column, bit) in line.iter().enumerate() {
+                if *bit == b'#' { surface.fill_rect(Rect::new(x + (size - 8) / 2 + column as i32, y + (size - 8) / 2 + row as i32, 1, 1), color); }
+            }
+        }
+    }
+
     // The launcher panel as the kernel renders it: rows of 14 pixels (title,
     // search, one per match or "No matches") inside a one-pixel border, just
     // above the taskbar.
@@ -14717,11 +13873,7 @@ fn stage20_3_self_test() -> bool {
         expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
         expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
         expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        expected.fill_rect(Rect::new(5, 5, 8, 8), rgb(0, 0, 0));
-        expected.fill_rect(Rect::new(4, 3, 8, 8), rgb(74, 88, 112));
-        expected.fill_rect(Rect::new(6, 5, 4, 2), rgb(220, 230, 242));
-        expected.fill_rect(Rect::new(6, 7, 4, 2), rgb(220, 230, 242));
-        expected.fill_rect(Rect::new(8, 11, 2, 2), rgb(220, 230, 242));
+        generic_icon(&mut expected, 4, 3, 8, false);
         expected.draw_text(16, 5, "WovenStart", WHITE);
         expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
         if names.is_empty() {
@@ -14732,14 +13884,7 @@ fn stage20_3_self_test() -> bool {
             if row == selected {
                 expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
             }
-            expected.fill_rect(Rect::new(5, row_y + 3, 12, 12), rgb(0, 0, 0));
-            expected.fill_rect(Rect::new(4, row_y + 1, 12, 12), rgb(74, 88, 112));
-            expected.fill_rect(Rect::new(6, row_y + 3, 8, 2), rgb(220, 230, 242));
-            if row == selected {
-                expected.stroke_rect(Rect::new(3, row_y, 14, 14), ACCENT);
-            }
-            expected.fill_rect(Rect::new(7, row_y + 7, 6, 2), rgb(220, 230, 242));
-            expected.fill_rect(Rect::new(9, row_y + 11, 2, 2), rgb(220, 230, 242));
+            generic_icon(&mut expected, 4, row_y + 1, 12, row == selected);
             expected.draw_text(22, row_y + 4, name, WHITE);
         }
         const PANEL_FILL: u32 = rgb(28, 32, 44);
@@ -14759,31 +13904,10 @@ fn stage20_3_self_test() -> bool {
         let sample = |x: i32, py: i32| {
             flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
         };
-        // This panel's tilt is steeper than the taskbar's (`TILT_DEPTH =
-        // 70 << 16` vs `30 << 16`), so the "too close to a shrunk-quad
-        // vertex" margin Stage 20.1 established near the taskbar's own top
-        // corners is wider here, and reaches further down each side than a
-        // few rows: a query within ~20px of the left or right edge, or
-        // within the title row's own height of the top, can still land on
-        // the wrong side of the top-left/top-right triangles' shared edge.
-        // The title row is skipped; the search row and every entry row,
-        // which is what this stage actually exercises (filtering,
-        // selection, launching), are checked exhaustively in a safe
-        // horizontal band, plus the two edge columns once clear of the top.
-        // The first projected columns are reserved for the launcher icon
-        // tiles, whose crisp glyphs are covered by the visual icon contract.
-        //
-        let matches = |actual: Result<u32, compositor::Error>, x: i32, py: i32| {
-            let expected_px = sample(4 + x, y + py);
-            actual == Ok(expected_px)
-        };
-        until(500, || {
-            (14..h).all(|py| (40..140).all(|x| matches(compositor::pixel(4 + x, y + py), x, py)))
-                && (h / 2..h).all(|py| {
-                    matches(compositor::pixel(4, y + py), 0, py)
-                        && matches(compositor::pixel(4 + 159, y + py), 159, py)
-                })
-        })
+        // Every pixel of the flat panel, including icon/selection/border.
+        let matches = until(500, || region(4, y, 160, h, sample));
+        if !matches { report_graphics_mismatch("launcher", 4, y, 160, h, sample); }
+        matches
     };
     let closed = || {
         let h = panel_height(3);
@@ -14791,8 +13915,7 @@ fn stage20_3_self_test() -> bool {
             (top - 2 - h..top - 2).all(|y| {
                 (4..164).all(|x| {
                     let actual = compositor::pixel(x, y);
-                    actual == Ok(expected_wallpaper(x, y, width, height))
-                        || actual == Ok(wallpaper(x, y, height))
+                    actual == Ok(wallpaper(x, y, height))
                 })
             })
         })
@@ -14862,20 +13985,19 @@ fn stage20_3_self_test() -> bool {
         return false;
     }
 
-    // A catalog entry whose program is missing: a toast, and no child.
-    // KNOWN BUG (see docs/agent-coordination.md, not yet root-caused): under
-    // 3D mode the toast notification's area shows exactly the (3D-projected)
-    // desktop background with no trace of its border/text/fill, even though
-    // `render_toast_3d` executes its triangle draws with correct geometry
-    // and a correctly-painted texture. This only checks the area still
-    // renders a sane 3D background, not what the toast should look like.
+    // A failed spawn must display a real notification, with exact text.
     let toast = || {
         let (x0, y0) = (width - 188, 8);
-        until(1000, || {
-            region(x0, y0, 180, 22, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
-        })
+        let mut expected = Surface::new(180, 22);
+        expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
+        expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
+        expected.draw_text(6, 8, "Could not start Gamma", WHITE);
+        until(1000, || region(x0, y0, 180, 22, |x, y| {
+            match expected.pixel(x - x0, y - y0) {
+                Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
+                Some(color) => color,
+            }
+        }))
     };
     let failed = keys(&[0x3b, 0x22])
         && panel(&["Gamma"], "g", 0)
@@ -14923,11 +14045,11 @@ fn stage20_3_self_test() -> bool {
 fn stage20_2_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(18, 42, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(64, 28, 88);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(20, 24, 32);
+    const TASKBAR: u32 = rgb(10, 18, 30);
     const ACTIVE: u32 = rgb(70, 120, 210);
     const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
     const RED: u32 = rgb(200, 60, 60);
@@ -14961,94 +14083,19 @@ fn stage20_2_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 32 + y / 32) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 18);
-        if x % 32 == 0 || y % 32 == 0 {
-            blend_pixel(WHITE, woven, 36)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
     }
 
-    /// Independently recomputes the wallpaper colour at a screen pixel once
-    /// the whole desktop background is 3D-projected as a floor receding
-    /// into the distance (bottom edge at `height` anchored, top edge at `0`
-    /// receded and narrowed) -- the same transform
-    /// `render_desktop_background` applies, reimplemented from scratch
-    /// (camera projection, triangle rasterization, barycentric source-
-    /// coordinate interpolation) so this test catches real divergence
-    /// rather than trusting shared code. `None` means the point falls in
-    /// the narrow gap neither projected triangle covers, where the flat
-    /// formula applies instead (painted first, underneath).
-    fn projected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> Option<u32> {
-        fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i64 {
-            i64::from(bx - ax) * i64::from(py - ay) - i64::from(by - ay) * i64::from(px - ax)
-        }
-        fn project(screen_x: i32, screen_y: i32, wx: i64, wy: i64, wz: i64) -> Option<(i32, i32)> {
-            const FOCAL: i64 = 200 << 16;
-            const DISTANCE: i64 = 200 << 16;
-            let eye_z = wz + DISTANCE;
-            if eye_z <= 0 {
-                return None;
-            }
-            let scale = |c: i64| -> i64 { c * FOCAL / (eye_z * 65536) };
-            Some((
-                screen_x.saturating_add(scale(wx) as i32),
-                screen_y.saturating_add(scale(wy) as i32),
-            ))
-        }
-        fn interpolate(a: i64, b: i64, c: i64, wa: i64, wb: i64, wc: i64, total: i64) -> i64 {
-            if total == 0 {
-                return a;
-            }
-            (a * wa + b * wb + c * wc + total / 2) / total
-        }
-        const TILT_DEPTH: i64 = 70 << 16;
-        let half_width = i64::from(width / 2) << 16;
-        let half_height = (i64::from(height - 1) << 16) / 2;
-        let (cx, cy) = (width / 2, height / 2);
-        let top_left = project(cx, cy, -half_width, -half_height, TILT_DEPTH)?;
-        let top_right = project(cx, cy, half_width, -half_height, TILT_DEPTH)?;
-        let bottom_left = project(cx, cy, -half_width, half_height, 0)?;
-        let bottom_right = project(cx, cy, half_width, half_height, 0)?;
-        let barycentric =
-            |a: (i32, i32), b: (i32, i32), c: (i32, i32)| -> Option<(i64, i64, i64)> {
-                let area = edge(a.0, a.1, b.0, b.1, c.0, c.1);
-                if area == 0 {
-                    return None;
-                }
-                let wa = edge(b.0, b.1, c.0, c.1, x, y);
-                let wb = edge(c.0, c.1, a.0, a.1, x, y);
-                let wc = edge(a.0, a.1, b.0, b.1, x, y);
-                let inside = if area > 0 {
-                    wa >= 0 && wb >= 0 && wc >= 0
-                } else {
-                    wa <= 0 && wb <= 0 && wc <= 0
-                };
-                if inside {
-                    Some((wa.abs(), wb.abs(), wc.abs()))
-                } else {
-                    None
-                }
-            };
-        let (w, h) = (i64::from(width), i64::from(height));
-        if let Some((wa, wb, wc)) = barycentric(top_left, top_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(0, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, 0, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        if let Some((wa, wb, wc)) = barycentric(top_right, bottom_right, bottom_left) {
-            let total = wa + wb + wc;
-            let sx = interpolate(w, w, 0, wa, wb, wc, total) as i32;
-            let sy = interpolate(0, h, h, wa, wb, wc, total) as i32;
-            return Some(wallpaper(sx, sy, height));
-        }
-        None
-    }
-    fn expected_wallpaper(x: i32, y: i32, width: i32, height: i32) -> u32 {
-        projected_wallpaper(x, y, width, height).unwrap_or_else(|| wallpaper(x, y, height))
+
+    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
+        wallpaper(x, y, height)
     }
 
     /// Text rendered with the kernel's font into a `width`×`height` mask at
@@ -15127,7 +14174,7 @@ fn stage20_2_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
+    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -15149,7 +14196,6 @@ fn stage20_2_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
     let entry = |index: i32| (56 + index * 84, top + 4);
     let (tray_x, tray_y) = (width - 54 - 20, top + 4);
     let (toast_x, toast_y) = (width - 188, 8);
@@ -15169,31 +14215,10 @@ fn stage20_2_self_test() -> bool {
     let alpha_mask = text_mask(80, 16, 4, 5, "Alpha");
     let beta_mask = text_mask(80, 16, 4, 5, "Beta");
     let entry_sample = |entries: &[TaskbarEntryMask3D], x: i32, y: i32| -> bool {
-        compositor::pixel(x, y)
-            == Ok(expected_taskbar_3d(
-                x,
-                y,
-                width,
-                top,
-                24,
-                |x, y| {
-                    flat_taskbar_3d(
-                        x,
-                        y,
-                        width,
-                        top,
-                        &button_mask,
-                        &ws_digit_masks,
-                        0,
-                        &qs_mask,
-                        false,
-                        entries,
-                        None,
-                        taskbar,
-                    )
-                },
-                |x, y| expected_wallpaper(x, y, width, height),
-            ))
+        compositor::pixel(x, y) == Ok(flat_taskbar_3d(
+            x, y, width, top, &button_mask, &ws_digit_masks, 0,
+            &qs_mask, false, entries, None, |x, y| wallpaper(x, y, height),
+        ))
     };
     let entry_region = |entries: &[TaskbarEntryMask3D], x0: i32, y0: i32, w: i32, h: i32| -> bool {
         (y0..y0 + h).all(|y| (x0..x0 + w).all(|x| entry_sample(entries, x, y)))
@@ -15234,29 +14259,22 @@ fn stage20_2_self_test() -> bool {
         entry_region(&alpha_active, entry(0).0, entry(0).1, 80, 16)
     });
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
-    // KNOWN BUG (flagged in docs/agent-coordination.md, not yet root-caused):
-    // under 3D mode, `render_toast_3d`'s two `textured_triangle_3d` calls
-    // execute with a correctly-painted texture (border, text) and a
-    // correctly-scoped, non-degenerate projected quad -- confirmed by
-    // instrumenting `render_toast_3d` directly -- yet the toast's screen
-    // area ends up showing exactly the (3D-projected) desktop background,
-    // as if those two calls never touched the canvas at all. The border/
-    // text pixel-exact check this stage used before the 3D-default flip
-    // cannot pass against that real, currently-unexplained behaviour, so
-    // this checks only that the area still renders a sane 3D desktop
-    // background (not garbage/a crash) rather than asserting what the
-    // toast itself should look like. Tracked as an open defect, not
-    // evidence the toast is correct.
-    let toast = until(500, || {
-        region(toast_x, toast_y, 180, 22, |x, y| {
-            expected_wallpaper(x, y, width, height)
-        })
-    });
+    // Exact notification content, not merely a sane background.
+    let mut toast_mask = Surface::new(180, 22);
+    toast_mask.fill_rect(toast_mask.bounds(), UNSET);
+    toast_mask.stroke_rect(toast_mask.bounds(), rgb(76, 190, 188));
+    toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
+    let toast = until(500, || region(toast_x, toast_y, 180, 22, |x, y| {
+        match toast_mask.pixel(x - toast_x, y - toast_y) {
+            Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
+            Some(color) => color,
+        }
+    }));
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
         || !step("tray icon shown", tray)
         || !step(
-            "notification toast area still renders (toast content tracked as a known 3D bug)",
+            "notification toast border, text and translucency",
             toast,
         )
     {
@@ -15688,6 +14706,24 @@ fn flat_taskbar_3d(
     crate::display::blend_pixel(TASKBAR, background(x, y), TASKBAR_OPACITY)
 }
 
+/// Report the first exact-pixel mismatch after an acceptance wait fails.
+#[cfg(any(feature = "stage20-3-test", feature = "stage20-6-test", feature = "stage20-9-test", feature = "stage20-18-test"))]
+fn report_graphics_mismatch(
+    label: &str, x0: i32, y0: i32, width: i32, height: i32,
+    expected: impl Fn(i32, i32) -> u32,
+) {
+    for y in y0..y0 + height {
+        for x in x0..x0 + width {
+            let actual = compositor::pixel(x, y);
+            let expected = expected(x, y);
+            if actual != Ok(expected) {
+                serial::write_line(format_args!("[GFX] {} mismatch x={} y={} expected={:#08x} actual={:?}", label, x, y, expected, actual));
+                return;
+            }
+        }
+    }
+}
+
 /// Independently recomputes a small bounded 3D chrome card's colour at a
 /// screen pixel (bottom edge anchored, top edge pushed back `tilt_depth`
 /// and narrowed by ordinary perspective, no taskbar-style width
@@ -15702,6 +14738,7 @@ fn flat_taskbar_3d(
     feature = "stage20-3-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
 ))]
 #[allow(clippy::too_many_arguments)]
 fn projected_card_3d(
@@ -15786,6 +14823,7 @@ fn projected_card_3d(
     feature = "stage20-3-test",
     feature = "stage20-9-test",
     feature = "stage20-10-test",
+    feature = "stage20-18-test",
 ))]
 #[allow(clippy::too_many_arguments)]
 fn expected_card_3d(

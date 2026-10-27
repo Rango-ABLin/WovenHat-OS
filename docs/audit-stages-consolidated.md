@@ -16183,7 +16183,7 @@ Prior evidence was copied under target/stage32-production-fix/prior-evidence-*
 before rerunning the established harnesses. This focused repair is not full
 Stage 32 or full historical Windows-chain acceptance.
 
-## Desktop experience focused repair (2026-10-27; validation in progress)
+## Desktop experience focused repair (2026-10-27; runtime validated, graphics acceptance incomplete)
 
 User-reported lag/input problems were investigated against the real desktop.
 The baseline 2-CPU qualification failed its terminal-close framebuffer check.
@@ -16199,3 +16199,14 @@ and preserves unique logs. Host tests include normalized pointer endpoint/
 scale/malformed-range regression coverage. No test thresholds, assertions,
 credential iterations, capabilities or ownership checks were weakened.
 Final matrix results and remaining limitations are recorded in stage-status.
+
+Final runtime qualification passes on WHPX 1/2/4 CPUs. Stage 20.1/5/7/10/11/
+12/15/17/18 pass on TCG 1/2/4 CPUs. Stage 20.2/3/4/6/8/9/13 pixel gates fail
+on all three CPU counts; 20.2 and 20.6 are reproduced with the pre-change
+shell at the same assertions on 1 CPU. Other failed gates remain open.
+No complete stage acceptance is claimed. Full paths/results are in stage-status.
+The already-enabled Windows hypervisor was probed, then the live desktop was
+verified with PS/2 typing and USB absolute-pointer evaluation of 12-3=9.
+No host security/firmware settings were changed. The launcher makes a private
+read-only boot-image snapshot so subsequent builds cannot change a new VM's
+boot disk. Kernel/app/host lints deny warnings; host and helper tests pass.

@@ -4375,3 +4375,9 @@ operations were introduced. RUN-DESKTOP.ps1 builds the demo or accepts an
 explicit image, uses 5 GiB configured RAM, creates a USB tablet and records a
 unique session directory with PID, local QMP port and serial/QEMU logs.
 The shell release profile uses opt-level=2 rather than size optimization for the software-rendering and credential-KDF hot paths. LTO/stripping and the existing executable-size bound remain in force. The PBKDF2 algorithm, credential format, 100,000 iterations and kernel verification boundary are unchanged. Closing a window also clears its pointer capture so slot reuse cannot inherit a dead client's capture.
+RUN-DESKTOP.ps1 defaults to the already-enabled Windows hypervisor accelerator (whpx), with explicit -Accelerator tcg for hosts without it. WHPX and tablet input were checked against the full demo image on this host; this launch configuration is separate from the unchanged TCG acceptance harnesses. No Windows features or host security settings were modified.
+
+The interactive launcher snapshots the chosen image into its unique run directory
+and passes it read-only to QEMU, preventing later Cargo builds from changing the
+boot disk of newly launched VMs. Desktop composition remains software rendering;
+WHPX accelerates guest CPU execution, not the graphics pipeline.
