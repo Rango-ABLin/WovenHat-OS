@@ -1,5 +1,57 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse file with mismatched data_checksum
+
+Branch: `auto/wovenhat-development` (base `1df80ada`). Working tree was clean.
+
+### Defect
+
+`check()` verified every structural invariant — inode block allocation, directory
+entry validity, cross-inode aliases, bitmap-vs-inode consistency — but never
+read a file's data blocks to verify them against the `data_checksum` stored in
+the inode.  `read_file` computes `fnv1a` over the complete file content and
+returns `Err(Corrupt)` on mismatch; a file whose data blocks were silently
+overwritten on disk (with the inode checksum left intact) would therefore fail at
+read time but be called clean by `check()` — the same oracle-vs-runtime
+inconsistency pattern as previous sessions.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the size-vs-blocks consistency check,
+  added a content-checksum verification for live `KIND_FILE` inodes with
+  `size > 0`.  Reads each data block with `self.read_block(block)`, chains
+  FNV-1a through `fnv1a_seeded` block by block (no allocation needed), and
+  returns `Err(Error::Corrupt)` if the final hash does not equal
+  `node.data_checksum`.  The tail of the last block is trimmed to `size %
+  SECTOR_SIZE` bytes when the file does not fill its final sector, matching
+  the logic in `read_file`.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_file_with_a_mismatched_data_checksum`.  Uses
+  `two_file_root()` (a.txt="alpha", b.txt="bravo"), forks the image, flips
+  the first byte of a.txt's data block via `CrashDisk::flip_byte`, and
+  asserts `check()` returns `Err(Corrupt)`, the image is unchanged, b.txt
+  remains readable, and the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **42 passed / 0 failed** (was 41; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The data-checksum scan reads every data block; O(data_blocks) I/O for a
+  consistency-check function, acceptable but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse bitmap-allocated block named by no inode
 
 Branch: `auto/wovenhat-development` (base `22681df3`). Uncommitted changes found

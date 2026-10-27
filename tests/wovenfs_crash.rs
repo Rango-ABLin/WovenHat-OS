@@ -2066,3 +2066,51 @@ fn check_refuses_a_bitmap_allocated_block_named_by_no_inode() {
     let mut clean_vol = Volume::mount(formatted()).expect("mount clean");
     assert_eq!(clean_vol.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a volume where a file inode's `data_checksum` does
+/// not match the content of its data blocks.
+///
+/// `read_file` always verifies the checksum before returning data; if
+/// `check()` skips the same verification it would call an image with silently
+/// corrupted file data consistent, diverging from the runtime's own verdict.
+#[test]
+fn check_refuses_a_file_with_a_mismatched_data_checksum() {
+    let (base, _, _) = two_file_root();
+    let (a_inode, b_inode, a_block) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        let block = volume.inode(a).expect("inode a").direct[0];
+        (a, b, block)
+    };
+    let _ = a_inode;
+
+    // Corrupt one byte in a.txt's data block.  The inode (and its
+    // data_checksum) are untouched, so every structural check passes but
+    // the content no longer matches the stored checksum.
+    let image = base.fork(None);
+    image.flip_byte(a_block as usize, 0);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file whose content does not match its data_checksum"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+    // b.txt is unaffected.
+    let mut buf = [0u8; wfs::MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(b_inode, &mut buf),
+        Ok(5),
+        "b.txt must remain readable after a corrupt-image check"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

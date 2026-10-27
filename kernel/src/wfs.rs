@@ -1330,6 +1330,35 @@ impl<D: BlockDevice> Volume<D> {
                     }
                 }
             }
+            // `read_file` verifies file content against `data_checksum` on
+            // every read, so `check()` must catch the same mismatch.  A file
+            // whose data blocks were silently overwritten on disk (with the
+            // inode checksum left intact) would pass every structural check
+            // above but fail when read — the oracle-vs-runtime gap this
+            // closes.  The checksum is computed the same way as in
+            // `stage_write`: FNV-1a over the raw content bytes, chained
+            // block by block through `fnv1a_seeded` so no allocation is
+            // needed.  Size 0 has no blocks to read and no checksum to verify
+            // (the runtime creates 0-size files with a zeroed checksum field
+            // via `stage_create`, not `stage_write`).
+            if node.kind == KIND_FILE && node.size > 0 {
+                let size = node.size as usize;
+                let needed = size.div_ceil(SECTOR_SIZE);
+                let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+                for slot in 0..needed {
+                    let block = node.direct[slot];
+                    let sector = self.read_block(block)?;
+                    let tail = if slot + 1 == needed && !size.is_multiple_of(SECTOR_SIZE) {
+                        size % SECTOR_SIZE
+                    } else {
+                        SECTOR_SIZE
+                    };
+                    hash = fnv1a_seeded(hash, &sector[..tail]);
+                }
+                if hash != node.data_checksum {
+                    return Err(Error::Corrupt);
+                }
+            }
             for slot in 0..DIRECT_BLOCKS {
                 let block = node.direct[slot];
                 if block == 0 {
