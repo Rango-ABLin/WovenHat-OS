@@ -70,7 +70,7 @@ class HardwareQualificationTests(unittest.TestCase):
         # These must fail on Linux runners too, not just on Windows.
         for evidence in (
             r"C:\outside\report.json",
-            r"C:\outside\report.json",
+            r"C:outside\report.json",
             r"\\server\share\report.json",
             r"audit-artifacts\..\outside.json",
             "/tmp/outside.json",
