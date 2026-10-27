@@ -14,7 +14,7 @@ APPS = 11
 BASE = ('[BOOT] shell-first runtime ready\n'
         '[SMP] acknowledged TLB shootdowns: PASSED\n')
 DESKTOP = ('[BOOT] desktop-first runtime ready\n'
-           f'[APPS] {APPS} signed applications installed\n'
+           f'[APPS] {APPS} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes\n'
            '[SESSION] WovenShell desktop started as pid 2\n'
            '[SESSION] diagnostic console\n'
            '[SESSION] back to the desktop\n'
