@@ -11237,3 +11237,15 @@ Evidence: target/stage32-{1-diagnostics,2-panic-dump,3-tracing,4-profiler}-*cpu;
 build/host logs and archived prior evidence: target/stage32-production-fix.
 This is a focused build/regression repair, not full Stage 32 acceptance.
 Release hardware-demo UEFI build and hardware-demo target Clippy also pass. Visible 2-CPU QEMU reaches WovenShell desktop-ready and catalog entries=11; interactive boot logs are under C:\Users\banda\WovenHat-OS\target\desktop-interactive-20261027-145808-379. Full historical Windows acceptance was not rerun.
+
+## Desktop experience repair - 2026-10-27 (validation in progress)
+
+Focused repair of shell event batching, pointer routing, taskbar/shortcut
+composition, client-close damage and Calculator startup/hover painting.
+Hardware-demo now selects flat rendering/reduced motion. RUN-DESKTOP.ps1 is
+the interactive USB-tablet launcher. App/host warning-denying Clippy and host
+tests pass. Earlier intermediate desktop checks passed 1/2/4 CPUs; a later
+1-CPU sign-in performance run exceeded the unchanged 20-second threshold.
+Final-source desktop and Stage 20 regression results are still pending.
+Baseline and all failed evidence remain under audit-artifacts/desktop-*.
+This is a focused repair, not a new stage or complete graphics acceptance.

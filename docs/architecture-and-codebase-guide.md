@@ -4351,3 +4351,27 @@ profiling. Boot self-test definitions have their own Stage 32 feature guards
 (or host-test guards), matching the existing guarded call sites. Disabled
 public operations retain their no-op behavior; production panic output and
 all accepted record formats remain unchanged. No lint allowances were added.
+
+## Desktop responsiveness and input routing repair (2026-10-27)
+
+WovenShell processes at most 32 mailbox messages and 32 input events per
+iteration before composition/presentation. Input remains ordered: buttons,
+keys and capture changes are handled individually, with paint deferred to the
+end of the batch. Old/new cursor rectangles stay separate rather than damaging
+the full path bounding box. Client teardown returns bounded separate damage
+regions for the released footprint, focus changes, taskbar and tiling.
+
+Normalized HID tablet coordinates now route through the same pointer update,
+hit testing, drag and capture path as PS/2 relative motion. The conversion is
+in logical desktop pixels, including at scale 2, with clamped range endpoints.
+The taskbar paints its own backdrop only, preserving desktop shortcuts.
+
+The hardware-demo session explicitly requests the existing flat renderer and
+reduced motion; other session defaults and the 3D settings toggle are kept.
+Session argv uses seven bounded borrowed string slots and the existing ELF
+loader copy; capabilities, syscall ABI and credential work factor are unchanged.
+No new kernel objects, locks, unsafe code, asynchronous pointers or blocking
+operations were introduced. RUN-DESKTOP.ps1 builds the demo or accepts an
+explicit image, uses 5 GiB configured RAM, creates a USB tablet and records a
+unique session directory with PID, local QMP port and serial/QEMU logs.
+The shell release profile uses opt-level=2 rather than size optimization for the software-rendering and credential-KDF hot paths. LTO/stripping and the existing executable-size bound remain in force. The PBKDF2 algorithm, credential format, 100,000 iterations and kernel verification boundary are unchanged. Closing a window also clears its pointer capture so slot reuse cannot inherit a dead client's capture.

@@ -2033,16 +2033,13 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        self.paint_desktop_icons(canvas);
         if self.three_d {
             self.render_taskbar_3d(canvas);
-            // Keep the desktop's depth and perspective while presenting the
-            // taskbar as a crisp foreground surface. Projecting a 24px bar
-            // compresses the bitmap font enough to make labels unreadable.
-            self.paint_taskbar_content(canvas);
-        } else {
-            self.paint_taskbar_content(canvas);
         }
+        // Taskbar preparation may restore its backdrop; shortcuts belong
+        // above the wallpaper and must not be erased by that preparation.
+        self.paint_desktop_icons(canvas);
+        self.paint_taskbar_content(canvas);
     }
 
     /// The taskbar's content -- its translucent fill, accent top border,
@@ -2057,7 +2054,18 @@ impl Desktop {
         let top = self.taskbar_top();
         let width = self.width as usize;
         let height = self.height;
-        canvas.shade(|x, y| wallpaper(x, y, height));
+        // This painter also receives desktop tiles above the taskbar. Shade
+        // only the bar's backdrop, preserving shortcuts and avoiding duplicate
+        // full-tile wallpaper work during every pointer/window repaint.
+        let left = canvas.x().max(0);
+        let right = (canvas.x() + canvas.width() as i32).min(self.width);
+        let first_row = canvas.y().max(top);
+        let last_row = (canvas.y() + canvas.height() as i32).min(height);
+        for y in first_row..last_row {
+            for x in left..right {
+                canvas.set(x, y, wallpaper(x, y, height));
+            }
+        }
         canvas.blend_rect(
             0,
             top,
@@ -2185,6 +2193,9 @@ impl Desktop {
     /// this is invoked for.
     fn render_taskbar_3d(&self, canvas: &mut Canvas<'_>) {
         let top = self.taskbar_top();
+        if canvas.y() + canvas.height() as i32 <= top || canvas.y() >= self.height {
+            return;
+        }
         let width = self.width;
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
@@ -3702,9 +3713,9 @@ impl Desktop {
     }
 
     /// Remove window `slot`. Returns the area to repaint.
-    fn close(&mut self, slot: usize) -> Area {
+    fn close(&mut self, slot: usize) -> Dirty {
         let Some(window) = self.windows[slot].take() else {
-            return Area::new(0, 0, 0, 0);
+            return Dirty::new();
         };
         if window.workspace == self.workspace {
             if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
@@ -3721,6 +3732,10 @@ impl Desktop {
         if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
             self.drag = None;
         }
+        // A reused window slot must never inherit a dead client's capture.
+        if self.pointer_capture == Some(slot) {
+            self.pointer_capture = None;
+        }
         log(&[
             b"woven-shell: window closed: ",
             &window.title[..window.title_length],
@@ -3730,11 +3745,11 @@ impl Desktop {
             .focused()
             .and_then(|top| self.windows[top])
             .map(|w| w.footprint());
-        window
-            .footprint()
-            .union(next.unwrap_or(Area::new(0, 0, 0, 0)))
-            .union(self.taskbar())
-            .union(self.retile())
+        let mut dirty = Dirty::of(window.footprint());
+        dirty.add(next.unwrap_or(Area::new(0, 0, 0, 0)));
+        dirty.add(self.taskbar());
+        dirty.add(self.retile());
+        dirty
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Dirty {
@@ -3779,35 +3794,31 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
-        // Locked, keys go to the PIN prompt and nowhere else; the pointer
-        // still moves, unseen, so it is where it was left once unlocked.
+        // Motion changes state immediately, but painting is deferred until the
+        // bounded input batch completes. Absolute devices use the same hit tests
+        // and pointer capture as the relative PS/2 path.
+        match event {
+            InputEvent::PointerMove { dx, dy } => {
+                return self.move_pointer_to(
+                    self.pointer.0 + i32::from(dx),
+                    self.pointer.1 + i32::from(dy),
+                );
+            }
+            InputEvent::PointerAbsolute { x, y } => {
+                return self.move_pointer_to(
+                    absolute_pointer_axis(x, self.desktop_width),
+                    absolute_pointer_axis(y, self.height),
+                );
+            }
+            _ => {}
+        }
         if self.locked {
             return match event {
                 InputEvent::Key(key) => self.lock_key(key),
-                InputEvent::PointerMove { dx, dy } => {
-                    self.pointer = (
-                        (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
-                        (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
-                    );
-                    empty
-                }
                 _ => empty,
             };
         }
         match event {
-            InputEvent::PointerMove { dx, dy } => {
-                let before = self.cursor_area();
-                self.pointer = (
-                    (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
-                    (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
-                );
-                self.pointer_visible = true;
-                let moved = self.drag_to_pointer();
-                if self.drag.is_none() {
-                    self.forward_pointer_move();
-                }
-                before.union(self.cursor_area()).union(moved)
-            }
             InputEvent::PointerButton {
                 button: 0,
                 pressed: false,
@@ -4029,6 +4040,24 @@ impl Desktop {
         }
     }
 
+    /// Update pointer state without painting a bounding box across its path.
+    /// The event loop damages the old/new cursor rectangles separately.
+    fn move_pointer_to(&mut self, x: i32, y: i32) -> Area {
+        self.pointer = (
+            x.clamp(0, self.desktop_width - 1),
+            y.clamp(0, self.height - 1),
+        );
+        if self.locked {
+            return Area::new(0, 0, 0, 0);
+        }
+        self.pointer_visible = true;
+        let moved = self.drag_to_pointer();
+        if self.drag.is_none() {
+            self.forward_pointer_move();
+        }
+        moved
+    }
+
     /// Forward a pointer move to the topmost client under the pointer. Shell
     /// chrome, title bars and window drags remain shell-owned.
     fn forward_pointer_move(&self) {
@@ -4096,8 +4125,8 @@ impl Desktop {
 
     /// Composite client damage, and drop windows and icons whose surface is
     /// gone. Returns the area to repaint.
-    fn check_clients(&mut self) -> Area {
-        let mut dirty = Area::new(0, 0, 0, 0);
+    fn check_clients(&mut self) -> Dirty {
+        let mut dirty = Dirty::new();
         for slot in 0..MAX_WINDOWS {
             let Some(window) = self.windows[slot] else {
                 continue;
@@ -4117,18 +4146,19 @@ impl Desktop {
                     // pixels into the compositor, but a full body repaint
                     // restores stacking order and guarantees the next
                     // present cannot retain a stale tile behind overlays.
-                    dirty = dirty.union(changed).union(window.body());
+                    dirty.add(changed.union(window.body()));
                 }
                 Ok(None) => {}
                 // While a resize is outstanding the owner may have released
                 // the old surface before its new one arrives.
                 Err(_) if libwoven::ticks() < window.resizing_until => {}
                 Err(_) => {
-                    // A released client surface can leave stale pixels in a
-                    // partially damaged scanout. Recompose the full screen
-                    // after removing the window so its wallpaper/taskbar
-                    // and all remaining layers are presented atomically.
-                    dirty = dirty.union(self.close(slot)).union(self.screen());
+                    // Recompose the released footprint, newly focused window,
+                    // taskbar and tiling changes as separate regions. Painting
+                    // an enclosing full-screen box delays close feedback.
+                    for &area in self.close(slot).areas() {
+                        dirty.add(area);
+                    }
                 }
             }
         }
@@ -4138,12 +4168,12 @@ impl Desktop {
             };
             let place = self.tray_area(index);
             match libwoven::compositor_blit_damage(icon.token, place.x, place.y) {
-                Ok(Some(_)) => dirty = dirty.union(place),
+                Ok(Some(_)) => dirty.add(place),
                 Ok(None) => {}
                 Err(_) => {
                     self.tray[index] = None;
                     log(&[b"woven-shell: tray icon removed"]);
-                    dirty = dirty.union(place);
+                    dirty.add(place);
                 }
             }
         }
@@ -4238,6 +4268,9 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     }
 }
 
+mod input;
+use input::{absolute_pointer_axis, EVENT_BATCH};
+
 fn main(args: Args) -> ! {
     // SAFETY: the only reference to the desktop's state, taken once.
     let desktop = unsafe { &mut *DESKTOP.0.get() };
@@ -4245,6 +4278,7 @@ fn main(args: Args) -> ! {
     while let Some(argument) = args.get(index) {
         match argument {
             b"--seconds" => desktop.seconds = true,
+            b"--reduced-motion" => desktop.reduced_motion = true,
             // The Stage 20.5 contract isolates the flat compositor's window
             // depth/shadow behavior. Production remains 3D by default; this
             // explicit switch keeps that acceptance independent of the later
@@ -4380,21 +4414,32 @@ fn main(args: Args) -> ! {
             }
             Err(_) => fail(8),
         }
-        while let Ok((length, sender)) = libwoven::message_receive(&mut message) {
+        // Bound each source so an application flooding its mailbox cannot
+        // indefinitely postpone keyboard input, pointer edges or presentation.
+        for _ in 0..EVENT_BATCH {
+            let Ok((length, sender)) = libwoven::message_receive(&mut message) else {
+                break;
+            };
             log(&[b"woven-shell: application message received"]);
             for &area in desktop.handle_message(sender, &message[..length]).areas() {
                 dirty.add(area);
             }
         }
-        while let Ok(Some(event)) = libwoven::input_poll_event() {
-            let area = desktop.handle_input(event);
-            if !area.is_empty() {
-                // Repainted per event, so pointer motion over several
-                // events never leaves a trail.
-                desktop.repaint(&mut painter, area);
+        for _ in 0..EVENT_BATCH {
+            let Ok(Some(event)) = libwoven::input_poll_event() else {
+                break;
+            };
+            let pointer_before = (desktop.pointer, desktop.pointer_visible);
+            let cursor_before = desktop.cursor_area();
+            dirty.add(desktop.handle_input(event));
+            if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
+                dirty.add(cursor_before);
+                dirty.add(desktop.cursor_area());
             }
         }
-        dirty.add(desktop.check_clients());
+        for &area in desktop.check_clients().areas() {
+            dirty.add(area);
+        }
         for &area in dirty.areas() {
             desktop.repaint(&mut painter, area);
         }

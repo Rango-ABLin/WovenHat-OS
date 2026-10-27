@@ -16182,3 +16182,20 @@ Stage 32.1, 32.2, 32.3 and 32.4 QEMU gates each pass on 1/2/4 CPUs (exit 33).
 Prior evidence was copied under target/stage32-production-fix/prior-evidence-*
 before rerunning the established harnesses. This focused repair is not full
 Stage 32 or full historical Windows-chain acceptance.
+
+## Desktop experience focused repair (2026-10-27; validation in progress)
+
+User-reported lag/input problems were investigated against the real desktop.
+The baseline 2-CPU qualification failed its terminal-close framebuffer check.
+Fixes bound shell event-source work, batch painting, keep cursor/teardown
+regions separate, route absolute HID pointers, and constrain taskbar backdrop
+painting (which previously erased desktop shortcuts). Calculator no longer
+renders its zero-filled startup input storage and uploads hover changes only
+when its button state changes; the desktop owns the cursor.
+
+The emulated demo chooses flat composition/reduced motion without changing
+other boot profiles or removing 3D. The interactive launcher adds a USB tablet
+and preserves unique logs. Host tests include normalized pointer endpoint/
+scale/malformed-range regression coverage. No test thresholds, assertions,
+credential iterations, capabilities or ownership checks were weakened.
+Final matrix results and remaining limitations are recorded in stage-status.
