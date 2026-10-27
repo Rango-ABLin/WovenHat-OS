@@ -3407,16 +3407,46 @@ impl Desktop {
     }
 
     /// Recompose `area` completely, bottom to top.
-    fn repaint(&self, painter: &mut Painter<'_>, area: Area) {
+    fn repaint(&mut self, painter: &mut Painter<'_>, mut area: Area) {
+        // A client can release its surface between check_clients and a blit.
+        // Recover before presenting the frame, using the same teardown as the
+        // liveness path. Each retry removes one window, so work is bounded.
+        for _ in 0..=MAX_WINDOWS {
+            let Some(slot) = self.repaint_once(painter, area) else {
+                return;
+            };
+            let Some(window) = self.windows[slot] else {
+                fail(8);
+            };
+            if libwoven::compositor_blit_damage(window.token, window.x, window.y).is_ok() {
+                // The surface is still valid: retain the unexpected failure
+                // diagnostic rather than classifying any blit error as exit.
+                log(&[
+                    b"woven-shell: shared surface compose failed: ",
+                    &window.title[..window.title_length],
+                ]);
+                fail(8);
+            }
+            log(&[b"woven-shell: released surface removed before present"]);
+            self.close(slot);
+            // Closing can change focus, tiling and the taskbar outside area.
+            // Rebuild the complete frame after this rare lifetime race.
+            area = self.screen();
+        }
+        fail(8);
+    }
+
+    /// Return a client that vanished while composing this frame.
+    fn repaint_once(&self, painter: &mut Painter<'_>, area: Area) -> Option<usize> {
         let area = area.intersect(self.screen());
         if area.is_empty() {
-            return;
+            return None;
         }
         // Locked, nothing but the lock screen is drawn: no window, no
         // notification, no pointer.
         if self.locked {
             painter.draw(area, |canvas| self.render_lock(canvas));
-            return;
+            return None;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
 
@@ -3491,11 +3521,10 @@ impl Desktop {
                         alpha,
                     )
                 };
-                if result.is_err() {
-                    log(&[
-                        b"woven-shell: shared surface compose failed: ",
-                        &window.title[..window.title_length],
-                    ]);
+                // A resize deliberately permits a bounded gap between the
+                // old surface's release and the replacement WRSZ message.
+                if result.is_err() && libwoven::ticks() >= window.resizing_until {
+                    return Some(slot);
                 }
             }
         }
@@ -3530,6 +3559,7 @@ impl Desktop {
         if !cursor.is_empty() {
             painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
+        None
     }
 
     fn raise(&mut self, slot: usize) {
