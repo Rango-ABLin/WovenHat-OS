@@ -116,6 +116,7 @@ mod panic;
 mod partition;
 // Public kernel instrumentation API; does not expose userspace authority.
 pub mod debug_dump;
+pub mod debug_serial;
 pub mod gdb_stub;
 pub mod log_filter;
 pub mod log_ring;
@@ -5206,6 +5207,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.8] GDB RSP framing: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-9-test")]
+    {
+        if !debug_serial::self_test() {
+            serial::write_line(format_args!("[S32.9] debug serial: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.9] debug serial: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

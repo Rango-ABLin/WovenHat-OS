@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 32.9 second-UART debug serial QEMU gate - 2026-10-27 — ACCEPTED
+
+Added the bounded COM2 transport for the WovenDev debugger path in
+`kernel/src/debug_serial.rs`. It configures a 16550-compatible second UART at
+115200 8N1, provides bounded transmit polling and nonblocking receive, and
+performs a loopback self-test before emitting a marker through the second QEMU
+serial device. The `debug-serial` production feature is zero-cost when off;
+`stage32-9-test` enables the QEMU gate.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-9-debug-serial-{1,2,4}cpu/`, including `debug-serial.log`.
+Target and host warning-denying Clippy plus host tests pass. This is the
+second-UART transport boundary only; live GDB command handling, trap entry,
+register/memory access, and debugger session lifecycle remain open.
+
 ## Stage 32.8 GDB RSP packet framing QEMU gate - 2026-10-27 — ACCEPTED
 
 Wire-level GDB Remote Serial Protocol packet framing: pure functions over byte

@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev second-UART boundary (2026-10-27)
+
+`kernel/src/debug_serial.rs` owns only COM2 and is independent of the COM1
+kernel log. Its transmit path has a bounded poll budget, receive is
+nonblocking, and the Stage 32.9 loopback test restores normal modem-control
+mode before emitting its marker. GDB framing, trap handling, and debug-session
+authority remain separate layers.
+
 ## WovenShell resize surface handoff (2026-10-27)
 
 The shell's `WSIZ`/`WRSZ` protocol permits an owner to release the old shared

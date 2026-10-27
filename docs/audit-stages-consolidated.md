@@ -4,6 +4,13 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.9 second-UART debug serial - 2026-10-27
+
+The bounded COM2 16550 transport passed its loopback and second-QEMU-serial
+marker gate at 1/2/4 CPUs with exit 33. Target and host warning-denying Clippy
+and host tests passed. The result is transport-boundary evidence only; live
+GDB command handling and trap/debug lifecycle remain outside this increment.
+
 ## Stage 20.8 resize-surface diagnostic cleanup - 2026-10-27
 
 The WovenShell repaint path previously logged expected shared-surface blit
