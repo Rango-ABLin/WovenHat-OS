@@ -1474,6 +1474,24 @@ impl<D: BlockDevice> Volume<D> {
                 }
             }
         }
+        // No two live entries may name the same inode. `stage_create` always
+        // allocates a fresh inode, so any two entries sharing an inode number
+        // represent an impossible hard link inconsistent with `links == 1`.
+        // After unlinking one entry, the other would become a stale reference
+        // to a now-free inode — the corrupt state the earlier checks detect.
+        for i in 0..view.entries.len() {
+            if view.entries[i].inode == 0 {
+                continue;
+            }
+            for j in 0..i {
+                if view.entries[j].inode == 0 {
+                    continue;
+                }
+                if view.entries[i].inode == view.entries[j].inode {
+                    return Err(Error::Corrupt);
+                }
+            }
+        }
         Ok(())
     }
 }

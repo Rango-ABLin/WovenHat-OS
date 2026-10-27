@@ -2114,3 +2114,49 @@ fn check_refuses_a_file_with_a_mismatched_data_checksum() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+#[test]
+fn check_refuses_two_directory_entries_naming_the_same_inode() {
+    let (base, block, _a_index) = two_file_root();
+    let (a_inode, b_index) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b_idx = volume
+            .read_dir(1)
+            .expect("read_dir")
+            .entries
+            .iter()
+            .position(|entry| entry.matches("b.txt"))
+            .expect("b.txt entry");
+        (a, b_idx)
+    };
+
+    // Point b.txt's directory entry at a.txt's inode: two different names,
+    // same inode number — an impossible hard link under WovenFS.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, b_index, 0, &a_inode.to_le_bytes());
+    let before = image.sectors();
+
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse two entries naming the same inode"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+    // a.txt's inode is still readable through the patched volume.
+    let mut buf = [0u8; wfs::MAX_FILE_SIZE];
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .read_file(a_inode, &mut buf),
+        Ok(5),
+        "a.txt must remain readable after a corrupt-image check"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

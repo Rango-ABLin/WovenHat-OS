@@ -1,5 +1,56 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse two directory entries naming the same inode
+
+Branch: `auto/wovenhat-development` (base `81b70ce4`). Working tree was clean.
+
+### Defect
+
+`check()` verified that no two live directory entries share the same name (the
+O(n²) pairwise scan added in the duplicate-name session) but did not verify
+that no two entries share the same inode number. Under normal operation
+`stage_create` always allocates a fresh inode, so two entries with different
+names pointing to the same inode number represent an impossible state:
+effectively a hard link whose count would be 2, inconsistent with the
+`links == 1` invariant that `check()` enforces per-inode. After unlinking
+one of those two entries the inode is freed, leaving the other entry pointing
+to a now-free inode — exactly the stale-entry corruption that later checks
+already detect — but `check()` would have silently called the pre-unlink image
+clean, creating an oracle-vs-runtime inconsistency.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: added a second O(n²) pairwise scan over live
+  directory entries immediately after the duplicate-name scan. For each pair
+  (i, j) with i > j and both entries live (inode != 0), if
+  `view.entries[i].inode == view.entries[j].inode`, `check()` returns
+  `Err(Error::Corrupt)`. At most 64 entries / 2016 pairs — same bound as the
+  existing name-duplicate scan.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_two_directory_entries_naming_the_same_inode`.
+  Uses `two_file_root()`, finds b.txt's entry index, patches its `inode` field
+  (offset 0) to match a.txt's inode via `patch_dir_entry`, and asserts
+  `check()` returns `Err(Corrupt)`, the image is unchanged, a.txt's inode
+  remains readable, and the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **43 passed / 0 failed** (was 42; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse file with mismatched data_checksum
 
 Branch: `auto/wovenhat-development` (base `1df80ada`). Working tree was clean.
