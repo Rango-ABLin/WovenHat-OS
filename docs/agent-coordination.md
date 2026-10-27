@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 32.5 log ring buffer QEMU gate (2026-10-27)
+
+New module `kernel/src/log_ring.rs`: allocation-free circular ring buffer fed
+by `diagnostics::emit()`. `log-ring = []` production feature;
+`stage32-5-test = ["qemu-test", "log-ring"]` gate.
+
+- `push(bytes)` — copies at most ENTRY_MAX=256 bytes into the next slot
+  (IrqMutex rank 2, below profiler rank 3).
+- `len()` / `drain(out, lens)` — count and oldest-first snapshot without alloc.
+- `emit()` in `diagnostics.rs` calls `log_ring::push()` after serial write when
+  `#[cfg(feature = "log-ring")]`; no call-site changes required.
+- Feature forwarded in root `Cargo.toml`: `log-ring = ["kernel/log-ring"]`,
+  `stage32-5-test = ["qemu-test", "kernel/stage32-5-test"]`.
+- Harness: `scripts/test-stage32-5-log-ring.py`.
+- Clippy: `stage32-5-test`, `log-ring`, `--all-targets`, and adjacent
+  `stage32-3-test`/`stage32-4-test` all pass with -D warnings.
+- 1 CPU: exit 33, `[S32.5] log ring: PASSED ring_count=0`.
+- 2 CPU: exit 33, `[S32.5] log ring: PASSED ring_count=0`.
+- 4 CPU: exit 33, `[S32.5] log ring: PASSED ring_count=0`.
+Evidence: `target/stage32-5-log-ring-{1,2,4}cpu/serial.log`.
+
 ## Claude Code - Stage 32.4 performance profiler QEMU gate (2026-10-27)
 
 Stage 32.4 QEMU acceptance for the allocation-free performance profiler. The
@@ -6880,3 +6901,5 @@ Final software graphics acceptance CLOSED: 87/87 matrix cases and strict clean-s
 
 ## Codex - sequential desktop reliability/settings/performance/native work (2026-10-27)
 User authorizes implementing the four recommended areas in order, with separate acceptance/commits. Starting with roadmap reconciliation and window/input/accessibility reliability. No delegation requested. Preserve accepted graphics source, existing ABI/authority and historical logs; do not advance beyond an unpassed current gate. Native qualification will require real device evidence and cannot be inferred from QEMU.
+
+Stage20.19 first focused 1CPU PASS for captured motion/clamping, cancellation before workspace return, no duplicate release, keyboard focus and teardown; added independent occluded-chrome check before final matrix. Fixed the probe's missing explicit damage notification; initial failed logs preserved at audit-artifacts/desktop-sequence-input-20261027-191011. Shared test helpers explicitly guard new19 without chaining existing stages. Stage01-09 bounded acceptance ledger reconciled from dedicated evidence; step1 remains in progress.

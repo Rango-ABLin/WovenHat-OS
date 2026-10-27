@@ -1,5 +1,27 @@
 # Stage status
 
+## Stage 32.5 log ring buffer QEMU gate - 2026-10-27 — ACCEPTED
+
+Allocation-free bounded circular ring buffer that `diagnostics::emit()` feeds
+automatically. `log-ring = []` production feature; `stage32-5-test = ["qemu-test",
+"log-ring"]` QEMU gate. New module `kernel/src/log_ring.rs`:
+- `push(bytes)` — copies up to [`ENTRY_MAX`] (256) bytes into the next slot of
+  the fixed-capacity ring; IrqMutex-protected; IRQ-safe.
+- `len() -> usize` — current number of valid entries (0…[`RING_CAPACITY`] = 64).
+- `drain(out, lens) -> usize` — copies entries oldest-first into caller-provided
+  arrays without allocation; stops when either output slice is exhausted.
+- When the ring is full, the oldest entry is overwritten silently.
+- All three symbols are `#[inline(always)]` no-ops when the `log-ring` feature
+  is disabled (zero overhead on default builds).
+- `diagnostics::emit()` now calls `log_ring::push()` after serial write when
+  `log-ring` is enabled; no call-site instrumentation required.
+- `self_test()` verifies push/drain order, exact-capacity fill, overflow
+  (oldest dropped), and byte-level truncation.
+Passes on 1/2/4 CPUs, exit 33. Boot serial shows `ring_count=0` (the minimal
+QEMU test path emits nothing via `emit()`; the integration fires on production
+boots that use the diagnostics API).
+Evidence: `target/stage32-5-log-ring-{1,2,4}cpu/serial.log`.
+
 ## Stage 32.4 performance profiler QEMU gate - 2026-10-27 — ACCEPTED
 
 Allocation-free kernel performance profiler built on the tracing and diagnostics

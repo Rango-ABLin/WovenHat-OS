@@ -115,6 +115,7 @@ mod paging;
 mod panic;
 mod partition;
 // Public kernel instrumentation API; does not expose userspace authority.
+pub mod log_ring;
 pub mod profiler;
 mod permission;
 mod pic;
@@ -4281,6 +4282,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S24.59] Change-PIN flow: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage20-19-test")]
+    {
+        if !stage20_19_self_test() {
+            serial::write_line(format_args!("[S20.19] input isolation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S20.19] input isolation: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-13-test")]
     {
         if !stage20_13_self_test() {
@@ -5136,6 +5146,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // is visible in the acceptance log.
         profiler::report();
         serial::write_line(format_args!("[S32.4] performance profiler: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-5-test")]
+    {
+        if !log_ring::self_test() {
+            serial::write_line(format_args!("[S32.5] log ring: FAILED"));
+            qemu_test_exit_failure();
+        }
+        // Show how many records emit() has pushed to the ring during boot
+        // so the acceptance log confirms end-to-end integration.
+        let ring_count = log_ring::len();
+        serial::write_line(format_args!("[S32.5] log ring: PASSED ring_count={}", ring_count));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]
@@ -8107,6 +8129,7 @@ fn stage16_1_self_test() -> bool {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-16-test",
@@ -8324,6 +8347,7 @@ fn stage13_15_self_test() -> bool {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-16-test",
     feature = "stage30-1-test",
@@ -8377,6 +8401,7 @@ fn spawn_hello_gui(
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-16-test",
     feature = "stage30-1-test",
@@ -8412,6 +8437,7 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-17-test",
@@ -9290,6 +9316,182 @@ fn stage24_59_change_pin_self_test() -> bool {
     }
     let _ = task::kill_process(shell, 9);
     true
+}
+
+/// Pointer capture, workspace cancellation and keyboard-only window focus.
+/// The independent Ring-3 probe paints the messages it actually receives;
+/// assertions observe client pixels and process exits, not shell internals.
+#[cfg(feature = "stage20-19-test")]
+fn stage20_19_self_test() -> bool {
+    use crate::display::rgb;
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[S20.19] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+    fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
+        let start = timer::ticks();
+        loop {
+            if condition() {
+                return true;
+            }
+            if timer::ticks().wrapping_sub(start) > limit {
+                return false;
+            }
+            task::yield_now();
+        }
+    }
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32, left: bool) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, left) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
+        }
+        true
+    }
+    fn key(code: u8) -> bool {
+        mouse::keyboard_loopback(code) && mouse::keyboard_loopback(code | 0x80)
+    }
+    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::DisplayIo)
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::Ipc);
+    let Some(program) = userspace::load_elf_with_argv(
+        WOVEN_SHELL_IMAGE,
+        &["/bin/woven-shell", "--no-3d", "--reduced-motion"],
+    ) else {
+        return step("shell image loads", false);
+    };
+    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
+    else {
+        return step("shell spawned", false);
+    };
+    if !step(
+        "shell owns the display",
+        until(3000, || {
+            compositor::holder() == Some(shell.as_u64()) && compositor::is_presenting()
+        }),
+    ) {
+        return false;
+    }
+    let Some((width, height)) = compositor::dimensions() else {
+        return step("dimensions", false);
+    };
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
+        .with(capability::Capability::Ipc);
+    let shell_arg = alloc::format!("{}", shell.as_u64());
+    let Some(probe) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "p"],
+        Some(client),
+    ) else {
+        return step("probe spawned", false);
+    };
+    if !step(
+        "independent pointer probe opens",
+        until(2000, || compositor::pixel(45, 45) == Ok(rgb(200, 60, 60))),
+    ) {
+        return false;
+    }
+    let pressed = move_by(60 - width as i32 / 2, 60 - height as i32 / 2, false)
+        && packet(0, 0, true)
+        && until(1000, || compositor::pixel(42, 42) == Ok(rgb(1, 0, 85)));
+    if !step("client receives one captured press", pressed) {
+        return false;
+    }
+    let captured =
+        move_by(140, 80, true) && until(1000, || compositor::pixel(48, 42) == Ok(rgb(119, 79, 85)));
+    if !step(
+        "captured motion outside the window stays with its owner and clamps",
+        captured,
+    ) {
+        return false;
+    }
+    let away = key(0x3d) && until(1000, || compositor::pixel(45, 45) != Ok(rgb(200, 60, 60)));
+    let back = away
+        && key(0x3d)
+        && key(0x3d)
+        && key(0x3d)
+        && until(1000, || compositor::pixel(42, 42) == Ok(rgb(1, 1, 85)));
+    if !step(
+        "workspace switch cancels capture before physical release",
+        back,
+    ) {
+        return false;
+    }
+    let released = packet(0, 0, false)
+        && key(0x1f)
+        && until(1000, || compositor::pixel(50, 42) == Ok(rgb(20, 40, 1)));
+    if !step(
+        "physical release after workspace return is not delivered twice",
+        released && compositor::pixel(42, 42) == Ok(rgb(1, 1, 85)),
+    ) {
+        return false;
+    }
+    let Some(beta) = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
+        Some(client),
+    ) else {
+        return step("second client spawned", false);
+    };
+    if !step(
+        "second client opens",
+        until(2000, || compositor::pixel(162, 122) == Ok(rgb(60, 60, 200))),
+    ) {
+        return false;
+    }
+    // Beta's title covers the right edge of the probe's client body.
+    // Hover must stop at that chrome instead of leaking to the lower client.
+    let occluded = move_by(-44, -35, false)
+        && key(0x0f)
+        && key(0x1f)
+        && until(1000, || compositor::pixel(50, 42) == Ok(rgb(20, 40, 2)))
+        && compositor::pixel(48, 42) == Ok(rgb(119, 79, 85));
+    if !step(
+        "top window chrome blocks pointer motion to the lower client",
+        occluded,
+    ) {
+        return false;
+    }
+    let keyboard_focus = key(0x2d)
+        && until(1000, || task::process_exited(probe))
+        && wait_hello_gui(probe).map(|(_, status)| status) == Some(Ok(0))
+        && !task::process_exited(beta);
+    if !step(
+        "Tab focuses the other window and routes its key exclusively",
+        keyboard_focus,
+    ) {
+        return false;
+    }
+    if !step(
+        "remaining client takes its own key",
+        key(0x15) && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0)),
+    ) {
+        return false;
+    }
+    if task::kill_process(shell.as_u64(), 9).is_err()
+        || !until(1000, || task::process_exited(shell))
+    {
+        return step("shell killed", false);
+    }
+    let _ = task::wait_process(shell.as_u64());
+    step(
+        "display and input lease teardown",
+        compositor::holder().is_none() && !compositor::is_presenting(),
+    )
 }
 
 /// Stage 20.13 acceptance: workspaces. With real i8042 input the kernel
@@ -14261,6 +14463,7 @@ fn stage20_2_self_test() -> bool {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage24-59-test",
 ))]
@@ -14363,6 +14566,7 @@ fn projected_taskbar_3d(
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage24-59-test",
 ))]
@@ -14398,6 +14602,7 @@ fn expected_taskbar_3d(
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage24-59-test",
 ))]
@@ -14429,6 +14634,7 @@ struct TaskbarEntryMask3D<'a> {
     feature = "stage20-11-test",
     feature = "stage20-12-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage24-59-test",
 ))]

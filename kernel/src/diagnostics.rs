@@ -221,6 +221,11 @@ pub fn emit(level: Level, subsystem: &str, message: &str, fields: &[Field<'_>]) 
     let formatted = format_record(&mut buf, level, subsystem, message, fields);
     crate::serial::write_bytes(&buf[..formatted.written]);
     crate::serial::write_bytes(b"\n");
+    // Mirror the formatted record into the ring buffer when enabled so
+    // crash handlers and debuggers can read recent activity without the
+    // serial log.
+    #[cfg(feature = "log-ring")]
+    crate::log_ring::push(&buf[..formatted.written]);
 }
 
 /// Boot-time self-test for the structured-record contract. Returns `true` when

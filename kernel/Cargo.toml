@@ -138,6 +138,10 @@ stage32-3-test = ["qemu-test", "tracing"]
 profiler = []
 # Stage 32 WovenDev performance profiler QEMU gate.
 stage32-4-test = ["qemu-test", "tracing", "profiler"]
+# Enable bounded circular ring buffer fed by diagnostics::emit().
+log-ring = []
+# Stage 32 WovenDev log ring QEMU gate.
+stage32-5-test = ["qemu-test", "log-ring"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
@@ -217,6 +221,8 @@ stage20-11-test = ["qemu-test"]
 stage20-12-test = ["qemu-test"]
 # Workspaces: switcher, F3/F4, per-workspace windows.
 stage20-13-test = ["qemu-test"]
+# Isolated pointer capture, workspace cancellation and keyboard focus gate.
+stage20-19-test = ["qemu-test"]
 # Two monitors: modern virtio-pci transport and a multi-scanout virtio-gpu.
 stage20-14-test = ["qemu-test"]
 # Single-output virtio-GPU compositor qualification reuses the GPU transport
