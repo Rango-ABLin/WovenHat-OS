@@ -22,6 +22,11 @@ struct ScancodeQueue {
     write_index: AtomicUsize,
 }
 
+// SAFETY: single-producer (keyboard IRQ) / single-consumer (service) ring. The
+// producer writes only the `write_index` slot and publishes it with a Release
+// store; the consumer reads only slots below `write_index` (Acquire). The
+// atomic indices guarantee producer and consumer never touch the same
+// `UnsafeCell` slot concurrently, so sharing it across threads is sound.
 unsafe impl Sync for ScancodeQueue {}
 
 impl ScancodeQueue {
@@ -39,6 +44,9 @@ impl ScancodeQueue {
         if next_index == self.read_index.load(Ordering::Acquire) {
             return;
         }
+        // SAFETY: SPSC ring — the sole producer owns `write_index`, which is not
+        // yet published, so the consumer cannot be reading this slot; the Release
+        // store below publishes it.
         unsafe { (*self.buffer.get())[write_index] = scancode };
         self.write_index.store(next_index, Ordering::Release);
     }
@@ -48,6 +56,8 @@ impl ScancodeQueue {
         if read_index == self.write_index.load(Ordering::Acquire) {
             return None;
         }
+        // SAFETY: SPSC ring — `read_index != write_index` (checked), so the
+        // producer has fully published this slot and the sole consumer owns it.
         let scancode = unsafe { (*self.buffer.get())[read_index] };
         self.read_index.store(
             (read_index + 1) % SCANCODE_QUEUE_CAPACITY,
@@ -77,11 +87,14 @@ impl Keyboard {
     }
 
     pub fn poll_legacy(&mut self) -> Option<Key> {
+        // SAFETY: read of the fixed i8042 status port.
         let status = unsafe { inb(STATUS_PORT) };
         // An auxiliary (mouse) byte is left for the mouse IRQ.
         if status & 1 == 0 || status & 0x20 != 0 {
             return None;
         }
+        // SAFETY: read of the fixed i8042 data port; output buffer is full and
+        // is a keyboard (not auxiliary) byte per the status check above.
         let scancode = unsafe { inb(DATA_PORT) };
         self.decode(scancode)
     }
@@ -158,10 +171,13 @@ pub fn self_test() -> bool {
 }
 
 pub fn handle_interrupt() {
+    // SAFETY: read of the fixed i8042 status port.
     let status = unsafe { inb(STATUS_PORT) };
     if status & 0x01 == 0 || status & 0x20 != 0 {
         return;
     }
+    // SAFETY: read of the fixed i8042 data port; a keyboard byte is pending per
+    // the status check above.
     let scancode = unsafe { inb(DATA_PORT) };
     SCANCODES.push(scancode);
     // Decode and publish now. Waiting for a consumer to call `service` left
@@ -171,8 +187,12 @@ pub fn handle_interrupt() {
     drain_scancodes(false);
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed i8042
+/// STATUS_PORT/DATA_PORT).
 unsafe fn inb(port: u16) -> u8 {
     let value: u8;
+    // SAFETY: `in al, dx` reads one byte from the valid I/O port in `dx`.
     unsafe {
         asm!(
             "in al, dx",

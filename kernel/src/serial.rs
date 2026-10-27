@@ -168,6 +168,8 @@ impl SerialPort {
             LAST_BYTE.store(byte, Ordering::Relaxed);
         }
         let mut polls = 0u16;
+        // SAFETY: reads the COM1 line-status register (COM1+5), a fixed UART I/O
+        // port initialized during kernel startup.
         while unsafe { inb(COM1 + 5) } & LINE_STATUS_TRANSMITTER_EMPTY == 0 {
             polls += 1;
             if polls == TX_POLL_LIMIT {

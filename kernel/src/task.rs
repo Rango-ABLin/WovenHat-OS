@@ -440,6 +440,9 @@ impl TaskControlBlock {
         // consumed by `ret`. Fresh tasks start with IF clear; task_bootstrap
         // completes the scheduler hand-off before deliberately enabling IRQs.
         // The reserved eight bytes preserve the SysV entry alignment.
+        // SAFETY: `cursor` walks down this task's own stack (TASK_STACKS[slot],
+        // exclusively owned during construction), staying within the mapped
+        // stack bounds, so each pushed word lands in valid, owned memory.
         unsafe {
             push_stack_value(&mut cursor, (task_bootstrap as fn() -> !) as usize as u64);
             push_stack_value(&mut cursor, 0x2);
@@ -492,6 +495,9 @@ impl TaskControlBlock {
         // it then installs the saved user context with iretq. The synthetic
         // scheduler frame starts with IF clear until task_bootstrap finalizes
         // the hand-off.
+        // SAFETY: `cursor` walks down this task's own stack (exclusively owned
+        // during construction) within its mapped bounds, so each pushed word
+        // lands in valid, owned memory.
         unsafe {
             push_stack_value(&mut cursor, (task_bootstrap as fn() -> !) as usize as u64);
             push_stack_value(&mut cursor, 0x2);
@@ -539,10 +545,15 @@ impl TaskControlBlock {
         let stack_start = TASK_STACKS[slot].0.get().cast::<u8>() as usize;
         let stack_top = (stack_start + TASK_STACK_SIZE) & !0xf;
         let frame_start = stack_top - core::mem::size_of::<crate::syscall::UserForkFrame>();
+        // SAFETY: `frame_start` is a `UserForkFrame`-sized, aligned region at the
+        // top of this child's own stack (exclusively owned during construction),
+        // so writing the child-return frame there is in bounds.
         unsafe {
             (frame_start as *mut crate::syscall::UserForkFrame).write(frame.child_return());
         }
         let mut cursor = frame_start;
+        // SAFETY: `cursor` walks down this child's own stack within its mapped
+        // bounds, so each pushed word lands in valid, owned memory.
         unsafe {
             // A fresh fork child must complete the scheduler hand-off before
             // returning to ring 3. Jumping directly to syscall_resume would
@@ -1404,6 +1415,11 @@ impl Scheduler {
     }
 }
 
+/// # Safety
+/// Must be called at a scheduler decision point with interrupts disabled and
+/// the scheduler lock released. `context_switch` must describe the chosen
+/// incoming task: a valid privilege stack, FS base, address space and a saved
+/// `next_rsp` built by task construction or a prior switch.
 unsafe fn switch_stacks(context_switch: ContextSwitch) {
     gdt::set_privilege_stack(context_switch.next_privilege_stack);
     // FS is task state, just like the address space.  The scheduler lock is
@@ -1412,6 +1428,9 @@ unsafe fn switch_stacks(context_switch: ContextSwitch) {
         context_switch.next_fs_base,
     ));
     paging::switch_to(context_switch.next_address_space);
+    // SAFETY: `previous_rsp`/`next_rsp` are the outgoing and incoming task
+    // kernel stacks; the asm routine saves callee-saved state to the former and
+    // restores it from the latter, both valid per this fn's contract.
     unsafe {
         wovenhat_context_switch(context_switch.previous_rsp, context_switch.next_rsp);
     }
@@ -1684,6 +1703,9 @@ pub fn begin_user_destructor_exit(
     if frame.is_null() {
         return false;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current kernel
+    // stack (checked non-null above); this task's syscall is the only code
+    // touching it, so a unique `&mut` is sound.
     let frame = unsafe { &mut *(frame as *mut crate::syscall::UserForkFrame) };
     let Some(retry_rip) = frame.rip.checked_sub(2) else {
         return false;
@@ -1767,6 +1789,8 @@ pub fn resolve_lazy_binding(frame: *const crate::syscall::UserForkFrame) -> u64 
     if frame.is_null() {
         return u64::MAX;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current kernel
+    // stack (checked non-null above), valid for reading the saved R11.
     let slot = unsafe { (*frame).r11 };
     let Some((address_space, target)) = ({
         let processes = process_table_lock();
@@ -2077,6 +2101,9 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
         scheduler.prepare_switch()
     };
     if let Some(context_switch) = context_switch {
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
     }
     loop {
@@ -2715,6 +2742,9 @@ fn block_current_and_wake_pager_from_exception(pager_id: TaskId) {
         // The saved context includes the CPU exception frame. Resuming this
         // task returns here, consumes its pager completion, returns from the
         // page-fault handler, and hardware retries the original user RIP.
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
     }
 }
@@ -2754,6 +2784,9 @@ fn pager_wait_for_request() -> PagerRequest {
 
         let context_switch = switch
             .expect("blocked pager has no runnable replacement; per-CPU idle fallback is missing");
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
 
         if interrupts_were_enabled {
@@ -3319,6 +3352,9 @@ pub fn exit_current_process(exit_code: i32) -> ! {
     if let Some(context_switch) = context_switch_result {
         if let Some(context_switch) = context_switch {
             paging::switch_to(context_switch.next_address_space);
+            // SAFETY: reached at a scheduler decision point with interrupts
+            // disabled and the scheduler lock released; `context_switch` names the
+            // chosen incoming task (see `switch_stacks`).
             unsafe { switch_stacks(context_switch) };
         }
     } else {
@@ -4357,6 +4393,9 @@ pub fn prepare_user_context_with_tls(
 
 fn enter_user_context(context: UserTaskContext) -> ! {
     x86_64::registers::model_specific::FsBase::write(x86_64::VirtAddr::new(context.fs_base));
+    // SAFETY: `context` was built by `prepare_user_context` with a validated
+    // user entry, stack top and ring-3 segment selectors; the asm routine
+    // performs the `iretq` into ring 3 and never returns.
     unsafe {
         wovenhat_enter_user_mode(
             context.entry,
@@ -6732,5 +6771,8 @@ pub unsafe fn spawn_parallel(name: &'static str, entry: fn() -> !) -> Result<Tas
             .min_by_key(|cpu| loads[*cpu].runnable())
             .unwrap_or(0)
     };
+    // SAFETY: `entry` obeys the restricted AP service contract required by
+    // `spawn_migratable_on` (forwarded by this fn's own `# Safety` contract),
+    // and `cpu` is a schedulable CPU chosen just above.
     unsafe { spawn_migratable_on(cpu, name, entry) }
 }

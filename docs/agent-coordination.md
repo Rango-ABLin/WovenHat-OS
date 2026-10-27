@@ -1,5 +1,63 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - trust/runtime tooling setup (2026-10-27)
+
+Installed/verified the host prerequisites the S02 and virtual-trust gates were
+blocked on. No host firmware, TPM, or disk was changed; nothing was committed.
+
+- **OpenSSL**: already present at `C:\Program Files\Git\usr\bin\openssl.exe`
+  (3.5.9). Pass it explicitly as `--openssl` since it is not on the bare Windows
+  PATH.
+- **Development signing key + certificate**: generated at
+  `audit-artifacts/dev-trust/dev-signing-{key,cert}.pem` (RSA-2048, self-signed,
+  10y, `CN=WovenHat Development Signing`). Git-ignored. `test-virtual-trust-chain.py`
+  confirmed key<->cert public keys match. These are DEV material for the
+  disposable QEMU boundary only; production custody remains separate/out of scope.
+- **OVMF**: `--ovmf-code` auto-resolves to `edk2-x86_64-code.fd`; `--ovmf-vars`
+  template is `C:\Program Files\qemu\share\edk2-i386-vars.fd`. Both PASS.
+- **LLVM/clang 23.1.4**: installed via `winget install LLVM.LLVM` to
+  `C:\Program Files\LLVM\bin`. `scripts/check-runtime-contract.py` now reports
+  `elf_c_compiler: AVAILABLE`, and clang was shown to emit a freestanding ELF64
+  object from `tools/runtime-fixtures/c-abi.c`. Prepend that bin dir to PATH
+  (new shells only) for the checker to find clang. S02 runtime *execution*
+  (build c-abi to an ELF executable, load it, QEMU acceptance) is still a
+  separate unrun gate.
+- **swtpm**: NOT installable natively on this Windows host (absent from winget
+  and choco; the only WSL distro is `docker-desktop`, no apt). The TPM-backed
+  virtual-trust gate must run on Linux (WSL2 Ubuntu with `swtpm`/`qemu`/`ovmf`,
+  or the Linux CI runner). Preflight evidence: `audit-artifacts/dev-trust/preflight.json`
+  shows 6 checks PASS; remaining blockers are `missing-swtpm`,
+  `missing-disk-image`, and `development-certificate-not-enrolled`.
+
+## Claude Code - unsafe-code SAFETY documentation pass (2026-10-27)
+
+Cross-cutting hardening, not a stage: documented the `unsafe` operation sites in
+the seven highest-density kernel files with specific SAFETY justifications
+(DMA/virtqueue, page-table and user-copy, syscall user-pointer and secret
+scrubbing, allocator, PCI config, and scheduler context-switch/stack
+construction), and merged a few adjacent blocks to shrink the unsafe surface.
+No behavior or ABI change: comment-only except the trivial block merges.
+
+- Files touched (core, 2026-10-27 first batch): `kernel/src/{virtio_net,
+  userspace,paging,syscall,heap,task}.rs` and `kernel/src/hal/pci.rs`.
+- Files touched (device drivers, 2026-10-27 second batch): `kernel/src/{rtc,
+  keyboard,bluetooth_hci,mouse,ata,hda,wifi_hw,power,serial,pic}.rs`,
+  `kernel/src/hal/acpi.rs`, and `kernel/src/hal/pci/msix.rs`. Every device
+  driver's `unsafe` operation sites (port I/O, MMIO, DMA buffers, key scrubbing)
+  are now documented.
+- Undocumented `unsafe` openers (repo-wide heuristic): 300 -> 67. The remaining
+  67 are NON-driver: `smp.rs` self-test probes (35), `#[cfg(test)]` heap
+  scaffolding (12), platform/arch init (`gdt`, `panic`, `main`, `terminal`,
+  `power`), crypto scrub one-liners (`secret_vault`, `volume_crypto`), and
+  `unsafe extern "C"` declaration blocks in `userspace`/`syscall`/`task` (not
+  operation blocks). None are device drivers.
+- Verified: warning-denying `cargo clippy -p wovenhat-kernel --target
+  x86_64-unknown-none` and `cargo clippy --all-targets` both pass on the current
+  tree. No QEMU gate was run; no acceptance claim is made.
+- Note for whoever picks this up: the lint `clippy::undocumented_unsafe_blocks`
+  is NOT enabled, so this is not yet enforced. Enabling it with `-D warnings`
+  will require finishing the remaining files first.
+
 ## Codex - Stage 11 shared accessibility-profile parser (2026-10-25)
 
 `libwoven::accessibility::Settings::apply_json` is now the shared bounded

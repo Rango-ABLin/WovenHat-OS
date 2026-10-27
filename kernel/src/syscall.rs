@@ -1348,6 +1348,9 @@ fn sys_fork(frame: *const UserForkFrame) -> u64 {
         crate::audit::record(actor, crate::audit::Action::ProcessFork, 0, false);
         return SYSCALL_ERROR;
     }
+    // SAFETY: the syscall entry stub passes `frame` pointing at the caller's
+    // saved register frame on the current kernel stack; it is valid and aligned
+    // for the whole syscall, and `as_ref` yields `None` only if it is null.
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         crate::audit::record(actor, crate::audit::Action::ProcessFork, 0, false);
         return SYSCALL_ERROR;
@@ -1394,6 +1397,9 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
     if crate::user_address::check_user_range(handler, 1).is_err() {
         return;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current
+    // kernel stack (checked non-null above); this task's syscall is the only
+    // code touching that frame, so a unique `&mut` is sound.
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
         return;
@@ -1763,6 +1769,9 @@ fn sys_process_info(index: u64, user_out: u64) -> u64 {
     let Some(info) = crate::task::process_info(index) else {
         return SYSCALL_ERROR;
     };
+    // SAFETY: `info` is a live local of `size_of::<ProcessInfo>()` bytes, so the
+    // slice covers exactly its bytes and is valid for reading; it is consumed by
+    // the copy below before `info` is dropped.
     let bytes = unsafe {
         core::slice::from_raw_parts(
             (&info as *const crate::task::ProcessInfo).cast::<u8>(),
@@ -1865,6 +1874,9 @@ fn sys_net_info(user_buffer: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let info = crate::network::net_info();
+    // SAFETY: `info` is a live local of `size_of::<NetInfo>()` bytes, so the
+    // slice covers exactly its bytes and is valid for reading; it is consumed by
+    // the copy below before `info` is dropped.
     let bytes = unsafe {
         core::slice::from_raw_parts(
             (&info as *const crate::network::NetInfo).cast::<u8>(),
@@ -2722,6 +2734,9 @@ fn sys_secret_store(user_secret: u64, length: u64) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
     let result = crate::secret_vault::store(actor, &secret[..length]);
     for byte in &mut secret {
+        // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+        // stack buffer; the volatile write scrubs the secret and cannot be
+        // elided by the optimizer.
         unsafe { core::ptr::write_volatile(byte, 0) };
     }
     match result {
@@ -2754,23 +2769,35 @@ fn sys_secret_read(raw_handle: u64, user_output: u64, capacity: u64) -> u64 {
     );
     let Ok(length) = result else {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     };
     if length > capacity {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     }
     if crate::paging::copy_to_current_user(user_output, &secret[..length]).is_err() {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     }
     for byte in &mut secret {
+        // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+        // stack buffer; the volatile write scrubs the secret and cannot be
+        // elided by the optimizer.
         unsafe { core::ptr::write_volatile(byte, 0) };
     }
     length as u64
