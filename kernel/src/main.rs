@@ -115,6 +115,7 @@ mod paging;
 mod panic;
 mod partition;
 // Public kernel instrumentation API; does not expose userspace authority.
+pub mod debug_dump;
 pub mod log_ring;
 pub mod profiler;
 mod permission;
@@ -5160,6 +5161,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S32.5] log ring: PASSED ring_count={}", ring_count));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage32-6-test")]
+    {
+        // Seed the ring with two test entries so the live dump below shows
+        // real ring_entry lines in the acceptance log.
+        log_ring::push(b"INFO boot: debug-dump test seed 1");
+        log_ring::push(b"WARN sched: debug-dump test seed 2");
+        if !debug_dump::self_test() {
+            serial::write_line(format_args!("[S32.6] debug dump: FAILED"));
+            qemu_test_exit_failure();
+        }
+        // Exercise the full dump path; the acceptance log should show the
+        // crash context and ring entries.
+        debug_dump::emit_dump(0x0000_ffff_dead_c0de, 0xffff_8000_0010_0000, 0x0000_0000_bad0_0000);
+        serial::write_line(format_args!("[S32.6] debug dump: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
@@ -9469,6 +9486,7 @@ fn stage20_19_self_test() -> bool {
     let keyboard_focus = key(0x2d)
         && until(1000, || task::process_exited(probe))
         && wait_hello_gui(probe).map(|(_, status)| status) == Some(Ok(0))
+        && until(1000, || compositor::pixel(45, 45) != Ok(rgb(200, 60, 60)))
         && !task::process_exited(beta);
     if !step(
         "Tab focuses the other window and routes its key exclusively",

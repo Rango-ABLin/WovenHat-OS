@@ -142,6 +142,10 @@ stage32-4-test = ["qemu-test", "tracing", "profiler"]
 log-ring = []
 # Stage 32 WovenDev log ring QEMU gate.
 stage32-5-test = ["qemu-test", "log-ring"]
+# Enable structured panic-context + ring-snapshot debug dump.  Requires log-ring.
+debug-dump = ["log-ring"]
+# Stage 32 WovenDev debug dump QEMU gate.
+stage32-6-test = ["qemu-test", "debug-dump"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

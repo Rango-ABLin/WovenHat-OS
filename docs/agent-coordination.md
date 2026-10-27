@@ -1,5 +1,36 @@
 # Agent coordination (Claude Code and Codex)
 
+## Active coordination - Codex desktop sequence isolation (2026-10-27)
+
+The desktop reliability 90-case chain was stopped after concurrent Stage32
+source edits invalidated the frozen tree. Codex is moving validation and future
+changes to target/worktrees/desktop-sequence (branch codex/desktop-sequence).
+Do not stage the input-specific shell/hello-gui/mouse/task/harness changes in
+main as part of Stage32 work. Stage32.5 already captured the new20.19 fixture
+and feature declarations; the remaining input implementation is not accepted.
+Please serialize QEMU acceptance: Codex needs the single chain after isolation
+and static checks; historical failures and all unrelated processes are preserved.
+
+
+## Claude Code - Stage 32.6 kernel debug dump QEMU gate (2026-10-27)
+
+New module `kernel/src/debug_dump.rs`: `emit_dump(rip, rsp, cr2)` combines a
+structured crash-context header with a ring buffer snapshot into one coherent
+serial report. Design: drain the ring first (releases IrqMutex before serial
+I/O), then write crash context + ring entries via format_record/serial directly
+— bypassing diagnostics::emit — to avoid recursive ring-push. DRAIN_MAX=8
+keeps stack allocation ≤2 KiB.
+
+- `debug-dump = ["log-ring"]` production feature.
+- `stage32-6-test = ["qemu-test", "debug-dump"]` gate; both forwarded in root Cargo.toml.
+- Harness: `scripts/test-stage32-6-debug-dump.py`; validates
+  `panic_context`, `ring_snapshot`, `ring_entry` lines and PASSED marker.
+- Clippy: `stage32-6-test`, `debug-dump`, `--all-targets` all pass -D warnings.
+- 1 CPU: exit 33, `[S32.6] debug dump: PASSED`.
+- 2 CPU: exit 33, `[S32.6] debug dump: PASSED`.
+- 4 CPU: exit 33, `[S32.6] debug dump: PASSED`.
+Evidence: `target/stage32-6-debug-dump-{1,2,4}cpu/serial.log`.
+
 ## Claude Code - Stage 32.5 log ring buffer QEMU gate (2026-10-27)
 
 New module `kernel/src/log_ring.rs`: allocation-free circular ring buffer fed
@@ -6903,3 +6934,5 @@ Final software graphics acceptance CLOSED: 87/87 matrix cases and strict clean-s
 User authorizes implementing the four recommended areas in order, with separate acceptance/commits. Starting with roadmap reconciliation and window/input/accessibility reliability. No delegation requested. Preserve accepted graphics source, existing ABI/authority and historical logs; do not advance beyond an unpassed current gate. Native qualification will require real device evidence and cannot be inferred from QEMU.
 
 Stage20.19 first focused 1CPU PASS for captured motion/clamping, cancellation before workspace return, no duplicate release, keyboard focus and teardown; added independent occluded-chrome check before final matrix. Fixed the probe's missing explicit damage notification; initial failed logs preserved at audit-artifacts/desktop-sequence-input-20261027-191011. Shared test helpers explicitly guard new19 without chaining existing stages. Stage01-09 bounded acceptance ledger reconciled from dedicated evidence; step1 remains in progress.
+
+Input reliability focused gate PASS 1/2/4 CPUs, including top-frame chrome occlusion. Accepted shell binary negative control fails captured-motion assertion as expected. All affected/default/lower-stage kernel lints, app lints, host Clippy/tests and build PASS. Final review retained popup damage when Tab closes Quick Settings, and requires visible closed-window cleanup before testing the next client key. Starting full frozen-source 90-case software/input matrix; step1 acceptance remains pending.

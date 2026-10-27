@@ -1,5 +1,29 @@
 # Stage status
 
+## Stage 32.6 kernel debug dump QEMU gate - 2026-10-27 — ACCEPTED
+
+Structured kernel debug dump combining a panic crash context with a ring
+buffer snapshot. `debug-dump = ["log-ring"]` production feature;
+`stage32-6-test = ["qemu-test", "debug-dump"]` QEMU gate. New module
+`kernel/src/debug_dump.rs`:
+- `emit_dump(rip, rsp, cr2)` — drains the ring first (releases lock), then
+  writes to serial via `format_record` + `serial::write_bytes` directly (bypasses
+  `diagnostics::emit` to avoid recursive ring-push):
+  1. `ERROR debugger: panic_context | rip=… | rsp=… | cr2=…`
+  2. `DEBUG debugger: ring_snapshot | count=N`
+  3. `DEBUG debugger: ring_entry | idx=I | record=…` × N (up to `DRAIN_MAX`=8)
+- Zero-cost `#[inline(always)]` stub when `debug-dump` is disabled.
+- `self_test()` verifies `format_record` output for the crash context and
+  ring-snapshot headers without serial I/O or lock acquisition.
+Passes on 1/2/4 CPUs, exit 33. Serial confirms end-to-end:
+```
+ERROR debugger: panic_context | rip=0xffffdeadc0de | rsp=0xffff800000100000 | cr2=0xbad00000
+DEBUG debugger: ring_snapshot | count=2
+DEBUG debugger: ring_entry | idx=0 | record=INFO boot: debug-dump test seed 1
+DEBUG debugger: ring_entry | idx=1 | record=WARN sched: debug-dump test seed 2
+```
+Evidence: `target/stage32-6-debug-dump-{1,2,4}cpu/serial.log`.
+
 ## Stage 32.5 log ring buffer QEMU gate - 2026-10-27 — ACCEPTED
 
 Allocation-free bounded circular ring buffer that `diagnostics::emit()` feeds
