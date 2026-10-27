@@ -1,5 +1,56 @@
 # Autonomous progress log
 
+## 2026-10-27 — WovenFS check(): refuse duplicate directory entry names
+
+Branch: `auto/wovenhat-development` (base `63641dce`). Working tree was clean.
+
+### Defect
+
+`check()` validated all per-entry field constraints (inode range, kind, name_len
+bounds, null bytes, `/`, `\\`, `"."`, `".."`) but never compared entries pairwise
+for duplicate names. `stage_create` rejects any attempt to create a second live
+entry with the same name, so two live entries sharing identical `name_len` and
+`name[..name_len]` bytes cannot arise through normal operation — they represent
+corruption. Under such corruption, `lookup` would always shadow the second entry
+(returning the first match), making it permanently unreachable by any name-based
+path, but `check()` would call the image clean. Same oracle-vs-runtime
+inconsistency pattern as the preceding sessions.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the per-entry validation loop, added an
+  O(n²) pairwise scan over all live entries (at most 64 entries; 2016 pairs).
+  For each pair (i, j) with i > j, if both entries are live and
+  `name[..name_len]` is identical, `check()` returns `Err(Corrupt)`.
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_duplicate_directory_entry_names`. Uses `two_file_root()`,
+  patches `b.txt`'s leading name byte from `b'b'` to `b'a'` so both entries
+  carry the name `"a.txt"`, then asserts `check()` returns `Err(Corrupt)`, the
+  image is unmodified, `a.txt` remains readable through its inode, and the
+  unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **39 passed / 0 failed** (was 38; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested directories
+  and rename remain unimplemented.
+
+Each entry is one bounded checkpoint. Entries record exactly what was run.
+Nothing here claims production readiness; completion requires independent
+human review.
+
 ## 2026-10-27 — WovenFS check(): refuse directory entries whose name is "." or ".."
 
 Branch: `auto/wovenhat-development` (base `8cac36e2`). Working tree was clean.

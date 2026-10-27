@@ -1390,6 +1390,24 @@ impl<D: BlockDevice> Volume<D> {
                 return Err(Error::Corrupt);
             }
         }
+        // No two live entries may share the same name. `stage_create` rejects
+        // duplicates, so any duplicate pair is corruption; the second entry
+        // can never be reached by `lookup` or `unlink`.
+        for i in 0..view.entries.len() {
+            if view.entries[i].inode == 0 {
+                continue;
+            }
+            let ni = usize::from(view.entries[i].name_len);
+            for j in 0..i {
+                if view.entries[j].inode == 0 {
+                    continue;
+                }
+                let nj = usize::from(view.entries[j].name_len);
+                if ni == nj && view.entries[i].name[..ni] == view.entries[j].name[..nj] {
+                    return Err(Error::Corrupt);
+                }
+            }
+        }
         Ok(())
     }
 }

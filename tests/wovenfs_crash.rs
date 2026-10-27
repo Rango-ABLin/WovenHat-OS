@@ -1870,3 +1870,60 @@ fn check_refuses_a_directory_entry_whose_name_is_dot_or_dotdot() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+#[test]
+fn check_refuses_duplicate_directory_entry_names() {
+    use wfs::DIR_ENTRIES_PER_BLOCK;
+
+    let (base, block, _a_index) = two_file_root();
+
+    // Find b.txt's entry index within the root directory view.
+    let b_pos = Volume::mount(base.clone())
+        .expect("mount b_pos")
+        .read_dir(1)
+        .expect("read_dir")
+        .entries
+        .iter()
+        .position(|e| e.matches("b.txt"))
+        .expect("b.txt entry");
+    // Both files were created in a fresh FS; they must sit in the first block.
+    assert!(
+        b_pos < DIR_ENTRIES_PER_BLOCK,
+        "b.txt must be in the first directory block"
+    );
+    let b_index = b_pos;
+
+    let a_inode = Volume::mount(base.clone())
+        .expect("mount a_inode")
+        .lookup(1, "a.txt")
+        .expect("a.txt")
+        .inode;
+
+    // Patch b.txt's name to "a.txt" so two live entries share the same name.
+    // Name bytes start at entry offset 16; change the leading 'b' to 'a'.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, b_index, 16, b"a");
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse two live entries with the same name"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+    // a.txt is still readable through its inode.
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(a_inode, &mut buf),
+        Ok(5),
+        "a.txt must remain readable after corrupt-image check"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
