@@ -1,5 +1,17 @@
 # Stage status
 
+## WovenWeb standalone C ELF CI qualification pending - 2026-10-27
+
+The standalone header-free C23 `_start`/exit ELF now builds through the Rust
+bundled linker and is retained for the later kernel lint path. The repaired
+hosted native matrix at `cfce543b435c030581f5ea68994b91aba90bb8cd` passed the
+complete 2- and 4-CPU jobs, including QEMU and warning-denying lint. The 1-CPU
+job was externally cancelled twice (once during dependency installation and
+once immediately after beginning the standalone C fixture); neither attempt
+reported a test, build, or lint failure. Its cancelled log and artifact are
+retained under workflow `40522583763`, rather than treating the partial matrix
+as acceptance. Do not retry it again without a changed external condition.
+
 ## WovenWeb freestanding C ABI and package-spawn ordering - 2026-10-27
 
 The controlled native C++ probe now includes a header-free C23 translation

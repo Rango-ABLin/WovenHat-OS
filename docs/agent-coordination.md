@@ -6673,3 +6673,15 @@ package capabilities were installed. The cloud provider needs `Secrets` for
 its first syscall, so it could exit before service publication on 4 CPUs.
 Capability and lineage state now publish atomically under the initial scheduler
 lock, with a focused regression contract. No authority was broadened.
+
+## Codex - standalone C ELF CI retention and external cancellation (2026-10-27)
+
+The C `_start` fixture now uses Rust's bundled linker and keeps the exact ELF
+at `target/wovenweb-runtime-c` so the workflow's later kernel feature lint
+receives the same `WOVENHAT_RUNTIME_C_ABI_ELF` input. The repaired native
+matrix on `cfce543b435c030581f5ea68994b91aba90bb8cd` passed at 2 and 4 CPUs.
+The 1-CPU job was externally cancelled twice, first during dependency setup
+and then after the standalone fixture began; no failure was reported. Preserve
+workflow `40522583763` and its artifact as evidence, keep the increment
+unaccepted until a 1-CPU run completes, and do not repeatedly rerun the same
+externally cancelled job without a changed condition.
