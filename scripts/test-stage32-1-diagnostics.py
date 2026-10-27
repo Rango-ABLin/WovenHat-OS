@@ -34,7 +34,7 @@ def main() -> int:
     qemu_log = out / "qemu.log"
     serial.write_text("")
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35",
+        str(qemu), "-accel", "tcg", "-machine", "q35",
         "-m", "256M", "-smp", str(args.cpus), "-display", "none",
         "-serial", f"file:{serial}", "-no-reboot",
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",

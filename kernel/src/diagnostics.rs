@@ -27,9 +27,6 @@
 //! their own QEMU acceptance (the accepted `serial`/`panic` output is left
 //! unchanged here).
 
-// Dead-code lint suppressed only for items not yet called outside this module;
-// the public API is exercised by the stage32-1 and stage32-2 boot gates.
-#![allow(dead_code)]
 
 use core::fmt::{self, Write};
 

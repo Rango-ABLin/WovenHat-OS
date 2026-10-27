@@ -1,32 +1,30 @@
 # Stage status
 
-## Stage 32.1 structured-diagnostics QEMU gate - 2026-10-27
+## Stage 32.1 structured-diagnostics QEMU gate - 2026-10-27 — ACCEPTED
 
-Boot-time QEMU acceptance for the structured-diagnostics primitive added in the
-previous increment. Feature `stage32-1-test` (chains `qemu-test`) calls
-`diagnostics::self_test()` from the boot sequence, writes
-`[S32.1] structured diagnostics: PASSED` on success and calls
-`qemu_test_exit_success()`. The stage32-2 gate (panic dump path) lands in the
-same commit. Warning-denying kernel-target Clippy passes for `stage32-1-test`.
-QEMU acceptance on 1/2/4 CPUs pending (QEMU environment not available in this
-session); harness is `scripts/test-stage32-1-diagnostics.py`. No prior gate
-broken; the `#![allow(dead_code)]` comment updated to reflect that both stage32
-gates now actively exercise the module.
+Boot-time QEMU acceptance for the structured-diagnostics primitive.
+Feature `stage32-1-test` (chains `qemu-test`) calls `diagnostics::self_test()`
+from the boot sequence and exits 33 on pass. Passes on 1/2/4 CPUs:
+- 1 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+- 2 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+- 4 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+Evidence: `target/stage32-1-diagnostics-{1,2,4}cpu/serial.log`.
+Note: QEMU 11.1 deprecated `-accel tcg,tb-size=128`; harness uses `-accel tcg`.
 
-## Stage 32.2 structured panic crash-dump QEMU gate - 2026-10-27
+## Stage 32.2 structured panic crash-dump QEMU gate - 2026-10-27 — ACCEPTED
 
-Boot-time QEMU acceptance for the structured panic crash-dump path. Feature
-`stage32-2-test` (chains `qemu-test`) wires `diagnostics::emit_panic_dump()`
-into `panic::kernel_panic()` (guarded by the feature) and calls
-`diagnostics::self_test_panic_dump()` from the boot sequence, which verifies
-the exact record format the panic handler emits. Writes
-`[S32.2] structured panic dump: PASSED` on success and calls
-`qemu_test_exit_success()`. Harness is `scripts/test-stage32-2-panic-dump.py`.
-QEMU acceptance on 1/2/4 CPUs pending. This gate does NOT trigger a real kernel
-panic (which would be visible in the serial log and fail the standard
-`validation_errors` check) — the boot self-test exercises the formatter
-directly. Promoting the structured panic dump from `stage32-2-test`-gated to
-unconditional production code is the next increment.
+Boot-time QEMU acceptance for the structured panic crash-dump path.
+Feature `stage32-2-test` wires `diagnostics::emit_panic_dump()` into
+`panic::kernel_panic()` and calls `diagnostics::self_test_panic_dump()` at
+boot to verify the exact record format. Does NOT trigger a real panic (which
+would put "KERNEL PANIC" in the serial log and fail `validation_errors`).
+Passes on 1/2/4 CPUs:
+- 1 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+- 2 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+- 4 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+Evidence: `target/stage32-2-panic-dump-{1,2,4}cpu/serial.log`.
+After acceptance: `emit_panic_dump()` promoted to unconditional production code
+in `kernel_panic()` (feature guard removed); `#![allow(dead_code)]` removed.
 
 ## Graphics shared accessibility-profile parser - 2026-10-25
 
