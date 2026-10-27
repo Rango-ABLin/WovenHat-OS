@@ -134,6 +134,10 @@ stage32-2-test = ["qemu-test"]
 tracing = []
 # Stage 32 WovenDev tracing: span-begin/end and SpanGuard QEMU gate.
 stage32-3-test = ["qemu-test", "tracing"]
+# Enable allocation-free per-span timing accumulation. Requires tracing.
+profiler = []
+# Stage 32 WovenDev performance profiler QEMU gate.
+stage32-4-test = ["qemu-test", "tracing", "profiler"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

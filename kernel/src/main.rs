@@ -113,6 +113,7 @@ mod page_permissions;
 mod paging;
 mod panic;
 mod partition;
+mod profiler;
 mod permission;
 mod pic;
 mod pipe;
@@ -5120,6 +5121,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.3] tracing span API: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-4-test")]
+    {
+        if !profiler::self_test() {
+            serial::write_line(format_args!("[S32.4] performance profiler: FAILED"));
+            qemu_test_exit_failure();
+        }
+        // Also exercise the report path so the profiler's serial output
+        // is visible in the acceptance log.
+        profiler::report();
+        serial::write_line(format_args!("[S32.4] performance profiler: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

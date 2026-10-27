@@ -58,7 +58,9 @@ pub fn span_begin(subsystem: &'static str, name: &'static str) -> (u64, u64) {
 }
 
 /// Emit a span-end record with the TSC cycle count elapsed since the paired
-/// [`span_begin`] call.
+/// [`span_begin`] call. When the `profiler` feature is also enabled, the
+/// delta is forwarded to [`crate::profiler::record`] for statistical
+/// accumulation.
 #[cfg(all(feature = "tracing", not(test)))]
 pub fn span_end(subsystem: &'static str, name: &'static str, id: u64, tsc_start: u64) {
     let tsc_delta = rdtsc().wrapping_sub(tsc_start);
@@ -72,6 +74,8 @@ pub fn span_end(subsystem: &'static str, name: &'static str, id: u64, tsc_start:
             Field::new("tsc", Value::U64(tsc_delta)),
         ],
     );
+    #[cfg(feature = "profiler")]
+    crate::profiler::record(subsystem, name, tsc_delta);
 }
 
 // ── Zero-cost stubs (tracing feature disabled or host-test context) ───────────
