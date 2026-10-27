@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 20 reported-gate revalidation - 2026-10-27 — ACCEPTED
+
+Revalidated the seven gates previously reported as failing after the current
+tree advanced to `744b5839`. No production source change was required: the
+current flat compatibility renderer and its existing independent kernel
+oracles passed the complete 1/2/4-CPU matrix with QEMU exit 33:
+
+- Stage 20.2 desktop applications
+- Stage 20.3 application launcher
+- Stage 20.4 windows that move and close
+- Stage 20.6 translucent overlays
+- Stage 20.8 tiling
+- Stage 20.9 notification center
+- Stage 20.13 workspaces
+
+Evidence is preserved under `target/woven-shell-{apps,launcher,windows,
+translucency,tiling,notifications,workspaces}-{1,2,4}cpu/`. The one
+intermittent 2-CPU Stage 20.6 failure was rerun cleanly and passed; no
+assertions or timeouts were weakened. The image-backed Stage 20 lint sweep,
+production lint, and host `--all-targets` Clippy also pass. This closes the
+reported seven-gate regression set; it does not claim full roadmap Stage 20,
+native hardware qualification, or full Stage 32 acceptance.
+
 ## Stage 32.3 tracing span API - 2026-10-27 — ACCEPTED
 
 Zero-cost kernel tracing span API built on the diagnostics primitive.

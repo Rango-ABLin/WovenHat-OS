@@ -6830,6 +6830,23 @@ start a fresh desktop session; no replacement window was forced open.
 
 ## Codex - close failed desktop graphics gates and push (2026-10-27)
 User explicitly authorizes fixing all reported graphics gate errors, closing acceptance after passing validation, committing and pushing. Owning kernel graphics oracles plus any real shell/renderer defects exposed. Scope is the reported Stage20 software desktop gates and required regressions; physical GPU/native-hardware claims must remain evidence-based. Existing dirty files are prior-turn changes to preserve and include where relevant. No subagents requested.
+
+### Concurrent earlier revalidation (preserved from origin/master)
+
+Revalidated the reported Stage 20.2/20.3/20.4/20.6/20.8/20.9/20.13 gates
+against current commit `744b5839`. All passed at 1/2/4 CPUs with exit 33;
+the image-backed Stage 20 lint sweep, production lint, and host all-targets
+Clippy passed. The first 2-CPU 20.6 run was intermittent; a clean rerun
+passed after removing a temporary diagnostic-only probe. No source behavior,
+assertion, or timeout was changed. Acceptance evidence is under the matching
+`target/woven-shell-*-{1,2,4}cpu` directories. This closes the reported
+regression set but does not claim full Stage 20/32 or native qualification.
+Earlier closure-candidate note is superseded by the complete 1/2/4-CPU
+revalidation recorded above; no acceptance claim is made beyond the seven
+reported gates explicitly listed there.
+
+### Subsequent full-matrix diagnosis and repair
+
 Closure candidate: all seven failed desktop stages now pass focused 1-CPU checks with explicit flat contracts, current palette, exact icon masks, and stronger full-panel/notification checks. Stage20.18 now verifies every projected toast pixel plus visible text, resolving the old blank-toast note. Build, all Stage20 feature lints, lower-stage guard lints, and Rust host tests pass. Python host suite passes with Windows elevation required solely by real symbolic-link fixtures; assertions were not bypassed. Starting the complete graphics matrix on 1/2/4 CPUs, preserving all prior artifacts. No acceptance/closure claim yet.
 
 Full matrix completed 84/87 PASS with unchanged source fingerprints. Only Stage20.14b failed on 1/2/4 CPUs: obsolete wallpaper/Start palette plus mixed flat/projected fixture. Repairing that test to explicit flat mode, current independent palette and full secondary-taskbar-region wallpaper comparison. All TCG/WHPX interactive desktop gates passed all CPUs. Historical failed evidence retained; closure still pending rerun.
@@ -6841,3 +6858,4 @@ Strict clean-source GFX-07 at c655d3a8 found a real close-time race: client rele
 Final-source sweep interrupted after Stage20.6 failed on 1/4 CPUs; task-owned process tree recorded and stopped, no unrelated QEMU touched. Exact diagnostic found actual opaque launcher header 0x1c7391 versus obsolete blended-header expectation 0x36242e. Old three samples could pass a partially painted frame. Repairing to 19x44 right strip (border/header/body/shadow), read only between completed frames, with unchanged 1000-tick limit. Failed logs preserved in graphics-close-translucency-* and interrupted matrix.
 
 Stronger completed-frame Stage20.6 PASS 1/2/4 CPUs; affected/default/lower-stage feature lints, host Clippy and tests PASS. Continuing final matrix with 36 unaffected passing runs from a84ae4eb; exclude every old20.6 result. Reuse requires byte-for-byte equality outside the Stage20.6 fixture and the explicit between_frames cfg extension, plus identical hashes for all other tracked build inputs. All remaining 51 cases run on the corrected source; evidence retains source revisions and prior failures.
+
