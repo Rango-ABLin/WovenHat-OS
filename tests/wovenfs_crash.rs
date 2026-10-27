@@ -2188,3 +2188,64 @@ fn read_file_succeeds_for_an_empty_file() {
     // consistent — it has no blocks, so no block or checksum checks apply.
     assert_eq!(volume.check(), Ok(()), "empty file must not make check() fail");
 }
+
+/// `check()` must refuse an image that contains a live `KIND_FILE` inode with
+/// no directory entry naming it.
+///
+/// An orphaned inode — mode != 0, kind == KIND_FILE, but `inode` field zeroed
+/// in every directory entry — represents a permanent space leak.  `unlink`
+/// works by name: without a directory entry there is no name, so neither the
+/// inode slot nor its data blocks can ever be freed through the normal path.
+/// The bitmap consistency checks cannot surface this because the orphan's
+/// blocks are correctly marked allocated and named by the (intact) inode; only
+/// the inode↔entry cross-reference exposes it.
+#[test]
+fn check_refuses_a_live_file_inode_not_named_by_any_directory_entry() {
+    // Build a volume with one file so the file's inode is live.
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "orphan.txt", 0o644, b"data", 1)
+            .expect("create")
+    };
+
+    // Locate the directory block and the entry's slot index.
+    let (dir_block, entry_index) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let root = volume.inode(1).expect("root inode");
+        let dir_block = root.direct[0];
+        let index = volume
+            .read_dir(1)
+            .expect("read_dir")
+            .entries
+            .iter()
+            .position(|e| e.matches("orphan.txt"))
+            .expect("orphan.txt entry");
+        (dir_block, index)
+    };
+
+    // Corrupt: zero the inode field (bytes 0..8) of the directory entry,
+    // turning the live entry into a free slot without touching the inode table.
+    // The file inode is still marked used and its blocks are still allocated,
+    // but no directory entry names it any more.
+    let corrupt = base.fork(None);
+    patch_dir_entry(&corrupt, dir_block, entry_index, 0, &0u64.to_le_bytes());
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse an orphaned file inode (inode {} has no directory entry)",
+        file_inode
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

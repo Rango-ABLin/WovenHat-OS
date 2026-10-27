@@ -1495,6 +1495,23 @@ impl<D: BlockDevice> Volume<D> {
                 }
             }
         }
+        // Every live KIND_FILE inode must be reachable via exactly one
+        // directory entry. An orphaned inode — live (mode != 0), kind ==
+        // KIND_FILE, but no directory entry names it — represents a permanent
+        // space leak: `unlink` works by name, so neither the inode slot nor
+        // its data blocks can ever be freed through the normal path. The bitmap
+        // direction alone cannot surface this: the orphan's blocks are
+        // correctly marked allocated and named by the inode, so both bitmap
+        // checks pass. Only the inode↔entry cross-reference exposes it.
+        for number in 1..=u64::from(sb.inode_count) {
+            let node = self.inode(number)?;
+            if !node.is_used() || node.kind != KIND_FILE {
+                continue;
+            }
+            if !view.entries.iter().any(|entry| entry.inode == number) {
+                return Err(Error::Corrupt);
+            }
+        }
         Ok(())
     }
 }

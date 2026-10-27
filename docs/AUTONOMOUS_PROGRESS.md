@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse live file inode not named by any directory entry
+
+Branch: `auto/wovenhat-development` (base `0fcb65a6`). Working tree was clean.
+
+### Defect
+
+`check()` verified the entry→inode direction exhaustively: every live directory
+entry must name a live `KIND_FILE` inode.  It did not verify the reverse
+direction: every live `KIND_FILE` inode must be named by exactly one directory
+entry.
+
+An orphaned inode — `mode != 0`, `kind == KIND_FILE`, but no directory entry
+has `inode == number` — represents a permanent space leak.  `unlink()` works
+by name: without a directory entry there is no name, so neither the inode slot
+nor its data blocks can ever be freed through the normal path.  The file is
+also inaccessible: `lookup()` only returns entries whose `entry.inode != 0`.
+
+The bitmap consistency checks cannot surface this because the orphan's blocks
+are correctly marked allocated and named by the (still-intact) inode.  The
+inode→bitmap check (every inode-named block is in the bitmap) and the
+bitmap→inode check (every allocated block is named by some live inode) both
+pass.  Only the inode↔entry cross-reference exposes the orphan.
+
+This corruption scenario arises when: the directory entry's inode field is
+zeroed without also freeing the inode (e.g., direct disk manipulation or a
+partial in-flight patch), or after a hypothetical journal replay that cleared
+the directory write but not the inode write.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the two-entry duplicate scans, added a
+  loop over all inodes `1..=inode_count`.  For each live `KIND_FILE` inode,
+  it scans `view.entries` to find at least one entry with `entry.inode ==
+  number`.  If none is found, returns `Err(Error::Corrupt)`.  A twelve-line
+  comment explains the space-leak scenario and why the bitmap checks alone
+  cannot detect it.
+
+- `tests/wovenfs_crash.rs`: added
+  `check_refuses_a_live_file_inode_not_named_by_any_directory_entry`.
+  Creates a volume with one file ("orphan.txt"), locates its directory entry,
+  zeroes the `inode` field (bytes 0..8) in the raw directory block via
+  `patch_dir_entry` (turning the entry into a free slot without touching the
+  inode table), and asserts `check()` returns `Err(Corrupt)`.  Also asserts:
+  the image is unmodified by check(), and the unpatched image passes check().
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **45 passed / 0 failed** (was 44; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan is O(inode_count²) in the worst case; acceptable for a
+  consistency-check function but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS: read_file() spuriously rejects empty files
 
 Branch: `auto/wovenhat-development` (base `4929ee81`). Working tree was clean.
