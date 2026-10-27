@@ -116,6 +116,7 @@ mod panic;
 mod partition;
 // Public kernel instrumentation API; does not expose userspace authority.
 pub mod debug_dump;
+pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
 mod permission;
@@ -5175,6 +5176,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // crash context and ring entries.
         debug_dump::emit_dump(0x0000_ffff_dead_c0de, 0xffff_8000_0010_0000, 0x0000_0000_bad0_0000);
         serial::write_line(format_args!("[S32.6] debug dump: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-7-test")]
+    {
+        if !log_filter::self_test() {
+            serial::write_line(format_args!("[S32.7] log filter: FAILED self_test"));
+            qemu_test_exit_failure();
+        }
+        // Demonstrate the filter in action against the ring: set min = Info,
+        // emit Debug (dropped), emit Info (passes), verify ring count = 1.
+        log_filter::set_min_level(diagnostics::Level::Info);
+        diagnostics::emit(diagnostics::Level::Debug, "filter_test", "should_be_dropped", &[]);
+        diagnostics::emit(diagnostics::Level::Info,  "filter_test", "should_appear",     &[]);
+        let ring_count = log_ring::len();
+        log_filter::set_min_level(diagnostics::Level::Debug); // restore default
+        if ring_count != 1 {
+            serial::write_line(format_args!("[S32.7] log filter: FAILED ring_count={}", ring_count));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.7] log filter: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

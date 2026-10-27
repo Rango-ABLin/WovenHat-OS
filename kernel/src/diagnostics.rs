@@ -38,6 +38,9 @@ pub const MAX_FIELDS: usize = 8;
 pub const TRUNCATION_MARKER: &str = "...";
 
 /// Severity of a diagnostic record, ordered from most to least severe.
+/// `#[repr(u8)]` so the discriminant can be stored in an `AtomicU8` by the
+/// log-filter module without allocation or a lock.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     Error,
@@ -215,6 +218,11 @@ pub fn format_record(
 /// [`EMIT_BUFFER_BYTES`] are truncated with [`TRUNCATION_MARKER`].
 #[cfg(not(test))]
 pub fn emit(level: Level, subsystem: &str, message: &str, fields: &[Field<'_>]) {
+    // Drop records below the configured minimum level when the filter is active.
+    #[cfg(feature = "log-filter")]
+    if level > crate::log_filter::min_level() {
+        return;
+    }
     /// Fixed line budget for a serial diagnostic record.
     const EMIT_BUFFER_BYTES: usize = 512;
     let mut buf = [0u8; EMIT_BUFFER_BYTES];

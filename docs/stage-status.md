@@ -1,5 +1,31 @@
 # Stage status
 
+## Stage 32.7 log-level filter QEMU gate - 2026-10-27 — ACCEPTED
+
+Minimum-severity gate on `diagnostics::emit()` using a lock-free `AtomicU8`.
+`log-filter = []` production feature; `stage32-7-test = ["qemu-test",
+"log-filter", "log-ring"]` QEMU gate. New module `kernel/src/log_filter.rs`:
+- `set_min_level(level)` / `min_level() -> Level` — atomic store/load
+  (`Ordering::Relaxed`); safe from IRQ context.
+- Default: `Level::Debug` — passes Error/Warn/Info/Debug, drops only Trace.
+- `emit()` check: `if level > min_level() { return; }` — fires before any
+  formatting, serial write, or ring push.
+- `Level` gained `#[repr(u8)]` in diagnostics.rs so its discriminant can be
+  stored directly as a `u8` (non-breaking; ordering unchanged).
+- Zero-cost stubs (`#[inline(always)]` no-ops) when `log-filter` is disabled.
+- `self_test()` verifies Level ordering assumptions and (when `log-filter`
+  is active) the atomic set/get round-trip.
+QEMU demonstration: sets min=Info, emits Debug (dropped) then Info (passes),
+checks ring count=1 to confirm the filter is live.
+Serial output confirms:
+```
+INFO filter_test: should_appear
+[S32.7] log filter: PASSED
+```
+(`DEBUG filter_test: should_be_dropped` is absent — correctly suppressed.)
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-7-log-filter-{1,2,4}cpu/serial.log`.
+
 ## Stage 32.6 kernel debug dump QEMU gate - 2026-10-27 — ACCEPTED
 
 Structured kernel debug dump combining a panic crash context with a ring
