@@ -984,6 +984,10 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
+    ///
+    /// Entries whose inode number is non-zero but names a free inode (stale
+    /// entries left by a partial unlink or corruption) are zeroed before
+    /// returning, so `live()` and `count()` agree with `lookup()`.
     #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn read_dir(&mut self, dir_inode: u64) -> Result<DirectoryView, Error> {
         let txn = Transaction::new();
@@ -991,7 +995,22 @@ impl<D: BlockDevice> Volume<D> {
         if dir.kind != KIND_DIR {
             return Err(Error::NotADirectory);
         }
-        self.dir_entries(&txn, &dir)
+        let mut view = self.dir_entries(&txn, &dir)?;
+        // Mirror the guard in `lookup()`: a non-zero inode that is out of range
+        // or whose mode is 0 is a stale entry.  Zero it so callers using
+        // `live()` or `count()` see a consistent picture.
+        for entry in view.entries.iter_mut() {
+            if entry.inode != 0 {
+                let valid = self
+                    .inode(entry.inode)
+                    .map(|n| n.is_used())
+                    .unwrap_or(false);
+                if !valid {
+                    *entry = DirEntry::empty();
+                }
+            }
+        }
+        Ok(view)
     }
 
     /// Stage one entry of directory `dir_inode` (whose inode is `dir`).

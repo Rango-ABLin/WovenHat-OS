@@ -1477,3 +1477,58 @@ fn lookup_refuses_a_stale_entry_naming_a_free_inode() {
     );
     let _ = free_inode;
 }
+
+/// `read_dir().live()` must not expose stale entries whose inode is free.
+///
+/// Before the fix, `live()` filtered only `inode == 0`; a stale entry with a
+/// non-zero free inode would appear in the count and live iterator despite
+/// naming a freed inode, inconsistent with what `lookup()` returns.
+#[test]
+fn read_dir_live_filters_a_stale_entry_naming_a_free_inode() {
+    let (base, block, index) = two_file_root();
+    let (a, b, free_inode) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let b = volume.lookup(1, "b.txt").expect("b.txt").inode;
+        let free_inode = (2..=u64::from(INODES))
+            .find(|n| !volume.inode(*n).expect("inode").is_used())
+            .expect("a free inode");
+        (a, b, free_inode)
+    };
+
+    // Patch a.txt's directory entry to name a free inode.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &free_inode.to_le_bytes());
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    let view = volume
+        .read_dir(1)
+        .expect("read_dir succeeds on a corrupt image");
+
+    assert!(
+        !view.live().any(|e| e.matches("a.txt")),
+        "live() must not return the stale a.txt entry"
+    );
+    assert!(
+        view.live().any(|e| e.matches("b.txt")),
+        "live() must still return the valid b.txt entry"
+    );
+    assert_eq!(view.count(), 1, "count must be 1 (only b.txt visible)");
+
+    // Control: on the unpatched image both entries appear.
+    let view_clean = Volume::mount(base.clone())
+        .expect("mount clean")
+        .read_dir(1)
+        .expect("read_dir clean");
+    assert!(
+        view_clean.live().any(|e| e.matches("a.txt")),
+        "clean: a.txt visible"
+    );
+    assert!(
+        view_clean.live().any(|e| e.matches("b.txt")),
+        "clean: b.txt visible"
+    );
+    assert_eq!(view_clean.count(), 2, "clean: count must be 2");
+
+    let _ = (a, b, free_inode);
+}

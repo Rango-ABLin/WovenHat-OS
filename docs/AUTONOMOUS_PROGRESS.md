@@ -4,6 +4,60 @@ Each entry is one bounded checkpoint. Entries record exactly what was run.
 Nothing here claims production readiness; completion requires independent
 human review.
 
+## 2026-10-27 — WovenFS read_dir(): filter stale entries naming free inodes
+
+Branch: `auto/wovenhat-development` (base `0c529636`). Working tree was clean.
+
+### Defect
+
+`read_dir()` returned a raw `DirectoryView` without sanitizing entries that
+reference a free inode. `live()` on `DirectoryView` filtered only `inode == 0`
+(empty slots), so a stale entry — one whose inode number is non-zero but the
+inode has `mode == 0` (freed) — appeared in `live()` and `count()` results.
+This was inconsistent with `lookup()`, which applies the same validity check
+and returns `Err(Corrupt)` for such entries. The open item was recorded in the
+2026-10-27 `lookup()` checkpoint:
+
+> `lookup` only checks the direct-match entry; callers that iterate `read_dir`
+> directly still receive stale entries (inode == 0 entries are filtered by
+> `live()` already, but non-zero free inodes are not).
+
+### Change
+
+- `kernel/src/wfs.rs` `read_dir()`: after calling `dir_entries()`, iterates
+  the returned `DirectoryView` and zeroes every entry whose `inode != 0` but
+  whose resolved inode is out-of-range or has `mode == 0` (`!is_used()`). Uses
+  `self.inode(entry.inode).map(|n| n.is_used()).unwrap_or(false)`, which
+  mirrors the guard in `lookup()`. The zeroed entries have `inode == 0` and so
+  are excluded by `live()` and `count()` automatically.
+- `tests/wovenfs_crash.rs`: added
+  `read_dir_live_filters_a_stale_entry_naming_a_free_inode`. Patches `a.txt`'s
+  directory entry to name a free inode, then asserts that `read_dir().live()`
+  does not include the stale entry, `count()` returns 1 (only `b.txt`), and
+  `b.txt` is still visible. Control: on the unpatched image, both entries
+  appear and `count()` returns 2.
+
+### Results (run on this host, 2026-10-27)
+
+Using project-local `CARGO_BUILD_BUILD_DIR=.cargo-build`, `CARGO_TARGET_DIR=target`:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (no output) |
+| `cargo test --test wovenfs_crash` | PASS, **31 passed / 0 failed** (was 30; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `read_dir` itself does not fail on a corrupt image; it silently filters stale
+  entries, consistent with `lookup()`'s fail-closed approach. Callers needing
+  to detect corruption should use `check()`.
+- No repair (fsck) path — `check()` detects but cannot fix stale entries.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-27 — WovenFS lookup(): refuse stale entry naming a free inode
 
 Branch: `auto/wovenhat-development` (base `dbe30e1e`). Working tree was clean.
