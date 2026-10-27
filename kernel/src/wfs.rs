@@ -1438,6 +1438,16 @@ impl<D: BlockDevice> Volume<D> {
         if root.data_checksum != 0 {
             return Err(Error::Corrupt);
         }
+        // `format()` always sets the root directory's `size` to `SECTOR_SIZE` (one
+        // directory data block).  `stage_create` and `stage_unlink` update only the
+        // directory inode's `modified` field, not `size`.  No other runtime path
+        // modifies a directory inode's `size`.  Any other value is corruption the
+        // runtime cannot have produced.  `dir_entries` reads directory blocks through
+        // the `direct` pointers and ignores `size`, so without an explicit guard here
+        // this inconsistency passes check() silently.
+        if root.size != SECTOR_SIZE as u64 {
+            return Err(Error::Corrupt);
+        }
         let view = self.dir_entries(&txn, &root)?;
         for entry in view.entries.iter().filter(|entry| entry.inode != 0) {
             if entry.inode > u64::from(sb.inode_count) {

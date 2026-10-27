@@ -1,5 +1,59 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong size
+
+Branch: `auto/wovenhat-development` (base `64395463`). Working tree was clean.
+
+### Defect
+
+`format()` always sets the root directory inode's `size` field to `SECTOR_SIZE`
+(512 bytes — one directory data block).  No runtime path ever modifies a
+directory inode's `size`: `stage_create` updates only the directory inode's
+`modified` field, and neither `stage_dir_entry` nor `stage_unlink` touches
+`size`.  Therefore any root directory inode with `size != SECTOR_SIZE` represents
+corruption that the runtime cannot have produced.
+
+`dir_entries` reads directory blocks by their `direct` pointers and ignores the
+`size` field entirely.  Without an explicit guard in `check()` this inconsistency
+passes silently — the same oracle-vs-runtime gap family as the recent
+`data_checksum`, `links`, and size-0 file series.
+
+### Change
+
+- `kernel/src/wfs.rs` `check()`: after the existing `root.data_checksum != 0`
+  guard, added a `root.size != SECTOR_SIZE as u64` guard returning
+  `Err(Error::Corrupt)`.  An eight-line comment explains the `format()` invariant
+  and why `dir_entries` cannot surface this inconsistency.
+
+- `tests/wovenfs_crash.rs`: added `reseal_inode_size` helper (patches offset 8 in
+  the raw inode, re-seals the structural checksum), and added test
+  `check_refuses_root_directory_inode_with_wrong_size`.  The test patches the
+  root inode's size to each of 0, 1, `SECTOR_SIZE - 1`, and `SECTOR_SIZE + 1` and
+  asserts `check()` returns `Err(Corrupt)` in every case without modifying the
+  image.  The unpatched volume passes as the positive control.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **49 passed / 0 failed** (was 48; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Only the root directory's `size` invariant is checked; the root's `direct`
+  block assignments and their exact block addresses are not independently verified
+  beyond the existing bitmap and aliasing checks.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+- The WovenFS flat-root adapter covers only the root directory; nested
+  directories and rename remain unimplemented.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with non-zero data_checksum
 
 Branch: `auto/wovenhat-development` (base `4bac909a`). Working tree was clean.

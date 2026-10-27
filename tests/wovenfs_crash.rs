@@ -1311,6 +1311,22 @@ fn reseal_inode_direct(image: &CrashDisk, inode: u64, slot: usize, block: u64) {
     raw[120..128].copy_from_slice(&checksum.to_le_bytes());
 }
 
+/// Set an on-disk inode's `size` field, re-sealing the inode checksum.
+fn reseal_inode_size(image: &CrashDisk, inode: u64, size: u64) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[8..16].copy_from_slice(&size.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
 /// Set an on-disk inode's `links` field, re-sealing the inode checksum.
 fn reseal_inode_links(image: &CrashDisk, inode: u64, links: u32) {
     let inode_start = {
@@ -2363,6 +2379,47 @@ fn check_refuses_root_directory_inode_with_nonzero_data_checksum() {
         corrupt.sectors() == before,
         "check() must not modify the image"
     );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+/// `check()` must refuse the root directory inode when its `size` field is not
+/// `SECTOR_SIZE`.
+///
+/// `format()` always sets the root directory's `size` to `SECTOR_SIZE` (512
+/// bytes — one directory data block).  No runtime path ever modifies a directory
+/// inode's `size`: `stage_create` updates only `modified` on the directory inode,
+/// and neither `stage_dir_entry` nor `stage_unlink` touches `size`.  Any other
+/// value is corruption the runtime cannot have produced.  `dir_entries` reads
+/// directory blocks by their `direct` pointers and ignores `size`, so without an
+/// explicit guard in `check()` this inconsistency passes silently.
+#[test]
+fn check_refuses_root_directory_inode_with_wrong_size() {
+    let base = formatted();
+    let root_inode = {
+        let volume = Volume::mount(base.clone()).expect("mount");
+        volume.super_block().root_inode
+    };
+    assert_eq!(root_inode, 1, "sanity: root inode is always 1 on a fresh volume");
+
+    for size in [0u64, 1, SECTOR_SIZE as u64 - 1, SECTOR_SIZE as u64 + 1] {
+        let corrupt = base.fork(None);
+        reseal_inode_size(&corrupt, root_inode, size);
+
+        let before = corrupt.sectors();
+        let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "size = {size}: check() must refuse the root directory inode with wrong size"
+        );
+        assert!(
+            corrupt.sectors() == before,
+            "check() must not modify the image"
+        );
+    }
 
     // Control: the unpatched volume passes check().
     let mut clean = Volume::mount(base).expect("mount clean");
