@@ -5187,7 +5187,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     {
         #[cfg(feature = "s03-keyboard-injection-test")]
         {
-            if xhci::init_hid().is_err() || xhci::start_input("xhci0").is_err() {
+            let report = drivers::bring_up();
+            if !report.drivers.iter().any(|driver| {
+                driver.name == "xhci0"
+                    && matches!(driver.outcome, drivers::Outcome::Ready(_))
+            }) {
                 serial::write_line(format_args!("[S03.KEYBOARD] USB HID setup: FAILED"));
                 qemu_test_exit_failure();
             }

@@ -61,10 +61,14 @@ by the in-kernel S03 probe. Session identity is inherited across process
 creation, `getsid`/`setsid` are exercised by a Ring-3 probe, and cross-session
 process-group assignment is rejected. Exact-child reaping now checks the
 second-wait `NoSuchChild` result and preserves the pre-test zombie count; the
-existing wait-any selector remains covered by its dedicated probe. Reliable
-QEMU keyboard injection is still an explicit qualification gap: PS/2 and
-USB-HID decoder tests pass, but the headless QMP-to-PS/2 runtime path has not
-produced a trustworthy Ctrl-C marker.
+existing wait-any selector remains covered by its dedicated probe. The
+dedicated headless QMP gate now enumerates xHCI, injects Ctrl-C through the USB
+HID keyboard, and proves foreground-group SIGINT termination (status 130);
+accepted evidence is under `target/s03-keyboard-injection/`. The bounded
+job-control implementation also covers default stop/continue dispositions,
+`TOSTOP` SIGTTOU enforcement, stopped orphaned-group SIGHUP/SIGCONT
+notification, child reparenting, and PTY hangup EOF/write rejection. Full
+POSIX terminal coverage beyond this bounded ABI remains open.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 

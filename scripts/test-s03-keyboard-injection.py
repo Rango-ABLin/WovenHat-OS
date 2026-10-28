@@ -2,6 +2,7 @@
 
 import json
 import os
+import argparse
 from pathlib import Path
 import shutil
 import socket
@@ -18,14 +19,21 @@ def qmp(sock: socket.socket, command: str, arguments: dict | None = None) -> Non
         request["arguments"] = arguments
     sock.sendall((json.dumps(request) + "\n").encode())
     data = b""
-    while b"\n" not in data:
-        data += sock.recv(4096)
-    reply = json.loads(data.split(b"\n", 1)[0])
-    if "error" in reply:
-        raise RuntimeError(f"QMP {command} failed: {reply['error']}")
+    while True:
+        while b"\n" not in data:
+            data += sock.recv(4096)
+        line, data = data.split(b"\n", 1)
+        reply = json.loads(line)
+        if "error" in reply:
+            raise RuntimeError(f"QMP {command} failed: {reply['error']}")
+        if "return" in reply:
+            return
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     firmware = qemu.parent / "share" / "edk2-x86_64-code.fd"
@@ -43,10 +51,11 @@ def main() -> int:
     serial.write_text("", encoding="utf-8")
     port = 45683
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "4G", "-smp", "1",
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "4G", "-smp", str(args.cpus),
         "-display", "none", "-serial", f"file:{serial}", "-no-reboot", "-qmp",
         f"tcp:127.0.0.1:{port},server=on,wait=off", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-        "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0",
+        "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0,id=kbd0",
+        "-device", "usb-mouse,bus=xhci.0,id=mouse0",
         "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
         "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}",
         "-device", "virtio-blk-pci,drive=boot,bootindex=1",
@@ -77,13 +86,14 @@ def main() -> int:
         with sock:
             sock.settimeout(10)
             qmp(sock, "qmp_capabilities")
-            events = [
-                {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": "ctrl"}}},
-                {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": "c"}}},
-                {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": "c"}}},
-                {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": "ctrl"}}},
-            ]
-            qmp(sock, "input-send-event", {"events": events})
+            def key(code: str, down: bool) -> dict:
+                return {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": code}}}
+            # The guest exits on the VINTR delivery. Do not send release
+            # events after that point: QEMU may close QMP as the isa-debug
+            # exit completes, which is expected rather than an input failure.
+            for code, down in (("ctrl", True), ("c", True)):
+                qmp(sock, "input-send-event", {"events": [key(code, down)]})
+                time.sleep(0.5)
         process.wait(timeout=60)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"keyboard gate failed: {error}", file=sys.stderr)
@@ -94,7 +104,7 @@ def main() -> int:
     errors = validation_errors(
         process.returncode,
         log,
-        ["[S03.KEYBOARD] USB HID Ctrl-C decoded as terminal byte 0x03: PASSED"],
+        ["[S03.KEYBOARD] USB HID Ctrl-C delivered SIGINT to foreground group: PASSED"],
     )
     if errors:
         print("\n".join(errors), file=sys.stderr)
