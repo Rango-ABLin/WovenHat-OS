@@ -173,7 +173,7 @@ static HANDLER_FIRED: AtomicBool = AtomicBool::new(false);
 static LIVE_TASK_DONE: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "stage32-20-test")]
 static LIVE_DETACH_DONE: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "stage32-21-test")]
+#[cfg(any(feature = "stage32-21-test", feature = "stage32-22-test"))]
 static LIVE_KILL_DONE: AtomicBool = AtomicBool::new(false);
 
 // ── Single-attachment authority (Stage 32.18) ──────────────────────────────
@@ -551,7 +551,7 @@ pub fn live_detach_task_done() -> bool {
     LIVE_DETACH_DONE.load(Ordering::SeqCst)
 }
 
-#[cfg(feature = "stage32-21-test")]
+#[cfg(any(feature = "stage32-21-test", feature = "stage32-22-test"))]
 pub fn live_kill_task_entry() -> ! {
     HANDLER_FIRED.store(false, Ordering::SeqCst);
     for _ in 0..2_000_000 { core::hint::spin_loop(); }
@@ -560,7 +560,7 @@ pub fn live_kill_task_entry() -> ! {
     loop { crate::task::yield_now(); }
 }
 
-#[cfg(feature = "stage32-21-test")]
+#[cfg(any(feature = "stage32-21-test", feature = "stage32-22-test"))]
 pub fn live_kill_task_done() -> bool {
     LIVE_KILL_DONE.load(Ordering::SeqCst)
 }

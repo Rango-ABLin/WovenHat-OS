@@ -216,6 +216,7 @@ stage32-18-test = ["qemu-test", "gdb-entry"]
 stage32-19-test = ["qemu-test", "gdb-entry"]
 stage32-20-test = ["qemu-test", "gdb-entry"]
 stage32-21-test = ["qemu-test", "gdb-entry"]
+stage32-22-test = ["qemu-test", "gdb-entry"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
