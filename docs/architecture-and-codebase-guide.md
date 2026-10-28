@@ -35,6 +35,13 @@ user copy cannot be validated. A Ring-3 SIGUSR1 self-signal probe passes on
 1/2/4 CPUs, including handler exit status 42. This remains a bounded signal
 contract, not full POSIX signal masks or stop/continue semantics.
 
+Terminal control is bounded to the owned standard-input terminal: validated
+`Termios` state supports `TCGETS`/`TCSETS`, and existing process groups can be
+read or assigned as foreground through `TIOCGPGRP`/`TIOCSPGRP`. User buffers
+are copied at the syscall boundary; invalid flags, descriptors, pointers, and
+unknown requests fail closed. No PTY namespace or multiplexed line discipline
+is implied.
+
 ## S02 freestanding C ABI boundary (2026-10-28)
 
 `tools/runtime-fixtures/c-abi.c` is a deliberately bounded no-libc C entry

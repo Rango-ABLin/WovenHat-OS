@@ -33,6 +33,11 @@ registers and self-delivers SIGUSR1, then exits from the handler with status
 42. `prepare_signal_delivery` restores the pending signal when any saved-frame
 validation or user copy fails; no signal is silently discarded.
 
+The terminal-control increment adds bounded `TCGETS`/`TCSETS` and
+`TIOCGPGRP`/`TIOCSPGRP` requests with copied user buffers and fail-closed
+validation. The Ring-3 S03 gate passes on 1/2/4 CPUs with the termios round
+trip included. PTY multiplexing and complete job-control semantics remain.
+
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
 Per user direction, the remaining Stage 32 work was consolidated into one

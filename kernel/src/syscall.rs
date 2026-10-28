@@ -1310,8 +1310,55 @@ fn sys_sync() -> u64 {
         .unwrap_or(SYSCALL_ERROR)
 }
 
-fn sys_ioctl(_fd: u64, _req: u64, _arg: u64) -> u64 {
-    0 // no-op placeholder for future TTY control
+fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+    if fd != 0 {
+        return SYSCALL_ERROR;
+    }
+    match request {
+        crate::terminal::TCGETS => {
+            let value = crate::terminal::termios();
+            let bytes = unsafe {
+                core::slice::from_raw_parts(
+                    (&value as *const crate::terminal::Termios).cast::<u8>(),
+                    core::mem::size_of::<crate::terminal::Termios>(),
+                )
+            };
+            crate::paging::copy_to_current_user(argument, bytes).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        crate::terminal::TCSETS => {
+            let mut value = crate::terminal::Termios::DEFAULT;
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    (&mut value as *mut crate::terminal::Termios).cast::<u8>(),
+                    core::mem::size_of::<crate::terminal::Termios>(),
+                )
+            };
+            if crate::paging::copy_from_current_user(argument, bytes).is_err()
+                || !crate::terminal::set_termios(value)
+            {
+                SYSCALL_ERROR
+            } else {
+                0
+            }
+        }
+        crate::terminal::TIOCGPGRP => {
+            let group = crate::terminal::foreground_pid().unwrap_or(0).to_le_bytes();
+            crate::paging::copy_to_current_user(argument, &group).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        crate::terminal::TIOCSPGRP => {
+            let mut bytes = [0u8; 8];
+            if crate::paging::copy_from_current_user(argument, &mut bytes).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let group = u64::from_le_bytes(bytes);
+            if !crate::task::process_group_exists(group) {
+                return SYSCALL_ERROR;
+            }
+            crate::terminal::set_foreground_group(group);
+            0
+        }
+        _ => SYSCALL_ERROR,
+    }
 }
 
 fn sys_sleep(ticks: u64) -> u64 {

@@ -52,6 +52,13 @@ saved-frame delivery cannot safely proceed, preventing silent signal loss.
 The broader S03 boundary remains open for PTYs/termios, job control, and
 complete default/stop/continue signal semantics.
 
+The terminal-control increment adds a validated `TCGETS`/`TCSETS` termios
+record and foreground process-group `TIOCGPGRP`/`TIOCSPGRP` requests on
+standard input. The Ring-3 S03 probe round-trips termios through the real
+syscall ABI and the full lifecycle gate remains green on 1/2/4 CPUs. This is
+a single-owner terminal boundary; PTY allocation/multiplexing and complete
+job-control stop/continue behavior remain open.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,

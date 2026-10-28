@@ -6104,6 +6104,14 @@ pub fn current_process_group() -> u64 {
     group.unwrap_or_else(current_process_id)
 }
 
+pub fn process_group_exists(group: u64) -> bool {
+    group != 0
+        && process_table_lock()
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == group && process.state == ProcessState::Ready)
+}
+
 pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
     let caller = current_process_id();
     let target = if pid == 0 { caller } else { pid };

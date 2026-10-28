@@ -103,6 +103,32 @@ pub mod process {
         Handler(u64),
     }
 }
+pub mod terminal {
+    pub const TCGETS: u64 = 0x5401;
+    pub const TCSETS: u64 = 0x5402;
+    pub const TIOCGPGRP: u64 = 0x540f;
+    pub const TIOCSPGRP: u64 = 0x5410;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Termios {
+        pub input_flags: u32,
+        pub output_flags: u32,
+        pub control_flags: u32,
+        pub local_flags: u32,
+        pub control_chars: [u8; 8],
+    }
+
+    impl Termios {
+        pub const DEFAULT: Self = Self {
+            input_flags: 0x0000_0500,
+            output_flags: 0x0000_0001,
+            control_flags: 0x0000_00b0,
+            local_flags: 0x0000_000b,
+            control_chars: [3, 28, 127, 21, 4, 0, 0, 0],
+        };
+    }
+}
 pub mod abi;
 pub mod accessibility;
 pub mod ai_assistant;
@@ -11993,6 +12019,7 @@ pub mod syscall {
     pub const RENAME: u64 = 30;
     pub const GETTICKS: u64 = 31;
     pub const SYNC: u64 = 32;
+    pub const IOCTL: u64 = 33;
     pub const SIGACTION: u64 = 34;
     pub const GETPGRP: u64 = 35;
     pub const SETPGID: u64 = 36;
@@ -12224,6 +12251,15 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn setpgid(pid: u64, group: u64) -> u64 {
         unsafe { invoke(SETPGID, pid, group, 0) }
+    }
+
+    /// Apply a bounded terminal control request.
+    ///
+    /// # Safety
+    /// `argument` must point to the readable or writable object required by
+    /// the request, and the call must originate from WovenHat userspace.
+    pub unsafe fn ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+        unsafe { invoke(IOCTL, fd, request, argument) }
     }
 
     /// # Safety
@@ -14688,6 +14724,56 @@ pub fn set_process_group(process_id: Option<process::Id>, group: Option<u64>) ->
     }
     check(unsafe { syscall::setpgid(process_id.map_or(0, |id| id.0), group.unwrap_or(0)) })
         .map(|_| ())
+}
+
+/// Read the bounded terminal settings for standard input.
+pub fn terminal_attributes() -> Result<terminal::Termios, Error> {
+    let mut value = terminal::Termios::DEFAULT;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCGETS,
+            (&mut value as *mut terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| value)
+}
+
+/// Replace the bounded terminal settings for standard input.
+pub fn set_terminal_attributes(value: &terminal::Termios) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCSETS,
+            (value as *const terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+/// Read the foreground process group associated with standard input.
+pub fn foreground_process_group() -> Result<u64, Error> {
+    let mut group = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCGPGRP,
+            (&mut group as *mut u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| group)
+}
+
+/// Assign standard input to an existing process group.
+pub fn set_foreground_process_group(group: u64) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCSPGRP,
+            (&group as *const u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
 }
 
 /// Terminate this process. Never returns.
