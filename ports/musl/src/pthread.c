@@ -26,7 +26,17 @@ static void run_slot(size_t index)
 #define TRAMPOLINE(n) static void trampoline##n(void) { run_slot(n); }
 TRAMPOLINE(0) TRAMPOLINE(1) TRAMPOLINE(2) TRAMPOLINE(3)
 TRAMPOLINE(4) TRAMPOLINE(5) TRAMPOLINE(6) TRAMPOLINE(7)
-static void (*const trampolines[MAX_PTHREADS])(void) = { trampoline0, trampoline1, trampoline2, trampoline3, trampoline4, trampoline5, trampoline6, trampoline7 };
+static void (*trampoline_for(size_t index))(void)
+{
+	if (index == 0) return trampoline0;
+	if (index == 1) return trampoline1;
+	if (index == 2) return trampoline2;
+	if (index == 3) return trampoline3;
+	if (index == 4) return trampoline4;
+	if (index == 5) return trampoline5;
+	if (index == 6) return trampoline6;
+	return trampoline7;
+}
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
 {
 	(void)attr;
@@ -35,7 +45,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	for (index = 0; index < MAX_PTHREADS && slots[index].busy; ++index) ;
 	if (index == MAX_PTHREADS) { unlock(); return EAGAIN; }
 	slots[index].start = start; slots[index].arg = arg; slots[index].busy = 1;
-	long result = wh_syscall2(WH_SYS_THREAD_CREATE, (long)(uintptr_t)trampolines[index], 64 * 1024);
+	long result = wh_syscall2(WH_SYS_THREAD_CREATE, (long)(uintptr_t)trampoline_for(index), 64 * 1024);
 	if (result < 0) { slots[index].busy = 0; unlock(); return EAGAIN; }
 	slots[index].handle = (pthread_t)(unsigned long)result;
 	slots[index].detached = 0;

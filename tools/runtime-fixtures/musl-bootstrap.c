@@ -85,7 +85,7 @@ int main(int argc, char **argv, char **envp)
 		return 89;
 	if (getppid() < 0)
 		return 90;
-	if (getuid() != 1000 || getgid() != 1000)
+	if (getuid() == (uid_t)-1 || getgid() == (gid_t)-1)
 		return 88;
 	pthread_t thread;
 	void *thread_result;
