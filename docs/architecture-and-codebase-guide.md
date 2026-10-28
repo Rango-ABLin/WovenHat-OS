@@ -2410,6 +2410,16 @@ discovering the service cannot grant an application filesystem visibility or
 write authority. The service process, source adapters, supervision, and QEMU
 acceptance are still required before treating this as an available OS service.
 
+`apps/woven-search` is the corresponding freestanding Ring-3 broker. It owns
+one locally seeded, public application catalog and publishes `woven.search`
+with only `Capability::Ipc`; queries run through `Index::search_for` using the
+sender process ID, preserving owner filtering when non-public adapters are
+introduced. The service does not join the WovenStart application catalog and
+receives no file, storage, network, secret, display, or mutation authority.
+`scripts/build-search-service.py` builds and signs that service as a separate
+WAPP artifact. Production boot/supervision and a live IPC acceptance gate are
+the next increment.
+
 ## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
 
 `libwoven::ai_assistant` stores at most eight fixed-size actions, rejects

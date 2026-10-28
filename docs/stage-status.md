@@ -4778,6 +4778,12 @@ mutation, so it introduces no implicit file access. The focused `libwoven`
 suite (196 tests) and warning-denying library Clippy pass. No service process,
 source adapter, supervisor integration, or QEMU acceptance is claimed yet.
 
+The companion `apps/woven-search` freestanding broker now builds and signs as
+a separate WAPP service artifact. It publishes only `woven.search`, carries
+only `Ipc` authority, and serves an eleven-entry public application index; it
+is not a twelfth launcher application. Production startup, supervision, and
+the Ring-3/QEMU IPC gate remain in progress.
+
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 
 The Stage 23.4 WovenGuard gate makes the AI security contract explicit and

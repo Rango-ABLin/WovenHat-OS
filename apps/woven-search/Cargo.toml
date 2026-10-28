@@ -1,0 +1,23 @@
+[workspace]
+
+[package]
+name = "wovenhat-search"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "wovenhat-search"
+path = "src/main.rs"
+
+[dependencies]
+libwoven = { path = "../../libwoven" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+strip = "symbols"
+
+[profile.dev]
+panic = "abort"
