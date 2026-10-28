@@ -1,5 +1,13 @@
 # Stage status
 
+## Dynamic TLS publication rollback - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The all-thread dynamic TLS mapper now treats descriptor publication as its
+transaction commit point. If publication fails after all per-thread installs,
+every resource slot and mapping is cleared before returning failure. Kernel
+target build and warning-denying Clippy plus focused libwoven TLS tests pass.
+Runtime multi-thread QEMU qualification remains open.
+
 ## Firmware artifact reconciliation - 2026-10-28 - QUALIFIED EXISTING ARTIFACT
 
 The repository is synchronized with `origin/master` and has no unresolved

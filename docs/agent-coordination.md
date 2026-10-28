@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS publication rollback completion (2026-10-28)
+
+Closed the final transaction tail in `map_dynamic_tls_all`: descriptor
+publication is now the commit point, and a publication failure rolls back every
+installed per-thread resource and mapping. Kernel target check, warning-denying
+kernel Clippy, libwoven dynamic-TLS tests, and diff checks pass.
+
 ## Codex - firmware artifact reconciliation and QEMU qualification (2026-10-28)
 
 Repository reconciliation completed cleanly: the worktree is clean, `master`
