@@ -13,6 +13,7 @@
 #define WH_LINUX_CLOSE      3
 #define WH_LINUX_LSEEK      8
 #define WH_LINUX_DUP        32
+#define WH_LINUX_DUP2       33
 #define WH_LINUX_EXIT       60
 #define WH_LINUX_EXIT_GROUP 231
 
@@ -38,10 +39,7 @@ static __inline long __syscall1(long number, long arg0)
 
 static __inline long __syscall2(long number, long arg0, long arg1)
 {
-	(void)number;
-	(void)arg0;
-	(void)arg1;
-	return -WH_ENOSYS;
+	return number == WH_LINUX_DUP2 ? wh_syscall2(WH_SYS_DUP2, arg0, arg1) : -WH_ENOSYS;
 }
 
 static __inline long __syscall3(long number, long arg0, long arg1, long arg2)
