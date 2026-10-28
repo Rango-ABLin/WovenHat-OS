@@ -4084,6 +4084,53 @@ pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, EnvError> {
     Err(EnvError::NotFound)
 }
 
+/// Stage 7 acceptance: exercise the bounded environment contract without
+/// allocating or depending on a live userspace task.
+#[cfg(feature = "stage7-test")]
+pub fn stage7_environment_self_test() -> bool {
+    fn value<'a>(environment: &'a ProcessEnvironment, key: &[u8]) -> Option<&'a [u8]> {
+        for index in 0..MAX_ENV_VARS {
+            let length = environment.lengths[index] as usize;
+            let entry = &environment.entries[index][..length];
+            if length > key.len() && &entry[..key.len()] == key && entry[key.len()] == b'=' {
+                return Some(&entry[key.len() + 1..]);
+            }
+        }
+        None
+    }
+
+    let parent = ProcessEnvironment::defaults();
+    if parent.lengths.iter().filter(|&&length| length != 0).count() != 4
+        || value(&parent, b"PATH") != Some(&b"/bin"[..])
+        || value(&parent, b"TERM") != Some(&b"wovenhat"[..])
+    {
+        return false;
+    }
+
+    let mut child = parent;
+    if !child.set_bytes(b"PATH", b"/sbin")
+        || value(&child, b"PATH") != Some(&b"/sbin"[..])
+        || value(&parent, b"PATH") != Some(&b"/bin"[..])
+    {
+        return false;
+    }
+
+    for key in [b"A".as_slice(), b"B", b"C", b"D"] {
+        if !child.set_bytes(key, b"1") {
+            return false;
+        }
+    }
+    if child.set_bytes(b"E", b"1")
+        || child.set_bytes(b"BAD=KEY", b"1")
+        || child.set_bytes(b"NONASCII", &[0x80])
+        || child.set_bytes(b"TOO_LONG", &[b'x'; MAX_ENV_ENTRY])
+    {
+        return false;
+    }
+
+    true
+}
+
 pub fn mmap_current(length: u64, writable: bool) -> Result<u64, MemoryError> {
     let length = usize::try_from(length).map_err(|_| MemoryError::InvalidLength)?;
     let size = length
