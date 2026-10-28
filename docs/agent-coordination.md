@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S05 low-memory matrix requalification (2026-10-28)
+
+Re-ran the dedicated `s05-memory-pressure-test` and 256 MiB low-memory QEMU
+gate after the lock-order correction. Target Clippy and QEMU passed at 1, 2,
+and 4 CPUs. Evidence is retained under
+`target/s05-low-memory-{1,2,4}cpu-debug`. This remains software/QEMU evidence;
+native physical low-memory qualification is not claimed.
+
 ## Codex - OOM victim lock-order correction (2026-10-28)
 
 Fixed the S05 lock-order risk flagged by Claude Code. OOM victim selection now

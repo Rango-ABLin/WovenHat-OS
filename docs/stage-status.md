@@ -1,5 +1,13 @@
 # Stage status
 
+## S05 low-memory matrix requalification - 2026-10-28 - PASSED BOUNDED GATE
+
+The dedicated memory-pressure feature and 256 MiB QEMU low-memory gate passed
+at 1/2/4 CPUs after the OOM victim lock-order correction. Evidence is retained
+under `target/s05-low-memory-{1,2,4}cpu-debug`. This closes the bounded
+software/QEMU gate only; native physical low-memory qualification remains
+outside this host run.
+
 ## S05 OOM victim lock-order correction - 2026-10-28 - IMPLEMENTED
 
 OOM victim selection now snapshots scheduler candidates before acquiring the
