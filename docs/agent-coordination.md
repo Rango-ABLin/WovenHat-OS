@@ -1,5 +1,35 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 12.2 extended attributes accepted (2026-10-28)
+
+Added real extended-attribute support to `kernel/src/wfs.rs` (the native FS,
+not the unrelated RAM-only `wovenfs.rs` side table): a new `xattr_block`
+inode field (fits in previously-always-zero spare space, no format-version
+bump), a 512-byte packed name/value block allocated from the existing bitmap
+allocator, and `set_xattr`/`get_xattr`/`list_xattr`/`remove_xattr` following
+the exact `mkdir`-style one-transaction template. `unlink` now also frees an
+attached xattr block (previously would have leaked it). `Volume::check()`
+validates xattr blocks the same way it validates direct blocks.
+
+Gated under `stage12-2-xattr-test` (kept distinct from the existing
+`stage12-2-test`, which exercises the unrelated `wovenfs.rs`). Host tests
+(`tests/wovenfs_crash.rs`, including exhaustive crash-point enumeration for
+both `set_xattr` and `remove_xattr`, plus block-reuse and unlink-frees-block
+tests), target+host warning-denying Clippy, and QEMU 1/2/4 CPUs all pass.
+`docs/wovenfs-on-disk-format.md` updated with the new inode field and the
+extended-attribute block layout.
+
+This is a Rust-API-level increment only -- no syscall/VFS exposure to
+userspace yet (deliberately separate follow-on work). Next queued: 12.5
+(`storage_manager.rs` mount-manager integration, currently zero real
+callers), then 12.4 (snapshots, currently a disconnected stub).
+
+Unrelated finding while running the full host suite: `thread::tests::
+abort_permanently_retires_exhausted_generations` (`tests/thread_registry.rs`)
+is currently failing on master, apparently from the in-progress dynamic
+TLS/mutex-ownership work -- not touched by this change, flagging for
+whoever owns that area.
+
 ## Claude Code - Stage 12 product decision resolved; starting 12.2 xattrs (2026-10-28)
 
 The user resolved the open product decision noted in `docs/stage-status.md`
