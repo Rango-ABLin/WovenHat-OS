@@ -40,6 +40,9 @@
 #define WH_SYS_THREAD_JOIN 132
 #define WH_SYS_THREAD_SELF 133
 #define WH_SYS_THREAD_CANCEL 136
+#define WH_SYS_THREAD_SLEEP 138
+#define WH_SYS_THREAD_CONDITION_WAIT 139
+#define WH_SYS_THREAD_CONDITION_SIGNAL 140
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38
