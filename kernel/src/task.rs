@@ -1832,7 +1832,8 @@ pub fn spawn_user_process_with_sandbox(
     feature = "stage21-11-test",
     feature = "stage23-1-test",
     feature = "stage23-2-test",
-    feature = "stage23-3-test"
+    feature = "stage23-3-test",
+    feature = "stage23-5-search-service-test"
 ))]
 pub fn spawn_user_process_with_package_capabilities(
     name: &'static str,
@@ -2333,6 +2334,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage23-2-test",
     feature = "stage27-5-recovery-test",
     feature = "stage23-3-test",
+    feature = "stage23-5-search-service-test",
     feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(

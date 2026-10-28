@@ -109,7 +109,10 @@ fn probe() -> ! {
     let request = Request {
         operation: Operation::Query,
         request_id: 0x23_05_01,
-        query: b"woven terminal",
+        // `terminal` is unique in the bounded public catalog. A multi-term
+        // query including `woven` correctly returns lower-scoring partial
+        // matches too, so it is not a one-result lifecycle oracle.
+        query: b"terminal",
     };
     let mut request_bytes = [0u8; REQUEST_CAPACITY];
     let Ok(length) = request.encode(&mut request_bytes) else {

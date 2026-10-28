@@ -4817,21 +4817,22 @@ embedding runtime. Source adapters, ranking quality evaluation, and
 user-facing search service integration remain required before release
 readiness.
 
-### WovenSearch IPC protocol foundation (2026-10-28) — IN PROGRESS
+### WovenSearch service boundary (2026-10-28) — ACCEPTED BOUNDED
 
 `libwoven::search_ipc` now supplies the versioned `WSR1` request/response
-codec for a future read-only `woven.search` service. The frame limits queries
+codec for the read-only `woven.search` service. The frame limits queries
 to validated UTF-8 and returns at most eight identifier/kind/score results in
 a fixed 116-byte response. It accepts neither filesystem paths nor index
 mutation, so it introduces no implicit file access. The focused `libwoven`
-suite (196 tests) and warning-denying library Clippy pass. No service process,
-source adapter, supervisor integration, or QEMU acceptance is claimed yet.
+suite (196 tests) and warning-denying library Clippy pass.
 
 The companion `apps/woven-search` freestanding broker now builds and signs as
 a separate WAPP service artifact. It publishes only `woven.search`, carries
 only `Ipc` authority, and serves an eleven-entry public application index; it
-is not a twelfth launcher application. Production startup, supervision, and
-the Ring-3/QEMU IPC gate remain in progress.
+is not a twelfth launcher application. The signed service/probe gate passes on
+1/2/4 CPUs, proving publication, query ranking, reaping, and registry cleanup.
+Evidence is retained under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
+Production startup and supervisor restart wiring remain open.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 

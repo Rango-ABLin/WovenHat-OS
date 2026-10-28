@@ -2399,16 +2399,18 @@ round-trips through bounded storage; upsert and removal never expose a partial
 index. Source adapters, ranking evaluation, and a user-facing service remain
 separate work.
 
-### WovenSearch IPC protocol foundation (2026-10-28)
+### WovenSearch service boundary (2026-10-28)
 
 `libwoven::search_ipc` defines the versioned `WSR1` control frame for the
-future `woven.search` Ring-3 service. A request is either `Describe` or a
+`woven.search` Ring-3 service. A request is either `Describe` or a
 bounded UTF-8 `Query`; a fixed-size response contains only request-correlated
 identifier, kind, and score hits. The frame deliberately does not transport
 paths, contents, index updates, or directory enumeration. Consequently,
 discovering the service cannot grant an application filesystem visibility or
 write authority. The service process, source adapters, supervision, and QEMU
-acceptance are still required before treating this as an available OS service.
+The focused signed service/probe acceptance passes on 1/2/4 CPUs, proving
+publication, query ranking, reaping, and registry cleanup. Production boot
+startup and supervisor restart wiring remain separate work.
 
 `apps/woven-search` is the corresponding freestanding Ring-3 broker. It owns
 one locally seeded, public application catalog and publishes `woven.search`

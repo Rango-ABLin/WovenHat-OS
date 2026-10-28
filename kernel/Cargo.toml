@@ -327,6 +327,9 @@ stage23-2-test = ["qemu-test"]
 stage23-3-test = ["qemu-test"]
 stage23-4-test = ["qemu-test"]
 stage23-5-test = ["qemu-test"]
+# Ring-3 WovenSearch publication/query/teardown acceptance. Kept separate
+# from the Stage 23.5 in-kernel algorithm gate, which exits QEMU on success.
+stage23-5-search-service-test = ["qemu-test"]
 stage23-6-test = ["qemu-test"]
 stage23-7-test = ["qemu-test"]
 stage24-1-test = ["qemu-test"]
