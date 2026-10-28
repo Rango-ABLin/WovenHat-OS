@@ -1,5 +1,12 @@
 # Stage status
 
+## Staged lazy-binding materialization - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Lazy-binding trampoline generation is now isolated in a reusable transaction
+helper. Existing slot bounds and W^X sequencing are preserved. Kernel target
+build and warning-denying Clippy pass; live-module PLT publication remains
+pending.
+
 ## Staged symbol-scope validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel linker now builds and validates the complete dependency symbol scope

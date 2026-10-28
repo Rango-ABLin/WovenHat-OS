@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - staged lazy-binding trampoline materialization (2026-10-28)
+
+Extracted lazy PLT trampoline emission into a bounded helper over the staged
+address space. Slot bounds remain enforced by relocation registration, and
+trampoline bytes are written before final W^X protection. The helper is ready
+for reuse by a live-module transaction.
+
 ## Codex - staged symbol-scope validation (2026-10-28)
 
 Extracted dependency scope construction and validation into `build_scope`.

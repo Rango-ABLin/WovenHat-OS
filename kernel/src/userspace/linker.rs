@@ -380,6 +380,28 @@ fn protect_linked_images(
     Some(())
 }
 
+fn materialize_lazy_trampolines(
+    space: &AddressSpace,
+    page_table: paging::AddressSpace,
+    base: u64,
+) -> Option<()> {
+    for (index, binding) in space.lazy_bindings[..space.lazy_binding_count]
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        let trampoline = base.checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
+        let mut code = [0u8; 24];
+        code[0..2].copy_from_slice(&[0x49, 0xbb]);
+        code[2..10].copy_from_slice(&binding.slot.to_le_bytes());
+        code[10..15].copy_from_slice(&[0xb8, 137, 0, 0, 0]);
+        code[15..17].copy_from_slice(&[0xcd, 0x80]);
+        code[17..19].copy_from_slice(&[0xff, 0xe0]);
+        paging::write_user_bytes(page_table, trampoline, &code).ok()?;
+    }
+    Some(())
+}
+
 fn map_initial_tls(
     pending: &mut Pending,
     plan: TlsPlan,
@@ -571,21 +593,7 @@ pub(super) fn load_with_geometry(
         &mut pending.space,
         tls_reservation.as_ref(),
     )?;
-    for (index, binding) in pending.space.lazy_bindings[..pending.space.lazy_binding_count]
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        let trampoline = lazy_trampoline_base
-            .checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
-        let mut code = [0u8; 24];
-        code[0..2].copy_from_slice(&[0x49, 0xbb]); // mov r11, slot
-        code[2..10].copy_from_slice(&binding.slot.to_le_bytes());
-        code[10..15].copy_from_slice(&[0xb8, 137, 0, 0, 0]); // SYS_LAZY_BIND
-        code[15..17].copy_from_slice(&[0xcd, 0x80]);
-        code[17..19].copy_from_slice(&[0xff, 0xe0]); // jmp rax
-        paging::write_user_bytes(page_table, trampoline, &code).ok()?;
-    }
+    materialize_lazy_trampolines(&pending.space, page_table, lazy_trampoline_base)?;
     paging::protect_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, false, true)
         .ok()?;
     protect_linked_images(&images, page_table)?;
