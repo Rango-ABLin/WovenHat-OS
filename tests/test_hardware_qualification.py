@@ -66,6 +66,31 @@ class HardwareQualificationTests(unittest.TestCase):
             MODULE.validate(report([item])),
         )
 
+    def test_cross_platform_absolute_and_unsafe_evidence_paths_are_rejected(self):
+        # These must fail on Linux runners too, not just on Windows.
+        for evidence in (
+            r"C:\outside\report.json",
+            r"C:outside\report.json",
+            r"\\server\share\report.json",
+            r"audit-artifacts\..\outside.json",
+            "/tmp/outside.json",
+            "../outside.json",
+            "audit-artifacts/../../outside.json",
+            "audit-artifacts/report.json\x00suffix",
+        ):
+            with self.subTest(evidence=evidence):
+                item = observation("usb")
+                item["evidence"] = evidence
+                self.assertIn(
+                    "observations[0].evidence must be a repository-relative path",
+                    MODULE.validate(report([item])),
+                )
+
+    def test_repository_relative_evidence_path_is_accepted(self):
+        item = observation("usb")
+        item["evidence"] = "audit-artifacts/native/usb-report.json"
+        self.assertEqual(MODULE.validate(report([item])), [])
+
     def test_duplicate_observation_ids_are_rejected(self):
         first = observation("audio")
         second = observation("bluetooth")
