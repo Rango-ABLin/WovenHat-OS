@@ -18,6 +18,7 @@
 #define WH_SYS_LSEEK 27
 #define WH_SYS_FILE_WRITE 10
 #define WH_SYS_OPEN_ACCESS 254
+#define WH_SYS_DUP 22
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38

@@ -29,6 +29,7 @@ SOURCES = (
     "vendor/musl/src/unistd/write.c",
     "vendor/musl/src/unistd/close.c",
     "vendor/musl/src/unistd/lseek.c",
+    "vendor/musl/src/unistd/dup.c",
 )
 ASSEMBLY_SOURCES = ("ports/musl/src/crt_start.S",)
 FIXTURE = "tools/runtime-fixtures/musl-bootstrap.c"

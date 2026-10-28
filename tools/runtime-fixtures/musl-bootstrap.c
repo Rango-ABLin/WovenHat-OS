@@ -6,6 +6,7 @@ int main(int argc, char **argv)
 	char byte = 'x';
 	char motd[24];
 	int fd;
+	int duplicate;
 
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;
@@ -33,5 +34,10 @@ int main(int argc, char **argv)
 	if (fd < 3 || write(fd, "Z", 1) != 1 || lseek(fd, 0, SEEK_SET) != 0
 		|| read(fd, &byte, 1) != 1 || byte != 'Z' || close(fd) != 0)
 		return 101;
+	fd = open("/etc/motd", O_RDONLY);
+	duplicate = dup(fd);
+	if (fd < 3 || duplicate < 3 || duplicate == fd || close(fd) != 0
+		|| read(duplicate, &byte, 1) != 1 || byte != 'W' || close(duplicate) != 0)
+		return 102;
 	return 42;
 }

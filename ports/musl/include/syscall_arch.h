@@ -12,6 +12,7 @@
 #define WH_LINUX_WRITE      1
 #define WH_LINUX_CLOSE      3
 #define WH_LINUX_LSEEK      8
+#define WH_LINUX_DUP        32
 #define WH_LINUX_EXIT       60
 #define WH_LINUX_EXIT_GROUP 231
 
@@ -25,6 +26,8 @@ static __inline long __syscall1(long number, long arg0)
 	switch (number) {
 	case WH_LINUX_CLOSE:
 		return wh_syscall1(WH_SYS_CLOSE, arg0);
+	case WH_LINUX_DUP:
+		return wh_syscall1(WH_SYS_DUP, arg0);
 	case WH_LINUX_EXIT:
 	case WH_LINUX_EXIT_GROUP:
 		return wh_syscall1(WH_SYS_EXIT, arg0);

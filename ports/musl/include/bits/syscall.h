@@ -8,5 +8,6 @@
 #define SYS_exit       60
 #define SYS_exit_group 231
 #define SYS_lseek      8
+#define SYS_dup        32
 
 #endif
