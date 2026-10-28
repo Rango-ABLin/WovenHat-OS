@@ -281,6 +281,21 @@ impl Drop for Pending {
     }
 }
 
+impl Pending {
+    /// Apply all admitted relocations while the address space is unpublished.
+    /// Any unsupported relocation or invalid target returns `None`; `Pending`
+    /// then destroys every staged mapping through its rollback guard. This is
+    /// the transaction boundary reused by future post-start module loading.
+    fn relocate_staged(
+        &mut self,
+        images: &[LinkImage<'_>],
+        scope: &SymbolScope<'_>,
+        tls_plan: Option<&TlsPlan>,
+    ) -> Option<()> {
+        relocate_linked_images(images, scope, self.space.paging(), &mut self.space, tls_plan)
+    }
+}
+
 /// Map and populate verified image segments into an unpublished address space.
 /// Keeping this operation on `Pending` preserves rollback if any segment fails.
 fn map_linked_segments(
@@ -589,13 +604,7 @@ pub(super) fn load_with_geometry(
     pending.space.lifecycle_trampoline = lifecycle_trampoline;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
-    relocate_linked_images(
-        &images,
-        &scope,
-        page_table,
-        &mut pending.space,
-        tls_reservation.as_ref(),
-    )?;
+    pending.relocate_staged(&images, &scope, tls_reservation.as_ref())?;
     materialize_lazy_trampolines(&pending.space, page_table, lazy_trampoline_base)?;
     paging::protect_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, false, true)
         .ok()?;
