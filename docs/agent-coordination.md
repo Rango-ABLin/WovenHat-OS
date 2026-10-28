@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.14 GDB trap-frame snapshot (2026-10-28)
+
+Added `kernel/src/gdb_frame.rs`, an owned conversion from captured
+architectural values to the fixed 24-slot GDB register context. It retains no
+interrupt-frame or stack reference and carries error code/vector values by
+copy. Target and host warning-denying Clippy, Python syntax, and QEMU 1/2/4-
+CPU gates pass with exit 33. Evidence is under
+`target/stage32-14-gdb-frame-{1,2,4}cpu/`. Stage32.14 is accepted; live IDT
+capture and task binding remain prerequisites for the next slice.
+
 ## Codex - Stage 32.13 GDB generation-bound owner (2026-10-28)
 
 Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority

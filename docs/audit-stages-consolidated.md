@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.14 GDB trap-frame snapshot - 2026-10-28
+
+The owned trap-frame conversion passed 1/2/4-CPU QEMU self-tests. Fixed-order
+general-register, control-register, segment, error-code, and vector copying
+is covered without retained frame references. Target and host warning-denying
+Clippy and Python syntax validation passed. Live IDT capture and task
+ownership remain outside this acceptance.
+
 ## Stage 32.13 GDB generation-bound owner - 2026-10-28
 
 The single-owner debugger authority passed 1/2/4-CPU QEMU self-tests.

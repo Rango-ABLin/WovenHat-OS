@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 32.14 GDB trap-frame snapshot QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_frame.rs`, which copies an owned architectural snapshot
+into the fixed 24-slot Stage 32.10 register context. General registers, RIP,
+RFLAGS, segment selectors, error code, and vector are copied by value; no
+interrupt-frame or stack reference escapes. The module remains a pure
+conversion boundary and does not install an exception handler or resume a
+task.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-14-gdb-frame-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live IDT capture and task binding
+remain open.
+
 ## Stage 32.13 GDB generation-bound owner QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority

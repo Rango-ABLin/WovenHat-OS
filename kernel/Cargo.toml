@@ -173,6 +173,9 @@ stage32-12-test = ["qemu-test", "gdb-trap"]
 # Enable generation-bound single-owner authority for the debugger.
 gdb-owner = []
 stage32-13-test = ["qemu-test", "gdb-owner"]
+# Enable the owned trap-frame to GDB-context snapshot boundary.
+gdb-frame = ["gdb-debugger"]
+stage32-14-test = ["qemu-test", "gdb-frame"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

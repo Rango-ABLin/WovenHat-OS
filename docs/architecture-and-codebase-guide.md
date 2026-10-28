@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev trap-frame snapshot boundary (2026-10-28)
+
+`kernel/src/gdb_frame.rs` copies a caller-owned architectural snapshot into
+the fixed GDB register order. It stores all values by value, including the
+error code and vector, so a future exception handler can hand off a stable
+context without retaining an interrupt-frame or stack reference. IDT capture,
+task binding, and resume authority remain outside this module.
+
 ## WovenDev generation-bound owner (2026-10-28)
 
 `kernel/src/gdb_owner.rs` provides a local single-attachment authority. Each
