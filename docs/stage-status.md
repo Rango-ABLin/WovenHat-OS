@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 7 bounded process-environment scope - 2026-10-28 - CLOSED BOUNDED SCOPE
+
+Added the independently guarded `stage7-test` acceptance gate for the bounded
+per-process environment ABI. The gate validates deterministic defaults,
+copy-on-inheritance behavior, existing-key updates, bounded capacity, and
+invalid ASCII/key/value rejection. Target Clippy and QEMU passed at 1/2/4
+CPUs. Evidence: `target/stage7-environment-{1,2,4}cpu-debug/`.
+
+This closes the bounded Stage 7 environment scope. Broader userspace ABI,
+dynamic libc/runtime behavior, unrestricted environment sizing, and native
+hardware qualification remain outside this closure.
+
 ## Stage 6 bounded SMP/hotplug scope - 2026-10-28 - CLOSED BOUNDED SCOPE
 
 The Stage 6 hotplug gate passed at 2 and 4 CPUs after warning-denying target
