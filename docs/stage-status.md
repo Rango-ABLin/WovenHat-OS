@@ -236,6 +236,13 @@ fixture validates the envp pointer and random bytes. The rebuilt ELF passes
 the production loader gate (exit 33) and retains the prior 1/2/4-CPU evidence.
 This remains a static startup profile rather than full dynamic musl.
 
+The synchronization follow-up now exposes `clock_gettime(CLOCK_MONOTONIC)` via
+the kernel's tick counter and makes `pthread_cond_timedwait` use an absolute
+tick deadline. The fixture validates sane monotonic timespec output and the
+timeout path; the static ELF builds and passes the loader gate. A true
+sleep-queue condition wait, robust owner-death recovery, dynamic TLS modules,
+and the remaining POSIX syscall families remain open.
+
 The startup/thread follow-up now publishes a bounded initial aux-vector
 (`AT_PAGESZ`, `AT_UID`, `AT_GID`) after the inherited argv/envp layout. The
 fixture validates those entries, exercises detached-thread reclamation, and

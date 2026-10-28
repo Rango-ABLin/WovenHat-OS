@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - kernel-tick clock and timed-wait increment (2026-10-28)
+
+Added a musl `clock_gettime` adapter over the kernel's monotonic 100 Hz tick
+source and changed `pthread_cond_timedwait` to compare absolute deadlines
+against that source rather than a fixed spin budget. The fixture validates the
+clock result and the timed-wait path; LLVM build/link and the production loader
+gate pass. This is still bounded: it does not yet provide sleep-queue-backed
+condition wait blocking or robust owner-death recovery.
+
 ## Codex - libc start-main and entropy auxv increment (2026-10-28)
 
 The static CRT now exports a musl-compatible `__libc_start_main` entry,
