@@ -38,21 +38,37 @@ mod userspace_allocator {
             }
             let mut next = NEXT.load(Ordering::Acquire);
             loop {
+                if next == u64::MAX {
+                    // Another thread owns arena initialization; END must be
+                    // published before NEXT becomes an allocatable address.
+                    core::hint::spin_loop();
+                    next = NEXT.load(Ordering::Acquire);
+                    continue;
+                }
                 if next == 0 {
-                    // SAFETY: mmap returns a private writable mapping for this
-                    // process and takes no userspace pointers.
-                    let base = unsafe { crate::syscall::invoke(8, ARENA_BYTES, 1, 0) };
-                    if base == crate::syscall::ERROR {
-                        return core::ptr::null_mut();
-                    }
+                    // Reserve initialization before mmap: publishing NEXT
+                    // before END could make another thread reject valid
+                    // allocations against an uninitialized upper bound.
                     if NEXT
-                        .compare_exchange(0, base, Ordering::AcqRel, Ordering::Acquire)
+                        .compare_exchange(0, u64::MAX, Ordering::AcqRel, Ordering::Acquire)
                         .is_err()
                     {
                         next = NEXT.load(Ordering::Acquire);
                         continue;
                     }
-                    END.store(base.saturating_add(ARENA_BYTES), Ordering::Release);
+                    // SAFETY: mmap returns a private writable mapping for this
+                    // process and takes no userspace pointers.
+                    let base = unsafe { crate::syscall::invoke(8, ARENA_BYTES, 1, 0) };
+                    if base == crate::syscall::ERROR || base == 0 {
+                        NEXT.store(0, Ordering::Release);
+                        return core::ptr::null_mut();
+                    }
+                    let Some(bound) = base.checked_add(ARENA_BYTES) else {
+                        NEXT.store(0, Ordering::Release);
+                        return core::ptr::null_mut();
+                    };
+                    END.store(bound, Ordering::Release);
+                    NEXT.store(base, Ordering::Release);
                     next = base;
                 }
                 let aligned = match next.checked_add(layout.align() as u64 - 1) {
