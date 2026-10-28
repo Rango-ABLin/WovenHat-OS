@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--firmware", type=Path, required=True)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=2)
     parser.add_argument("--timeout", type=float, default=240)
+    parser.add_argument("--memory", default="256M", help="guest RAM size")
     parser.add_argument("--release", action="store_true")
     args = parser.parse_args()
 
@@ -48,7 +49,7 @@ def main() -> int:
         str(qemu),
         "-accel", "tcg,tb-size=128",
         "-machine", "q35",
-        "-m", "256M",
+        "-m", args.memory,
         "-smp", str(args.cpus),
         "-display", "none",
         "-serial", f"file:{serial}",

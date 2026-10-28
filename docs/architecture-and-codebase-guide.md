@@ -4622,3 +4622,15 @@ and `memory::deallocate_frame` take the allocator snapshot while holding the
 allocator lock, then publish it after releasing that lock; pressure observers
 therefore never run under the allocator lock. This slice is notification and
 accounting only: reclaimers still own eviction/writeback and task teardown.
+
+The bounded follow-up closes those software policy points. `file_frames::reclaim_unused`
+selects the oldest unpinned cache entry on each pass, with the slot index as a
+stable tie-breaker. `CachedDevice` retries each dirty-sector writeback at most
+three times; a successful retry clears dirty state, while final failure leaves
+the original entry resident and dirty for a later flush. `task::select_oom_victim`
+builds a fixed-size candidate set without heap allocation, excludes the current
+task, and delegates deterministic ranking to `memory_pressure::choose_victim`.
+Selection is recorded, while existing scheduler-owned signal/teardown remains
+the only termination path. The 256 MiB QEMU profile qualifies physical-frame
+pressure under emulation; native hardware below the 4 GiB production floor is
+not implied.

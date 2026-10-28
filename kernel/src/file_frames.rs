@@ -27,14 +27,19 @@ static CACHE: Mutex<[Option<Entry>; CAPACITY]> = Mutex::with_rank([None; CAPACIT
 pub fn reclaim_unused() -> usize {
     let mut cache = CACHE.lock();
     let mut released = 0;
-    for slot in cache.iter_mut() {
-        if let Some(entry) = *slot {
-            if paging::file_frame_references(entry.frame) == 1
-                && paging::release_file_frame(entry.frame)
-            {
-                *slot = None;
-                released += 1;
-            }
+    while let Some(index) = cache
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let entry = (*entry)?;
+            (paging::file_frame_references(entry.frame) == 1).then_some((index, entry.age))
+        })
+        .max_by_key(|(index, age)| (*age, core::cmp::Reverse(*index)))
+        .map(|(index, _)| index)
+    {
+        let entry = cache[index].take().expect("selected cache entry exists");
+        if paging::release_file_frame(entry.frame) {
+            released += 1;
         }
     }
     released

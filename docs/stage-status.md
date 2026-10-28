@@ -1,22 +1,28 @@
 # Stage status
 
-## S05 deterministic memory-pressure boundary - 2026-10-28 - ACCEPTED BOUNDED
+## S05 deterministic memory-pressure and low-memory boundary - 2026-10-28 - ACCEPTED BOUNDED
 
 Added `kernel/src/memory_pressure.rs` as the physical-frame allocation
 boundary's explicit policy signal. Remaining frames are classified
 deterministically as Normal (>20%), Moderate (6-20%), Critical (1-5%), or
 Exhausted (0); level transitions and allocation failures are counted with
 atomics. Every successful frame allocation/deallocation publishes the current
-snapshot, and a failed allocation records an explicit OOM decision. The policy
-does not reclaim or kill tasks, so existing paging/COW/swap ownership and
-teardown rules remain unchanged.
+snapshot, and a failed allocation records an explicit OOM decision.
+
+Added deterministic reclaim ordering for unpinned file frames (oldest first),
+a three-attempt writeback retry policy that retains dirty data after final
+failure, and an allocation-free OOM victim selector. Victim selection excludes
+the current task and ranks lower scheduler classes first, then larger mapped
+footprints, then stable task IDs; the selected process ID is recorded with the
+pressure snapshot for a safe existing termination path to consume.
 
 The independently guarded `s05-memory-pressure-test` passed target and host
 warning-denying Clippy, 193 `libwoven` tests, and executable QEMU at 1/2/4
 CPUs (exit 33). Evidence: `target/s05-memory-pressure-{1,2,4}cpu-debug/`.
-This closes the deterministic software pressure-notification/OOM accounting
-slice; reclaim ordering, writeback retry policy, task selection, and physical
-low-memory qualification remain separate prerequisites.
+The dedicated 256 MiB low-memory matrix also passed at 1/2/4 CPUs, with
+evidence under `target/s05-low-memory-{1,2,4}cpu-debug/`. This closes the
+deterministic software/QEMU S05 slice. Native hardware qualification below the
+supported 4 GiB production floor remains unclaimed.
 
 ## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
 

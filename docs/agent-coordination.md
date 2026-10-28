@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S05 reclaim, writeback, OOM selection, and low-memory qualification (2026-10-28)
+
+Completed the remaining bounded S05 implementation: unpinned file-frame
+reclaim is oldest-first, dirty block-cache writeback makes three deterministic
+attempts and preserves dirty state after final failure, and OOM selection
+excludes the current task then ranks class, mapped footprint, and stable task
+ID. Added `scripts/test-s05-low-memory.py`; the S05 feature and 256 MiB
+low-memory QEMU matrix pass at 1/2/4 CPUs. Native hardware below the 4 GiB
+production floor is not claimed. Do not overlap these allocator/cache/task/S05
+docs edits without coordinating here.
+
 ## Codex - S05 deterministic memory-pressure boundary (2026-10-28)
 
 Added the atomic frame-pressure policy and explicit allocation-failure
