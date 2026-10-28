@@ -62,6 +62,8 @@ job-control stop/continue behavior remain open. Foreground assignment now
 requires the caller's current process group or TaskControl capability, and
 console stdin rejects reads from background process groups; the shell's
 foreground assignment is normalized to the target process group.
+The input path also consumes the configured `VINTR` byte and sends SIGINT to
+the foreground group; it is not returned as ordinary stdin data.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

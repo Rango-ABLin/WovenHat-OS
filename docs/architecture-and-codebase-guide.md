@@ -43,6 +43,8 @@ are copied at the syscall boundary; invalid flags, descriptors, pointers, and
 unknown requests fail closed. Foreground assignment is limited to the caller's
 own group or TaskControl authority, and standard-input reads reject background
 groups. No PTY namespace or multiplexed line discipline is implied.
+The bounded input path consumes the configured `VINTR` byte and signals the
+foreground group with SIGINT; it does not yet implement a PTY line buffer.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

@@ -39,6 +39,8 @@ and validation are now part of the bounded terminal ABI; PTY multiplexing and
 full job-control semantics remain open. Foreground assignment is authorized
 against the caller's group or TaskControl capability, and background console
 reads are rejected; the 1/2/4-CPU gate remains green.
+The input path also consumes the configured `VINTR` byte and targets SIGINT at
+the foreground group.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 

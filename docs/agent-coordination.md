@@ -39,6 +39,8 @@ validation. The Ring-3 S03 gate passes on 1/2/4 CPUs with the termios round
 trip included. Foreground assignment now checks the caller's process group or
 TaskControl capability, and background console reads fail closed. PTY
 multiplexing and complete job-control semantics remain.
+The bounded input path now consumes the configured `VINTR` byte and sends
+SIGINT to the foreground group; PTY line buffering remains open.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
