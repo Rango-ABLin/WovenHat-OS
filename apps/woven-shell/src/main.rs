@@ -213,7 +213,7 @@ const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
 const MAX_TITLE: usize = 24;
 /// Shadow bands, outermost first, as (offset, opacity) of black over what
 /// lies beneath. The focused window's shadow is deeper: its elevation.
-const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 24), (4, 48)];
+const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 72), (4, 104)];
 const UNFOCUSED_SHADOW: [(i32, u8); 2] = [(4, 20), (2, 40)];
 /// The furthest any shadow band reaches beyond its window.
 const SHADOW_REACH: i32 = 8;
@@ -1083,12 +1083,12 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
     let mut count = 0;
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut index = 0;
-    while count < MAX_APPS {
+    while count < MAX_APPS && index < 256 {
         let Ok((length, is_directory)) = libwoven::read_dir(CATALOG, index, &mut name) else {
             break;
         };
         index += 1;
-        if is_directory || !name[..length].ends_with(b".app") {
+        if length > name.len() || is_directory || !name[..length].ends_with(b".app") {
             continue;
         }
         let mut path = [0u8; 128];
