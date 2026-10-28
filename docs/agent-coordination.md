@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded DTV publication and address lookup (2026-10-28)
+
+Extended `libwoven::dynamic_tls` with a fixed-capacity per-thread DTV. Modules
+are published lazily, initialized into caller-owned storage, and looked up by
+module-relative offset through generation-checked handles. Reused module slots
+cannot expose stale storage, and mutation persists across lookups. This is a
+safe runtime contract for a future kernel-backed `__tls_get_addr` adapter; it
+does not yet map TLS pages or integrate shared-library loading.
+
 ## Codex - dynamic TLS template registry foundation (2026-10-28)
 
 Added `libwoven::dynamic_tls`, a fixed-capacity generation-checked registry

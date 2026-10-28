@@ -1,5 +1,14 @@
 # Stage status
 
+## Bounded DTV publication and address lookup - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Extended `libwoven::dynamic_tls` with a fixed-capacity per-thread DTV. Dynamic
+TLS modules are lazily published and initialized, `get_addr` validates the
+module generation and offset, and slot reuse cannot expose stale storage.
+Focused dynamic-TLS tests and warning-denying all-target Clippy pass. Actual
+kernel runtime mappings, exported `__tls_get_addr`, and shared-library TLS
+loader integration remain open acceptance work.
+
 ## Dynamic TLS template foundation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Added a fixed-capacity `libwoven::dynamic_tls` registry for validated TLS
