@@ -7266,3 +7266,7 @@ write and create bits), musl flag mapping, and normal-fd FileWrite routing.
 Open/create/write/SEEK_SET/readback/close passed QEMU at 1/2/4 CPUs; legacy
 Open is unchanged and unsupported flags remain unclaimed.
 
+POSIX port increment 14: genuine musl dup() now verifies a shared VFS open
+file description. After original fd reads `W`, duplicate fd reads the next
+byte `e` even after original close; QEMU passed at 1/2/4 CPUs.
+

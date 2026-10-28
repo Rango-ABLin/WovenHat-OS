@@ -35,9 +35,11 @@ int main(int argc, char **argv)
 		|| read(fd, &byte, 1) != 1 || byte != 'Z' || close(fd) != 0)
 		return 101;
 	fd = open("/etc/motd", O_RDONLY);
+	if (fd < 3 || read(fd, &byte, 1) != 1 || byte != 'W')
+		return 102;
 	duplicate = dup(fd);
 	if (fd < 3 || duplicate < 3 || duplicate == fd || close(fd) != 0
-		|| read(duplicate, &byte, 1) != 1 || byte != 'W' || close(duplicate) != 0)
-		return 102;
+		|| read(duplicate, &byte, 1) != 1 || byte != 'e' || close(duplicate) != 0)
+		return 103;
 	return 42;
 }
