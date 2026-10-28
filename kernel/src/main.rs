@@ -118,6 +118,7 @@ mod partition;
 pub mod debug_dump;
 pub mod debug_serial;
 pub mod gdb_stub;
+pub mod gdb_debugger;
 pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
@@ -5216,6 +5217,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.9] debug serial: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-10-test")]
+    {
+        if !gdb_debugger::self_test() {
+            serial::write_line(format_args!("[S32.10] GDB command dispatch: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.10] GDB command dispatch: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

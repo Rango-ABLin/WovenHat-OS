@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev GDB context and command boundary (2026-10-28)
+
+`kernel/src/gdb_debugger.rs` keeps GDB command parsing separate from UART and
+trap state. A stopped-context value is copied into a fixed 24-register
+x86-64 representation, while `m` reads only a caller-owned bounded window;
+arbitrary guest addresses are never dereferenced by this layer. Continue,
+step, and kill are classified as actions for a future session owner and do not
+execute from the pure dispatch boundary.
+
 ## WovenDev second-UART boundary (2026-10-27)
 
 `kernel/src/debug_serial.rs` owns only COM2 and is independent of the COM1

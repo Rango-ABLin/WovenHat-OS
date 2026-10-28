@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.10 GDB register context and command dispatch - 2026-10-28
+
+The pure GDB command boundary passed 1/2/4-CPU QEMU self-tests. Register
+encoding, bounded memory reads, malformed/out-of-range refusal, feature
+negotiation, and continue/step/kill action classification are covered. Target
+and host warning-denying Clippy plus host tests passed. Live trap/session
+integration remains outside this acceptance.
+
 ## Stage 32.9 second-UART debug serial - 2026-10-27
 
 The bounded COM2 16550 transport passed its loopback and second-QEMU-serial

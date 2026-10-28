@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 32.10 GDB register context and command dispatch QEMU gate - 2026-10-28 — ACCEPTED
+
+Added `kernel/src/gdb_debugger.rs`, a pure bounded command boundary over the
+Stage 32.8 packet layer. It encodes a fixed 24-register x86-64 context in
+target-endian hexadecimal and dispatches `?`, `g`, bounded `m`, `qSupported`,
+`c`, `s`, and `k` commands. Memory reads are limited to a caller-owned window
+and 256 bytes; invalid or out-of-range requests return `E01` without guest
+pointer access.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-10-gdb-dispatch-{1,2,4}cpu/`. Target and host warning-denying
+Clippy, host tests, and Python syntax validation pass. This is a pure command
+and context boundary; live trap entry, stopped-task ownership, register
+mutation, memory mapping, continue/step execution, and debugger lifecycle
+remain open.
+
 ## Stage 32.9 second-UART debug serial QEMU gate - 2026-10-27 — ACCEPTED
 
 Added the bounded COM2 transport for the WovenDev debugger path in

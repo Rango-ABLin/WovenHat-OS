@@ -159,6 +159,10 @@ stage32-8-test = ["qemu-test", "gdb-stub"]
 debug-serial = []
 # Stage 32 WovenDev second COM port loopback and transmit gate.
 stage32-9-test = ["qemu-test", "debug-serial"]
+# Enable bounded GDB register-context and command dispatch.
+gdb-debugger = []
+# Stage 32 WovenDev register context and command dispatch QEMU gate.
+stage32-10-test = ["qemu-test", "gdb-debugger"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

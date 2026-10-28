@@ -6978,6 +6978,15 @@ second-QEMU-serial marker harness. Stage 32.9 passes at 1/2/4 CPUs with exit
 live GDB command handling, trap entry, register/memory access, or debugger
 session lifecycle. No collision with the parallel desktop reliability work.
 
+## Codex - Stage 32.10 GDB context and command dispatch (2026-10-28)
+
+Added the pure bounded `gdb_debugger` boundary: fixed 24-register x86-64
+context encoding, `?`/`g`/`m`/`qSupported` replies, bounded caller-window
+memory reads, and `c`/`s`/`k` action classification. Stage 32.10 passes at
+1/2/4 CPUs with target/host warning-denying Clippy, host tests, and Python
+syntax validation green. Live trap entry, stopped-task ownership, execution
+control, and debugger lifecycle remain for later slices.
+
 ### Subsequent full-matrix diagnosis and repair
 
 Closure candidate: all seven failed desktop stages now pass focused 1-CPU checks with explicit flat contracts, current palette, exact icon masks, and stronger full-panel/notification checks. Stage20.18 now verifies every projected toast pixel plus visible text, resolving the old blank-toast note. Build, all Stage20 feature lints, lower-stage guard lints, and Rust host tests pass. Python host suite passes with Windows elevation required solely by real symbolic-link fixtures; assertions were not bypassed. Starting the complete graphics matrix on 1/2/4 CPUs, preserving all prior artifacts. No acceptance/closure claim yet.
