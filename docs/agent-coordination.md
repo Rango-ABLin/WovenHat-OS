@@ -21,11 +21,11 @@ integrated Stage 32 target/host lints and QEMU 1/2/4-CPU gate pass again.
 Scheduler-owned saved-context mutation for continue/step and physical GDB
 qualification remain open.
 
-The saved-context review confirms that user return state is embedded in
-scheduler-owned saved stacks/context structures rather than represented by a
-standalone mutable register frame. Do not add register mutation in the IRQ
-handler or by dereferencing an unowned stack; the remaining adapter must be
-implemented at a scheduler safe point with explicit owner/generation checks.
+The saved-context adapter is now implemented in `gdb_scheduler.rs`. It accepts
+only a scheduler-owned `UserForkFrame`, validates current kernel-stack
+ownership and user return state, maps registers, and controls TF at a safe
+point. It is not callable from the IRQ handler; physical qualification remains
+open.
 
 ## Codex - Stage 32.16 GDB transport pump (2026-10-28)
 

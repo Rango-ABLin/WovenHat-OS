@@ -184,9 +184,11 @@ gdb-transport = ["gdb-stub"]
 stage32-16-test = ["qemu-test", "gdb-transport"]
 # Integrated WovenDev debugger path; the acceptance feature enables its boot self-test.
 wovendev = ["gdb-binding", "gdb-transport", "debug-serial"]
-stage32-integrated-test = ["qemu-test", "wovendev-live"]
+stage32-integrated-test = ["qemu-test", "wovendev-live", "gdb-scheduler"]
 # Enable the interrupt-safe, nonblocking trap handoff.
 wovendev-live = ["wovendev"]
+# Enable scheduler safe-point debugger resume adapters.
+gdb-scheduler = ["wovendev"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

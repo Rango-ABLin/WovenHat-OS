@@ -8,10 +8,11 @@ session dispatch, bounded register writes, and optional bounded COM2 polling.
 The coordinator keeps the packet/frame/context lifetimes explicit. The
 `gdb_live` handoff publishes one packed vector/error event atomically from the
 breakpoint ISR and consumes it outside the IRQ path. It does not take locks,
-sleep, switch tasks, or claim physical GDB qualification. Continue/step still
-require a scheduler-owned saved-context adapter; the current task model keeps
-user return state in saved scheduler stacks rather than exposing a mutable
-register frame to the debugger.
+sleep, switch tasks, or claim physical GDB qualification. `gdb_scheduler.rs`
+is the safe-point adapter for the owned `UserForkFrame`: it validates user
+RIP/RSP and selectors, maps the fixed GDB register order, and controls x86 TF
+for step/continue. Its raw-pointer entry is explicitly unsafe and checks
+kernel-stack ownership; it is not callable from the IRQ handler.
 
 ## WovenDev bounded transport pump (2026-10-28)
 

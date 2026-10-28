@@ -127,6 +127,7 @@ pub mod gdb_binding;
 pub mod gdb_transport;
 #[cfg(feature = "wovendev-live")]
 pub mod gdb_live;
+pub mod gdb_scheduler;
 #[cfg(feature = "wovendev")]
 pub mod wovendev;
 pub mod log_filter;
@@ -5300,6 +5301,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         if !gdb_live::self_test() {
             serial::write_line(format_args!("[S32] live trap handoff: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !gdb_scheduler::self_test() {
+            serial::write_line(format_args!("[S32] scheduler adapter: FAILED"));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32] WovenDev integrated path: PASSED"));

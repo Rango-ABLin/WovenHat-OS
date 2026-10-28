@@ -13,11 +13,11 @@ surfaces through `kernel/src/wovendev.rs`. The single integrated gate is
 The breakpoint IDT path now also has an interrupt-safe live handoff under the
 integrated feature: it records one packed vector/error event atomically and
 returns without locks, sleeping, or switching tasks. The event is consumed
-later through `gdb_live::take()`. The remaining continue/step mutation is
-intentionally not claimed: this kernel stores user execution state in
-scheduler-owned saved stacks/context structures and needs a dedicated safe
-point adapter before GDB may mutate it. Physical GDB qualification also
-remains separate.
+later through `gdb_live::take()`. Continue/step mutation is now covered by
+`gdb_scheduler.rs`, which validates user return state, maps the fixed GDB
+context into the owned `UserForkFrame`, controls x86 TF, and checks current
+kernel-stack ownership before its raw-pointer entry. Physical GDB
+qualification remains separate.
 
 ## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
 
