@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse non-root KIND_DIR inode
+
+Branch: `auto/wovenhat-development` (base `6d471968`). Working tree was clean.
+
+### Defect / gap
+
+`check()` did not validate that the only live `KIND_DIR` inode is the root.
+`mkdir` is not implemented — this is a flat, single-directory filesystem — so
+`stage_create` never allocates a `KIND_DIR` inode; all created inodes carry
+`KIND_FILE`.  A phantom `KIND_DIR` inode injected into any non-root slot evades
+every guard in the function:
+
+- The `KIND_FILE`-specific checks (links, size, data_checksum, block/size
+  consistency) are skipped.
+- The per-inode block-range and bitmap checks have nothing to verify when no
+  data blocks are set.
+- `refuse_shared_blocks` has nothing to check either.
+- The orphan-block scan is unaffected (no blocks).
+- The orphan-inode scan (`kind != KIND_FILE → continue`) skips the phantom.
+- `check()` therefore returns `Ok(())`, calling the image clean — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — at the start of the per-inode loop, after
+the `!node.is_used()` continue and before the first `KIND_FILE` check, added:
+
+```rust
+if node.kind == KIND_DIR && number != sb.root_inode {
+    return Err(Error::Corrupt);
+}
+```
+
+An eleven-line comment explains the invariant and why the orphan-inode scan
+cannot surface it without this guard.
+
+**`tests/wovenfs_crash.rs`** — added two helpers and one test:
+
+- `reseal_inode_mode(image, inode, mode)`: sets bytes 0–3 (the `mode` field)
+  in the on-disk inode and re-seals the checksum.  Setting a non-zero mode
+  on an otherwise-zeroed slot makes it "used" (`is_used()` returns `mode != 0`).
+- `reseal_inode_kind(image, inode, kind)`: sets bytes 104–105 (the `kind` field)
+  and re-seals.  Called after `reseal_inode_mode` so the re-seal inherits the
+  correct mode.
+- `check_refuses_non_root_dir_kind_inode`:
+  1. Formats a fresh volume (`formatted()`).
+  2. Forks the image.
+  3. Calls `reseal_inode_mode(&corrupt, 2, 0o040_755)` — inode 2 is the first
+     free slot after root (inode 1).
+  4. Calls `reseal_inode_kind(&corrupt, 2, KIND_DIR)` — now inode 2 is a live
+     `KIND_DIR` inode with no data blocks.
+  5. Asserts `check()` returns `Err(Corrupt)`.
+  6. Asserts `check()` does not modify the image.
+  7. Control: asserts the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **52 passed / 0 failed** (was 51; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The check covers only the root inode as the sole valid `KIND_DIR` entry.
+  When `mkdir` is eventually implemented, this guard must be relaxed or replaced
+  with a proper directory-tree traversal.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): standalone test for non-zero extra direct block in root inode
 
 Branch: `auto/wovenhat-development` (base `0a9c9b6b`). Working tree was clean.

@@ -1385,6 +1385,42 @@ fn set_bitmap_block(image: &CrashDisk, block: u64) {
     image.image.borrow_mut()[lba][within / 8] |= 1u8 << (within % 8);
 }
 
+/// Set an on-disk inode's `mode` field, re-sealing the inode checksum.
+///
+/// Setting a non-zero `mode` on an otherwise-zeroed inode makes it appear
+/// "used" (`Inode::is_used()` returns `self.mode != 0`).  Call this before
+/// `reseal_inode_kind` so the kind write inherits the correct mode.
+fn reseal_inode_mode(image: &CrashDisk, inode: u64, mode: u32) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[0..4].copy_from_slice(&mode.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+/// Set an on-disk inode's `kind` field, re-sealing the inode checksum.
+fn reseal_inode_kind(image: &CrashDisk, inode: u64, kind: u16) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[104..106].copy_from_slice(&kind.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
 #[test]
 fn unlink_refuses_a_file_whose_link_count_is_not_one() {
     let (base, _, _) = two_file_root();
@@ -2558,6 +2594,48 @@ fn check_refuses_root_directory_inode_with_nonzero_extra_direct_block() {
         "check() must refuse a root directory inode with non-zero direct[1]"
     );
     assert!(corrupt.sectors() == before, "check() must not modify the image");
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+/// `check()` must refuse a live non-root `KIND_DIR` inode.
+///
+/// `mkdir` is not implemented: this is a flat, single-directory filesystem.
+/// `stage_create` only allocates `KIND_FILE` inodes, so any live inode with
+/// `kind == KIND_DIR` and a number other than `root_inode` is corruption.
+/// Without the guard, the phantom inode evades every check: the `KIND_FILE`
+/// structural checks are skipped, the per-inode block scans find no blocks,
+/// and the orphan-inode scan at the end of `check()` skips non-`KIND_FILE`
+/// inodes — so `check()` would call the image clean.
+#[test]
+fn check_refuses_non_root_dir_kind_inode() {
+    use wfs::KIND_DIR;
+
+    let base = formatted();
+
+    // Inode 1 is the root (KIND_DIR).  Inode 2 is the first free slot.
+    // Inject a phantom KIND_DIR inode there.  It has no data blocks, so
+    // neither the bitmap scan nor the block-range check fires before our
+    // guard — the phantom simply exists as corrupt metadata.
+    let corrupt = base.fork(None);
+    // Make inode 2 "used" (mode != 0) before setting its kind.
+    reseal_inode_mode(&corrupt, 2, 0o040_755);
+    // Set kind = KIND_DIR; reseal_inode_kind re-seals after the mode is in place.
+    reseal_inode_kind(&corrupt, 2, KIND_DIR);
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a non-root KIND_DIR inode"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
 
     // Control: the unpatched volume passes check().
     let mut clean = Volume::mount(base).expect("mount clean");

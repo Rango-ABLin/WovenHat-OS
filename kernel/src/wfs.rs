@@ -1316,6 +1316,17 @@ impl<D: BlockDevice> Volume<D> {
             if !node.is_used() {
                 continue;
             }
+            // `mkdir` is not implemented: this is a flat, single-directory
+            // filesystem.  The only valid KIND_DIR inode is the root
+            // (sb.root_inode).  A live inode with kind == KIND_DIR and a number
+            // other than the root is corruption that `stage_create` cannot
+            // produce — it only allocates KIND_FILE inodes and there is no
+            // directory-creation path.  The orphan-inode scan at the end of
+            // this function skips non-KIND_FILE inodes, so without this guard a
+            // phantom directory inode passes check() silently.
+            if node.kind == KIND_DIR && number != sb.root_inode {
+                return Err(Error::Corrupt);
+            }
             if node.kind == KIND_FILE && node.links != 1 {
                 return Err(Error::Corrupt);
             }
