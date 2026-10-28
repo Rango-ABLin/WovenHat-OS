@@ -1,5 +1,22 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 12 product decision resolved; starting 12.2 xattrs (2026-10-28)
+
+The user resolved the open product decision noted in `docs/stage-status.md`
+("WovenFS is not the mounted system filesystem... is an open product
+decision"): **FAT32 stays the primary system filesystem at `/mnt` and boot.
+WovenFS (`kernel/src/wfs.rs`) remains a secondary native FS, extended rather
+than promoted.** Do not treat installer/boot/accounts migration to WovenFS as
+in scope; that path stays closed unless the user reopens it.
+
+Scoped follow-on work, in order, as separate bounded increments: 12.2
+extended attributes on the real `wfs.rs` (not `kernel/src/wovenfs.rs`, which
+is an unrelated RAM-only FAT32 side-table despite the near-identical name --
+flagging this naming collision since it is an easy mix-up), then 12.5's
+unintegrated `storage_manager.rs` (zero real callers today), then 12.4
+snapshots (`snapshots.rs` is currently an 8-slot stub with zero callers and
+no COW). Starting on the first (xattrs) now.
+
 ## Claude Code - Stage 32.18 GDB owner/binding + real memory read (2026-10-28)
 
 Wired the previously-isolated `gdb_owner`/`gdb_binding` (32.13/32.15) into the
