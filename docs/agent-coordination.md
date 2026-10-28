@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - userspace runtime completion design (2026-10-28)
+
+Added `docs/musl-runtime-completion-design.md`, defining the remaining
+dynamic-module namespace, DTV/general-dynamic TLS, constructor/destructor and
+unload quiescence, detached/cancellation cleanup, kernel-clock timed waits,
+allocator qualification, and ordered acceptance gates. This is a design
+baseline only; it does not claim those unresolved capabilities are complete.
+
 ## Codex - bounded musl startup auxv and detached-thread increment (2026-10-28)
 
 The loader's initial stack now carries a bounded aux-vector containing page

@@ -1,5 +1,14 @@
 # Stage status
 
+## Userspace runtime completion design - 2026-10-28 - DESIGN BASELINE
+
+`docs/musl-runtime-completion-design.md` now defines the implementation order
+and safety invariants for dynamic modules, `dlopen`/`dlsym`, DTV/general-
+dynamic TLS, constructor/destructor lifetime, cancellation cleanup,
+kernel-clock timed waits, allocator qualification, and final dynamic-PIE
+acceptance. This is a design baseline; the bounded static musl profile remains
+the only accepted runtime scope until those gates pass.
+
 ## Userspace synchronization/allocator stress increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
 
 The static runtime now exposes bounded process-private pthread mutexes and
