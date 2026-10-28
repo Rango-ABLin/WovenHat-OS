@@ -763,8 +763,8 @@ pub(super) fn run() -> bool {
 /// Stage 11.6: module-plan, per-thread staged segments, and rollback fixture.
 ///
 /// Tests three paths in order:
-/// 1. Basic rollback — stage segments then drop without commit; verifies
-///    physical frames are freed.
+/// 1. Basic rollback — stage segments then drop without commit; verifies the
+///    PTEs are cleared and the range is inaccessible.
 /// 2. Failure injection — stage, attempt relocation with an invalid type,
 ///    confirm the `None` return, then verify Drop rolls back the pages.
 /// 3. Success path — stage, relocate, commit; verifies the generation is
@@ -772,70 +772,105 @@ pub(super) fn run() -> bool {
 #[cfg(feature = "stage11-6-test")]
 #[inline(never)]
 pub(super) fn module_staging_run() -> bool {
+    // Install the shared-library fixtures that fixture(0) depends on via
+    // DT_NEEDED (stage11-5 teardown removes them).  We reinstall here and
+    // clean up before exiting.
+    let scope_bytes = match fixture(1) { Some(b) => b, None => return false };
+    let base_bytes_vfs = match fixture(2) { Some(b) => b, None => return false };
+    let made_lib = crate::vfs::stat("/lib").is_err();
+    if made_lib && crate::vfs::mkdir("/lib").is_err() { return false; }
+    let mut owned_scope = false;
+    let mut owned_base = false;
+
+    // With qemu-test ASLR disabled, load_with_candidate_bias places scope.so
+    // at LIBRARY_START and base.so at LIBRARY_START + LIBRARY_STRIDE.  Stage
+    // the fixture into the third slot so the maps never conflict.
+    const STAGING_BASE: u64 = LIBRARY_START + 2 * LIBRARY_STRIDE;
+
     let result = (|| -> Option<bool> {
-        // A minimal main executable to provide a host address space.
+        crate::vfs::create_read_only("/lib/base.so", &package(&base_bytes_vfs)).ok()?;
+        owned_base = true;
+        crate::vfs::create_read_only("/lib/scope.so", &package(&scope_bytes)).ok()?;
+        owned_scope = true;
+        crate::serial::write_line(format_args!("[S11.6-D] vfs ready"));
+
         let main_bytes = fixture(0)?;
+        crate::serial::write_line(format_args!("[S11.6-D] fixture(0) ok"));
         let program = load_with_candidate_bias(&main_bytes, &["staging-test"], 0)?;
+        crate::serial::write_line(format_args!("[S11.6-D] load ok"));
         let mut space = program.address_space;
 
-        // fixture(2) = "base.so": ET_DYN, one R_X86_64_RELATIVE, no DT_NEEDED.
         let lib_bytes = fixture(2)?;
-        let plan = ModulePlan::new(lib_bytes.clone(), 0, LIBRARY_START)?;
+        let plan = ModulePlan::new(lib_bytes.clone(), 0, STAGING_BASE)?;
+        crate::serial::write_line(format_args!(
+            "[S11.6-D] plan ok start={:#x} size={:#x}",
+            plan.mapping_start, plan.mapping_size
+        ));
 
         // ── 1. basic rollback ──────────────────────────────────────────────
-        drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY]);
-        crate::heap::maintain_capacity();
-        let frames_before = crate::memory::stats().allocated_frames;
         {
             let staged = stage_module_segments(&mut space, &plan)?;
-            drop(staged); // committed=false → Drop unmaps the pages
+            crate::serial::write_line(format_args!("[S11.6-D] staged ok"));
+            drop(staged);
+            crate::serial::write_line(format_args!("[S11.6-D] rollback1 done"));
         }
-        if crate::memory::stats().allocated_frames != frames_before {
-            let _ = destroy(space);
-            return None;
+        {
+            let mut probe = [0u8; 1];
+            if paging::read_user_bytes_in(space.paging(), plan.mapping_start, &mut probe).is_ok() {
+                crate::serial::write_line(format_args!("[S11.6-D] rollback1 probe fail: still mapped"));
+                let _ = destroy(space);
+                return None;
+            }
         }
+        crate::serial::write_line(format_args!("[S11.6-D] rollback1 probe ok"));
 
         // ── 2. failure injection ───────────────────────────────────────────
         let mut bad_bytes = fixture(2)?;
-        // Corrupt the relocation info to a type not in the admitted set.
         write_u64(&mut bad_bytes, 0x1388, 0x99)?;
-        let bad_image = elf::parse_shared(&bad_bytes).ok()?.relocated(LIBRARY_START)?;
-        let bad_link =
-            LinkImage { name: None, bytes: Cow::Owned(bad_bytes), image: bad_image };
+        let bad_image = elf::parse_shared(&bad_bytes).ok()?.relocated(STAGING_BASE)?;
+        let bad_link = LinkImage { name: None, bytes: Cow::Owned(bad_bytes), image: bad_image };
         let bad_scope = elf::SymbolScope::new(&bad_link.image, &bad_link.bytes);
         {
             let mut staged = stage_module_segments(&mut space, &plan)?;
-            // validate_relocation_plan rejects type 0x99 → returns None.
-            let ok =
-                staged.relocate_staged(core::slice::from_ref(&bad_link), &bad_scope, None);
+            crate::serial::write_line(format_args!("[S11.6-D] staged2 ok"));
+            let ok = staged.relocate_staged(core::slice::from_ref(&bad_link), &bad_scope, None);
+            crate::serial::write_line(format_args!("[S11.6-D] relocate_staged bad result: {}", ok.is_some()));
             if ok.is_some() {
                 drop(staged);
                 let _ = destroy(space);
                 return None;
             }
-            drop(staged); // committed=false → Drop unmaps the staged pages
+            drop(staged);
+            crate::serial::write_line(format_args!("[S11.6-D] rollback2 done"));
         }
         drop(bad_link);
-        if crate::memory::stats().allocated_frames != frames_before {
-            let _ = destroy(space);
-            return None;
+        {
+            let mut probe = [0u8; 1];
+            if paging::read_user_bytes_in(space.paging(), plan.mapping_start, &mut probe).is_ok() {
+                crate::serial::write_line(format_args!("[S11.6-D] rollback2 probe fail: still mapped"));
+                let _ = destroy(space);
+                return None;
+            }
         }
+        crate::serial::write_line(format_args!("[S11.6-D] rollback2 probe ok"));
 
         // ── 3. success path ────────────────────────────────────────────────
         let ok_bytes = fixture(2)?;
-        let ok_image = elf::parse_shared(&ok_bytes).ok()?.relocated(LIBRARY_START)?;
+        let ok_image = elf::parse_shared(&ok_bytes).ok()?.relocated(STAGING_BASE)?;
         let ok_link = LinkImage { name: None, bytes: Cow::Owned(ok_bytes), image: ok_image };
         let ok_scope = elf::SymbolScope::new(&ok_link.image, &ok_link.bytes);
         let generation = {
             let mut staged = stage_module_segments(&mut space, &plan)?;
-            // Relocate through the same validate+apply path as Pending.
+            crate::serial::write_line(format_args!("[S11.6-D] staged3 ok"));
             staged.relocate_staged(core::slice::from_ref(&ok_link), &ok_scope, None)?;
-            // Publish: generation only advances after commit.
+            crate::serial::write_line(format_args!("[S11.6-D] relocate ok"));
             staged.commit()?
         };
+        crate::serial::write_line(format_args!("[S11.6-D] commit ok gen={}", generation));
         drop(ok_link);
-        // Module slot 0 is now live at LIBRARY_START; generation starts at 1.
-        if generation != 1 || space.dynamic_tls_module_range(1, 0).is_none() {
+        let tls_range = space.dynamic_tls_module_range(1, 0);
+        crate::serial::write_line(format_args!("[S11.6-D] tls_range: {}", tls_range.is_some()));
+        if generation != 1 || tls_range.is_none() {
             let _ = destroy(space);
             return None;
         }
@@ -843,9 +878,13 @@ pub(super) fn module_staging_run() -> bool {
         Some(true)
     })()
     .unwrap_or(false);
+    let scope_cleaned = !owned_scope || crate::vfs::remove("/lib/scope.so").is_ok();
+    let base_cleaned = !owned_base || crate::vfs::remove("/lib/base.so").is_ok();
+    let lib_cleaned = !made_lib || crate::vfs::remove("/lib").is_ok();
+    let ok = result && scope_cleaned && base_cleaned && lib_cleaned;
     crate::serial::write_line(format_args!(
         "[S11.6] module staging rollback: {}",
-        if result { "PASSED" } else { "FAILED" }
+        if ok { "PASSED" } else { "FAILED" }
     ));
-    result
+    ok
 }

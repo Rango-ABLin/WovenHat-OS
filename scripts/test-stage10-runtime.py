@@ -80,6 +80,7 @@ def required_markers(stage, cpus):
                   '11.3': '[S11.3] notifications: PASSED',
                   '11.4': '[S11.4] libwoven runtime boundary: PASSED',
                   '11.5': '[S11.5] loader hardening: PASSED',
+                  '11.6': '[S11.6] module staging rollback: PASSED',
                   '11.5-compiler': '[S11.COMPILER] signed toolchain PIE: PASSED',
                   '12.1': '[S12.1] VFS boundary: PASSED', '12.2': '[S12.2] WovenFS: PASSED',
                   '12.3': '[S12.3] encryption: PASSED', '12.4': '[S12.4] snapshots: PASSED',
@@ -211,7 +212,7 @@ def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('5-font', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('5-font', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
