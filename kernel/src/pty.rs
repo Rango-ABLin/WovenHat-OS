@@ -184,6 +184,11 @@ fn close(id: PtyId, master: bool) {
         &mut pty.slave_refs
     };
     *refs = refs.saturating_sub(1);
+    if master && pty.master_refs == 0 {
+        // Closing the controlling master hangs up the slave. A pending or
+        // subsequent slave read observes EOF, while writes fail closed.
+        pty.eof = true;
+    }
     if pty.master_refs == 0 && pty.slave_refs == 0 {
         pty.occupied = false;
         pty.input = Buffer::empty();
@@ -295,6 +300,9 @@ pub fn write_master(id: PtyId, buffer: &[u8]) -> Result<usize, Error> {
 pub fn write_slave(id: PtyId, buffer: &[u8]) -> Result<usize, Error> {
     let mut table = TABLE.lock();
     let pty = table.get_mut(id)?;
+    if pty.master_refs == 0 {
+        return Err(Error::Closed);
+    }
     for &byte in buffer {
         pty.output.push(byte).map_err(|_| Error::Full)?;
     }
@@ -323,5 +331,14 @@ pub fn self_test() -> bool {
     let ok = first && empty && newline && line && echo_read && output && echoed;
     close_slave(slave);
     close_master(master);
-    ok
+    let Ok(hangup_master) = create() else { return false };
+    let Ok(hangup_slave) = open_slave(hangup_master.index) else {
+        close_master(hangup_master);
+        return false;
+    };
+    close_master(hangup_master);
+    let hangup_read = read_slave(hangup_slave, &mut read) == Ok(0);
+    let hangup_write = write_slave(hangup_slave, b"x") == Err(Error::Closed);
+    close_slave(hangup_slave);
+    ok && hangup_read && hangup_write
 }
