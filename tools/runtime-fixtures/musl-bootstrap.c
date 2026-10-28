@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -71,8 +72,11 @@ int main(int argc, char **argv, char **envp)
 		if (aux[0] == 6 && aux[1] == 4096) saw_pagesz = 1;
 		if (aux[0] == 11 && aux[1] == 1000) saw_uid = 1;
 		if (aux[0] == 12 && aux[1] == 1000) saw_gid = 1;
-		if (aux[0] == 25 && aux[1] != 0 && ((unsigned char *)aux[1])[0] != 0)
-			saw_random = 1;
+		if (aux[0] == 25 && aux[1] != 0) {
+			const unsigned char *random = (const unsigned char *)(uintptr_t)aux[1];
+			for (int i = 0; i < 16; ++i)
+				if (random[i] != 0) saw_random = 1;
+		}
 	}
 	if (!saw_pagesz || !saw_uid || !saw_gid || !saw_random)
 		return 95;
