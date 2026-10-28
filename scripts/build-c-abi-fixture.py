@@ -51,6 +51,7 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     source = root / "tools" / "runtime-fixtures" / "c-abi.c"
     linker = root / "tools" / "runtime-fixtures" / "link.x"
+    port_include = root / "ports" / "musl" / "include"
     clang = find_clang(args.clang)
     report: dict[str, object] = {
         "contract": "WOVENHAT-S02-FREESTANDING-C-ABI-V1",
@@ -82,7 +83,7 @@ def main() -> int:
     elf_file = output / "c-abi.elf"
     compile_command = [clang, "--target=x86_64-unknown-none", "-ffreestanding",
                        "-fno-stack-protector", "-fno-builtin", "-nostdlib",
-                       "-nodefaultlibs", "-c", str(source),
+                       "-nodefaultlibs", "-I", str(port_include), "-c", str(source),
                        "-o", str(object_file)]
     compiled = subprocess.run(compile_command, cwd=root, capture_output=True,
                               text=True, check=False)

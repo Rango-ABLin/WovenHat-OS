@@ -29,6 +29,7 @@ def run_version(command):
 def check(output):
     root = Path(__file__).resolve().parents[1]
     source = root / "tools" / "runtime-fixtures" / "c-abi.c"
+    transport = root / "ports" / "musl" / "include" / "wovenhat" / "syscall.h"
     rust_sources = {
         "shared-main": root / "tools" / "loader-fixtures" / "shared-main.rs",
         "library": root / "tools" / "loader-fixtures" / "library.rs",
@@ -36,8 +37,11 @@ def check(output):
         "tls-threads": root / "tools" / "loader-fixtures" / "tls-threads.rs",
     }
     text = source.read_text(encoding="utf-8")
-    required = ("void _start", "int $0x80", "mov $3, %%eax", "42")
+    transport_text = transport.read_text(encoding="utf-8")
+    required = ("void _start", "wh_syscall1", "WH_SYS_EXIT", "42")
+    required_transport = ("int $0x80", "WH_SYS_CLOSE", "wh_syscall3", "wh_syscall4_unmapped")
     missing = [token for token in required if token not in text]
+    missing += [f"transport:{token}" for token in required_transport if token not in transport_text]
     if missing:
         raise RuntimeError(f"C fixture contract missing tokens: {missing}")
 
@@ -56,7 +60,10 @@ def check(output):
         "contract": "WOVENHAT-S02-FREESTANDING-C-ABI-V1",
         "source": str(source.relative_to(root)),
         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "transport": str(transport.relative_to(root)),
+        "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
         "required_source_tokens": required,
+        "required_transport_tokens": required_transport,
         "source_shape": "PASS" if not missing else "FAIL",
         "rust_fixtures": {
             name: {
