@@ -39,11 +39,17 @@ fn mock_mmap() -> u64 {
 """ + body + """
 #[test]
 fn concurrent_allocations_publish_once_and_do_not_overlap() {
-    let threads: Vec<_> = (0..32).map(|_| std::thread::spawn(|| {
+    // Release all callers together so initialization is genuinely contended.
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(32));
+    let threads: Vec<_> = (0..32).map(|_| {
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+        barrier.wait();
         let p = userspace_allocator::allocate(64);
         assert_ne!(p, 0);
         p
-    })).collect();
+        })
+    }).collect();
     let mut pointers: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
     pointers.sort_unstable();
     assert!(pointers.windows(2).all(|w| w[1] - w[0] >= 64));
