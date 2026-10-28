@@ -12,6 +12,15 @@ gate pass with exit 33. This is a repository-level software boundary; live
 IDT safe-point wiring, scheduler-owned continue/step mutation, and physical
 GDB qualification are deliberately not claimed.
 
+## Codex - Stage 32 live breakpoint handoff continuation (2026-10-28)
+
+Wired the breakpoint IDT handler to `gdb_live::record`, a packed atomic
+vector/error latch. The handler returns immediately and never takes a lock,
+sleeps, or switches tasks; a later safe point consumes through `take()`. The
+integrated Stage 32 target/host lints and QEMU 1/2/4-CPU gate pass again.
+Scheduler-owned saved-context mutation for continue/step and physical GDB
+qualification remain open.
+
 ## Codex - Stage 32.16 GDB transport pump (2026-10-28)
 
 Added `kernel/src/gdb_transport.rs`, a fixed-size COM2/RSP byte assembler with

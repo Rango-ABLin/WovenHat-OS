@@ -10,8 +10,9 @@ The one integrated Stage 32 software gate passed 1/2/4-CPU QEMU self-tests.
 It composes diagnostics, crash dumps, tracing, profiling, RSP framing, COM2,
 packet assembly, session lifecycle, trap classification, generation ownership,
 frame snapshots, task binding, register writes, UART polling, and developer
-artifacts. Physical GDB qualification and scheduler-owned live trap/resume
-execution remain explicitly outside this boundary.
+artifacts. The breakpoint ISR handoff is live and nonblocking; physical GDB
+qualification and scheduler-owned resume/register mutation remain explicitly
+outside this boundary.
 
 ## Stage 32.16 GDB transport pump - 2026-10-28
 

@@ -10,10 +10,12 @@ surfaces through `kernel/src/wovendev.rs`. The single integrated gate is
 `stage32-integrated-test` and passes on 1/2/4 CPUs with exit 33. Evidence:
 `target/stage32-integrated-{1,2,4}cpu/`.
 
-This accepts the repository-level software integration boundary. It does not
-claim physical GDB hardware qualification or silently install a live IDT
-debug-stop handler: trap entry must still be wired at a scheduler-safe point,
-and continue/step must still mutate the scheduler-owned saved task context.
+The breakpoint IDT path now also has an interrupt-safe live handoff under the
+integrated feature: it records one packed vector/error event atomically and
+returns without locks, sleeping, or switching tasks. The event is consumed
+later through `gdb_live::take()`. Physical GDB qualification and continue/step
+mutation of the scheduler-owned saved task context remain explicit
+prerequisites.
 
 ## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
 

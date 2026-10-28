@@ -5,10 +5,11 @@
 `kernel/src/wovendev.rs` composes the Stage 32 primitives in one caller-owned
 coordinator: generation-bound attachment, copied trap context, RSP byte pump,
 session dispatch, bounded register writes, and optional bounded COM2 polling.
-The coordinator keeps the packet/frame/context lifetimes explicit. It does not
-take scheduler locks from interrupt context, install a trap handler, or claim
-physical GDB qualification; those remaining authorities require a dedicated
-safe-point handoff in the task scheduler.
+The coordinator keeps the packet/frame/context lifetimes explicit. The
+`gdb_live` handoff publishes one packed vector/error event atomically from the
+breakpoint ISR and consumes it outside the IRQ path. It does not take locks,
+sleep, switch tasks, or claim physical GDB qualification; continue/step still
+require scheduler-owned saved-context mutation.
 
 ## WovenDev bounded transport pump (2026-10-28)
 
