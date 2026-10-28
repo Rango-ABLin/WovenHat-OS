@@ -13,8 +13,9 @@ ELF through its paired `ld.lld`; the exact output was embedded by the
 independently guarded `s02-c-abi-test` and run through the production loader.
 The Ring-3 fixture returned native exit status 42 with full process/IPC/frame
 teardown, and QEMU exit 33 passed on 1/2/4 CPUs. Evidence:
-`audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This is only the no-libc C ABI
-subgate; S02's broader runtime scope remains open.
+`audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This closes the documented
+no-libc C ABI scope of S02; hosted-C and broader runtime work remain explicitly
+outside that stage.
 
 ## Stage 32 integrated WovenDev software boundary - 2026-10-28
 

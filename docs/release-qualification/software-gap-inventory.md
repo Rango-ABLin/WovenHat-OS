@@ -16,7 +16,7 @@ foreign-OS compatibility, production trust, or release approval.
 |---|---|---|---|
 | S00 | Kernel, userspace, storage, security, drivers, graphics, network, SDK and services are represented by `kernel/src`, `libwoven`, `apps`, `tools`, `scripts`, and `tests`. | VERIFIED-SOFTWARE | This inventory, `checkpoint.json`, `m00-baseline-ledger.md`; refresh after every accepted increment. |
 | S01 | Native syscall/IPC/capability boundaries and `libwoven` wrappers; package metadata and application launch paths. | VERIFIED-SOFTWARE | `libwoven::abi` and syscall 243 provide fail-closed major/minor/descriptor negotiation. The independently built exit-status fixture passed current, unsupported-major and malformed-reserved-byte cases at 1/2/4 CPUs; the inherited release chain passed 158/158. Physical, foreign-OS and production-trust claims remain separate. |
-| S02 | ELF loading, relocations, TLS and async VFS/network paths in `kernel/src`; Rust applications are the supported path. | PARTIAL | The bounded `WOVENHAT-S02-FREESTANDING-C-ABI-V1` fixture builds with LLVM/ld.lld and its independently guarded `s02-c-abi-test` uses the production loader, executes in Ring-3 with native exit 42, and verifies teardown at 1/2/4 CPUs (QEMU exit 33). Evidence: `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. libc/pthread/locale/math, destructors, TLS, async VFS/network and shared-library compatibility remain open. |
+| S02 | Freestanding C entry/exit ABI and static ELF loader interoperability in `kernel/src`; Rust applications remain the supported application path. | VERIFIED-SOFTWARE (bounded) | The `WOVENHAT-S02-FREESTANDING-C-ABI-V1` fixture builds with LLVM/ld.lld and its independently guarded `s02-c-abi-test` uses the production loader, executes in Ring-3 with native exit 42, and verifies teardown at 1/2/4 CPUs (QEMU exit 33). Evidence: `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. libc/pthread/locale/math, destructors, TLS, async VFS/network and shared-library compatibility are explicitly outside S02. |
 | S03 | Task/process lifecycle, IPC waits, terminal and input paths, shell/terminal applications. | PARTIAL | Desktop and terminal journeys pass. Full signal disposition, process groups, PTYs/termios, job control and exact zombie/wait semantics are not evidenced as a complete contract. |
 | S04 | Scheduler, CPU migration/hotplug, capability/resource bounds and SMP tests in `kernel/src`. | VERIFIED-SOFTWARE (bounded) | Warning-denying lint and 1/2/4-CPU acceptance pass. Quota/priority/affinity accounting and topology-aware policy remain incomplete for S04 closure. |
 | S05 | Paging, COW, allocator, swap and memory-pressure paths in `kernel/src`. | PARTIAL | Low-memory and allocator tests exist; deterministic reclaim/writeback/OOM policy and pressure-notification acceptance remain open. |
@@ -41,12 +41,10 @@ foreign-OS compatibility, production trust, or release approval.
 S00 is `CLOSED` for the inventory increment. S01 is `CLOSED` for bounded
 software qualification: the independent fixture exercised the real syscall
 and fail-closed negative paths at 1/2/4 CPUs, and the current-head release
-chain passed 158/158. S01 does not close any downstream capability. The
-earliest unclosed implementable prerequisite is S02: a documented, bounded
-portable-runtime/libc compatibility slice with actual C and Rust fixtures. The
-first implementation increment now defines the freestanding C ABI fixture and
-records compiler availability without treating source inspection as runtime
-qualification.
+chain passed 158/158. S01 does not close any downstream capability. S02 is
+`CLOSED` for its documented freestanding C ABI boundary: the exact C ELF built
+and executed through the real loader on 1/2/4 CPUs. Hosted-C/POSIX runtime
+compatibility remains outside S02.
 S10, S13, S15, S17 and S19 also have independent software slices, but they are
 not allowed to bypass the sequential prerequisite order.
 

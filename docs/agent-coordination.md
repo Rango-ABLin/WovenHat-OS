@@ -7137,6 +7137,7 @@ It embeds the exact C ELF, parses and loads it through the production loader,
 spawns it as a normal user process, expects native exit status 42, and checks
 frame/process/IPC teardown. The real QEMU gate passed with exit 33 on 1/2/4
 CPUs; evidence is `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This closes
-only the narrow freestanding C ABI subgate; it does not claim hosted-C,
-libc/pthread/TLS/destructor/shared-library or broad S02 closure.
+the documented S02 freestanding C ABI boundary. It does not claim hosted-C,
+libc/pthread/TLS/destructor/shared-library compatibility, which is explicitly
+outside S02 rather than an uncompleted hidden acceptance criterion.
 

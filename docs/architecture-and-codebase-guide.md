@@ -12,8 +12,9 @@ acceptance. On Windows, the builder invokes the selected LLVM installation's
 paired `ld.lld` directly because clang's generic driver otherwise delegates
 to an unavailable GNU linker driver. The `s02-c-abi-test` QEMU feature embeds
 the exact built ELF, loads it via the production loader, expects native exit
-status 42, and checks frame/process/IPC teardown. It passed on 1/2/4 CPUs;
-hosted-C and broader runtime compatibility remain outside this boundary.
+status 42, and checks frame/process/IPC teardown. It passed on 1/2/4 CPUs and
+closes the documented S02 boundary; hosted-C and broader runtime compatibility
+remain explicitly outside it.
 
 ## Integrated WovenDev software boundary (2026-10-28)
 

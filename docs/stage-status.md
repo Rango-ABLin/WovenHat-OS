@@ -1,6 +1,6 @@
 # Stage status
 
-## S02 freestanding C ABI boundary - 2026-10-28 - PARTIAL
+## S02 freestanding C ABI boundary - 2026-10-28 - ACCEPTED BOUNDED
 
 Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
 The builder records source/linker/compiler provenance and produces a static
@@ -10,9 +10,9 @@ loader, runs it as an ordinary Ring-3 process, verifies native exit status 42,
 and verifies process/IPC/frame teardown. QEMU passed with exit 33 on 1, 2 and
 4 CPUs. Evidence: `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`.
 
-This is a bounded freestanding C ABI subgate, not S02 closure: libc, pthread,
-locale, math, destructors, TLS, async VFS/network and shared-library
-compatibility remain open.
+This closes S02's documented freestanding C ABI scope. libc, pthread, locale,
+math, destructors, TLS, async VFS/network and shared-library compatibility are
+explicitly outside S02 and remain separately unclaimed.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
