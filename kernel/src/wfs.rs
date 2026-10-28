@@ -1340,6 +1340,17 @@ impl<D: BlockDevice> Volume<D> {
             if node.kind == KIND_FILE && node.size == 0 && node.data_checksum != 0 {
                 return Err(Error::Corrupt);
             }
+            // `stage_write` and `create_file` both enforce `data.len() <=
+            // MAX_FILE_SIZE` (the maximum bytes eight direct blocks can hold).
+            // No runtime path can therefore write a file inode with a size
+            // beyond that limit.  Without an explicit guard the block-count
+            // check below computes `needed = size.div_ceil(SECTOR_SIZE)`, which
+            // can exceed `DIRECT_BLOCKS` for an oversized `size`; the later
+            // data-checksum loop (`for slot in 0..needed { node.direct[slot] }`)
+            // would then index past the eight-element `direct` array and panic.
+            if node.kind == KIND_FILE && node.size > MAX_FILE_SIZE as u64 {
+                return Err(Error::Corrupt);
+            }
             // `stage_write` allocates exactly one block per sector of content
             // and zeroes every slot beyond the last.  A missing block makes the
             // file unreadable (`read_file` returns Corrupt on a zero slot); an

@@ -2680,3 +2680,59 @@ fn check_refuses_non_root_dir_kind_inode() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a `KIND_FILE` inode whose `size` exceeds `MAX_FILE_SIZE`.
+///
+/// `stage_write` and `create_file` both enforce `data.len() <= MAX_FILE_SIZE`
+/// (the maximum bytes eight direct blocks can hold), so no runtime path can
+/// produce a file inode with a larger size.  Without an explicit guard the
+/// block-count check computes `needed = size.div_ceil(SECTOR_SIZE)`, which can
+/// exceed `DIRECT_BLOCKS`; the later data-checksum loop then indexes past the
+/// end of the eight-element `direct` array and panics rather than returning
+/// `Corrupt`.
+///
+/// To isolate the new size-bounds guard as the first error path, the test
+/// writes a full `MAX_FILE_SIZE` file (allocating all 8 direct blocks and
+/// setting the correct data checksum), then patches only the `size` field to
+/// `MAX_FILE_SIZE + 1`.  With all 8 blocks allocated the existing block-count
+/// check (`needed = 9`, all 8 slots non-zero: each `(true) != (true)` false,
+/// no Corrupt) would pass, but the data-checksum loop would panic at
+/// `direct[8]`.  With the new size-bounds guard, `check()` returns `Corrupt`.
+#[test]
+fn check_refuses_file_inode_with_size_above_max_file_size() {
+    use wfs::MAX_FILE_SIZE;
+
+    let base = formatted();
+
+    // Create a file with exactly MAX_FILE_SIZE bytes, filling all 8 direct
+    // blocks.  The data checksum is set to fnv1a(data) by stage_write, which
+    // is correct for this content.
+    let data = vec![0xaau8; MAX_FILE_SIZE];
+    let file_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .create_file(1, "full.bin", 0o600, &data, 1)
+        .expect("create full file");
+
+    // Fork the image and patch only the size field to MAX_FILE_SIZE + 1.
+    // All 8 direct blocks remain non-zero and the data checksum is unchanged,
+    // so neither the block-count check nor the data-checksum check would fire
+    // before the new size-bounds guard does.
+    let corrupt = base.fork(None);
+    reseal_inode_size(&corrupt, file_inode, MAX_FILE_SIZE as u64 + 1);
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode with size > MAX_FILE_SIZE"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: unpatched volume with size == MAX_FILE_SIZE passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}

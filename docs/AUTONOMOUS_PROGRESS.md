@@ -1,5 +1,82 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse KIND_FILE inode with size above MAX_FILE_SIZE
+
+Branch: `auto/wovenhat-development` (base `0382eb7b`). Working tree was clean.
+
+### Defect / gap
+
+`check()` did not verify that a `KIND_FILE` inode's `size` field is within
+`MAX_FILE_SIZE` (`DIRECT_BLOCKS * SECTOR_SIZE = 4096`).
+
+`stage_write` and `create_file` both enforce `data.len() <= MAX_FILE_SIZE`, so
+no runtime path can produce a file inode with a larger size.  Without an
+explicit guard the per-inode block-count check in `check()` computes:
+
+```rust
+let needed = (node.size as usize).div_ceil(SECTOR_SIZE);
+```
+
+When `size > MAX_FILE_SIZE`, `needed > DIRECT_BLOCKS` (e.g. 9 for size 4097).
+The block-count loop only covers `slot in 0..DIRECT_BLOCKS`, so with all 8
+slots non-zero and `needed = 9`, every `(true) != (slot < 9)` = false — the
+loop passes silently.  The data-checksum loop that follows then runs:
+
+```rust
+for slot in 0..needed {
+    let block = node.direct[slot];   // slot 8 is out of bounds!
+```
+
+Indexing `node.direct[8]` on an `[u64; 8]` array panics in both debug and
+release builds.  So a crafted image with `size = MAX_FILE_SIZE + 1` and all 8
+direct blocks set causes `check()` to **panic** rather than return `Corrupt`.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — before the block-count check, added:
+
+```rust
+if node.kind == KIND_FILE && node.size > MAX_FILE_SIZE as u64 {
+    return Err(Error::Corrupt);
+}
+```
+
+An eight-line comment explains that `stage_write`/`create_file` enforce the
+bound, so any larger value is corruption, and that without this guard the
+data-checksum loop would index past the eight-element `direct` array.
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_file_inode_with_size_above_max_file_size`:
+1. Formats a fresh volume.
+2. Creates a file with exactly `MAX_FILE_SIZE` bytes (filling all 8 direct
+   blocks and setting the correct data checksum).
+3. Forks the image and patches the inode's `size` to `MAX_FILE_SIZE + 1` via
+   `reseal_inode_size`.  All 8 blocks remain non-zero and the data checksum
+   is unchanged.
+4. Asserts `check()` returns `Err(Corrupt)`.
+5. Asserts `check()` does not modify the image.
+6. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **54 passed / 0 failed** (was 53; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard covers the `MAX_FILE_SIZE` limit enforced by the runtime.  When
+  indirect blocks are added (future), the guard must be updated to match the
+  new maximum.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong mode
 
 Branch: `auto/wovenhat-development` (base `a6d56119`). Working tree was clean.
