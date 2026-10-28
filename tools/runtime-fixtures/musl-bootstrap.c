@@ -7,6 +7,7 @@
 
 static char pipe_buffer[2048];
 _Noreturn void _Exit(int);
+void (*__wovenhat_signal_no_restart(int, void (*)(int)))(int);
 
 static void note_sigpipe(int sig)
 {
@@ -139,7 +140,7 @@ int main(int argc, char **argv)
 	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
 		return 130;
 	if (child == 0) {
-		if (signal(SIGUSR1, resume_after_signal) == SIG_ERR || close(pipe_fd[1]) != 0)
+		if (__wovenhat_signal_no_restart(SIGUSR1, resume_after_signal) == SIG_ERR || close(pipe_fd[1]) != 0)
 			return 131;
 		return read(pipe_fd[0], &byte, 1) == -1 && errno == EINTR ? 0 : 132;
 	}
@@ -147,5 +148,18 @@ int main(int argc, char **argv)
 		|| waitpid(child, &child_status, 0) != child || !WIFEXITED(child_status)
 		|| WEXITSTATUS(child_status) != 0 || close(pipe_fd[1]) != 0)
 		return 133;
+	/* signal() requests restart: after SIGUSR1, data completes the same read. */
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 134;
+	if (child == 0) {
+		if (signal(SIGUSR1, resume_after_signal) == SIG_ERR || close(pipe_fd[1]) != 0)
+			return 135;
+		return read(pipe_fd[0], &byte, 1) == 1 && byte == 'R' ? 0 : 136;
+	}
+	if (close(pipe_fd[0]) != 0 || sched_yield() != 0 || kill(child, SIGUSR1) != 0
+		|| write(pipe_fd[1], "R", 1) != 1 || waitpid(child, &child_status, 0) != child
+		|| !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0
+		|| close(pipe_fd[1]) != 0)
+		return 137;
 	return 42;
 }

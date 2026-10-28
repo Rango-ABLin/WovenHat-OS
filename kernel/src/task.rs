@@ -711,6 +711,7 @@ pub struct Process {
     process_group: u64,
     session_id: u64,
     signal_actions: [u64; 32],
+    signal_restart: [bool; 32],
     environment: ProcessEnvironment,
 }
 
@@ -1554,6 +1555,7 @@ fn create_process(
         process_group: inherited_group.unwrap_or(fallback_group),
         session_id: inherited_session.unwrap_or(fallback_session),
         signal_actions: [0; 32],
+        signal_restart: [false; 32],
         environment: inherited_environment,
     }
 }
@@ -3495,6 +3497,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         process_group: parent.process_group,
         session_id: parent.session_id,
         signal_actions: parent.signal_actions,
+        signal_restart: parent.signal_restart,
         environment: parent.environment,
     });
     Ok(child_id)
@@ -6463,6 +6466,17 @@ pub fn current_has_caught_signal() -> bool {
         })
 }
 
+/// Whether the pending caught signal requests the supported restart policy.
+pub fn current_caught_signal_restarts() -> bool {
+    let process_id = current_process_id();
+    process_table_lock().iter().flatten().find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| {
+            let sig = process.pending_signal;
+            sig > 0 && sig <= 31 && process.signal_actions[sig as usize] > 1
+                && process.signal_restart[sig as usize]
+        })
+}
+
 /// `kill` from Ring 3. Each selected process is checked separately, as POSIX
 /// does for process groups. Processes the caller may not signal are skipped;
 /// if every match is refused, the call fails with `PermissionDenied`.
@@ -6601,7 +6615,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
 
 /// Set/query a minimal sigaction disposition. `handler` uses 0=SIG_DFL, 1=SIG_IGN,
 /// otherwise it is a userspace handler address. Returns the previous disposition.
-pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
+pub fn sigaction_current(sig: u64, handler: u64, restart: bool) -> Result<u64, FileError> {
     if sig == 0 || sig > 31 || sig == 9 {
         return Err(FileError::PermissionDenied);
     }
@@ -6625,6 +6639,7 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
     let slot = &mut process.signal_actions[sig as usize];
     let old = *slot;
     *slot = handler;
+    process.signal_restart[sig as usize] = restart && handler > 1;
     Ok(old)
 }
 

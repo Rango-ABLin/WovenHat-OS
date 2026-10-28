@@ -1490,7 +1490,9 @@ fn sys_fork(frame: *const UserForkFrame) -> u64 {
     }
 }
 fn sys_sigaction(sig: u64, handler: u64) -> u64 {
-    crate::task::sigaction_current(sig, handler).unwrap_or(SYSCALL_ERROR)
+    const RESTART: u64 = 1 << 63;
+    crate::task::sigaction_current(sig, handler & !RESTART, handler & RESTART != 0)
+        .unwrap_or(SYSCALL_ERROR)
 }
 
 fn sys_setpgid(pid: u64, pgid: u64) -> u64 {
