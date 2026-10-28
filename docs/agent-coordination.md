@@ -7258,3 +7258,8 @@ POSIX port increment 12: upstream musl lseek.c now supports only SEEK_SET via
 the existing absolute-offset kernel syscall; fixture rewind/read passed QEMU
 at 1/2/4 CPUs. SEEK_CUR and SEEK_END remain ENOSYS.
 
+POSIX port increment 13: added the versioned OpenAccess kernel ABI (read,
+write and create bits), musl flag mapping, and normal-fd FileWrite routing.
+Open/create/write/SEEK_SET/readback/close passed QEMU at 1/2/4 CPUs; legacy
+Open is unchanged and unsupported flags remain unclaimed.
+

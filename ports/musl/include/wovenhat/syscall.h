@@ -16,6 +16,8 @@
 #define WH_SYS_EXIT  3
 #define WH_SYS_CLOSE 6
 #define WH_SYS_LSEEK 27
+#define WH_SYS_FILE_WRITE 10
+#define WH_SYS_OPEN_ACCESS 254
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38

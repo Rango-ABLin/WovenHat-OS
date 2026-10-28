@@ -116,6 +116,9 @@ pub enum Number {
     Read = 0,
     Write = 1,
     Open = 2,
+    /// path ptr, path length, access bits (1=read, 2=write, 4=create) -> descriptor.
+    /// Kept distinct from legacy Open so its ABI cannot change silently.
+    OpenAccess = 254,
     Exit = 3,
     Getpid = 4,
     Waitpid = 5,
@@ -654,6 +657,18 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
             IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release);
             descriptor
         }
+        Err(_) => SYSCALL_ERROR,
+    }
+}
+
+fn sys_open_access(user_path: u64, length: u64, access: u64) -> u64 {
+    let Ok(length) = usize::try_from(length) else { return SYSCALL_ERROR; };
+    if length == 0 || length > MAX_PATH_SIZE || access & !7 != 0 || access & 3 == 0 || (access & 4 != 0 && access & 2 == 0) { return SYSCALL_ERROR; }
+    let mut path = [0_u8; MAX_PATH_SIZE];
+    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() { return SYSCALL_ERROR; }
+    let Ok(path) = core::str::from_utf8(&path[..length]) else { return SYSCALL_ERROR; };
+    match crate::task::open_current_access(path, access) {
+        Ok(descriptor) => { IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release); descriptor }
         Err(_) => SYSCALL_ERROR,
     }
 }
@@ -2897,6 +2912,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::FileWrite as u64 => sys_file_write(arg0, arg1, arg2),
         value if value == Number::Write as u64 => sys_write(arg0, arg1, arg2),
         value if value == Number::Open as u64 => sys_open(arg0, arg1),
+        value if value == Number::OpenAccess as u64 => sys_open_access(arg0, arg1, arg2),
         value if value == Number::Close as u64 => sys_close(arg0),
         value if value == Number::Exec as u64 => sys_exec(arg0, arg1),
         value if value == Number::ExecCommand as u64 => sys_exec_command(arg0, arg1),

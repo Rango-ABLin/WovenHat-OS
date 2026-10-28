@@ -3974,14 +3974,26 @@ pub fn anonymous_mapping_count() -> usize {
         .sum()
 }
 pub fn open_current(path: &str) -> Result<u64, FileError> {
-    if !current_has(Capability::FileRead) {
+    open_current_with_access(path, 1, true)
+}
+
+fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Result<u64, FileError> {
+    let read = access & 1 != 0;
+    let write = access & 2 != 0;
+    let create = access & 4 != 0;
+    if access & !7 != 0 || !read && !write || create && !write
+        || (read && !current_has(Capability::FileRead))
+        || (write && !current_has(Capability::FileWrite))
+    {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
     if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
-    if !authorize_current_file_path(&path, false) {
+    if (read && !authorize_current_file_path(&path, false))
+        || (write && !authorize_current_file_path(&path, true))
+    {
         return Err(FileError::PermissionDenied);
     }
     if touches_mnt(&path) {
@@ -3997,8 +4009,11 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
     let file = match vfs::open(&path) {
         Ok(id) => id,
         Err(_) => {
-            // POSIX-ish O_CREAT for missing files when writer-capable.
-            if !current_has(Capability::FileWrite) || !authorize_current_file_path(&path, true) {
+            // Legacy Open retains its established implicit-create behavior.
+            if !(legacy_create || create)
+                || !current_has(Capability::FileWrite)
+                || !authorize_current_file_path(&path, true)
+            {
                 return Err(FileError::NotFound);
             }
             if path.starts_with("/wfs/") {
@@ -4029,6 +4044,11 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
         scope: wovenguard::classify_file_path(&path),
     });
     Ok(descriptor as u64)
+}
+
+/// Checked access-mode entry for the versioned OpenAccess syscall.
+pub fn open_current_access(path: &str, access: u64) -> Result<u64, FileError> {
+    open_current_with_access(path, access, false)
 }
 pub fn descriptor_is_open(descriptor: u64) -> bool {
     let Ok(descriptor) = usize::try_from(descriptor) else {

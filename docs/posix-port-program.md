@@ -107,3 +107,11 @@ Upstream musl `lseek.c` now maps `SEEK_SET` to the existing bounded WovenHat
 absolute-offset syscall. The fixture seeks from EOF to offset 7 and reads the
 expected byte; QEMU passed at 1/2/4 CPUs. Relative and end-based seeks remain
 explicitly rejected with ENOSYS.
+
+## Bootstrap increment: writable descriptor lifecycle
+
+Versioned kernel `OpenAccess` keeps legacy Open unchanged and accepts only
+explicit read/write/create bits. The musl adapter maps `O_RDWR|O_CREAT` to
+that ABI and routes writes on normal fds to the bounded FileWrite syscall. The
+fixture creates `/tmp/musl-bootstrap-probe`, writes, seeks to zero, reads back,
+and closes it at 1/2/4 CPUs. Unsupported flags remain unclaimed.
