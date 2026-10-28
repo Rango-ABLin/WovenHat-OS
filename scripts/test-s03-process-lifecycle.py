@@ -39,16 +39,13 @@ class Qmp:
                 time.sleep(0.1)
 
     def ctrl_c(self, deadline: float) -> None:
-        self.command(
-            "input-send-event",
-            deadline,
-            {"events": [
-                {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": "ctrl"}}},
-                {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": "c"}}},
-                {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": "c"}}},
-                {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": "ctrl"}}},
-            ]},
-        )
+        key = lambda code, down: {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": code}}}
+        self.command("input-send-event", deadline, {"events": [key("ctrl", True)]})
+        time.sleep(0.1)
+        self.command("input-send-event", deadline, {"events": [key("c", True)]})
+        self.command("input-send-event", deadline, {"events": [key("c", False)]})
+        time.sleep(0.1)
+        self.command("input-send-event", deadline, {"events": [key("ctrl", False)]})
 
     def close(self) -> None:
         self.file.close()
