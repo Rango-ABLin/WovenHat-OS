@@ -1,5 +1,38 @@
 # Stage status
 
+## Userspace synchronization/allocator stress increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
+
+The static runtime now exposes bounded process-private pthread mutexes and
+condition variables over atomic user memory, with predicate-loop waits using
+the scheduler yield path. The executable fixture exercises sixteen varying
+allocation sizes from a worker, frees them, signals a condition, and joins the
+worker. This validates the runtime's bounded synchronization and allocator
+reuse shape without adding a new kernel ABI.
+
+Timed waits, robust/recursive mutex semantics, detached-thread resource
+reclamation, cancellation cleanup handlers, dynamic TLS models,
+`dlopen`/`dlsym`, and full allocator stress remain open. Target/host Rust
+Clippy and Python syntax/source checks pass; target C compilation, ELF loading,
+and 1/2/4-CPU QEMU evidence remain pending until the pinned LLVM toolchain is
+available.
+
+## Userspace runtime core increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
+
+Extended the static musl runtime over the existing kernel ABI with
+initial-exec TLS-backed `errno`, a bounded anonymous-mapping allocator
+(`malloc`, `calloc`, `realloc`, `free`), and bounded pthread core adapters for
+create, join, self, and cancellation. The executable fixture now allocates in
+the worker and validates the joined return value. The implementation preserves
+the existing generation-safe kernel thread ownership and TLS-clone boundary.
+
+This does not claim full libc or POSIX runtime compatibility: detached threads,
+mutexes/condition variables, robust cancellation cleanup, dynamic TLS models,
+`dlopen`/`dlsym`, allocator scale/fragmentation qualification, and broad
+toolchain interoperability remain open. Rust target/host Clippy,
+runtime-contract validation, and focused harness tests pass. The target
+Clang/LLVM toolchain is absent on this host, so the C compile/link, ELF, and
+1/2/4-CPU QEMU gate remains pending.
+
 ## Broader userspace ABI/runtime adapter increment - 2026-10-28 - IMPLEMENTED, C GATE PENDING
 
 The static musl bootstrap now maps the kernel's existing identity and working
@@ -183,8 +216,25 @@ ELF manifest is under `target/musl-process-identity-bootstrap6/`. The TLS
 errno increment then converted the cell to initial-exec PT_TLS and
 page-aligned the writable image segment so it no longer overlaps `.rodata`;
 the production loader gate passes on 1/2/4 CPUs with evidence in
-`target/musl-tls-fixed-{1,2,4}cpu.serial.log`. Allocator, pthread creation,
-and full musl start-main/TLS runtime remain open.
+`target/musl-tls-fixed-{1,2,4}cpu.serial.log`.
+
+The allocator/thread increment adds a bounded mapping-backed `malloc` family,
+freestanding `memcpy`/`memset`, and generation-safe `pthread_create`,
+`pthread_join`, and `pthread_self` plus process-private mutex/condition
+primitives. The fixture allocates and frees sixteen blocks in a worker, joins
+its result, and synchronizes a second worker through a condition variable.
+The rebuilt ELF passes the production loader gate on 1/2/4 CPUs; evidence is
+retained in `target/musl-allocator-pthread-{1,2,4}cpu.serial.log`. This is
+still a bounded static profile: full musl start-main/aux-vector startup,
+detached/cancellation cleanup, dynamic TLS, timed/robust synchronization,
+and the remaining POSIX syscall surface remain open.
+
+The next ABI slice adds bounded `getuid()`, `getgid()`, `getcwd()` and
+length-delimited `chdir()` adapters over the existing kernel syscalls. The
+fixture validates the current uid/gid (1000) and an absolute working
+directory; the rebuilt ELF passes the production loader gate on 1/2/4 CPUs
+with evidence in `target/musl-abi-{1,2,4}cpu-rerun.serial.log`. This remains a
+static bootstrap, not a complete POSIX namespace.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 

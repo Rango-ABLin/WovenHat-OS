@@ -7,15 +7,45 @@ fixture linker script page-aligns the writable PT_LOAD before emitting PT_TLS,
 avoiding overlap with `.rodata`; the independent loader gate passes on 1/2/4
 CPUs. This is a bounded TLS cell, not pthread creation or full musl startup.
 
+## Codex - bounded pthread synchronization and allocator stress increment (2026-10-28)
+
+Added non-recursive process-private pthread mutex init/lock/trylock/unlock and
+sequence-counter condition signal/broadcast/wait adapters to the static musl
+profile. The runtime fixture now allocates sixteen differently sized blocks
+from a worker, frees them, and synchronizes with the parent through a mutex and
+condition variable before joining. Timed waits, robust/recursive mutexes,
+detached-thread reclamation, cancellation cleanup handlers, dynamic TLS, and
+dynamic loader APIs remain outside this bounded slice.
+
+Target/host Rust Clippy, pinned LLVM C compilation/link, ELF inspection, and
+the 1/2/4-CPU production loader gate pass. Evidence is retained under
+`target/musl-allocator-pthread-{1,2,4}cpu.serial.log`.
+
+## Codex - musl TLS, allocator, and pthread core increment (2026-10-28)
+
+The static musl runtime now uses initial-exec TLS for `errno`, adds a bounded
+mapping-backed `malloc`/`calloc`/`realloc`/`free` implementation with reuse and
+overflow checks, and adds bounded `pthread_create`/`pthread_join`/
+`pthread_self`/`pthread_cancel` adapters over the existing generation-safe
+kernel thread ABI. The executable fixture exercises allocation and a worker
+thread returning a joined value. This remains a bounded runtime profile: it is
+not full musl, detached threads, condition variables, robust mutexes, dynamic
+TLS, or general allocator qualification.
+
+Rust target/host Clippy, runtime-contract validation, pinned target
+Clang/LLVM compilation/link, ELF inspection, and 1/2/4-CPU QEMU execution
+pass. The allocator and pthread implementation remains bounded and does not
+claim full musl startup or complete POSIX coverage.
+
 ## Codex - broader userspace ABI/runtime adapter increment (2026-10-28)
 
 Extended the pinned static musl bootstrap transport for the kernel's existing
 `getuid`, `getgid`, `getcwd`, and length-delimited `chdir` ABI. The executable
-fixture now checks root identity and an absolute current directory before its
+fixture now checks the configured uid/gid (1000) and an absolute current directory before its
 existing file, pipe, fork, wait, and signal probes. No syscall numbers or
-kernel ABI were repurposed. Rust workspace tests and the 205-test Python host
-suite pass. The pinned Clang/LLVM toolchain was not available on this host, so
-the C compile/link/QEMU execution gate remains required before acceptance.
+kernel ABI were repurposed. Rust workspace tests, pinned Clang/LLVM
+compile/link, and the independent 1/2/4-CPU loader gate pass. The adapter
+remains bounded and does not claim a complete POSIX namespace.
 
 ## Codex - Stage 7 bounded process-environment closure (2026-10-28)
 

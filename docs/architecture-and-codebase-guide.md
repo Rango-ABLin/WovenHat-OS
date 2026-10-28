@@ -25,7 +25,12 @@ identity calls as musl `getpid()`/`getppid()`; this does not imply a complete
 Linux syscall-number compatibility layer. The independent `musl-bootstrap-test`
 loads the resulting static ELF through the production loader and passes on
 1/2/4 CPUs, including process teardown and the existing I/O, pipe, signal,
-and wait fixture checks.
+and wait fixture checks. The adapter also exposes bounded `getuid()`,
+`getgid()`, caller-buffer `getcwd()`, and explicit-length `chdir()` mappings;
+these are ABI slices, not a complete POSIX namespace. The static profile also
+has a bounded mmap-backed allocator and generation-safe pthread create/join
+with process-private mutex/condition primitives; it deliberately does not
+claim full musl startup, dynamic TLS, detached cleanup, or complete POSIX.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 

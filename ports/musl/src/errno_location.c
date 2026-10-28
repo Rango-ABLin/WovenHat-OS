@@ -1,8 +1,5 @@
-/*
- * Bootstrap errno storage backed by the loader's initial-exec PT_TLS area.
- * This supplies per-thread errno without claiming pthread creation or the
- * rest of musl's TLS runtime.
- */
+/* Bootstrap errno storage backed by initial-exec TLS. The loader supplies
+ * each thread's FS base and the kernel clones the PT_TLS image for threads. */
 #include <errno.h>
 
 static __thread int errno_value = 0x1234;

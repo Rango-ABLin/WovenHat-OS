@@ -23,6 +23,9 @@ SOURCES = (
     "ports/musl/src/crt_start.c",
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
+    "ports/musl/src/string.c",
+    "ports/musl/src/malloc.c",
+    "ports/musl/src/pthread.c",
     "ports/musl/src/open.c",
     "vendor/musl/src/exit/_Exit.c",
     "vendor/musl/src/internal/syscall_ret.c",
@@ -139,7 +142,7 @@ def main() -> int:
     shutil.copy2(root / "ports/musl/include/bits/syscall.h", generated / "syscall.h")
 
     common = [clang, "--target=x86_64-unknown-none", "-std=c99", "-ffreestanding",
-              "-fno-stack-protector", "-fno-builtin", "-nostdinc", "-D_XOPEN_SOURCE=700",
+              "-fno-stack-protector", "-fno-builtin", "-mcmodel=large", "-nostdinc", "-D_XOPEN_SOURCE=700",
               # musl's own upstream build does not enable -Wextra.  In
               # particular, its generic socket fallback intentionally has an
               # unused argument on x86_64, where SYS_socketcall is absent.

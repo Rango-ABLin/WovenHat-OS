@@ -32,6 +32,13 @@
 #define WH_SYS_DUP 22
 #define WH_SYS_DUP2 24
 #define WH_SYS_PIPE 23
+#define WH_SYS_MMAP 8
+#define WH_SYS_MUNMAP 9
+#define WH_SYS_THREAD_CREATE 130
+#define WH_SYS_THREAD_EXIT 131
+#define WH_SYS_THREAD_JOIN 132
+#define WH_SYS_THREAD_SELF 133
+#define WH_SYS_THREAD_CANCEL 136
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38
