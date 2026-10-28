@@ -118,6 +118,47 @@ global_asm!(
     "int 0x80",
     "jmp 0b",
     "wovenhat_s03_group_end:",
+    ".global wovenhat_s03_handler_start",
+    ".global wovenhat_s03_handler_end",
+    "wovenhat_s03_handler_start:",
+    // Round-trip the bounded termios ABI through the caller-owned stack.
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 34",
+    "mov edi, 10",
+    "lea rsi, [rip + wovenhat_s03_handler]",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 10",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "4:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler_end:",
 );
 
 global_asm!(
@@ -5152,6 +5193,21 @@ pub fn create_s03_group_process() -> Option<UserProgram> {
     let stub = unsafe {
         let start = &wovenhat_s03_group_start as *const u8;
         let end = &wovenhat_s03_group_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_handler_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_handler_start: u8;
+        static wovenhat_s03_handler_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_handler_start as *const u8;
+        let end = &wovenhat_s03_handler_end as *const u8;
         core::slice::from_raw_parts(start, end.offset_from(start) as usize)
     };
     load_elf(&build_stub_elf(stub)?)

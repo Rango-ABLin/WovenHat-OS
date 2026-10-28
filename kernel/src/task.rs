@@ -2535,7 +2535,22 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if status != Ok(143) {
         return false;
     }
-    true
+
+    let Some(handler_program) = userspace::create_s03_handler_process() else {
+        return false;
+    };
+    let Ok((handler_child, _)) = spawn_user_process("s03-signal-handler", handler_program)
+    else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(handler_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    wait_process(handler_child.as_u64()) == Ok(42)
 }
 
 /// Whether the process named by the raw id `id` is in the table and has not
@@ -6089,6 +6104,14 @@ pub fn current_process_group() -> u64 {
     group.unwrap_or_else(current_process_id)
 }
 
+pub fn process_group_exists(group: u64) -> bool {
+    group != 0
+        && process_table_lock()
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == group && process.state == ProcessState::Ready)
+}
+
 pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
     let caller = current_process_id();
     let target = if pid == 0 { caller } else { pid };
@@ -6124,6 +6147,25 @@ pub fn take_pending_signal_current() -> Option<(u64, u64)> {
     }
     process.pending_signal = 0;
     Some((sig, handler))
+}
+
+/// Put a caught signal back if delivery could not safely modify the current
+/// user frame. A newer pending signal wins; never overwrite it during recovery.
+pub fn restore_pending_signal_current(signal: u64) {
+    if signal == 0 || signal > 31 {
+        return;
+    }
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    if let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+    {
+        if process.pending_signal == 0 {
+            process.pending_signal = signal;
+        }
+    }
 }
 
 pub fn seek_current(descriptor: u64, offset: u64) -> Result<u64, FileError> {

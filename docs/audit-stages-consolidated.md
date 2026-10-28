@@ -28,6 +28,16 @@ The dedicated `s03-process-lifecycle-test` then passed on 1/2/4 CPUs with exit
 targeting, safe-point termination, and exit status 143. PTYs/termios, job
 control, caught handlers, and full signal semantics remain outside this slice.
 
+The caught-handler increment also passed on 1/2/4 CPUs: a Ring-3 SIGUSR1
+handler was installed, invoked through the real syscall return path, and
+returned status 42. Failed frame delivery now restores the pending signal
+instead of dropping it.
+
+The terminal-control increment passed in the same 1/2/4-CPU S03 gate with a
+Ring-3 `TCGETS`/`TCSETS` round trip. Foreground process-group ioctl constants
+and validation are now part of the bounded terminal ABI; PTY multiplexing and
+full job-control semantics remain open.
+
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
 Added the reproducible source/linker boundary in
