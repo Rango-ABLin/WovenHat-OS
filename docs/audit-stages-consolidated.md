@@ -16454,3 +16454,8 @@ CPUs with exit 33. Evidence: `target/s05-low-memory-{1,2,4}cpu-debug/`.
 Target/host warning-denying Clippy and 193 `libwoven` tests pass. This is
 software/QEMU qualification of the physical-frame path; native hardware below
 the supported 4 GiB production floor remains outside the evidence.
+The read-only host inventory
+`audit-artifacts/physical-host-20261028-112453-065/host.json` was refreshed
+after the QEMU matrix. It reports 8.21 GiB installed RAM and
+`PhysicalTestPerformed=false`; it changes no firmware, boot configuration,
+disk, or device state and cannot substitute for an authorized native test.

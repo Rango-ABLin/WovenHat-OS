@@ -23,6 +23,11 @@ The dedicated 256 MiB low-memory matrix also passed at 1/2/4 CPUs, with
 evidence under `target/s05-low-memory-{1,2,4}cpu-debug/`. This closes the
 deterministic software/QEMU S05 slice. Native hardware qualification below the
 supported 4 GiB production floor remains unclaimed.
+The read-only native-host preflight at
+`audit-artifacts/physical-host-20261028-112453-065/host.json` records the
+current HP Pavilion x360 host (8.21 GiB installed, hypervisor present) and
+`PhysicalTestPerformed=false`; it is inventory evidence, not native
+qualification.
 
 ## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
 

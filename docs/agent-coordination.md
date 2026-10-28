@@ -11,6 +11,12 @@ low-memory QEMU matrix pass at 1/2/4 CPUs. Native hardware below the 4 GiB
 production floor is not claimed. Do not overlap these allocator/cache/task/S05
 docs edits without coordinating here.
 
+The subsequent read-only physical-host preflight is retained at
+`audit-artifacts/physical-host-20261028-112453-065/host.json`. It identifies
+the current HP Pavilion x360, 8.21 GiB installed RAM, a hypervisor-present
+Windows host, and `PhysicalTestPerformed=false`; no native low-memory target or
+authorized physical test session is available.
+
 ## Codex - S05 deterministic memory-pressure boundary (2026-10-28)
 
 Added the atomic frame-pressure policy and explicit allocation-failure
