@@ -138,7 +138,9 @@ use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Field, Vertex3Tex};
+use libwoven::graphics::{
+    Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
+};
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -816,6 +818,55 @@ fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
     canvas.fill_rect(area.x, area.y + area.height - 1, width, 1, color);
     canvas.fill_rect(area.x, area.y, 1, height, color);
     canvas.fill_rect(area.x + area.width - 1, area.y, 1, height, color);
+}
+
+/// Corner radius shared by window chrome, the taskbar, the Start button, and
+/// toasts, so the desktop reads as one consistent style rather than a
+/// patchwork of ad hoc roundings.
+const CHROME_RADIUS: usize = 6;
+/// A smaller radius for compact controls (the window close button) where the
+/// full `CHROME_RADIUS` would look disproportionate.
+const CHROME_RADIUS_SMALL: usize = 3;
+
+fn rect_of(area: Area) -> Rect {
+    Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width.max(0) as usize,
+        height: area.height.max(0) as usize,
+    }
+}
+
+fn color_of(packed: u32) -> Color {
+    Color::rgb((packed >> 16) as u8, (packed >> 8) as u8, packed as u8)
+}
+
+/// A filled rounded rectangle in `area`, replacing a flat `fill_rect` call
+/// with WovenGraphics's anti-aliased corner blending.
+fn fill_rounded(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32) {
+    Renderer::new(canvas).rounded_rect(rect_of(area), radius, color_of(color));
+}
+
+/// A top-to-bottom gradient fill in `area`, replacing a flat `fill_rect` call
+/// for chrome that reads better with a subtle highlight (title bars, the
+/// taskbar, the Start button) rather than a single flat colour.
+fn fill_gradient(canvas: &mut Canvas<'_>, area: Area, top: u32, bottom: u32) {
+    Renderer::new(canvas).vertical_gradient(rect_of(area), color_of(top), color_of(bottom));
+}
+
+/// `color`, lightened toward white by `amount` (0..=255) -- used to derive a
+/// gradient's lighter top stop from a single existing theme colour, so theme
+/// swaps (e.g. high-contrast mode) only need to change one value.
+fn lighten(color: u32, amount: u8) -> u32 {
+    let mix = |channel: u8| {
+        let headroom = 255 - channel;
+        channel + ((u16::from(headroom) * u16::from(amount)) / 255) as u8
+    };
+    rgb(
+        mix(((color >> 16) & 0xff) as u8),
+        mix(((color >> 8) & 0xff) as u8),
+        mix((color & 0xff) as u8),
+    )
 }
 
 /// A rectangle in screen coordinates.
@@ -2076,11 +2127,13 @@ impl Desktop {
         );
         canvas.fill_rect(0, top, width, 1, theme_accent());
 
-        canvas.fill_rect(
-            START_X,
-            top + 4,
-            START_WIDTH,
-            START_HEIGHT,
+        // The taskbar band itself stays flat and full-width (rounding a
+        // screen-edge-spanning bar would look wrong); only the self-contained
+        // Start button gets the rounded chrome treatment.
+        fill_rounded(
+            canvas,
+            Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32),
+            CHROME_RADIUS,
             theme_start_fill(),
         );
         let icon_x = START_X + START_ICON_MARGIN;
@@ -2737,12 +2790,12 @@ impl Desktop {
     fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         outline(canvas, area, theme_accent());
-        canvas.fill_rect(
-            x + 1,
-            y + 1,
-            (area.width - 2) as usize,
-            PANEL_ROW as usize,
-            theme_start_fill(),
+        let fill = theme_start_fill();
+        fill_gradient(
+            canvas,
+            Area::new(x + 1, y + 1, area.width - 2, PANEL_ROW),
+            lighten(fill, 40),
+            fill,
         );
         canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_text());
         for (row, text) in self.qs_rows().iter().enumerate() {
@@ -3001,12 +3054,12 @@ impl Desktop {
     fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         outline(canvas, area, theme_accent());
-        canvas.fill_rect(
-            x + 1,
-            y + 1,
-            (area.width - 2) as usize,
-            PANEL_ROW as usize,
-            theme_start_fill(),
+        let fill = theme_start_fill();
+        fill_gradient(
+            canvas,
+            Area::new(x + 1, y + 1, area.width - 2, PANEL_ROW),
+            lighten(fill, 40),
+            fill,
         );
         canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_text());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
@@ -3185,23 +3238,15 @@ impl Desktop {
         if three_d {
             Self::render_title_3d(area, fill, canvas);
         } else {
-            canvas.fill_rect(
-                area.x,
-                area.y,
-                area.width as usize,
-                area.height as usize,
-                fill,
-            );
+            // A subtle top-to-bottom highlight instead of one flat colour.
+            // Square corners here: the title bar sits directly against the
+            // window body below it, and rounding only the title independently
+            // would show a seam where the two meet.
+            fill_gradient(canvas, area, lighten(fill, 40), fill);
         }
         let close = window.close_area();
         if !close.is_empty() {
-            canvas.fill_rect(
-                close.x,
-                close.y,
-                close.width as usize,
-                close.height as usize,
-                CLOSE_FILL,
-            );
+            fill_rounded(canvas, close, CHROME_RADIUS_SMALL, CLOSE_FILL);
             canvas.draw_text(close.x + 3, close.y + 2, "x", theme_text());
         }
         let mut buffer = [0u8; 32];

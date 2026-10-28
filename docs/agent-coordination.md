@@ -1,5 +1,39 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
+
+User reported the GUI "looks like 1998 graphics." Root cause:
+`libwoven::graphics::Renderer` already has anti-aliased rounded rects, alpha
+blending and gradients (accepted at the library level), but
+`apps/woven-shell/src/main.rs` never called them for everyday chrome -- only
+for the opt-in 3D panel effect (deliberately made non-default by an earlier
+M01 regression fix, `docs/stage-status.md:1799-1806`). Converted the
+self-contained chrome elements to use `Renderer`: the Start button and window
+close button now use `rounded_rect` (new `CHROME_RADIUS`/
+`CHROME_RADIUS_SMALL` constants), and the window title bar plus the Quick
+Settings/Notification Center panel headers now use `vertical_gradient`
+(square corners kept there deliberately -- they sit flush against an
+adjacent region and independent rounding would show a seam). Two small local
+helpers (`rect_of`/`color_of`) convert between the shell's `Area`/packed-`u32`
+types and `libwoven::graphics`'s `Rect`/`Color`; no changes to
+`kernel/src/display.rs`, `compositor.rs`, the font/text path, or the 3D opt-in
+path.
+
+Verified visually, not just by a clean build: ran
+`scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture) --
+the Start button renders as a rounded pill and the Files window title bar
+shows a visible gradient with a rounded close button, both with text still
+correctly positioned; the desktop qualification gate itself passed (1 CPU).
+Target Clippy on `apps/woven-shell` (its own workspace, `--target
+x86_64-unknown-none`) is clean.
+
+Deliberately left for a follow-on, not this pass: the toast notification's
+background fill goes through a `painter.blend(...)` call I haven't fully
+traced (risk of disturbing alpha-layering order without understanding it
+first); and font/text rendering (`kernel/src/font.rs`, a 5x7 bitmap glyph
+table) is untouched -- it's a separate, larger change touching text layout
+throughout the shell, not a chrome-fill swap.
+
 ## Claude Code - Stage 12.2 extended attributes accepted (2026-10-28)
 
 Added real extended-attribute support to `kernel/src/wfs.rs` (the native FS,
