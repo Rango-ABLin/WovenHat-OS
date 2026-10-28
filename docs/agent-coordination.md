@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded musl startup auxv and detached-thread increment (2026-10-28)
+
+The loader's initial stack now carries a bounded aux-vector containing page
+size and configured uid/gid entries. The static CRT fixture validates those
+entries. The pthread adapter now supports detached-thread reclamation and a
+bounded yield-based `pthread_cond_timedwait` timeout path; the fixture covers
+both. Target/host Clippy, LLVM C compilation/link, and the production loader
+gate pass on 1/2/4 CPUs with evidence under
+`target/musl-startup-thread-{1,2,4}cpu.serial.log`.
+
+This is not full musl `__libc_start_main`: random bytes, platform-specific
+auxv entries, dynamic TLS modules, kernel-clock timed waits, robust owner-death
+recovery, and the remaining POSIX syscall families remain open.
+
 ## Codex - musl initial-exec TLS errno increment (2026-10-28)
 
 The musl bootstrap now uses an initial-exec `__thread` errno cell. The custom

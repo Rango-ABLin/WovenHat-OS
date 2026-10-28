@@ -30,7 +30,9 @@ and wait fixture checks. The adapter also exposes bounded `getuid()`,
 these are ABI slices, not a complete POSIX namespace. The static profile also
 has a bounded mmap-backed allocator and generation-safe pthread create/join
 with process-private mutex/condition primitives; it deliberately does not
-claim full musl startup, dynamic TLS, detached cleanup, or complete POSIX.
+claim full musl startup, dynamic TLS, kernel-clock timed waits, robust owner
+death recovery, or complete POSIX. The loader's initial stack now includes a
+small explicit aux-vector for page size and configured uid/gid discovery.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 

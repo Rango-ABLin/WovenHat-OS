@@ -229,6 +229,15 @@ still a bounded static profile: full musl start-main/aux-vector startup,
 detached/cancellation cleanup, dynamic TLS, timed/robust synchronization,
 and the remaining POSIX syscall surface remain open.
 
+The startup/thread follow-up now publishes a bounded initial aux-vector
+(`AT_PAGESZ`, `AT_UID`, `AT_GID`) after the inherited argv/envp layout. The
+fixture validates those entries, exercises detached-thread reclamation, and
+checks the bounded yield-based `pthread_cond_timedwait` timeout path. The
+production loader passes on 1/2/4 CPUs with evidence in
+`target/musl-startup-thread-{1,2,4}cpu.serial.log`. Kernel-clock timed waits,
+robust owner-death recovery, dynamic TLS modules, and the wider POSIX syscall
+families remain unimplemented.
+
 The next ABI slice adds bounded `getuid()`, `getgid()`, `getcwd()` and
 length-delimited `chdir()` adapters over the existing kernel syscalls. The
 fixture validates the current uid/gid (1000) and an absolute working
