@@ -17,6 +17,7 @@ const TRANSMITTER_EMPTY: u8 = 1 << 5;
 #[cfg(feature = "debug-serial")]
 const TX_POLL_LIMIT: u16 = 4096;
 #[cfg(feature = "debug-serial")]
+#[cfg(feature = "stage32-9-test")]
 const LOOPBACK: u8 = 1 << 4;
 #[cfg(feature = "debug-serial")]
 const MODEM_CONTROL: u16 = 4;

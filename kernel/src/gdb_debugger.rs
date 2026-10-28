@@ -46,6 +46,7 @@ pub enum Action {
     Continue,
     Step,
     Kill,
+    Detach,
     Empty,
 }
 
@@ -104,6 +105,13 @@ pub fn dispatch(
     if command == b"k" {
         return Some((Action::Kill, 0));
     }
+    if command == b"D" {
+        if reply.len() < 2 {
+            return None;
+        }
+        reply[..2].copy_from_slice(b"OK");
+        return Some((Action::Detach, 2));
+    }
     if command == b"qSupported" {
         return reply_bytes(reply, b"PacketSize=0200;swbreak+;hwbreak-");
     }
@@ -113,15 +121,29 @@ pub fn dispatch(
     reply_bytes(reply, b"")
 }
 
+/// Parse a `m<addr>,<len>` command (with the leading `m` still attached) into
+/// its address and length. Pure; performs no bounds checking against
+/// [`MAX_MEMORY_READ`] or any memory window — callers that need a real byte
+/// range still go through [`dispatch`] for that enforcement.
+#[cfg(any(feature = "gdb-entry", test))]
+pub(crate) fn parse_memory_request(command: &[u8]) -> Option<(u64, usize)> {
+    parse_memory_spec(command.strip_prefix(b"m")?)
+}
+
+fn parse_memory_spec(spec: &[u8]) -> Option<(u64, usize)> {
+    let comma = spec.iter().position(|&byte| byte == b',')?;
+    let address = parse_hex(&spec[..comma])?;
+    let length = parse_hex_usize(&spec[comma + 1..])?;
+    Some((address, length))
+}
+
 fn dispatch_memory(
     spec: &[u8],
     memory_base: u64,
     memory: &[u8],
     reply: &mut [u8],
 ) -> Option<(Action, usize)> {
-    let comma = spec.iter().position(|&byte| byte == b',')?;
-    let address = parse_hex(&spec[..comma])?;
-    let length = parse_hex_usize(&spec[comma + 1..])?;
+    let (address, length) = parse_memory_spec(spec)?;
     if length > MAX_MEMORY_READ
         || address < memory_base
         || address.checked_sub(memory_base)? > memory.len() as u64
@@ -238,7 +260,7 @@ pub fn self_test() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch, Action, RegisterContext};
+    use super::{dispatch, parse_memory_request, Action, RegisterContext};
 
     #[test]
     fn rejects_unbounded_memory() {
@@ -248,5 +270,23 @@ mod tests {
             Some((Action::Reply, 3))
         );
         assert_eq!(&reply[..3], b"E01");
+    }
+
+    #[test]
+    fn detach_replies_ok_and_signals_detach() {
+        let mut reply = [0u8; 8];
+        assert_eq!(
+            dispatch(b"D", &RegisterContext::ZERO, 0, b"", &mut reply),
+            Some((Action::Detach, 2))
+        );
+        assert_eq!(&reply[..2], b"OK");
+    }
+
+    #[test]
+    fn parse_memory_request_matches_dispatch_memory() {
+        assert_eq!(parse_memory_request(b"m1000,2"), Some((0x1000, 2)));
+        assert_eq!(parse_memory_request(b"g"), None);
+        assert_eq!(parse_memory_request(b"m"), None);
+        assert_eq!(parse_memory_request(b"m1000"), None);
     }
 }

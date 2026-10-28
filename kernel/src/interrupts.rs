@@ -259,6 +259,7 @@ pub fn breakpoint_reached() -> bool {
     BREAKPOINT_REACHED.load(Ordering::SeqCst)
 }
 
+#[cfg(not(feature = "gdb-entry"))]
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
     BREAKPOINT_REACHED.store(true, Ordering::SeqCst);
     #[cfg(feature = "wovendev-live")]

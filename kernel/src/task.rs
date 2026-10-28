@@ -3121,6 +3121,21 @@ pub fn current_process_id() -> u64 {
     CURRENT_PROCESS_IDS[crate::smp::cpu_index()].load(Ordering::Acquire)
 }
 
+/// The current process's address space, if any. Used by debug/diagnostic
+/// paths (the GDB memory-read boundary) that need a bounded, read-only
+/// snapshot of where to translate a user address; never held across a
+/// `paging`/`PAGING` lock acquisition, so it does not change this module's
+/// lock-order contract.
+#[cfg(feature = "gdb-entry")]
+pub(crate) fn current_user_address_space() -> Option<userspace::AddressSpace> {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .and_then(|process| process.address_space)
+}
+
 static FILE_IO_DEPTH: [AtomicU64; crate::smp::MAX_CPUS] =
     [const { AtomicU64::new(0) }; crate::smp::MAX_CPUS];
 static LOCAL_PREEMPT_DEPTH: [AtomicU64; crate::smp::MAX_CPUS] =
