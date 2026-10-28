@@ -681,6 +681,9 @@ impl<D: BlockDevice> Volume<D> {
             if target >= sb.total_blocks
                 || target < 2
                 || (target >= sb.journal_start && target < journal_end)
+                || (0..index).any(|earlier| {
+                    read_u64(&descriptor, 24 + earlier * 8) == target
+                })
             {
                 return Err(Error::Corrupt);
             }
