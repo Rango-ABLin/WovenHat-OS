@@ -192,6 +192,33 @@ fn replay_rejects_reserved_journal_targets_without_touching_metadata() {
 }
 
 #[test]
+fn replay_rejects_duplicate_destination_before_any_write() {
+    let disk = formatted();
+    let sb = {
+        let volume = Volume::mount(disk.clone()).expect("baseline mount");
+        *volume.super_block()
+    };
+    let destination = sb.data_start;
+    let original = disk.sectors()[destination as usize];
+    {
+        let mut image = disk.image.borrow_mut();
+        let mut descriptor = [0u8; SECTOR_SIZE];
+        descriptor[..8].copy_from_slice(wfs::JOURNAL_DESC_MAGIC);
+        descriptor[8..16].copy_from_slice(&1000_u64.to_le_bytes());
+        descriptor[16..20].copy_from_slice(&2_u32.to_le_bytes());
+        descriptor[24..32].copy_from_slice(&destination.to_le_bytes());
+        descriptor[32..40].copy_from_slice(&destination.to_le_bytes());
+        image[sb.journal_start as usize] = descriptor;
+        let mut commit = [0u8; SECTOR_SIZE];
+        commit[..8].copy_from_slice(wfs::JOURNAL_COMMIT_MAGIC);
+        commit[8..16].copy_from_slice(&1000_u64.to_le_bytes());
+        image[(sb.journal_start + 3) as usize] = commit;
+    }
+    assert!(matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)));
+    assert_eq!(disk.sectors()[destination as usize], original);
+}
+
+#[test]
 fn format_produces_a_consistent_mountable_volume() {
     let image = formatted();
     let mut volume = mount_consistent(&image, "fresh format");
