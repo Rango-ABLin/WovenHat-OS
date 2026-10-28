@@ -34,9 +34,10 @@ silently mapped to a different WovenHat authority.
 ## Bootstrap increment: upstream I/O objects
 
 `scripts/build-musl-wovenhat-bootstrap.py` generates musl's `alltypes.h` from
-the pinned sources, compiles the upstream musl `read.c` and `write.c`, and
-archives those objects with the WovenHat cancellation-point transport bridge.
-It is deliberately a `BUILT_NOT_LINKED` artifact: `__syscall_ret`, errno/TLS,
-C startup, allocator, and thread cancellation semantics have not yet been
-implemented. The bridge rejects unmapped calls with `ENOSYS`; it does not
-discard extra arguments or route them through a different authority.
+the pinned sources, compiles upstream `read.c`, `write.c`, and `syscall_ret.c`,
+and links a static C ELF with the WovenHat transport bridge. The executable
+proves that a denied `write()` returns `-1` and records the current transport
+failure as `errno == EIO` before exiting. Its errno storage is intentionally
+single-threaded: TLS, C startup, allocator, and thread cancellation semantics
+have not yet been implemented. The bridge rejects unmapped calls with ENOSYS;
+it does not discard extra arguments or route them through another authority.

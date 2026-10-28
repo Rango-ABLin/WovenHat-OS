@@ -17,16 +17,17 @@ explicitly outside S02 and remain separately unclaimed.
 ## POSIX musl static-libc bootstrap - 2026-10-28 - IMPLEMENTING
 
 The repeatable `scripts/build-musl-wovenhat-bootstrap.py` build generated
-musl's type header and compiled pinned upstream musl 1.2.6 `read.c` and
-`write.c` with the WovenHat adapter, then archived them with the bounded
-cancellation-point bridge. The build is intentionally `BUILT_NOT_LINKED`:
-the required `__syscall_ret`/errno/TLS, C startup, allocator, cancellation,
-and broader syscall bodies do not exist yet. Python validation, the bootstrap
-build, S02 target warning-denying Clippy, and the preserved S02 QEMU regression
-gate passed at 1/2/4 CPUs. Evidence: `target/musl-wovenhat-bootstrap-check2/`
-and `target/musl-bootstrap-s02-1cpu-debug/`,
-`target/musl-bootstrap-s02-rerun-{2,4}cpu-debug/`. This is not a POSIX profile
-acceptance or static-libc execution gate.
+musl's type header, compiled pinned upstream musl 1.2.6 `read.c`, `write.c`,
+and `syscall_ret.c`, and linked a static ELF with the bounded
+cancellation-point bridge and explicitly single-threaded errno cell. The ELF
+ran through the production loader and proved a denied upstream `write()`
+returns `-1` with `errno == EIO`, then exits 42. Python validation, the
+bootstrap build, target/host warning-denying Clippy, and QEMU passed at 1/2/4
+CPUs. Evidence: `target/musl-wovenhat-static-check2/` and
+`target/musl-static-bootstrap-1cpu-debug/`,
+`target/musl-static-bootstrap-rerun-{2,4}cpu-debug/`. TLS, startup, allocator,
+cancellation, and the broader syscall surface are open. This is not a POSIX
+profile acceptance.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 

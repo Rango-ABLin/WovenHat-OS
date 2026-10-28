@@ -20,9 +20,12 @@ import sys
 MUSL_VERSION = "1.2.6"
 SOURCES = (
     "ports/musl/src/syscall_cp.c",
+    "ports/musl/src/errno_location.c",
+    "vendor/musl/src/internal/syscall_ret.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
 )
+FIXTURE = "tools/runtime-fixtures/musl-bootstrap.c"
 
 
 def find_tool(explicit: str | None, names: tuple[str, ...]) -> str | None:
@@ -48,6 +51,11 @@ def git_sed() -> str | None:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def find_lld(clang: str) -> str | None:
+    candidate = Path(clang).resolve().parent / ("ld.lld.exe" if os.name == "nt" else "ld.lld")
+    return str(candidate) if candidate.is_file() else shutil.which("ld.lld")
 
 
 def run(command: list[str], log: Path, root: Path) -> None:
@@ -76,14 +84,16 @@ def main() -> int:
         "contract": "WOVENHAT-MUSL-BOOTSTRAP-V1",
         "musl_version": MUSL_VERSION,
         "sources": {source: sha256(root / source) for source in SOURCES},
+        "fixture": {"path": FIXTURE, "sha256": sha256(root / FIXTURE)},
         "qualification": "NOT_QUALIFIED",
         "scope": "upstream musl read/write objects plus WovenHat cancellation bridge",
     }
     if (root / "vendor/musl/VERSION").read_text(encoding="utf-8").strip() != MUSL_VERSION:
         raise SystemExit("pinned musl version is not the expected bootstrap source")
-    if not clang or not ar or not sed:
+    lld = find_lld(clang) if clang else None
+    if not clang or not ar or not sed or not lld:
         report["status"] = "NOT_AVAILABLE"
-        report["missing_tools"] = [name for name, value in (("clang", clang), ("llvm-ar", ar), ("sed", sed)) if not value]
+        report["missing_tools"] = [name for name, value in (("clang", clang), ("ld.lld", lld), ("llvm-ar", ar), ("sed", sed)) if not value]
         (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
         return 2
@@ -119,12 +129,21 @@ def main() -> int:
         objects.append(object_file)
     archive = output / "libmusl-wovenhat-bootstrap.a"
     run([ar, "rcs", str(archive), *map(str, objects)], output / "archive.log", root)
+    fixture_object = output / "musl-bootstrap-fixture.o"
+    run(common + ["-c", str(root / FIXTURE), "-o", str(fixture_object)],
+        output / "fixture.compile.log", root)
+    elf = output / "musl-bootstrap.elf"
+    run([lld, "--entry=_start", f"--script={root / 'tools/runtime-fixtures/link.x'}",
+         "-z", "norelro", "--oformat=elf64-x86-64", "-o", str(elf),
+         str(fixture_object), str(archive)], output / "fixture.link.log", root)
     report.update({
-        "status": "BUILT_NOT_LINKED",
+        "status": "BUILT_NOT_EXECUTED",
         "archive": str(archive.relative_to(root)),
         "archive_sha256": sha256(archive),
+        "elf": str(elf.relative_to(root)),
+        "elf_sha256": sha256(elf),
         "objects": {str(path.relative_to(root)): sha256(path) for path in objects},
-        "reason": "Object/archive build passed; errno/TLS/startup and loader/QEMU execution are separate gates",
+        "reason": "Static errno/write link passed; TLS, allocator, threads and loader/QEMU execution are separate gates",
     })
     (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))

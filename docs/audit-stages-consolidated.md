@@ -7,12 +7,12 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 ## POSIX musl static-libc bootstrap - 2026-10-28
 
 Added the repeatable bounded bootstrap builder for pinned musl 1.2.6. It
-generates the required type header, compiles the actual upstream `read.c` and
-`write.c`, and archives them with a WovenHat cancellation-point bridge. The
-archive is recorded as `BUILT_NOT_LINKED`, not executed or conformant: errno,
-TLS, C startup, allocator, cancellation, and broader POSIX bodies are open.
-The existing S02 fixture regression passed at 1/2/4 CPUs; this proves no
-regression of S02 rather than proving musl execution.
+generates the required type header, compiles upstream `read.c`, `write.c`, and
+`syscall_ret.c`, and links them with the WovenHat cancellation bridge and a
+single-thread errno cell. The resulting static C ELF executed through the
+production loader on QEMU at 1/2/4 CPUs and proved denied-write `-1`/EIO
+behavior. TLS, C startup, allocator, cancellation, and broader POSIX bodies
+remain open; this is neither full static libc nor a profile-conformance claim.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28
 

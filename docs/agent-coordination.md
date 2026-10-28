@@ -7182,3 +7182,11 @@ not present and remain next work. Bootstrap build/contract validation and the
 preserved S02 QEMU regression passed at 1/2/4 CPUs. No POSIX profile or static
 libc execution claim is made.
 
+POSIX port increment 3: added a deliberately single-thread `__errno_location`
+compatibility cell and compiled musl's upstream `syscall_ret.c`. The bootstrap
+now links and executes an actual static C ELF through the production loader;
+the fixture verifies upstream `write(-1, ...) == -1` and `errno == EIO` before
+the accepted exit 42. QEMU passed at 1/2/4 CPUs. This is narrow static-libc
+execution only: no TLS/pthread semantics, normal C startup, allocator, or
+POSIX profile acceptance is claimed.
+

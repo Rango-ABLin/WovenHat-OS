@@ -7,10 +7,11 @@ outside the vendor tree. `ports/musl/include/syscall_arch.h` translates only
 the currently checked Linux-shaped read, write, close, and exit calls to the
 three-argument WovenHat syscall gate. `ports/musl/src/syscall_cp.c` is the
 temporary cancellation-point transport boundary; it contains no cancellation
-claim. The reproducible bootstrap builder compiles genuine upstream `read.c`
-and `write.c` into an archive but intentionally does not link or execute it:
-errno/TLS, startup, allocator, threading and the remaining syscall surface
-must be implemented and qualified in later increments.
+claim. The reproducible bootstrap builder compiles genuine upstream `read.c`,
+`write.c`, and `syscall_ret.c`, then links a static ELF. Its fixture proves the
+denied-write `-1`/`errno == EIO` path on QEMU. `errno_location.c` is expressly
+a single-threaded temporary cell, not TLS. Startup, allocator, threading and
+the remaining syscall surface must be implemented and qualified later.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 
