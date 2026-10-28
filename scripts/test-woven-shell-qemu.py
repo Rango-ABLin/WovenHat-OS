@@ -94,6 +94,10 @@ def main():
             [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
             cwd=root, env=package_env, text=True,
         ).strip()
+        env['WOVENHAT_SEARCH_IMAGE'] = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-search-service.py')],
+            cwd=root, env=package_env, text=True,
+        ).strip()
     if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13','20.18','20.19'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1

@@ -6581,6 +6581,8 @@ const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_INSTALLER: &[u8] = include_bytes!(env!("WOVENHAT_INSTALLER_IMAGE"));
 #[cfg(feature = "system-apps")]
+const SEARCH_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_IMAGE"));
+#[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER: &[u8] = include_bytes!(env!("WOVENHAT_WALLPAPER_IMAGE"));
 #[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER_MANIFEST: &[u8] = include_bytes!(concat!(
@@ -7760,7 +7762,7 @@ fn start_production_system_services() -> bool {
                     "[SERVICES] woven-installer published as pid {}",
                     pid.as_u64()
                 ));
-                return true;
+                break;
             }
         }
         if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
@@ -7768,6 +7770,45 @@ fn start_production_system_services() -> bool {
             serial::write_line(format_args!(
                 "[SERVICES] woven-installer publication failed"
             ));
+            return false;
+        }
+        task::yield_now();
+    }
+
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        SEARCH_SERVICE_IMAGE,
+        &["/bin/woven-search"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-search load failed"));
+        return false;
+    };
+    let search_capabilities = capability::CapabilitySet::only(capability::Capability::Ipc);
+    let Ok((pid, _, _)) =
+        task::spawn_user_system_service("woven-search", program, search_capabilities)
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-search spawn failed"));
+        return false;
+    };
+    if !service_supervisor::register(service_supervisor::ServiceKind::Search, pid) {
+        serial::write_line(format_args!(
+            "[SERVICES] woven-search supervisor registration failed"
+        ));
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(libwoven::search_ipc::SERVICE_NAME) {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-search published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-search publication failed"));
             return false;
         }
         task::yield_now();

@@ -309,6 +309,12 @@ def main():
         env=system_app_env,
         text=True,
     ).strip()))
+    system_app_env['WOVENHAT_SEARCH_IMAGE'] = str(Path(subprocess.check_output(
+        [sys.executable, 'scripts/build-search-service.py'],
+        cwd=root,
+        env=system_app_env,
+        text=True,
+    ).strip()))
     run(
         'lint-kernel-system-apps',
         [

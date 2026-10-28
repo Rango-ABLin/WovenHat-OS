@@ -4832,7 +4832,12 @@ only `Ipc` authority, and serves an eleven-entry public application index; it
 is not a twelfth launcher application. The signed service/probe gate passes on
 1/2/4 CPUs, proving publication, query ranking, reaping, and registry cleanup.
 Evidence is retained under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
-Production startup and supervisor restart wiring remain open.
+Production `system-apps` boot now publishes WovenSearch as the fourth
+supervised service with IPC-only authority; the signed supervisor gate passes
+with `[SERVICES] woven-search published as pid 4` and the existing update
+restart marker. Launcher builders now provide the signed service image
+quietly. Search-specific restart injection and physical hardware qualification
+remain open.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 

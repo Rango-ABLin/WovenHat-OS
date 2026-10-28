@@ -66,6 +66,12 @@ def main():
             text=True,
         ).strip()
         build_env['WOVENHAT_PACKAGE_IMAGE'] = package_service
+        build_env['WOVENHAT_SEARCH_IMAGE'] = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-search-service.py')],
+            cwd=root,
+            env=package_env,
+            text=True,
+        ).strip()
         build_env['WOVENHAT_CALCULATOR_IMAGE'] = str(packages['woven-calculator'])
         build_env['WOVENHAT_TERMINAL_IMAGE'] = str(packages['woven-terminal'])
         build_env['WOVENHAT_FILES_IMAGE'] = str(packages['woven-files'])

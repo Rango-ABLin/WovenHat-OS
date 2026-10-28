@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenSearch production startup integration (2026-10-28)
+
+The signed WovenSearch broker is now embedded in `system-apps` boot as a
+fourth supervised service with `Ipc` authority only. Release, desktop, shell,
+and interactive launchers build its WAPP image and pass a quiet image path to
+Cargo. The existing signed supervisor QEMU gate proves publication alongside
+package/update/installer and passes update restart recovery; search-specific
+crash injection remains future work.
+
 ## Codex — WovenSearch service boundary increment (2026-10-28)
 
 Reserved scope: complete the existing Stage 23.5 bounded search core with a

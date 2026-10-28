@@ -21,6 +21,7 @@ def main() -> int:
         ["cargo", "build", "--release", "--target", "x86_64-unknown-none"],
         cwd=app,
         env=build_env,
+        stdout=subprocess.DEVNULL,
         check=True,
     )
     elf = app / "target" / "x86_64-unknown-none" / "release" / "wovenhat-search"
@@ -35,6 +36,7 @@ def main() -> int:
         ],
         cwd=root,
         env=package_env,
+        stdout=subprocess.DEVNULL,
         check=True,
     )
     print(output)

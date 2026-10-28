@@ -5,7 +5,7 @@
 
 use crate::{capability, irq_lock::IrqMutex, task, timer, userspace};
 
-const MAX_SERVICES: usize = 3;
+const MAX_SERVICES: usize = 4;
 const MAX_RESTARTS: u8 = 3;
 const BASE_BACKOFF_TICKS: u64 = 100;
 
@@ -14,6 +14,7 @@ pub enum ServiceKind {
     Package,
     Update,
     Installer,
+    Search,
 }
 
 #[derive(Clone, Copy)]
@@ -190,6 +191,12 @@ fn spawn(kind: ServiceKind) -> Result<task::ProcessId, task::ProcessError> {
             &["/bin/wovenhat-installer", "--service"],
             capabilities,
         ),
+        ServiceKind::Search => spawn_one(
+            "woven-search",
+            crate::SEARCH_SERVICE_IMAGE,
+            &["/bin/woven-search"],
+            capability::CapabilitySet::only(capability::Capability::Ipc),
+        ),
     }
 }
 
@@ -210,6 +217,7 @@ fn name(kind: ServiceKind) -> &'static str {
         ServiceKind::Package => "woven-package",
         ServiceKind::Update => "woven-update",
         ServiceKind::Installer => "woven-installer",
+        ServiceKind::Search => "woven-search",
     }
 }
 

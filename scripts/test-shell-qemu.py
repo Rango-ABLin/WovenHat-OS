@@ -173,6 +173,12 @@ def main():
             text=True,
         ).strip()
         build_env['WOVENHAT_PACKAGE_IMAGE'] = package_service
+        build_env['WOVENHAT_SEARCH_IMAGE'] = subprocess.check_output(
+            [sys.executable, str(root / 'scripts' / 'build-search-service.py')],
+            cwd=root,
+            env=package_env,
+            text=True,
+        ).strip()
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
         feature = ('stage31-service-supervisor-test' if args.supervisor_test
