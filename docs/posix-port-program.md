@@ -57,3 +57,10 @@ is retained because async I/O cancellation is not implemented. The fixture
 proves denied `close(-1)` returns `-1` with `errno == EIO` at 1/2/4 CPUs.
 Successful descriptor close and standard-descriptor setup remain kernel ABI
 work, not implied by this error-path proof.
+
+## Bootstrap increment: console write
+
+The static fixture proves upstream musl `write(1, ...)` returns its full byte
+count through WovenHat's existing capability-gated console path on 1/2/4 CPUs.
+It does not create a file-table entry for stdout or relax the kernel policy
+that descriptors below 3 cannot be closed.

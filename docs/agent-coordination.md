@@ -7216,3 +7216,9 @@ bootstrap. Its documented weak no-AIO fallback is preserved. The fixture
 checks denied `close(-1)` maps to `-1`/EIO and passed QEMU at 1/2/4 CPUs.
 No successful-close or standard-descriptor claim is made.
 
+POSIX port increment 6: the static musl fixture now proves valid
+`write(1, ...)` through the existing capability-gated console fallback, with
+the exact byte count and all prior errno checks. QEMU passed at 1/2/4 CPUs.
+The fallback is not a closable file-table entry; no standard-stream close
+policy was changed.
+
