@@ -66,7 +66,14 @@ record and foreground process-group `TIOCGPGRP`/`TIOCSPGRP` requests on
 standard input. The Ring-3 S03 probe round-trips termios through the real
 syscall ABI and the full lifecycle gate remains green on 1/2/4 CPUs. This is
 a single-owner terminal boundary; PTY allocation/multiplexing and complete
-job-control stop/continue behavior remain open.
+job-control stop/continue behavior remain open. Foreground assignment now
+requires the caller's current process group or TaskControl capability, and
+console stdin rejects reads from background process groups; the shell's
+foreground assignment is normalized to the target process group.
+The input path also consumes the configured `VINTR` byte and sends SIGINT to
+the foreground group; it is not returned as ordinary stdin data. The current
+QEMU fixture does not inject keyboard bytes, so this behavior still needs a
+dedicated runtime acceptance probe.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

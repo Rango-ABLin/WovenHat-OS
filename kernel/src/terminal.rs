@@ -457,12 +457,18 @@ pub fn clear() {
 }
 
 pub fn set_foreground(pid: u64) {
-    FOREGROUND_PID.store(pid, Ordering::Release);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    set_foreground_group(group);
 }
 
 pub fn release_foreground(pid: u64) {
-    let _ =
-        FOREGROUND_PID.compare_exchange(pid, NO_FOREGROUND, Ordering::AcqRel, Ordering::Acquire);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    let _ = FOREGROUND_PID.compare_exchange(
+        group,
+        NO_FOREGROUND,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    );
 }
 
 pub fn foreground_pid() -> Option<u64> {

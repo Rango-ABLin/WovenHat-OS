@@ -6104,12 +6104,26 @@ pub fn current_process_group() -> u64 {
     group.unwrap_or_else(current_process_id)
 }
 
+pub fn process_group_of(pid: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == pid)
+        .map(|process| process.process_group)
+}
+
 pub fn process_group_exists(group: u64) -> bool {
     group != 0
         && process_table_lock()
             .iter()
             .flatten()
             .any(|process| process.process_group == group && process.state == ProcessState::Ready)
+}
+
+pub fn can_control_foreground_group(group: u64) -> bool {
+    group != 0
+        && (current_has(crate::capability::Capability::TaskControl)
+            || current_process_group() == group)
 }
 
 pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
