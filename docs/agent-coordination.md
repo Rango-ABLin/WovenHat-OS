@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex — WovenSearch service boundary increment (2026-10-28)
+
+Reserved scope: complete the existing Stage 23.5 bounded search core with a
+least-privilege Ring-3 `woven.search` service, fixed versioned IPC frames, and
+an explicit read-only client boundary for desktop applications. This increment
+does not add implicit filesystem crawling, network access, model execution,
+or privileged mutation. Do not concurrently modify `libwoven::semantic_search`,
+the new search IPC module, `apps/woven-search`, or its focused acceptance
+harness. QEMU acceptance remains serialized; no full acceptance chain will be
+started while another owner reservation is present.
+
 ## Codex — S03 keyboard/job-control closure increment (2026-10-28)
 
 The dedicated headless QMP gate now boots xHCI with USB keyboard/mouse,

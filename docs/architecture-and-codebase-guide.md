@@ -2399,6 +2399,17 @@ round-trips through bounded storage; upsert and removal never expose a partial
 index. Source adapters, ranking evaluation, and a user-facing service remain
 separate work.
 
+### WovenSearch IPC protocol foundation (2026-10-28)
+
+`libwoven::search_ipc` defines the versioned `WSR1` control frame for the
+future `woven.search` Ring-3 service. A request is either `Describe` or a
+bounded UTF-8 `Query`; a fixed-size response contains only request-correlated
+identifier, kind, and score hits. The frame deliberately does not transport
+paths, contents, index updates, or directory enumeration. Consequently,
+discovering the service cannot grant an application filesystem visibility or
+write authority. The service process, source adapters, supervision, and QEMU
+acceptance are still required before treating this as an available OS service.
+
 ## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
 
 `libwoven::ai_assistant` stores at most eight fixed-size actions, rejects

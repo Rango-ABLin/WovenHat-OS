@@ -1,5 +1,35 @@
 # Stage status
 
+## Stage 15.2 physical qualification — 2026-10-28 — READY TO RUN
+
+Physical WovenFS qualification was attempted with the 15 GB VendorCo USB drive
+(serial 4045141272666606378, `\\.\PhysicalDrive2`) and exit 35 was returned.
+Investigation confirmed the failure was in **old code** (the serial log contained
+`[S03.TOSTOP-DIAG]` diagnostics removed by commit `a26937bc`); S10.3 failed with
+`verified=false active=0 owner_reaped=0`, meaning user-space async syscalls were
+never reached.
+
+The current HEAD (`ef3aca4d`) passes S10.3 and all prior gates in every tested
+configuration:
+- `stage10-4-test` on `-machine q35` → exit 33
+- `stage10-4-test` on `-machine pc` (no disk) → exit 33
+- `stage10-4-test` on `-machine pc` + 16 MB virtual ATA image → exit 33
+- `stage15-2-test` on `-machine pc` + 16 MB virtual ATA image → exit 33, all
+  S15.2 sub-tests including `[S15.2] WovenFS physical device: PASSED`
+
+Evidence: `audit-artifacts/s103-q35-check/`, `audit-artifacts/s103-pc-nodisk-check/`,
+`audit-artifacts/s103-pc-virtdisk-check/`, `audit-artifacts/s152-pc-virtdisk-check/`
+
+`scripts/test-wovenfs-physical.ps1` defaults updated to 15 GB drive
+(size 15726735360, serial 4045141272666606378).  Re-run in an elevated
+PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-wovenfs-physical.ps1
+```
+
+**Status: READY TO RUN** — requires elevated PowerShell + 15 GB USB drive plugged in.
+
 ## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
 
 Five host Python tests (`test_disk_install_executor`, `test_file_image_filesystem`,
@@ -4737,6 +4767,16 @@ a complete production filesystem/message ingestion pipeline or vector-
 embedding runtime. Source adapters, ranking quality evaluation, and
 user-facing search service integration remain required before release
 readiness.
+
+### WovenSearch IPC protocol foundation (2026-10-28) — IN PROGRESS
+
+`libwoven::search_ipc` now supplies the versioned `WSR1` request/response
+codec for a future read-only `woven.search` service. The frame limits queries
+to validated UTF-8 and returns at most eight identifier/kind/score results in
+a fixed 116-byte response. It accepts neither filesystem paths nor index
+mutation, so it introduces no implicit file access. The focused `libwoven`
+suite (196 tests) and warning-denying library Clippy pass. No service process,
+source adapter, supervisor integration, or QEMU acceptance is claimed yet.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 
