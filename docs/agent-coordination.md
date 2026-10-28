@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded musl startup auxv and detached-thread increment (2026-10-28)
+
+The loader's initial stack now carries a bounded aux-vector containing page
+size and configured uid/gid entries. The static CRT fixture validates those
+entries. The pthread adapter now supports detached-thread reclamation and a
+bounded yield-based `pthread_cond_timedwait` timeout path; the fixture covers
+both. Target/host Clippy, LLVM C compilation/link, and the production loader
+gate pass on 1/2/4 CPUs with evidence under
+`target/musl-startup-thread-{1,2,4}cpu.serial.log`.
+
+This is not full musl `__libc_start_main`: random bytes, platform-specific
+auxv entries, dynamic TLS modules, kernel-clock timed waits, robust owner-death
+recovery, and the remaining POSIX syscall families remain open.
+
+## Codex - musl initial-exec TLS errno increment (2026-10-28)
+
+The musl bootstrap now uses an initial-exec `__thread` errno cell. The custom
+fixture linker script page-aligns the writable PT_LOAD before emitting PT_TLS,
+avoiding overlap with `.rodata`; the independent loader gate passes on 1/2/4
+CPUs. This is a bounded TLS cell, not pthread creation or full musl startup.
+
 ## Codex - bounded pthread synchronization and allocator stress increment (2026-10-28)
 
 Added non-recursive process-private pthread mutex init/lock/trylock/unlock and
@@ -10,9 +31,9 @@ condition variable before joining. Timed waits, robust/recursive mutexes,
 detached-thread reclamation, cancellation cleanup handlers, dynamic TLS, and
 dynamic loader APIs remain outside this bounded slice.
 
-Target/host Rust Clippy and Python syntax/source checks pass. C compilation,
-ELF inspection, and QEMU execution remain pending because the pinned LLVM
-toolchain is not installed on this host.
+Target/host Rust Clippy, pinned LLVM C compilation/link, ELF inspection, and
+the 1/2/4-CPU production loader gate pass. Evidence is retained under
+`target/musl-allocator-pthread-{1,2,4}cpu.serial.log`.
 
 ## Codex - musl TLS, allocator, and pthread core increment (2026-10-28)
 
@@ -25,20 +46,20 @@ thread returning a joined value. This remains a bounded runtime profile: it is
 not full musl, detached threads, condition variables, robust mutexes, dynamic
 TLS, or general allocator qualification.
 
-Rust target/host Clippy, runtime-contract validation, and focused Python
-harness tests pass. The pinned target Clang/LLVM compiler and linker are not
-available on this host, so C compilation, ELF inspection, and 1/2/4-CPU QEMU
-execution remain required before acceptance.
+Rust target/host Clippy, runtime-contract validation, pinned target
+Clang/LLVM compilation/link, ELF inspection, and 1/2/4-CPU QEMU execution
+pass. The allocator and pthread implementation remains bounded and does not
+claim full musl startup or complete POSIX coverage.
 
 ## Codex - broader userspace ABI/runtime adapter increment (2026-10-28)
 
 Extended the pinned static musl bootstrap transport for the kernel's existing
 `getuid`, `getgid`, `getcwd`, and length-delimited `chdir` ABI. The executable
-fixture now checks root identity and an absolute current directory before its
+fixture now checks the configured uid/gid (1000) and an absolute current directory before its
 existing file, pipe, fork, wait, and signal probes. No syscall numbers or
-kernel ABI were repurposed. Rust workspace tests and the 205-test Python host
-suite pass. The pinned Clang/LLVM toolchain was not available on this host, so
-the C compile/link/QEMU execution gate remains required before acceptance.
+kernel ABI were repurposed. Rust workspace tests, pinned Clang/LLVM
+compile/link, and the independent 1/2/4-CPU loader gate pass. The adapter
+remains bounded and does not claim a complete POSIX namespace.
 
 ## Codex - Stage 7 bounded process-environment closure (2026-10-28)
 

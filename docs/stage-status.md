@@ -212,7 +212,38 @@ start-main or TLS acceptance. The process-identity increment rebuilds cleanly
 with LLVM and runs through the production loader on 1/2/4 CPUs using the
 independent `musl-bootstrap-test` gate. Evidence is retained in
 `target/musl-process-identity-final-{1,2,4}cpu.serial.log` and the rebuilt
-ELF manifest is under `target/musl-process-identity-bootstrap6/`.
+ELF manifest is under `target/musl-process-identity-bootstrap6/`. The TLS
+errno increment then converted the cell to initial-exec PT_TLS and
+page-aligned the writable image segment so it no longer overlaps `.rodata`;
+the production loader gate passes on 1/2/4 CPUs with evidence in
+`target/musl-tls-fixed-{1,2,4}cpu.serial.log`.
+
+The allocator/thread increment adds a bounded mapping-backed `malloc` family,
+freestanding `memcpy`/`memset`, and generation-safe `pthread_create`,
+`pthread_join`, and `pthread_self` plus process-private mutex/condition
+primitives. The fixture allocates and frees sixteen blocks in a worker, joins
+its result, and synchronizes a second worker through a condition variable.
+The rebuilt ELF passes the production loader gate on 1/2/4 CPUs; evidence is
+retained in `target/musl-allocator-pthread-{1,2,4}cpu.serial.log`. This is
+still a bounded static profile: full musl start-main/aux-vector startup,
+detached/cancellation cleanup, dynamic TLS, timed/robust synchronization,
+and the remaining POSIX syscall surface remain open.
+
+The startup/thread follow-up now publishes a bounded initial aux-vector
+(`AT_PAGESZ`, `AT_UID`, `AT_GID`) after the inherited argv/envp layout. The
+fixture validates those entries, exercises detached-thread reclamation, and
+checks the bounded yield-based `pthread_cond_timedwait` timeout path. The
+production loader passes on 1/2/4 CPUs with evidence in
+`target/musl-startup-thread-{1,2,4}cpu.serial.log`. Kernel-clock timed waits,
+robust owner-death recovery, dynamic TLS modules, and the wider POSIX syscall
+families remain unimplemented.
+
+The next ABI slice adds bounded `getuid()`, `getgid()`, `getcwd()` and
+length-delimited `chdir()` adapters over the existing kernel syscalls. The
+fixture validates the current uid/gid (1000) and an absolute working
+directory; the rebuilt ELF passes the production loader gate on 1/2/4 CPUs
+with evidence in `target/musl-abi-{1,2,4}cpu-rerun.serial.log`. This remains a
+static bootstrap, not a complete POSIX namespace.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 

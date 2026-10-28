@@ -10,8 +10,11 @@ temporary cancellation-point transport boundary; it contains no cancellation
 claim. The reproducible bootstrap builder compiles genuine upstream `read.c`,
 `write.c`, and `syscall_ret.c`, then links a static ELF. Its fixture proves the
 denied-write `-1`/`errno == EIO` path on QEMU. `errno_location.c` is expressly
-a single-threaded temporary cell, not TLS. Startup, allocator, threading and
-the remaining syscall surface must be implemented and qualified later.
+a single-threaded temporary cell, not TLS. The bounded TLS increment now uses
+an initial-exec `__thread` errno cell and a page-separated PT_TLS linker
+segment; the production loader/QEMU gate passes on 1/2/4 CPUs. Startup,
+allocator, threading and the remaining syscall surface must be implemented
+and qualified later.
 
 The initial WovenHat CRT entry is a separate, deliberately small adapter. It
 uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and
@@ -22,7 +25,14 @@ identity calls as musl `getpid()`/`getppid()`; this does not imply a complete
 Linux syscall-number compatibility layer. The independent `musl-bootstrap-test`
 loads the resulting static ELF through the production loader and passes on
 1/2/4 CPUs, including process teardown and the existing I/O, pipe, signal,
-and wait fixture checks.
+and wait fixture checks. The adapter also exposes bounded `getuid()`,
+`getgid()`, caller-buffer `getcwd()`, and explicit-length `chdir()` mappings;
+these are ABI slices, not a complete POSIX namespace. The static profile also
+has a bounded mmap-backed allocator and generation-safe pthread create/join
+with process-private mutex/condition primitives; it deliberately does not
+claim full musl startup, dynamic TLS, kernel-clock timed waits, robust owner
+death recovery, or complete POSIX. The loader's initial stack now includes a
+small explicit aux-vector for page size and configured uid/gid discovery.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 

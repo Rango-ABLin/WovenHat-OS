@@ -4673,9 +4673,16 @@ pub fn setup_argv_stack(
         cursor = cursor.checked_add(arg.len() as u64 + 1)?;
     }
 
-    // argc + argv... + NULL + envp NULL
+    // argc + argv... + NULL + envp NULL + a bounded aux-vector.  The
+    // bootstrap runtime consumes only these stable process facts; keeping the
+    // vector explicit avoids pretending this is a complete Linux ABI.
     let argc = args.len() as u64;
-    let pointer_words = 1 + args.len() + 1 + 1;
+    const AT_NULL: u64 = 0;
+    const AT_PAGESZ: u64 = 6;
+    const AT_UID: u64 = 11;
+    const AT_GID: u64 = 12;
+    let auxv = [AT_PAGESZ, 4096, AT_UID, 1000, AT_GID, 1000, AT_NULL, 0];
+    let pointer_words = 1 + args.len() + 1 + 1 + auxv.len();
     let pointer_bytes = pointer_words * 8;
     let mut rsp = strings_start.checked_sub(pointer_bytes as u64)?;
     rsp &= !0xfu64;
@@ -4692,6 +4699,10 @@ pub fn setup_argv_stack(
     paging::write_user_bytes(address_space, argv_null, &0u64.to_le_bytes()).ok()?;
     let envp_null = argv_null + 8;
     paging::write_user_bytes(address_space, envp_null, &0u64.to_le_bytes()).ok()?;
+    for (index, value) in auxv.iter().enumerate() {
+        let address = envp_null + 8 + (index as u64) * 8;
+        paging::write_user_bytes(address_space, address, &value.to_le_bytes()).ok()?;
+    }
 
     Some(rsp)
 }

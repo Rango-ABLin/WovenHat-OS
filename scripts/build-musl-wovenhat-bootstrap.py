@@ -23,6 +23,7 @@ SOURCES = (
     "ports/musl/src/crt_start.c",
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
+    "ports/musl/src/string.c",
     "ports/musl/src/malloc.c",
     "ports/musl/src/memory.c",
     "ports/musl/src/pthread.c",
@@ -34,7 +35,7 @@ SOURCES = (
     "vendor/musl/src/unistd/getuid.c",
     "vendor/musl/src/unistd/getgid.c",
     "ports/musl/src/chdir.c",
-    "vendor/musl/src/unistd/getcwd.c",
+    "ports/musl/src/getcwd.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
     "vendor/musl/src/unistd/close.c",
@@ -142,7 +143,7 @@ def main() -> int:
     shutil.copy2(root / "ports/musl/include/bits/syscall.h", generated / "syscall.h")
 
     common = [clang, "--target=x86_64-unknown-none", "-std=c99", "-ffreestanding",
-              "-fno-stack-protector", "-fno-builtin", "-nostdinc", "-D_XOPEN_SOURCE=700",
+              "-fno-stack-protector", "-fno-builtin", "-mcmodel=large", "-nostdinc", "-D_XOPEN_SOURCE=700",
               # musl's own upstream build does not enable -Wextra.  In
               # particular, its generic socket fallback intentionally has an
               # unused argument on x86_64, where SYS_socketcall is absent.
@@ -179,7 +180,7 @@ def main() -> int:
         "elf": str(elf.relative_to(root)),
         "elf_sha256": sha256(elf),
         "objects": {str(path.relative_to(root)): sha256(path) for path in objects},
-        "reason": "Static errno/write link passed; TLS, allocator, threads and loader/QEMU execution are separate gates",
+        "reason": "Static errno/TLS/write link passed; allocator, threads and broader loader/QEMU coverage are separate gates",
     })
     (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
