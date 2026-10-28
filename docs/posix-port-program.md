@@ -115,3 +115,11 @@ explicit read/write/create bits. The musl adapter maps `O_RDWR|O_CREAT` to
 that ABI and routes writes on normal fds to the bounded FileWrite syscall. The
 fixture creates `/tmp/musl-bootstrap-probe`, writes, seeks to zero, reads back,
 and closes it at 1/2/4 CPUs. Unsupported flags remain unclaimed.
+
+## Bootstrap increment: pipe lifecycle
+
+The musl-facing pipe adapter decodes WovenHat's packed two-fd result without a
+user-pointer syscall ABI. Generic Write dispatches owned descriptors through
+the task file table while preserving the unopened stdout/stderr console
+fallback. Pipe write/read/close passed at 1/2/4 CPUs; blocking, EOF-after-close
+and SIGPIPE semantics remain separate work.

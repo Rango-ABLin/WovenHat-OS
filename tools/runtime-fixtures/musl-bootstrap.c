@@ -8,6 +8,7 @@ int main(int argc, char **argv)
 	int fd;
 	int duplicate;
 	int replacement;
+	int pipe_fd[2];
 
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;
@@ -47,5 +48,9 @@ int main(int argc, char **argv)
 	if (fd < 3 || replacement != fd + 1 || close(fd) != 0
 		|| read(replacement, &byte, 1) != 1 || byte != 'W' || close(replacement) != 0)
 		return 104;
+	if (pipe(pipe_fd) != 0 || write(pipe_fd[1], "P", 1) != 1
+		|| read(pipe_fd[0], &byte, 1) != 1 || byte != 'P'
+		|| close(pipe_fd[0]) != 0 || close(pipe_fd[1]) != 0)
+		return 105;
 	return 42;
 }
