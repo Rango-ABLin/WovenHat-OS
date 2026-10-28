@@ -176,6 +176,9 @@ stage32-13-test = ["qemu-test", "gdb-owner"]
 # Enable the owned trap-frame to GDB-context snapshot boundary.
 gdb-frame = ["gdb-debugger"]
 stage32-14-test = ["qemu-test", "gdb-frame"]
+# Enable generation-checked stopped-context binding.
+gdb-binding = ["gdb-frame", "gdb-owner"]
+stage32-15-test = ["qemu-test", "gdb-binding"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

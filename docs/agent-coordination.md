@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.15 GDB generation-checked task binding (2026-10-28)
+
+Added `kernel/src/gdb_binding.rs`, binding a copied trap-frame context to the
+current generation-bound owner. Reads are revalidated against the owner, so
+detach invalidates the context and stale/foreign tokens are rejected. Target
+and host warning-denying Clippy, Python syntax, and QEMU 1/2/4-CPU gates pass
+with exit 33. Evidence is under
+`target/stage32-15-gdb-binding-{1,2,4}cpu/`. Stage32.15 is accepted; live
+scheduler lookup and exception/register integration remain next.
+
 ## Codex - Stage 32.14 GDB trap-frame snapshot (2026-10-28)
 
 Added `kernel/src/gdb_frame.rs`, an owned conversion from captured

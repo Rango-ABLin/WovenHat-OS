@@ -123,6 +123,7 @@ pub mod gdb_session;
 pub mod gdb_trap;
 pub mod gdb_owner;
 pub mod gdb_frame;
+pub mod gdb_binding;
 pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
@@ -5266,6 +5267,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.14] GDB frame snapshot: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-15-test")]
+    {
+        if !gdb_binding::self_test() {
+            serial::write_line(format_args!("[S32.15] GDB task binding: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.15] GDB task binding: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

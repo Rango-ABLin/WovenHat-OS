@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev generation-checked task binding (2026-10-28)
+
+`kernel/src/gdb_binding.rs` combines the current owner token with a copied
+GDB register context. Every read checks the owner generation again, so detach
+immediately invalidates the binding and a reused attachment cannot consume an
+old context. It does not perform scheduler lookup or register mutation; those
+authorities remain for live exception integration.
+
 ## WovenDev trap-frame snapshot boundary (2026-10-28)
 
 `kernel/src/gdb_frame.rs` copies a caller-owned architectural snapshot into

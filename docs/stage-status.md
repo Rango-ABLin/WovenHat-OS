@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 32.15 GDB generation-checked task binding QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_binding.rs`, which binds an owned trap-frame snapshot to
+the current generation-bound debugger owner. Context reads are refused after
+detach or when a token belongs to another owner, preventing stale attachment
+events from exposing or replacing a stopped context.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-15-gdb-binding-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live scheduler/task lookup,
+exception-handler wiring, and register mutation remain open.
+
 ## Stage 32.14 GDB trap-frame snapshot QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_frame.rs`, which copies an owned architectural snapshot

@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.15 GDB generation-checked task binding - 2026-10-28
+
+The stopped-context binding passed 1/2/4-CPU QEMU self-tests. It covers
+current-token capture, context access while attached, rejection of foreign
+tokens, and invalidation after detach. Target and host warning-denying Clippy
+and Python syntax validation passed. Scheduler lookup, exception wiring, and
+register mutation remain outside this acceptance.
+
 ## Stage 32.14 GDB trap-frame snapshot - 2026-10-28
 
 The owned trap-frame conversion passed 1/2/4-CPU QEMU self-tests. Fixed-order
