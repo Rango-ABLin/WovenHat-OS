@@ -13,6 +13,7 @@
 #define WH_SYS_READ  0
 #define WH_SYS_WRITE 1
 #define WH_SYS_OPEN  2
+#define WH_SYS_GETPID 4
 #define WH_SYS_EXIT  3
 #define WH_SYS_CLOSE 6
 #define WH_SYS_YIELD 7
@@ -20,6 +21,7 @@
 #define WH_SYS_FORK 16
 #define WH_SYS_SIGACTION 34
 #define WH_SYS_KILL 26
+#define WH_SYS_GETPPID 25
 #define WH_SYS_LSEEK 27
 #define WH_SYS_FILE_WRITE 10
 #define WH_SYS_OPEN_ACCESS 254

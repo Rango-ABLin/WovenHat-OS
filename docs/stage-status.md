@@ -116,10 +116,15 @@ profile acceptance.
 The same bootstrap now has an executable minimal CRT: `_start` consumes the
 existing loader argv stack, invokes `main(argc, argv)`, and exits through musl
 `_Exit`. The fixture checks its expected `argc`/`argv` prefix and the prior
-denied-write errno behavior. QEMU passed at 1/2/4 CPUs in
+denied-write errno behavior. The bootstrap now also maps musl `getpid()` and
+`getppid()` to the native process-identity syscalls and checks both in the
+fixture. QEMU passed at 1/2/4 CPUs in
 `target/musl-crt-bootstrap-1cpu-debug/` and
 `target/musl-crt-bootstrap-rerun-{2,4}cpu-debug/`. It is not a full musl
-start-main or TLS acceptance.
+start-main or TLS acceptance. The process-identity increment rebuilds cleanly
+with LLVM into `target/musl-process-identity-bootstrap3/`; a fresh QEMU
+execution of that rebuilt ELF remains required before this increment can be
+marked runtime-accepted.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 

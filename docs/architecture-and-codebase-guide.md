@@ -17,7 +17,9 @@ The initial WovenHat CRT entry is a separate, deliberately small adapter. It
 uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and
 `argv` directly to `main`, then uses musl `_Exit`. It must not be confused with
 the full musl start-main lifecycle, which requires later TLS and aux-vector
-support.
+support. The current syscall adapter also exposes the bounded native process
+identity calls as musl `getpid()`/`getppid()`; this does not imply a complete
+Linux syscall-number compatibility layer.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 

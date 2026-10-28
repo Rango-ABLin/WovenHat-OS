@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - musl process identity increment (2026-10-28)
+
+The freestanding musl bootstrap now maps `getpid()` and `getppid()` to the
+native WovenHat syscall numbers and checks both from the executable fixture.
+This remains a bounded static bootstrap; TLS, allocator, threading, and the
+broader syscall surface are still outside the accepted scope.
+
 ## Codex - S03 USB-HID keyboard matrix (2026-10-28)
 
 The headless xHCI keyboard gate now preserves separate per-CPU evidence and

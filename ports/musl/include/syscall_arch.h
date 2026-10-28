@@ -10,7 +10,9 @@
 /* Linux numbers used by the small initial static-libc bring-up subset. */
 #define WH_LINUX_READ       0
 #define WH_LINUX_WRITE      1
+#define WH_LINUX_GETPID     39
 #define WH_LINUX_CLOSE      3
+#define WH_LINUX_GETPPID    110
 #define WH_LINUX_LSEEK      8
 #define WH_LINUX_DUP        32
 #define WH_LINUX_DUP2       33
@@ -25,6 +27,10 @@ static __inline long __syscall0(long number)
 static __inline long __syscall1(long number, long arg0)
 {
 	switch (number) {
+	case WH_LINUX_GETPID:
+		return wh_syscall0(WH_SYS_GETPID);
+	case WH_LINUX_GETPPID:
+		return wh_syscall0(WH_SYS_GETPPID);
 	case WH_LINUX_CLOSE:
 		return wh_syscall1(WH_SYS_CLOSE, arg0);
 	case WH_LINUX_DUP:
