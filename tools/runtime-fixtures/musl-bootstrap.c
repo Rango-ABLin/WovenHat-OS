@@ -30,7 +30,9 @@ int main(int argc, char **argv)
 	int child_status;
 	pid_t child;
 
-	if (getpid() <= 0 || getppid() < 0)
+	if (getpid() < 0)
+		return 89;
+	if (getppid() < 0)
 		return 90;
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;

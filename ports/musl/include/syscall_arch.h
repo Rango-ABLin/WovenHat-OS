@@ -21,16 +21,19 @@
 
 static __inline long __syscall0(long number)
 {
-	return wh_syscall0(number);
-}
-
-static __inline long __syscall1(long number, long arg0)
-{
 	switch (number) {
 	case WH_LINUX_GETPID:
 		return wh_syscall0(WH_SYS_GETPID);
 	case WH_LINUX_GETPPID:
 		return wh_syscall0(WH_SYS_GETPPID);
+	default:
+		return -WH_ENOSYS;
+	}
+}
+
+static __inline long __syscall1(long number, long arg0)
+{
+	switch (number) {
 	case WH_LINUX_CLOSE:
 		return wh_syscall1(WH_SYS_CLOSE, arg0);
 	case WH_LINUX_DUP:
