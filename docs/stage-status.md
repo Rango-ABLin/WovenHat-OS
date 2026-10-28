@@ -12272,3 +12272,12 @@ transactional inode/bitmap updates, unlink cleanup, remount persistence, and
 crash-recovery enumeration. Target and host warning-denying Clippy pass.
 QEMU passes at 1/2/4 CPUs. Evidence: `target/stage12-2-xattr-{1,2,4}cpu-*`.
 
+## Stage 12.5 storage manager integration — 2026-10-28 — ACCEPTED
+
+Integrated the storage manager with the existing MBR/GPT partition
+detectors. `inspect_device` now returns bounded disk/partition/filesystem
+metadata, and `discover_and_mount` publishes a manager mount record only
+after successful FAT32 discovery. The self-test covers removable metadata,
+partition bounds and mount teardown. Host/target warning-denying Clippy and
+QEMU pass at 1/2/4 CPUs. Evidence: `target/stage12-5-storage-manager-*`.
+

@@ -7933,3 +7933,11 @@ remount persistence, and crash-recovery checks pass. Target and host
 warning-denying Clippy pass; QEMU passes at 1/2/4 CPUs. Evidence is under
 `target/stage12-2-xattr-{1,2,4}cpu-*`.
 
+## Codex - Stage 12.5 storage manager integration (2026-10-28)
+
+Completed the next filesystem increment after xattrs. The storage manager
+now consumes the existing MBR/GPT FAT32 discovery boundary, exposes bounded
+disk/partition/filesystem metadata, and publishes mount records through one
+discover-and-mount operation. Host/target Clippy and QEMU 1/2/4 CPU gates
+pass. Evidence is under `target/stage12-5-storage-manager-*`.
+
