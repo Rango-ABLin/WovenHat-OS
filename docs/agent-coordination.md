@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS resource-boundary host coverage (2026-10-28)
+
+Added host coverage for dynamic TLS resource installation, duplicate-install
+rejection, address-checked clearing, and cleared-slot reuse. The thread test
+double now also provides the task wake boundary required by the production
+thread module. Focused thread tests, full host Clippy, kernel target check,
+kernel target Clippy, and diff checks pass.
+
 ## Codex - host test-double compatibility for dynamic TLS resources (2026-10-28)
 
 Updated the `thread_registry` host double to expose the production mapping

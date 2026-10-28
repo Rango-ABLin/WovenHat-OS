@@ -1,5 +1,12 @@
 # Stage status
 
+## Dynamic TLS resource-boundary host coverage - 2026-10-28 - CLOSED
+
+Host coverage now exercises dynamic TLS install, duplicate rejection,
+address-validated clearing, and post-clear reuse. The test double includes the
+production task wake boundary. Focused tests, host Clippy, kernel target build,
+kernel target Clippy, and diff checks pass.
+
 ## Host validation compatibility - 2026-10-28 - CLOSED
 
 The host `thread_registry` test double now matches the production
