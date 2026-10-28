@@ -22,6 +22,44 @@ const FG_G: u8 = 220;
 const FG_B: u8 = 230;
 const NO_FOREGROUND: u64 = 0;
 
+pub const TCGETS: u64 = 0x5401;
+pub const TCSETS: u64 = 0x5402;
+pub const TIOCGPGRP: u64 = 0x540f;
+pub const TIOCSPGRP: u64 = 0x5410;
+pub const TIOCGPTN: u64 = 0x8004_5430;
+/// Local flag: send SIGTTOU when a background process group writes the
+/// controlling terminal.
+pub const TOSTOP: u32 = 0x0100;
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Termios {
+    pub input_flags: u32,
+    pub output_flags: u32,
+    pub control_flags: u32,
+    pub local_flags: u32,
+    pub control_chars: [u8; 8],
+}
+
+impl Termios {
+    pub const DEFAULT: Self = Self {
+        input_flags: 0x0000_0500,
+        output_flags: 0x0000_0001,
+        control_flags: 0x0000_00b0,
+        local_flags: 0x0000_000b,
+        control_chars: [3, 28, 127, 21, 4, 0, 0, 0],
+    };
+
+    pub const fn is_valid(self) -> bool {
+        self.input_flags & !0x0000_153f == 0
+            && self.output_flags & !0x0000_0001 == 0
+            && self.control_flags & !0x0000_00bf == 0
+            && self.local_flags & !0x0000_8f0b == 0
+    }
+}
+
+static TERMIOS: Mutex<Termios> = Mutex::with_rank(Termios::DEFAULT, 10);
+
 #[derive(Clone, Copy)]
 enum Format {
     Rgb,
@@ -423,12 +461,18 @@ pub fn clear() {
 }
 
 pub fn set_foreground(pid: u64) {
-    FOREGROUND_PID.store(pid, Ordering::Release);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    set_foreground_group(group);
 }
 
 pub fn release_foreground(pid: u64) {
-    let _ =
-        FOREGROUND_PID.compare_exchange(pid, NO_FOREGROUND, Ordering::AcqRel, Ordering::Acquire);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    let _ = FOREGROUND_PID.compare_exchange(
+        group,
+        NO_FOREGROUND,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    );
 }
 
 pub fn foreground_pid() -> Option<u64> {
@@ -440,4 +484,20 @@ pub fn foreground_pid() -> Option<u64> {
 
 pub fn foreground_active() -> bool {
     foreground_pid().is_some()
+}
+
+pub fn termios() -> Termios {
+    *TERMIOS.lock()
+}
+
+pub fn set_termios(value: Termios) -> bool {
+    if !value.is_valid() {
+        return false;
+    }
+    *TERMIOS.lock() = value;
+    true
+}
+
+pub fn set_foreground_group(group: u64) {
+    FOREGROUND_PID.store(group, Ordering::Release);
 }

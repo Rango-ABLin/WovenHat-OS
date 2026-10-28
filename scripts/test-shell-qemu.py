@@ -22,7 +22,7 @@ def build_woven_shell(root):
 
 def apps_installed_marker(app_count: int) -> str:
     """Kernel marker for a fully installed signed system-app catalog."""
-    return f'[APPS] {app_count} signed applications installed'
+    return f'[APPS] {app_count} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes'
 
 
 def normal_boot_serial_errors(log: str, system_apps: bool, app_count: int | None = None) -> list[str]:

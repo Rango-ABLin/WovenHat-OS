@@ -172,12 +172,7 @@ impl WallpaperCatalog {
         }
     }
 
-    pub fn register(
-        &mut self,
-        id: &[u8],
-        spdx: &[u8],
-        source_hash: [u8; 32],
-    ) -> bool {
+    pub fn register(&mut self, id: &[u8], spdx: &[u8], source_hash: [u8; 32]) -> bool {
         if id.is_empty()
             || id.len() > MAX_ASSET_NAME
             || spdx.is_empty()
@@ -226,9 +221,12 @@ pub enum VfsAssetError {
 
 /// Read one immutable image asset from the mounted VFS into caller storage.
 /// The descriptor is always closed before returning.
-pub fn load_vfs_asset(path: &str, buffer: &mut [u8]) -> Result<(usize, ImageMetadata), VfsAssetError> {
+pub fn load_vfs_asset(
+    path: &str,
+    buffer: &mut [u8],
+) -> Result<(usize, ImageMetadata), VfsAssetError> {
     let descriptor = crate::open(path).map_err(|_| VfsAssetError::Open)?;
-    let result = crate::read(descriptor, buffer).map_err(|_| VfsAssetError::Read);
+    let result = crate::read_all(descriptor, buffer).map_err(|_| VfsAssetError::Read);
     let _ = crate::close(descriptor);
     let length = result?;
     if length == buffer.len() {
@@ -246,6 +244,127 @@ pub enum ImageError {
     UnsupportedEncoding,
     OutputTooSmall,
     Malformed,
+}
+
+/// Validated PCM WAVE metadata. The data range points into the caller's
+/// encoded buffer; no sample storage is allocated or retained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WavMetadata {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub data_offset: u32,
+    pub data_len: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WavError {
+    Truncated,
+    Unsupported,
+    Malformed,
+}
+
+/// Parse a RIFF/WAVE PCM container without decoding or copying its samples.
+///
+/// Every chunk length is checked against both the RIFF extent and the input
+/// slice. Only integer PCM with byte-aligned 8/16/24/32-bit samples is
+/// accepted, and the data chunk must contain complete interleaved frames.
+pub fn parse_wav_pcm(bytes: &[u8]) -> Result<WavMetadata, WavError> {
+    if bytes.len() < 12 {
+        return Err(WavError::Truncated);
+    }
+    if &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(WavError::Unsupported);
+    }
+    let riff_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let riff_end = 8usize.checked_add(riff_len).ok_or(WavError::Malformed)?;
+    if riff_end > bytes.len() || riff_end < 12 {
+        return Err(WavError::Truncated);
+    }
+    let mut cursor = 12usize;
+    let mut format = None;
+    let mut data = None;
+    while cursor < riff_end {
+        if riff_end - cursor < 8 {
+            return Err(WavError::Truncated);
+        }
+        let chunk_len =
+            u32::from_le_bytes(bytes[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
+        let chunk_start = cursor.checked_add(8).ok_or(WavError::Malformed)?;
+        let chunk_end = chunk_start
+            .checked_add(chunk_len)
+            .ok_or(WavError::Malformed)?;
+        if chunk_end > riff_end {
+            return Err(WavError::Truncated);
+        }
+        match &bytes[cursor..cursor + 4] {
+            b"fmt " => {
+                if chunk_len < 16 || format.is_some() {
+                    return Err(WavError::Malformed);
+                }
+                let audio_format =
+                    u16::from_le_bytes(bytes[chunk_start..chunk_start + 2].try_into().unwrap());
+                if audio_format != 1 {
+                    return Err(WavError::Unsupported);
+                }
+                let channels =
+                    u16::from_le_bytes(bytes[chunk_start + 2..chunk_start + 4].try_into().unwrap());
+                let sample_rate =
+                    u32::from_le_bytes(bytes[chunk_start + 4..chunk_start + 8].try_into().unwrap());
+                let byte_rate = u32::from_le_bytes(
+                    bytes[chunk_start + 8..chunk_start + 12].try_into().unwrap(),
+                );
+                let block_align = u16::from_le_bytes(
+                    bytes[chunk_start + 12..chunk_start + 14]
+                        .try_into()
+                        .unwrap(),
+                );
+                let bits_per_sample = u16::from_le_bytes(
+                    bytes[chunk_start + 14..chunk_start + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                if channels == 0
+                    || sample_rate == 0
+                    || !matches!(bits_per_sample, 8 | 16 | 24 | 32)
+                    || bits_per_sample % 8 != 0
+                {
+                    return Err(WavError::Malformed);
+                }
+                let expected_align = channels
+                    .checked_mul(bits_per_sample / 8)
+                    .ok_or(WavError::Malformed)?;
+                let expected_rate = sample_rate
+                    .checked_mul(u32::from(expected_align))
+                    .ok_or(WavError::Malformed)?;
+                if block_align != expected_align || byte_rate != expected_rate {
+                    return Err(WavError::Malformed);
+                }
+                format = Some((sample_rate, channels, bits_per_sample, block_align));
+            }
+            b"data" if data.is_none() => {
+                data = Some((chunk_start, chunk_len));
+            }
+            _ => {}
+        }
+        cursor = chunk_end + (chunk_len & 1);
+        if cursor > riff_end {
+            return Err(WavError::Truncated);
+        }
+    }
+    let (sample_rate, channels, bits_per_sample, block_align) =
+        format.ok_or(WavError::Malformed)?;
+    let (data_offset, data_len) = data.ok_or(WavError::Malformed)?;
+    if data_len == 0 || data_len % usize::from(block_align) != 0 {
+        return Err(WavError::Malformed);
+    }
+    Ok(WavMetadata {
+        sample_rate,
+        channels,
+        bits_per_sample,
+        data_offset: u32::try_from(data_offset).map_err(|_| WavError::Malformed)?,
+        data_len: u32::try_from(data_len).map_err(|_| WavError::Malformed)?,
+    })
 }
 
 const MAX_DIMENSION: u32 = 8192;
@@ -335,13 +454,37 @@ pub fn parse_image_header(bytes: &[u8]) -> Result<ImageMetadata, ImageError> {
         }
         return Err(ImageError::Truncated);
     }
-    if bytes.len() >= 30 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        if &bytes[12..16] != b"VP8X" {
-            return Err(ImageError::UnsupportedEncoding);
-        }
-        let width = 1 + (u32::from(bytes[24]) | (u32::from(bytes[25]) << 8) | (u32::from(bytes[26]) << 16));
-        let height = 1 + (u32::from(bytes[27]) | (u32::from(bytes[28]) << 8) | (u32::from(bytes[29]) << 16));
-        return dimensions(ImageFormat::WebP, width, height);
+    if bytes.len() >= 20 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return match &bytes[12..16] {
+            b"VP8X" if bytes.len() >= 30 => {
+                let width = 1
+                    + (u32::from(bytes[24])
+                        | (u32::from(bytes[25]) << 8)
+                        | (u32::from(bytes[26]) << 16));
+                let height = 1
+                    + (u32::from(bytes[27])
+                        | (u32::from(bytes[28]) << 8)
+                        | (u32::from(bytes[29]) << 16));
+                dimensions(ImageFormat::WebP, width, height)
+            }
+            b"VP8L" if bytes.len() >= 25 && bytes[20] == 0x2f => {
+                let bits = u32::from(bytes[21])
+                    | (u32::from(bytes[22]) << 8)
+                    | (u32::from(bytes[23]) << 16)
+                    | (u32::from(bytes[24]) << 24);
+                dimensions(
+                    ImageFormat::WebP,
+                    1 + (bits & 0x3fff),
+                    1 + ((bits >> 14) & 0x3fff),
+                )
+            }
+            b"VP8 " if bytes.len() >= 30 && bytes[23..26] == [0x9d, 0x01, 0x2a] => {
+                let width = u16::from_le_bytes([bytes[26], bytes[27]]) & 0x3fff;
+                let height = u16::from_le_bytes([bytes[28], bytes[29]]) & 0x3fff;
+                dimensions(ImageFormat::WebP, u32::from(width), u32::from(height))
+            }
+            _ => Err(ImageError::UnsupportedEncoding),
+        };
     }
     Err(ImageError::Unsupported)
 }
@@ -374,13 +517,19 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
         .and_then(|row| row.checked_add(3).map(|padded| padded & !3))
         .ok_or(ImageError::Malformed)?;
     let pixel_bytes = row_bytes.checked_mul(height).ok_or(ImageError::Malformed)?;
-    let end = pixel_offset.checked_add(pixel_bytes).ok_or(ImageError::Malformed)?;
+    let end = pixel_offset
+        .checked_add(pixel_bytes)
+        .ok_or(ImageError::Malformed)?;
     if pixel_offset < 14 + dib_size as usize || end > bytes.len() {
         return Err(ImageError::Truncated);
     }
     let source_height = i32::from_le_bytes(bytes[22..26].try_into().unwrap());
     for source_y in 0..height {
-        let destination_y = if source_height < 0 { source_y } else { height - 1 - source_y };
+        let destination_y = if source_height < 0 {
+            source_y
+        } else {
+            height - 1 - source_y
+        };
         let row = &bytes[pixel_offset + source_y * row_bytes..];
         for x in 0..width {
             let offset = x * usize::from(bits / 8);
@@ -394,11 +543,327 @@ pub fn decode_bmp_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
     Ok(metadata)
 }
 
+struct GifSubBlocks<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+    remaining: usize,
+    ended: bool,
+}
+
+impl<'a> GifSubBlocks<'a> {
+    fn new(bytes: &'a [u8], cursor: usize) -> Self {
+        Self {
+            bytes,
+            cursor,
+            remaining: 0,
+            ended: false,
+        }
+    }
+
+    fn next_byte(&mut self) -> Result<Option<u8>, ImageError> {
+        if self.ended {
+            return Ok(None);
+        }
+        if self.remaining == 0 {
+            let size = *self.bytes.get(self.cursor).ok_or(ImageError::Truncated)? as usize;
+            self.cursor += 1;
+            if size == 0 {
+                self.ended = true;
+                return Ok(None);
+            }
+            self.remaining = size;
+        }
+        let byte = *self.bytes.get(self.cursor).ok_or(ImageError::Truncated)?;
+        self.cursor += 1;
+        self.remaining -= 1;
+        Ok(Some(byte))
+    }
+
+    fn skip(&mut self) -> Result<usize, ImageError> {
+        while self.next_byte()?.is_some() {}
+        Ok(self.cursor)
+    }
+}
+
+struct GifBitReader<'a> {
+    data: GifSubBlocks<'a>,
+    bits: u32,
+    available: u8,
+}
+
+impl<'a> GifBitReader<'a> {
+    fn new(data: GifSubBlocks<'a>) -> Self {
+        Self {
+            data,
+            bits: 0,
+            available: 0,
+        }
+    }
+
+    fn read(&mut self, width: u8) -> Result<Option<u16>, ImageError> {
+        while self.available < width {
+            let Some(byte) = self.data.next_byte()? else {
+                return Ok(None);
+            };
+            self.bits |= u32::from(byte) << self.available;
+            self.available += 8;
+        }
+        let mask = (1u32 << width) - 1;
+        let code = (self.bits & mask) as u16;
+        self.bits >>= width;
+        self.available -= width;
+        Ok(Some(code))
+    }
+
+    fn finish(&mut self) -> Result<(), ImageError> {
+        self.data.skip()?;
+        Ok(())
+    }
+}
+
+fn gif_color_table(
+    bytes: &[u8],
+    cursor: &mut usize,
+    entries: usize,
+    palette: &mut [u8; 768],
+) -> Result<(), ImageError> {
+    let length = entries.checked_mul(3).ok_or(ImageError::Malformed)?;
+    let source = bytes
+        .get(*cursor..cursor.checked_add(length).ok_or(ImageError::Malformed)?)
+        .ok_or(ImageError::Truncated)?;
+    palette[..length].copy_from_slice(source);
+    *cursor += length;
+    Ok(())
+}
+
+/// Decode the first non-interlaced GIF frame into caller-owned RGBA pixels.
+///
+/// Global and local palettes, transparency control extensions, and GIF LZW
+/// are supported. Animated/multi-frame and interlaced images fail closed so a
+/// caller never mistakes a partial frame for a complete image.
+pub fn decode_gif_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata, ImageError> {
+    let metadata = parse_image_header(bytes)?;
+    if metadata.format != ImageFormat::Gif {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    let pixels = (metadata.width as usize)
+        .checked_mul(metadata.height as usize)
+        .ok_or(ImageError::InvalidDimensions)?;
+    if output.len() < pixels {
+        return Err(ImageError::OutputTooSmall);
+    }
+    let packed = *bytes.get(10).ok_or(ImageError::Truncated)?;
+    let mut cursor = 13usize;
+    let mut global_palette = [0u8; 768];
+    let global_entries = if packed & 0x80 != 0 {
+        2usize << usize::from(packed & 0x07)
+    } else {
+        0
+    };
+    if global_entries != 0 {
+        gif_color_table(bytes, &mut cursor, global_entries, &mut global_palette)?;
+    }
+    if global_entries == 0 {
+        return Err(ImageError::UnsupportedEncoding);
+    }
+    output[..pixels].fill(0);
+    let mut transparent = None;
+    let mut frame_seen = false;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            0x3b => break,
+            0x21 => {
+                cursor += 2;
+                let label = *bytes.get(cursor - 1).ok_or(ImageError::Truncated)?;
+                if label == 0xf9 {
+                    if *bytes.get(cursor).ok_or(ImageError::Truncated)? != 4 {
+                        return Err(ImageError::Malformed);
+                    }
+                    let block = bytes
+                        .get(cursor + 1..cursor + 5)
+                        .ok_or(ImageError::Truncated)?;
+                    if block[0] & 1 != 0 {
+                        transparent = Some(block[3]);
+                    }
+                    cursor += 5;
+                    if *bytes.get(cursor).ok_or(ImageError::Truncated)? != 0 {
+                        return Err(ImageError::Malformed);
+                    }
+                    cursor += 1;
+                } else {
+                    let mut data = GifSubBlocks::new(bytes, cursor);
+                    cursor = data.skip()?;
+                }
+            }
+            0x2c => {
+                if frame_seen {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                frame_seen = true;
+                let descriptor = bytes
+                    .get(cursor + 1..cursor + 10)
+                    .ok_or(ImageError::Truncated)?;
+                let left = usize::from(u16::from_le_bytes([descriptor[0], descriptor[1]]));
+                let top = usize::from(u16::from_le_bytes([descriptor[2], descriptor[3]]));
+                let width = usize::from(u16::from_le_bytes([descriptor[4], descriptor[5]]));
+                let height = usize::from(u16::from_le_bytes([descriptor[6], descriptor[7]]));
+                let image_packed = descriptor[8];
+                if image_packed & 0x40 != 0 || width == 0 || height == 0 {
+                    return Err(ImageError::UnsupportedEncoding);
+                }
+                let right = left.checked_add(width).ok_or(ImageError::Malformed)?;
+                let bottom = top.checked_add(height).ok_or(ImageError::Malformed)?;
+                if right > metadata.width as usize || bottom > metadata.height as usize {
+                    return Err(ImageError::Malformed);
+                }
+                let mut palette = global_palette;
+                let local_entries = if image_packed & 0x80 != 0 {
+                    2usize << usize::from(image_packed & 0x07)
+                } else {
+                    0
+                };
+                cursor += 10;
+                if local_entries != 0 {
+                    gif_color_table(bytes, &mut cursor, local_entries, &mut palette)?;
+                }
+                let min_code_size = *bytes.get(cursor).ok_or(ImageError::Truncated)?;
+                if !(2..=8).contains(&min_code_size) {
+                    return Err(ImageError::Malformed);
+                }
+                cursor += 1;
+                let mut reader = GifBitReader::new(GifSubBlocks::new(bytes, cursor));
+                let clear = 1u16 << min_code_size;
+                let end = clear + 1;
+                let mut code_size = min_code_size + 1;
+                let mut next_code = end + 1;
+                let mut prefix = [0u16; 4096];
+                let mut suffix = [0u8; 4096];
+                let mut stack = [0u8; 4096];
+                let mut old = None;
+                let mut first = 0u8;
+                let mut output_index = 0usize;
+                let expected = width.checked_mul(height).ok_or(ImageError::Malformed)?;
+                let mut saw_end = false;
+                while let Some(raw_code) = reader.read(code_size)? {
+                    if raw_code == clear {
+                        code_size = min_code_size + 1;
+                        next_code = end + 1;
+                        old = None;
+                        continue;
+                    }
+                    if raw_code == end {
+                        saw_end = true;
+                        break;
+                    }
+                    if raw_code >= 4096 || raw_code >= (1u16 << code_size) {
+                        return Err(ImageError::Malformed);
+                    }
+                    let mut code = raw_code;
+                    let mut stack_len = 0usize;
+                    if let Some(old_code) = old {
+                        let in_code = raw_code;
+                        if code == next_code {
+                            if stack_len == stack.len() {
+                                return Err(ImageError::Malformed);
+                            }
+                            stack[stack_len] = first;
+                            stack_len += 1;
+                            code = old_code;
+                        } else if code > next_code {
+                            return Err(ImageError::Malformed);
+                        }
+                        while code >= clear {
+                            let index = usize::from(code);
+                            if index >= next_code as usize || stack_len == stack.len() {
+                                return Err(ImageError::Malformed);
+                            }
+                            stack[stack_len] = suffix[index];
+                            stack_len += 1;
+                            code = prefix[index];
+                        }
+                        first = code as u8;
+                        stack[stack_len] = first;
+                        stack_len += 1;
+                        while stack_len != 0 {
+                            let index = output_index;
+                            if index >= expected {
+                                return Err(ImageError::Malformed);
+                            }
+                            let palette_index = stack[stack_len - 1];
+                            if transparent != Some(palette_index) {
+                                let color = usize::from(palette_index);
+                                if color >= global_entries.max(local_entries) {
+                                    return Err(ImageError::Malformed);
+                                }
+                                let offset = color * 3;
+                                let destination = (top + index / width) * metadata.width as usize
+                                    + left
+                                    + index % width;
+                                output[destination] = u32::from_be_bytes([
+                                    palette[offset],
+                                    palette[offset + 1],
+                                    palette[offset + 2],
+                                    255,
+                                ]);
+                            }
+                            output_index += 1;
+                            stack_len -= 1;
+                        }
+                        if next_code < 4096 {
+                            prefix[next_code as usize] = old_code;
+                            suffix[next_code as usize] = first;
+                            next_code += 1;
+                            if next_code == (1u16 << code_size) && code_size < 12 {
+                                code_size += 1;
+                            }
+                        }
+                        old = Some(in_code);
+                    } else {
+                        if code >= clear {
+                            return Err(ImageError::Malformed);
+                        }
+                        first = code as u8;
+                        if output_index == expected {
+                            return Err(ImageError::Malformed);
+                        }
+                        let color = usize::from(first);
+                        if color >= global_entries.max(local_entries) {
+                            return Err(ImageError::Malformed);
+                        }
+                        if transparent != Some(first) {
+                            let offset = color * 3;
+                            let destination = top * metadata.width as usize + left + output_index;
+                            output[destination] = u32::from_be_bytes([
+                                palette[offset],
+                                palette[offset + 1],
+                                palette[offset + 2],
+                                255,
+                            ]);
+                        }
+                        output_index += 1;
+                        old = Some(code);
+                    }
+                }
+                reader.finish()?;
+                if !saw_end || output_index != expected {
+                    return Err(ImageError::Truncated);
+                }
+                cursor = reader.data.cursor;
+            }
+            _ => return Err(ImageError::Malformed),
+        }
+    }
+    if !frame_seen || cursor >= bytes.len() || bytes[cursor] != 0x3b {
+        return Err(ImageError::Truncated);
+    }
+    Ok(metadata)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, decode_bmp_rgba,
-        parse_image_header,
+        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, WavError,
+        decode_bmp_rgba, decode_gif_rgba, parse_image_header, parse_wav_pcm,
     };
 
     #[test]
@@ -417,6 +882,43 @@ mod tests {
         bmp[18..22].copy_from_slice(&32i32.to_le_bytes());
         bmp[22..26].copy_from_slice(&(-24i32).to_le_bytes());
         assert_eq!(parse_image_header(&bmp).unwrap().height, 24);
+    }
+
+    #[test]
+    fn parses_aligned_pcm_wave_chunks_without_copying_samples() {
+        let mut wav = [0u8; 48];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[4..8].copy_from_slice(&40u32.to_le_bytes());
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[20..22].copy_from_slice(&1u16.to_le_bytes());
+        wav[22..24].copy_from_slice(&2u16.to_le_bytes());
+        wav[24..28].copy_from_slice(&48_000u32.to_le_bytes());
+        wav[28..32].copy_from_slice(&192_000u32.to_le_bytes());
+        wav[32..34].copy_from_slice(&4u16.to_le_bytes());
+        wav[34..36].copy_from_slice(&16u16.to_le_bytes());
+        wav[36..40].copy_from_slice(b"data");
+        wav[40..44].copy_from_slice(&4u32.to_le_bytes());
+        wav[44..48].copy_from_slice(&[0, 0, 0, 0]);
+        let metadata = parse_wav_pcm(&wav).unwrap();
+        assert_eq!(metadata.sample_rate, 48_000);
+        assert_eq!(metadata.channels, 2);
+        assert_eq!(metadata.data_offset, 44);
+        assert_eq!(metadata.data_len, 4);
+    }
+
+    #[test]
+    fn rejects_wave_format_mismatch_and_truncated_chunks() {
+        assert_eq!(parse_wav_pcm(b"RIFFxxxxWAVE"), Err(WavError::Truncated));
+        let mut wav = [0u8; 44];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[4..8].copy_from_slice(&36u32.to_le_bytes());
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[20..22].copy_from_slice(&3u16.to_le_bytes());
+        assert_eq!(parse_wav_pcm(&wav), Err(WavError::Unsupported));
     }
 
     #[test]
@@ -448,6 +950,18 @@ mod tests {
     }
 
     #[test]
+    fn decodes_bounded_single_frame_gif_lzw_to_rgba() {
+        let gif = [
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255,
+            0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3b,
+        ];
+        let mut pixels = [0u32; 1];
+        let metadata = decode_gif_rgba(&gif, &mut pixels).unwrap();
+        assert_eq!((metadata.width, metadata.height), (1, 1));
+        assert_eq!(pixels[0], 0x000000ff);
+    }
+
+    #[test]
     fn validates_webp_vp8x_dimensions_without_allocating() {
         let mut webp = [0u8; 30];
         webp[..4].copy_from_slice(b"RIFF");
@@ -458,6 +972,17 @@ mod tests {
         let metadata = parse_image_header(&webp).unwrap();
         assert_eq!(metadata.format, ImageFormat::WebP);
         assert_eq!((metadata.width, metadata.height), (10, 5));
+    }
+
+    #[test]
+    fn parses_webp_lossless_dimensions() {
+        let webp = [
+            0x52, 0x49, 0x46, 0x46, 0x1e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+            0x38, 0x4c, 0x11, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00, 0x00, 0x07, 0x50, 0x94,
+            0x52, 0x94, 0xa7, 0xff, 0x81, 0x88, 0xe8, 0x7f, 0x00, 0x00,
+        ];
+        let metadata = parse_image_header(&webp).unwrap();
+        assert_eq!((metadata.width, metadata.height), (2, 2));
     }
 
     #[test]

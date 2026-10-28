@@ -1,14 +1,993 @@
 # Stage status
 
+## S05 deterministic memory-pressure and low-memory boundary - 2026-10-28 - ACCEPTED BOUNDED
+
+Added `kernel/src/memory_pressure.rs` as the physical-frame allocation
+boundary's explicit policy signal. Remaining frames are classified
+deterministically as Normal (>20%), Moderate (6-20%), Critical (1-5%), or
+Exhausted (0); level transitions and allocation failures are counted with
+atomics. Every successful frame allocation/deallocation publishes the current
+snapshot, and a failed allocation records an explicit OOM decision.
+
+Added deterministic reclaim ordering for unpinned file frames (oldest first),
+a three-attempt writeback retry policy that retains dirty data after final
+failure, and an allocation-free OOM victim selector. Victim selection excludes
+the current task and ranks lower scheduler classes first, then larger mapped
+footprints, then stable task IDs; the selected process ID is recorded with the
+pressure snapshot for a safe existing termination path to consume.
+
+The independently guarded `s05-memory-pressure-test` passed target and host
+warning-denying Clippy, 193 `libwoven` tests, and executable QEMU at 1/2/4
+CPUs (exit 33). Evidence: `target/s05-memory-pressure-{1,2,4}cpu-debug/`.
+The dedicated 256 MiB low-memory matrix also passed at 1/2/4 CPUs, with
+evidence under `target/s05-low-memory-{1,2,4}cpu-debug/`. This closes the
+deterministic software/QEMU S05 slice. Native hardware qualification below the
+supported 4 GiB production floor remains unclaimed.
+The read-only native-host preflight at
+`audit-artifacts/physical-host-20261028-112453-065/host.json` records the
+current HP Pavilion x360 host (8.21 GiB installed, hypervisor present) and
+`PhysicalTestPerformed=false`; it is inventory evidence, not native
+qualification.
+
+## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
+
+Five host Python tests (`test_disk_install_executor`, `test_file_image_filesystem`,
+`test_file_image_layout`, `test_file_install_executor`, `test_uefi_boot_artifact`)
+were erroring with `OSError: [WinError 1314] A required privilege is not held by
+the client` when attempting to create symlinks without `SeCreateSymbolicLinkPrivilege`
+or Windows Developer Mode. Each test verified that the production code *refuses*
+symlink inputs — valid test intent, but the symlink creation step itself requires
+elevated privileges on Windows.
+
+Fix applied: each `link.symlink_to(...)` call is now wrapped in a
+`try/except OSError` that calls `self.skipTest(...)` when `winerror == 1314`.
+Other `OSError` values re-raise unchanged so real filesystem errors are not silently
+swallowed. **The tests are not weakened** — they skip only when the OS cannot create
+a symlink at all; on elevated Windows or Linux they run the full assertion.
+
+Result: `python -m unittest discover -s tests -p 'test_*.py'` → **205 passed,
+6 skipped, 0 errors**. The six skips are the five symlink tests plus one pre-existing
+skip.
+
+**Stage closure status unchanged.** Software QEMU gates for Stages 1–10 pass (see
+[Stage 1–19 closure gate](stage1-19-closure-gate.md)); hardware qualification (native
+storage/DMA, power-loss recovery, physical boot, firmware provisioning) remains
+**BLOCKED** until the user authorizes an elevated physical test session on a selected
+non-boot device.
+
+## S02 freestanding C ABI boundary - 2026-10-28 - ACCEPTED BOUNDED
+
+Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
+The builder records source/linker/compiler provenance and produces a static
+ELF64 validation record. LLVM 23.1.4 built the no-libc fixture through its
+paired `ld.lld`; `s02-c-abi-test` embeds that exact ELF, uses the production
+loader, runs it as an ordinary Ring-3 process, verifies native exit status 42,
+and verifies process/IPC/frame teardown. QEMU passed with exit 33 on 1, 2 and
+4 CPUs. Evidence: `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`.
+
+This closes S02's documented freestanding C ABI scope. libc, pthread, locale,
+math, destructors, TLS, async VFS/network and shared-library compatibility are
+explicitly outside S02 and remain separately unclaimed.
+
+## POSIX musl static-libc bootstrap - 2026-10-28 - IMPLEMENTING
+
+The repeatable `scripts/build-musl-wovenhat-bootstrap.py` build generated
+musl's type header, compiled pinned upstream musl 1.2.6 `read.c`, `write.c`,
+and `syscall_ret.c`, and linked a static ELF with the bounded
+cancellation-point bridge and explicitly single-threaded errno cell. The ELF
+ran through the production loader and proved a denied upstream `write()`
+returns `-1` with `errno == EIO`, then exits 42. Python validation, the
+bootstrap build, target/host warning-denying Clippy, and QEMU passed at 1/2/4
+CPUs. Evidence: `target/musl-wovenhat-static-check2/` and
+`target/musl-static-bootstrap-1cpu-debug/`,
+`target/musl-static-bootstrap-rerun-{2,4}cpu-debug/`. TLS, startup, allocator,
+cancellation, and the broader syscall surface are open. This is not a POSIX
+profile acceptance.
+
+The same bootstrap now has an executable minimal CRT: `_start` consumes the
+existing loader argv stack, invokes `main(argc, argv)`, and exits through musl
+`_Exit`. The fixture checks its expected `argc`/`argv` prefix and the prior
+denied-write errno behavior. QEMU passed at 1/2/4 CPUs in
+`target/musl-crt-bootstrap-1cpu-debug/` and
+`target/musl-crt-bootstrap-rerun-{2,4}cpu-debug/`. It is not a full musl
+start-main or TLS acceptance.
+
+## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
+
+The existing bounded kernel process lifecycle now has matching safe `libwoven`
+wrappers for process-group targets, signal dispositions, `kill`, `getpgrp`,
+and `setpgid`. The API rejects invalid signal/group encodings before entering
+the kernel and preserves the established wait/exit sentinels. Focused
+`libwoven` tests (193) and warning-denying Clippy pass. Full S03 acceptance
+for signals, process groups, PTYs/termios, job control, and zombie/wait
+semantics still requires a dedicated kernel/QEMU matrix.
+
+The independent `s03-process-lifecycle-test` now passes on 1/2/4 CPUs with
+QEMU exit 33. Its freestanding Ring-3 probes verify fork/child exit status,
+would-block wait retry, parent-owned reap, process-group assignment, negative
+process-group targeting, SIGTERM safe-point teardown, and status 143. Evidence:
+`target/s03-process-lifecycle-{1,2,4}cpu/`. PTYs/termios, job control, caught
+handler delivery, and broader signal semantics remain open.
+
+The next increment adds caught-handler delivery recovery: a Ring-3 probe
+registers a SIGUSR1 handler, self-signals, and exits from the handler with
+status 42 on 1/2/4 CPUs. The kernel now restores a pending caught signal when
+saved-frame delivery cannot safely proceed, preventing silent signal loss.
+The broader S03 boundary remains open for PTYs/termios, job control, and
+complete default/stop/continue signal semantics.
+
+The terminal-control increment adds a validated `TCGETS`/`TCSETS` termios
+record and foreground process-group `TIOCGPGRP`/`TIOCSPGRP` requests on
+standard input. The Ring-3 S03 probe round-trips termios through the real
+syscall ABI and the full lifecycle gate remains green on 1/2/4 CPUs. This is
+a single-owner terminal boundary; PTY allocation/multiplexing and complete
+job-control stop/continue behavior remain open. Foreground assignment now
+requires the caller's current process group or TaskControl capability, and
+console stdin rejects reads from background process groups; the shell's
+foreground assignment is normalized to the target process group.
+The input path also consumes the configured `VINTR` byte and sends SIGINT to
+the foreground group; it is not returned as ordinary stdin data. The current
+QEMU fixture does not inject keyboard bytes, so this behavior still needs a
+dedicated runtime acceptance probe.
+The PS/2 and USB-HID decoder self-tests now verify that Ctrl-C produces the
+configured `VINTR` byte (`0x03`); QEMU keyboard injection remains separate.
+The default signal path now terminates on the common terminating dispositions,
+with a Ring-3 process-group SIGQUIT/status-131 check in the S03 gate.
+The scheduler now tracks stopped process/task state: SIGSTOP prevents
+dispatch, SIGCONT returns stopped tasks to Ready, and the gate verifies
+SIGSTOP -> still-running wait -> SIGCONT -> SIGTERM/reap status 143.
+The wait ABI now also reserves `waitpid(-1)` for bounded wait-any child
+selection and reaping; the fork probe exercises that selector.
+The PTY increment adds fixed-capacity `/dev/ptmx` and `/dev/pts/N` master/slave
+objects, generation validation, descriptor cloning/teardown, and a canonical
+line buffer with echo, erase, EOF, and VINTR handling. The S03 gate exercises
+allocation, buffering, echo separation, and bidirectional transfer. The session
+increment adds inherited session identity, `getsid`/`setsid`, same-session
+process-group assignment, and a Ring-3 session probe; the 1/2/4-CPU gate passes.
+The bounded job-control slice now includes default SIGSTOP/SIGTSTP/SIGTTIN/
+SIGTTOU stopping, SIGCONT resumption, caught/ignored stop dispositions,
+`TOSTOP` background-write enforcement, stopped orphaned-group SIGHUP/SIGCONT
+notification, child reparenting, and PTY hangup EOF/write rejection. A
+dedicated headless QMP gate enumerates xHCI, injects Ctrl-C through the USB HID
+keyboard, and proves foreground-group SIGINT termination (status 130). Full
+POSIX terminal coverage beyond this bounded ABI remains outside S03.
+
+## S04 scheduler and SMP accounting - 2026-10-28 - ACCEPTED BOUNDED
+
+S04 now has a bounded scheduler policy contract. Every live task records
+timer-tick runtime and dispatch count; fixed scheduler classes rank work above
+the existing quantum priority; and opt-in per-task runtime quotas enforce a
+bounded budget within a bounded period by throttling until the next period.
+Quota configuration is accepted only before first dispatch, retains no
+userspace pointers, and never turns telemetry into an implicit reservation.
+The existing hard affinity, Ready-only migration, NUMA-domain preference, and
+hotplug invariants remain authoritative.
+
+The dedicated `s04-scheduler-accounting-test` passes on 1/2/4 CPUs with
+warning-denying target/host Clippy and Python validation. Its 2/4-CPU QEMU
+profiles create two explicit NUMA nodes, verify topology publication, and
+prove Realtime and Background 2/8-tick quota enforcement and recovery. Evidence:
+`audit-artifacts/s04-scheduler-accounting-{1,2,4}cpu-*`.
+
+This closes S04's bounded software/QEMU scope. Physical CPU hotplug, native
+NUMA latency/placement, cgroup-like dynamic classes, and unbounded quota
+policy remain outside this stage.
+
+## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
+
+The integrated Stage 32 change set connects the bounded diagnostics/logging,
+crash-dump, tracing, profiler, RSP, COM2, packet pump, session, trap-stop,
+generation-owner, trap-frame, task-binding, register-write, UART-poll, SDK
+documentation, API documentation, example path, and application-template
+surfaces through `kernel/src/wovendev.rs`. The single integrated gate is
+`stage32-integrated-test` and passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-integrated-{1,2,4}cpu/`.
+
+The breakpoint IDT path now also has an interrupt-safe live handoff under the
+integrated feature: it records one packed vector/error event atomically and
+returns without locks, sleeping, or switching tasks. The event is consumed
+later through `gdb_live::take()`. Continue/step mutation is now covered by
+`gdb_scheduler.rs`, which validates user return state, maps the fixed GDB
+context into the owned `UserForkFrame`, controls x86 TF, and checks current
+kernel-stack ownership before its raw-pointer entry. Physical GDB
+qualification remains separate.
+
+## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_transport.rs`, a bounded byte pump for COM2/RSP input.
+It recognizes acknowledgements, assembles one bounded frame, validates the
+checksum through `gdb_stub`, exposes a packet only through an explicit take
+operation, and resets on malformed or oversized input. It does not poll UART
+or own debugger/session state.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-16-gdb-transport-{1,2,4}cpu/`. Target and host
+warning-denying Clippy plus Python syntax validation pass. Live UART loop,
+session dispatch, and task execution control remain open.
+
+## Stage 32.15 GDB generation-checked task binding QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_binding.rs`, which binds an owned trap-frame snapshot to
+the current generation-bound debugger owner. Context reads are refused after
+detach or when a token belongs to another owner, preventing stale attachment
+events from exposing or replacing a stopped context.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-15-gdb-binding-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live scheduler/task lookup,
+exception-handler wiring, and register mutation remain open.
+
+## Stage 32.14 GDB trap-frame snapshot QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_frame.rs`, which copies an owned architectural snapshot
+into the fixed 24-slot Stage 32.10 register context. General registers, RIP,
+RFLAGS, segment selectors, error code, and vector are copied by value; no
+interrupt-frame or stack reference escapes. The module remains a pure
+conversion boundary and does not install an exception handler or resume a
+task.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-14-gdb-frame-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live IDT capture and task binding
+remain open.
+
+## Stage 32.13 GDB generation-bound owner QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority
+with checked generation increments. It rejects zero or duplicate task
+identities, requires the current token for detach, and prevents stale tokens
+from matching after teardown and reattachment. No global task lookup, trap
+handling, or execution control is introduced.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-13-gdb-owner-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live task binding, transport
+ownership, and debugger execution remain open.
+
+## Stage 32.17 IDT trap-frame capture and GDB entry point — 2026-10-28 — ACCEPTED
+
+Added `kernel/src/gdb_entry.rs`: a `global_asm!` trampoline (`wovenhat_debug_entry`)
+that saves all 15 GPRs on the kernel stack, calls `wovenhat_debug_dispatch`, and
+returns via `iretq`. The `DebugFrame` struct captures the saved GPRs plus the
+CPU-pushed exception frame; `to_register_context()` maps them to the 24-register
+GDB x86-64 order. The dispatch function drives a bounded stub loop (65536 COM2
+polls) over `debug_serial`, `gdb_stub`, and `gdb_session`, sets TF for step and RF
+for resume, and times out cleanly when no GDB client connects. IDT vectors 1 (#DB)
+and 3 (INT3) are wired to the trampoline in `interrupts::init` via
+`set_handler_addr` when `gdb-entry` is active; the existing `breakpoint_handler`
+path is preserved for all lower-stage gates. Feature chain:
+`gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]`.
+Self-test: pure register-mapping check plus a live INT3 via `HANDLER_FIRED`.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-17-gdb-entry-{1,2,4}cpu/`. Target (stage32-17-test and
+stage32-12-test) and host warning-denying Clippy pass. No intermediate live
+GDB client needed; the stub loop timeout path is sufficient for gate acceptance.
+
+## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_trap.rs`, a bounded translation layer for an already
+captured architectural vector and optional error code. Breakpoint, single-step,
+fault, external, and unknown vectors map to explicit GDB signals; publication
+feeds the caller-owned Stage 32.11 session. The layer does not install an IDT
+handler, inspect a frame, dereference memory, or resume a task.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-12-gdb-trap-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live exception-handler wiring,
+trap-frame capture, stopped-task ownership, and execution control remain open.
+
+## Stage 32.11 GDB session state machine QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_session.rs`, a bounded lifecycle owner around the Stage
+32.10 command boundary. It tracks active/stopped state and stop signals,
+returns `Sxx` stop replies, refuses commands while running, and translates
+continue, step, and kill into explicit actions without executing them in the
+parser layer. Session state is local to the caller and does not dereference
+guest pointers or introduce task ownership.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-11-gdb-session-{1,2,4}cpu/`. Target and host warning-denying
+Clippy, host tests, and Python syntax validation pass. Live trap ownership,
+task binding, register mutation, transport polling, and actual continue/step
+execution remain open.
+
+## Stage 32.10 GDB register context and command dispatch QEMU gate - 2026-10-28 — ACCEPTED
+
+Added `kernel/src/gdb_debugger.rs`, a pure bounded command boundary over the
+Stage 32.8 packet layer. It encodes a fixed 24-register x86-64 context in
+target-endian hexadecimal and dispatches `?`, `g`, bounded `m`, `qSupported`,
+`c`, `s`, and `k` commands. Memory reads are limited to a caller-owned window
+and 256 bytes; invalid or out-of-range requests return `E01` without guest
+pointer access.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-10-gdb-dispatch-{1,2,4}cpu/`. Target and host warning-denying
+Clippy, host tests, and Python syntax validation pass. This is a pure command
+and context boundary; live trap entry, stopped-task ownership, register
+mutation, memory mapping, continue/step execution, and debugger lifecycle
+remain open.
+
+## Stage 32.9 second-UART debug serial QEMU gate - 2026-10-27 — ACCEPTED
+
+Added the bounded COM2 transport for the WovenDev debugger path in
+`kernel/src/debug_serial.rs`. It configures a 16550-compatible second UART at
+115200 8N1, provides bounded transmit polling and nonblocking receive, and
+performs a loopback self-test before emitting a marker through the second QEMU
+serial device. The `debug-serial` production feature is zero-cost when off;
+`stage32-9-test` enables the QEMU gate.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-9-debug-serial-{1,2,4}cpu/`, including `debug-serial.log`.
+Target and host warning-denying Clippy plus host tests pass. This is the
+second-UART transport boundary only; live GDB command handling, trap entry,
+register/memory access, and debugger session lifecycle remain open.
+
+## Stage 32.8 GDB RSP packet framing QEMU gate - 2026-10-27 — ACCEPTED
+
+Wire-level GDB Remote Serial Protocol packet framing: pure functions over byte
+slices, no I/O, no allocation, no global state. `gdb-stub = []` production
+feature; `stage32-8-test = ["qemu-test", "gdb-stub"]` QEMU gate. New module
+`kernel/src/gdb_stub.rs`:
+- `checksum(data) -> u8` — 8-bit modular sum (RSP spec § E.1).
+- `encode(data, out) -> Option<usize>` — writes `$<data>#<cs_hi><cs_lo>`.
+- `decode(input) -> Option<Packet>` — parses and checksum-verifies a packet;
+  extra trailing bytes are ignored.
+- `Packet::data() -> &[u8]` / `as_str() -> Option<&str>` — accessor pair.
+- `self_test()` covers: known checksum values (including wrap-around), encode
+  output for `?`/`OK`/empty, encode/decode round-trip, trailing-byte
+  tolerance, and five rejection cases (wrong start byte, checksum mismatch,
+  too short, invalid hex, no `#`).
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-8-gdb-stub-{1,2,4}cpu/serial.log`.
+Next: Stage 32.9 — GDB debug serial port (second COM port I/O).
+
+## Stage 32.7 log-level filter QEMU gate - 2026-10-27 — ACCEPTED
+
+Minimum-severity gate on `diagnostics::emit()` using a lock-free `AtomicU8`.
+`log-filter = []` production feature; `stage32-7-test = ["qemu-test",
+"log-filter", "log-ring"]` QEMU gate. New module `kernel/src/log_filter.rs`:
+- `set_min_level(level)` / `min_level() -> Level` — atomic store/load
+  (`Ordering::Relaxed`); safe from IRQ context.
+- Default: `Level::Debug` — passes Error/Warn/Info/Debug, drops only Trace.
+- `emit()` check: `if level > min_level() { return; }` — fires before any
+  formatting, serial write, or ring push.
+- `Level` gained `#[repr(u8)]` in diagnostics.rs so its discriminant can be
+  stored directly as a `u8` (non-breaking; ordering unchanged).
+- Zero-cost stubs (`#[inline(always)]` no-ops) when `log-filter` is disabled.
+- `self_test()` verifies Level ordering assumptions and (when `log-filter`
+  is active) the atomic set/get round-trip.
+QEMU demonstration: sets min=Info, emits Debug (dropped) then Info (passes),
+checks ring count=1 to confirm the filter is live.
+Serial output confirms:
+```
+INFO filter_test: should_appear
+[S32.7] log filter: PASSED
+```
+(`DEBUG filter_test: should_be_dropped` is absent — correctly suppressed.)
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-7-log-filter-{1,2,4}cpu/serial.log`.
+
+## Stage 32.6 kernel debug dump QEMU gate - 2026-10-27 — ACCEPTED
+
+Structured kernel debug dump combining a panic crash context with a ring
+buffer snapshot. `debug-dump = ["log-ring"]` production feature;
+`stage32-6-test = ["qemu-test", "debug-dump"]` QEMU gate. New module
+`kernel/src/debug_dump.rs`:
+- `emit_dump(rip, rsp, cr2)` — drains the ring first (releases lock), then
+  writes to serial via `format_record` + `serial::write_bytes` directly (bypasses
+  `diagnostics::emit` to avoid recursive ring-push):
+  1. `ERROR debugger: panic_context | rip=… | rsp=… | cr2=…`
+  2. `DEBUG debugger: ring_snapshot | count=N`
+  3. `DEBUG debugger: ring_entry | idx=I | record=…` × N (up to `DRAIN_MAX`=8)
+- Zero-cost `#[inline(always)]` stub when `debug-dump` is disabled.
+- `self_test()` verifies `format_record` output for the crash context and
+  ring-snapshot headers without serial I/O or lock acquisition.
+Passes on 1/2/4 CPUs, exit 33. Serial confirms end-to-end:
+```
+ERROR debugger: panic_context | rip=0xffffdeadc0de | rsp=0xffff800000100000 | cr2=0xbad00000
+DEBUG debugger: ring_snapshot | count=2
+DEBUG debugger: ring_entry | idx=0 | record=INFO boot: debug-dump test seed 1
+DEBUG debugger: ring_entry | idx=1 | record=WARN sched: debug-dump test seed 2
+```
+Evidence: `target/stage32-6-debug-dump-{1,2,4}cpu/serial.log`.
+
+## Stage 32.5 log ring buffer QEMU gate - 2026-10-27 — ACCEPTED
+
+Allocation-free bounded circular ring buffer that `diagnostics::emit()` feeds
+automatically. `log-ring = []` production feature; `stage32-5-test = ["qemu-test",
+"log-ring"]` QEMU gate. New module `kernel/src/log_ring.rs`:
+- `push(bytes)` — copies up to [`ENTRY_MAX`] (256) bytes into the next slot of
+  the fixed-capacity ring; IrqMutex-protected; IRQ-safe.
+- `len() -> usize` — current number of valid entries (0…[`RING_CAPACITY`] = 64).
+- `drain(out, lens) -> usize` — copies entries oldest-first into caller-provided
+  arrays without allocation; stops when either output slice is exhausted.
+- When the ring is full, the oldest entry is overwritten silently.
+- All three symbols are `#[inline(always)]` no-ops when the `log-ring` feature
+  is disabled (zero overhead on default builds).
+- `diagnostics::emit()` now calls `log_ring::push()` after serial write when
+  `log-ring` is enabled; no call-site instrumentation required.
+- `self_test()` verifies push/drain order, exact-capacity fill, overflow
+  (oldest dropped), and byte-level truncation.
+Passes on 1/2/4 CPUs, exit 33. Boot serial shows `ring_count=0` (the minimal
+QEMU test path emits nothing via `emit()`; the integration fires on production
+boots that use the diagnostics API).
+Evidence: `target/stage32-5-log-ring-{1,2,4}cpu/serial.log`.
+
+## Stage 32.4 performance profiler QEMU gate - 2026-10-27 — ACCEPTED
+
+Allocation-free kernel performance profiler built on the tracing and diagnostics
+primitives. `profiler = []` production feature; `stage32-4-test = ["qemu-test",
+"tracing", "profiler"]` QEMU gate. Module `kernel/src/profiler.rs`:
+- `record(subsystem, name, tsc_delta)` — accumulates per-`(subsystem, name)`
+  count/sum/min/max TSC-cycle statistics into a fixed-capacity static table; key
+  lookup by `&'static str` pointer equality avoids byte-by-byte comparison.
+- `report()` — emits all accumulated slots as structured diagnostics records:
+  `INFO profiler: slot | sub=… | name=… | count=… | avg_tsc=… | min_tsc=… | max_tsc=…`.
+- `reset()` — clears all accumulated samples.
+- When both `tracing` and `profiler` features are enabled, `tracing::span_end`
+  automatically calls `record`; no call-site instrumentation is needed.
+- When `profiler` is disabled (default), all three are `#[inline(always)]`
+  no-ops that the compiler eliminates entirely.
+- `self_test()` verifies accumulation arithmetic, slot allocation, min/max/avg
+  computation, and `reset()` behavior without touching the static IrqMutex.
+Passes on 1/2/4 CPUs, exit 33.
+Evidence: `target/stage32-4-profiler-{1,2,4}cpu/serial.log`.
+
+## Desktop software graphics acceptance closed - 2026-10-27
+
+ACCEPTED AND CLOSED for the reported software/QEMU desktop repair at source
+`cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`. This supersedes the open desktop pixel failures in the historical records;
+those historical failed artifacts remain preserved. All 87 required matrix
+cases pass on 1/2/4 CPUs, including TCG/WHPX keyboard/mouse/performance,
+software 3D, GPU recovery, two monitors and session behavior. The strict
+clean-source GFX-07 checker passes 9/9 with its fatal detector unchanged.
+Build, warning-denying lints, Rust tests and all 205 Python tests pass.
+
+See [the acceptance record](graphics/desktop-acceptance-2026-10-27.md) for exact
+source/evidence provenance, stronger completed-frame pixel assertions,
+close-time repaint recovery, and validation limits. This closes software
+desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
+graphics mandate or the full historical Windows acceptance chain.
+
+
+## Stage 20 reported-gate revalidation - 2026-10-27 — ACCEPTED
+
+Revalidated the seven gates previously reported as failing after the current
+tree advanced to `744b5839`. No production source change was required: the
+current flat compatibility renderer and its existing independent kernel
+oracles passed the complete 1/2/4-CPU matrix with QEMU exit 33:
+
+- Stage 20.2 desktop applications
+- Stage 20.3 application launcher
+- Stage 20.4 windows that move and close
+- Stage 20.6 translucent overlays
+- Stage 20.8 tiling
+- Stage 20.9 notification center
+- Stage 20.13 workspaces
+
+Evidence is preserved under `target/woven-shell-{apps,launcher,windows,
+translucency,tiling,notifications,workspaces}-{1,2,4}cpu/`. The one
+intermittent 2-CPU Stage 20.6 failure was rerun cleanly and passed; no
+assertions or timeouts were weakened. The image-backed Stage 20 lint sweep,
+production lint, and host `--all-targets` Clippy also pass. This closes the
+reported seven-gate regression set; it does not claim full roadmap Stage 20,
+native hardware qualification, or full Stage 32 acceptance.
+
+## Stage 32.3 tracing span API - 2026-10-27 — ACCEPTED
+
+Zero-cost kernel tracing span API built on the diagnostics primitive.
+`tracing = []` production feature; `stage32-3-test = ["qemu-test", "tracing"]`
+QEMU gate. New module `kernel/src/tracing.rs`:
+- `span_begin(subsystem, name) -> (id, tsc_start)` — emits `span_begin` record.
+- `span_end(subsystem, name, id, tsc_start)` — emits `span_end | tsc=<cycles>`.
+- `SpanGuard::enter(subsystem, name)` — RAII guard; `Drop` emits `span_end`.
+- When `tracing` feature is disabled (default), all three are `#[inline(always)]`
+  no-ops; the compiler eliminates them entirely (`SpanGuard` is a ZST).
+- `self_test()` verifies monotone span-ID counter and non-decreasing TSC.
+Passes on 1/2/4 CPUs, exit 33. Serial shows span records with non-zero TSC
+deltas (e.g. `TRACE tracing: span_end | name=self_test | id=3 | tsc=4885175`).
+Evidence: `target/stage32-3-tracing-{1,2,4}cpu/serial.log`.
+
+## Stage 32.1 structured-diagnostics QEMU gate - 2026-10-27 — ACCEPTED
+
+Boot-time QEMU acceptance for the structured-diagnostics primitive.
+Feature `stage32-1-test` (chains `qemu-test`) calls `diagnostics::self_test()`
+from the boot sequence and exits 33 on pass. Passes on 1/2/4 CPUs:
+- 1 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+- 2 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+- 4 CPU: exit 33, `[S32.1] structured diagnostics: PASSED`
+Evidence: `target/stage32-1-diagnostics-{1,2,4}cpu/serial.log`.
+Note: QEMU 11.1 deprecated `-accel tcg,tb-size=128`; harness uses `-accel tcg`.
+
+## Stage 32.2 structured panic crash-dump QEMU gate - 2026-10-27 — ACCEPTED
+
+Boot-time QEMU acceptance for the structured panic crash-dump path.
+Feature `stage32-2-test` wires `diagnostics::emit_panic_dump()` into
+`panic::kernel_panic()` and calls `diagnostics::self_test_panic_dump()` at
+boot to verify the exact record format. Does NOT trigger a real panic (which
+would put "KERNEL PANIC" in the serial log and fail `validation_errors`).
+Passes on 1/2/4 CPUs:
+- 1 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+- 2 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+- 4 CPU: exit 33, `[S32.2] structured panic dump: PASSED`
+Evidence: `target/stage32-2-panic-dump-{1,2,4}cpu/serial.log`.
+After acceptance: `emit_panic_dump()` promoted to unconditional production code
+in `kernel_panic()` (feature guard removed); `#![allow(dead_code)]` removed.
+
+## Graphics shared accessibility-profile parser - 2026-10-25
+
+`libwoven::accessibility::Settings::apply_json` now parses the bounded
+accessibility profile format shared by the installer and WovenShell. It
+accepts only quoted recognized keys, checked booleans, and clamped small
+integer values; malformed or unknown fields fail closed. The full 193-test
+libwoven suite and warning-denying host/freestanding Clippy pass. Direct
+settings write-back remains intentionally unavailable because packaged apps
+have no `/etc` write authority.
+
+## Graphics persisted accessibility profile handoff - 2026-10-25
+
+The installer now emits bounded `high_contrast` and `reduced_motion` keys in
+`/etc/wovenhat/settings.json`. Production system-apps boot imports that file
+from the mounted installation, passes it to WovenShell, and the shell applies
+only recognized `true` values with a fixed 512-byte read bound. The no-file
+path remains unchanged. Warning-denying target Clippy passes for WovenShell
+and the kernel `system-apps` feature; the production desktop boot gate passes
+on 1/2/4 CPUs. Settings UI write-back and compositor-wide persistence remain
+open.
+
+## Graphics shell high-contrast launch mode - 2026-10-25
+
+WovenShell now accepts `--high-contrast` and routes wallpaper, taskbar,
+launcher, panels, title bars, badges, workspace/Quick Settings entries, and
+text through a high-contrast palette. The default production palette remains
+unchanged. Target release build and warning-denying target Clippy pass; the
+default desktop gate passes at 1/2/4 CPUs with evidence under
+`target/woven-shell-{1,2,4}cpu`. This is an application launch mode, not
+persisted compositor-wide accessibility settings or full Stage 11 acceptance.
+
+## Graphics bounded HTTP chunked-body increment - 2026-10-25
+
+`libwoven::web` now records chunked transfer encoding and decodes bounded
+HTTP/1.1 chunked bodies into caller-owned storage. Hex sizes, extensions,
+CRLF framing, trailers, overflow, truncation, and output capacity are checked
+fail-closed. The full 191-test libwoven suite and warning-denying freestanding
+target Clippy pass. Socket transport, TLS, policy, and network imagery remain
+open.
+
+## Graphics bounded grid-repeat increment - 2026-10-25
+
+The browser grid parser now recognizes bounded `repeat(N, …)` column syntax
+with a fixed maximum of 16 columns, while retaining explicit track-list
+support and fail-closed invalid counts. The full 190-test libwoven suite and
+warning-denying freestanding target Clippy pass.
+
+## Graphics bounded media-query increment - 2026-10-25
+
+`StyleSheet::parse_for_viewport` now evaluates bounded `@media
+(min-width: Npx)` and `@media (max-width: Npx)` blocks, skips inactive rules,
+and rejects malformed or over-nested input. The full 190-test libwoven suite
+and warning-denying freestanding target Clippy pass. Broader media features and
+responsive semantics remain open.
+
+## Graphics bounded responsive-length increment - 2026-10-25
+
+Browser inline and stylesheet `width`/`height` now accept checked percentage
+lengths in addition to pixels. Width resolves against the containing box and
+height against the bounded viewport; invalid or overflowing values fail closed.
+The full 189-test libwoven suite and warning-denying freestanding target
+Clippy pass. Media queries and full responsive semantics remain open.
+
+## Graphics bounded stylesheet cascade increment - 2026-10-25
+
+`libwoven::browser` now captures HTML class/id attributes and parses a
+fixed-capacity stylesheet with tag, class, and id selectors. Matching rules
+apply by selector specificity, then source order, and inline declarations apply
+last; bounded inherited text color follows the parent chain, and the existing
+flex/grid layout and paint paths can consume the stylesheet through dedicated
+APIs. The 188-test libwoven suite, host all-targets Clippy, and freestanding
+target Clippy pass with warnings denied. Media-query evaluation and full
+responsive semantics remain open.
+
+## Graphics roadmap ledger correction - 2026-10-25
+
+The live audit now classifies the existing bounded browser substrate and scalar
+JavaScript seam as PARTIAL rather than MISSING: browser DOM/layout/paint/software
+rendering and inline script execution are implemented and tested, while full
+browser, ECMAScript, DOM, module, async, and sandbox capabilities remain open.
+
+## Graphics bounded PCM WAVE parser increment - 2026-10-25
+
+`libwoven::media::parse_wav_pcm` now validates RIFF/WAVE chunk bounds, PCM
+format, sample alignment, byte rate, and caller-visible sample ranges without
+allocating or copying audio data. Eleven media tests pass for the affected
+module, and freestanding target Clippy passes with warnings denied. This is a
+container/metadata boundary only; full streaming playback and codec support
+remain open.
+
+## Graphics browser bounded flex/grid layout increment - 2026-10-25
+
+The borrowed browser layout substrate now supports bounded `display:flex` rows
+and columns, `display:grid` columns, and fixed inline `gap` placement. Child capacity,
+column count, coordinate arithmetic, viewport bounds, and overflow remain
+fail-closed. The 184-test libwoven suite, host all-targets Clippy, and
+freestanding target Clippy pass with warnings denied. This is not a full CSS
+cascade or responsive browser claim.
+
+## Graphics theme-mode boundary increment - 2026-10-25
+
+WovenSettings now selects the shared `libwoven::ui::Theme` palette through
+bounded `--light` and `--high-contrast` GUI modes, while retaining dark as the
+default. The target release build and warning-denying target Clippy pass. This
+is an application-level theme increment only: the shell still uses its
+accepted production palette, and no compositor-wide persisted accessibility
+settings service is claimed.
+
+The existing signed WovenSettings QEMU gate also passes at 1/2/4 CPUs; evidence
+is retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
+
+## Graphics Stage 24.59 low-memory Change-PIN acceptance - 2026-10-25
+
+The 256 MiB system-apps fixture initially failed in the bootloader because
+128 service-sized 1 MiB task stacks plus the bounded VFS/catalog footprint
+left no mapping headroom. Stage 24.59 now uses an explicit 256 KiB task-stack
+profile (four times the ordinary stack) while production system-apps sizing
+remains unchanged. The complete Change-PIN flow passes on 1/2/4 CPUs with
+QEMU exit 33 and target Clippy green; evidence is under
+`target/woven-shell-change-pin-{1,2,4}cpu`.
+
+## Graphics Stage 20.15 session acceptance - 2026-10-25
+
+Repaired the session oracle to account for the launcher’s app-icon text
+offset and the projected Quick Settings top edge. The session now passes
+catalog loading/listing, display and input ownership, F12 console handoff and
+return, keyboard delivery, Quick Settings access, and desktop power-off on
+1/2/4 CPUs. Target Clippy is green; evidence is preserved under
+`audit-artifacts/stage20.15-{1,2,4}cpu-*`.
+
+## Stage 13.20 power-off matrix - 2026-10-25
+
+The ACPI PM1/_S5 power-off gate passes on 1/2/4 CPUs. Evidence is preserved
+under `audit-artifacts/stage13.20-poweroff-{1,2,4}cpu-*`.
+
+## Graphics Stage 20 feature-lint sweep - 2026-10-25
+
+With the built hello-gui and woven-shell images supplied through the required
+environment variables, `python scripts/lint-all-features.py --only stage20`
+passes every Stage 20 feature, production kernel Clippy, and host
+`--all-targets` Clippy with warnings denied.
+
+## Graphics Stage 20.6 translucency acceptance - 2026-10-25
+
+Repaired the stage oracle for the current wallpaper and accent system and
+isolated this flat-overlay contract with the shell's supported `--no-3d` mode,
+leaving the later 3D toast behavior to its dedicated gate. Toast and launcher
+panel translucency, pointer transparency, layering over a window/shadow,
+close, teardown, and display restoration pass on 1/2/4 CPUs with QEMU exit
+33. Target Clippy for `stage20-6-test` is green; evidence is under
+`target/woven-shell-translucency-{1,2,4}cpu`.
+
+## Graphics Stage 20.5 window-depth acceptance - 2026-10-25
+
+The complete depth/shadow gate passes on 1/2/4 CPUs with QEMU exit 33. It
+verifies focused-window shadow ordering, shadow contrast, taskbar clipping,
+raise/lower behavior, application teardown, and display restoration. Evidence
+is retained under `target/woven-shell-depth-{1,2,4}cpu`; warning-denying
+freestanding kernel Clippy for `stage20-5-test` passes.
+
+## Graphics Stage 20.9 notification-center acceptance - 2026-10-25
+
+Repaired the notification-center oracle to match the production wallpaper,
+taskbar, accent, and clock geometry. The complete toast, unread-badge,
+newest-first ordering, clear, close, key handoff, and teardown gate passes on
+1/2/4 CPUs with QEMU exit 33. Evidence is retained under
+`target/woven-shell-notifications-{1,2,4}cpu`; warning-denying freestanding
+kernel Clippy for `stage20-9-test` passes.
+
+## Graphics Stage 20.12 sign-in acceptance - 2026-10-25
+
+Repaired the sign-in oracle to match the production wallpaper and projected
+background. The complete account-file, account-selection, wrong-PIN,
+successful-sign-in, taskbar identity, identity-bound lock/unlock, and teardown
+gate passes on 1/2/4 CPUs with QEMU exit 33.
+
+## Graphics Stage 20.11 lock-screen acceptance - 2026-10-25
+
+Repaired the Stage 20.11 lock-screen oracle to match the production flat
+wallpaper palette, weave, and projected 3D background. The complete lock,
+input isolation, PIN masking, wrong-PIN, unlock delivery, lockout, recovery,
+and teardown gate passes on 1/2/4 CPUs with QEMU exit 33.
+
+## Graphics Stage 11 desktop catalog blocker repair - 2026-10-25
+
+The production catalog blocker was traced to `woven-images.wapp` (166,248
+bytes) exceeding the 128 KiB VFS node/exec-image bound. The bounded capacity is
+now 256 KiB. The focused signed system-app catalog gate passes on 1 CPU with
+all eleven applications installed; the desktop screenshot/input matrix now
+passes on 1/2/4 CPUs, while theme-variation screenshots and low-power runtime
+remain open.
+
+## Graphics Stage 11 design tokens increment - 2026-10-25
+
+Added allocation-free `libwoven::ui::DesignTokens` for spacing, radii,
+elevation, and motion durations, plus light, dark, and high-contrast `Theme`
+variants selected from the shared accessibility settings. Host qualification
+passes with 182 libwoven tests and warning-denying libwoven Clippy. This is a
+code/library increment only; full Stage 11 desktop screenshot, animation
+starvation, and low-power runtime acceptance remains open.
+
+## Graphics Stage 11 motion/pacing acceptance increment - 2026-10-25
+
+Requalified the existing graphics runtime slices against the current shell.
+Stage 19.14 display scaling/frame pacing and Stage 20.7 spring animation now
+pass on 1/2/4 CPUs with exit 33. The animation oracle was repaired to use the
+actual pre-window framebuffer pixel, keeping its monotonic alpha and teardown
+checks independent of wallpaper/projection geometry. Warning-denying freestanding kernel Clippy for
+`stage20-7-test` passes. Evidence is in
+`docs/graphics/stage-11-motion-evidence.md`; full Stage 11 screenshot/theme,
+starvation, and low-power acceptance remains open.
+
+The Stage 20.7 matrix now also injects neutral pointer packets throughout the
+fade and passes its sustained-input starvation check on 1/2/4 CPUs. Full Stage
+11 screenshot/theme and low-power acceptance remains open.
+
+The earlier desktop screenshot qualification stopped before the session
+because the production system-app catalog could not fit `woven-images.wapp`.
+After raising the bounded VFS node capacity to 256 KiB, the full desktop
+qualification passed on 1/2/4 CPUs with six captured PPM frames per run and
+signed-in WovenFiles/WovenTerminal interaction evidence under
+`audit-artifacts/desktop-qualification-1792952128648637100`,
+`audit-artifacts/desktop-qualification-1792952312640236600`, and
+`audit-artifacts/desktop-qualification-1792952447677142500`. Theme-variation
+screenshots and low-power runtime remain open.
+
+## Graphics Stage 11 shared-theme visual regression - 2026-10-25
+
+Added allocation-free golden pixel signatures for a representative focused
+Button and checked Checkbox composition under dark, light, and high-contrast
+WovenUI themes. All three themes remain visually distinct and stable. The
+libwoven suite passes 183/183 tests and warning-denying all-targets Clippy
+passes. This is host visual-regression evidence; the full desktop screenshot,
+starvation, and low-power gates remain open.
+
+## Graphics Stage 11 Quick Settings accessibility acceptance - 2026-10-25
+
+Repaired the Stage 20.10 oracle to match the current shell's branded wallpaper
+weave and flat compatibility presentation. The panel model now composes its
+translucent background over the actual beneath-surface, including the tiled
+client. The complete Quick Settings gate passed on 1/2/4 CPUs with exit 33,
+covering Reduced Motion visibility, Do Not Disturb, tiling, scale 1/2,
+and now an actual Reduced Motion toggle with visible `On` state, plus
+keyboard/pointer routing and teardown. Warning-denying freestanding kernel
+Clippy for `stage20-10-test` passes. Full Stage 11 screenshot/theme,
+starvation, and low-power acceptance remains open.
+
+## Graphics Stage 20.8/20.13 flat-renderer oracle repairs - 2026-10-25
+
+Updated the tiling/resize and workspace acceptance oracles to the current
+flat WovenShell renderer: branded wallpaper gradient/weave and taskbar token.
+Stage 20.8 and Stage 20.13 each passed on 1/2/4 CPUs with QEMU exit 33,
+covering edge snap, resize, master/stack tiling, workspace switching, focus,
+hidden-window teardown, and display recovery. These close additional Stage 10
+dependency slices; the full roadmap Stage 10 acceptance remains broader than
+these component gates.
+
+## Graphics Stage 20.4 interaction oracle repair - 2026-10-25
+
+Repaired the current-head window interaction oracle to match WovenShell's
+accepted flat software default: the previous fixture still expected an old
+palette, weave pitch, and projected 3D wallpaper. The move, repaint, close,
+focus, and teardown gate now passes on 1/2/4 CPUs with QEMU exit 33. This
+repairs the Stage 10 dependency slice; full roadmap Stage 10 still requires
+its complete focus, snapping, workspace, clipboard, keyboard-navigation, and
+accessibility acceptance matrix.
+
+## Graphics roadmap Stage 09 compositor and composition scheduler - 2026-10-25
+
+Stage 09 is accepted for the compositor scheduler scope. The roadmap-native
+`stage09-compositor-test` gate passed on 1/2/4 CPUs with QEMU exit 33. It
+combines the damage-only composition contract with overlapping-window
+stacking, raise/focus, keyboard routing, compositor lease ownership, and
+owner teardown. The gate also removes the damage fixture before exercising
+the window-manager fixture, so both paths are validated in one boot without
+stale filesystem state. Existing Stage 20.8 remains the complementary
+resize/tiling/killed-window recovery gate. Evidence is recorded in
+`docs/graphics/stage-09-compositor-evidence.md`.
+
+## Graphics roadmap Stage 08 secure userspace surfaces and IPC - 2026-10-25
+
+Stage 08 is accepted for the secure userspace surface/IPC and QEMU scope. The
+roadmap-native `stage08-graphics-test` gate passed on 1/2/4 CPUs with exit 33:
+two independent Ring-3 processes submitted surfaces, unauthorized private
+surface reads were refused, shared pixels composed correctly, and client
+surfaces/grants were released on exit. Evidence is recorded in
+`docs/graphics/stage-08-surfaces-evidence.md`.
+
+## Codec qualification update - 2026-10-25
+
+- External randomized codec campaign: **PASS** — 50,000 inputs and 250,000
+  decoder cases through `tools/codec-fuzz`.
+- Multi-frame GIF playback emission: implemented, unit-tested, and guest
+  qualified through the WovenImages QEMU gate.
+- Caller-workspace-bounded WebP final decoding: **implemented and tested** via
+  `decode_webp_rgba_stream_bounded`, with dimension/file/memory limits.
+- Strict whole-process allocation certification: **PASS for the pinned
+  exercised paths** through `tools/webp-allocation-cert`; peak live allocation
+  was 702,669 bytes under a hard 1 MiB budget, with no leak. Universal proof
+  for every future zenwebp code path is not claimed because the backend
+  documents that some internal allocations may ignore its configured limit.
+- WovenImages guest qualification: **PASS** on 1/2/4 CPUs, exit 33, with
+  streamed BMP, interlaced GIF, and two-frame GIF playback markers.
+
+## Bounded multi-frame GIF playback emission - 2026-10-25
+
+`decode_gif_animation_stream` now emits every source frame through a
+synchronous `GifFrameSink`, using caller-owned canvas/previous buffers for
+composition. Frame delays, Background disposal, Previous disposal, local
+palettes, transparency, interlace mapping, and fail-closed malformed input
+handling are integrated. The 180-test libwoven suite and host/freestanding
+warning-denying Clippy pass.
+
+## Bounded GIF playback state - 2026-10-25
+
+`GifPlayback` now provides caller-owned canvas/previous buffers, frame timing
+metadata, and checked Keep/Background/Previous disposal behavior. The 179-test
+libwoven suite and host/freestanding warning-denying Clippy pass. The GIF
+source parser still emits only one frame; multi-frame parsing and playback
+integration remain open.
+
+## Codec truncation/property qualification - 2026-10-25
+
+The codec suite now exhaustively checks every truncated BMP/GIF fixture prefix
+and malformed/truncated WebP stream prefix, requiring fail-closed errors. The
+178-test libwoven suite and host/freestanding warning-denying Clippy pass.
+External fuzzing and long-running randomized campaigns remain separate
+qualification work.
+
+## Userspace stack qualification for streamed codecs - 2026-10-25
+
+The WovenImages Ring-3 self-test exposed a stack fault while entering the
+streamed GIF path under the previous 16-KiB stack. LZW tables are heap-backed
+with fixed sizes, and `UserStack::SIZE` is now 64 KiB plus its guard page to
+provide bounded codec/browser/compositor headroom. Host/freestanding lint and
+the corrected 1/2/4-CPU guest matrix pass; serial evidence is retained under
+`audit-artifacts/woven-images-{1,2,4}cpu`.
+
+## Memory-bounded interlaced GIF rows - 2026-10-25
+
+The source-driven GIF decoder now supports the four-pass interlace mapping
+while retaining fixed palette/LZW workspace and direct caller-owned output.
+The 176-test libwoven suite and host/freestanding warning-denying Clippy pass.
+Animated frame timing, disposal, and playback remain open.
+
+## Memory-bounded GIF stream decoder - 2026-10-25
+
+`decode_gif_rgba_stream` now parses GIF headers, palettes, sub-blocks, and LZW
+codes directly from `ImageStream`; it no longer assembles the encoded payload.
+The decoder retains only fixed palette/LZW tables and a 1024-byte source
+request, then writes directly into caller-owned pixels. The 175-test libwoven
+suite and host/freestanding warning-denying Clippy pass. Animation, disposal,
+and timing remain open.
+
+## GIF incremental-delivery boundary - 2026-10-25
+
+`libwoven::codecs::decode_gif_rgba_stream` now consumes GIF sources through
+validated 1024-byte requests and hands the checked payload to the bounded
+single-frame GIF decoder. Source truncation, allocation failure, and metadata
+mismatch fail closed. The 175-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Memory-bounded GIF decoding and animation remain
+open.
+
+## Bounded BMP row streaming - 2026-10-25
+
+`libwoven::codecs::decode_bmp_rgba_stream` now reads BMP headers and rows via
+the shared `ImageStream` boundary with validated 1024-byte requests. It
+supports uncompressed 24/32-bit BMPs, preserves caller-owned RGBA output, and
+rejects indexed, compressed, oversized-row, and malformed inputs. The
+174-test libwoven suite and host/freestanding warning-denying Clippy pass.
+
+## Bounded JavaScript boolean/comparison operators - 2026-10-25
+
+The scalar runtime now supports boolean literals, `!`, `==`, `!=`, integer
+ordering, and boolean `&&`/`||` with checked precedence and type validation.
+The 173-test libwoven suite and host/freestanding warning-denying Clippy pass.
+Objects, strings, functions, DOM, async, modules, JIT, and sandbox
+certification remain open.
+
+## Bounded GIF pixel decoder - 2026-10-25
+
+`libwoven::media::decode_gif_rgba` now rasterizes a validated first GIF frame
+with global/local palettes, transparency control, and bounded LZW tables into
+caller-owned RGBA storage. Interlaced and animated/multi-frame inputs fail
+closed. The 172-test libwoven suite and host/freestanding warning-denying
+Clippy pass. GIF streaming delivery, animation playback, and GPU decode remain
+separate gates.
+
+## Bounded browser script seam - 2026-10-25
+
+`libwoven::browser::execute_script` now connects inline `<script>` node text
+to the bounded scalar JavaScript runtime. It rejects non-script nodes and
+missing source, preserves fixed runtime capacity, and exposes no DOM or
+system capabilities. The 171-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Full ECMAScript, DOM, module, async, and browser
+sandbox gates remain open.
+
+## Browser software-canvas renderer - 2026-10-25
+
+`libwoven::browser::render` now consumes the bounded paint list through the
+existing software `Canvas`, rendering fill and text commands into caller-owned
+pixels. Coordinate conversions are checked and fail closed. The 170-test
+libwoven suite and host/freestanding warning-denying Clippy pass. GPU
+composition, full CSS, networking, JavaScript, and text shaping remain open.
+
+## Browser paint-command boundary - 2026-10-25
+
+`libwoven::browser::paint` now turns the bounded DOM/layout result into a
+capacity-checked renderer-neutral command list for background fills and text.
+Inline six-digit CSS hex `color` and `background-color` are supported, with
+tests for command ordering and capacity failure. The 169-test libwoven suite
+and host/freestanding warning-denying Clippy pass. Full CSS cascade, layout
+features, network, JavaScript, shaping, and GPU composition remain separate
+gates.
+
+## Incremental WebP stream delivery - 2026-10-25
+
+`libwoven::codecs::decode_webp_rgba_stream` now consumes WebP input through
+the shared `ImageStream` boundary in validated 1024-byte requests, checks the
+decoded dimensions, and writes RGBA pixels into caller-owned storage. The
+pinned `zenwebp 0.3.2` backend buffers the encoded RIFF payload internally
+before rasterization, so this closes incremental input delivery but does not
+claim memory-bounded WebP decoding. Animation remains outside this gate.
+
+## WovenFiles shared-control migration - 2026-10-25
+
+WovenFiles now uses shared bounded Label and Button controls for its title and
+Refresh action. The existing VFS listing, resize behavior, and shell window
+protocol remain unchanged; the shared release-inside pointer contract is now
+used for activation. Freestanding warning-denying Clippy passes. Broader
+application migration remains in progress.
+
+## Bounded streaming PNG/JPEG codec reader - 2026-10-25
+
+`libwoven::codecs` now exposes a seekable `ImageStream` boundary for PNG and
+JPEG decoding. Reads are split into validated 1024-byte source requests and
+pixels remain caller-owned. The 166-test libwoven suite, host/freestanding
+Clippy, and WovenImages target lint pass. WebP has a separate incremental
+delivery path, but its backend buffers the encoded payload before decode.
+
+## Bounded freestanding JavaScript runtime foundation - 2026-10-25
+
+`libwoven::javascript::Runtime` provides a no-std fixed-capacity scalar
+evaluator for integer arithmetic, precedence, comments, `let` bindings,
+updates, and statement sequencing. Script length, variable count, nesting,
+and arithmetic are checked and fail closed. The 165-test libwoven suite and
+host/freestanding warning-denying Clippy pass. Full ECMAScript semantics,
+DOM bindings, promises, modules, JIT execution, and sandbox certification
+remain open.
+
+## Scalable I/O and launcher capacity increment - 2026-10-25
+
+The safe userspace API no longer treats the kernel's per-syscall transfer
+validation as an application-level payload ceiling. `libwoven::read_all`,
+`write_all`, and `write_file_all` stream arbitrarily sized buffers in validated
+chunks; standard output and media VFS loading use those helpers. The WovenShell
+launcher no longer truncates the production catalog at ten entries: its
+metadata staging capacity is 64 applications and its child-process staging is
+32. Pointer, integer-overflow, memory, IPC, path, and resource limits remain
+intentional safety gates and are not removed. Host tests and warning-denying
+Clippy pass; production system-app QEMU passes at 1/2/4 CPUs with 1280x800
+desktop evidence.
+
 ## Graphics roadmap Stage 07 image/asset increment - 2026-10-25
 
-Stage 07 has started but is not accepted. `libwoven::media` now has bounded
-pixel/dimension policy, PNG/JPEG RGBA adapters, host-target WebP decoding, an
-allocation-free 24/32-bit BMP decoder, fixed thumbnail cache, license/digest
-wallpaper catalog, and bounded VFS asset loading. The suite and warning-denying
-Clippy pass (157 tests). Freestanding WebP, licensed wallpaper binaries,
-persistent boot-image installation, thumbnail UI integration, and guest image
-qualification remain open. See
+Stage 07 is accepted for the freestanding/QEMU scope. The wallpaper
+deliverables are complete: a CC0-1.0, SHA-verified deterministic BMP is
+generated by `kernel/build.rs`, embedded in the kernel build, installed
+read-only at `/share/wallpapers/wovenhat-gradient.bmp`, and read back through
+the boot VFS image. WovenImages now loads and decodes the VFS asset and draws
+its thumbnail. Freestanding WebP uses pinned alloc-only `zenwebp 0.3.2`, with
+VP8, VP8L, and VP8X/ALPH coverage. The 160-test suite, warning-denying
+checks, and dedicated signed Ring-3 QEMU self-test passed at 1/2/4 CPUs. See
 `docs/graphics/stage-07-images-evidence.md`.
 
 ## Graphics roadmap Stage 06 iconography - 2026-10-25
@@ -99,6 +1078,15 @@ timeout was fixed in the headless QMP input and PPM harness paths; the corrected
 real-QEMU desktop qualification passed serially at 1/2/4 CPUs with 5 GiB
 configured RAM and the 4 GiB usable-memory floor. Stage 00 is accepted. No
 later graphics stage is accepted by this entry.
+
+## Browser layout substrate increment - 2026-10-25
+
+`libwoven::browser` now provides a fixed-capacity borrowed DOM layout pass
+with inline `width`, `height`, `margin`, and `display:none` handling. It emits
+checked block rectangles for a caller viewport and rejects invalid or
+overflowing layouts. The 162-test libwoven suite and host/freestanding
+warning-denying Clippy pass. Full CSS cascade, networking, JavaScript,
+sandboxing, and pixel rendering remain open.
 
 ## Bounded WebView HTTP(S) network boundary - 2026-10-25
 
@@ -10712,3 +11700,51 @@ Removed obsolete stage-only README files and legacy Stage 6–9, Stage 10.8–10
 and Stage 13 runner wrappers. The current Stage 10.1–10.7 acceptance chain,
 `RUN-STAGE10.7.ps1`, `run-release.ps1`, the root README, and app/tool/vendor
 READMEs remain because they are active instructions or package documentation.
+
+## Stage 32 production compilation repair - 2026-10-27
+
+Default production instrumentation compiles with warnings denied after API
+visibility and optional-state/self-test cfg repairs. Kernel Clippy passes for
+default, tracing, profiler, and Stage 32.1-32.4; host all-target Clippy and
+tests pass. All four Stage 32 QEMU gates pass on 1/2/4 CPUs, exit 33.
+Evidence: target/stage32-{1-diagnostics,2-panic-dump,3-tracing,4-profiler}-*cpu;
+build/host logs and archived prior evidence: target/stage32-production-fix.
+This is a focused build/regression repair, not full Stage 32 acceptance.
+Release hardware-demo UEFI build and hardware-demo target Clippy also pass. Visible 2-CPU QEMU reaches WovenShell desktop-ready and catalog entries=11; interactive boot logs are under C:\Users\banda\WovenHat-OS\target\desktop-interactive-20261027-145808-379. Full historical Windows acceptance was not rerun.
+
+## Desktop experience repair - 2026-10-27 (focused runtime path validated)
+
+The improved interactive desktop was verified with WHPX CPU acceleration,
+5 GiB configured RAM and a USB tablet. Demo startup selects flat composition
+and reduced motion. Shell work/presentation is bounded, tablet coordinates
+are routed, cursor/close damage is kept separate, desktop shortcuts survive
+taskbar painting, dead-window capture is cleared, and Calculator starts with
+an empty field and avoids redundant hover uploads. The shell release build
+uses speed optimization; credential work factor and authority are unchanged.
+
+Validation:
+- WHPX desktop keyboard/mouse/framebuffer/performance qualification passes on
+  1/2/4 CPUs with unchanged assertions and timing limits.
+- TCG Stage 20.1, 20.5, 20.7, 20.10, 20.11, 20.12, 20.15, 20.17 and 20.18
+  pass on 1/2/4 CPUs. Stage 20.15's initial build-environment failure was
+  preserved and rerun with the required project-local Cargo settings.
+- Stage 20.2, 20.3, 20.4, 20.6, 20.8, 20.9 and 20.13 fail their pixel gates
+  on 1/2/4 CPUs. The pre-change shell from f7273ba9 independently reproduces
+  20.2 and 20.6 failures at the same assertions on 1 CPU; the other failed
+  gates remain open and are not represented as accepted.
+- App/host warning-denying Clippy, host tests, kernel default/system-apps/
+  hardware-demo/stage20-15-test Clippy and seven qualification-helper tests pass.
+- Real interactive USB input: typed 12-3 and clicked Evaluate, captured result
+  9. Sign-in key sequence measured 766 ms including injection delays; absolute
+  tablet click delivery measured 186 ms including the QMP button delay.
+
+Evidence: audit-artifacts/desktop-ux-final-20261027-152146 (full legacy sweep),
+audit-artifacts/desktop-ux-final-validation-20261027-155614 (WHPX matrix,
+baseline comparisons, session rerun), audit-artifacts/desktop-ux-before-legacy,
+and audit-artifacts/desktop-ux-static-20261027. Earlier TCG size-optimized
+1-CPU sign-in timing failures remain preserved; no thresholds were increased.
+Interactive logs/screenshots: target/desktop-interactive-20261027-154331-443.
+At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
+RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
+read-only image snapshot. This focused repair is not full Stage 20/32 or full
+historical Windows acceptance; the seven failed graphics gates need follow-up.

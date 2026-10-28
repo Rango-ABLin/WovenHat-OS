@@ -48,13 +48,36 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     if let Some(path) = accounts {
         crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
     }
-    let program = match accounts {
-        Some(path) => {
-            crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell", "--accounts", path])
-        }
-        None => crate::userspace::load_elf_with_argv(image, &["/bin/woven-shell"]),
+    #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+    let settings = crate::vfs::stat("/etc/wovenhat/settings.json")
+        .ok()
+        .filter(|stat| stat.kind == crate::vfs::NodeKind::File)
+        .map(|_| "/etc/wovenhat/settings.json");
+    #[cfg(not(any(feature = "system-apps", feature = "stage20-15-test")))]
+    let settings: Option<&str> = None;
+    // Build one bounded argv without allocating. The emulated demo uses the
+    // existing flat renderer and reduced motion; other sessions retain their
+    // established defaults and all profiles keep the 3D settings toggle.
+    let mut argv = [""; 7];
+    let mut argc = 1;
+    argv[0] = "/bin/woven-shell";
+    if let Some(path) = accounts {
+        argv[argc] = "--accounts";
+        argv[argc + 1] = path;
+        argc += 2;
     }
-    .ok_or(Error::Image)?;
+    if let Some(path) = settings {
+        argv[argc] = "--settings";
+        argv[argc + 1] = path;
+        argc += 2;
+    }
+    if cfg!(feature = "hardware-demo") {
+        argv[argc] = "--no-3d";
+        argv[argc + 1] = "--reduced-motion";
+        argc += 2;
+    }
+    let program = crate::userspace::load_elf_with_argv(image, &argv[..argc])
+        .ok_or(Error::Image)?;
     let (pid, _, _) = crate::task::spawn_user_system_service("woven-shell", program, CAPABILITIES)
         .map_err(|_| Error::Spawn)?;
     CONSOLE.store(false, Ordering::Release);

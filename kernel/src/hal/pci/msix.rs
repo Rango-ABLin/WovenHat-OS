@@ -192,6 +192,10 @@ fn restore_table_entry(
     let (pointer, mappings) = map_table_entry(table_base, offset, owner)?;
     // Keep the entry masked while restoring message fields, then restore its
     // original vector-control value last.
+    // SAFETY: `pointer` is the mapped MSI-X table entry from `map_table_entry`,
+    // a 16-byte (four-u32) entry, so `.add(0..=3)` stays within that one entry;
+    // writing vector-control masked first keeps the interrupt masked during the
+    // update.
     let result = unsafe {
         pointer
             .add(3)

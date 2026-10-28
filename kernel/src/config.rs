@@ -26,9 +26,13 @@ pub const MAX_FILE_DESCRIPTORS: usize = 64;
 // The package authority also carries two bounded WovenStore snapshots while
 // crossing the native WovenFS boundary, so service-enabled builds reserve the
 // larger stack explicitly rather than allowing a transaction to overrun the
-// canary-protected 64-KiB baseline.
-pub const TASK_STACK_SIZE: usize = if cfg!(any(feature = "stage22-5-test", feature = "system-apps"))
-{
+// canary-protected 64-KiB baseline. The 256 MiB Stage 24.59 regression fixture
+// is intentionally tighter: its bounded system-app image set must boot without
+// spending 128 MiB on idle task stacks, while 256 KiB still leaves four times
+// the ordinary stack budget for the Change-PIN path.
+pub const TASK_STACK_SIZE: usize = if cfg!(feature = "stage24-59-test") {
+    4096 * 64
+} else if cfg!(any(feature = "stage22-5-test", feature = "system-apps")) {
     4096 * 256
 } else {
     4096 * 64
@@ -82,8 +86,10 @@ pub const MAX_VFS_NODES: usize = 64;
 
 /// Capacity of each VFS node data buffer (bytes). This is also the largest
 /// executable image `exec` reads from the VFS. Production signed system-app
-/// packages can exceed 128 KiB (WovenImages is 166,272 bytes). Use 256 KiB
-/// until dynamic VFS payload allocation removes this fixed per-node ceiling.
+/// packages can exceed 128 KiB (the signed WovenImages package is 166,248
+/// bytes), so the capacity must cover it while remaining a bounded per-node
+/// allocation. Keep this at 256 KiB until dynamic VFS payload allocation
+/// removes the fixed per-node ceiling.
 /// Never put a buffer of this size on a kernel stack.
 pub const VFS_NODE_CAPACITY: usize = 256 * 1024;
 

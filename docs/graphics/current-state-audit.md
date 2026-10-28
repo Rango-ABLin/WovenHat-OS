@@ -1,8 +1,22 @@
 # WovenHat Graphics Current-State Audit
 
 Audit date: 2026-10-25  
-Audited commit: `a57f007617811792ad5d1fcb48cbe7647414b8f7`  
+Audited commit: `25cc1adb`
 Branch: `master`
+
+## Latest accepted graphics gate
+
+Software desktop repair accepted and closed on 2026-10-27 at `cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`:
+87/87 required cases plus strict clean-source GFX-07 9/9, all on 1/2/4 CPUs.
+See [desktop acceptance](desktop-acceptance-2026-10-27.md). Earlier pixel defects
+and the close-time repaint race are resolved with preserved failure evidence.
+This adds no native hardware, GPU acceleration or GFX-08 certification claim.
+
+Graphics roadmap Stage 09 (compositor and composition scheduler) passed on
+1/2/4 CPUs with QEMU exit 33. The accepted evidence covers damage-only
+composition, overlap and z-order, raise/focus, input routing, lease cleanup,
+and owner teardown. Stage 20.8 is the complementary resize/tiling/killed
+window recovery gate. See `docs/graphics/stage-09-compositor-evidence.md`.
 
 This is an evidence-based baseline for the graphics modernization mandate. It
 does not promote any phase to complete merely because a source module exists.
@@ -58,7 +72,7 @@ stale palette/start-mode fixtures were repaired.
 | Window surfaces | PARTIAL | Kernel client-surface registry and shell windows exist; the complete isolated production surface protocol is not closed. |
 | Compositor | PARTIAL | Bounded kernel compositor supports client blits, damage, ownership, and VirtIO outputs; a dedicated userspace compositor boundary is not complete. |
 | Window management | PARTIAL | Shell supports application windows, focus, close, resize-related behavior, and launcher interactions; full snapping/workspaces/modal policy is not complete. |
-| WovenUI framework | PARTIAL | `libwoven::ui` now provides bounded Button/TextField/Label/Checkbox/ListBox/Table/Menu/Tree/Tabs/Dialog/Navigation/ImageView/VideoView/WebView host primitives with keyboard/pointer interaction helpers, theme tokens, and vertical stack layout; `libwoven::web` adds bounded HTTP(S) metadata parsing; WovenSettings, WovenUpdate, WovenMonitor, WovenEditor, WovenImages, WovenStore, WovenTerminal, WovenCalculator, and WovenInstaller use shared controls; codec/browser-engine functionality and full application migration are not complete. |
+| WovenUI framework | PARTIAL | `libwoven::ui` now provides bounded Button/TextField/Label/Checkbox/ListBox/Table/Menu/Tree/Tabs/Dialog/Navigation/ImageView/VideoView/WebView host primitives with keyboard/pointer interaction helpers, theme tokens, and vertical stack layout; `libwoven::web` adds bounded HTTP(S) metadata parsing; WovenSettings, WovenUpdate, WovenMonitor, WovenEditor, WovenImages, WovenStore, WovenTerminal, WovenCalculator, WovenInstaller, and WovenFiles use shared controls; codec/browser-engine functionality and full application migration are not complete. |
 | WovenDesktop shell | IMPLEMENTED for current QEMU scope | Automatic system-apps desktop boot, taskbar, launcher, clock, shortcuts, and visual shell are evidenced in QEMU. |
 | Core graphical applications | PARTIAL | System app catalog includes Files, Terminal, Store, Settings, Images, Calculator, Editor, Update, Security, and Monitor; full real-service behavior for every listed feature is not verified. |
 | Keyboard/mouse input | PARTIAL | QEMU keyboard/pointer acceptance exists, including launcher and desktop qualification; native hardware input remains unqualified. |
@@ -115,9 +129,16 @@ stale palette/start-mode fixtures were repaired.
 
 ## Immediate implementation queue
 
-The next eligible work is to close the current graphics acceptance defect with
-an evidence-preserving renderer/oracle fix, then add the smallest missing
+The software desktop acceptance repair is closed. Continue the smallest missing
 reusable graphics abstractions and tests in roadmap order. Each increment must
 retain the 1/2/4-CPU gates and remain explicitly marked partial or blocked when
 the environment cannot provide hardware evidence.
 
+# Current graphics increment - window/input reliability
+
+The accepted Stage 08/09 surface and compositor boundaries and the software
+desktop closure remain the prerequisite baseline. The sequential follow-up
+starts with capture/drag cancellation, occluded-client input isolation and
+keyboard-only window focus, verified through an independent Ring-3 input probe.
+This increment is in progress. Persistent settings, performance qualification
+and native-device work follow only after its acceptance gate passes.

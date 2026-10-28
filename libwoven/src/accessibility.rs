@@ -396,6 +396,31 @@ impl Settings {
         self.magnification = magnification.clamp(1, 4);
     }
 
+    /// Apply the bounded boolean and small-integer fields understood by the
+    /// persisted accessibility profile. Unknown, malformed, or oversized
+    /// fields are ignored so a partially authored profile cannot broaden
+    /// accessibility behavior accidentally.
+    pub fn apply_json(&mut self, bytes: &[u8]) {
+        if let Some(value) = json_bool(bytes, b"screen_reader") {
+            self.screen_reader = value;
+        }
+        if let Some(value) = json_bool(bytes, b"captions") {
+            self.captions = value;
+        }
+        if let Some(value) = json_bool(bytes, b"high_contrast") {
+            self.high_contrast = value;
+        }
+        if let Some(value) = json_bool(bytes, b"reduced_motion") {
+            self.reduced_motion = value;
+        }
+        if let Some(value) = json_u8(bytes, b"scale") {
+            self.set_scale(value);
+        }
+        if let Some(value) = json_u8(bytes, b"magnification") {
+            self.set_magnification(value);
+        }
+    }
+
     pub const fn transition_duration(self, base_milliseconds: u32) -> u32 {
         if self.reduced_motion {
             0
@@ -403,6 +428,67 @@ impl Settings {
             base_milliseconds
         }
     }
+}
+
+fn json_bool(bytes: &[u8], key: &[u8]) -> Option<bool> {
+    let quoted = key.len().checked_add(2)?;
+    for offset in 0..bytes.len().saturating_sub(quoted).saturating_add(1) {
+        if bytes.get(offset) != Some(&b'"')
+            || bytes.get(offset + 1..offset + 1 + key.len()) != Some(key)
+            || bytes.get(offset + 1 + key.len()) != Some(&b'"')
+        {
+            continue;
+        }
+        let rest = bytes.get(offset + quoted..)?.trim_ascii_start();
+        if rest.first() != Some(&b':') {
+            continue;
+        }
+        let value = rest.get(1..)?.trim_ascii_start();
+        let token = |prefix: &[u8]| {
+            value.strip_prefix(prefix).is_some_and(|rest| {
+                rest.first()
+                    .is_none_or(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+            })
+        };
+        return if token(b"true") {
+            Some(true)
+        } else if token(b"false") {
+            Some(false)
+        } else {
+            None
+        };
+    }
+    None
+}
+
+fn json_u8(bytes: &[u8], key: &[u8]) -> Option<u8> {
+    let quoted = key.len().checked_add(2)?;
+    for offset in 0..bytes.len().saturating_sub(quoted).saturating_add(1) {
+        if bytes.get(offset) != Some(&b'"')
+            || bytes.get(offset + 1..offset + 1 + key.len()) != Some(key)
+            || bytes.get(offset + 1 + key.len()) != Some(&b'"')
+        {
+            continue;
+        }
+        let rest = bytes.get(offset + quoted..)?.trim_ascii_start();
+        if rest.first() != Some(&b':') {
+            continue;
+        }
+        let digits = rest.get(1..)?.trim_ascii_start();
+        let first = *digits.first()?;
+        if !first.is_ascii_digit() {
+            return None;
+        }
+        let mut value = first - b'0';
+        for byte in digits.get(1..)?.iter().copied() {
+            if !byte.is_ascii_digit() {
+                break;
+            }
+            value = value.checked_mul(10)?.checked_add(byte - b'0')?;
+        }
+        return Some(value);
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -537,5 +623,28 @@ mod tests {
         assert_eq!(settings.magnify_point(2, -3), (2, -3));
         settings.set_magnification(3);
         assert_eq!(settings.magnify_point(2, -3), (6, -9));
+    }
+
+    #[test]
+    fn settings_apply_bounded_json_profile() {
+        let mut settings = Settings::new();
+        settings.apply_json(
+            br#"{"high_contrast": true, "reduced_motion":true, "scale": 9, "magnification": 3}"#,
+        );
+        assert!(settings.high_contrast);
+        assert!(settings.reduced_motion);
+        assert_eq!(settings.scale, 4);
+        assert_eq!(settings.magnification, 3);
+    }
+
+    #[test]
+    fn settings_ignore_malformed_or_unquoted_profile_fields() {
+        let mut settings = Settings::new();
+        settings.apply_json(br#"{high_contrast:true,"scale":9}"#);
+        assert!(!settings.high_contrast);
+        assert_eq!(settings.scale, 4);
+        settings.apply_json(br#"{"high_contrast": false, "reduced_motion": nope}"#);
+        assert!(!settings.high_contrast);
+        assert!(!settings.reduced_motion);
     }
 }

@@ -682,7 +682,7 @@ pub fn structural_self_test() -> bool {
 }
 
 /// Grant rules for the Stage 19.7 gate.
-#[cfg(feature = "stage19-7-test")]
+#[cfg(any(feature = "stage19-7-test", feature = "stage08-graphics-test"))]
 pub fn sharing_self_test() -> bool {
     let (owner, grantee, stranger) = (501u64, 502u64, 503u64);
     let Ok(surface) = create(owner, 4, 4) else {
@@ -723,7 +723,7 @@ pub fn sharing_self_test() -> bool {
 }
 
 /// Damage rules for the Stage 19.9 gate.
-#[cfg(feature = "stage19-9-test")]
+#[cfg(any(feature = "stage19-9-test", feature = "stage09-compositor-test"))]
 pub fn damage_self_test() -> bool {
     use crate::display::rgb;
     let (owner, grantee) = (601u64, 602u64);

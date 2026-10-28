@@ -25,6 +25,81 @@ impl Theme {
         disabled: crate::rgb(76, 84, 100),
         focus: crate::rgb(255, 205, 96),
     };
+
+    pub const LIGHT: Self = Self {
+        surface: crate::rgb(239, 243, 248),
+        accent: crate::rgb(22, 128, 122),
+        text: crate::rgb(25, 32, 44),
+        disabled: crate::rgb(132, 143, 158),
+        focus: crate::rgb(160, 92, 0),
+    };
+
+    pub const HIGH_CONTRAST: Self = Self {
+        surface: crate::rgb(0, 0, 0),
+        accent: crate::rgb(255, 255, 0),
+        text: crate::rgb(255, 255, 255),
+        disabled: crate::rgb(160, 160, 160),
+        focus: crate::rgb(0, 255, 255),
+    };
+
+    /// Select the application palette from the shared accessibility policy.
+    /// The returned colors are opaque RGB values suitable for Canvas.
+    pub const fn for_accessibility(settings: crate::accessibility::Settings) -> Self {
+        if settings.high_contrast {
+            Self::HIGH_CONTRAST
+        } else {
+            Self::DARK
+        }
+    }
+}
+
+/// Shared geometry and motion tokens for WovenUI applications.
+///
+/// Tokens are deliberately plain constants: applications can use them in
+/// `no_std` builds without a global theme service or heap allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DesignTokens {
+    pub space_1: i32,
+    pub space_2: i32,
+    pub space_3: i32,
+    pub space_4: i32,
+    pub space_6: i32,
+    pub radius_small: i32,
+    pub radius_large: i32,
+    pub elevation_low: i32,
+    pub elevation_high: i32,
+    pub motion_fast_ms: u32,
+    pub motion_normal_ms: u32,
+}
+
+impl DesignTokens {
+    pub const DEFAULT: Self = Self {
+        space_1: 4,
+        space_2: 8,
+        space_3: 12,
+        space_4: 16,
+        space_6: 24,
+        radius_small: 4,
+        radius_large: 10,
+        elevation_low: 2,
+        elevation_high: 8,
+        motion_fast_ms: 120,
+        motion_normal_ms: 220,
+    };
+
+    pub const REDUCED_MOTION: Self = Self {
+        motion_fast_ms: 0,
+        motion_normal_ms: 0,
+        ..Self::DEFAULT
+    };
+
+    pub const fn for_accessibility(settings: crate::accessibility::Settings) -> Self {
+        if settings.reduced_motion {
+            Self::REDUCED_MOTION
+        } else {
+            Self::DEFAULT
+        }
+    }
 }
 
 /// A bounded push button. The caller supplies its label and routes pointer
@@ -1299,7 +1374,7 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 mod tests {
     use super::{
         Button, Checkbox, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table, Tabs,
-        TextField, Theme, Tree, VideoView, WebView, stack_vertical,
+        DesignTokens, TextField, Theme, Tree, VideoView, WebView, stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -1554,5 +1629,51 @@ mod tests {
         view.draw(&mut canvas, Theme::DARK);
         assert!(pixels.contains(&Theme::DARK.focus));
         assert!(pixels.contains(&Theme::DARK.surface));
+    }
+
+    #[test]
+    fn design_tokens_select_accessible_theme_and_motion() {
+        let mut settings = crate::accessibility::Settings::new();
+        assert_eq!(Theme::for_accessibility(settings), Theme::DARK);
+        assert_eq!(DesignTokens::for_accessibility(settings).motion_normal_ms, 220);
+
+        settings.high_contrast = true;
+        settings.reduced_motion = true;
+        assert_eq!(Theme::for_accessibility(settings), Theme::HIGH_CONTRAST);
+        let tokens = DesignTokens::for_accessibility(settings);
+        assert_eq!(tokens.motion_fast_ms, 0);
+        assert_eq!(tokens.motion_normal_ms, 0);
+        assert_eq!(tokens.space_4, DesignTokens::DEFAULT.space_4);
+    }
+
+    #[test]
+    fn theme_widget_visual_regressions_are_distinct_and_stable() {
+        fn signature(pixels: &[u32]) -> u64 {
+            pixels.iter().fold(0xcbf2_9ce4_8422_2325, |hash, pixel| {
+                (hash ^ u64::from(*pixel)).wrapping_mul(0x1000_0000_01b3)
+            })
+        }
+        fn render(theme: Theme) -> u64 {
+            let mut pixels = [0_u32; 64 * 40];
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 64, 40).unwrap();
+            let mut button = Button::new(Frame::new(2, 2, 42, 14), "Apply");
+            button.hovered = true;
+            button.focused = true;
+            button.draw(&mut canvas, theme);
+            let mut checkbox = Checkbox::new(Frame::new(2, 20, 42, 14), "Enabled");
+            checkbox.checked = true;
+            checkbox.draw(&mut canvas, theme);
+            signature(&pixels)
+        }
+
+        let dark = render(Theme::DARK);
+        let light = render(Theme::LIGHT);
+        let high_contrast = render(Theme::HIGH_CONTRAST);
+        assert_ne!(dark, light);
+        assert_ne!(dark, high_contrast);
+        assert_ne!(light, high_contrast);
+        assert_eq!(dark, 14_167_676_546_058_782_013);
+        assert_eq!(light, 13_378_977_747_546_284_125);
+        assert_eq!(high_contrast, 13_757_308_704_317_173_985);
     }
 }
