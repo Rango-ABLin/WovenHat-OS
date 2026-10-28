@@ -30,6 +30,7 @@ def check(output):
     root = Path(__file__).resolve().parents[1]
     source = root / "tools" / "runtime-fixtures" / "c-abi.c"
     transport = root / "ports" / "musl" / "include" / "wovenhat" / "syscall.h"
+    musl_transport = root / "ports" / "musl" / "include" / "syscall_arch.h"
     rust_sources = {
         "shared-main": root / "tools" / "loader-fixtures" / "shared-main.rs",
         "library": root / "tools" / "loader-fixtures" / "library.rs",
@@ -38,10 +39,13 @@ def check(output):
     }
     text = source.read_text(encoding="utf-8")
     transport_text = transport.read_text(encoding="utf-8")
-    required = ("void _start", "wh_syscall1", "WH_SYS_EXIT", "42")
+    musl_transport_text = musl_transport.read_text(encoding="utf-8")
+    required = ("void _start", "__syscall1", "WH_LINUX_EXIT", "42")
     required_transport = ("int $0x80", "WH_SYS_CLOSE", "wh_syscall3", "wh_syscall4_unmapped")
     missing = [token for token in required if token not in text]
     missing += [f"transport:{token}" for token in required_transport if token not in transport_text]
+    required_musl_transport = ("WH_LINUX_EXIT", "WH_LINUX_CLOSE", "wh_musl_syscall3", "-WH_ENOSYS")
+    missing += [f"musl_transport:{token}" for token in required_musl_transport if token not in musl_transport_text]
     if missing:
         raise RuntimeError(f"C fixture contract missing tokens: {missing}")
 
@@ -62,8 +66,11 @@ def check(output):
         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "transport": str(transport.relative_to(root)),
         "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
+        "musl_transport": str(musl_transport.relative_to(root)),
+        "musl_transport_sha256": hashlib.sha256(musl_transport.read_bytes()).hexdigest(),
         "required_source_tokens": required,
         "required_transport_tokens": required_transport,
+        "required_musl_transport_tokens": required_musl_transport,
         "source_shape": "PASS" if not missing else "FAIL",
         "rust_fixtures": {
             name: {

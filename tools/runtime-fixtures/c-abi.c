@@ -9,6 +9,7 @@
  */
 
 #include "wovenhat/syscall.h"
+#include "syscall_arch.h"
 
 typedef unsigned long long wh_u64;
 
@@ -18,7 +19,7 @@ static wh_u64 wh_exit_status(void) {
 
 __attribute__((noreturn)) void _start(void) {
     wh_u64 status = wh_exit_status();
-    (void)wh_syscall1(WH_SYS_EXIT, (long)status);
+    (void)__syscall1(WH_LINUX_EXIT, (long)status);
     __asm__ volatile ("ud2" ::: "memory");
     __builtin_unreachable();
 }
