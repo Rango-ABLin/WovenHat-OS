@@ -167,6 +167,9 @@ stage32-10-test = ["qemu-test", "gdb-debugger"]
 gdb-session = []
 # Stage 32 WovenDev packet/session lifecycle QEMU gate.
 stage32-11-test = ["qemu-test", "gdb-session"]
+gdb-trap = ["gdb-session"]
+# Stage 32 WovenDev trap-stop classification QEMU gate.
+stage32-12-test = ["qemu-test", "gdb-trap"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

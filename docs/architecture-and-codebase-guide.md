@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev trap-stop classification boundary (2026-10-28)
+
+`kernel/src/gdb_trap.rs` converts a captured vector and optional error code
+into a fixed `StopEvent` and GDB-compatible signal, then publishes only the
+stop signal to the caller-owned session. It is deliberately outside the IDT
+and does not inspect interrupt frames, read guest memory, own a task, or
+resume execution. Future exception wiring must preserve this separation and
+define trap-frame lifetime and teardown before using it.
+
 ## WovenDev GDB session lifecycle boundary (2026-10-28)
 
 `kernel/src/gdb_session.rs` owns only the bounded stopped/running/active

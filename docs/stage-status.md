@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_trap.rs`, a bounded translation layer for an already
+captured architectural vector and optional error code. Breakpoint, single-step,
+fault, external, and unknown vectors map to explicit GDB signals; publication
+feeds the caller-owned Stage 32.11 session. The layer does not install an IDT
+handler, inspect a frame, dereference memory, or resume a task.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-12-gdb-trap-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live exception-handler wiring,
+trap-frame capture, stopped-task ownership, and execution control remain open.
+
 ## Stage 32.11 GDB session state machine QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_session.rs`, a bounded lifecycle owner around the Stage

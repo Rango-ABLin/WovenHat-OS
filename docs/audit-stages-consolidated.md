@@ -4,6 +4,15 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.12 GDB trap-stop boundary - 2026-10-28
+
+The bounded architectural stop classifier passed 1/2/4-CPU QEMU self-tests.
+Breakpoint, single-step, fault, external, and unknown-vector signal mapping,
+error-code retention, and publication into the active session are covered.
+Target and host warning-denying Clippy and Python syntax validation passed.
+Live IDT/exception wiring, frame capture, task ownership, and execution
+control remain outside this acceptance.
+
 ## Stage 32.11 GDB session state machine - 2026-10-28
 
 The bounded session lifecycle passed 1/2/4-CPU QEMU self-tests. Stop replies,

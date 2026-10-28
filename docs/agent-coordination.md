@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.12 GDB trap-stop boundary (2026-10-28)
+
+Added `kernel/src/gdb_trap.rs`, a pure bounded classifier for captured
+architectural vectors and optional error codes. It maps breakpoint,
+single-step, faults, external events, and unknown vectors to explicit GDB
+signals, and publishes only the signal into the Stage 32.11 session. Target
+and host warning-denying Clippy, Python syntax, and QEMU 1/2/4-CPU gates pass
+with exit 33. Evidence is under
+`target/stage32-12-gdb-trap-{1,2,4}cpu/`. Stage32.12 is accepted; live IDT
+wiring and trap-frame/task ownership remain prerequisites for the next slice.
+
 ## Codex - Stage 32.11 GDB session state machine (2026-10-28)
 
 Added the bounded `kernel/src/gdb_session.rs` lifecycle layer above the Stage
