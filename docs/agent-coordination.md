@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - unload-safe module namespace foundation (2026-10-28)
+
+Added `libwoven::module_namespace`, a fixed-capacity identity layer for the
+future dynamic loader. It provides generation-tagged module handles,
+reference-gated unload, bounded symbol publication/lookup, and stale-handle
+rejection. Two host tests cover capacity, reference gating, symbol invalidation,
+and generation reuse. It deliberately does not map images, relocate code,
+allocate dynamic TLS, or run constructors/destructors.
+
 ## Codex - scheduler-backed condition wait increment (2026-10-28)
 
 Added a dedicated userspace thread-sleep syscall backed by the scheduler's

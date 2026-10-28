@@ -1,5 +1,14 @@
 # Stage status
 
+## Dynamic module namespace foundation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Added `libwoven::module_namespace` as the identity/reference boundary for
+future `dlopen`/`dlsym`: module handles carry generations, unload requires zero
+references, published symbols are fixed-capacity and invalidated on unload, and
+stale handles fail closed. Two focused host tests pass, alongside all-target
+warning-denying Clippy. This does not claim image mapping, relocation,
+constructors/destructors, dynamic TLS, or a working `dlopen` implementation.
+
 ## Userspace runtime completion design - 2026-10-28 - DESIGN BASELINE
 
 `docs/musl-runtime-completion-design.md` now defines the implementation order
