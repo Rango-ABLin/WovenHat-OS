@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - broader userspace ABI/runtime adapter increment (2026-10-28)
+
+Extended the pinned static musl bootstrap transport for the kernel's existing
+`getuid`, `getgid`, `getcwd`, and length-delimited `chdir` ABI. The executable
+fixture now checks root identity and an absolute current directory before its
+existing file, pipe, fork, wait, and signal probes. No syscall numbers or
+kernel ABI were repurposed. Rust workspace tests and the 205-test Python host
+suite pass. The pinned Clang/LLVM toolchain was not available on this host, so
+the C compile/link/QEMU execution gate remains required before acceptance.
+
 ## Codex - Stage 7 bounded process-environment closure (2026-10-28)
 
 Added the independently guarded `stage7-test` gate for deterministic process

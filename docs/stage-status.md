@@ -1,5 +1,22 @@
 # Stage status
 
+## Broader userspace ABI/runtime adapter increment - 2026-10-28 - IMPLEMENTED, C GATE PENDING
+
+The static musl bootstrap now maps the kernel's existing identity and working
+directory ABI: `getuid`, `getgid`, `getcwd`, and a bounded length-safe `chdir`
+adapter. The executable fixture exercises these calls in the production
+userspace transport before continuing through its existing file, descriptor,
+pipe, fork/wait, and signal coverage. This is an adapter increment, not a
+claim of full POSIX or dynamic-libc compatibility; allocator, TLS, pthread,
+locale, dynamic linking, and the remaining syscall surface stay outside this
+acceptance.
+
+`cargo test --workspace` passed, including 196 `libwoven` tests, and the host
+Python suite passed 205/205. The pinned Clang/LLVM compiler and linker were not
+available on this Windows host, so the musl C compile/link and QEMU execution
+gate must still be run in the configured toolchain environment. No production
+readiness claim is made from this increment alone.
+
 ## Stage 7 bounded process-environment scope - 2026-10-28 - CLOSED BOUNDED SCOPE
 
 Added the independently guarded `stage7-test` acceptance gate for the bounded
