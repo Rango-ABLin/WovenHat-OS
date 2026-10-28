@@ -5588,7 +5588,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage32-19-test")]
     {
-        if !gdb_entry::self_test() {
+        if task::spawn("gdb-live-test", gdb_entry::live_task_entry).is_err() {
+            serial::write_line(format_args!(
+                "[S32.19] live GDB COM2 client qualification: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        let mut waited = 0u32;
+        while !gdb_entry::live_task_done() && waited < 2_000_000 {
+            task::yield_now();
+            waited += 1;
+        }
+        if !gdb_entry::live_task_done() {
             serial::write_line(format_args!(
                 "[S32.19] live GDB COM2 client qualification: FAILED"
             ));

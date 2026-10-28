@@ -169,6 +169,8 @@ const FRAME_BUF: usize = 520;
 /// Used by the self-test to verify the IDT wiring without a GDB client.
 #[cfg(feature = "gdb-entry")]
 static HANDLER_FIRED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "stage32-19-test")]
+static LIVE_TASK_DONE: AtomicBool = AtomicBool::new(false);
 
 // ── Single-attachment authority (Stage 32.18) ──────────────────────────────
 
@@ -200,6 +202,13 @@ fn gdb_owner_acquire() -> Option<AttachmentToken> {
     // Task slot zero is a valid scheduler identity, while Owner reserves zero
     // as the invalid sentinel. Encode the live identity one-based at this
     // boundary so the production trap path can bind the idle/first task too.
+    #[cfg(feature = "stage32-19-test")]
+    let task_id = crate::task::current_task_id_if_running()
+        .map(|id| id.as_u64())
+        .filter(|&id| id != u64::MAX)
+        .unwrap_or(0)
+        .checked_add(1)?;
+    #[cfg(not(feature = "stage32-19-test"))]
     let task_id = crate::task::current_task_id_if_running()?
         .as_u64()
         .checked_add(1)?;
@@ -418,6 +427,15 @@ pub fn self_test() -> bool {
     // ── Live INT3 test (QEMU only; skipped in host unit-test builds) ─────────
     #[cfg(not(test))]
     {
+        #[cfg(feature = "stage32-19-test")]
+        {
+            // Give the host-side COM2 client a bounded window to connect
+            // before the qualification trap is raised. This is test-only
+            // synchronization; the production trap path remains immediate.
+            for _ in 0..2_000_000 {
+                core::hint::spin_loop();
+            }
+        }
         HANDLER_FIRED.store(false, Ordering::SeqCst);
         // SAFETY: INT3 is a standard debug instruction; the GDB entry handler
         // has been installed in `interrupts::init` before this self-test runs.
@@ -493,6 +511,24 @@ pub fn owner_binding_self_test() -> bool {
     gdb_owner_release(token_c);
     gdb_owner_release(token_c);
     true
+}
+
+/// Execute the live RSP qualification trap from a scheduler-owned task.
+#[cfg(feature = "stage32-19-test")]
+pub fn live_task_entry() -> ! {
+    HANDLER_FIRED.store(false, Ordering::SeqCst);
+    // SAFETY: this is the qualification breakpoint; the installed IDT entry
+    // returns through the task's interrupt frame after the RSP client sends c.
+    unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+    LIVE_TASK_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
+    loop {
+        crate::task::yield_now();
+    }
+}
+
+#[cfg(feature = "stage32-19-test")]
+pub fn live_task_done() -> bool {
+    LIVE_TASK_DONE.load(Ordering::SeqCst)
 }
 
 // ── Host unit tests ───────────────────────────────────────────────────────────

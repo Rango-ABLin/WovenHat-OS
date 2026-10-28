@@ -50,6 +50,18 @@ pub const MAX_DIR_ENTRIES: usize = DIRECT_BLOCKS * DIR_ENTRIES_PER_BLOCK;
 pub const KIND_FILE: u16 = 1;
 pub const KIND_DIR: u16 = 2;
 
+/// Extended-attribute name/value bound. Names reuse the directory-entry
+/// bound; values are capped so one bounded 512-byte block always holds the
+/// header, checksum, and at least one maximally-sized entry.
+pub const MAX_XATTR_NAME: usize = MAX_NAME;
+pub const MAX_XATTR_VALUE: usize = 256;
+/// `entry_count` (2) + packed entries region (502) + checksum (8) = 512.
+const XATTR_BLOCK_HEADER: usize = 2;
+const XATTR_BLOCK_CHECKSUM_AT: usize = SECTOR_SIZE - 8;
+const XATTR_ENTRIES_CAPACITY: usize = XATTR_BLOCK_CHECKSUM_AT - XATTR_BLOCK_HEADER;
+/// `[name_len: u8][value_len: u16]` precedes each entry's bytes.
+const XATTR_ENTRY_HEADER: usize = 3;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Device,
@@ -164,6 +176,11 @@ pub struct Inode {
     pub data_checksum: u64,
     pub direct: [u64; DIRECT_BLOCKS],
     pub kind: u16,
+    /// Extended-attribute block, 0 = none. Lives in what was previously
+    /// always-zero spare space (bytes 106..114); every inode written before
+    /// this field existed already decodes as 0 here, so no format-version
+    /// change is needed.
+    pub xattr_block: u64,
 }
 
 const INODE_CHECKSUM_AT: usize = 120;
@@ -179,6 +196,7 @@ impl Inode {
             data_checksum: 0,
             direct: [0; DIRECT_BLOCKS],
             kind: 0,
+            xattr_block: 0,
         }
     }
 
@@ -199,6 +217,7 @@ impl Inode {
             raw[at..at + 8].copy_from_slice(&block.to_le_bytes());
         }
         raw[104..106].copy_from_slice(&self.kind.to_le_bytes());
+        raw[106..114].copy_from_slice(&self.xattr_block.to_le_bytes());
         let checksum = fnv1a(&raw[..INODE_CHECKSUM_AT]);
         raw[INODE_CHECKSUM_AT..INODE_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
@@ -226,6 +245,7 @@ impl Inode {
             data_checksum: read_u64(raw, 32),
             direct,
             kind: read_u16(raw, 104),
+            xattr_block: read_u64(raw, 106),
         })
     }
 }

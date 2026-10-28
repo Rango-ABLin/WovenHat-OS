@@ -70,9 +70,13 @@ def main() -> int:
         client.sendall(packet(b"?"))
         received = bytearray()
         while b"S05" not in received and time.monotonic() < deadline:
-            received.extend(client.recv(256))
+            try:
+                received.extend(client.recv(256))
+            except socket.timeout:
+                continue
         if b"S05" not in received:
             raise RuntimeError(f"missing GDB stop reply: {received!r}")
+        client.sendall(b"+")
         client.sendall(packet(b"c"))
         remaining = max(0.1, deadline - time.monotonic())
         stdout, stderr = process.communicate(timeout=remaining)
