@@ -378,6 +378,13 @@ pub fn read_bytes(buffer: &mut [u8]) -> usize {
             Key::Tab => b'\t',
             Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::F12 | Key::Char(_) => continue,
         };
+        let termios = crate::terminal::termios();
+        if byte == termios.control_chars[0] {
+            if let Some(group) = crate::terminal::foreground_pid() {
+                let _ = crate::task::kill_process(0u64.wrapping_sub(group), 2);
+            }
+            continue;
+        }
         buffer[count] = byte;
         count += 1;
     }

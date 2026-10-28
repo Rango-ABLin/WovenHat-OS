@@ -304,6 +304,9 @@ impl HeapState {
         }
         // Clear the tag before linking this span into the free list, including
         // the case where alignment left the header after the span's start.
+        // SAFETY: the header slot immediately before `ptr` was validated as this
+        // allocation's header (magic/size/bounds checks above) and `&mut HEAP`
+        // gives exclusive access, so clearing its tag `u64` is in bounds.
         unsafe { ((ptr - HEADER_SIZE) as *mut u64).write(0) };
         self.total_allocations = self.total_allocations.saturating_sub(1);
         self.total_allocated_bytes = self
@@ -341,6 +344,11 @@ pub enum InitError {
     AddressOverflow,
 }
 
+// SAFETY: this allocator returns either null or a block that is at least
+// `layout.size()` bytes, aligned to `layout.align()`, and distinct from every
+// other live block (enforced by `HeapState::alloc` under the `HEAP` lock), and
+// it frees exactly the blocks it handed out, so it satisfies the `GlobalAlloc`
+// contract.
 unsafe impl GlobalAlloc for TrackedAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let (pointer, low_water) = {
@@ -486,8 +494,11 @@ fn alloc_with_growth(layout: Layout) -> *mut u8 {
             GrowthStep::Grew => {}
             GrowthStep::Failed => return null_mut(),
             GrowthStep::Busy => {
+                // SAFETY: `_rdtsc` reads the CPU timestamp counter, always
+                // available on x86_64; used only as a bounded spin deadline.
                 let start = unsafe { core::arch::x86_64::_rdtsc() };
                 while GROW_OWNER.load(Ordering::Acquire) != 0 {
+                    // SAFETY: timestamp-counter read, as above.
                     if unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(start) > 5_000_000_000 {
                         return null_mut();
                     }

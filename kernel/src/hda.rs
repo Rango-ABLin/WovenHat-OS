@@ -150,6 +150,9 @@ impl DmaPage {
         let frame = memory::allocate_contiguous_frames(1).ok_or(InitError::DmaUnavailable)?;
         let physical = frame.start_address().as_u64();
         let virtual_address = paging::map_mmio(physical).map_err(|_| InitError::MmioUnavailable)?;
+        // SAFETY: `virtual_address` is the MMIO mapping of the freshly allocated
+        // single contiguous frame owned by this DmaPage; zeroing exactly its
+        // 4096 bytes is in bounds.
         unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, 4096) };
         Ok(Self {
             physical,
@@ -343,6 +346,8 @@ impl HdaController {
         let rirb = self.rirb.as_ref().ok_or(InitError::DmaUnavailable)?;
         let current_wp = mmio_read16(self.mmio + REG_CORBWP)? & 0xff;
         let next_wp = current_wp.wrapping_add(1) & 0xff;
+        // SAFETY: `next_wp <= 0xff`, so the u32 entry is within the 256-entry
+        // (1 KiB) CORB inside its 4 KiB DMA page, owned by this driver.
         unsafe {
             ptr::write_volatile(
                 (corb.virtual_address as *mut u32).add(next_wp as usize),
@@ -354,6 +359,8 @@ impl HdaController {
             let hardware_wp = mmio_read16(self.mmio + REG_RIRBWP)? & 0xff;
             if hardware_wp != self.rirb_read {
                 let next = self.rirb_read.wrapping_add(1) & 0xff;
+                // SAFETY: `next <= 0xff`, so the u64 entry is within the
+                // 256-entry (2 KiB) RIRB inside its 4 KiB DMA page.
                 let entry = unsafe {
                     ptr::read_volatile((rirb.virtual_address as *const u64).add(next as usize))
                 };
@@ -383,6 +390,8 @@ impl HdaController {
         let rirb = self.rirb.as_ref().ok_or(InitError::DmaUnavailable)?;
         let current_wp = mmio_read16(self.mmio + REG_CORBWP)? & 0xff;
         let next_wp = current_wp.wrapping_add(1) & 0xff;
+        // SAFETY: `next_wp <= 0xff`, so the u32 entry is within the 256-entry
+        // (1 KiB) CORB inside its 4 KiB DMA page, owned by this driver.
         unsafe {
             ptr::write_volatile(
                 (corb.virtual_address as *mut u32).add(next_wp as usize),
@@ -394,6 +403,8 @@ impl HdaController {
             let hardware_wp = mmio_read16(self.mmio + REG_RIRBWP)? & 0xff;
             if hardware_wp != self.rirb_read {
                 let next = self.rirb_read.wrapping_add(1) & 0xff;
+                // SAFETY: `next <= 0xff`, so the u64 entry is within the
+                // 256-entry (2 KiB) RIRB inside its 4 KiB DMA page.
                 let entry = unsafe {
                     ptr::read_volatile((rirb.virtual_address as *const u64).add(next as usize))
                 };
@@ -813,11 +824,15 @@ impl HdaController {
             } else {
                 -0x1800
             };
+            // SAFETY: `index < PCM_BYTES/2`, so the i16 slot is within the PCM
+            // DMA page, owned by this driver before the stream runs.
             unsafe {
                 ptr::write_volatile((pcm.virtual_address as *mut i16).add(index), sample);
             }
         }
 
+        // SAFETY: writes the single 16-byte BDL entry (buffer address, length,
+        // IOC flag) at offsets 0/8/12, all within the BDL DMA page.
         unsafe {
             ptr::write_volatile(bdl.virtual_address as *mut u64, pcm.physical);
             ptr::write_volatile((bdl.virtual_address + 8) as *mut u32, PCM_BYTES);
@@ -1005,6 +1020,9 @@ impl HdaController {
 
         let bdl = DmaPage::allocate()?;
         let pcm = DmaPage::allocate()?;
+        // SAFETY: fills the PCM capture buffer with a sentinel (PCM_BYTES, the
+        // buffer size) and writes the single 16-byte BDL entry at offsets
+        // 0/8/12; both pages are freshly allocated and owned by this driver.
         unsafe {
             ptr::write_bytes(pcm.virtual_address as *mut u8, SENTINEL, PCM_BYTES as usize);
             ptr::write_volatile(bdl.virtual_address as *mut u64, pcm.physical);
@@ -1069,6 +1087,8 @@ impl HdaController {
         compiler_fence(Ordering::Acquire);
         let mut changed = 0u32;
         for off in 0..PCM_BYTES as usize {
+            // SAFETY: `off < PCM_BYTES`, so the byte is within the PCM DMA page;
+            // the Acquire fence above orders this after the stream's DMA writes.
             let v = unsafe { ptr::read_volatile((pcm.virtual_address as *const u8).add(off)) };
             if v != SENTINEL {
                 changed = changed.saturating_add(1);
@@ -1349,24 +1369,32 @@ fn mmio_read8(p: u64) -> Result<u8, InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     Ok(unsafe { ptr::read_volatile((v + offset) as *const u8) })
 }
 fn mmio_read16(p: u64) -> Result<u16, InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     Ok(unsafe { ptr::read_volatile((v + offset) as *const u16) })
 }
 fn mmio_read32(p: u64) -> Result<u32, InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     Ok(unsafe { ptr::read_volatile((v + offset) as *const u32) })
 }
 fn mmio_write8(p: u64, x: u8) -> Result<(), InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     unsafe { ptr::write_volatile((v + offset) as *mut u8, x) };
     Ok(())
 }
@@ -1374,6 +1402,8 @@ fn mmio_write16(p: u64, x: u16) -> Result<(), InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     unsafe { ptr::write_volatile((v + offset) as *mut u16, x) };
     Ok(())
 }
@@ -1381,6 +1411,8 @@ fn mmio_write32(p: u64, x: u32) -> Result<(), InitError> {
     let page = p & !0xfff;
     let offset = p & 0xfff;
     let v = paging::map_mmio(page).map_err(|_| InitError::MmioUnavailable)?;
+    // SAFETY: `v` is the MMIO mapping of `page` and `offset < 4096`, so the
+    // address lies within that mapped device-register page.
     unsafe { ptr::write_volatile((v + offset) as *mut u32, x) };
     Ok(())
 }

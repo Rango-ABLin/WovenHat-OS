@@ -70,7 +70,11 @@ pub enum PlanError {
 
 /// Validate the compact service plan without allocating or touching storage.
 /// Fields are canonical ASCII `key=value` pairs separated by semicolons.
-pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: bool) -> Result<(), PlanError> {
+pub fn validate_plan(
+    plan: &[u8],
+    target_sectors: u64,
+    require_confirmation: bool,
+) -> Result<(), PlanError> {
     let mut target = None;
     let mut partition = None;
     let mut filesystem = None;
@@ -96,9 +100,22 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
             b"filesystem" => return Err(PlanError::Unsupported),
             b"user" => username = Some(valid_username(value)?),
             b"password" => password = Some(valid_password(value)?),
-            b"timezone" if matches!(value, b"UTC" | b"Africa/Blantyre" | b"America/New_York" | b"Asia/Tokyo" | b"Europe/London") => timezone = Some(()),
+            b"timezone"
+                if matches!(
+                    value,
+                    b"UTC"
+                        | b"Africa/Blantyre"
+                        | b"America/New_York"
+                        | b"Asia/Tokyo"
+                        | b"Europe/London"
+                ) =>
+            {
+                timezone = Some(())
+            }
             b"timezone" => return Err(PlanError::Unsupported),
-            b"keyboard" if matches!(value, b"us" | b"gb" | b"de" | b"es" | b"fr") => keyboard = Some(()),
+            b"keyboard" if matches!(value, b"us" | b"gb" | b"de" | b"es" | b"fr") => {
+                keyboard = Some(())
+            }
             b"keyboard" => return Err(PlanError::Unsupported),
             b"network" if matches!(value, b"disabled" | b"dhcp") => network = Some(()),
             b"network" => return Err(PlanError::Unsupported),
@@ -106,9 +123,19 @@ pub fn validate_plan(plan: &[u8], target_sectors: u64, require_confirmation: boo
             _ => return Err(PlanError::InvalidField),
         }
     }
-    let Some(target) = target else { return Err(PlanError::MissingField) };
-    let Some(partition) = partition else { return Err(PlanError::MissingField) };
-    if filesystem.is_none() || username.is_none() || password.is_none() || timezone.is_none() || keyboard.is_none() || network.is_none() {
+    let Some(target) = target else {
+        return Err(PlanError::MissingField);
+    };
+    let Some(partition) = partition else {
+        return Err(PlanError::MissingField);
+    };
+    if filesystem.is_none()
+        || username.is_none()
+        || password.is_none()
+        || timezone.is_none()
+        || keyboard.is_none()
+        || network.is_none()
+    {
         return Err(PlanError::MissingField);
     }
     let minimum_target_sectors = INSTALLER_ESP_SECTORS + INSTALLER_GPT_TAIL_SECTORS;
@@ -130,13 +157,26 @@ fn parse_positive(value: &[u8]) -> Result<u64, PlanError> {
     }
     let mut result = 0u64;
     for byte in value {
-        result = result.checked_mul(10).and_then(|value| value.checked_add(u64::from(byte - b'0'))).ok_or(PlanError::InvalidField)?;
+        result = result
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u64::from(byte - b'0')))
+            .ok_or(PlanError::InvalidField)?;
     }
-    if result == 0 { Err(PlanError::InvalidField) } else { Ok(result) }
+    if result == 0 {
+        Err(PlanError::InvalidField)
+    } else {
+        Ok(result)
+    }
 }
 
 fn valid_username(value: &[u8]) -> Result<(), PlanError> {
-    if value.is_empty() || value.len() > 32 || !value[0].is_ascii_lowercase() || value.iter().any(|byte| !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_' || *byte == b'-')) {
+    if value.is_empty()
+        || value.len() > 32
+        || !value[0].is_ascii_lowercase()
+        || value.iter().any(|byte| {
+            !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_' || *byte == b'-')
+        })
+    {
         Err(PlanError::InvalidField)
     } else {
         Ok(())
@@ -156,7 +196,11 @@ impl Request<'_> {
 
     pub fn encode(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         if self.plan.len() > MAX_PLAN_BYTES || output.len() < Self::HEADER_BYTES + self.plan.len() {
-            return Err(if self.plan.len() > MAX_PLAN_BYTES { CodecError::TooLarge } else { CodecError::ShortBuffer });
+            return Err(if self.plan.len() > MAX_PLAN_BYTES {
+                CodecError::TooLarge
+            } else {
+                CodecError::ShortBuffer
+            });
         }
         output[0..3].copy_from_slice(b"WI\x01");
         output[3] = self.operation as u8;
@@ -172,11 +216,17 @@ impl Request<'_> {
         let operation = Operation::decode(bytes[3]).ok_or(CodecError::Invalid)?;
         let plan = &bytes[Self::HEADER_BYTES..];
         if plan.len() > MAX_PLAN_BYTES || plan.iter().any(|byte| *byte < 0x20 || *byte == 0x7f) {
-            return Err(if plan.len() > MAX_PLAN_BYTES { CodecError::TooLarge } else { CodecError::Invalid });
+            return Err(if plan.len() > MAX_PLAN_BYTES {
+                CodecError::TooLarge
+            } else {
+                CodecError::Invalid
+            });
         }
         Ok(Request {
             operation,
-            request_id: u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| CodecError::Invalid)?),
+            request_id: u32::from_le_bytes(
+                bytes[4..8].try_into().map_err(|_| CodecError::Invalid)?,
+            ),
             plan,
         })
     }
@@ -203,21 +253,29 @@ impl Response {
             return Err(CodecError::Invalid);
         }
         Ok(Self {
-            request_id: u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| CodecError::Invalid)?),
+            request_id: u32::from_le_bytes(
+                bytes[4..8].try_into().map_err(|_| CodecError::Invalid)?,
+            ),
             status: u16::from_le_bytes(bytes[8..10].try_into().map_err(|_| CodecError::Invalid)?),
             progress: bytes[10],
-            value: u64::from(u32::from_le_bytes(bytes[12..16].try_into().map_err(|_| CodecError::Invalid)?)),
+            value: u64::from(u32::from_le_bytes(
+                bytes[12..16].try_into().map_err(|_| CodecError::Invalid)?,
+            )),
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_plan, Operation, Request, Response};
+    use super::{Operation, Request, Response, validate_plan};
 
     #[test]
     fn request_round_trip_is_bounded() {
-        let request = Request { operation: Operation::Validate, request_id: 7, plan: b"plan-v1" };
+        let request = Request {
+            operation: Operation::Validate,
+            request_id: 7,
+            plan: b"plan-v1",
+        };
         let mut bytes = [0; 256];
         let length = request.encode(&mut bytes).unwrap();
         assert_eq!(Request::decode(&bytes[..length]).unwrap(), request);
@@ -227,14 +285,24 @@ mod tests {
     fn rejects_bad_header_and_control_bytes() {
         assert!(Request::decode(b"bad").is_err());
         let mut bytes = [0; 256];
-        let length = (Request { operation: Operation::Inventory, request_id: 1, plan: b"a\n" })
-            .encode(&mut bytes).unwrap();
+        let length = (Request {
+            operation: Operation::Inventory,
+            request_id: 1,
+            plan: b"a\n",
+        })
+        .encode(&mut bytes)
+        .unwrap();
         assert!(Request::decode(&bytes[..length]).is_err());
     }
 
     #[test]
     fn response_round_trip_is_fixed_size() {
-        let response = Response { request_id: 8, status: 3, progress: 42, value: 99 };
+        let response = Response {
+            request_id: 8,
+            status: 3,
+            progress: 42,
+            value: 99,
+        };
         let mut bytes = [0; Response::ENCODED_LEN];
         response.encode(&mut bytes).unwrap();
         assert_eq!(Response::decode(&bytes).unwrap(), response);
@@ -244,7 +312,10 @@ mod tests {
     fn validates_capacity_and_install_confirmation() {
         let plan = b"target-sectors=150000;partition-sectors=70000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled";
         assert!(validate_plan(plan, 150000, false).is_ok());
-        assert_eq!(validate_plan(plan, 150000, true), Err(super::PlanError::Confirmation));
+        assert_eq!(
+            validate_plan(plan, 150000, true),
+            Err(super::PlanError::Confirmation)
+        );
         assert!(validate_plan(b"target-sectors=150000;partition-sectors=1000;filesystem=fat32;user=banda;password=change-me;timezone=UTC;keyboard=us;network=disabled", 150000, false).is_err());
     }
 }

@@ -254,8 +254,7 @@ pub fn test_update_recovery() -> bool {
             if after.owner != before.owner && after.client_rights == 1 {
                 crate::serial::write_line(format_args!(
                     "[STAGE31 SUPERVISOR] update recovery: PASSED old={} new={}",
-                    before.owner,
-                    after.owner
+                    before.owner, after.owner
                 ));
                 return true;
             }

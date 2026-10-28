@@ -3,7 +3,7 @@
 #![no_main]
 
 use core::sync::atomic::{AtomicI32, Ordering};
-use libwoven::{Error, process, syscall, thread};
+use libwoven::{process, syscall, thread, Error};
 
 static STATUS: AtomicI32 = AtomicI32::new(0);
 const STATUSES: [i32; 6] = [-1, -2, i32::MIN, i32::MAX, 0, 37];
@@ -59,6 +59,31 @@ fn require(condition: bool, code: u64) {
     }
 }
 
+fn verify_native_abi() {
+    let current = libwoven::abi::negotiate_kernel(libwoven::abi::Contract::CURRENT);
+    require(current == Ok(libwoven::abi::Contract::CURRENT), 170);
+    let unsupported = libwoven::abi::Contract::new(
+        libwoven::abi::ABI_MAJOR + 1,
+        0,
+        libwoven::abi::DESCRIPTOR_VERSION,
+    );
+    require(libwoven::abi::negotiate_kernel(unsupported).is_err(), 171);
+    let mut malformed = [0_u8; libwoven::abi::DESCRIPTOR_BYTES];
+    malformed[0..2].copy_from_slice(&libwoven::abi::ABI_MAJOR.to_le_bytes());
+    malformed[4..6].copy_from_slice(&libwoven::abi::DESCRIPTOR_VERSION.to_le_bytes());
+    malformed[6] = 1;
+    let raw = unsafe {
+        libwoven::syscall::invoke(
+            libwoven::syscall::ABI_NEGOTIATE,
+            malformed.as_ptr() as u64,
+            malformed.as_mut_ptr() as u64,
+            malformed.len() as u64,
+        )
+    };
+    require(raw == libwoven::syscall::ERROR, 172);
+    let _ = libwoven::print("[S01.ABI] native SDK negotiation: PASSED\n");
+}
+
 fn fork() -> u64 {
     // SAFETY: Fork takes no user pointer and returns in the cloned context.
     unsafe { syscall::invoke(syscall::FORK, 0, 0, 0) }
@@ -85,6 +110,7 @@ fn create(entry: unsafe extern "C" fn()) -> thread::Id {
 }
 
 fn main(_: libwoven::Args) -> ! {
+    verify_native_abi();
     for (index, status) in STATUSES.into_iter().enumerate() {
         let pid = fork();
         require(pid != syscall::ERROR, 12);

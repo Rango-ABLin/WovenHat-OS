@@ -95,6 +95,13 @@ def snapshot(run_dir: Path, suite: str, cpus: int, command: list[str], result: s
 
 def run(args: argparse.Namespace) -> int:
     evidence_root = evidence_directory(args.suite, args.cpus, args.count)
+    # Never merge a rerun into a historical directory. Child harnesses reuse
+    # fixed evidence paths, so merging would make provenance and memory-floor
+    # assertions ambiguous even when every new child passed.
+    if evidence_root.exists() and any(evidence_root.iterdir()):
+        evidence_root = evidence_root.with_name(
+            f"{evidence_root.name}-rerun-{time.time_ns()}"
+        )
     evidence_root.mkdir(parents=True, exist_ok=True)
     for index in range(1, args.count + 1):
         command = build_command(args.suite, args.cpus, args.timeout)

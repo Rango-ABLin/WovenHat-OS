@@ -168,6 +168,8 @@ impl SerialPort {
             LAST_BYTE.store(byte, Ordering::Relaxed);
         }
         let mut polls = 0u16;
+        // SAFETY: reads the COM1 line-status register (COM1+5), a fixed UART I/O
+        // port initialized during kernel startup.
         while unsafe { inb(COM1 + 5) } & LINE_STATUS_TRANSMITTER_EMPTY == 0 {
             polls += 1;
             if polls == TX_POLL_LIMIT {
@@ -188,7 +190,7 @@ impl SerialPort {
 ///
 /// The caller must ensure that `port` is valid and that WovenHat owns the
 /// associated device.
-unsafe fn inb(port: u16) -> u8 {
+pub(crate) unsafe fn inb(port: u16) -> u8 {
     let value: u8;
 
     // SAFETY: The caller upholds the port-I/O requirements above.
@@ -210,7 +212,7 @@ unsafe fn inb(port: u16) -> u8 {
 ///
 /// The caller must ensure that `port` is valid and that WovenHat owns the
 /// associated device.
-unsafe fn outb(port: u16, value: u8) {
+pub(crate) unsafe fn outb(port: u16, value: u8) {
     // SAFETY: The caller upholds the port-I/O requirements above.
     unsafe {
         asm!(

@@ -78,6 +78,234 @@ global_asm!(
     "wovenhat_stage31_process_crash_end:",
 );
 
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_fork_wait_start",
+    ".global wovenhat_s03_fork_wait_end",
+    "wovenhat_s03_fork_wait_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    "test rax, rax",
+    "jz 1f",
+    "mov r12, rax",
+    "0:",
+    "mov eax, 5",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, -2",
+    "je 0b",
+    "cmp rax, 42",
+    "jne 2f",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_fork_wait_end:",
+    ".global wovenhat_s03_group_start",
+    ".global wovenhat_s03_group_end",
+    "wovenhat_s03_group_start:",
+    "0:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 0b",
+    "wovenhat_s03_group_end:",
+    ".global wovenhat_s03_handler_start",
+    ".global wovenhat_s03_handler_end",
+    "wovenhat_s03_handler_start:",
+    // Round-trip the bounded termios ABI through the caller-owned stack.
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 34",
+    "mov edi, 10",
+    "lea rsi, [rip + wovenhat_s03_handler]",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 10",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "4:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_session_start",
+    ".global wovenhat_s03_session_end",
+    "wovenhat_s03_session_start:",
+    // setsid must create a session/process group for a non-group-leader.
+    "mov eax, 245",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "mov r12, rax",
+    "mov eax, 244",
+    "xor edi, edi",
+    "int 0x80",
+    "cmp rax, r12",
+    "jne 3f",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 11",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "mov edi, 12",
+    "mov eax, 3",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_session_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_tostop_start",
+    ".global wovenhat_s03_tostop_end",
+    "wovenhat_s03_tostop_start:",
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    // Termios::local_flags is the fourth u32 in the bounded record.
+    "or dword ptr [rdx + 12], 0x100",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    // A background write with TOSTOP enabled must receive SIGTTOU.
+    "mov eax, 1",
+    "mov edi, 1",
+    "mov rsi, rdx",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 5f",
+    "mov edi, 14",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "mov edi, 11",
+    "mov eax, 3",
+    "int 0x80",
+    "4:",
+    "mov edi, 12",
+    "mov eax, 3",
+    "int 0x80",
+    "5:",
+    "mov edi, 13",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "wovenhat_s03_tostop_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_orphan_start",
+    ".global wovenhat_s03_orphan_end",
+    "wovenhat_s03_orphan_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    "test rax, rax",
+    "jz 1f",
+    // The parent exits, leaving the stopped child to the init surrogate.
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 36",
+    "xor edi, edi",
+    "xor esi, esi",
+    "int 0x80",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 19",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "3:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_orphan_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_vintr_start",
+    ".global wovenhat_s03_vintr_end",
+    "wovenhat_s03_vintr_start:",
+    "1:",
+    "mov eax, 0",
+    "xor edi, edi",
+    "mov rsi, 0x4000001fffe0",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "test rax, rax",
+    "jz 1b",
+    "cmp byte ptr [rsi], 3",
+    "je 2f",
+    "jmp 1b",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_vintr_end:",
+);
+
 global_asm!(
     ".global wovenhat_user_program_start",
     ".global wovenhat_user_program_end",
@@ -98,7 +326,8 @@ global_asm!(
     "jne wovenhat_user_failure",
     "wovenhat_fork_wait:",
     "mov eax, 5",
-    "mov rdi, r12",
+    // `waitpid(-1)` exercises bounded wait-any selection and reaping.
+    "mov rdi, -1",
     "int 0x80",
     "cmp rax, -2",
     "jne wovenhat_fork_reaped",
@@ -4353,10 +4582,9 @@ pub struct UserStack {
 impl UserStack {
     pub const GUARD_SIZE: usize = 4096;
     /// The desktop and system applications keep large render/input frames
-    /// outside this stack, but 8 KiB was still too close to the boundary for
-    /// the production shell's diagnostic path. Four pages retain the guard
-    /// page while providing a bounded margin for nested userspace calls.
-    pub const SIZE: usize = 4096 * 4;
+    /// outside this stack. Sixteen pages retain the guard page while giving
+    /// codec, browser, and compositor call paths room for bounded nested work.
+    pub const SIZE: usize = 4096 * 16;
 
     pub fn new(base: u64) -> Self {
         Self {
@@ -4705,6 +4933,9 @@ pub fn elf_loader_self_test() -> bool {
     const PT_TLS: u32 = 7;
     const PT_GNU_RELRO: u32 = 0x6474_e552;
 
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -5054,6 +5285,9 @@ pub fn mmap_w_xor_x_self_test(address_space: AddressSpace) -> bool {
 }
 
 pub fn create_stub_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -5080,6 +5314,111 @@ pub fn create_stage31_process_crash_process() -> Option<UserProgram> {
     load_elf(&build_stub_elf(stub)?)
 }
 
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_fork_wait_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_fork_wait_start: u8;
+        static wovenhat_s03_fork_wait_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_fork_wait_start as *const u8;
+        let end = &wovenhat_s03_fork_wait_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_group_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_group_start: u8;
+        static wovenhat_s03_group_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_group_start as *const u8;
+        let end = &wovenhat_s03_group_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_handler_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_handler_start: u8;
+        static wovenhat_s03_handler_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_handler_start as *const u8;
+        let end = &wovenhat_s03_handler_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_session_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_session_start: u8;
+        static wovenhat_s03_session_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_session_start as *const u8;
+        let end = &wovenhat_s03_session_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_tostop_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_tostop_start: u8;
+        static wovenhat_s03_tostop_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_tostop_start as *const u8;
+        let end = &wovenhat_s03_tostop_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_orphan_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_orphan_start: u8;
+        static wovenhat_s03_orphan_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_orphan_start as *const u8;
+        let end = &wovenhat_s03_orphan_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_vintr_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_vintr_start: u8;
+        static wovenhat_s03_vintr_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_vintr_start as *const u8;
+        let end = &wovenhat_s03_vintr_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
 #[cfg(feature = "stage10-8-test")]
 pub fn create_stage10_8_process() -> Option<UserProgram> {
     unsafe extern "C" {
@@ -5101,6 +5440,9 @@ pub fn create_stage10_9_process() -> Option<UserProgram> {
         static wovenhat_stage10_9_start: u8;
         static wovenhat_stage10_9_end: u8;
     }
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_9_start as *const u8;
         let end = &wovenhat_stage10_9_end as *const u8;
@@ -5110,6 +5452,9 @@ pub fn create_stage10_9_process() -> Option<UserProgram> {
 }
 
 pub fn install_stub_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -5121,6 +5466,9 @@ pub fn install_stub_executable() -> bool {
 
 #[cfg(feature = "stage10-4-test")]
 pub fn create_stage10_4_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_4_program_start as *const u8;
         let end = &wovenhat_stage10_4_program_end as *const u8;
@@ -5132,6 +5480,9 @@ pub fn create_stage10_4_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-5-test")]
 pub fn create_stage10_5_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_5_program_start as *const u8;
         let end = &wovenhat_stage10_5_program_end as *const u8;
@@ -5143,6 +5494,9 @@ pub fn create_stage10_5_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-6-test")]
 pub fn create_stage10_6_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_6_program_start as *const u8;
         let end = &wovenhat_stage10_6_program_end as *const u8;
@@ -5154,6 +5508,9 @@ pub fn create_stage10_6_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-7-test")]
 pub fn create_stage10_7_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_7_program_start as *const u8;
         let end = &wovenhat_stage10_7_program_end as *const u8;
@@ -5165,6 +5522,9 @@ pub fn create_stage10_7_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage11-2-test")]
 pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage11_2_program_start as *const u8;
         let end = &wovenhat_stage11_2_program_end as *const u8;
@@ -5174,6 +5534,9 @@ pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
 }
 
 pub fn create_exec_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_exec_program_start as *const u8;
         let end = &wovenhat_exec_program_end as *const u8;
@@ -5185,6 +5548,9 @@ pub fn create_exec_process() -> Option<UserProgram> {
 
 /// Spawnable userspace init process (`argv[0] == "/init"`).
 pub fn create_init_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_init_program_start as *const u8;
         let end = &wovenhat_init_program_end as *const u8;
@@ -5196,6 +5562,9 @@ pub fn create_init_process() -> Option<UserProgram> {
 
 /// Install `/bin/init` into the VFS for later `exec`.
 pub fn install_init_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_init_program_start as *const u8;
         let end = &wovenhat_init_program_end as *const u8;
@@ -5206,6 +5575,9 @@ pub fn install_init_executable() -> bool {
 
 /// Interactive userspace shell (`argv[0] == "/bin/sh"`).
 pub fn create_shell_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sh_program_start as *const u8;
         let end = &wovenhat_sh_program_end as *const u8;
@@ -5221,6 +5593,9 @@ pub fn create_shell_process() -> Option<UserProgram> {
 /// pinned-AP userspace execution proof without exercising BSP-owned file,
 /// network, pager or device-service paths.
 pub fn create_true_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_true_program_start as *const u8;
         let end = &wovenhat_true_program_end as *const u8;
@@ -5231,6 +5606,9 @@ pub fn create_true_process() -> Option<UserProgram> {
 }
 /// Install `/bin/true` into the VFS.
 pub fn install_true_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_true_program_start as *const u8;
         let end = &wovenhat_true_program_end as *const u8;
@@ -5240,6 +5618,9 @@ pub fn install_true_executable() -> bool {
 }
 
 pub fn install_false_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_false_program_start as *const u8;
         let end = &wovenhat_false_program_end as *const u8;
@@ -5249,6 +5630,9 @@ pub fn install_false_executable() -> bool {
 }
 
 pub fn install_ls_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_ls_program_start as *const u8;
         let end = &wovenhat_ls_program_end as *const u8;
@@ -5258,6 +5642,9 @@ pub fn install_ls_executable() -> bool {
 }
 
 pub fn install_sleep_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sleepbin_program_start as *const u8;
         let end = &wovenhat_sleepbin_program_end as *const u8;
@@ -5267,6 +5654,9 @@ pub fn install_sleep_executable() -> bool {
 }
 
 pub fn install_cat_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_cat_program_start as *const u8;
         let end = &wovenhat_cat_program_end as *const u8;
@@ -5276,6 +5666,9 @@ pub fn install_cat_executable() -> bool {
 }
 
 pub fn install_echo_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_echo_program_start as *const u8;
         let end = &wovenhat_echo_program_end as *const u8;
@@ -5285,6 +5678,9 @@ pub fn install_echo_executable() -> bool {
 }
 
 pub fn install_pwd_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_pwd_program_start,
@@ -5296,6 +5692,9 @@ pub fn install_pwd_executable() -> bool {
 }
 
 pub fn install_mkdir_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_mkdir_program_start,
@@ -5307,6 +5706,9 @@ pub fn install_mkdir_executable() -> bool {
 }
 
 pub fn install_rm_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_rm_program_start,
@@ -5318,6 +5720,9 @@ pub fn install_rm_executable() -> bool {
 }
 
 pub fn install_shell_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sh_program_start as *const u8;
         let end = &wovenhat_sh_program_end as *const u8;
@@ -6000,6 +6405,10 @@ fn stage5_program(start: *const u8, end: *const u8) -> Option<&'static [u8]> {
     if len == 0 {
         return None;
     }
+    // SAFETY: callers pass the linker-provided start/end symbols that bound an
+    // immutable byte blob embedded in the kernel image. `len = end - start` was
+    // computed with a checked subtraction and is non-zero, so the slice covers
+    // exactly that in-image region, which is valid and lives for `'static`.
     Some(unsafe { core::slice::from_raw_parts(start, len) })
 }
 
@@ -7111,6 +7520,9 @@ pub fn install_file_mmap_test() -> bool {
         static wovenhat_file_mmap_start: u8;
         static wovenhat_file_mmap_end: u8;
     }
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_file_mmap_start as *const u8;
         let end = &wovenhat_file_mmap_end as *const u8;

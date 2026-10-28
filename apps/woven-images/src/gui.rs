@@ -1,3 +1,6 @@
+use libwoven::layout::Frame;
+use libwoven::media::ThumbnailCache;
+use libwoven::ui::{Button, Label, Theme};
 use libwoven::{rgb, Canvas, GraphicsSurface};
 
 const WIDTH: u32 = 360;
@@ -19,14 +22,37 @@ const PANEL_HEIGHT: usize = 196;
 const MAX_ENTRIES: usize = 128;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
+const WALLPAPER_WIDTH: usize = 160;
+const WALLPAPER_HEIGHT: usize = 90;
+const WALLPAPER_CACHE_KEY: u64 = 0x574f5645_4e484154;
+// Leave one sentinel byte because load_vfs_asset reserves the full buffer
+// length to distinguish an exact-size asset from a truncated read.
+const WALLPAPER_BYTES: usize = 54 + ((WALLPAPER_WIDTH * 3 + 3) & !3) * WALLPAPER_HEIGHT + 1;
 
 struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
 // SAFETY: the images GUI is single-threaded and owns this buffer exclusively.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
+));
+
+struct WallpaperBytes(core::cell::UnsafeCell<[u8; WALLPAPER_BYTES]>);
+unsafe impl Sync for WallpaperBytes {}
+static WALLPAPER_DATA: WallpaperBytes =
+    WallpaperBytes(core::cell::UnsafeCell::new([0; WALLPAPER_BYTES]));
+
+struct WallpaperPixels(core::cell::UnsafeCell<[u32; WALLPAPER_WIDTH * WALLPAPER_HEIGHT]>);
+unsafe impl Sync for WallpaperPixels {}
+static WALLPAPER_PIXELS: WallpaperPixels = WallpaperPixels(core::cell::UnsafeCell::new(
+    [0; WALLPAPER_WIDTH * WALLPAPER_HEIGHT],
+));
+
+struct WallpaperThumbnailCache(core::cell::UnsafeCell<ThumbnailCache<1>>);
+unsafe impl Sync for WallpaperThumbnailCache {}
+static WALLPAPER_THUMBNAILS: WallpaperThumbnailCache =
+    WallpaperThumbnailCache(core::cell::UnsafeCell::new(ThumbnailCache::new()));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenImages: failure\n");
@@ -53,19 +79,128 @@ fn image_count() -> usize {
     count
 }
 
+fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
+    let cache: &'static mut ThumbnailCache<1> = unsafe { &mut *WALLPAPER_THUMBNAILS.0.get() };
+    if cache.get(WALLPAPER_CACHE_KEY).is_some() {
+        let thumbnail = cache.get(WALLPAPER_CACHE_KEY)?;
+        return Some((
+            &thumbnail.pixels,
+            usize::from(thumbnail.width),
+            usize::from(thumbnail.height),
+        ));
+    }
+    let bytes = unsafe { &mut *WALLPAPER_DATA.0.get() };
+    let pixels = unsafe { &mut *WALLPAPER_PIXELS.0.get() };
+    let (length, metadata) =
+        match libwoven::media::load_vfs_asset("/share/wallpapers/wovenhat-gradient.bmp", bytes) {
+            Ok(asset) => asset,
+            Err(libwoven::media::VfsAssetError::Open) => {
+                let _ = libwoven::print("WovenImages: wallpaper open denied\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::Read) => {
+                let _ = libwoven::print("WovenImages: wallpaper read failed\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::TooLarge) => {
+                let _ = libwoven::print("WovenImages: wallpaper too large\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::InvalidImage(_)) => {
+                let _ = libwoven::print("WovenImages: wallpaper header invalid\n");
+                return None;
+            }
+        };
+    if metadata.width as usize != WALLPAPER_WIDTH || metadata.height as usize != WALLPAPER_HEIGHT {
+        return None;
+    }
+    libwoven::media::decode_bmp_rgba(&bytes[..length], pixels).ok()?;
+    let mut thumbnail = [0u32; libwoven::media::THUMBNAIL_PIXELS];
+    for y in 0..libwoven::media::THUMBNAIL_SIDE {
+        let source_y = y * WALLPAPER_HEIGHT / libwoven::media::THUMBNAIL_SIDE;
+        for x in 0..libwoven::media::THUMBNAIL_SIDE {
+            let source_x = x * WALLPAPER_WIDTH / libwoven::media::THUMBNAIL_SIDE;
+            thumbnail[y * libwoven::media::THUMBNAIL_SIDE + x] =
+                pixels[source_y * WALLPAPER_WIDTH + source_x];
+        }
+    }
+    if !cache.insert(
+        WALLPAPER_CACHE_KEY,
+        libwoven::media::THUMBNAIL_SIDE,
+        libwoven::media::THUMBNAIL_SIDE,
+        &thumbnail,
+    ) {
+        return None;
+    }
+    let thumbnail = cache.get(WALLPAPER_CACHE_KEY)?;
+    Some((
+        &thumbnail.pixels,
+        usize::from(thumbnail.width),
+        usize::from(thumbnail.height),
+    ))
+}
+
+fn draw_thumbnail(canvas: &mut Canvas<'_>, image: Option<(&[u32], usize, usize)>) {
+    let Some((pixels, width, height)) = image else {
+        canvas.draw_text(182, 72, "Wallpaper unavailable", TEXT);
+        return;
+    };
+    let x0 = 182i32;
+    let y0 = 70i32;
+    let target_width = 140usize;
+    let target_height = 78usize;
+    canvas.fill_rect(x0 - 2, y0 - 2, target_width + 4, target_height + 4, ACCENT);
+    for y in 0..target_height {
+        let source_y = y * height / target_height;
+        for x in 0..target_width {
+            let source_x = x * width / target_width;
+            canvas.set(
+                x0 + x as i32,
+                y0 + y as i32,
+                pixels[source_y * width + source_x],
+            );
+        }
+    }
+}
+
 fn draw_images(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    refresh: &Button<'_>,
+    wallpaper: Option<(&[u32], usize, usize)>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenImages", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Image workspace", ACCENT);
+    let theme = Theme {
+        surface: PANEL,
+        accent: ACCENT,
+        text: TEXT,
+        disabled: BUTTON,
+        focus: ACCENT,
+    };
+    Label::new(
+        Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
+        "WovenImages",
+    )
+    .draw(canvas, theme);
+    Label::new(
+        Frame::new(PANEL_X + 10, PANEL_Y + 36, 180, 16),
+        "Image workspace",
+    )
+    .draw(
+        canvas,
+        Theme {
+            text: ACCENT,
+            ..theme
+        },
+    );
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 88, "Image files", ACCENT);
+    canvas.draw_text(182, 54, "Licensed wallpaper", ACCENT);
+    draw_thumbnail(canvas, wallpaper);
     let mut digits = [0u8; 20];
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 106, "Entries ", TEXT);
     let count_text = libwoven::format_u64(image_count() as u64, &mut digits);
@@ -80,16 +215,15 @@ fn draw_images(
     if let Ok(text) = core::str::from_utf8(refresh_text) {
         canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, ACCENT);
     }
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
-    );
-    canvas.draw_text(BUTTON_X + 14, BUTTON_Y + 6, "Refresh", TEXT);
+    refresh.draw(canvas, theme);
     if let Some((x, y)) = pointer {
-        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(2),
+            i32::from(y).saturating_sub(2),
+            5,
+            5,
+            if pressed { TEXT } else { POINTER_MARKER },
+        );
     }
 }
 
@@ -98,6 +232,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    refresh: &Button<'_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -109,7 +244,15 @@ fn render(
     ) else {
         return false;
     };
-    draw_images(&mut canvas, pointer, pressed, refresh_count);
+    let wallpaper = load_wallpaper();
+    draw_images(
+        &mut canvas,
+        pointer,
+        pressed,
+        refresh_count,
+        refresh,
+        wallpaper,
+    );
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -129,7 +272,27 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    if !render(&window, None, false, 0) {
+    let mut refresh = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Refresh",
+    );
+    match load_wallpaper() {
+        Some((_, width, height)) => {
+            let _ = libwoven::print("WovenImages: wallpaper decoded 160x90\n");
+            if width != WALLPAPER_WIDTH || height != WALLPAPER_HEIGHT {
+                fail(9)
+            }
+        }
+        None => {
+            let _ = libwoven::print("WovenImages: wallpaper unavailable\n");
+        }
+    }
+    if !render(&window, None, false, 0, &refresh) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -162,11 +325,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 break;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
-                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
-                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
+                    .min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]]))
+                    .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count) {
+                        if render(&resized, pointer, pointer_pressed, refresh_count, &refresh) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenImages: window resized\n");
@@ -178,24 +343,29 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     }
                 }
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
-                pointer = Some((u16::from_le_bytes([message[4], message[5]]), u16::from_le_bytes([message[6], message[7]])));
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                pointer = Some((
+                    u16::from_le_bytes([message[4], message[5]]),
+                    u16::from_le_bytes([message[6], message[7]]),
+                ));
+                if let Some((x, y)) = pointer {
+                    refresh.pointer(i32::from(x), i32::from(y), pointer_pressed);
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenImages: pointer updated\n");
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
-                if !pointer_pressed
-                    && i32::from(local_x) >= BUTTON_X
-                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
-                    && i32::from(local_y) >= BUTTON_Y
-                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
-                {
+                if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenImages: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenImages: pointer updated\n");
             }
         }
@@ -213,7 +383,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         if !digit.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }

@@ -988,6 +988,10 @@ fn cmd_fs(console: &mut Console) {
         print_u64(console, stats.writebacks);
         console.print(" evictions=");
         print_u64(console, stats.evictions);
+        console.print(" retries=");
+        print_u64(console, stats.writeback_retries);
+        console.print(" failures=");
+        print_u64(console, stats.writeback_failures);
         console.newline();
         console.print("sectors: resident=");
         print_u64(console, stats.resident as u64);
