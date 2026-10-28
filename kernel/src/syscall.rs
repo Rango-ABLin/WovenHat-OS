@@ -992,6 +992,11 @@ fn sys_read(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         if !crate::task::current_has(crate::capability::Capability::Console) {
             return SYSCALL_ERROR;
         }
+        if let Some(group) = crate::terminal::foreground_pid() {
+            if crate::task::current_process_group() != group {
+                return SYSCALL_ERROR;
+            }
+        }
         let count = crate::keyboard::read_bytes(&mut buffer[..length]);
         if crate::paging::copy_to_current_user(user_buffer, &buffer[..count]).is_err() {
             return SYSCALL_ERROR;
@@ -1317,6 +1322,8 @@ fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
     match request {
         crate::terminal::TCGETS => {
             let value = crate::terminal::termios();
+            // SAFETY: `value` is a live, initialized `repr(C)` value and the
+            // slice is bounded to exactly its object representation.
             let bytes = unsafe {
                 core::slice::from_raw_parts(
                     (&value as *const crate::terminal::Termios).cast::<u8>(),
@@ -1327,6 +1334,8 @@ fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
         }
         crate::terminal::TCSETS => {
             let mut value = crate::terminal::Termios::DEFAULT;
+            // SAFETY: `value` is a live, writable `repr(C)` value and the
+            // slice is bounded to exactly its object representation.
             let bytes = unsafe {
                 core::slice::from_raw_parts_mut(
                     (&mut value as *mut crate::terminal::Termios).cast::<u8>(),
@@ -1351,7 +1360,9 @@ fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
                 return SYSCALL_ERROR;
             }
             let group = u64::from_le_bytes(bytes);
-            if !crate::task::process_group_exists(group) {
+            if !crate::task::process_group_exists(group)
+                || !crate::task::can_control_foreground_group(group)
+            {
                 return SYSCALL_ERROR;
             }
             crate::terminal::set_foreground_group(group);

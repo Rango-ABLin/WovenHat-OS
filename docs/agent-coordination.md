@@ -36,7 +36,9 @@ validation or user copy fails; no signal is silently discarded.
 The terminal-control increment adds bounded `TCGETS`/`TCSETS` and
 `TIOCGPGRP`/`TIOCSPGRP` requests with copied user buffers and fail-closed
 validation. The Ring-3 S03 gate passes on 1/2/4 CPUs with the termios round
-trip included. PTY multiplexing and complete job-control semantics remain.
+trip included. Foreground assignment now checks the caller's process group or
+TaskControl capability, and background console reads fail closed. PTY
+multiplexing and complete job-control semantics remain.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

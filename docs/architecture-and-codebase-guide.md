@@ -40,8 +40,9 @@ Terminal control is bounded to the owned standard-input terminal: validated
 `Termios` state supports `TCGETS`/`TCSETS`, and existing process groups can be
 read or assigned as foreground through `TIOCGPGRP`/`TIOCSPGRP`. User buffers
 are copied at the syscall boundary; invalid flags, descriptors, pointers, and
-unknown requests fail closed. No PTY namespace or multiplexed line discipline
-is implied.
+unknown requests fail closed. Foreground assignment is limited to the caller's
+own group or TaskControl authority, and standard-input reads reject background
+groups. No PTY namespace or multiplexed line discipline is implied.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

@@ -36,7 +36,9 @@ instead of dropping it.
 The terminal-control increment passed in the same 1/2/4-CPU S03 gate with a
 Ring-3 `TCGETS`/`TCSETS` round trip. Foreground process-group ioctl constants
 and validation are now part of the bounded terminal ABI; PTY multiplexing and
-full job-control semantics remain open.
+full job-control semantics remain open. Foreground assignment is authorized
+against the caller's group or TaskControl capability, and background console
+reads are rejected; the 1/2/4-CPU gate remains green.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
