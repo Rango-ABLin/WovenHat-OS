@@ -64,6 +64,8 @@ static CURRENT_PROCESS_IDS: [AtomicU64; crate::smp::MAX_CPUS] =
 static PREEMPTION_REQUESTED: [AtomicBool; crate::smp::MAX_CPUS] =
     [const { AtomicBool::new(false) }; crate::smp::MAX_CPUS];
 static PREEMPTION_SWITCHES: AtomicU64 = AtomicU64::new(0);
+static CPU_RUNTIME_TICKS: [AtomicU64; crate::smp::MAX_CPUS] =
+    [const { AtomicU64::new(0) }; crate::smp::MAX_CPUS];
 static REBALANCE_PASSES: AtomicU64 = AtomicU64::new(0);
 static REBALANCE_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
 static USERSPACE_REBALANCE_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
@@ -336,6 +338,8 @@ struct TaskControlBlock {
     fs_base: u64,
     address_space: Option<paging::AddressSpace>,
     remaining_ticks: u8,
+    runtime_ticks: u64,
+    dispatches: u64,
     cpu: usize,
     migratable: bool,
     /// True once the scheduler has selected this task for execution at least once.
@@ -392,6 +396,8 @@ impl TaskControlBlock {
             fs_base: 0,
             address_space: None,
             remaining_ticks: 0,
+            runtime_ticks: 0,
+            dispatches: 0,
             cpu: 0,
             migratable: false,
             ever_dispatched: false,
@@ -427,6 +433,8 @@ impl TaskControlBlock {
         self.fs_base = 0;
         self.address_space = paging::kernel_address_space();
         self.remaining_ticks = priority.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
         self.migratable = false;
         self.ever_dispatched = false;
         self.affinity_mask = 1;
@@ -482,6 +490,8 @@ impl TaskControlBlock {
         self.fs_base = context.fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
         self.capabilities = CapabilitySet::userspace();
         self.capability_lineages = [None; Capability::COUNT];
         self.security_domain = wovenguard::SecurityDomain::User;
@@ -538,6 +548,8 @@ impl TaskControlBlock {
         self.fs_base = fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
         self.capabilities = security.capabilities;
         self.capability_lineages = security.capability_lineages;
         self.security_domain = security.security_domain;
@@ -863,6 +875,19 @@ pub struct CpuRunLoad {
     pub running: usize,
 }
 
+/// Stable scheduler accounting copied while holding the scheduler lock.
+/// Runtime is counted in timer ticks and dispatches count Ready-to-Running
+/// selections; neither value is a reservation or a billing guarantee.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TaskAccounting {
+    pub priority: u8,
+    pub cpu: usize,
+    pub affinity_mask: usize,
+    pub runtime_ticks: u64,
+    pub dispatches: u64,
+}
+
 impl CpuRunLoad {
     pub const fn runnable(self) -> usize {
         self.ready + self.running
@@ -1122,6 +1147,7 @@ impl Scheduler {
         // therefore never mistake a task that has already been dispatched for
         // a fresh pre-dispatch Ring-3 placement candidate.
         self.tasks[next_slot].ever_dispatched = true;
+        self.tasks[next_slot].dispatches = self.tasks[next_slot].dispatches.saturating_add(1);
         self.tasks[next_slot].state = TaskState::Running;
         self.tasks[next_slot].remaining_ticks = self.tasks[next_slot].priority.quantum();
         self.current_slot[crate::smp::cpu_index()] = next_slot;
@@ -5005,6 +5031,8 @@ pub fn tick() {
     if task.state != TaskState::Running {
         return;
     }
+    task.runtime_ticks = task.runtime_ticks.saturating_add(1);
+    CPU_RUNTIME_TICKS[crate::smp::cpu_index()].fetch_add(1, Ordering::Relaxed);
     if task.remaining_ticks > 1 {
         task.remaining_ticks -= 1;
     } else {
@@ -7305,6 +7333,30 @@ pub fn set_ready_task_affinity(id: TaskId, affinity_mask: usize) -> Result<(), A
 /// data; callers must not treat them as reservations.
 pub fn cpu_run_loads() -> [CpuRunLoad; crate::smp::MAX_CPUS] {
     SCHEDULER.lock().run_loads()
+}
+
+/// Return accounting for a live task without exposing its mutable scheduler
+/// state. A task that has already been retired is intentionally absent.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn task_accounting(id: TaskId) -> Option<TaskAccounting> {
+    let scheduler = SCHEDULER.lock();
+    scheduler
+        .tasks
+        .iter()
+        .find(|task| task.id == id && task.state != TaskState::Empty)
+        .map(|task| TaskAccounting {
+            priority: task.priority.as_u8(),
+            cpu: task.cpu,
+            affinity_mask: task.affinity_mask,
+            runtime_ticks: task.runtime_ticks,
+            dispatches: task.dispatches,
+        })
+}
+
+/// Snapshot timer-tick runtime accumulated by each logical CPU.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn cpu_runtime_ticks() -> [u64; crate::smp::MAX_CPUS] {
+    core::array::from_fn(|cpu| CPU_RUNTIME_TICKS[cpu].load(Ordering::Relaxed))
 }
 
 /// Perform one bounded automatic load-balancing transfer. Only explicitly

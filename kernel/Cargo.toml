@@ -132,6 +132,8 @@ stage31-process-crash-test = ["qemu-test"]
 s03-process-lifecycle-test = ["qemu-test"]
 # S03 runtime keyboard evidence through the emulated USB HID path.
 s03-keyboard-injection-test = ["qemu-test", "stage13-12-test", "s03-process-lifecycle-test"]
+# S04 scheduler accounting: bounded per-task dispatch/runtime and per-CPU ticks.
+s04-scheduler-accounting-test = ["qemu-test"]
 # Stage 32 WovenDev diagnostics primitive: structured-record boot self-test.
 stage32-1-test = ["qemu-test"]
 # Stage 32 WovenDev diagnostics: structured panic crash-dump emission path.

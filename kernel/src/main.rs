@@ -3102,6 +3102,31 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         "[BOOT] priority round-robin fairness and per-task quanta verified"
     ));
 
+    #[cfg(feature = "s04-scheduler-accounting-test")]
+    {
+        let accounting = task::task_accounting(task::summary().current_id);
+        let cpu_ticks = task::cpu_runtime_ticks();
+        let cpu = smp::cpu_index();
+        let passed = accounting.is_some_and(|item| {
+            item.priority <= 2
+                && item.dispatches > 0
+                && item.runtime_ticks > 0
+                && item.affinity_mask & (1usize << cpu) != 0
+        }) && cpu_ticks[cpu] > 0;
+        if !passed {
+            serial::write_line(format_args!(
+                "[S04.SCHEDULER] accounting: FAILED cpu={} ticks={}",
+                cpu, cpu_ticks[cpu]
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S04.SCHEDULER] accounting: PASSED cpu={} ticks={}",
+            cpu, cpu_ticks[cpu]
+        ));
+        qemu_test_exit_success();
+    }
+
     console.println("TIMER IRQ: OK");
 
     keyboard::inject_validation_input(2);
