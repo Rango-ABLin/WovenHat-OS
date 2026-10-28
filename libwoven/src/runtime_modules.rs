@@ -1,6 +1,7 @@
 //! Bounded runtime module lifecycle joining namespace and dynamic TLS state.
 
 use crate::dynamic_tls::{Dtv, Error as TlsError, ModuleId as TlsModuleId, Registry as TlsRegistry};
+use crate::elf_loader::ImagePlan;
 use crate::module_namespace::{Error as NamespaceError, ModuleId, Namespace};
 
 pub const MAX_MODULES: usize = crate::dynamic_tls::MAX_MODULES;
@@ -87,6 +88,21 @@ impl RuntimeModules {
             return self.load(&image[offset..end], memory_size, alignment.max(1));
         }
         Err(Error::MissingTls)
+    }
+
+    /// Admit a complete validated ELF image, including modules without PT_TLS.
+    /// The returned plan is the contract consumed by a future kernel mapper.
+    pub fn load_elf_image(&mut self, image: &[u8], load_bias: u64) -> Result<(ModuleId, ImagePlan), Error> {
+        let plan = ImagePlan::parse(image, load_bias).map_err(|_| Error::InvalidImage)?;
+        let id = if let Some(tls) = plan.tls {
+            let offset = usize::try_from(tls.file_offset).map_err(|_| Error::InvalidImage)?;
+            let end = offset.checked_add(usize::try_from(tls.file_size).map_err(|_| Error::InvalidImage)?).ok_or(Error::InvalidImage)?;
+            if end > image.len() { return Err(Error::InvalidImage); }
+            self.load(&image[offset..end], usize::try_from(tls.memory_size).map_err(|_| Error::InvalidImage)?, usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?)?
+        } else {
+            self.load(&[], 0, 1)?
+        };
+        Ok((id, plan))
     }
 
     pub fn retain(&mut self, id: ModuleId) -> Result<(), Error> {
@@ -188,5 +204,19 @@ mod tests {
         let id = modules.load_elf_tls(&image).unwrap();
         let mut dtv = Dtv::new();
         assert_eq!(*modules.tls_addr(&mut dtv, id, 0).unwrap(), b't');
+    }
+
+    #[test]
+    fn admits_non_tls_elf_as_a_lifetime_managed_module() {
+        let mut image = vec![0u8; 0x120];
+        image[..4].copy_from_slice(b"\x7fELF"); image[4] = 2; image[5] = 1;
+        image[24..32].copy_from_slice(&0x1000u64.to_le_bytes()); image[32..40].copy_from_slice(&64u64.to_le_bytes());
+        image[54..56].copy_from_slice(&56u16.to_le_bytes()); image[56..58].copy_from_slice(&1u16.to_le_bytes());
+        image[64..68].copy_from_slice(&1u32.to_le_bytes()); image[72..80].copy_from_slice(&0x100u64.to_le_bytes()); image[80..88].copy_from_slice(&0x1000u64.to_le_bytes()); image[96..104].copy_from_slice(&4u64.to_le_bytes()); image[104..112].copy_from_slice(&0x100u64.to_le_bytes());
+        let mut modules = RuntimeModules::new();
+        let (id, plan) = modules.load_elf_image(&image, 0x4000).unwrap();
+        assert_eq!(plan.entry, 0x5000); assert!(plan.tls.is_none());
+        assert!(modules.release(id).unwrap());
+        modules.unload(id).unwrap();
     }
 }

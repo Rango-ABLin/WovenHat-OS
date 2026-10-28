@@ -1,5 +1,13 @@
 # Stage status
 
+## Complete ELF image admission boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Runtime modules now admit validated ELF images with optional PT_TLS, returning
+the checked segment plan and registering either the TLS template or a no-TLS
+module lifetime. Focused runtime-manager and ELF-plan tests plus libwoven
+warning-denying Clippy pass. Kernel process mapping, relocation, and execution
+remain required for full post-start `dlopen`.
+
 ## Bounded dynamic ELF image admission - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Added a fixed-capacity ELF64 image plan that validates loadable segments,

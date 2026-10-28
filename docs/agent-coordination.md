@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - complete ELF image admission in runtime manager (2026-10-28)
+
+Extended the runtime manager to accept validated ELF images with or without
+PT_TLS. TLS-bearing images register their checked initializer and alignment;
+non-TLS images still receive a namespace lifetime handle. The returned
+`ImagePlan` is ready for kernel mapping while preserving transactional unload.
+
 ## Codex - bounded dynamic ELF image admission plan (2026-10-28)
 
 Added `libwoven::elf_loader::ImagePlan` for checked ELF64 image admission.

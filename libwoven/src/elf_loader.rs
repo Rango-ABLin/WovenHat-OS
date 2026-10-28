@@ -9,6 +9,7 @@ pub struct Segment {
     pub file_size: u64,
     pub memory_size: u64,
     pub flags: u32,
+    pub alignment: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,9 +64,10 @@ impl ImagePlan {
             let virtual_address = read_u64(image, header + 16)?;
             let file_size = read_u64(image, header + 32)?;
             let memory_size = read_u64(image, header + 40)?;
+            let alignment = read_u64(image, header + 48)?;
             let end = offset.checked_add(file_size).ok_or(Error::Overflow)?;
             if end > image.len() as u64 || file_size > memory_size { return Err(Error::Bounds); }
-            let segment = Segment { virtual_address: virtual_address.checked_add(load_bias).ok_or(Error::Overflow)?, file_offset: offset, file_size, memory_size, flags };
+            let segment = Segment { virtual_address: virtual_address.checked_add(load_bias).ok_or(Error::Overflow)?, file_offset: offset, file_size, memory_size, flags, alignment };
             match kind {
                 1 => {
                     if plan.segment_count == MAX_LOAD_SEGMENTS { return Err(Error::TooManySegments); }
