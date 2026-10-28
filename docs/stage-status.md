@@ -12326,3 +12326,11 @@ Evidence: `audit-artifacts/stage13.11-{1,2,4}cpu-*`. Later SMP key
 distribution, cryptographic confirmation, encryption, identity and lifecycle
 increments remain separate.
 
+## Stage 13.11B BLE SMP LTK/key distribution — 2026-10-28 — ACCEPTED
+
+The chained Stage 13.11 gate accepts bounded Encryption Information and Master
+Identification distribution. Material is bound to the pairing handle, key
+size, and peer identity; malformed, stale, duplicate, and mismatched inputs
+fail closed. QEMU passes at 1/2/4 CPUs with exit 33. Evidence:
+`audit-artifacts/stage13.11-{1,2,4}cpu-*`.
+

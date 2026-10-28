@@ -7979,3 +7979,10 @@ distribution policy, handle binding, and fail-closed stale/malformed traffic
 pass host/target Clippy and QEMU 1/2/4 CPUs. Later 13.11 increments remain
 open.
 
+## Codex - Stage 13.11B BLE SMP LTK distribution (2026-10-28)
+
+Stage 13.11B passes the chained 1/2/4-CPU runtime gate with LTK and key
+distribution bound to handle, key size, and peer identity. Duplicate, stale,
+malformed, and mismatched material is rejected. Evidence is retained under
+`audit-artifacts/stage13.11-{1,2,4}cpu-*`.
+
