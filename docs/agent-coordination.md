@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - staged symbol-scope validation (2026-10-28)
+
+Extracted dependency scope construction and validation into `build_scope`.
+Dependency names, image references, and symbol visibility are now validated in
+one staged operation before relocation, preserving the existing failure-closed
+behavior and preparing live-module publication.
+
 ## Codex - bounded lifecycle staging helper (2026-10-28)
 
 Extracted constructor/destructor collection into `collect_lifecycle`, with one

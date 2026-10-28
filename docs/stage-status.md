@@ -1,5 +1,11 @@
 # Stage status
 
+## Staged symbol-scope validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel linker now builds and validates the complete dependency symbol scope
+through one helper before relocation. Target build and warning-denying Clippy
+pass. Live-process symbol-scope publication remains pending.
+
 ## Bounded lifecycle staging - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel linker now stages constructor and destructor callbacks through a

@@ -460,6 +460,16 @@ fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
     Some((init, fini))
 }
 
+fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
+    let main = images.first()?;
+    let mut scope = SymbolScope::new(&main.image, &main.bytes);
+    for image in &images[1..] {
+        scope.add_dependency(image.name.as_deref()?, &image.image, &image.bytes).ok()?;
+    }
+    scope.validate_dependencies().ok()?;
+    Some(scope)
+}
+
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
@@ -490,13 +500,7 @@ pub(super) fn load_with_geometry(
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
     let (init_functions, fini_functions) = collect_lifecycle(&images)?;
-    let mut scope = SymbolScope::new(&main.image, &main.bytes);
-    for image in &images[1..] {
-        scope
-            .add_dependency(image.name.as_deref()?, &image.image, &image.bytes)
-            .ok()?;
-    }
-    scope.validate_dependencies().ok()?;
+    let scope = build_scope(&images)?;
     let tls_reservation = plan_tls(&images)?;
     let tls_size = tls_reservation.map_or(0, |plan| plan.total as u64);
     let stack_base = plan_stack_base(stack_base, mmap_base, tls_size)?;
