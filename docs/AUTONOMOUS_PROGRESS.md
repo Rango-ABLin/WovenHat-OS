@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): standalone test for non-zero extra direct block in root inode
+
+Branch: `auto/wovenhat-development` (base `0a9c9b6b`). Working tree was clean.
+
+### Defect / gap
+
+The prior session added a guard in `check()` (`kernel/src/wfs.rs` lines 1462–1466)
+that refuses a root directory inode with any non-zero `direct[slot]` for
+`slot in 1..DIRECT_BLOCKS`.  That guard was documented as having no standalone
+test because exercising it requires a block that is both named by `direct[1]` and
+marked allocated in the bitmap — if the bitmap bit is clear, the per-inode
+range/bitmap scan fires first; if the bitmap bit is set but the block is not named
+by any inode, the orphan-block scan fires first.  The previous session explicitly
+listed "A test would require manually setting a bitmap bit for an otherwise-free
+block" as an open item.
+
+### Change
+
+**`tests/wovenfs_crash.rs`:**
+
+- Added `set_bitmap_block(image, block)` helper: symmetric to the existing
+  `clear_bitmap_block`, it sets one bit in the on-disk bitmap without touching
+  any inode or checksum.  Used to make an otherwise-free block appear
+  bitmap-allocated so the orphan-block scan passes, leaving the root-specific
+  `direct[1..]` guard as the first error path.
+
+- Added test `check_refuses_root_directory_inode_with_nonzero_extra_direct_block`:
+  1. Formats a fresh volume (`formatted()`).
+  2. Reads `root_block = read_inode_direct0(&base, 1)` — the root directory's
+     only data block, allocated at `data_start`.
+  3. Computes `extra_block = root_block + 1`, the next free data block.
+  4. Asserts `extra_block < total_blocks` (paranoia; 192-sector/32-inode volume
+     has many free blocks).
+  5. Calls `set_bitmap_block(&corrupt, extra_block)` so the orphan-block scan
+     reports the block as "named by root via `direct[1]`" and passes.
+  6. Calls `reseal_inode_direct(&corrupt, 1, 1, extra_block)` to set
+     `root.direct[1]` and re-seal the inode checksum.
+  7. Asserts `check()` returns `Err(Corrupt)`.
+  8. Asserts `check()` does not modify the image.
+  9. Control: asserts the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **51 passed / 0 failed** (was 50; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `direct[2..DIRECT_BLOCKS]` slots have no individual tests; the new test covers
+  only slot 1.  The guard uses a loop, so the same code handles all slots.  Adding
+  one test per slot would add redundancy without covering new code paths.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Only the root directory inode's `direct` block count is verified; the exact
+  content of the directory data block (beyond what `dir_entries` validates) is not
+  independently hashed.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with zero first direct block
 
 Branch: `auto/wovenhat-development` (base `04f7e9d1`). Working tree was clean.

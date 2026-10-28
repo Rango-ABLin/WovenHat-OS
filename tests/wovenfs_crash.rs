@@ -1370,6 +1370,21 @@ fn clear_bitmap_block(image: &CrashDisk, block: u64) {
     image.image.borrow_mut()[lba][within / 8] &= !(1u8 << (within % 8));
 }
 
+/// Set the bitmap bit for `block` directly in the image, without updating any
+/// inode or checksum.  Use this to make the orphan-block scan treat an
+/// otherwise-free block as allocated, so the scan passes and a downstream
+/// inode-level guard becomes the first error path.
+fn set_bitmap_block(image: &CrashDisk, block: u64) {
+    let bitmap_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().bitmap_start
+    };
+    let bits_per_sector = SECTOR_SIZE * 8;
+    let lba = (bitmap_start + block / bits_per_sector as u64) as usize;
+    let within = (block % bits_per_sector as u64) as usize;
+    image.image.borrow_mut()[lba][within / 8] |= 1u8 << (within % 8);
+}
+
 #[test]
 fn unlink_refuses_a_file_whose_link_count_is_not_one() {
     let (base, _, _) = two_file_root();
@@ -2483,6 +2498,64 @@ fn check_refuses_root_directory_inode_with_zero_first_direct_block() {
         volume.check(),
         Err(Error::Corrupt),
         "check() must refuse root directory inode with direct[0] == 0"
+    );
+    assert!(corrupt.sectors() == before, "check() must not modify the image");
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+/// `check()` must refuse a root directory inode whose `direct[1]` (or any later
+/// slot) is non-zero.
+///
+/// `format()` sets `root.direct[0]` to the directory data block and zeroes
+/// every other slot via `Inode::empty()`.  No runtime operation ever sets a
+/// non-zero value in `direct[1..DIRECT_BLOCKS]` for a directory inode, so any
+/// such value is corruption.  `dir_entries` reads blocks through the `direct`
+/// array, so a non-zero `direct[1]` would be interpreted as a second directory
+/// data block, silently doubling the directory without any runtime path to
+/// produce it.
+///
+/// The test must suppress two earlier checks that would otherwise fire first.
+/// First, the per-inode block range/bitmap check would see the block in
+/// `direct[1]` is not bitmap-allocated and return `Corrupt` before the root
+/// section runs; `set_bitmap_block` marks it allocated so that check passes.
+/// Second, the orphan-block scan would see the block as bitmap-allocated and
+/// named by the root inode (via `direct[1]`), so it passes too.
+/// With both earlier paths satisfied, the root-specific `direct[1..]` guard
+/// becomes the first error path.
+#[test]
+fn check_refuses_root_directory_inode_with_nonzero_extra_direct_block() {
+    let base = formatted();
+
+    // After format() the root block is the only allocated data block.  The
+    // adjacent block (root_block + 1) is free; use it as the spurious extra.
+    let root_block = read_inode_direct0(&base, 1);
+    let extra_block = root_block + 1;
+    {
+        let volume = Volume::mount(base.clone()).expect("mount");
+        let sb = volume.super_block();
+        assert!(
+            extra_block < sb.total_blocks,
+            "volume too small: extra_block {extra_block} >= total_blocks {}",
+            sb.total_blocks
+        );
+    }
+
+    let corrupt = base.fork(None);
+    // Mark the extra block as bitmap-allocated so the orphan-block scan sees it
+    // as named by the root inode via direct[1] and passes without firing first.
+    set_bitmap_block(&corrupt, extra_block);
+    // Set root.direct[1] to the extra block, re-sealing the inode checksum.
+    reseal_inode_direct(&corrupt, 1, 1, extra_block);
+
+    let before = corrupt.sectors();
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a root directory inode with non-zero direct[1]"
     );
     assert!(corrupt.sectors() == before, "check() must not modify the image");
 
