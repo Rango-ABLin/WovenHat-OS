@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - generation-safe dynamic module publication (2026-10-28)
+
+Startup PT_TLS publication now goes through `AddressSpace::publish_dynamic_module`,
+which rejects occupied slots and empty mappings and records a generation,
+reference count, and mapped range. Queries consume this process-owned state;
+unpublish/retention will be added with the live-module syscall transaction.
+
 ## Codex - AddressSpace dynamic-module descriptors (2026-10-28)
 
 Added a bounded generation/refcounted dynamic-module descriptor array to the

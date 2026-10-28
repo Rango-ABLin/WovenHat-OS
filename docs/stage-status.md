@@ -1,5 +1,12 @@
 # Stage status
 
+## Generation-safe dynamic module publication - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The startup TLS mapper now publishes each module through the address-space
+descriptor API with an initial generation and reference. Occupied slots and
+empty mappings fail closed. Kernel target build and warning-denying Clippy pass;
+live retain/release and dynamic insertion remain pending.
+
 ## AddressSpace dynamic-module descriptors - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel address space now owns bounded dynamic-module descriptors. Existing

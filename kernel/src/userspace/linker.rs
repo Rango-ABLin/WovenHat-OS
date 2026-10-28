@@ -458,13 +458,11 @@ fn map_initial_tls(
     let tls_base = initialize_tls(page_table, start, initial)?;
     for (index, image) in images.iter().enumerate() {
         let Some(tls) = image.image.tls() else { continue };
-        pending.space.dynamic_modules[index] = DynamicModule {
-            generation: 1,
-            live: true,
-            references: 1,
-            mapping_start: tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
-            mapping_size: tls.memory_size,
-        };
+        pending.space.publish_dynamic_module(
+            index,
+            tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
+            tls.memory_size,
+        )?;
     }
     Some(tls_base)
 }

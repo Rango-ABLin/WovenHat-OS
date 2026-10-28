@@ -4916,6 +4916,16 @@ impl AddressSpace {
             .then_some((descriptor.mapping_start, descriptor.mapping_size))
     }
 
+    pub fn publish_dynamic_module(&mut self, index: usize, mapping_start: u64, mapping_size: usize) -> Option<u32> {
+        let descriptor = self.dynamic_modules.get_mut(index)?;
+        if descriptor.live || mapping_size == 0 { return None; }
+        descriptor.live = true;
+        descriptor.references = 1;
+        descriptor.mapping_start = mapping_start;
+        descriptor.mapping_size = mapping_size;
+        Some(descriptor.generation)
+    }
+
     pub fn paging(self) -> paging::AddressSpace {
         self.paging
     }
