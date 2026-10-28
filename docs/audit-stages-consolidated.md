@@ -4,6 +4,16 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## S02 freestanding C ABI build boundary - 2026-10-28
+
+Added the reproducible source/linker boundary in
+`scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
+Source-shape and Rust-fixture inventory checks passed. The local build
+returned `NOT_AVAILABLE` (exit 2) because no target-qualified clang was
+available; no C ELF, loader execution, or QEMU qualification is claimed.
+S02 remains `IMPLEMENTING` pending a target-capable compiler and execution
+evidence.
+
 ## Stage 32 integrated WovenDev software boundary - 2026-10-28
 
 The one integrated Stage 32 software gate passed 1/2/4-CPU QEMU self-tests.

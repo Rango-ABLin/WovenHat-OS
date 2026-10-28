@@ -7098,3 +7098,13 @@ User authorizes implementing the four recommended areas in order, with separate 
 Stage20.19 first focused 1CPU PASS for captured motion/clamping, cancellation before workspace return, no duplicate release, keyboard focus and teardown; added independent occluded-chrome check before final matrix. Fixed the probe's missing explicit damage notification; initial failed logs preserved at audit-artifacts/desktop-sequence-input-20261027-191011. Shared test helpers explicitly guard new19 without chaining existing stages. Stage01-09 bounded acceptance ledger reconciled from dedicated evidence; step1 remains in progress.
 
 Input reliability focused gate PASS 1/2/4 CPUs, including top-frame chrome occlusion. Accepted shell binary negative control fails captured-motion assertion as expected. All affected/default/lower-stage kernel lints, app lints, host Clippy/tests and build PASS. Final review retained popup damage when Tab closes Quick Settings, and requires visible closed-window cleanup before testing the next client key. Starting full frozen-source 90-case software/input matrix; step1 acceptance remains pending.
+## Codex - S02 freestanding C ABI build boundary (2026-10-28)
+
+Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
+The source contract and Rust-fixture inventory checks pass. The current host
+has no target-qualified clang (`clang`, `clang-cl`, `gcc`, and `zig` are not
+available), so the builder returned `NOT_AVAILABLE` with exit 2 and no ELF or
+QEMU execution evidence was produced. S02 remains implementing; do not treat
+this slice as accepted until a target-capable compiler builds the ELF and the
+real WovenHat loader/QEMU gate passes. No Rust/kernel files were changed.
+
