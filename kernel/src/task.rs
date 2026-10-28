@@ -2536,6 +2536,32 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         return false;
     }
 
+    let Some(vintr_program) = userspace::create_s03_vintr_process() else {
+        return false;
+    };
+    let Ok((vintr_child, _)) = spawn_user_process("s03-vintr", vintr_program) else {
+        return false;
+    };
+    if set_process_group(vintr_child.as_u64(), vintr_child.as_u64()).is_err() {
+        return false;
+    }
+    crate::terminal::set_foreground_group(vintr_child.as_u64());
+    crate::serial::write_line(format_args!(
+        "[S03.VINTR] waiting for injected Ctrl-C foreground interrupt"
+    ));
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(vintr_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            crate::terminal::release_foreground(vintr_child.as_u64());
+            return false;
+        }
+        yield_now();
+    }
+    crate::terminal::release_foreground(vintr_child.as_u64());
+    if wait_process(vintr_child.as_u64()) != Ok(130) {
+        return false;
+    }
+
     let Some(handler_program) = userspace::create_s03_handler_process() else {
         return false;
     };

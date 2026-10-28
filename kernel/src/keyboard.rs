@@ -69,11 +69,15 @@ impl ScancodeQueue {
 
 pub struct Keyboard {
     shift: bool,
+    control: bool,
 }
 
 impl Keyboard {
     pub const fn new() -> Self {
-        Self { shift: false }
+        Self {
+            shift: false,
+            control: false,
+        }
     }
 
     fn poll(&mut self, allow_legacy: bool) -> Option<Key> {
@@ -106,12 +110,20 @@ impl Keyboard {
                     self.shift = false;
                     None
                 }
+                0x9D => {
+                    self.control = false;
+                    None
+                }
                 _ => None,
             };
         }
         match scancode {
             0x2A | 0x36 => {
                 self.shift = true;
+                None
+            }
+            0x1D => {
+                self.control = true;
                 None
             }
             0x1C => Some(Key::Enter),
@@ -122,7 +134,13 @@ impl Keyboard {
             0x3D => Some(Key::F3),
             0x3E => Some(Key::F4),
             0x58 => Some(Key::F12),
-            code => decode_scancode(code, self.shift).map(Key::Char),
+            code => decode_scancode(code, self.shift).map(|character| {
+                if self.control && character.is_ascii_alphabetic() {
+                    Key::Char((character.to_ascii_lowercase() as u8 - b'a' + 1) as char)
+                } else {
+                    Key::Char(character)
+                }
+            }),
         }
     }
 }
