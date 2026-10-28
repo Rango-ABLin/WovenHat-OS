@@ -1,5 +1,24 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - firmware artifact reconciliation and QEMU qualification (2026-10-28)
+
+Repository reconciliation completed cleanly: the worktree is clean, `master`
+matches `origin/master`, and no unresolved conflict markers remain in tracked
+source, scripts, tests, or documentation. The local QEMU installation provides
+`C:\Program Files\qemu\share\edk2-x86_64-code.fd`.
+
+The exact existing `audit-artifacts/stage28-wovenhat-catalog.iso` was booted
+with that EDK2 firmware through `scripts/test-uefi-iso-qemu.py`; the retained
+serial evidence is `audit-artifacts/current-uefi-qemu-1cpu.log` and reaches the
+eleven signed applications PASS marker. The ISO SHA-256 remains
+`4102e72057702dd37d2ade52d65c36a8b5bc5f01d6776114b4841c512d5af04a`.
+
+An attempted rebuild from the newest debug disk image was intentionally
+rejected by `build-uefi-iso.py`: its EFI System Partition contains non-zero
+data beyond El Torito's 65536-sector limit. No truncation or physical-media
+operation was performed. A release rebuild therefore still requires a source
+image with a bounded ESP (or a reviewed filesystem-aware repacking step).
+
 ## Codex - atomic all-thread dynamic TLS mapping (2026-10-28)
 
 Added the transaction-gated `DynamicTlsMapAll` operation. It snapshots live

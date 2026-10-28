@@ -1,5 +1,15 @@
 # Stage status
 
+## Firmware artifact reconciliation - 2026-10-28 - QUALIFIED EXISTING ARTIFACT
+
+The repository is synchronized with `origin/master` and has no unresolved
+merge markers. The exact Stage 28 catalog ISO was re-qualified with the local
+x86_64 EDK2 firmware and reached the eleven signed applications PASS marker;
+serial evidence is retained in `audit-artifacts/current-uefi-qemu-1cpu.log`.
+The newest debug disk image was not converted because its ESP has non-zero
+bytes beyond the El Torito size limit, which the builder correctly rejects.
+This does not claim a new release image or physical-media qualification.
+
 ## Atomic all-thread dynamic TLS mapping - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel now exposes a transaction-owned all-thread mapper. It validates the
