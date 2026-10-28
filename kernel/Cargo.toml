@@ -341,6 +341,7 @@ stage24-3-test = ["qemu-test"]
 stage24-4-test = ["qemu-test"]
 stage24-5-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
+stage7-test = ["qemu-test"]
 
 [dependencies]
 libwoven = { path = "../libwoven", default-features = false }

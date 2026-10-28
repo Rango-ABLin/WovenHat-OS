@@ -4448,6 +4448,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S1-5] storage journal: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage7-test")]
+    {
+        if !task::stage7_environment_self_test() {
+            serial::write_line(format_args!("[S7] process environment: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S7] process environment: PASSED bounded defaults/inheritance/capacity"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage20-14b-test")]
     {
         if !stage20_14b_self_test() {

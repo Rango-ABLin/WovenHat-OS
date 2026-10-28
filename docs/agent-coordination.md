@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 7 bounded process-environment closure (2026-10-28)
+
+Added the independently guarded `stage7-test` gate for deterministic process
+environment defaults, copy-on-inheritance, existing-key update, bounded
+capacity, and invalid-input rejection. Target Clippy and QEMU passed at 1/2/4
+CPUs; evidence is under `target/stage7-environment-{1,2,4}cpu-debug/`. This
+closes only the bounded Stage 7 environment scope; broader userspace ABI,
+dynamic runtime behavior, unrestricted environment sizing, and hardware
+qualification remain deferred.
+
 ## Codex - Stage 6 bounded SMP/hotplug closure (2026-10-28)
 
 Stage 6 target Clippy passed with `stage6-hotplug-test`. The hotplug gate passed
