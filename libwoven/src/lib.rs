@@ -145,6 +145,7 @@ pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
 pub mod media;
+pub mod module_namespace;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
