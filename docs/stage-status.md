@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 6 bounded SMP/hotplug scope - 2026-10-28 - CLOSED BOUNDED SCOPE
+
+The Stage 6 hotplug gate passed at 2 and 4 CPUs after warning-denying target
+Clippy. Each lane completed two offline/online cycles, including cancellation,
+evacuation, rejection recovery, timeout recovery, and non-contiguous middle-CPU
+hotplug at 4 CPUs. Evidence: `audit-artifacts/stage6-hotplug-2cpu-*` and
+`audit-artifacts/stage6-hotplug-4cpu-*`.
+
+This closes the bounded software/QEMU SMP and hotplug scope. Physical
+non-contiguous hotplug, APIC-ID-above-255 hardware, native multi-node NUMA,
+unrestricted multicore I/O throughput, broader lock-path stress, priority
+inheritance, and sudden guarded heap demand remain deferred qualification
+items; no production-readiness claim is made for them.
+
 ## S05 deterministic memory-pressure and low-memory boundary - 2026-10-28 - CLOSED BOUNDED SCOPE
 ## Stage 15.2 physical qualification — 2026-10-28 — READY TO RUN
 
