@@ -29,6 +29,12 @@ stays runnable until a process-group SIGTERM is delivered. The gate passes on
 1/2/4 CPUs and preserves the scheduler-safe termination and zombie ownership
 boundary.
 
+Caught signal delivery is now transactional at the saved-frame boundary: the
+kernel requeues a signal if the frame, handler address, stack decrement, or
+user copy cannot be validated. A Ring-3 SIGUSR1 self-signal probe passes on
+1/2/4 CPUs, including handler exit status 42. This remains a bounded signal
+contract, not full POSIX signal masks or stop/continue semantics.
+
 ## S02 freestanding C ABI boundary (2026-10-28)
 
 `tools/runtime-fixtures/c-abi.c` is a deliberately bounded no-libc C entry

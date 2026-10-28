@@ -28,6 +28,11 @@ with exit 33. It uses freestanding Ring-3 fork/wait and live process-group
 probes and limiting the claim to the accepted bounded slice. PTY/termios, job
 control, caught handlers, and full signal semantics remain for later S03 work.
 
+The caught-handler increment now also passes on 1/2/4 CPUs. Its Ring-3 probe
+registers and self-delivers SIGUSR1, then exits from the handler with status
+42. `prepare_signal_delivery` restores the pending signal when any saved-frame
+validation or user copy fails; no signal is silently discarded.
+
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
 Per user direction, the remaining Stage 32 work was consolidated into one

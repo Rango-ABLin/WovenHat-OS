@@ -45,6 +45,13 @@ process-group targeting, SIGTERM safe-point teardown, and status 143. Evidence:
 `target/s03-process-lifecycle-{1,2,4}cpu/`. PTYs/termios, job control, caught
 handler delivery, and broader signal semantics remain open.
 
+The next increment adds caught-handler delivery recovery: a Ring-3 probe
+registers a SIGUSR1 handler, self-signals, and exits from the handler with
+status 42 on 1/2/4 CPUs. The kernel now restores a pending caught signal when
+saved-frame delivery cannot safely proceed, preventing silent signal loss.
+The broader S03 boundary remains open for PTYs/termios, job control, and
+complete default/stop/continue signal semantics.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,

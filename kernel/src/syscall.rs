@@ -1390,11 +1390,13 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
         return;
     };
     if frame.is_null() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
     // `sigaction` admits only executable user addresses; never return to a
     // non-user RIP, which would fault on `iretq` in ring 0.
     if crate::user_address::check_user_range(handler, 1).is_err() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
     // SAFETY: `frame` is the caller's saved register frame on the current
@@ -1402,9 +1404,11 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
     // code touching that frame, so a unique `&mut` is sound.
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
+        crate::task::restore_pending_signal_current(sig);
         return;
     };
     if crate::paging::copy_to_current_user(new_rsp, &frame.rip.to_le_bytes()).is_err() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
     frame.rsp = new_rsp;
