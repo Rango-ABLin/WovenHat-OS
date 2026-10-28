@@ -163,6 +163,39 @@ global_asm!(
 
 #[cfg(feature = "s03-process-lifecycle-test")]
 global_asm!(
+    ".global wovenhat_s03_session_start",
+    ".global wovenhat_s03_session_end",
+    "wovenhat_s03_session_start:",
+    // setsid must create a session/process group for a non-group-leader.
+    "mov eax, 245",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "mov r12, rax",
+    "mov eax, 244",
+    "xor edi, edi",
+    "int 0x80",
+    "cmp rax, r12",
+    "jne 3f",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 11",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "mov edi, 12",
+    "mov eax, 3",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_session_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
     ".global wovenhat_s03_vintr_start",
     ".global wovenhat_s03_vintr_end",
     "wovenhat_s03_vintr_start:",
@@ -5234,6 +5267,21 @@ pub fn create_s03_handler_process() -> Option<UserProgram> {
     let stub = unsafe {
         let start = &wovenhat_s03_handler_start as *const u8;
         let end = &wovenhat_s03_handler_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_session_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_session_start: u8;
+        static wovenhat_s03_session_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_session_start as *const u8;
+        let end = &wovenhat_s03_session_end as *const u8;
         core::slice::from_raw_parts(start, end.offset_from(start) as usize)
     };
     load_elf(&build_stub_elf(stub)?)
