@@ -1,5 +1,21 @@
 # Stage status
 
+## Userspace synchronization/allocator stress increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
+
+The static runtime now exposes bounded process-private pthread mutexes and
+condition variables over atomic user memory, with predicate-loop waits using
+the scheduler yield path. The executable fixture exercises sixteen varying
+allocation sizes from a worker, frees them, signals a condition, and joins the
+worker. This validates the runtime's bounded synchronization and allocator
+reuse shape without adding a new kernel ABI.
+
+Timed waits, robust/recursive mutex semantics, detached-thread resource
+reclamation, cancellation cleanup handlers, dynamic TLS models,
+`dlopen`/`dlsym`, and full allocator stress remain open. Target/host Rust
+Clippy and Python syntax/source checks pass; target C compilation, ELF loading,
+and 1/2/4-CPU QEMU evidence remain pending until the pinned LLVM toolchain is
+available.
+
 ## Userspace runtime core increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
 
 Extended the static musl runtime over the existing kernel ABI with

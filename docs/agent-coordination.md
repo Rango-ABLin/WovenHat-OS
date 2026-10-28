@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded pthread synchronization and allocator stress increment (2026-10-28)
+
+Added non-recursive process-private pthread mutex init/lock/trylock/unlock and
+sequence-counter condition signal/broadcast/wait adapters to the static musl
+profile. The runtime fixture now allocates sixteen differently sized blocks
+from a worker, frees them, and synchronizes with the parent through a mutex and
+condition variable before joining. Timed waits, robust/recursive mutexes,
+detached-thread reclamation, cancellation cleanup handlers, dynamic TLS, and
+dynamic loader APIs remain outside this bounded slice.
+
+Target/host Rust Clippy and Python syntax/source checks pass. C compilation,
+ELF inspection, and QEMU execution remain pending because the pinned LLVM
+toolchain is not installed on this host.
+
 ## Codex - musl TLS, allocator, and pthread core increment (2026-10-28)
 
 The static musl runtime now uses initial-exec TLS for `errno`, adds a bounded

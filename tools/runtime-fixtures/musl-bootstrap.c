@@ -23,11 +23,32 @@ static void resume_after_signal(int sig)
 
 static void *thread_probe(void *argument)
 {
-	char *value = malloc(8);
-	if (!value || !argument) return (void *)1;
-	value[0] = 'T';
-	free(value);
+	char *values[16];
+	if (!argument) return (void *)1;
+	for (int i = 0; i < 16; ++i) {
+		values[i] = malloc((size_t)(i + 1) * 8);
+		if (!values[i]) return (void *)1;
+		values[i][0] = 'T';
+	}
+	for (int i = 15; i >= 0; --i) free(values[i]);
 	return (void *)42;
+}
+
+struct sync_probe {
+	pthread_mutex_t mutex;
+	pthread_cond_t condition;
+	int ready;
+};
+
+static void *sync_thread(void *argument)
+{
+	struct sync_probe *probe = argument;
+	if (pthread_mutex_lock(&probe->mutex) != 0)
+		return (void *)1;
+	probe->ready = 1;
+	pthread_cond_signal(&probe->condition);
+	pthread_mutex_unlock(&probe->mutex);
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -54,6 +75,15 @@ int main(int argc, char **argv)
 		|| pthread_join(thread, &thread_result) != 0
 		|| thread_result != (void *)42)
 		return 86;
+	struct sync_probe probe = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0 };
+	if (pthread_create(&thread, 0, sync_thread, &probe) != 0
+		|| pthread_mutex_lock(&probe.mutex) != 0)
+		return 85;
+	while (!probe.ready && pthread_cond_wait(&probe.condition, &probe.mutex) == 0)
+		;
+	if (!probe.ready || pthread_mutex_unlock(&probe.mutex) != 0
+		|| pthread_join(thread, 0) != 0)
+		return 84;
 	if (!getcwd(cwd, sizeof cwd) || cwd[0] != '/')
 		return 87;
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
