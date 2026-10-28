@@ -1,6 +1,5 @@
 # Agent coordination (Claude Code and Codex)
 
-<<<<<<< HEAD
 ## Codex - loader-backed dynamic TLS address ABI (2026-10-28)
 
 Added checked per-process PT_TLS module metadata to the kernel's existing
@@ -10,7 +9,6 @@ module-relative offset, current thread TLS base, and final address against the
 mapped TLS range. Shared-library PT_TLS images already loaded by the bounded
 ELF linker are now addressable through the general-dynamic ABI. This does not
 add post-start `dlopen` mapping or unloadable module publication.
-=======
 ## Codex - direct condition waiter wake ABI (2026-10-28)
 
 Added bounded kernel condition wait registration keyed by the userspace
@@ -19,8 +17,6 @@ scheduler's latched event path, closing the registration race; waits remove
 their registration after wake or timeout. LLVM build/link, target Clippy, and
 the production loader fixture pass. Robust owner-death recovery, dynamic TLS,
 and the remaining POSIX families remain separate increments.
->>>>>>> fcce0955faa11e909ac1f3b9cdd344aa503a2a9e
-
 ## Codex - bounded DTV publication and address lookup (2026-10-28)
 
 Extended `libwoven::dynamic_tls` with a fixed-capacity per-thread DTV. Modules
