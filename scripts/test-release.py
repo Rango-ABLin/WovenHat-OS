@@ -76,6 +76,17 @@ def main():
     ).strip()
     if len(source_sha) != 40 or any(c not in '0123456789abcdef' for c in source_sha):
         raise SystemExit('Release acceptance could not identify an exact source SHA')
+    # A commit hash does not describe uncommitted tracked source changes.
+    # Ignore untracked build outputs, but reject staged and unstaged edits.
+    tracked_changes = subprocess.check_output(
+        ['git', 'status', '--porcelain=v1', '--untracked-files=no'],
+        cwd=root, text=True,
+    ).strip()
+    if tracked_changes:
+        raise SystemExit(
+            'Release acceptance requires a clean tracked source tree. '
+            'Commit or revert changes before testing: ' + tracked_changes
+        )
     # Release acceptance is serialized and must not depend on Cargo's
     # incremental artifact graph. On Windows, a stale/missing incremental
     # object directory can make an otherwise valid image build fail before
