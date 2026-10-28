@@ -26,6 +26,7 @@
 #define WH_SYS_GETGID 14
 #define WH_SYS_CHDIR 20
 #define WH_SYS_GETCWD 21
+#define WH_SYS_GETTICKS 31
 #define WH_SYS_LSEEK 27
 #define WH_SYS_FILE_WRITE 10
 #define WH_SYS_OPEN_ACCESS 254

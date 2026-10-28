@@ -4,6 +4,7 @@
 #include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 #include <wovenhat/syscall.h>
 
 #define MAX_PTHREADS 8
@@ -167,9 +168,10 @@ int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
 		return EINVAL;
 	int sequence = condition->__u.__vi[0];
 	if (pthread_mutex_unlock(mutex)) return EINVAL;
-	/* Bounded static profile: yield for a finite slice, then report timeout.
-	 * A kernel clock-backed wait remains a later integration increment. */
-	for (unsigned long spins = 0; spins < 4096 && condition->__u.__vi[0] == sequence; ++spins)
+	long now = wh_syscall0(WH_SYS_GETTICKS);
+	long deadline_ticks = timeout->tv_sec * 100L + (timeout->tv_nsec + 9999999L) / 10000000L;
+	if (now < 0 || timeout->tv_sec < 0 || deadline_ticks < now) deadline_ticks = now;
+	while (condition->__u.__vi[0] == sequence && wh_syscall0(WH_SYS_GETTICKS) < deadline_ticks)
 		sched_yield();
 	if (condition->__u.__vi[0] == sequence) {
 		(void)pthread_mutex_lock(mutex);
