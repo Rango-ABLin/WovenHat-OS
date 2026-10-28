@@ -23,6 +23,11 @@ unchanged. The focused 193-test `libwoven` suite and warning-denying Clippy
 pass. S03 remains implementing pending its dedicated kernel/QEMU lifecycle
 matrix; S02 is now accepted by the remote LLVM/QEMU qualification.
 
+The dedicated `s03-process-lifecycle-test` subsequently passed on 1/2/4 CPUs
+with exit 33. It uses freestanding Ring-3 fork/wait and live process-group
+probes and limiting the claim to the accepted bounded slice. PTY/termios, job
+control, caught handlers, and full signal semantics remain for later S03 work.
+
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
 Per user direction, the remaining Stage 32 work was consolidated into one

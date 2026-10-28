@@ -23,6 +23,11 @@ conventions. The focused 193-test `libwoven` suite and warning-denying
 `libwoven` Clippy pass. Kernel/QEMU lifecycle evidence is still required;
 S03 remains implementing.
 
+The dedicated `s03-process-lifecycle-test` then passed on 1/2/4 CPUs with exit
+33. Freestanding Ring-3 probes covered fork/wait/reap, process-group signal
+targeting, safe-point termination, and exit status 143. PTYs/termios, job
+control, caught handlers, and full signal semantics remain outside this slice.
+
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
 Added the reproducible source/linker boundary in

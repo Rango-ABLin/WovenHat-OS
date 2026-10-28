@@ -78,6 +78,48 @@ global_asm!(
     "wovenhat_stage31_process_crash_end:",
 );
 
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_fork_wait_start",
+    ".global wovenhat_s03_fork_wait_end",
+    "wovenhat_s03_fork_wait_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "test rax, rax",
+    "jz 1f",
+    "mov r12, rax",
+    "0:",
+    "mov eax, 5",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, -2",
+    "je 0b",
+    "cmp rax, 42",
+    "jne 2f",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_fork_wait_end:",
+    ".global wovenhat_s03_group_start",
+    ".global wovenhat_s03_group_end",
+    "wovenhat_s03_group_start:",
+    "0:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 0b",
+    "wovenhat_s03_group_end:",
+);
+
 global_asm!(
     ".global wovenhat_user_program_start",
     ".global wovenhat_user_program_end",
@@ -5080,6 +5122,36 @@ pub fn create_stage31_process_crash_process() -> Option<UserProgram> {
     let stub = unsafe {
         let start = &wovenhat_stage31_process_crash_start as *const u8;
         let end = &wovenhat_stage31_process_crash_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_fork_wait_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_fork_wait_start: u8;
+        static wovenhat_s03_fork_wait_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_fork_wait_start as *const u8;
+        let end = &wovenhat_s03_fork_wait_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_group_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_group_start: u8;
+        static wovenhat_s03_group_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_group_start as *const u8;
+        let end = &wovenhat_s03_group_end as *const u8;
         core::slice::from_raw_parts(start, end.offset_from(start) as usize)
     };
     load_elf(&build_stub_elf(stub)?)
