@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## S03 process-lifecycle ABI surface (2026-10-28)
+
+The existing `kernel/src/task.rs` process authority owns parent/child
+relationships, exit-state retention, wait/reap, process groups, and bounded
+signal disposition. `libwoven` now exposes those existing authorities through
+safe `kill`, `signal_action`, `process_group`, and `set_process_group` APIs;
+raw syscall wrappers remain isolated in the `syscall` module. The wrappers
+perform local range/encoding checks and retain no userspace pointers. This is
+an implementation increment, not full POSIX, PTY, termios, job-control, or
+S03 QEMU qualification.
+
 ## S02 freestanding C ABI boundary (2026-10-28)
 
 `tools/runtime-fixtures/c-abi.c` is a deliberately bounded no-libc C entry

@@ -14,6 +14,14 @@ Clippy, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence under
 `target/stage32-17-gdb-entry-{1,2,4}cpu/`. Stage 32.17 accepted. (Originally
 committed as Stage 32.13; renumbered to 32.17 after Codex concurrently accepted
 32.13–32.16 and the integrated gate.)
+## Codex - S03 process-lifecycle ABI surface (2026-10-28)
+
+Added safe `libwoven` wrappers and raw ABI shims for `kill`, bounded
+`sigaction`, `getpgrp`, and `setpgid`, including explicit process/group target
+encoding and local invalid-range rejection. Existing kernel authority remains
+unchanged. The focused 193-test `libwoven` suite and warning-denying Clippy
+pass. S03 remains implementing pending its dedicated kernel/QEMU lifecycle
+matrix; S02 is now accepted by the remote LLVM/QEMU qualification.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

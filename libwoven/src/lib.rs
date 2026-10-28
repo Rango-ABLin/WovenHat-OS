@@ -86,6 +86,22 @@ mod userspace_allocator {
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
+
+    /// A bounded process or process-group signal target.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalTarget {
+        Process(Id),
+        CurrentGroup,
+        Group(u64),
+    }
+
+    /// The dispositions supported by the bounded process-lifecycle ABI.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalDisposition {
+        Default,
+        Ignore,
+        Handler(u64),
+    }
 }
 pub mod abi;
 pub mod accessibility;
@@ -11970,12 +11986,16 @@ pub mod syscall {
     pub const CHDIR: u64 = 20;
     pub const GETCWD: u64 = 21;
     pub const GETPPID: u64 = 25;
+    pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
     pub const UNLINK: u64 = 28;
     pub const SLEEP: u64 = 29;
     pub const RENAME: u64 = 30;
     pub const GETTICKS: u64 = 31;
     pub const SYNC: u64 = 32;
+    pub const SIGACTION: u64 = 34;
+    pub const GETPGRP: u64 = 35;
+    pub const SETPGID: u64 = 36;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
     pub const ENV_COUNT: u64 = 53;
@@ -12171,6 +12191,39 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn getppid() -> u64 {
         unsafe { invoke(GETPPID, 0, 0, 0) }
+    }
+
+    /// Send a signal to a process or process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn kill(target: u64, signal: u64) -> u64 {
+        unsafe { invoke(KILL, target, signal, 0) }
+    }
+
+    /// Read or replace the current process's signal disposition.
+    ///
+    /// # Safety
+    /// `handler`, when greater than one, must be a candidate userspace code
+    /// address. The kernel validates that it belongs to the current image.
+    pub unsafe fn sigaction(signal: u64, handler: u64) -> u64 {
+        unsafe { invoke(SIGACTION, signal, handler, 0) }
+    }
+
+    /// Return the current process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getpgrp() -> u64 {
+        unsafe { invoke(GETPGRP, 0, 0, 0) }
+    }
+
+    /// Set a process group using the kernel's zero-value conventions.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setpgid(pid: u64, group: u64) -> u64 {
+        unsafe { invoke(SETPGID, pid, group, 0) }
     }
 
     /// # Safety
@@ -14584,6 +14637,57 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
 pub fn wait(pid: process::Id) -> Result<u64, Error> {
     // SAFETY: waitpid takes no pointers.
     check(unsafe { syscall::waitpid(pid.0) })
+}
+
+/// Send a bounded signal to a process or process group.
+pub fn kill(target: process::SignalTarget, signal: u8) -> Result<(), Error> {
+    if signal > 31 {
+        return Err(Error::Failed);
+    }
+    let encoded_target = match target {
+        process::SignalTarget::Process(id) => id.0,
+        process::SignalTarget::CurrentGroup => 0,
+        process::SignalTarget::Group(0) => return Err(Error::Failed),
+        process::SignalTarget::Group(group) => 0u64.wrapping_sub(group),
+    };
+    check(unsafe { syscall::kill(encoded_target, u64::from(signal)) }).map(|_| ())
+}
+
+/// Read or replace the current process's bounded signal disposition.
+pub fn signal_action(
+    signal: u8,
+    disposition: process::SignalDisposition,
+) -> Result<process::SignalDisposition, Error> {
+    let handler = match disposition {
+        process::SignalDisposition::Default => 0,
+        process::SignalDisposition::Ignore => 1,
+        process::SignalDisposition::Handler(address) if address > 1 => address,
+        process::SignalDisposition::Handler(_) => return Err(Error::Failed),
+    };
+    if signal == 0 || signal > 31 || signal == 9 {
+        return Err(Error::Failed);
+    }
+    let previous = check(unsafe { syscall::sigaction(u64::from(signal), handler) })?;
+    Ok(match previous {
+        0 => process::SignalDisposition::Default,
+        1 => process::SignalDisposition::Ignore,
+        address => process::SignalDisposition::Handler(address),
+    })
+}
+
+/// Return the current process group identifier.
+pub fn process_group() -> Result<u64, Error> {
+    check(unsafe { syscall::getpgrp() })
+}
+
+/// Set a process's bounded process group. `None` selects the caller, and
+/// `None` for `group` applies the kernel's default group convention.
+pub fn set_process_group(process_id: Option<process::Id>, group: Option<u64>) -> Result<(), Error> {
+    if group == Some(0) {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::setpgid(process_id.map_or(0, |id| id.0), group.unwrap_or(0)) })
+        .map(|_| ())
 }
 
 /// Terminate this process. Never returns.
