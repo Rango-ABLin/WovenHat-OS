@@ -1,5 +1,106 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - atomic all-thread dynamic TLS mapping (2026-10-28)
+
+Added the transaction-gated `DynamicTlsMapAll` operation. It snapshots live
+thread paging spaces, maps the reserved per-module slot in each, copies the
+validated initializer, installs ownership in each thread resource record, and
+rolls back prior mappings/resources if any step fails. The process descriptor
+publishes only after every thread succeeds.
+
+## Codex - dynamic TLS resource clearing boundary (2026-10-28)
+
+Added a used thread-resource API for clearing one dynamic TLS ownership slot
+after its mapping is unmapped. Thread join now validates the mapping address
+before clearing ownership, giving future allocation rollback a single resource
+mutation boundary.
+
+## Codex - dynamic TLS caller-buffer validation ABI (2026-10-28)
+
+Added a bounded kernel validation syscall that checks initializer length versus
+memory size, caps both at 4096 bytes, and copies from the caller pointer before
+any mapping mutation. libwoven and musl constants/wrappers expose the contract;
+the copied template is not yet published until the all-thread map transaction
+completes.
+
+## Codex - reserved dynamic TLS mapping slots (2026-10-28)
+
+Reserved the tail of the anonymous mapping-slot range for per-thread dynamic
+TLS modules. Ordinary `mmap` allocation now stops before that tail, preventing
+future dynamic TLS allocations from colliding with process mappings.
+
+## Codex - scheduler runnable-task parking (2026-10-28)
+
+While a process owns the dynamic-module transaction, scheduler Ready selection
+excludes that process's sibling tasks. The owner can continue, while siblings
+already executing must hand off before transaction completion is accepted.
+This provides cooperative stop-the-world parking without sleeping under the
+scheduler IRQ lock.
+
+## Codex - conservative transaction quiescence check (2026-10-28)
+
+Dynamic-module transaction end now checks the scheduler under its IRQ-safe lock
+and refuses to complete while another same-process task is Running or in
+Switching handoff. This prevents premature publication/teardown; Ready tasks
+still require the forthcoming scheduler parking protocol.
+
+## Codex - scheduler dynamic-module transaction gate (2026-10-28)
+
+Added an IRQ-safe scheduler-owned transaction gate with process ownership and
+reentrant depth. New syscalls and libwoven wrappers serialize dynamic-module
+operations across processes and require the owner to release the gate. This
+coordinates the future all-thread mapping transaction; it does not yet stop
+threads or allocate their private mappings.
+
+## Codex - per-thread dynamic TLS ownership (2026-10-28)
+
+Extended thread resources with independently reclaimable dynamic TLS mapping
+slots. Thread join teardown now unmaps and releases those mappings before the
+generation-tagged thread handle is reusable, while startup TLS remains a
+separate aggregate mapping.
+
+## Codex - dynamic module retain/release ABI (2026-10-28)
+
+Added generation-checked retain and release operations on the current process's
+dynamic-module table, with syscall and libwoven wrappers. Final release marks a
+descriptor unpublished and invalidates its generation; physical mapping teardown
+is intentionally a later transaction step.
+
+## Codex - generation-safe dynamic module publication (2026-10-28)
+
+Startup PT_TLS publication now goes through `AddressSpace::publish_dynamic_module`,
+which rejects occupied slots and empty mappings and records a generation,
+reference count, and mapped range. Queries consume this process-owned state;
+unpublish/retention will be added with the live-module syscall transaction.
+
+## Codex - AddressSpace dynamic-module descriptors (2026-10-28)
+
+Added a bounded generation/refcounted dynamic-module descriptor array to the
+kernel `AddressSpace`. Startup PT_TLS mappings populate per-module ranges, the
+descriptor state is copied with address-space cloning, and module-range queries
+now use the process-owned descriptors with generation/reference validation.
+
+## Codex - staged lazy-binding trampoline materialization (2026-10-28)
+
+Extracted lazy PLT trampoline emission into a bounded helper over the staged
+address space. Slot bounds remain enforced by relocation registration, and
+trampoline bytes are written before final W^X protection. The helper is ready
+for reuse by a live-module transaction.
+
+## Codex - staged symbol-scope validation (2026-10-28)
+
+Extracted dependency scope construction and validation into `build_scope`.
+Dependency names, image references, and symbol visibility are now validated in
+one staged operation before relocation, preserving the existing failure-closed
+behavior and preparing live-module publication.
+
+## Codex - bounded lifecycle staging helper (2026-10-28)
+
+Extracted constructor/destructor collection into `collect_lifecycle`, with one
+capacity check before any callback list is returned. Initialization order and
+reverse finalization order are unchanged, and the helper is suitable for
+staging callbacks in a future live-module transaction.
+
 ## Codex - reusable PT_TLS mapping transaction (2026-10-28)
 
 Extracted template reservation, PT_TLS image copying, per-module metadata, and

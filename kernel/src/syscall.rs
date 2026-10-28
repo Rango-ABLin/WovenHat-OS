@@ -366,11 +366,20 @@ pub enum Number {
     DynamicTlsModuleStart = 142,
     /// TLS module ID -> mapped module block size, or ERROR.
     DynamicTlsModuleSize = 143,
+    DynamicModuleRetain = 144,
+    DynamicModuleRelease = 145,
+    DynamicModuleTransactionBegin = 146,
+    DynamicModuleTransactionEnd = 147,
+    /// user initializer pointer, packed initializer/memory lengths -> length or ERROR
+    DynamicTlsValidate = 148,
+    DynamicTlsMapAll = 149,
     /// current thread, validated mutex address, operation (1 add, 0 remove)
-    ThreadRobustRegister = 144,
-    ThreadRobustLock = 145,
-    ThreadRobustUnlock = 146,
-    ThreadRobustConsistent = 147,
+    ThreadRobustRegister = 150,
+    ThreadRobustLock = 151,
+    ThreadRobustUnlock = 152,
+    ThreadRobustConsistent = 153,
+    ThreadRobustWait = 154,
+    ThreadRobustWake = 155,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3119,6 +3128,34 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadCancel as u64 => {
             crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
         }
+        value if value == Number::DynamicModuleRetain as u64 => {
+            u64::from(crate::task::retain_dynamic_module(arg0, arg1))
+        }
+        value if value == Number::DynamicModuleRelease as u64 => {
+            crate::task::release_dynamic_module(arg0, arg1).map_or(SYSCALL_ERROR, u64::from)
+        }
+        value if value == Number::DynamicModuleTransactionBegin as u64 => {
+            u64::from(crate::task::begin_dynamic_module_transaction())
+        }
+        value if value == Number::DynamicModuleTransactionEnd as u64 => {
+            u64::from(crate::task::end_dynamic_module_transaction())
+        }
+        value if value == Number::DynamicTlsValidate as u64 => {
+            let initializer_len = arg1 >> 32;
+            let memory_size = arg1 & 0xffff_ffff;
+            match crate::task::validate_dynamic_tls_initializer(arg0, initializer_len, memory_size) {
+                0 => SYSCALL_ERROR,
+                length => length,
+            }
+        }
+        value if value == Number::DynamicTlsMapAll as u64 => {
+            let initializer_len = usize::try_from(arg2 >> 32).ok();
+            let memory_size = usize::try_from(arg2 & 0xffff_ffff).ok();
+            let (Some(initializer_len), Some(memory_size)) = (initializer_len, memory_size) else { return SYSCALL_ERROR; };
+            if initializer_len == 0 || initializer_len > memory_size || initializer_len > 4096 { return SYSCALL_ERROR; }
+            let mut initializer = [0u8; 4096];
+            if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len]).is_err() || !crate::task::map_dynamic_tls_all(arg0, &initializer[..initializer_len], memory_size) { SYSCALL_ERROR } else { 0 }
+        }
         value if value == Number::ThreadRobustRegister as u64 => {
             let Some(thread) = crate::task::current_thread_id() else { return SYSCALL_ERROR; };
             let mut probe = [0_u8; 4];
@@ -3140,6 +3177,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::ThreadRobustConsistent as u64 => {
             crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_consistent(id, arg0)))
+        }
+        value if value == Number::ThreadRobustWait as u64 => {
+            crate::thread::wait_robust_waiter(arg0, crate::task::current_task_id().as_u64()); 0
+        }
+        value if value == Number::ThreadRobustWake as u64 => {
+            crate::thread::signal_robust_waiter(arg0); 0
         }
         value if value == Number::ThreadSleep as u64 => {
             crate::task::sleep_current(arg0);

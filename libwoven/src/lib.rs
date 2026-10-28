@@ -12369,6 +12369,59 @@ pub mod syscall {
         unsafe { invoke(143, module, 0, 0) }
     }
 
+    /// Retain a generation-checked dynamic module handle.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_retain(module: u64, generation: u64) -> u64 {
+        unsafe { invoke(144, module, generation, 0) }
+    }
+
+    /// Release a dynamic module handle; returns one when the final reference
+    /// was dropped and the mapping is ready for teardown.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_release(module: u64, generation: u64) -> u64 {
+        unsafe { invoke(145, module, generation, 0) }
+    }
+
+    /// Begin the process-wide dynamic-module transaction.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_transaction_begin() -> u64 {
+        unsafe { invoke(146, 0, 0, 0) }
+    }
+
+    /// End the current process's dynamic-module transaction.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_transaction_end() -> u64 {
+        unsafe { invoke(147, 0, 0, 0) }
+    }
+
+    /// Validate and copy-check a dynamic TLS initializer without mapping it.
+    ///
+    /// # Safety
+    /// `initializer` must point to readable WovenHat userspace memory.
+    pub unsafe fn dynamic_tls_validate(initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+        let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
+        unsafe { invoke(148, initializer, packed, 0) }
+    }
+
+    /// Atomically map a dynamic TLS block into all live threads.
+    ///
+    /// # Safety
+    /// The caller must own the dynamic-module transaction and provide readable
+    /// userspace initializer memory.
+    pub unsafe fn dynamic_tls_map_all(module: u64, initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+        let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
+        unsafe { invoke(149, module, initializer, packed) }
+    }
+
+
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
     ///

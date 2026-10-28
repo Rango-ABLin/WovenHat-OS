@@ -115,7 +115,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
 	if (!mutex) return EINVAL;
 	while (!__sync_bool_compare_and_swap(&mutex->__u.__vi[0], 0, 1))
-		sched_yield();
+		(void)wh_syscall1(WH_SYS_THREAD_ROBUST_WAIT, (long)(uintptr_t)mutex);
 	long state = wh_syscall1(WH_SYS_THREAD_ROBUST_LOCK, (long)(uintptr_t)mutex);
 	return state == 1 ? EOWNERDEAD : state == 2 ? ENOTRECOVERABLE : state < 0 ? EBUSY : 0;
 }

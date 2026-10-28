@@ -5,6 +5,7 @@ use crate::userspace::AnonymousMapping;
 pub const MAX_THREADS: usize = 64;
 pub const MAX_ROBUST_ENTRIES: usize = 16;
 const MAX_ROBUST_RECORDS: usize = 64;
+const MAX_ROBUST_WAITERS: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ThreadId(u64);
@@ -26,6 +27,7 @@ impl ThreadId {
 pub struct Resources {
     pub stack: AnonymousMapping,
     pub tls: Option<AnonymousMapping>,
+    pub dynamic_tls: [Option<AnonymousMapping>; crate::userspace::MAX_DYNAMIC_MODULES],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,6 +90,8 @@ enum RobustState { Free, Consistent, Abandoned, Unrecoverable }
 struct RobustRecord { address: u64, owner: Option<ThreadId>, generation: u32, state: RobustState }
 static ROBUST: Mutex<[RobustRecord; MAX_ROBUST_RECORDS]> = Mutex::with_rank(
     [RobustRecord { address: 0, owner: None, generation: 1, state: RobustState::Free }; MAX_ROBUST_RECORDS], 11);
+static ROBUST_WAITERS: Mutex<[Option<(u64, u64)>; MAX_ROBUST_WAITERS]> =
+    Mutex::with_rank([None; MAX_ROBUST_WAITERS], 12);
 
 fn lookup(table: &mut Table, id: ThreadId) -> Option<&mut Record> {
     let slot = (id.0 & 0xffff_ffff) as usize;
@@ -128,6 +132,16 @@ pub fn register_robust_mutex(id: ThreadId, address: u64) -> bool {
     if index >= MAX_ROBUST_ENTRIES { return false; }
     record.robust_mutexes[index] = address;
     record.robust_count += 1;
+    let mut robust = ROBUST.lock();
+    if !robust.iter().any(|entry| entry.address == address) {
+        let Some(entry) = robust.iter_mut().find(|entry| entry.state == RobustState::Free) else {
+            return false;
+        };
+        entry.address = address;
+        entry.owner = None;
+        entry.generation = entry.generation.wrapping_add(1).max(1);
+        entry.state = RobustState::Consistent;
+    }
     true
 }
 
@@ -141,6 +155,11 @@ pub fn unregister_robust_mutex(id: ThreadId, address: u64) -> bool {
     record.robust_mutexes[index..count].rotate_left(1);
     record.robust_count -= 1;
     record.robust_mutexes[record.robust_count as usize] = 0;
+    let mut robust = ROBUST.lock();
+    if let Some(entry) = robust.iter_mut().find(|entry| entry.address == address) {
+        if entry.owner.is_some() { return false; }
+        *entry = RobustRecord { address: 0, owner: None, generation: entry.generation, state: RobustState::Free };
+    }
     true
 }
 
@@ -158,6 +177,8 @@ pub fn robust_unlock(id: ThreadId, address: u64) -> bool {
     if record.owner != Some(id) { return false; }
     record.owner = None;
     if record.state == RobustState::Abandoned { record.state = RobustState::Unrecoverable; }
+    drop(table);
+    signal_robust_waiter(address);
     true
 }
 pub fn robust_consistent(id: ThreadId, address: u64) -> bool {
@@ -173,13 +194,49 @@ pub fn robust_consistent(id: ThreadId, address: u64) -> bool {
 /// ownership accidentally.
 pub fn mark_robust_owner_dead(id: ThreadId) {
     let mut table = ROBUST.lock();
+    let mut wake = [0_u64; MAX_ROBUST_RECORDS];
+    let mut wake_count = 0;
     for record in table.iter_mut() {
         if record.owner == Some(id) {
+            wake[wake_count] = record.address;
+            wake_count += 1;
             record.owner = None;
             if record.state == RobustState::Consistent {
                 record.state = RobustState::Abandoned;
             }
         }
+    }
+    drop(table);
+    for address in wake.into_iter().take(wake_count) {
+        signal_robust_waiter(address);
+    }
+}
+
+/// Park the current task until an unlock or owner-death transition latches an
+/// event for this mutex address. Registration is bounded and removed after the
+/// scheduler wake, so stale thread generations cannot accumulate.
+pub fn wait_robust_waiter(address: u64, waiter: u64) {
+    {
+        let mut waiters = ROBUST_WAITERS.lock();
+        let Some(slot) = waiters.iter_mut().find(|entry| entry.is_none()) else { return; };
+        *slot = Some((address, waiter));
+    }
+    crate::task::wait_for_event();
+    let mut waiters = ROBUST_WAITERS.lock();
+    if let Some(entry) = waiters.iter_mut().find(|entry| {
+        entry.is_some_and(|(candidate, id)| candidate == address && id == waiter)
+    }) {
+        *entry = None;
+    }
+}
+
+pub fn signal_robust_waiter(address: u64) {
+    let target = {
+        let waiters = ROBUST_WAITERS.lock();
+        waiters.iter().flatten().find(|(candidate, _)| *candidate == address).map(|(_, id)| *id)
+    };
+    if let Some(id) = target {
+        let _ = crate::task::signal_event(crate::task::TaskId::from_u64(id));
     }
 }
 
@@ -273,6 +330,27 @@ pub fn resources(owner: u64, id: ThreadId) -> Option<Resources> {
     }
     record.resources
 }
+
+pub fn clear_dynamic_tls(id: ThreadId, slot: usize, address: u64) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let Some(resources) = record.resources.as_mut() else { return false; };
+    let Some(destination) = resources.dynamic_tls.get_mut(slot) else { return false; };
+    if destination.is_none_or(|mapping| mapping.address != address) { return false; }
+    *destination = None;
+    true
+}
+
+pub fn install_dynamic_tls(id: ThreadId, slot: usize, mapping: AnonymousMapping) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let Some(resources) = record.resources.as_mut() else { return false; };
+    let Some(destination) = resources.dynamic_tls.get_mut(slot) else { return false; };
+    if destination.is_some() { return false; }
+    *destination = Some(mapping);
+    true
+}
+
 
 pub fn joinable(owner: u64, id: ThreadId) -> Result<bool, JoinError> {
     let mut table = TABLE.lock();

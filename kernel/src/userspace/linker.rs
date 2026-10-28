@@ -380,6 +380,28 @@ fn protect_linked_images(
     Some(())
 }
 
+fn materialize_lazy_trampolines(
+    space: &AddressSpace,
+    page_table: paging::AddressSpace,
+    base: u64,
+) -> Option<()> {
+    for (index, binding) in space.lazy_bindings[..space.lazy_binding_count]
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        let trampoline = base.checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
+        let mut code = [0u8; 24];
+        code[0..2].copy_from_slice(&[0x49, 0xbb]);
+        code[2..10].copy_from_slice(&binding.slot.to_le_bytes());
+        code[10..15].copy_from_slice(&[0xb8, 137, 0, 0, 0]);
+        code[15..17].copy_from_slice(&[0xcd, 0x80]);
+        code[17..19].copy_from_slice(&[0xff, 0xe0]);
+        paging::write_user_bytes(page_table, trampoline, &code).ok()?;
+    }
+    Some(())
+}
+
 fn map_initial_tls(
     pending: &mut Pending,
     plan: TlsPlan,
@@ -428,19 +450,48 @@ fn map_initial_tls(
         template: pending.template_mapped,
         template_size,
         module_tpoff: core::array::from_fn(|index| tls_tpoff(images, index, &plan).unwrap_or(0)),
-        module_size: core::array::from_fn(|index| {
-            images
-                .get(index)
-                .and_then(|image| image.image.tls())
-                .map(|tls| tls.memory_size)
-                .unwrap_or(0)
-        }),
         module_valid: core::array::from_fn(|index| {
             images.get(index).and_then(|image| image.image.tls()).is_some()
         }),
     };
     pending.space.tls = Some(initial);
-    initialize_tls(page_table, start, initial)
+    let tls_base = initialize_tls(page_table, start, initial)?;
+    for (index, image) in images.iter().enumerate() {
+        let Some(tls) = image.image.tls() else { continue };
+        pending.space.publish_dynamic_module(
+            index,
+            tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
+            tls.memory_size,
+        )?;
+    }
+    Some(tls_base)
+}
+
+fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
+    let capacity = elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS;
+    let mut init = Vec::new();
+    let mut fini = Vec::new();
+    for image in images {
+        let lifecycle = image.image.lifecycle();
+        if init.len() + lifecycle.init_count > capacity { return None; }
+        init.extend_from_slice(&lifecycle.init[..lifecycle.init_count]);
+    }
+    for image in images.iter().rev() {
+        let lifecycle = image.image.lifecycle();
+        if fini.len() + lifecycle.fini_count > capacity { return None; }
+        fini.extend_from_slice(&lifecycle.fini[..lifecycle.fini_count]);
+    }
+    Some((init, fini))
+}
+
+fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
+    let main = images.first()?;
+    let mut scope = SymbolScope::new(&main.image, &main.bytes);
+    for image in &images[1..] {
+        scope.add_dependency(image.name.as_deref()?, &image.image, &image.bytes).ok()?;
+    }
+    scope.validate_dependencies().ok()?;
+    Some(scope)
 }
 
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
@@ -472,33 +523,8 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
-    let mut init_functions = Vec::new();
-    let mut fini_functions = Vec::new();
-    for image in &images {
-        let lifecycle = image.image.lifecycle();
-        for function in lifecycle.init[..lifecycle.init_count].iter().copied() {
-            if init_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
-                return None;
-            }
-            init_functions.push(function);
-        }
-    }
-    for image in images.iter().rev() {
-        let lifecycle = image.image.lifecycle();
-        for function in lifecycle.fini[..lifecycle.fini_count].iter().copied() {
-            if fini_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
-                return None;
-            }
-            fini_functions.push(function);
-        }
-    }
-    let mut scope = SymbolScope::new(&main.image, &main.bytes);
-    for image in &images[1..] {
-        scope
-            .add_dependency(image.name.as_deref()?, &image.image, &image.bytes)
-            .ok()?;
-    }
-    scope.validate_dependencies().ok()?;
+    let (init_functions, fini_functions) = collect_lifecycle(&images)?;
+    let scope = build_scope(&images)?;
     let tls_reservation = plan_tls(&images)?;
     let tls_size = tls_reservation.map_or(0, |plan| plan.total as u64);
     let stack_base = plan_stack_base(stack_base, mmap_base, tls_size)?;
@@ -515,6 +541,7 @@ pub(super) fn load_with_geometry(
             relro: main.image.relro(),
             library_relro: [None; elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
             destructors: [0; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
@@ -569,21 +596,7 @@ pub(super) fn load_with_geometry(
         &mut pending.space,
         tls_reservation.as_ref(),
     )?;
-    for (index, binding) in pending.space.lazy_bindings[..pending.space.lazy_binding_count]
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        let trampoline = lazy_trampoline_base
-            .checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
-        let mut code = [0u8; 24];
-        code[0..2].copy_from_slice(&[0x49, 0xbb]); // mov r11, slot
-        code[2..10].copy_from_slice(&binding.slot.to_le_bytes());
-        code[10..15].copy_from_slice(&[0xb8, 137, 0, 0, 0]); // SYS_LAZY_BIND
-        code[15..17].copy_from_slice(&[0xcd, 0x80]);
-        code[17..19].copy_from_slice(&[0xff, 0xe0]); // jmp rax
-        paging::write_user_bytes(page_table, trampoline, &code).ok()?;
-    }
+    materialize_lazy_trampolines(&pending.space, page_table, lazy_trampoline_base)?;
     paging::protect_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, false, true)
         .ok()?;
     protect_linked_images(&images, page_table)?;

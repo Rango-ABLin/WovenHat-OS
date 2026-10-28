@@ -27,6 +27,8 @@ pub(crate) const MAX_LAZY_BINDINGS: usize = 8;
 use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
+pub const MAX_DYNAMIC_MODULES: usize = crate::elf::MAX_SCOPE_IMAGES;
+pub const DYNAMIC_MMAP_SLOT_BASE: usize = MAX_ANONYMOUS_MAPPINGS - MAX_DYNAMIC_MODULES;
 
 const USER_REGION_START: u64 = 0x0000_4000_0000_0000;
 const USER_STACK_OFFSET: u64 = 0x1f_0000;
@@ -4841,7 +4843,6 @@ struct InitialTls {
     template: Option<(u64, usize)>,
     template_size: usize,
     module_tpoff: [i64; crate::elf::MAX_SCOPE_IMAGES],
-    module_size: [usize; crate::elf::MAX_SCOPE_IMAGES],
     module_valid: [bool; crate::elf::MAX_SCOPE_IMAGES],
 }
 
@@ -4873,17 +4874,19 @@ impl InitialTls {
             .then_some(address)
     }
 
-    fn module_range(self, module: u64, tls_base: u64) -> Option<(u64, usize)> {
-        let index = usize::try_from(module.checked_sub(1)?).ok()?;
-        if !self.module_valid.get(index).copied().unwrap_or(false) {
-            return None;
-        }
-        let start = tls_base.checked_add_signed(self.module_tpoff[index])?;
-        let size = self.module_size[index];
-        (size != 0 && start >= self.start
-            && start.checked_add(size as u64)? <= self.start + self.layout.mapping_size as u64)
-            .then_some((start, size))
-    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DynamicModule {
+    pub generation: u32,
+    pub live: bool,
+    pub references: u16,
+    pub mapping_start: u64,
+    pub mapping_size: usize,
+}
+
+impl DynamicModule {
+    pub const EMPTY: Self = Self { generation: 1, live: false, references: 0, mapping_start: 0, mapping_size: 0 };
 }
 
 #[derive(Clone, Copy)]
@@ -4896,6 +4899,7 @@ pub struct AddressSpace {
     relro: Option<(u64, usize)>,
     library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
     tls: Option<InitialTls>,
+    dynamic_modules: [DynamicModule; MAX_DYNAMIC_MODULES],
     pub(crate) destructors:
         [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
     pub(crate) destructor_count: usize,
@@ -4906,6 +4910,46 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
+    pub fn mmap_base(self) -> u64 { self.mmap_base }
+    pub fn dynamic_tls_module_range(self, module: u64, _tls_base: u64) -> Option<(u64, usize)> {
+        let index = usize::try_from(module.checked_sub(1)?).ok()?;
+        let descriptor = self.dynamic_modules.get(index)?;
+        (descriptor.generation == 1 && descriptor.live && descriptor.references != 0)
+            .then_some((descriptor.mapping_start, descriptor.mapping_size))
+    }
+
+    pub fn publish_dynamic_module(&mut self, index: usize, mapping_start: u64, mapping_size: usize) -> Option<u32> {
+        let descriptor = self.dynamic_modules.get_mut(index)?;
+        if descriptor.live || mapping_size == 0 { return None; }
+        descriptor.live = true;
+        descriptor.references = 1;
+        descriptor.mapping_start = mapping_start;
+        descriptor.mapping_size = mapping_size;
+        Some(descriptor.generation)
+    }
+
+    pub fn retain_dynamic_module(&mut self, index: usize, generation: u32) -> bool {
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
+        if !descriptor.live || descriptor.generation != generation { return false; }
+        let Some(references) = descriptor.references.checked_add(1) else { return false; };
+        descriptor.references = references;
+        true
+    }
+
+    pub fn release_dynamic_module(&mut self, index: usize, generation: u32) -> Option<bool> {
+        let descriptor = self.dynamic_modules.get_mut(index)?;
+        if !descriptor.live || descriptor.generation != generation || descriptor.references == 0 {
+            return None;
+        }
+        descriptor.references -= 1;
+        if descriptor.references != 0 { return Some(false); }
+        descriptor.live = false;
+        descriptor.mapping_start = 0;
+        descriptor.mapping_size = 0;
+        descriptor.generation = descriptor.generation.saturating_add(1).max(1);
+        Some(true)
+    }
+
     pub fn paging(self) -> paging::AddressSpace {
         self.paging
     }
@@ -4934,10 +4978,6 @@ impl AddressSpace {
 
     pub fn dynamic_tls_address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {
         self.tls?.address(module, offset, tls_base)
-    }
-
-    pub fn dynamic_tls_module_range(self, module: u64, tls_base: u64) -> Option<(u64, usize)> {
-        self.tls?.module_range(module, tls_base)
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -4981,6 +5021,31 @@ impl AddressSpace {
         }
         false
     }
+}
+
+pub fn map_dynamic_anonymous(
+    address_space: paging::AddressSpace,
+    mmap_base: u64,
+    slot: usize,
+    size: usize,
+) -> Option<AnonymousMapping> {
+    if !(DYNAMIC_MMAP_SLOT_BASE..MAX_ANONYMOUS_MAPPINGS).contains(&slot)
+        || size == 0
+        || !size.is_multiple_of(4096)
+    {
+        return None;
+    }
+    let address = mmap_base.checked_add((slot as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+    paging::map_user_range_in(address_space, address, size, true, false).ok()?;
+    if paging::zero_user_range_in(address_space, address, size).is_err() {
+        let _ = paging::unmap_user_range_in(address_space, address, size);
+        return None;
+    }
+    Some(AnonymousMapping { address, size, writable: true, lazy: None, resident: 0, dirty: 0, swap_slots: [None; USER_MMAP_PAGES] })
+}
+
+pub fn unmap_dynamic_anonymous(address_space: paging::AddressSpace, mapping: AnonymousMapping) -> bool {
+    paging::unmap_user_range_in(address_space, mapping.address, mapping.size).is_ok()
 }
 
 #[derive(Clone, Copy)]
@@ -6317,6 +6382,7 @@ pub fn clone_address_space(
         relro: source.relro,
         library_relro: source.library_relro,
         tls: source.tls,
+        dynamic_modules: source.dynamic_modules,
         destructors: source.destructors,
         destructor_count: source.destructor_count,
         destructor_pending: source.destructor_pending,
@@ -6672,6 +6738,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             relro: None,
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
@@ -6734,6 +6801,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             relro: None,
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
@@ -6787,6 +6855,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -6880,6 +6949,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -6974,6 +7044,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -7052,6 +7123,7 @@ pub fn file_mmap_self_test() -> bool {
         relro: None,
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,

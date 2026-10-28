@@ -1,5 +1,104 @@
 # Stage status
 
+## Atomic all-thread dynamic TLS mapping - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now exposes a transaction-owned all-thread mapper. It validates the
+bounded initializer, allocates private mappings in each live thread paging
+space, installs resource ownership, and rolls back partial work. Descriptor
+publication occurs after all installations succeed. Kernel/libwoven target
+checks and warning-denying Clippy pass; QEMU multi-CPU qualification remains.
+
+## Dynamic TLS resource clearing boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Thread teardown now clears dynamic TLS ownership through a validated resource
+API after unmapping. Kernel target build and warning-denying Clippy pass. The
+all-thread allocator still needs its matching install/rollback operation.
+
+## Dynamic TLS caller-buffer validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now validates and copy-checks dynamic TLS initializer buffers before
+mapping work, rejecting oversize, inconsistent, or unreadable inputs. Target
+build and kernel/libwoven warning-denying Clippy pass. Per-thread mapping,
+rollback, and publication remain the next transaction steps.
+
+## Reserved dynamic TLS mapping slots - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The anonymous allocator now reserves a dedicated tail range for dynamic TLS
+module mappings. Ordinary mappings cannot consume those slots, establishing a
+collision-free address/slot boundary for the upcoming all-thread allocator.
+Kernel target build and warning-denying Clippy pass.
+
+## Scheduler runnable-task parking - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Dynamic-module transactions now prevent same-process sibling tasks from being
+selected from Ready state. Combined with the transaction-end Running/Switching
+check, this provides cooperative scheduler coordination. Target build and
+warning-denying Clippy pass; all-thread mapping and DTV publication remain.
+
+## Conservative transaction quiescence check - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Ending a dynamic-module transaction now rejects active same-process sibling
+tasks, including scheduler handoff states. Kernel target build and
+warning-denying Clippy pass. Full stop-the-world parking for Ready/runnable
+siblings remains required before all-thread TLS publication.
+
+## Scheduler dynamic-module transaction gate - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The scheduler now owns a process-scoped, depth-counted dynamic-module
+transaction gate. Kernel and libwoven ABIs expose begin/end operations, with
+cross-process ownership rejection and nested-owner support. Target build and
+warning-denying Clippy pass. Stop-the-world coordination and all-thread
+allocation remain the next implementation step.
+
+## Per-thread dynamic TLS ownership - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Thread resources now own bounded dynamic TLS mapping slots independently from
+startup TLS. Join teardown identifies, unmaps, and clears those slots before
+thread-handle reuse. Kernel target build and warning-denying Clippy pass. Live
+module allocation and DTV publication across all existing threads remain next.
+
+## Dynamic module retain/release ABI - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now exposes generation-checked dynamic-module retain/release
+operations and the libwoven ABI wrappers. Final release invalidates the
+descriptor generation while leaving physical teardown for the mapping
+transaction. Kernel and libwoven warning-denying Clippy pass.
+
+## Generation-safe dynamic module publication - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The startup TLS mapper now publishes each module through the address-space
+descriptor API with an initial generation and reference. Occupied slots and
+empty mappings fail closed. Kernel target build and warning-denying Clippy pass;
+live retain/release and dynamic insertion remain pending.
+
+## AddressSpace dynamic-module descriptors - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel address space now owns bounded dynamic-module descriptors. Existing
+startup PT_TLS modules publish their mapped ranges into this table, and range
+queries validate liveness, generation, and references. Target build and
+warning-denying Clippy pass. Dynamic insertion/removal and thread-wide TLS
+expansion remain the next live-loader steps.
+
+## Staged lazy-binding materialization - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Lazy-binding trampoline generation is now isolated in a reusable transaction
+helper. Existing slot bounds and W^X sequencing are preserved. Kernel target
+build and warning-denying Clippy pass; live-module PLT publication remains
+pending.
+
+## Staged symbol-scope validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel linker now builds and validates the complete dependency symbol scope
+through one helper before relocation. Target build and warning-denying Clippy
+pass. Live-process symbol-scope publication remains pending.
+
+## Bounded lifecycle staging - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel linker now stages constructor and destructor callbacks through a
+bounded helper with capacity validation and preserved ordering. Target build
+and warning-denying Clippy pass. Live-module constructor execution and
+destructor registration remain pending.
+
 ## Reusable PT_TLS mapping transaction - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The startup loader now uses a single `Pending`-owned helper for PT_TLS template
