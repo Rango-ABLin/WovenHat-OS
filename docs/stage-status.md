@@ -12307,3 +12307,12 @@ characteristic capacity handling. QEMU passes at 1/2/4 CPUs with exit 33.
 Evidence: `audit-artifacts/stage13.10-{1,2,4}cpu-*`. Next: Stage 13.10L
 Bluetooth lifecycle and teardown hardening.
 
+## Stage 13.10L Bluetooth lifecycle hardening — 2026-10-28 — ACCEPTED
+
+Accepted the existing bounded `BluetoothLeLifecycle` integration. Disconnect
+events revoke all subscriptions for the handle; controller reset clears links
+and subscriptions; stale/unknown handles fail closed; and the lifecycle
+generation advances only on successful invalidation. The full Stage 13.10
+runtime gate passes at 1/2/4 CPUs with exit 33. Physical controller recovery
+and radio qualification remain outside this deterministic gate.
+

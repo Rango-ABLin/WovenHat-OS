@@ -7963,3 +7963,11 @@ The exact current Stage 13.10 runtime chain passed at 1/2/4 CPUs with exit
 surface. Evidence is under `audit-artifacts/stage13.10-{1,2,4}cpu-*`.
 Next permitted work is Stage 13.10L lifecycle hardening.
 
+## Codex - Stage 13.10L Bluetooth lifecycle hardening (2026-10-28)
+
+Closed the lifecycle boundary already wired through `BluetoothLeLifecycle`:
+disconnect revokes per-link subscriptions, reset clears all live state, stale
+handles fail closed, and successful invalidation advances the generation. The
+full Stage 13.10 1/2/4-CPU runtime gate passes. Physical controller recovery
+and radio qualification remain separate.
+
