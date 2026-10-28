@@ -67,7 +67,12 @@ PTYs use a fixed eight-pair table with generation-tagged handles. Master input
 is canonicalized into a bounded 512-byte line, while slave output is readable
 from the master through a separate bounded stream. `/dev/ptmx` and
 `/dev/pts/N` are capability-gated special opens; no userspace pointer is
-retained by the line discipline.
+retained by the line discipline. Each process also carries a bounded session
+identifier inherited across spawn/fork. `getsid(0)` reports it and `setsid()`
+creates a new session and process group only for a non-group-leader; process
+group assignment and foreground authority reject cross-session targets. This
+is the kernel authority needed by a shell, not a claim that orphaned-group,
+hangup, `TOSTOP`, or complete terminal job-control policy is implemented.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

@@ -2574,6 +2574,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if !crate::pty::self_test() {
         return false;
     }
+    let zombie_baseline = zombie_count();
     let Some(program) = userspace::create_s03_fork_wait_process() else {
         return false;
     };
@@ -2591,7 +2592,15 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if first_status != Ok(0) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.DIAG] fork-wait ok"));
+    // The exact-child reap must remove the zombie and a second wait must not
+    // observe a phantom child.
+    let second_wait = wait_process(child.as_u64());
+    let reap_clean = second_wait == Err(WaitError::NoSuchChild)
+        && zombie_count() == zombie_baseline;
+    crate::serial::write_line(format_args!("[S03.WAIT] exact-reap-clean={}", reap_clean));
+    if !reap_clean {
+        return false;
+    }
 
     let Some(group_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2600,12 +2609,10 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         return false;
     };
     let group_set = set_process_group(group_child.as_u64(), group_child.as_u64());
-    crate::serial::write_line(format_args!("[S03.DIAG] term group set={}", group_set.is_ok()));
     if group_set.is_err() {
         return false;
     }
     let group_kill = kill_process(0u64.wrapping_sub(group_child.as_u64()), 15);
-    crate::serial::write_line(format_args!("[S03.DIAG] term group kill={}", group_kill.is_ok()));
     if group_kill.is_err() {
         return false;
     }
@@ -2617,11 +2624,9 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         yield_now();
     }
     let status = wait_process(group_child.as_u64());
-    crate::serial::write_line(format_args!("[S03.DIAG] term status={}", status.unwrap_or(-999)));
     if status != Ok(143) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.DIAG] term group ok"));
 
     let Some(quit_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2644,7 +2649,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(quit_child.as_u64()) != Ok(131) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.DIAG] quit group ok"));
 
     let Some(stop_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2675,7 +2679,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(stop_child.as_u64()) != Ok(143) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.DIAG] stop continue ok"));
 
     let Some(session_program) = userspace::create_s03_session_process() else {
         return false;
@@ -2691,11 +2694,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         yield_now();
     }
     let session_status = wait_process(session_child.as_u64());
-    crate::serial::write_line(format_args!(
-        "[S03.SESSION] success={} status={}",
-        session_status == Ok(42),
-        session_status.unwrap_or(-999)
-    ));
     if session_status != Ok(42) {
         return false;
     }
@@ -6484,14 +6482,15 @@ pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
         .iter()
         .flatten()
         .find(|process| process.id.as_u64() == caller)
-        .map(|process| process.session_id)
-        .ok_or(FileError::NoProcess)?;
-    if processes
-        .iter()
-        .flatten()
-        .any(|process| process.process_group == group && process.session_id != caller_session)
-    {
-        return Err(FileError::PermissionDenied);
+        .map(|process| process.session_id);
+    if let Some(caller_session) = caller_session {
+        if processes
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == group && process.session_id != caller_session)
+        {
+            return Err(FileError::PermissionDenied);
+        }
     }
     let process = processes
         .iter_mut()
