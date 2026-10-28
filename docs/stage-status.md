@@ -1,5 +1,31 @@
 # Stage status
 
+## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
+
+Five host Python tests (`test_disk_install_executor`, `test_file_image_filesystem`,
+`test_file_image_layout`, `test_file_install_executor`, `test_uefi_boot_artifact`)
+were erroring with `OSError: [WinError 1314] A required privilege is not held by
+the client` when attempting to create symlinks without `SeCreateSymbolicLinkPrivilege`
+or Windows Developer Mode. Each test verified that the production code *refuses*
+symlink inputs — valid test intent, but the symlink creation step itself requires
+elevated privileges on Windows.
+
+Fix applied: each `link.symlink_to(...)` call is now wrapped in a
+`try/except OSError` that calls `self.skipTest(...)` when `winerror == 1314`.
+Other `OSError` values re-raise unchanged so real filesystem errors are not silently
+swallowed. **The tests are not weakened** — they skip only when the OS cannot create
+a symlink at all; on elevated Windows or Linux they run the full assertion.
+
+Result: `python -m unittest discover -s tests -p 'test_*.py'` → **205 passed,
+6 skipped, 0 errors**. The six skips are the five symlink tests plus one pre-existing
+skip.
+
+**Stage closure status unchanged.** Software QEMU gates for Stages 1–10 pass (see
+[Stage 1–19 closure gate](stage1-19-closure-gate.md)); hardware qualification (native
+storage/DMA, power-loss recovery, physical boot, firmware provisioning) remains
+**BLOCKED** until the user authorizes an elevated physical test session on a selected
+non-boot device.
+
 ## S02 freestanding C ABI boundary - 2026-10-28 - ACCEPTED BOUNDED
 
 Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
