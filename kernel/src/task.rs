@@ -2215,6 +2215,14 @@ pub fn end_dynamic_module_transaction() -> bool {
     let owner = current_process_id();
     let mut scheduler = SCHEDULER.lock();
     if scheduler.dynamic_module_owner != Some(owner) { return false; }
+    let current = scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id;
+    if scheduler.tasks.iter().any(|task| {
+        task.id != current
+            && task.process_id.as_u64() == owner
+            && matches!(task.state, TaskState::Running | TaskState::Switching)
+    }) {
+        return false;
+    }
     scheduler.dynamic_module_depth = scheduler.dynamic_module_depth.saturating_sub(1);
     if scheduler.dynamic_module_depth == 0 { scheduler.dynamic_module_owner = None; }
     true

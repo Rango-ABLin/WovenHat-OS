@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - conservative transaction quiescence check (2026-10-28)
+
+Dynamic-module transaction end now checks the scheduler under its IRQ-safe lock
+and refuses to complete while another same-process task is Running or in
+Switching handoff. This prevents premature publication/teardown; Ready tasks
+still require the forthcoming scheduler parking protocol.
+
 ## Codex - scheduler dynamic-module transaction gate (2026-10-28)
 
 Added an IRQ-safe scheduler-owned transaction gate with process ownership and

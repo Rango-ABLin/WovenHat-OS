@@ -1,5 +1,12 @@
 # Stage status
 
+## Conservative transaction quiescence check - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Ending a dynamic-module transaction now rejects active same-process sibling
+tasks, including scheduler handoff states. Kernel target build and
+warning-denying Clippy pass. Full stop-the-world parking for Ready/runnable
+siblings remains required before all-thread TLS publication.
+
 ## Scheduler dynamic-module transaction gate - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The scheduler now owns a process-scoped, depth-counted dynamic-module
