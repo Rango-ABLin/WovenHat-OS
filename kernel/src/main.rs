@@ -5616,6 +5616,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[S32.20] live GDB detach: FAILED"));
             qemu_test_exit_failure();
         }
+        serial::write_line(format_args!("[S32.20] live GDB detach: READY"));
         let mut waited = 0u32;
         while !gdb_entry::live_detach_task_done() && waited < 2_000_000 {
             task::yield_now();

@@ -71,22 +71,36 @@ def main() -> int:
         # Do not transmit before the guest has initialized COM2 and reached
         # the scheduler-owned qualification hook; early UART bytes are not
         # buffered by the kernel's bounded polling path.
+        ready_marker = (
+            "[S32.20] live GDB detach: READY"
+            if args.command == "D"
+            else "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED"
+        )
         while time.monotonic() < deadline:
-            if "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED" in serial.read_text(encoding="utf-8", errors="replace"):
+            if ready_marker in serial.read_text(encoding="utf-8", errors="replace"):
                 break
             time.sleep(0.02)
         # The INT3 self-test polls COM2. Ask for the stop reason, verify the
         # reply, then continue so the kernel can publish its acceptance marker.
-        client.sendall(packet(b"?"))
         received = bytearray()
+        next_query = 0.0
         while b"S05" not in received and time.monotonic() < deadline:
+            if time.monotonic() >= next_query:
+                client.sendall(packet(b"?"))
+                # Keep at most one outstanding query in the bounded guest
+                # poll loop; flooding it can starve the subsequent D packet.
+                next_query = time.monotonic() + 1.0
             try:
                 received.extend(client.recv(256))
             except socket.timeout:
                 continue
         if b"S05" not in received:
             raise RuntimeError(f"missing GDB stop reply: {received!r}")
-        client.sendall(b"+")
+        # The bounded kernel entry consumes complete `$...#cc` frames directly;
+        # it does not feed standalone host ACK bytes into that frame buffer.
+        # Sending `+` here would prefix the next packet and make it invalid.
+        if args.command != "D":
+            client.sendall(b"+")
         client.sendall(packet(args.command.encode()))
         if args.command == "D":
             while b"OK" not in received and time.monotonic() < deadline:
@@ -103,7 +117,8 @@ def main() -> int:
             process.kill()
         stdout, stderr = process.communicate()
         qemu_log.write_text((stdout or b"").decode(errors="replace") + (stderr or b"").decode(errors="replace"), encoding="utf-8")
-        print(f"Stage 32.19 live GDB qualification failed: {error}; evidence: {out}", file=sys.stderr)
+        detail = f"; received={bytes(received)!r}" if "received" in locals() else ""
+        print(f"Stage 32.19 live GDB qualification failed: {error}{detail}; evidence: {out}", file=sys.stderr)
         return 1
     finally:
         if client is not None:
