@@ -2536,6 +2536,28 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         return false;
     }
 
+    let Some(quit_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((quit_child, _)) = spawn_user_process("s03-default-quit", quit_program) else {
+        return false;
+    };
+    if set_process_group(quit_child.as_u64(), quit_child.as_u64()).is_err()
+        || kill_process(0u64.wrapping_sub(quit_child.as_u64()), 3).is_err()
+    {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(quit_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(quit_child.as_u64()) != Ok(131) {
+        return false;
+    }
+
     let Some(handler_program) = userspace::create_s03_handler_process() else {
         return false;
     };
@@ -5955,6 +5977,13 @@ impl SignalSender {
     }
 }
 
+fn default_terminates(signal: u64) -> bool {
+    matches!(
+        signal,
+        1 | 2 | 3 | 4 | 6 | 8 | 9 | 11 | 12 | 13 | 14 | 15
+    )
+}
+
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
     signal_processes(pid, sig, SignalSender::Kernel)
 }
@@ -6021,7 +6050,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
             process.pending_signal = sig;
             continue;
         }
-        if sig == 9 || sig == 15 || sig == 2 {
+        if default_terminates(sig) {
             // Do not publish ProcessState::Exited or release resources here.
             // This process may still be physically executing on a CPU. The
             // scheduler owns the transition and acknowledges it at a safe

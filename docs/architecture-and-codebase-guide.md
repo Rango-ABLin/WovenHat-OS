@@ -53,6 +53,9 @@ The bounded input path consumes the configured `VINTR` byte and signals the
 foreground group with SIGINT; it does not yet implement a PTY line buffer.
 PS/2 and boot-protocol USB-HID decoder self-tests cover the Ctrl modifier and
 control-byte conversion without claiming hardware-injected runtime coverage.
+Common default terminating signals now use the same scheduler-safe teardown
+path as SIGINT/SIGTERM; SIGSTOP/SIGCONT state transitions remain outside this
+bounded slice.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

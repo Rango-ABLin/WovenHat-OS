@@ -43,6 +43,8 @@ The bounded input path now consumes the configured `VINTR` byte and sends
 SIGINT to the foreground group; PTY line buffering remains open.
 PS/2 and USB-HID decoder self-tests now cover Ctrl-C to the configured
 control-byte path; injected QEMU keyboard evidence is still separate.
+The S03 lifecycle probe now covers default SIGQUIT process-group termination
+and status 131; SIGSTOP/SIGCONT scheduler state remains future work.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
