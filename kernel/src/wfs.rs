@@ -1567,6 +1567,21 @@ impl<D: BlockDevice> Volume<D> {
                 return Err(Error::Corrupt);
             }
         }
+        // The DirEntry on-disk layout has a 4-byte reserved gap at raw bytes
+        // 12..16, between `kind` (10..12) and `name` (16..64).
+        // `DirEntry::encode` calls `raw[..DIR_ENTRY_SIZE].fill(0)` before
+        // writing any field, so those 4 bytes are always zero on a
+        // correctly-written filesystem.  The decoded `DirEntry` struct drops
+        // those bytes; `check()` must inspect the raw block directly.
+        for block in root.direct.iter().copied().filter(|&b| b != 0) {
+            let sector = self.read_block_staged(&txn, block)?;
+            for index in 0..DIR_ENTRIES_PER_BLOCK {
+                let at = index * DIR_ENTRY_SIZE;
+                if sector[at + 12..at + 16].iter().any(|&b| b != 0) {
+                    return Err(Error::Corrupt);
+                }
+            }
+        }
         // No two live entries may share the same name. `stage_create` rejects
         // duplicates, so any duplicate pair is corruption; the second entry
         // can never be reached by `lookup` or `unlink`.

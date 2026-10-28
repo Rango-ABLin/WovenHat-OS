@@ -2850,3 +2850,58 @@ fn check_refuses_file_inode_with_size_above_max_file_size() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a directory entry that has non-zero bytes in the
+/// 4-byte reserved padding gap at raw entry bytes 12..16.
+///
+/// `DirEntry::encode` begins with `raw[..DIR_ENTRY_SIZE].fill(0)` and then
+/// writes the `inode` (0..8), `name_len` (8..10), `kind` (10..12), and `name`
+/// (16..64) fields, leaving bytes 12..16 as zero.  The decoded `DirEntry`
+/// struct drops those bytes; no field reads them.  A correctly-written
+/// filesystem therefore always has zeros there, and any non-zero byte is
+/// corruption `check()` must detect.
+#[test]
+fn check_refuses_a_directory_entry_with_nonzero_reserved_padding() {
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // Each of the 4 padding bytes (raw entry offsets 12, 13, 14, 15) must be
+    // independently refused by check().
+    let cases: &[(usize, u8, &str)] = &[
+        (12, 0xFF, "first padding byte (offset 12)"),
+        (13, 0x01, "second padding byte (offset 13)"),
+        (14, 0x80, "third padding byte (offset 14)"),
+        (15, 0x42, "fourth padding byte (offset 15)"),
+    ];
+
+    for &(at, val, label) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, index, at, &[val]);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a directory entry with non-zero reserved padding ({label})"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+        let mut buf = [0u8; wfs::MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(b_inode, &mut buf),
+            Ok(5),
+            "b.txt must remain readable ({label})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
