@@ -1,5 +1,36 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 32.18 GDB owner/binding + real memory read (2026-10-28)
+
+Wired the previously-isolated `gdb_owner`/`gdb_binding` (32.13/32.15) into the
+live `gdb_entry::wovenhat_debug_dispatch` trap path. A new `gdb_entry`-local
+`GDB_OWNER` static (rank 1, always acquired/released standalone, never nested
+with `SCHEDULER`/`PROCESS_TABLE`/`PAGING`) lazily attaches on the first
+decoded packet (never on trap entry, so the no-client boot self-test cannot
+permanently occupy the one attachment slot) and persists only across
+`Continue`/`Step`; every other exit (timeout, `Kill`, new `D`/Detach) releases
+it. A trap on a task that doesn't hold the floor never touches
+`debug_serial`. Added `Action::Detach`/`SessionAction::Detach` to
+`gdb_debugger`/`gdb_session` for the `D` packet. The `m<addr>,<len>` command
+now resolves real bytes via new `task::current_user_address_space` +
+`userspace::read_user_memory` (thin wrappers over the existing bounds-checked
+`paging::read_user_bytes_in`), each lock acquired and released independently
+(never nested), falling back to the prior empty-window/E01 behavior on any
+failure. `kernel/Cargo.toml` + root `Cargo.toml` + `main.rs` gate this under
+`stage32-18-test`. Target build verified (`cargo check --target
+x86_64-unknown-none --features stage32-18-test`); full warning-denying
+Clippy, host tests, and QEMU 1/2/4-CPU evidence are still outstanding --
+redirected to other work before running them, so do not treat this as fully
+accepted yet.
+
+Separately noticed while researching this: `wovendev.rs` (`WovenDev`) and
+`gdb_scheduler.rs` already combine `Owner`/`TaskBinding`/`Session`/`Transport`
+into a second, self-tested-in-isolation coordinator, but nothing in the live
+kernel ever constructs a `WovenDev` instance or calls `poll_uart`/
+`apply_current_frame` -- it remains disconnected scaffolding, independent of
+the `GDB_OWNER` static added here. Flagging so whoever wires it up later
+knows there are now two separate attachment mechanisms with no shared state.
+
 ## Codex - S05 low-memory matrix requalification (2026-10-28)
 
 Re-ran the dedicated `s05-memory-pressure-test` and 256 MiB low-memory QEMU
