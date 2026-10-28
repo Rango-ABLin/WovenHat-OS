@@ -49,3 +49,11 @@ calls `__wovenhat_start_c`, which invokes `main(argc, argv)` and exits through
 upstream musl `_Exit`. QEMU proves this entry path at 1/2/4 CPUs. It is not
 musl `__libc_start_main`: auxiliary vectors, environment setup, TLS, init/fini
 hooks, locale, and constructors remain explicit prerequisites.
+
+## Bootstrap increment: close error path
+
+The bootstrap now compiles upstream musl `close.c`; its weak no-AIO fallback
+is retained because async I/O cancellation is not implemented. The fixture
+proves denied `close(-1)` returns `-1` with `errno == EIO` at 1/2/4 CPUs.
+Successful descriptor close and standard-descriptor setup remain kernel ABI
+work, not implied by this error-path proof.

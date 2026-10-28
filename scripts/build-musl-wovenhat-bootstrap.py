@@ -26,6 +26,7 @@ SOURCES = (
     "vendor/musl/src/internal/syscall_ret.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
+    "vendor/musl/src/unistd/close.c",
 )
 ASSEMBLY_SOURCES = ("ports/musl/src/crt_start.S",)
 FIXTURE = "tools/runtime-fixtures/musl-bootstrap.c"

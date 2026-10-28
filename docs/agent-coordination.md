@@ -7211,3 +7211,8 @@ and verifies argv shape. QEMU passed at 1/2/4 CPUs. This is not a claim of
 musl `__libc_start_main`, TLS, constructors, environment/aux-vector setup, or
 full static-libc acceptance.
 
+POSIX port increment 5: added upstream musl `close.c` to the executable
+bootstrap. Its documented weak no-AIO fallback is preserved. The fixture
+checks denied `close(-1)` maps to `-1`/EIO and passed QEMU at 1/2/4 CPUs.
+No successful-close or standard-descriptor claim is made.
+
