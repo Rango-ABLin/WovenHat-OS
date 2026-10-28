@@ -4,6 +4,15 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## S03 process-lifecycle ABI surface - 2026-10-28
+
+Added safe `libwoven` wrappers for the existing bounded kernel process-group
+and signal authorities, including explicit process/group target encoding,
+signal range checks, disposition decoding, and zero-value `setpgid`
+conventions. The focused 193-test `libwoven` suite and warning-denying
+`libwoven` Clippy pass. Kernel/QEMU lifecycle evidence is still required;
+S03 remains implementing.
+
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
 Added the reproducible source/linker boundary in

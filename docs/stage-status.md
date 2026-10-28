@@ -14,6 +14,16 @@ This closes S02's documented freestanding C ABI scope. libc, pthread, locale,
 math, destructors, TLS, async VFS/network and shared-library compatibility are
 explicitly outside S02 and remain separately unclaimed.
 
+## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
+
+The existing bounded kernel process lifecycle now has matching safe `libwoven`
+wrappers for process-group targets, signal dispositions, `kill`, `getpgrp`,
+and `setpgid`. The API rejects invalid signal/group encodings before entering
+the kernel and preserves the established wait/exit sentinels. Focused
+`libwoven` tests (193) and warning-denying Clippy pass. Full S03 acceptance
+for signals, process groups, PTYs/termios, job control, and zombie/wait
+semantics still requires a dedicated kernel/QEMU matrix.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,
