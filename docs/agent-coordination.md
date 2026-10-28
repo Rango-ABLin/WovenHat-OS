@@ -25,8 +25,9 @@ no production-readiness claim is made for those items.
 
 The freestanding musl bootstrap now maps `getpid()` and `getppid()` to the
 native WovenHat syscall numbers and checks both from the executable fixture.
-This remains a bounded static bootstrap; TLS, allocator, threading, and the
-broader syscall surface are still outside the accepted scope.
+The independent `musl-bootstrap-test` loader gate passes on 1/2/4 CPUs with
+exit 33. This remains a bounded static bootstrap; TLS, allocator, threading,
+and the broader syscall surface are still outside the accepted scope.
 
 ## Codex - S03 USB-HID keyboard matrix (2026-10-28)
 

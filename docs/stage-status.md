@@ -147,9 +147,10 @@ fixture. QEMU passed at 1/2/4 CPUs in
 `target/musl-crt-bootstrap-1cpu-debug/` and
 `target/musl-crt-bootstrap-rerun-{2,4}cpu-debug/`. It is not a full musl
 start-main or TLS acceptance. The process-identity increment rebuilds cleanly
-with LLVM into `target/musl-process-identity-bootstrap3/`; a fresh QEMU
-execution of that rebuilt ELF remains required before this increment can be
-marked runtime-accepted.
+with LLVM and runs through the production loader on 1/2/4 CPUs using the
+independent `musl-bootstrap-test` gate. Evidence is retained in
+`target/musl-process-identity-final-{1,2,4}cpu.serial.log` and the rebuilt
+ELF manifest is under `target/musl-process-identity-bootstrap6/`.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 
