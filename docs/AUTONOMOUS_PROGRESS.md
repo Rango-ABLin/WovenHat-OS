@@ -1,5 +1,78 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse live inode with unknown kind
+
+Branch: `auto/wovenhat-development` (base `78e92220`). Working tree was clean.
+
+### Defect / gap
+
+Only two inode kind values are defined: `KIND_FILE` (1) and `KIND_DIR` (2).
+`stage_create` allocates only `KIND_FILE` inodes; `format()` writes exactly one
+`KIND_DIR` inode (the root). Any other kind value is corruption no runtime path
+can produce.
+
+`check()` has guards gated on `kind == KIND_FILE` or `kind == KIND_DIR`, but no
+guard that rejects an unknown kind outright. A live inode with, e.g., `kind = 3`
+slips through every existing check silently:
+
+- The non-root `KIND_DIR` guard fires only for kind == 2.
+- All `KIND_FILE`-specific checks (links, size, data_checksum, block allocation,
+  data checksum verification) are gated on `kind == KIND_FILE`.
+- The orphan-inode scan at the end of `check()` skips non-`KIND_FILE` inodes:
+  `if !node.is_used() || node.kind != KIND_FILE { continue; }`.
+- The bitmap→inode scan passes because no directory entry names the phantom inode,
+  yet its `direct` slots can all be zero (so no allocated blocks to check).
+- Result: `check()` returns `Ok(())` on the corrupt image — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — at the top of the per-inode loop, right after
+the `!node.is_used()` continue and before the non-root `KIND_DIR` check, added:
+
+```rust
+// Only KIND_FILE (1) and KIND_DIR (2) are defined.  `stage_create`
+// allocates only KIND_FILE inodes; `format()` writes exactly one
+// KIND_DIR inode (the root).  Any other value is corruption that no
+// runtime path can produce.  All downstream guards are gated on
+// `node.kind == KIND_FILE` or `node.kind == KIND_DIR`, so an unknown
+// kind slips through every check — the KIND_FILE guards are skipped,
+// the orphan-inode scan at the end skips non-KIND_FILE inodes, and
+// the bitmap→inode check sees no named blocks to verify.
+if !matches!(node.kind, KIND_FILE | KIND_DIR) {
+    return Err(Error::Corrupt);
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added test `check_refuses_a_live_inode_with_unknown_kind`:
+1. Formats a fresh volume (`formatted()`).
+2. For each of four unknown kind values (0, 3, 0xFF, 0xFFFF):
+   a. Forks the image.
+   b. Calls `reseal_inode_mode(&image, 2, 0o100_644)` — inode 2 is the first free slot.
+   c. Calls `reseal_inode_kind(&image, 2, kind)` — sets the unknown kind and reseals.
+   d. Asserts `check()` returns `Err(Corrupt)`.
+   e. Asserts `check()` does not modify the image.
+3. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **58 passed / 0 failed** (was 57; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+Commit: `d9f4a826`
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Unknown kind is now caught for all non-root inode slots. The root inode (KIND_DIR)
+  is the only live inode that is not KIND_FILE; the existing `root.kind != KIND_DIR`
+  guard covers it.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse directory entry with non-zero reserved padding bytes
 
 Branch: `auto/wovenhat-development` (base `26751c10`). Working tree was clean.
