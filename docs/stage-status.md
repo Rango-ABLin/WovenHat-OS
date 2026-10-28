@@ -24,6 +24,13 @@ the kernel and preserves the established wait/exit sentinels. Focused
 for signals, process groups, PTYs/termios, job control, and zombie/wait
 semantics still requires a dedicated kernel/QEMU matrix.
 
+The independent `s03-process-lifecycle-test` now passes on 1/2/4 CPUs with
+QEMU exit 33. Its freestanding Ring-3 probes verify fork/child exit status,
+would-block wait retry, parent-owned reap, process-group assignment, negative
+process-group targeting, SIGTERM safe-point teardown, and status 143. Evidence:
+`target/s03-process-lifecycle-{1,2,4}cpu/`. PTYs/termios, job control, caught
+handler delivery, and broader signal semantics remain open.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,

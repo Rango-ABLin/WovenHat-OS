@@ -11,6 +11,12 @@ perform local range/encoding checks and retain no userspace pointers. This is
 an implementation increment, not full POSIX, PTY, termios, job-control, or
 S03 QEMU qualification.
 
+The independent `s03-process-lifecycle-test` uses two freestanding Ring-3
+probes rather than the shell fixture: one exercises fork/wait/reap and one
+stays runnable until a process-group SIGTERM is delivered. The gate passes on
+1/2/4 CPUs and preserves the scheduler-safe termination and zombie ownership
+boundary.
+
 ## S02 freestanding C ABI boundary (2026-10-28)
 
 `tools/runtime-fixtures/c-abi.c` is a deliberately bounded no-libc C entry

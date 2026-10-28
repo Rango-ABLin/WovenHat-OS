@@ -2494,7 +2494,7 @@ pub fn process_exited(id: ProcessId) -> bool {
 /// dedicated group and terminated through the process-group signal path.
 #[cfg(feature = "s03-process-lifecycle-test")]
 pub fn s03_process_lifecycle_self_test() -> bool {
-    let Some(program) = userspace::create_stub_process() else {
+    let Some(program) = userspace::create_s03_fork_wait_process() else {
         return false;
     };
     let Ok((child, _)) = spawn_user_process("s03-fork-wait", program) else {
@@ -2507,11 +2507,12 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         }
         yield_now();
     }
-    if wait_process(child.as_u64()) != Ok(0) {
+    let first_status = wait_process(child.as_u64());
+    if first_status != Ok(0) {
         return false;
     }
 
-    let Some(group_program) = userspace::create_stub_process() else {
+    let Some(group_program) = userspace::create_s03_group_process() else {
         return false;
     };
     let Ok((group_child, _)) = spawn_user_process("s03-process-group", group_program) else {
@@ -2530,7 +2531,11 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         }
         yield_now();
     }
-    wait_process(group_child.as_u64()) == Ok(143)
+    let status = wait_process(group_child.as_u64());
+    if status != Ok(143) {
+        return false;
+    }
+    true
 }
 
 /// Whether the process named by the raw id `id` is in the table and has not
