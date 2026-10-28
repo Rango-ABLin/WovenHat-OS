@@ -2292,6 +2292,20 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
         .and_then(|space| space.release_dynamic_module(index, generation))
 }
 
+/// Copy and validate a dynamic TLS initializer before any address-space
+/// mutation. The returned length is zero on invalid input or copy failure.
+pub fn validate_dynamic_tls_initializer(user_ptr: u64, initializer_len: u64, memory_size: u64) -> u64 {
+    const MAX_DYNAMIC_TLS_BYTES: usize = 4096;
+    let Ok(initializer_len) = usize::try_from(initializer_len) else { return 0; };
+    let Ok(memory_size) = usize::try_from(memory_size) else { return 0; };
+    if initializer_len > memory_size || memory_size > MAX_DYNAMIC_TLS_BYTES { return 0; }
+    let mut initializer = [0u8; MAX_DYNAMIC_TLS_BYTES];
+    if crate::paging::copy_from_current_user(user_ptr, &mut initializer[..initializer_len]).is_err() {
+        return 0;
+    }
+    initializer_len as u64
+}
+
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
 /// generation-tagged handle is reused.
 pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {

@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS caller-buffer validation ABI (2026-10-28)
+
+Added a bounded kernel validation syscall that checks initializer length versus
+memory size, caps both at 4096 bytes, and copies from the caller pointer before
+any mapping mutation. libwoven and musl constants/wrappers expose the contract;
+the copied template is not yet published until the all-thread map transaction
+completes.
+
 ## Codex - reserved dynamic TLS mapping slots (2026-10-28)
 
 Reserved the tail of the anonymous mapping-slot range for per-thread dynamic

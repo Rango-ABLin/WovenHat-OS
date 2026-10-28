@@ -1,5 +1,12 @@
 # Stage status
 
+## Dynamic TLS caller-buffer validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now validates and copy-checks dynamic TLS initializer buffers before
+mapping work, rejecting oversize, inconsistent, or unreadable inputs. Target
+build and kernel/libwoven warning-denying Clippy pass. Per-thread mapping,
+rollback, and publication remain the next transaction steps.
+
 ## Reserved dynamic TLS mapping slots - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The anonymous allocator now reserves a dedicated tail range for dynamic TLS
