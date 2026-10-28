@@ -3956,6 +3956,53 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S02.C] freestanding ELF load, exit, teardown: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "musl-bootstrap-test")]
+    {
+        let frames = memory::stats().allocated_frames;
+        let processes = task::process_count();
+        let endpoints = ipc::endpoint_count();
+        let bytes = include_bytes!(env!("WOVENHAT_MUSL_BOOTSTRAP_ELF"));
+        let Some(program) = userspace::load_elf_with_argv(bytes, &["s0"]) else {
+            serial::write_line(format_args!("[MUSL] ELF load: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let Ok((pid, _)) = task::spawn_user_process("musl-bootstrap", program) else {
+            serial::write_line(format_args!("[MUSL] process spawn: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let status = loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(status) => break status,
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => {
+                    serial::write_line(format_args!("[MUSL] process wait: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
+        };
+        if status != 42
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
+            || thread::reap_owner(pid.as_u64()) != 0
+        {
+            serial::write_line(format_args!(
+                "[MUSL] exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
+                status,
+                memory::stats().allocated_frames,
+                frames,
+                task::process_count(),
+                processes,
+                ipc::endpoint_count(),
+                endpoints
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[MUSL] process identity and static bootstrap: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage11-2-test")]
     {
         if !thread::structural_self_test() {

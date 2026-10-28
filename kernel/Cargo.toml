@@ -40,6 +40,9 @@ stage11-compiler-test = ["stage11-5-test"]
 stage11-tls-test = ["stage11-2-test"]
 stage11-aslr-test = ["stage11-2-test"]
 s02-c-abi-test = ["qemu-test"]
+# Execute the bounded static musl bootstrap fixture through the production
+# loader and verify process identity plus its existing syscall coverage.
+musl-bootstrap-test = ["qemu-test"]
 stage12-1-test = ["qemu-test"]
 stage12-2-test = ["qemu-test"]
 stage12-3-test = ["qemu-test"]
