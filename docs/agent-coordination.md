@@ -6969,6 +6969,15 @@ Earlier closure-candidate note is superseded by the complete 1/2/4-CPU
 revalidation recorded above; no acceptance claim is made beyond the seven
 reported gates explicitly listed there.
 
+## Codex - Stage 32.9 second-UART debug serial (2026-10-27)
+
+Added the bounded COM2 16550 transport with feature-gated initialization,
+bounded transmit polling, nonblocking receive, loopback self-test, and a
+second-QEMU-serial marker harness. Stage 32.9 passes at 1/2/4 CPUs with exit
+33; target/host warning-denying Clippy and host tests pass. This does not claim
+live GDB command handling, trap entry, register/memory access, or debugger
+session lifecycle. No collision with the parallel desktop reliability work.
+
 ### Subsequent full-matrix diagnosis and repair
 
 Closure candidate: all seven failed desktop stages now pass focused 1-CPU checks with explicit flat contracts, current palette, exact icon masks, and stronger full-panel/notification checks. Stage20.18 now verifies every projected toast pixel plus visible text, resolving the old blank-toast note. Build, all Stage20 feature lints, lower-stage guard lints, and Rust host tests pass. Python host suite passes with Windows elevation required solely by real symbolic-link fixtures; assertions were not bypassed. Starting the complete graphics matrix on 1/2/4 CPUs, preserving all prior artifacts. No acceptance/closure claim yet.

@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev second-UART boundary (2026-10-27)
+
+`kernel/src/debug_serial.rs` owns only COM2 and is independent of the COM1
+kernel log. Its transmit path has a bounded poll budget, receive is
+nonblocking, and the Stage 32.9 loopback test restores normal modem-control
+mode before emitting its marker. GDB framing, trap handling, and debug-session
+authority remain separate layers.
+
+## WovenShell resize surface handoff (2026-10-27)
+
+The shell's `WSIZ`/`WRSZ` protocol permits an owner to release the old shared
+surface before publishing its replacement. During this bounded handoff,
+repaint blits may fail transiently; the shell suppresses only those expected
+errors until the existing resize grace deadline. Client liveness handling and
+post-deadline ownership failures remain unchanged and fail closed.
+
 ## Stage 20 desktop acceptance revalidation (2026-10-27)
 
 The current WovenShell desktop uses the bounded flat compatibility renderer

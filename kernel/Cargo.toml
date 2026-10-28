@@ -155,9 +155,10 @@ stage32-7-test = ["qemu-test", "log-filter", "log-ring"]
 gdb-stub = []
 # Stage 32 WovenDev GDB RSP framing QEMU gate.
 stage32-8-test = ["qemu-test", "gdb-stub"]
-gdb-serial = []
-# Stage 32 WovenDev GDB debug serial port (COM2) QEMU gate.
-stage32-9-test = ["qemu-test", "gdb-serial", "gdb-stub"]
+# Enable the bounded second-UART debugger transport.
+debug-serial = []
+# Stage 32 WovenDev second COM port loopback and transmit gate.
+stage32-9-test = ["qemu-test", "debug-serial"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
