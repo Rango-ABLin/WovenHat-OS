@@ -23,6 +23,7 @@ STAGES={
     '20.10': ('stage20-10-test', '[S20.10] quick settings: PASSED', 'woven-shell-quick-settings', 'quick settings'),
     '20.11': ('stage20-11-test', '[S20.11] lock screen: PASSED', 'woven-shell-lock', 'lock screen'),
     '20.12': ('stage20-12-test', '[S20.12] sign-in: PASSED', 'woven-shell-sign-in', 'sign-in'),
+    '20.19': ('stage20-19-test', '[S20.19] input isolation: PASSED', 'woven-shell-input-isolation', 'input isolation'),
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
     '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
     '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
@@ -93,7 +94,7 @@ def main():
             [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
             cwd=root, env=package_env, text=True,
         ).strip()
-    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13','20.18'):
+    if a.stage in ('20.2','20.3','20.4','20.5','20.6','20.7','20.8','20.9','20.10','20.11','20.12','20.13','20.18','20.19'):
         gui_dir=root/'apps'/'hello-gui'
         if subprocess.run(['cargo','build','--release'],cwd=gui_dir,env=app_build_env(gui_dir)).returncode: return 1
         env['WOVENHAT_HELLO_GUI_IMAGE']=str(gui_dir/'target'/'x86_64-unknown-none'/'release'/'wovenhat-hello-gui')

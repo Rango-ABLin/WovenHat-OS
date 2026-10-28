@@ -48,7 +48,12 @@ class FileImageLayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.LayoutError, "harness"):
             MODULE.build(self.image, self.plan)
         link = self.root / "link.img"
-        link.symlink_to(self.image)
+        try:
+            link.symlink_to(self.image)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("symlink creation requires SeCreateSymbolicLinkPrivilege or Developer Mode")
+            raise
         with self.assertRaisesRegex(MODULE.LayoutError, "symlink"):
             MODULE.build(link, self.plan, harness_created=True)
         bad = json.loads(self.plan.read_text(encoding="utf-8"))

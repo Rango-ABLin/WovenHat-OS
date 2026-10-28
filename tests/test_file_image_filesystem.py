@@ -58,7 +58,12 @@ class FileImageFilesystemTests(unittest.TestCase):
 
     def test_refuses_symlink_and_protected_identity(self):
         link = self.root / "link.img"
-        link.symlink_to(self.image)
+        try:
+            link.symlink_to(self.image)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("symlink creation requires SeCreateSymbolicLinkPrivilege or Developer Mode")
+            raise
         with self.assertRaisesRegex(fs.FormatError, "symlink"):
             fs.format_image(link, self.plan, harness_created=True)
         bad = json.loads(self.plan.read_text(encoding="utf-8"))

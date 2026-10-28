@@ -184,7 +184,8 @@ pub fn format(device: &mut impl BlockDevice, label: &[u8; 11]) -> Result<Volume,
     if device.is_read_only() {
         return Err(Error::ReadOnly);
     }
-    let total_sectors = u32::try_from(device.sector_count()).map_err(|_| Error::UnsupportedGeometry)?;
+    let total_sectors =
+        u32::try_from(device.sector_count()).map_err(|_| Error::UnsupportedGeometry)?;
     let geometry = format_geometry(total_sectors).ok_or(Error::UnsupportedGeometry)?;
     let reserved = 32_u32;
     let first_fat = u64::from(reserved);
@@ -222,7 +223,11 @@ pub fn format(device: &mut impl BlockDevice, label: &[u8; 11]) -> Result<Volume,
     let mut fs_info = [0_u8; SECTOR_SIZE];
     write_u32(&mut fs_info, 0, FSINFO_LEAD_SIGNATURE);
     write_u32(&mut fs_info, 484, FSINFO_STRUCT_SIGNATURE);
-    write_u32(&mut fs_info, FSINFO_FREE_COUNT_OFFSET, geometry.cluster_count - 1);
+    write_u32(
+        &mut fs_info,
+        FSINFO_FREE_COUNT_OFFSET,
+        geometry.cluster_count - 1,
+    );
     write_u32(&mut fs_info, FSINFO_NEXT_FREE_OFFSET, 3);
     write_u32(&mut fs_info, 508, FSINFO_TRAIL_SIGNATURE);
     device.write_sector(1, &fs_info).map_err(Error::Block)?;
@@ -235,15 +240,21 @@ pub fn format(device: &mut impl BlockDevice, label: &[u8; 11]) -> Result<Volume,
         write_u32(&mut sector, 0, 0x0fff_fff8);
         write_u32(&mut sector, 4, FAT32_END_MIN);
         write_u32(&mut sector, 8, FAT32_END_MIN);
-        device.write_sector(fat_start, &sector).map_err(Error::Block)?;
+        device
+            .write_sector(fat_start, &sector)
+            .map_err(Error::Block)?;
         sector.fill(0);
         for offset in 1..geometry.fat_size {
-            device.write_sector(fat_start + u64::from(offset), &sector).map_err(Error::Block)?;
+            device
+                .write_sector(fat_start + u64::from(offset), &sector)
+                .map_err(Error::Block)?;
         }
     }
     sector.fill(0);
     for offset in 0..u64::from(geometry.sectors_per_cluster) {
-        device.write_sector(root_lba + offset, &sector).map_err(Error::Block)?;
+        device
+            .write_sector(root_lba + offset, &sector)
+            .map_err(Error::Block)?;
     }
     device.flush().map_err(Error::Block)?;
     mount(device)
@@ -256,12 +267,19 @@ fn format_geometry(total_sectors: u32) -> Option<FormatGeometry> {
         for _ in 0..4 {
             let clusters = data_sectors.checked_sub(fat_size.checked_mul(2)?)?
                 / u32::from(sectors_per_cluster);
-            fat_size = clusters.checked_add(2)?.checked_mul(4)?.div_ceil(SECTOR_SIZE as u32);
+            fat_size = clusters
+                .checked_add(2)?
+                .checked_mul(4)?
+                .div_ceil(SECTOR_SIZE as u32);
         }
-        let cluster_count = data_sectors.checked_sub(fat_size.checked_mul(2)?)?
-            / u32::from(sectors_per_cluster);
+        let cluster_count =
+            data_sectors.checked_sub(fat_size.checked_mul(2)?)? / u32::from(sectors_per_cluster);
         if (FAT32_MIN_CLUSTERS..=0x0fff_ffef).contains(&cluster_count) {
-            return Some(FormatGeometry { sectors_per_cluster, fat_size, cluster_count });
+            return Some(FormatGeometry {
+                sectors_per_cluster,
+                fat_size,
+                cluster_count,
+            });
         }
     }
     None
@@ -1735,17 +1753,12 @@ pub fn space_info(device: &mut impl BlockDevice, volume: Volume) -> Result<Space
 /// hint older than the FAT even when the volume remains mountable.  Never
 /// trust that hint for allocation until a bounded FAT scan has repaired it.
 /// Returns whether either primary or backup FSINFO was rewritten.
-pub fn repair_fs_info(
-    device: &mut impl BlockDevice,
-    volume: Volume,
-) -> Result<bool, Error> {
+pub fn repair_fs_info(device: &mut impl BlockDevice, volume: Volume) -> Result<bool, Error> {
     let space = space_info(device, volume)?;
     let Some(mut info) = read_fs_info(device, volume)? else {
         return Ok(false);
     };
-    let repaired_next = space
-        .first_free_cluster
-        .unwrap_or(FSINFO_UNKNOWN);
+    let repaired_next = space.first_free_cluster.unwrap_or(FSINFO_UNKNOWN);
     if info.free_count == space.free_clusters && info.next_free == repaired_next {
         return Ok(false);
     }

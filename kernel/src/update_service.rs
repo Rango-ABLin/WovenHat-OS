@@ -445,11 +445,9 @@ pub fn service_ipc_self_test(update_image: &[u8]) -> bool {
     ) else {
         return fail("daemon restart load failed");
     };
-    let Ok((restarted_pid, _, _)) = crate::task::spawn_user_system_service(
-        "woven-update",
-        restarted_program,
-        capabilities,
-    ) else {
+    let Ok((restarted_pid, _, _)) =
+        crate::task::spawn_user_system_service("woven-update", restarted_program, capabilities)
+    else {
         return fail("daemon restart spawn failed");
     };
     let restart_deadline = crate::timer::ticks().wrapping_add(500);
@@ -470,10 +468,9 @@ pub fn service_ipc_self_test(update_image: &[u8]) -> bool {
         let _ = reap(restarted_pid);
         return fail("daemon restart publication failed");
     }
-    let Ok(restarted_handle) = crate::ipc::discover_service(
-        restarted_pid.as_u64(),
-        b"woven.update",
-    ) else {
+    let Ok(restarted_handle) =
+        crate::ipc::discover_service(restarted_pid.as_u64(), b"woven.update")
+    else {
         let _ = reap(restarted_pid);
         return fail("daemon restart discovery failed");
     };

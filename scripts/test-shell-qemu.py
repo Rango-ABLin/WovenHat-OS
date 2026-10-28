@@ -22,7 +22,7 @@ def build_woven_shell(root):
 
 def apps_installed_marker(app_count: int) -> str:
     """Kernel marker for a fully installed signed system-app catalog."""
-    return f'[APPS] {app_count} signed applications installed'
+    return f'[APPS] {app_count} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes'
 
 
 def normal_boot_serial_errors(log: str, system_apps: bool, app_count: int | None = None) -> list[str]:
@@ -115,8 +115,8 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=4)
-    parser.add_argument('--memory', default='4G',
-                        help='guest RAM passed to QEMU (minimum supported is 4G)')
+    parser.add_argument('--memory', default='5G',
+                        help='guest RAM passed to QEMU (5G configured to leave the 4 GiB usable floor after firmware reservations)')
     parser.add_argument('--system-apps', action='store_true',
                         help='build the production system-app image and verify normal-boot installation')
     parser.add_argument('--hardware-demo', action='store_true',
@@ -299,7 +299,11 @@ def main():
                         # after its first frame before injecting the PIN.
                         time.sleep(1)
                         for key in ['1', '2', '3', '4', 'ret']:
-                            execute('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
+                            execute('input-send-event', {'events': [
+                                {'type': 'key', 'data': {'down': True, 'key': {'type': 'qcode', 'data': key}}},
+                                {'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': key}}},
+                            ]})
+                            time.sleep(0.08)
                             time.sleep(0.12)
                         deadline = time.monotonic() + 15
                         while 'woven-shell: signed in: ada' not in serial.read_text(errors='replace'):

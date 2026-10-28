@@ -72,7 +72,12 @@ fn decode_check(bytes: &[u8; CHECK_BYTES]) -> CheckReport {
 pub fn status() -> Result<Status, crate::Error> {
     let mut bytes = [0u8; STATUS_BYTES];
     crate::check(unsafe {
-        crate::syscall::invoke(crate::syscall::RECOVERY_QUERY, OP_STATUS, bytes.as_mut_ptr() as u64, 0)
+        crate::syscall::invoke(
+            crate::syscall::RECOVERY_QUERY,
+            OP_STATUS,
+            bytes.as_mut_ptr() as u64,
+            0,
+        )
     })?;
     Ok(decode_status(&bytes))
 }

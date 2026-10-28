@@ -18,25 +18,141 @@
 //! exit-status payload. After checking the full-width error sentinels, casting
 //! that payload to `i32` recovers negative statuses, including -1 and -2.
 
+extern crate alloc;
+
+#[cfg(all(feature = "userspace-allocator", not(test)))]
+mod userspace_allocator {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    const ARENA_BYTES: u64 = 64 * 1024;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static END: AtomicU64 = AtomicU64::new(0);
+
+    struct Arena;
+
+    unsafe impl GlobalAlloc for Arena {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if layout.size() == 0 {
+                return layout.align() as *mut u8;
+            }
+            let mut next = NEXT.load(Ordering::Acquire);
+            loop {
+                if next == 0 {
+                    // SAFETY: mmap returns a private writable mapping for this
+                    // process and takes no userspace pointers.
+                    let base = unsafe { crate::syscall::invoke(8, ARENA_BYTES, 1, 0) };
+                    if base == crate::syscall::ERROR {
+                        return core::ptr::null_mut();
+                    }
+                    if NEXT
+                        .compare_exchange(0, base, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err()
+                    {
+                        next = NEXT.load(Ordering::Acquire);
+                        continue;
+                    }
+                    END.store(base.saturating_add(ARENA_BYTES), Ordering::Release);
+                    next = base;
+                }
+                let aligned = match next.checked_add(layout.align() as u64 - 1) {
+                    Some(value) => value & !(layout.align() as u64 - 1),
+                    None => return core::ptr::null_mut(),
+                };
+                let end = match aligned.checked_add(layout.size() as u64) {
+                    Some(value) => value,
+                    None => return core::ptr::null_mut(),
+                };
+                if end > END.load(Ordering::Acquire) {
+                    return core::ptr::null_mut();
+                }
+                if NEXT
+                    .compare_exchange(next, end, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return aligned as *mut u8;
+                }
+                next = NEXT.load(Ordering::Acquire);
+            }
+        }
+
+        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Arena = Arena;
+}
+
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
+
+    /// A bounded process or process-group signal target.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalTarget {
+        Process(Id),
+        CurrentGroup,
+        Group(u64),
+    }
+
+    /// The dispositions supported by the bounded process-lifecycle ABI.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalDisposition {
+        Default,
+        Ignore,
+        Handler(u64),
+    }
 }
+pub mod terminal {
+    pub const TCGETS: u64 = 0x5401;
+    pub const TCSETS: u64 = 0x5402;
+    pub const TIOCGPGRP: u64 = 0x540f;
+    pub const TIOCSPGRP: u64 = 0x5410;
+    pub const TIOCGPTN: u64 = 0x8004_5430;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Termios {
+        pub input_flags: u32,
+        pub output_flags: u32,
+        pub control_flags: u32,
+        pub local_flags: u32,
+        pub control_chars: [u8; 8],
+    }
+
+    impl Termios {
+        pub const DEFAULT: Self = Self {
+            input_flags: 0x0000_0500,
+            output_flags: 0x0000_0001,
+            control_flags: 0x0000_00b0,
+            local_flags: 0x0000_000b,
+            control_chars: [3, 28, 127, 21, 4, 0, 0, 0],
+        };
+    }
+}
+pub mod abi;
 pub mod accessibility;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
+pub mod browser;
+pub mod javascript;
+pub mod codecs;
 pub mod i18n;
+pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
+pub mod media;
 pub mod package;
 pub mod package_ipc;
+pub mod recovery;
 pub mod semantic_search;
 pub mod store;
+pub mod ui;
 pub mod update_ipc;
-pub mod recovery;
+pub mod web;
 
 #[cfg(test)]
 #[path = "../../kernel/src/exit_status.rs"]
@@ -590,6 +706,338 @@ pub mod graphics {
         pub script_tag: Option<[u8; 4]>,
         pub language_tag: Option<[u8; 4]>,
         pub ppem: Option<u16>,
+    }
+
+    /// Maximum number of faces in a bounded fallback chain.  The chain is
+    /// caller-owned so font bytes can remain in the VFS/cache that loaded
+    /// them; this type never copies or retains font data.
+    pub const MAX_FALLBACK_FONTS: usize = 8;
+    /// Maximum number of character-to-face decisions retained by one chain.
+    pub const MAX_GLYPH_CACHE: usize = 128;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct GlyphCacheEntry {
+        character: char,
+        face: u8,
+        glyph_id: u16,
+        advance: u16,
+    }
+
+    /// A bounded, deterministic font fallback chain.  Face selection is
+    /// fail-closed: a face is eligible only when it maps the scalar and has a
+    /// usable advance.  The cache stores only validated IDs and metrics, so a
+    /// later font-byte eviction cannot leave an unsafe pointer behind.
+    pub struct FontFallback<'a> {
+        faces: [Option<&'a TrueTypeFace<'a>>; MAX_FALLBACK_FONTS],
+        face_count: usize,
+        cache: [Option<GlyphCacheEntry>; MAX_GLYPH_CACHE],
+        next_cache: usize,
+    }
+
+    impl<'a> FontFallback<'a> {
+        pub const fn new() -> Self {
+            Self {
+                faces: [None; MAX_FALLBACK_FONTS],
+                face_count: 0,
+                cache: [None; MAX_GLYPH_CACHE],
+                next_cache: 0,
+            }
+        }
+
+        /// Add a face in priority order.  Additional faces are rejected
+        /// without changing the existing chain.
+        pub fn push(&mut self, face: &'a TrueTypeFace<'a>) -> bool {
+            if self.face_count >= MAX_FALLBACK_FONTS {
+                return false;
+            }
+            self.faces[self.face_count] = Some(face);
+            self.face_count += 1;
+            true
+        }
+
+        pub const fn len(&self) -> usize {
+            self.face_count
+        }
+
+        pub const fn is_empty(&self) -> bool {
+            self.face_count == 0
+        }
+
+        /// Resolve a scalar to its highest-priority face and validated glyph
+        /// metrics.  Results are cached in a fixed-size round-robin table.
+        pub fn resolve(&mut self, character: char) -> Option<(usize, u16, u16)> {
+            if let Some(entry) = self
+                .cache
+                .iter()
+                .flatten()
+                .find(|entry| entry.character == character)
+            {
+                return Some((usize::from(entry.face), entry.glyph_id, entry.advance));
+            }
+            for (index, face) in self.faces[..self.face_count].iter().flatten().enumerate() {
+                let Some(glyph_id) = face.glyph_index(character) else {
+                    continue;
+                };
+                let Some(advance) = face.advance_width(character) else {
+                    continue;
+                };
+                let entry = GlyphCacheEntry {
+                    character,
+                    face: u8::try_from(index).ok()?,
+                    glyph_id,
+                    advance,
+                };
+                self.cache[self.next_cache] = Some(entry);
+                self.next_cache = (self.next_cache + 1) % MAX_GLYPH_CACHE;
+                return Some((index, glyph_id, advance));
+            }
+            None
+        }
+
+        pub fn face(&self, index: usize) -> Option<&'a TrueTypeFace<'a>> {
+            (index < self.face_count)
+                .then(|| self.faces[index])
+                .flatten()
+        }
+
+        pub fn clear_cache(&mut self) {
+            self.cache = [None; MAX_GLYPH_CACHE];
+            self.next_cache = 0;
+        }
+    }
+
+    impl Default for FontFallback<'_> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// Maximum UTF-8 storage for one bounded text-input control.
+    pub const MAX_TEXT_INPUT_BYTES: usize = 512;
+    /// Maximum UTF-8 storage for one active IME preedit string.
+    pub const MAX_IME_PREEDIT_BYTES: usize = 256;
+
+    /// Allocation-free UTF-8 text editing state for controls and IME
+    /// adapters. Cursor and selection offsets are always byte offsets at
+    /// scalar boundaries; malformed UTF-8 cannot be created through this API.
+    pub struct TextInputState {
+        bytes: [u8; MAX_TEXT_INPUT_BYTES],
+        len: usize,
+        cursor: usize,
+        anchor: Option<usize>,
+        preedit: [u8; MAX_IME_PREEDIT_BYTES],
+        preedit_len: usize,
+    }
+
+    impl TextInputState {
+        pub const fn new() -> Self {
+            Self {
+                bytes: [0; MAX_TEXT_INPUT_BYTES],
+                len: 0,
+                cursor: 0,
+                anchor: None,
+                preedit: [0; MAX_IME_PREEDIT_BYTES],
+                preedit_len: 0,
+            }
+        }
+
+        pub fn as_str(&self) -> &str {
+            core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
+        }
+
+        pub const fn len_bytes(&self) -> usize {
+            self.len
+        }
+
+        pub const fn cursor(&self) -> usize {
+            self.cursor
+        }
+
+        pub fn selection(&self) -> Option<(usize, usize)> {
+            let anchor = self.anchor?;
+            Some((anchor.min(self.cursor), anchor.max(self.cursor)))
+        }
+
+        pub fn select_all(&mut self) {
+            self.anchor = Some(0);
+            self.cursor = self.len;
+        }
+
+        pub fn clear_selection(&mut self) {
+            self.anchor = None;
+        }
+
+        fn delete_selection(&mut self) -> bool {
+            let Some((start, end)) = self.selection() else {
+                return false;
+            };
+            if start == end {
+                self.anchor = None;
+                return false;
+            }
+            self.bytes.copy_within(end..self.len, start);
+            self.len -= end - start;
+            self.cursor = start;
+            self.anchor = None;
+            true
+        }
+
+        pub fn insert(&mut self, character: char) -> bool {
+            let mut encoded = [0u8; 4];
+            let encoded = character.encode_utf8(&mut encoded).as_bytes();
+            self.delete_selection();
+            if self.len.saturating_add(encoded.len()) > MAX_TEXT_INPUT_BYTES {
+                return false;
+            }
+            self.bytes
+                .copy_within(self.cursor..self.len, self.cursor + encoded.len());
+            self.bytes[self.cursor..self.cursor + encoded.len()].copy_from_slice(encoded);
+            self.len += encoded.len();
+            self.cursor += encoded.len();
+            true
+        }
+
+        pub fn backspace(&mut self) -> bool {
+            if self.delete_selection() {
+                return true;
+            }
+            let Some(previous) = self.as_str()[..self.cursor].char_indices().next_back() else {
+                return false;
+            };
+            self.bytes.copy_within(self.cursor..self.len, previous.0);
+            self.len -= self.cursor - previous.0;
+            self.cursor = previous.0;
+            true
+        }
+
+        pub fn delete(&mut self) -> bool {
+            if self.delete_selection() {
+                return true;
+            }
+            let Some(character) = self.as_str()[self.cursor..].chars().next() else {
+                return false;
+            };
+            let width = character.len_utf8();
+            self.bytes
+                .copy_within(self.cursor + width..self.len, self.cursor);
+            self.len -= width;
+            true
+        }
+
+        pub fn move_left(&mut self, extend_selection: bool) {
+            if !extend_selection && let Some((start, _end)) = self.selection() {
+                self.cursor = start;
+                self.anchor = None;
+                return;
+            }
+            if let Some(previous) = self.as_str()[..self.cursor].char_indices().next_back() {
+                self.cursor = previous.0;
+            }
+            if !extend_selection {
+                self.anchor = None;
+            }
+        }
+
+        pub fn move_right(&mut self, extend_selection: bool) {
+            if !extend_selection && let Some((_start, end)) = self.selection() {
+                self.cursor = end;
+                self.anchor = None;
+                return;
+            }
+            if let Some(character) = self.as_str()[self.cursor..].chars().next() {
+                self.cursor += character.len_utf8();
+            }
+            if !extend_selection {
+                self.anchor = None;
+            }
+        }
+
+        pub fn begin_selection(&mut self) {
+            self.anchor.get_or_insert(self.cursor);
+        }
+
+        /// Replace the active IME preedit. Invalid UTF-8 or an over-capacity
+        /// composition is rejected without changing the previous preedit.
+        pub fn composition_update(&mut self, text: &str) -> bool {
+            if text.len() > MAX_IME_PREEDIT_BYTES || core::str::from_utf8(text.as_bytes()).is_err()
+            {
+                return false;
+            }
+            self.preedit[..text.len()].copy_from_slice(text.as_bytes());
+            self.preedit_len = text.len();
+            true
+        }
+
+        pub fn composition_active(&self) -> bool {
+            self.preedit_len != 0
+        }
+
+        pub fn preedit(&self) -> &str {
+            core::str::from_utf8(&self.preedit[..self.preedit_len]).unwrap_or("")
+        }
+
+        pub fn composition_cancel(&mut self) {
+            self.preedit_len = 0;
+        }
+
+        /// Commit the preedit transactionally into the main text buffer. If
+        /// any scalar would exceed the bounded control capacity, the main
+        /// text and selection are restored and the preedit remains active.
+        pub fn composition_commit(&mut self) -> bool {
+            if self.preedit_len == 0 {
+                return true;
+            }
+            let bytes = self.preedit;
+            let length = self.preedit_len;
+            let old_bytes = self.bytes;
+            let old_len = self.len;
+            let old_cursor = self.cursor;
+            let old_anchor = self.anchor;
+            let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+            for character in text.chars() {
+                if !self.insert(character) {
+                    self.bytes = old_bytes;
+                    self.len = old_len;
+                    self.cursor = old_cursor;
+                    self.anchor = old_anchor;
+                    return false;
+                }
+            }
+            self.preedit_len = 0;
+            true
+        }
+    }
+
+    impl Default for TextInputState {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// Reorder one UTF-8 paragraph using the full Unicode Bidirectional
+    /// Algorithm (UAX #9). The result is caller-owned and bounded; this API
+    /// does not silently truncate visual text.
+    pub fn reorder_text_uax9(text: &str, output: &mut [char]) -> Result<usize, TrueTypeError> {
+        let bidi = unicode_bidi::BidiInfo::new(text, None);
+        let mut count = 0;
+        for (paragraph_index, paragraph) in bidi.paragraphs.iter().enumerate() {
+            let visual = bidi.reorder_line(paragraph, paragraph.range.clone());
+            for character in visual.chars() {
+                if count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                output[count] = character;
+                count += 1;
+            }
+            if paragraph_index + 1 < bidi.paragraphs.len() {
+                if count >= output.len() {
+                    return Err(TrueTypeError::TooLarge);
+                }
+                output[count] = '\n';
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -10158,7 +10606,13 @@ pub mod graphics {
 
     impl Vertex3Field {
         pub const fn new(x: i32, y: i32, depth: u16, source_x: i32, source_y: i32) -> Self {
-            Self { x, y, depth, source_x, source_y }
+            Self {
+                x,
+                y,
+                depth,
+                source_x,
+                source_y,
+            }
         }
     }
 
@@ -11559,12 +12013,19 @@ pub mod syscall {
     pub const CHDIR: u64 = 20;
     pub const GETCWD: u64 = 21;
     pub const GETPPID: u64 = 25;
+    pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
     pub const UNLINK: u64 = 28;
     pub const SLEEP: u64 = 29;
     pub const RENAME: u64 = 30;
     pub const GETTICKS: u64 = 31;
     pub const SYNC: u64 = 32;
+    pub const IOCTL: u64 = 33;
+    pub const SIGACTION: u64 = 34;
+    pub const GETPGRP: u64 = 35;
+    pub const SETPGID: u64 = 36;
+    pub const GETSID: u64 = 244;
+    pub const SETSID: u64 = 245;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
     pub const ENV_COUNT: u64 = 53;
@@ -11635,6 +12096,7 @@ pub mod syscall {
     pub const RECOVERY_QUERY: u64 = 240;
     pub const INSTALLER_INVENTORY: u64 = 241;
     pub const INSTALLER_INSTALL: u64 = 242;
+    pub const ABI_NEGOTIATE: u64 = 243;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -11759,6 +12221,64 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn getppid() -> u64 {
         unsafe { invoke(GETPPID, 0, 0, 0) }
+    }
+
+    /// Send a signal to a process or process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn kill(target: u64, signal: u64) -> u64 {
+        unsafe { invoke(KILL, target, signal, 0) }
+    }
+
+    /// Read or replace the current process's signal disposition.
+    ///
+    /// # Safety
+    /// `handler`, when greater than one, must be a candidate userspace code
+    /// address. The kernel validates that it belongs to the current image.
+    pub unsafe fn sigaction(signal: u64, handler: u64) -> u64 {
+        unsafe { invoke(SIGACTION, signal, handler, 0) }
+    }
+
+    /// Return the current process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getpgrp() -> u64 {
+        unsafe { invoke(GETPGRP, 0, 0, 0) }
+    }
+
+    /// Set a process group using the kernel's zero-value conventions.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setpgid(pid: u64, group: u64) -> u64 {
+        unsafe { invoke(SETPGID, pid, group, 0) }
+    }
+
+    /// Return the session containing `pid`; zero selects the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getsid(pid: u64) -> u64 {
+        unsafe { invoke(GETSID, pid, 0, 0) }
+    }
+
+    /// Create a new session and process group for the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setsid() -> u64 {
+        unsafe { invoke(SETSID, 0, 0, 0) }
+    }
+
+    /// Apply a bounded terminal control request.
+    ///
+    /// # Safety
+    /// `argument` must point to the readable or writable object required by
+    /// the request, and the call must originate from WovenHat userspace.
+    pub unsafe fn ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+        unsafe { invoke(IOCTL, fd, request, argument) }
     }
 
     /// # Safety
@@ -13844,6 +14364,25 @@ pub fn write(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// The kernel intentionally validates each individual user pointer and caps
+/// one syscall transfer. This helper makes that implementation detail
+/// invisible to callers while retaining progress and overflow checks.
+pub fn write_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write bytes to an opened filesystem descriptor. The kernel enforces the
 /// descriptor's owner and `FileWrite` capability before mutating storage.
 pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
@@ -13852,14 +14391,29 @@ pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized file payload through chunked file-write calls.
+pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write_file(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write a string to standard output.
 pub fn print(text: &str) -> Result<usize, Error> {
-    write(syscall::STDOUT, text.as_bytes())
+    write_all(syscall::STDOUT, text.as_bytes())
 }
 
 /// Write a string to standard error.
 pub fn eprint(text: &str) -> Result<usize, Error> {
-    write(syscall::STDERR, text.as_bytes())
+    write_all(syscall::STDERR, text.as_bytes())
 }
 
 /// Read into a buffer, returning the count filled.
@@ -13867,6 +14421,29 @@ pub fn read(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
     // SAFETY: a slice is writable for its own length.
     let result = unsafe { syscall::read(descriptor, buffer.as_mut_ptr(), buffer.len()) };
     check(result).map(|count| count as usize)
+}
+
+/// Fill an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// A short read is returned as normal end-of-stream behavior. Every syscall
+/// still receives a separately validated slice, so this does not weaken the
+/// kernel's pointer or per-call memory checks.
+pub fn read_all(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < buffer.len() {
+        let end = (offset + CHUNK).min(buffer.len());
+        let requested = end - offset;
+        let read = read(descriptor, &mut buffer[offset..end])?;
+        if read == 0 || read > requested {
+            break;
+        }
+        offset += read;
+        if read < requested {
+            break;
+        }
+    }
+    Ok(offset)
 }
 
 /// This process's identifier.
@@ -14115,6 +14692,137 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
 pub fn wait(pid: process::Id) -> Result<u64, Error> {
     // SAFETY: waitpid takes no pointers.
     check(unsafe { syscall::waitpid(pid.0) })
+}
+
+/// Wait for any child process, reaping one exited child when available.
+/// Returns `Error::WouldBlock` while owned children remain live.
+pub fn wait_any_child() -> Result<u64, Error> {
+    // SAFETY: the reserved all-children selector takes no pointers.
+    check(unsafe { syscall::waitpid(u64::MAX) })
+}
+
+/// Send a bounded signal to a process or process group.
+pub fn kill(target: process::SignalTarget, signal: u8) -> Result<(), Error> {
+    if signal > 31 {
+        return Err(Error::Failed);
+    }
+    let encoded_target = match target {
+        process::SignalTarget::Process(id) => id.0,
+        process::SignalTarget::CurrentGroup => 0,
+        process::SignalTarget::Group(0) => return Err(Error::Failed),
+        process::SignalTarget::Group(group) => 0u64.wrapping_sub(group),
+    };
+    check(unsafe { syscall::kill(encoded_target, u64::from(signal)) }).map(|_| ())
+}
+
+/// Read or replace the current process's bounded signal disposition.
+pub fn signal_action(
+    signal: u8,
+    disposition: process::SignalDisposition,
+) -> Result<process::SignalDisposition, Error> {
+    let handler = match disposition {
+        process::SignalDisposition::Default => 0,
+        process::SignalDisposition::Ignore => 1,
+        process::SignalDisposition::Handler(address) if address > 1 => address,
+        process::SignalDisposition::Handler(_) => return Err(Error::Failed),
+    };
+    if signal == 0 || signal > 31 || signal == 9 {
+        return Err(Error::Failed);
+    }
+    let previous = check(unsafe { syscall::sigaction(u64::from(signal), handler) })?;
+    Ok(match previous {
+        0 => process::SignalDisposition::Default,
+        1 => process::SignalDisposition::Ignore,
+        address => process::SignalDisposition::Handler(address),
+    })
+}
+
+/// Return the current process group identifier.
+pub fn process_group() -> Result<u64, Error> {
+    check(unsafe { syscall::getpgrp() })
+}
+
+/// Set a process's bounded process group. `None` selects the caller, and
+/// `None` for `group` applies the kernel's default group convention.
+pub fn set_process_group(process_id: Option<process::Id>, group: Option<u64>) -> Result<(), Error> {
+    if group == Some(0) {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::setpgid(process_id.map_or(0, |id| id.0), group.unwrap_or(0)) })
+        .map(|_| ())
+}
+
+/// Return the caller's session identifier.
+pub fn session() -> Result<u64, Error> {
+    check(unsafe { syscall::getsid(0) })
+}
+
+/// Start a new terminal session and process group for the caller.
+pub fn create_session() -> Result<process::Id, Error> {
+    check(unsafe { syscall::setsid() }).map(process::Id)
+}
+
+/// Read the bounded terminal settings for standard input.
+pub fn terminal_attributes() -> Result<terminal::Termios, Error> {
+    let mut value = terminal::Termios::DEFAULT;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCGETS,
+            (&mut value as *mut terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| value)
+}
+
+/// Replace the bounded terminal settings for standard input.
+pub fn set_terminal_attributes(value: &terminal::Termios) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCSETS,
+            (value as *const terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+/// Read the foreground process group associated with standard input.
+pub fn foreground_process_group() -> Result<u64, Error> {
+    let mut group = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCGPGRP,
+            (&mut group as *mut u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| group)
+}
+
+/// Assign standard input to an existing process group.
+pub fn set_foreground_process_group(group: u64) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCSPGRP,
+            (&group as *const u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+/// Return the bounded PTY number for a master or slave descriptor.
+pub fn pty_number(descriptor: u64) -> Result<u64, Error> {
+    let mut number = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            descriptor,
+            terminal::TIOCGPTN,
+            (&mut number as *mut u64) as u64,
+        )
+    })?;
+    Ok(number)
 }
 
 /// Terminate this process. Never returns.
@@ -14608,6 +15316,63 @@ mod tests {
             TrueTypeFace::from_bytes(b"not-a-font"),
             Err(TrueTypeError::TooSmall)
         ));
+
+        let mut fallback = crate::graphics::FontFallback::new();
+        assert!(fallback.is_empty());
+        assert!(fallback.push(&face));
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+        // The second lookup is served from the bounded cache and remains
+        // stable even after a failed fallback search.
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+        assert_eq!(fallback.resolve('B'), None);
+        fallback.clear_cache();
+        assert_eq!(fallback.resolve('A'), Some((0, 3, 700)));
+    }
+
+    #[test]
+    fn wovengraphics_text_input_preserves_utf8_boundaries_and_selection() {
+        use crate::graphics::TextInputState;
+
+        let mut input = TextInputState::new();
+        assert!(input.insert('A'));
+        assert!(input.insert('界'));
+        assert!(input.insert('Z'));
+        assert_eq!(input.as_str(), "A界Z");
+        input.move_left(false);
+        input.backspace();
+        assert_eq!(input.as_str(), "AZ");
+        input.select_all();
+        assert_eq!(input.selection(), Some((0, 2)));
+        assert!(input.insert('é'));
+        assert_eq!(input.as_str(), "é");
+        input.begin_selection();
+        input.move_left(true);
+        assert_eq!(input.selection(), Some((0, 2)));
+        assert!(input.delete());
+        assert_eq!(input.as_str(), "");
+        assert!(input.composition_update("é界"));
+        assert!(input.composition_active());
+        assert_eq!(input.preedit(), "é界");
+        assert!(input.composition_commit());
+        assert_eq!(input.as_str(), "é界");
+        assert!(!input.composition_active());
+        assert!(input.composition_update("cancelled"));
+        input.composition_cancel();
+        assert!(!input.composition_active());
+    }
+
+    #[test]
+    fn wovengraphics_uax9_reorders_mixed_text_without_truncation() {
+        let mut visual = ['\0'; 32];
+        let count = crate::graphics::reorder_text_uax9("abc אבג, 123", &mut visual).unwrap();
+        let reordered: String = visual[..count].iter().collect();
+        assert_eq!(reordered, "abc 123 ,גבא");
+        let mut tiny = ['\0'; 4];
+        assert!(matches!(
+            crate::graphics::reorder_text_uax9("abc אבג", &mut tiny),
+            Err(crate::graphics::TrueTypeError::TooLarge)
+        ));
     }
 
     #[test]
@@ -14843,6 +15608,24 @@ mod tests {
             );
         }
         assert!(pixels.iter().any(|pixel| *pixel != 0));
+        let mut high_dpi_pixels = [0u32; 80 * 80];
+        {
+            let mut canvas = Canvas::new(&mut high_dpi_pixels, 0, 0, 80, 80).unwrap();
+            let mut renderer = crate::graphics::Renderer::new(&mut canvas);
+            assert_eq!(
+                face.render_glyph(
+                    'A',
+                    crate::graphics::Point::new(8, 72),
+                    400,
+                    crate::graphics::Color::WHITE,
+                    &mut renderer,
+                )
+                .unwrap(),
+                2
+            );
+        }
+        let high_dpi_coverage = high_dpi_pixels.iter().filter(|pixel| **pixel != 0).count();
+        assert!(high_dpi_coverage > 100 && high_dpi_coverage < 2_500);
         let mut placements = [crate::graphics::GlyphPlacement {
             character: '\0',
             origin: crate::graphics::Point::new(0, 0),
@@ -15013,6 +15796,37 @@ mod tests {
         assert_eq!(face.glyph_index('\u{1f600}'), Some(3));
         assert_eq!(face.glyph_index('A'), None);
         assert_eq!(face.advance_width('\u{1f600}'), Some(700));
+    }
+
+    #[test]
+    fn wovengraphics_bundled_ofl_font_validates_multilingual_metrics() {
+        use crate::graphics::TrueTypeFace;
+
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../assets/fonts/NotoSans-Regular.ttf"
+        ));
+        let face = TrueTypeFace::from_bytes(bytes).expect("bundled OFL font must validate");
+        for character in "WovenHat Ελληνικά Кириллица".chars() {
+            if !character.is_whitespace() {
+                assert!(
+                    face.glyph_index(character).is_some(),
+                    "missing {character:?}"
+                );
+                assert!(
+                    face.advance_width(character).is_some(),
+                    "no advance {character:?}"
+                );
+            }
+        }
+        assert!(bytes.len() > 500_000);
+        assert!(face.units_per_em() >= 1_000);
+        assert!(face.glyph_index('W').is_some());
+        assert!(face.glyph_index('Ω').is_some());
+        assert!(face.glyph_index('Ж').is_some());
+        assert!(face.advance_width('W').is_some());
+        assert!(face.advance_width('Ω').is_some());
+        assert!(face.advance_width('Ж').is_some());
     }
 
     #[test]

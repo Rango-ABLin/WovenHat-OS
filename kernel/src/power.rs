@@ -150,8 +150,11 @@ fn capture_cpu_resume_context() -> CpuResumeContext {
 }
 
 /// Restore a validated architectural context and transfer control without a
-/// Rust return. The caller must have validated the context and must provide a
-/// kernel-owned continuation with the same privilege and address-space rules.
+/// Rust return.
+///
+/// # Safety
+/// The caller must have validated the context and must provide a kernel-owned
+/// continuation with the same privilege and address-space rules.
 #[expect(
     unreachable_code,
     reason = "Rust requires a diverging tail after noreturn inline assembly"
@@ -368,6 +371,9 @@ pub fn enter_suspend(
     };
     let write_ok = match write_values {
         (Some(pm1a_value), Some(pm1b_value)) if power.pm1b_control != 0 => {
+            // SAFETY: writes the ACPI PM1b then PM1a control ports (addresses
+            // from the parsed FADT) with the computed SLP_TYP|SLP_EN values to
+            // enter the sleep state.
             unsafe {
                 let mut pm1b = Port::<u16>::new(power.pm1b_control);
                 pm1b.write(pm1b_value);
@@ -425,6 +431,9 @@ extern "C" fn wake_resume_continuation() -> ! {
     }
 }
 
+/// # Safety
+/// `frame` must point at a validated syscall register frame retained by the
+/// pending suspend record, matching the layout the assembly epilogue pops.
 unsafe fn resume_userspace(frame: *mut crate::syscall::UserForkFrame) -> ! {
     // SAFETY: `frame` is the validated syscall frame retained by the pending
     // suspend record. The existing assembly epilogue pops this exact layout
@@ -514,6 +523,9 @@ pub fn resume_context_restore_self_test() -> bool {
     }
     // The continuation never returns: the restored context transfers directly
     // to it and the QEMU test device terminates the guest.
+    // SAFETY: `context` was captured locally and checked `valid()` above, and
+    // the continuation is a kernel-owned diverging fn, satisfying
+    // restore_cpu_resume_context's contract.
     unsafe { restore_cpu_resume_context(&context, restore_self_test_continuation) }
 }
 
