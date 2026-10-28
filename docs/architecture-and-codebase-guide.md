@@ -17,7 +17,9 @@ The initial WovenHat CRT entry is a separate, deliberately small adapter. It
 uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and
 `argv` directly to `main`, then uses musl `_Exit`. It must not be confused with
 the full musl start-main lifecycle, which requires later TLS and aux-vector
-support.
+support. The current syscall adapter also exposes the bounded native process
+identity calls as musl `getpid()`/`getppid()`; this does not imply a complete
+Linux syscall-number compatibility layer.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 
@@ -52,7 +54,10 @@ groups. No PTY namespace or multiplexed line discipline is implied.
 The bounded input path consumes the configured `VINTR` byte and signals the
 foreground group with SIGINT; it does not yet implement a PTY line buffer.
 PS/2 and boot-protocol USB-HID decoder self-tests cover the Ctrl modifier and
-control-byte conversion without claiming hardware-injected runtime coverage.
+control-byte conversion. The headless xHCI/QMP gate
+`scripts/test-s03-keyboard-injection.py` additionally passes on 1/2/4 CPUs,
+proving runtime Ctrl-C delivery to the foreground group and status 130; this
+is emulated device coverage, not physical USB qualification.
 Common default terminating signals now use the same scheduler-safe teardown
 path as SIGINT/SIGTERM; SIGSTOP/SIGCONT state transitions remain outside this
 bounded slice.
@@ -2398,6 +2403,33 @@ matches. The WSI1 fixed-format snapshot includes an FNV-1a checksum and
 round-trips through bounded storage; upsert and removal never expose a partial
 index. Source adapters, ranking evaluation, and a user-facing service remain
 separate work.
+
+### WovenSearch service boundary (2026-10-28)
+
+`libwoven::search_ipc` defines the versioned `WSR1` control frame for the
+`woven.search` Ring-3 service. A request is either `Describe` or a
+bounded UTF-8 `Query`; a fixed-size response contains only request-correlated
+identifier, kind, and score hits. The frame deliberately does not transport
+paths, contents, index updates, or directory enumeration. Consequently,
+discovering the service cannot grant an application filesystem visibility or
+write authority. The service process, source adapters, supervision, and QEMU
+The focused signed service/probe acceptance passes on 1/2/4 CPUs, proving
+publication, query ranking, reaping, and registry cleanup. Production
+`system-apps` boot now publishes it as a fourth supervised service with an
+IPC-only capability set; the signed supervisor gate also kills and recovers
+the search broker itself while preserving that IPC-only registration. Physical
+hardware qualification remains separate work. Production 1/2/4-CPU serial
+evidence is retained under `target/shell-regression/system-apps-{1,2,4}cpu-*`.
+
+`apps/woven-search` is the corresponding freestanding Ring-3 broker. It owns
+one locally seeded, public application catalog and publishes `woven.search`
+with only `Capability::Ipc`; queries run through `Index::search_for` using the
+sender process ID, preserving owner filtering when non-public adapters are
+introduced. The service does not join the WovenStart application catalog and
+receives no file, storage, network, secret, display, or mutation authority.
+`scripts/build-search-service.py` builds and signs that service as a separate
+WAPP artifact. Production boot/supervision and a live IPC acceptance gate are
+the next increment.
 
 ## Stage 23.6 WovenAssistant permissioned action planner (2026-10-20)
 

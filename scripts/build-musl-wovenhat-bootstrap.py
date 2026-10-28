@@ -1,10 +1,11 @@
 """Build the deliberately small genuine-musl static bootstrap subset.
 
 This is not a full musl build and is not a POSIX-conformance claim.  It
-generates musl's required type header, compiles the upstream read/write
-sources against the WovenHat syscall adapter, and archives their objects with
-the cancellation-point bridge.  Startup, errno/TLS, allocator, threads and
-the rest of musl are later, independently accepted increments.
+generates musl's required type header, compiles the bounded upstream
+process/file/I-O sources against the WovenHat syscall adapter, and archives
+their objects with the cancellation-point bridge.  Startup, errno/TLS,
+allocator, threads and the rest of musl are later, independently accepted
+increments.
 """
 
 import argparse
@@ -25,6 +26,8 @@ SOURCES = (
     "ports/musl/src/open.c",
     "vendor/musl/src/exit/_Exit.c",
     "vendor/musl/src/internal/syscall_ret.c",
+    "vendor/musl/src/unistd/getpid.c",
+    "vendor/musl/src/unistd/getppid.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
     "vendor/musl/src/unistd/close.c",
@@ -105,7 +108,7 @@ def main() -> int:
         "sources": {source: sha256(root / source) for source in SOURCES + ASSEMBLY_SOURCES},
         "fixture": {"path": FIXTURE, "sha256": sha256(root / FIXTURE)},
         "qualification": "NOT_QUALIFIED",
-        "scope": "upstream musl read/write objects plus WovenHat cancellation bridge",
+        "scope": "bounded upstream musl process/file/I-O objects plus WovenHat cancellation bridge",
     }
     if (root / "vendor/musl/VERSION").read_text(encoding="utf-8").strip() != MUSL_VERSION:
         raise SystemExit("pinned musl version is not the expected bootstrap source")

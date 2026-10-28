@@ -1758,6 +1758,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 if !service_supervisor::test_update_recovery() {
                     qemu_test_exit_failure();
                 }
+                if !service_supervisor::test_search_recovery() {
+                    qemu_test_exit_failure();
+                }
                 qemu_test_exit_success();
             }
         }
@@ -5158,6 +5161,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S23.5] WovenAI semantic search: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage23-5-search-service-test")]
+    {
+        if !stage23_search_service_self_test() {
+            serial::write_line(format_args!("[S23.5S] WovenSearch service: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S23.5S] WovenSearch service: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage23-6-test")]
     {
         if !stage23_assistant_action_self_test() {
@@ -6572,6 +6584,8 @@ const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_INSTALLER: &[u8] = include_bytes!(env!("WOVENHAT_INSTALLER_IMAGE"));
 #[cfg(feature = "system-apps")]
+const SEARCH_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_IMAGE"));
+#[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER: &[u8] = include_bytes!(env!("WOVENHAT_WALLPAPER_IMAGE"));
 #[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER_MANIFEST: &[u8] = include_bytes!(concat!(
@@ -6608,6 +6622,11 @@ const AI_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_IMAGE"));
     feature = "stage23-3-test"
 ))]
 const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
+
+#[cfg(feature = "stage23-5-search-service-test")]
+const SEARCH_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_IMAGE"));
+#[cfg(feature = "stage23-5-search-service-test")]
+const SEARCH_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_PROBE_IMAGE"));
 
 #[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
 fn stage22_3_package_service_self_test() -> bool {
@@ -7274,6 +7293,104 @@ fn stage23_ai_capability_security_self_test() -> bool {
     true
 }
 
+#[cfg(feature = "stage23-5-search-service-test")]
+fn stage23_search_service_self_test() -> bool {
+    fn fail(reason: &str) -> bool {
+        serial::write_line(format_args!("[S23.5S] {reason}"));
+        false
+    }
+
+    for (label, image) in [
+        ("service", SEARCH_SERVICE_IMAGE),
+        ("probe", SEARCH_PROBE_IMAGE),
+    ] {
+        let Ok(verified) = signed_app::verify_package(image) else {
+            return fail(match label {
+                "service" => "service signature rejected",
+                _ => "probe signature rejected",
+            });
+        };
+        if elf::parse(verified.bytes()).is_err() {
+            return fail(match label {
+                "service" => "service ELF rejected",
+                _ => "probe ELF rejected",
+            });
+        }
+    }
+
+    let Some(service_program) =
+        userspace::load_elf_with_argv_verified(SEARCH_SERVICE_IMAGE, &["/bin/woven-search"])
+    else {
+        return fail("service load failed");
+    };
+    let only_ipc = capability::CapabilitySet::only(capability::Capability::Ipc);
+    let Ok((service_pid, _, _)) =
+        task::spawn_user_system_service("woven-search", service_program, only_ipc)
+    else {
+        return fail("service spawn failed");
+    };
+
+    let publication_deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(libwoven::search_ipc::SERVICE_NAME) {
+            if info.owner == service_pid.as_u64() && info.client_rights == 1 {
+                break;
+            }
+        }
+        if task::process_exited(service_pid)
+            || timer::ticks().wrapping_sub(publication_deadline) < u64::MAX / 2
+        {
+            let _ = task::kill_process(service_pid.as_u64(), 9);
+            return fail("service publication failed");
+        }
+        task::yield_now();
+    }
+
+    let Some(probe_program) = userspace::load_elf_with_argv_verified(
+        SEARCH_PROBE_IMAGE,
+        &["/bin/woven-search", "--probe"],
+    ) else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe load failed");
+    };
+    let Ok((probe_pid, _)) = task::spawn_user_process_with_package_capabilities(
+        "woven-search-probe",
+        probe_program,
+        only_ipc.bits(),
+    ) else {
+        let _ = task::kill_process(service_pid.as_u64(), 9);
+        return fail("probe spawn failed");
+    };
+    let probe_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(probe_pid) {
+        if timer::ticks().wrapping_sub(probe_deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(probe_pid.as_u64(), 9);
+            let _ = task::kill_process(service_pid.as_u64(), 9);
+            return fail("probe timed out");
+        }
+        task::yield_now();
+    }
+    let probe_status = task::wait_process(probe_pid.as_u64()).ok();
+    let _ = task::kill_process(service_pid.as_u64(), 9);
+    let teardown_deadline = timer::ticks().wrapping_add(500);
+    while !task::process_exited(service_pid) {
+        if timer::ticks().wrapping_sub(teardown_deadline) < u64::MAX / 2 {
+            return fail("service teardown timed out");
+        }
+        task::yield_now();
+    }
+    if probe_status != Some(0) {
+        return fail("probe returned failure");
+    }
+    if task::wait_process(service_pid.as_u64()).is_err() {
+        return fail("service reap failed");
+    }
+    if ipc::service_info(libwoven::search_ipc::SERVICE_NAME).is_ok() {
+        return fail("service publication survived owner teardown");
+    }
+    true
+}
+
 #[cfg(feature = "stage23-5-test")]
 fn stage23_semantic_search_self_test() -> bool {
     use libwoven::semantic_search::{Entry, Error, Hit, Index, Kind, MAX_ENCODED_BYTES, MAX_HITS};
@@ -7648,7 +7765,7 @@ fn start_production_system_services() -> bool {
                     "[SERVICES] woven-installer published as pid {}",
                     pid.as_u64()
                 ));
-                return true;
+                break;
             }
         }
         if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
@@ -7656,6 +7773,45 @@ fn start_production_system_services() -> bool {
             serial::write_line(format_args!(
                 "[SERVICES] woven-installer publication failed"
             ));
+            return false;
+        }
+        task::yield_now();
+    }
+
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        SEARCH_SERVICE_IMAGE,
+        &["/bin/woven-search"],
+    ) else {
+        serial::write_line(format_args!("[SERVICES] woven-search load failed"));
+        return false;
+    };
+    let search_capabilities = capability::CapabilitySet::only(capability::Capability::Ipc);
+    let Ok((pid, _, _)) =
+        task::spawn_user_system_service("woven-search", program, search_capabilities)
+    else {
+        serial::write_line(format_args!("[SERVICES] woven-search spawn failed"));
+        return false;
+    };
+    if !service_supervisor::register(service_supervisor::ServiceKind::Search, pid) {
+        serial::write_line(format_args!(
+            "[SERVICES] woven-search supervisor registration failed"
+        ));
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(500);
+    loop {
+        if let Ok(info) = ipc::service_info(libwoven::search_ipc::SERVICE_NAME) {
+            if info.owner == pid.as_u64() && info.client_rights == 1 {
+                serial::write_line(format_args!(
+                    "[SERVICES] woven-search published as pid {}",
+                    pid.as_u64()
+                ));
+                return true;
+            }
+        }
+        if task::process_exited(pid) || timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[SERVICES] woven-search publication failed"));
             return false;
         }
         task::yield_now();

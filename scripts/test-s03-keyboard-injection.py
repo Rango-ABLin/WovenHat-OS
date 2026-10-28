@@ -44,7 +44,9 @@ def main() -> int:
         ["cargo", "run", "--quiet", "--features", "s03-keyboard-injection-test", "--", "--print-image"],
         cwd=root, text=True,
     ).strip()
-    out = root / "target" / "s03-keyboard-injection"
+    # Keep each CPU profile as independent evidence; a later matrix run must
+    # never overwrite the serial log from an earlier profile.
+    out = root / "target" / f"s03-keyboard-injection-{args.cpus}cpu"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
     qemu_log = out / "qemu.log"

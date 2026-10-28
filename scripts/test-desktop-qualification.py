@@ -357,6 +357,16 @@ def build_hardware_demo(output: Path) -> Path:
     env = dict(os.environ)
     env["WOVENHAT_SHELL_IMAGE"] = str(shell_image)
     env["WOVENHAT_PACKAGE_IMAGE"] = service.stdout.strip().splitlines()[-1]
+    search_service = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build-search-service.py")],
+        cwd=ROOT, env=package_env, capture_output=True, text=True,
+    )
+    (output / "search-service-build.log").write_text(
+        search_service.stdout + search_service.stderr, encoding="utf-8"
+    )
+    if search_service.returncode or not search_service.stdout.strip():
+        raise UnsupportedQualification("search service build failed; inspect search-service-build.log")
+    env["WOVENHAT_SEARCH_IMAGE"] = search_service.stdout.strip().splitlines()[-1]
     env["WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"] = TEST_PUBLIC_KEY
     variables = {
         "woven-calculator": "WOVENHAT_CALCULATOR_IMAGE",

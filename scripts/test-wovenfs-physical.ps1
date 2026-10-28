@@ -16,8 +16,8 @@ param(
     # the only thing standing between a test and the wrong disk.
     [int]$DiskNumber = -1,
     [string]$ExpectedModel = 'VendorCo ProductCode USB Device',
-    [long]$ExpectedSize = 8053063680,
-    [string]$ExpectedSerial = '5474001281346643368',
+    [long]$ExpectedSize = 15726735360,
+    [string]$ExpectedSerial = '4045141272666606378',
     [ValidateSet(1, 2, 4)][int]$Cpus = 1,
     [int]$TimeoutSeconds = 240,
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe',

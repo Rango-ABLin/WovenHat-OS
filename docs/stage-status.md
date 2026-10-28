@@ -1,6 +1,36 @@
 # Stage status
 
 ## S05 deterministic memory-pressure and low-memory boundary - 2026-10-28 - CLOSED BOUNDED SCOPE
+## Stage 15.2 physical qualification — 2026-10-28 — READY TO RUN
+
+Physical WovenFS qualification was attempted with the 15 GB VendorCo USB drive
+(serial 4045141272666606378, `\\.\PhysicalDrive2`) and exit 35 was returned.
+Investigation confirmed the failure was in **old code** (the serial log contained
+`[S03.TOSTOP-DIAG]` diagnostics removed by commit `a26937bc`); S10.3 failed with
+`verified=false active=0 owner_reaped=0`, meaning user-space async syscalls were
+never reached.
+
+The current HEAD (`ef3aca4d`) passes S10.3 and all prior gates in every tested
+configuration:
+- `stage10-4-test` on `-machine q35` → exit 33
+- `stage10-4-test` on `-machine pc` (no disk) → exit 33
+- `stage10-4-test` on `-machine pc` + 16 MB virtual ATA image → exit 33
+- `stage15-2-test` on `-machine pc` + 16 MB virtual ATA image → exit 33, all
+  S15.2 sub-tests including `[S15.2] WovenFS physical device: PASSED`
+
+Evidence: `audit-artifacts/s103-q35-check/`, `audit-artifacts/s103-pc-nodisk-check/`,
+`audit-artifacts/s103-pc-virtdisk-check/`, `audit-artifacts/s152-pc-virtdisk-check/`
+
+`scripts/test-wovenfs-physical.ps1` defaults updated to 15 GB drive
+(size 15726735360, serial 4045141272666606378).  Re-run in an elevated
+PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-wovenfs-physical.ps1
+```
+
+**Status: READY TO RUN** — requires elevated PowerShell + 15 GB USB drive plugged in.
+## S05 deterministic memory-pressure and low-memory boundary - 2026-10-28 - ACCEPTED BOUNDED
 
 Added `kernel/src/memory_pressure.rs` as the physical-frame allocation
 boundary's explicit policy signal. Remaining frames are classified
@@ -97,10 +127,15 @@ profile acceptance.
 The same bootstrap now has an executable minimal CRT: `_start` consumes the
 existing loader argv stack, invokes `main(argc, argv)`, and exits through musl
 `_Exit`. The fixture checks its expected `argc`/`argv` prefix and the prior
-denied-write errno behavior. QEMU passed at 1/2/4 CPUs in
+denied-write errno behavior. The bootstrap now also maps musl `getpid()` and
+`getppid()` to the native process-identity syscalls and checks both in the
+fixture. QEMU passed at 1/2/4 CPUs in
 `target/musl-crt-bootstrap-1cpu-debug/` and
 `target/musl-crt-bootstrap-rerun-{2,4}cpu-debug/`. It is not a full musl
-start-main or TLS acceptance.
+start-main or TLS acceptance. The process-identity increment rebuilds cleanly
+with LLVM into `target/musl-process-identity-bootstrap3/`; a fresh QEMU
+execution of that rebuilt ELF remains required before this increment can be
+marked runtime-accepted.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 
@@ -3822,11 +3857,13 @@ pass on immediate retry -- a timing margin in the *test*, not the feature.
 The dedicated deterministic Change-PIN self-test is accepted as Stage 24.59
 above. It opens Quick Settings, enters old/new/confirmation PINs, verifies the
 durable record, rejects the old PIN after relock, and unlocks with the new PIN.
-The existing Stage 20.15-style kernel self-tests drive WovenShell through
-kernel-internal input injection rather than QMP key events specifically
-because QMP timing is flaky (as just observed); a correct test here should
-follow that pattern, not add another QMP-driven gate. This is the next
-concrete follow-up if work returns to this feature.
+The dedicated `scripts/test-s03-keyboard-injection.py` gate now drives the
+real xHCI USB keyboard through QMP and passes on 1/2/4 CPUs, proving Ctrl-C
+delivery to the foreground process group and status 130. Evidence is retained
+under `target/s03-keyboard-injection-{1,2,4}cpu/`. The existing Stage 20.15
+desktop self-tests continue to use kernel-internal input injection for stable
+window journeys; that is complementary to, not a substitute for, this device
+boundary gate.
 
 ## Stage 24.58 physical TPM broker boot activation (2026-10-21)
 
@@ -4797,6 +4834,29 @@ a complete production filesystem/message ingestion pipeline or vector-
 embedding runtime. Source adapters, ranking quality evaluation, and
 user-facing search service integration remain required before release
 readiness.
+
+### WovenSearch service boundary (2026-10-28) — ACCEPTED BOUNDED
+
+`libwoven::search_ipc` now supplies the versioned `WSR1` request/response
+codec for the read-only `woven.search` service. The frame limits queries
+to validated UTF-8 and returns at most eight identifier/kind/score results in
+a fixed 116-byte response. It accepts neither filesystem paths nor index
+mutation, so it introduces no implicit file access. The focused `libwoven`
+suite (196 tests) and warning-denying library Clippy pass.
+
+The companion `apps/woven-search` freestanding broker now builds and signs as
+a separate WAPP service artifact. It publishes only `woven.search`, carries
+only `Ipc` authority, and serves an eleven-entry public application index; it
+is not a twelfth launcher application. The signed service/probe gate passes on
+1/2/4 CPUs, proving publication, query ranking, reaping, and registry cleanup.
+Evidence is retained under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
+Production `system-apps` boot now publishes WovenSearch as the fourth
+supervised service with IPC-only authority; the signed supervisor gate passes
+with `[SERVICES] woven-search published as pid 4`, update recovery, and
+search recovery markers. Launcher builders now provide the signed service
+image quietly. The 1/2/4-CPU production evidence is retained under
+`target/shell-regression/system-apps-{1,2,4}cpu-*`. Physical hardware
+qualification remains open.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 

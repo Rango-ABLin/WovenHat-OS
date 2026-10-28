@@ -10,6 +10,45 @@ durability checks. True physical low-memory qualification and controlled
 power-loss/torn-sector testing remain explicitly deferred release prerequisites;
 no production-readiness claim is made for those items.
 
+## Codex - musl process identity increment (2026-10-28)
+
+The freestanding musl bootstrap now maps `getpid()` and `getppid()` to the
+native WovenHat syscall numbers and checks both from the executable fixture.
+This remains a bounded static bootstrap; TLS, allocator, threading, and the
+broader syscall surface are still outside the accepted scope.
+
+## Codex - S03 USB-HID keyboard matrix (2026-10-28)
+
+The headless xHCI keyboard gate now preserves separate per-CPU evidence and
+passes on 1/2/4 CPUs. QMP Ctrl-C reaches the foreground process group and the
+guest exits with status 130; evidence is under
+`target/s03-keyboard-injection-{1,2,4}cpu/`.
+
+## Codex - WovenSearch supervisor recovery qualification (2026-10-28)
+
+The production Stage 31 supervisor gate now fault-injects both woven-update
+and woven-search. It requires each service to publish a new PID after kill,
+and verifies WovenSearch is re-registered with IPC-only client rights. The
+remaining qualification item for this boundary is physical hardware testing.
+
+## Codex - WovenSearch production startup integration (2026-10-28)
+
+The signed WovenSearch broker is now embedded in `system-apps` boot as a
+fourth supervised service with `Ipc` authority only. Release, desktop, shell,
+and interactive launchers build its WAPP image and pass a quiet image path to
+Cargo. The signed supervisor QEMU gate proves publication alongside
+package/update/installer and now covers update and search restart recovery.
+
+## Codex — WovenSearch service boundary increment (2026-10-28)
+
+Reserved scope: complete the existing Stage 23.5 bounded search core with a
+least-privilege Ring-3 `woven.search` service, fixed versioned IPC frames, and
+an explicit read-only client boundary for desktop applications. This increment
+does not add implicit filesystem crawling, network access, model execution,
+or privileged mutation. Do not concurrently modify `libwoven::semantic_search`,
+the new search IPC module, `apps/woven-search`, or its focused acceptance
+harness. QEMU acceptance remains serialized; no full acceptance chain will be
+started while another owner reservation is present.
 ## Codex - S05 reclaim, writeback, OOM selection, and low-memory qualification (2026-10-28)
 
 Completed the remaining bounded S05 implementation: unpinned file-frame

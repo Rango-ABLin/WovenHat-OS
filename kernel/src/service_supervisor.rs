@@ -5,7 +5,7 @@
 
 use crate::{capability, irq_lock::IrqMutex, task, timer, userspace};
 
-const MAX_SERVICES: usize = 3;
+const MAX_SERVICES: usize = 4;
 const MAX_RESTARTS: u8 = 3;
 const BASE_BACKOFF_TICKS: u64 = 100;
 
@@ -14,6 +14,7 @@ pub enum ServiceKind {
     Package,
     Update,
     Installer,
+    Search,
 }
 
 #[derive(Clone, Copy)]
@@ -190,6 +191,12 @@ fn spawn(kind: ServiceKind) -> Result<task::ProcessId, task::ProcessError> {
             &["/bin/wovenhat-installer", "--service"],
             capabilities,
         ),
+        ServiceKind::Search => spawn_one(
+            "woven-search",
+            crate::SEARCH_SERVICE_IMAGE,
+            &["/bin/woven-search"],
+            capability::CapabilitySet::only(capability::Capability::Ipc),
+        ),
     }
 }
 
@@ -210,6 +217,7 @@ fn name(kind: ServiceKind) -> &'static str {
         ServiceKind::Package => "woven-package",
         ServiceKind::Update => "woven-update",
         ServiceKind::Installer => "woven-installer",
+        ServiceKind::Search => "woven-search",
     }
 }
 
@@ -262,6 +270,60 @@ pub fn test_update_recovery() -> bool {
         if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
             crate::serial::write_line(format_args!(
                 "[STAGE31 SUPERVISOR] update recovery: timeout"
+            ));
+            return false;
+        }
+        task::yield_now();
+    }
+}
+
+/// Kill and recover the production search broker through the same supervisor
+/// path used for all system services.  The broker is intentionally checked for
+/// its IPC-only registration so a restart cannot silently broaden authority.
+#[cfg(feature = "stage31-service-supervisor-test")]
+pub fn test_search_recovery() -> bool {
+    let Ok(before) = crate::ipc::service_info(b"woven.search") else {
+        crate::serial::write_line(format_args!(
+            "[STAGE31 SUPERVISOR] search recovery: missing initial publication"
+        ));
+        return false;
+    };
+    let Some(old_pid) = ({
+        let state = STATE.lock();
+        state
+            .entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.kind == ServiceKind::Search)
+            .and_then(|entry| entry.pid)
+    }) else {
+        crate::serial::write_line(format_args!(
+            "[STAGE31 SUPERVISOR] search recovery: supervisor lost initial PID"
+        ));
+        return false;
+    };
+    if old_pid.as_u64() != before.owner || task::kill_process(old_pid.as_u64(), 9).is_err() {
+        crate::serial::write_line(format_args!(
+            "[STAGE31 SUPERVISOR] search recovery: initial kill failed"
+        ));
+        return false;
+    }
+
+    let deadline = timer::ticks().wrapping_add(2_000);
+    loop {
+        poll();
+        if let Ok(after) = crate::ipc::service_info(b"woven.search") {
+            if after.owner != before.owner && after.client_rights == 1 {
+                crate::serial::write_line(format_args!(
+                    "[STAGE31 SUPERVISOR] search recovery: PASSED old={} new={}",
+                    before.owner, after.owner
+                ));
+                return true;
+            }
+        }
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            crate::serial::write_line(format_args!(
+                "[STAGE31 SUPERVISOR] search recovery: timeout"
             ));
             return false;
         }
