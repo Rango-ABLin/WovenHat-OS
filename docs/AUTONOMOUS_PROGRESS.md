@@ -1,5 +1,77 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse free inode with nonzero fields
+
+Branch: `auto/wovenhat-development` (base `69f69984`). Working tree was clean.
+
+### Defect / gap
+
+`check()` immediately `continue`s when `!node.is_used()` (mode == 0) without
+verifying that the remaining inode fields are zero.
+
+`Inode::empty()` zeroes every field — `mode`, `links`, `size`, `created`,
+`modified`, `data_checksum`, `kind`, and all `direct[]` entries.  `format()`
+zeroes inode slots directly (no encode call); `stage_unlink` writes
+`Inode::empty()` to free an occupied slot.  No runtime path can therefore leave
+a non-zero `links`, `size`, `data_checksum`, `kind`, or `direct[i]` in a free
+inode slot.
+
+A crafted image can reseal the structural checksum after patching any of those
+fields while leaving `mode == 0`.  `Inode::decode()` accepts the image
+(checksum valid), returns the inode with the non-zero field, and `check()`
+silently continues — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — replaced the bare `continue` on
+`!node.is_used()` with an explicit guard before continuing:
+
+```rust
+if !node.is_used() {
+    // `Inode::empty()` zeroes every field. ... no runtime path can leave
+    // non-zero links, size, data_checksum, kind, or any direct entry in a
+    // free inode (mode == 0). ...
+    if node.links != 0
+        || node.size != 0
+        || node.data_checksum != 0
+        || node.kind != 0
+        || node.direct.iter().any(|&b| b != 0)
+    {
+        return Err(Error::Corrupt);
+    }
+    continue;
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_free_inode_with_nonzero_fields`:
+1. Formats a fresh volume (inode 2 is the first free slot).
+2. For each of five cases — `links = 1`, `size = 1`, non-zero `data_checksum`,
+   `kind = 1`, `direct[0] = 1` — forks the image, patches that field via the
+   existing `reseal_inode_*` helpers (resealing the structural checksum so
+   `mount()` accepts the image), and asserts `check()` returns `Err(Corrupt)`
+   and does not modify the image.
+3. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **60 passed / 0 failed** (was 59; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard covers `links`, `size`, `data_checksum`, `kind`, and `direct[]`;
+  `created` and `modified` timestamps are not checked (they do not affect
+  structural invariants and no runtime path leaves them non-zero in a free
+  inode, but this guard does not verify that explicitly).
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse free directory entry with nonzero fields
 
 Branch: `auto/wovenhat-development` (base `d9f4a826`). Working tree was clean.

@@ -3008,3 +3008,108 @@ fn check_refuses_a_free_directory_entry_with_nonzero_fields() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a free inode with any non-zero field beyond `mode`.
+///
+/// `Inode::empty()` zeroes every field; `format()` zeroes inode slots directly
+/// (no encode call); `stage_unlink` writes `Inode::empty()` to free a slot.
+/// No runtime path can therefore produce a free inode (mode == 0) with a
+/// non-zero `links`, `size`, `data_checksum`, `kind`, or `direct[i]` entry.
+/// A crafted image with a resealed structural checksum passes `Inode::decode()`
+/// while hiding the corruption from every per-field check, so without an
+/// explicit guard `check()` silently accepts the corrupt image.
+#[test]
+fn check_refuses_a_free_inode_with_nonzero_fields() {
+    let base = formatted();
+    // Inode 2 is the first free slot after the root (inode 1) on a freshly
+    // formatted volume.
+
+    // Non-zero links.
+    {
+        let image = base.fork(None);
+        reseal_inode_links(&image, 2, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with links = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (links)"
+        );
+    }
+
+    // Non-zero size.
+    {
+        let image = base.fork(None);
+        reseal_inode_size(&image, 2, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with size = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (size)"
+        );
+    }
+
+    // Non-zero data_checksum.
+    {
+        let image = base.fork(None);
+        reseal_inode_data_checksum(&image, 2, b"corrupt");
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with non-zero data_checksum"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (data_checksum)"
+        );
+    }
+
+    // Non-zero kind.
+    {
+        let image = base.fork(None);
+        reseal_inode_kind(&image, 2, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with kind = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (kind)"
+        );
+    }
+
+    // Non-zero direct[0].
+    {
+        let image = base.fork(None);
+        reseal_inode_direct(&image, 2, 0, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with direct[0] = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (direct[0])"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
