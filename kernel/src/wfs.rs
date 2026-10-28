@@ -1430,6 +1430,18 @@ impl<D: BlockDevice> Volume<D> {
         }
 
         let root = self.inode(sb.root_inode)?;
+        // `format()` hardcodes `root.mode = 0o040_755` and no runtime path
+        // ever modifies a directory inode's `mode` field: `stage_create` sets
+        // `mode` only on freshly allocated file inodes, not on the directory.
+        // Any value other than `0o040_755` is corruption that `format()` cannot
+        // have produced.  A mode of zero is already caught by the bitmap orphan
+        // scan (root_block would appear allocated but unnamed by a live inode),
+        // but any non-zero invalid mode evades every earlier check — the inode
+        // is still "live", its block passes the bitmap scan, and no structural
+        // check compares this field against the format constant without this guard.
+        if root.mode != 0o040_755 {
+            return Err(Error::Corrupt);
+        }
         if root.kind != KIND_DIR {
             return Err(Error::Corrupt);
         }

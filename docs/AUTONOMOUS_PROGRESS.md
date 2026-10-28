@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with wrong mode
+
+Branch: `auto/wovenhat-development` (base `a6d56119`). Working tree was clean.
+
+### Defect / gap
+
+`format()` hardcodes `root.mode = 0o040_755` and no runtime path ever modifies
+a directory inode's `mode` field: `stage_create` sets `mode` only on freshly
+allocated file inodes, not on the directory.  Any value other than `0o040_755`
+is corruption the runtime cannot have produced.
+
+`check()` already validated `root.kind`, `root.links`, `root.data_checksum`,
+`root.size`, and `root.direct[0]` / `root.direct[1..]`, but never compared
+`root.mode` against the format constant.  A non-zero invalid mode (e.g.
+`0o100_644`) evades every existing guard:
+
+- `is_used()` returns true (mode != 0), so the per-inode loop processes the inode.
+- The `non-root KIND_DIR` guard fires only for non-root inodes with `KIND_DIR`;
+  the root inode number is equal to `root_inode`, so it passes.
+- All `KIND_FILE`-specific checks are skipped for the directory inode.
+- The root_block is still allocated, named by a live inode → bitmap orphan scan passes.
+- None of the root section checks (`kind`, `links`, etc.) compare `mode`.
+- `check()` therefore returns `Ok(())` — wrong.
+
+A mode of zero would be caught by the bitmap orphan scan (root_block appears
+allocated but unnamed), but any non-zero invalid mode passes silently.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — at the start of the root section, before
+the existing `root.kind != KIND_DIR` guard, added:
+
+```rust
+if root.mode != 0o040_755 {
+    return Err(Error::Corrupt);
+}
+```
+
+A ten-line comment explains the `format()` invariant, why zero is already caught
+by the orphan scan, and why non-zero invalid modes evade every earlier check.
+
+**`tests/wovenfs_crash.rs`** — added test `check_refuses_root_directory_inode_with_wrong_mode`:
+1. Formats a fresh volume (`formatted()`).
+2. Reads `root_inode` from the superblock and asserts it is 1.
+3. For each of `1u32`, `0o100_644`, `0o777`, `u32::MAX`:
+   a. Forks the image.
+   b. Calls `reseal_inode_mode(&corrupt, root_inode, mode)` to patch the mode
+      field and re-seal the inode checksum.
+   c. Asserts `check()` returns `Err(Corrupt)`.
+   d. Asserts `check()` does not modify the image.
+4. Control: asserts the unpatched volume passes `check()`.
+
+The test reuses the existing `reseal_inode_mode` helper (patches bytes 0–3 of
+the on-disk inode and re-seals the structural checksum).
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **53 passed / 0 failed** (was 52; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The mode check covers only the fixed `0o040_755` constant that `format()` writes.
+  When directory modes become configurable (future mkdir support), this guard must
+  be relaxed or replaced with a valid-set check.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse non-root KIND_DIR inode
 
 Branch: `auto/wovenhat-development` (base `6d471968`). Working tree was clean.

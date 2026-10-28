@@ -2600,6 +2600,45 @@ fn check_refuses_root_directory_inode_with_nonzero_extra_direct_block() {
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
 
+/// `check()` must refuse the root directory inode when `mode` is not `0o040_755`.
+///
+/// `format()` hardcodes `root.mode = 0o040_755` and no runtime path ever
+/// modifies a directory inode's `mode` field.  Any non-zero value other than
+/// `0o040_755` — e.g. a regular-file mode like `0o100_644` — evades the
+/// bitmap orphan scan (the inode is still "live") and every other structural
+/// check in `check()`.  Only the explicit mode guard at the start of the root
+/// section surfaces the inconsistency.
+#[test]
+fn check_refuses_root_directory_inode_with_wrong_mode() {
+    let base = formatted();
+    let root_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .super_block()
+        .root_inode;
+    assert_eq!(root_inode, 1, "sanity: root inode is always 1");
+
+    for mode in [1u32, 0o100_644, 0o777, u32::MAX] {
+        let corrupt = base.fork(None);
+        reseal_inode_mode(&corrupt, root_inode, mode);
+        let before = corrupt.sectors();
+
+        let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "mode = {mode:#o}: check() must refuse root directory inode with wrong mode"
+        );
+        assert!(
+            corrupt.sectors() == before,
+            "check() must not modify the image (mode = {mode:#o})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
 /// `check()` must refuse a live non-root `KIND_DIR` inode.
 ///
 /// `mkdir` is not implemented: this is a flat, single-directory filesystem.
