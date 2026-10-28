@@ -1,13 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenSearch supervisor recovery qualification (2026-10-28)
+
+The production Stage 31 supervisor gate now fault-injects both woven-update
+and woven-search. It requires each service to publish a new PID after kill,
+and verifies WovenSearch is re-registered with IPC-only client rights. The
+remaining qualification item for this boundary is physical hardware testing.
+
 ## Codex - WovenSearch production startup integration (2026-10-28)
 
 The signed WovenSearch broker is now embedded in `system-apps` boot as a
 fourth supervised service with `Ipc` authority only. Release, desktop, shell,
 and interactive launchers build its WAPP image and pass a quiet image path to
-Cargo. The existing signed supervisor QEMU gate proves publication alongside
-package/update/installer and passes update restart recovery; search-specific
-crash injection remains future work.
+Cargo. The signed supervisor QEMU gate proves publication alongside
+package/update/installer and now covers update and search restart recovery.
 
 ## Codex — WovenSearch service boundary increment (2026-10-28)
 

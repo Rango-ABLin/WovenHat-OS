@@ -1758,6 +1758,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 if !service_supervisor::test_update_recovery() {
                     qemu_test_exit_failure();
                 }
+                if !service_supervisor::test_search_recovery() {
+                    qemu_test_exit_failure();
+                }
                 qemu_test_exit_success();
             }
         }

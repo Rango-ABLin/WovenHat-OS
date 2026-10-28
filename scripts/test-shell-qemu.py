@@ -230,9 +230,12 @@ def main():
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
             if args.supervisor_test:
-                marker = '[STAGE31 SUPERVISOR] update recovery: PASSED'
+                markers = (
+                    '[STAGE31 SUPERVISOR] update recovery: PASSED',
+                    '[STAGE31 SUPERVISOR] search recovery: PASSED',
+                )
                 deadline = time.monotonic() + 240
-                while marker not in serial.read_text(errors='replace'):
+                while not all(marker in serial.read_text(errors='replace') for marker in markers):
                     if process.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Service supervisor recovery gate failed; inspect shell-regression logs')
                     time.sleep(0.1)
@@ -247,6 +250,8 @@ def main():
                         failures.append(f'Guest serial contains fatal evidence: {fatal}')
                 if '[STAGE31 SUPERVISOR] update recovery: timeout' in evidence:
                     failures.append('Supervisor recovery timed out')
+                if '[STAGE31 SUPERVISOR] search recovery: timeout' in evidence:
+                    failures.append('Search supervisor recovery timed out')
                 if failures:
                     raise RuntimeError('; '.join(failures))
                 print('Signed service supervisor crash/restart: PASS', flush=True)

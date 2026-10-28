@@ -4834,10 +4834,11 @@ is not a twelfth launcher application. The signed service/probe gate passes on
 Evidence is retained under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
 Production `system-apps` boot now publishes WovenSearch as the fourth
 supervised service with IPC-only authority; the signed supervisor gate passes
-with `[SERVICES] woven-search published as pid 4` and the existing update
-restart marker. Launcher builders now provide the signed service image
-quietly. Search-specific restart injection and physical hardware qualification
-remain open.
+with `[SERVICES] woven-search published as pid 4`, update recovery, and
+search recovery markers. Launcher builders now provide the signed service
+image quietly. The 1/2/4-CPU production evidence is retained under
+`target/shell-regression/system-apps-{1,2,4}cpu-*`. Physical hardware
+qualification remains open.
 
 ## Stage 23.4 WovenAI capability security (2026-10-20)
 

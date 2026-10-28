@@ -2411,9 +2411,10 @@ write authority. The service process, source adapters, supervision, and QEMU
 The focused signed service/probe acceptance passes on 1/2/4 CPUs, proving
 publication, query ranking, reaping, and registry cleanup. Production
 `system-apps` boot now publishes it as a fourth supervised service with an
-IPC-only capability set; the existing supervisor restart gate passes after a
-different service is restarted. Search-specific restart injection and physical
-hardware qualification remain separate work.
+IPC-only capability set; the signed supervisor gate also kills and recovers
+the search broker itself while preserving that IPC-only registration. Physical
+hardware qualification remains separate work. Production 1/2/4-CPU serial
+evidence is retained under `target/shell-regression/system-apps-{1,2,4}cpu-*`.
 
 `apps/woven-search` is the corresponding freestanding Ring-3 broker. It owns
 one locally seeded, public application catalog and publishes `woven.search`
