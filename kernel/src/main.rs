@@ -4243,7 +4243,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S13.13] USB input: PASSED"));
         qemu_test_exit_success();
     }
-    #[cfg(feature = "stage13-12-test")]
+    #[cfg(all(
+        feature = "stage13-12-test",
+        not(feature = "s03-keyboard-injection-test")
+    ))]
     {
         if !drivers::self_test() {
             serial::write_line(format_args!("[S13.12] driver bring-up: FAILED"));
@@ -5182,6 +5185,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "s03-process-lifecycle-test")]
     {
+        #[cfg(feature = "s03-keyboard-injection-test")]
+        {
+            if xhci::init_hid().is_err() || xhci::start_input("xhci0").is_err() {
+                serial::write_line(format_args!("[S03.KEYBOARD] USB HID setup: FAILED"));
+                qemu_test_exit_failure();
+            }
+        }
         if !task::s03_process_lifecycle_self_test() {
             serial::write_line(format_args!("[S03.PROCESS-LIFECYCLE] FAILED"));
             qemu_test_exit_failure();

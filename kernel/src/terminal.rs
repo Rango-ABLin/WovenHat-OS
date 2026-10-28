@@ -27,6 +27,9 @@ pub const TCSETS: u64 = 0x5402;
 pub const TIOCGPGRP: u64 = 0x540f;
 pub const TIOCSPGRP: u64 = 0x5410;
 pub const TIOCGPTN: u64 = 0x8004_5430;
+/// Local flag: send SIGTTOU when a background process group writes the
+/// controlling terminal.
+pub const TOSTOP: u32 = 0x0100;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]

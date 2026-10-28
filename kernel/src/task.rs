@@ -2680,6 +2680,110 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         return false;
     }
 
+    let Some(foreground_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((foreground_child, _)) = spawn_user_process("s03-foreground", foreground_program)
+    else {
+        return false;
+    };
+    if set_process_group(foreground_child.as_u64(), foreground_child.as_u64()).is_err() {
+        return false;
+    }
+    crate::terminal::set_foreground_group(foreground_child.as_u64());
+    let Some(tostop_program) = userspace::create_s03_tostop_process() else {
+        return false;
+    };
+    let Ok((tostop_child, _)) = spawn_user_process("s03-tostop", tostop_program) else {
+        return false;
+    };
+    if set_process_group(tostop_child.as_u64(), tostop_child.as_u64()).is_err() {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(tostop_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    let tostop_status = wait_process(tostop_child.as_u64());
+    crate::terminal::set_termios(crate::terminal::Termios::DEFAULT);
+    if tostop_status != Ok(150) {
+        return false;
+    }
+    if kill_process(0u64.wrapping_sub(foreground_child.as_u64()), 15).is_err() {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(foreground_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(foreground_child.as_u64()) != Ok(143) {
+        return false;
+    }
+
+    let Some(orphan_program) = userspace::create_s03_orphan_process() else {
+        return false;
+    };
+    let Ok((orphan_parent, _)) = spawn_user_process("s03-orphan-parent", orphan_program)
+    else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(orphan_parent) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(orphan_parent.as_u64()) != Ok(0) {
+        return false;
+    }
+    let Some(orphan_child) = reparented_group_child(orphan_parent.as_u64()) else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(ProcessId(orphan_child)) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(orphan_child) != Ok(129) {
+        return false;
+    }
+
+    #[cfg(feature = "s03-keyboard-injection-test")]
+    {
+        let Some(keyboard_program) = userspace::create_s03_vintr_process() else {
+            return false;
+        };
+        let Ok((keyboard_child, _)) = spawn_user_process("s03-keyboard", keyboard_program)
+        else {
+            return false;
+        };
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] waiting for QEMU Ctrl-C injection"
+        ));
+        let deadline = timer::ticks().wrapping_add(3000);
+        while !process_exited(keyboard_child) {
+            if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                return false;
+            }
+            yield_now();
+        }
+        if wait_process(keyboard_child.as_u64()) != Ok(1) {
+            return false;
+        }
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] USB HID Ctrl-C decoded as terminal byte 0x03: PASSED"
+        ));
+    }
+
     let Some(session_program) = userspace::create_s03_session_process() else {
         return false;
     };
@@ -3558,6 +3662,8 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         release_task_runtime_resources(sibling);
     }
     release_file_table(&mut detached_files);
+    notify_orphaned_groups(exiting_pid);
+    reparent_children(exiting_pid);
     if let Some(thread_id) = exiting_thread {
         let _ = crate::thread::terminate(thread_id, exit_code);
         let _ = crate::thread::take_waiter(thread_id);
@@ -3613,6 +3719,75 @@ fn process_has_live_tasks(process_id: u64) -> bool {
                     | TaskState::Stopped
             )
     })
+}
+
+/// Apply the POSIX orphaned-group transition to stopped descendants of an
+/// exiting parent. The scan is bounded by the process table and the signals
+/// are published only after the table lock is released.
+fn notify_orphaned_groups(exiting_pid: u64) {
+    let mut candidates = [0u64; MAX_PROCESSES];
+    let mut candidate_count = 0usize;
+    let mut notify = [0u64; MAX_PROCESSES];
+    let mut notify_count = 0usize;
+    {
+        let processes = process_table_lock();
+        for process in processes.iter().flatten() {
+            if process.parent.as_u64() != exiting_pid
+                || process.state == ProcessState::Exited
+                || process.process_group == 0
+            {
+                continue;
+            }
+            if !candidates[..candidate_count].contains(&process.process_group) {
+                candidates[candidate_count] = process.process_group;
+                candidate_count += 1;
+            }
+        }
+        for &group in &candidates[..candidate_count] {
+            let Some(session) = processes
+                .iter()
+                .flatten()
+                .find(|process| {
+                    process.process_group == group && process.state != ProcessState::Exited
+                })
+                .map(|process| process.session_id)
+            else {
+                continue;
+            };
+            let orphaned = !processes.iter().flatten().any(|member| {
+                member.process_group == group
+                    && member.session_id == session
+                    && member.state != ProcessState::Exited
+                    && processes.iter().flatten().any(|parent| {
+                        parent.id == member.parent
+                            && parent.state != ProcessState::Exited
+                            && parent.session_id == session
+                            && parent.process_group != group
+                    })
+            });
+            let stopped = processes.iter().flatten().any(|process| {
+                process.process_group == group && process.state == ProcessState::Stopped
+            });
+            if orphaned && stopped {
+                notify[notify_count] = group;
+                notify_count += 1;
+            }
+        }
+    }
+    for &group in &notify[..notify_count] {
+        let _ = signal_processes(0u64.wrapping_sub(group), 1, SignalSender::Kernel);
+        let _ = signal_processes(0u64.wrapping_sub(group), 18, SignalSender::Kernel);
+    }
+}
+
+fn reparent_children(exiting_pid: u64) {
+    let mut processes = process_table_lock();
+    for process in processes.iter_mut().flatten() {
+        if process.parent.as_u64() == exiting_pid && process.state != ProcessState::Exited {
+            // PID 0 is the bounded kernel/init surrogate for this slice.
+            process.parent = ProcessId(0);
+        }
+    }
 }
 
 pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
@@ -3719,6 +3894,19 @@ pub fn zombie_count() -> usize {
         .flatten()
         .filter(|process| process.state == ProcessState::Exited)
         .count()
+}
+
+fn reparented_group_child(parent: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| {
+            process.parent.as_u64() == 0
+                && process.id.as_u64() != parent
+                && process.process_group == process.id.as_u64()
+                && process.state != ProcessState::Exited
+        })
+        .map(|process| process.id.as_u64())
 }
 
 #[repr(C)]
@@ -6391,6 +6579,18 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
     let old = *slot;
     *slot = handler;
     Ok(old)
+}
+
+pub fn current_signal_ignored(sig: u64) -> bool {
+    if sig > 31 {
+        return false;
+    }
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| process.signal_actions[sig as usize] == 1)
 }
 
 pub fn current_process_group() -> u64 {

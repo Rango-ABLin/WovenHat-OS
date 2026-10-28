@@ -196,6 +196,76 @@ global_asm!(
 
 #[cfg(feature = "s03-process-lifecycle-test")]
 global_asm!(
+    ".global wovenhat_s03_tostop_start",
+    ".global wovenhat_s03_tostop_end",
+    "wovenhat_s03_tostop_start:",
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    // Termios::local_flags is the fourth u32 in the bounded record.
+    "or dword ptr [rdx + 12], 0x100",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    // A background write with TOSTOP enabled must receive SIGTTOU.
+    "mov eax, 4",
+    "mov edi, 1",
+    "mov rsi, rdx",
+    "mov edx, 1",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "wovenhat_s03_tostop_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_orphan_start",
+    ".global wovenhat_s03_orphan_end",
+    "wovenhat_s03_orphan_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    "test rax, rax",
+    "jz 1f",
+    // The parent exits, leaving the stopped child to the init surrogate.
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 36",
+    "xor edi, edi",
+    "xor esi, esi",
+    "int 0x80",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 19",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "3:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_orphan_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
     ".global wovenhat_s03_vintr_start",
     ".global wovenhat_s03_vintr_end",
     "wovenhat_s03_vintr_start:",
@@ -5282,6 +5352,36 @@ pub fn create_s03_session_process() -> Option<UserProgram> {
     let stub = unsafe {
         let start = &wovenhat_s03_session_start as *const u8;
         let end = &wovenhat_s03_session_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_tostop_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_tostop_start: u8;
+        static wovenhat_s03_tostop_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_tostop_start as *const u8;
+        let end = &wovenhat_s03_tostop_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_orphan_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_orphan_start: u8;
+        static wovenhat_s03_orphan_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_orphan_start as *const u8;
+        let end = &wovenhat_s03_orphan_end as *const u8;
         core::slice::from_raw_parts(start, end.offset_from(start) as usize)
     };
     load_elf(&build_stub_elf(stub)?)

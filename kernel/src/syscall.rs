@@ -634,6 +634,17 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
     if !crate::task::current_has(crate::capability::Capability::Console) {
         return SYSCALL_ERROR;
     }
+    let termios = crate::terminal::termios();
+    if termios.local_flags & crate::terminal::TOSTOP != 0 {
+        if let Some(group) = crate::terminal::foreground_pid() {
+            if crate::task::current_process_group() != group
+                && !crate::task::current_signal_ignored(22)
+            {
+                let _ = crate::task::kill_process(0u64.wrapping_sub(crate::task::current_process_group()), 22);
+                return SYSCALL_ERROR;
+            }
+        }
+    }
     crate::serial::write_bytes(&buffer[..length]);
     crate::terminal::write_bytes(&buffer[..length]);
     IO_COMPLETIONS.fetch_or(IO_WRITE, Ordering::Release);
