@@ -7141,3 +7141,13 @@ the documented S02 freestanding C ABI boundary. It does not claim hosted-C,
 libc/pthread/TLS/destructor/shared-library compatibility, which is explicitly
 outside S02 rather than an uncompleted hidden acceptance criterion.
 
+## Codex - POSIX.1-2017/2024 musl port program (2026-10-28)
+
+User authorized a full POSIX implementation using musl (MIT licensed) as the
+base. This is a new cross-stage program, separate from the closed bounded S02
+ABI gate. Codex owns the initial source provenance, WovenHat syscall/startup
+adaptation, static libc bring-up, and conformance-profile work only. No claim
+of POSIX conformance, no replacement of the existing loader ABI, and no
+network/third-party import will be treated as accepted until its license,
+revision, build, QEMU, and compatibility evidence are recorded.
+
