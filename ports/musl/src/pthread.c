@@ -7,7 +7,7 @@
 #include <wovenhat/syscall.h>
 
 #define MAX_PTHREADS 8
-struct slot { void *(*start)(void *); void *arg; pthread_t handle; int busy; };
+struct slot { void *(*start)(void *); void *arg; pthread_t handle; int busy; int detached; int finished; };
 static struct slot slots[MAX_PTHREADS];
 static volatile int slots_lock;
 static void lock(void) { while (__sync_lock_test_and_set(&slots_lock, 1)) sched_yield(); }
@@ -15,6 +15,11 @@ static void unlock(void) { __sync_lock_release(&slots_lock); }
 static void run_slot(size_t index)
 {
 	void *result = slots[index].start(slots[index].arg);
+	lock();
+	slots[index].finished = 1;
+	if (slots[index].detached)
+		slots[index].busy = 0;
+	unlock();
 	wh_syscall1(WH_SYS_THREAD_EXIT, (long)(intptr_t)result);
 	for (;;) ;
 }
@@ -32,7 +37,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	slots[index].start = start; slots[index].arg = arg; slots[index].busy = 1;
 	long result = wh_syscall2(WH_SYS_THREAD_CREATE, (long)(uintptr_t)trampolines[index], 64 * 1024);
 	if (result < 0) { slots[index].busy = 0; unlock(); return EAGAIN; }
-	slots[index].handle = (pthread_t)(unsigned long)result; *thread = slots[index].handle;
+	slots[index].handle = (pthread_t)(unsigned long)result;
+	slots[index].detached = 0;
+	slots[index].finished = 0;
+	*thread = slots[index].handle;
 	unlock(); return 0;
 }
 int pthread_join(pthread_t thread, void **result)
@@ -43,8 +51,27 @@ int pthread_join(pthread_t thread, void **result)
 	if (status < 0) return EINVAL;
 	if (result) *result = (void *)(intptr_t)status;
 	lock();
-	for (size_t i = 0; i < MAX_PTHREADS; ++i) if (slots[i].busy && slots[i].handle == thread) { slots[i].busy = 0; break; }
+	for (size_t i = 0; i < MAX_PTHREADS; ++i)
+		if (slots[i].busy && slots[i].handle == thread) {
+			if (slots[i].detached) { unlock(); return EINVAL; }
+			slots[i].busy = 0;
+			break;
+		}
 	unlock(); return 0;
+}
+int pthread_detach(pthread_t thread)
+{
+	lock();
+	for (size_t i = 0; i < MAX_PTHREADS; ++i)
+		if (slots[i].busy && slots[i].handle == thread) {
+			if (slots[i].detached) { unlock(); return EINVAL; }
+			slots[i].detached = 1;
+			if (slots[i].finished) slots[i].busy = 0;
+			unlock();
+			return 0;
+		}
+	unlock();
+	return ESRCH;
 }
 pthread_t pthread_self(void) { return (pthread_t)(unsigned long)wh_syscall0(WH_SYS_THREAD_SELF); }
 int pthread_cancel(pthread_t thread)
@@ -126,6 +153,17 @@ int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
 int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
 	const struct timespec *timeout)
 {
-	(void)condition; (void)mutex; (void)timeout;
-	return ENOSYS;
+	if (!condition || !mutex || !timeout || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L)
+		return EINVAL;
+	int sequence = condition->__u.__vi[0];
+	if (pthread_mutex_unlock(mutex)) return EINVAL;
+	/* Bounded static profile: yield for a finite slice, then report timeout.
+	 * A kernel clock-backed wait remains a later integration increment. */
+	for (unsigned long spins = 0; spins < 4096 && condition->__u.__vi[0] == sequence; ++spins)
+		sched_yield();
+	if (condition->__u.__vi[0] == sequence) {
+		(void)pthread_mutex_lock(mutex);
+		return ETIMEDOUT;
+	}
+	return pthread_mutex_lock(mutex);
 }

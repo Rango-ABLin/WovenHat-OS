@@ -62,6 +62,16 @@ int main(int argc, char **argv)
 	int pipe_fd[2];
 	int child_status;
 	pid_t child;
+	/* The loader supplies a bounded aux-vector after the empty envp. */
+	unsigned long *aux = (unsigned long *)(argv + argc + 2);
+	int saw_pagesz = 0, saw_uid = 0, saw_gid = 0;
+	for (; aux[0] != 0; aux += 2) {
+		if (aux[0] == 6 && aux[1] == 4096) saw_pagesz = 1;
+		if (aux[0] == 11 && aux[1] == 1000) saw_uid = 1;
+		if (aux[0] == 12 && aux[1] == 1000) saw_gid = 1;
+	}
+	if (!saw_pagesz || !saw_uid || !saw_gid)
+		return 95;
 
 	if (getpid() < 0)
 		return 89;
@@ -84,6 +94,15 @@ int main(int argc, char **argv)
 	if (!probe.ready || pthread_mutex_unlock(&probe.mutex) != 0
 		|| pthread_join(thread, 0) != 0)
 		return 84;
+	if (pthread_mutex_lock(&probe.mutex) != 0)
+		return 83;
+	struct timespec deadline = { 0, 1 };
+	if (pthread_cond_timedwait(&probe.condition, &probe.mutex, &deadline) != ETIMEDOUT
+		|| pthread_mutex_unlock(&probe.mutex) != 0)
+		return 82;
+	if (pthread_create(&thread, 0, thread_probe, &byte) != 0
+		|| pthread_detach(thread) != 0 || sched_yield() != 0)
+		return 81;
 	if (!getcwd(cwd, sizeof cwd) || cwd[0] != '/')
 		return 87;
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
