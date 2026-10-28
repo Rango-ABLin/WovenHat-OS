@@ -1083,12 +1083,14 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
     let mut count = 0;
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut index = 0;
-    while count < MAX_APPS {
+    // Directory entries may include non-app files and subdirectories. Bound
+    // enumeration independently from the number of accepted applications.
+    while count < MAX_APPS && index < 256 {
         let Ok((length, is_directory)) = libwoven::read_dir(CATALOG, index, &mut name) else {
             break;
         };
         index += 1;
-        if is_directory || !name[..length].ends_with(b".app") {
+        if length > name.len() || is_directory || !name[..length].ends_with(b".app") {
             continue;
         }
         let mut path = [0u8; 128];
