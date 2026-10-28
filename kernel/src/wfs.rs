@@ -672,8 +672,17 @@ impl<D: BlockDevice> Volume<D> {
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
-            if target >= sb.total_blocks {
-                return Ok(());
+            // Never replay user-controlled journal targets into reserved
+            // superblock or journal sectors, even after checksum verification.
+            let journal_end = sb
+                .journal_start
+                .checked_add(u64::from(sb.journal_blocks))
+                .ok_or(Error::Corrupt)?;
+            if target >= sb.total_blocks
+                || target < 2
+                || (target >= sb.journal_start && target < journal_end)
+            {
+                return Err(Error::Corrupt);
             }
             let mut data = [0u8; SECTOR_SIZE];
             self.device
