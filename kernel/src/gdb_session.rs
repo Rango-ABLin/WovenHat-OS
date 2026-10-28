@@ -14,6 +14,10 @@ pub enum SessionAction {
     Continue,
     Step,
     Kill,
+    /// Detach acknowledged. The payload is `frame[..n]`, the encoded `OK`
+    /// reply, written the same way as [`SessionAction::Reply`]. The caller
+    /// must send it before releasing any attachment and resuming.
+    Detach(usize),
     Ignore,
 }
 
@@ -103,6 +107,14 @@ impl Session {
                 self.stopped = false;
                 SessionAction::Kill
             }
+            Action::Detach => {
+                self.active = false;
+                self.stopped = false;
+                match gdb_stub::encode(&payload[..written], frame) {
+                    Some(encoded) => SessionAction::Detach(encoded),
+                    None => SessionAction::Ignore,
+                }
+            }
             Action::Empty => SessionAction::Ignore,
         }
     }
@@ -172,6 +184,7 @@ pub fn self_test() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Session, SessionAction};
+    use crate::{gdb_debugger::RegisterContext, gdb_stub};
 
     #[test]
     fn fresh_session_is_stopped_and_active() {
@@ -179,5 +192,22 @@ mod tests {
         assert!(Session::STOPPED.is_active());
         assert!(Session::STOPPED.is_stopped());
         assert_eq!(SessionAction::Ignore, SessionAction::Ignore);
+    }
+
+    #[test]
+    fn detach_acknowledges_and_deactivates() {
+        let mut context = RegisterContext::ZERO;
+        let mut session = Session::STOPPED;
+        let mut frame = [0u8; 520];
+        let packet = gdb_stub::decode(b"$D#44").expect("valid D packet");
+        let SessionAction::Detach(written) =
+            session.handle(&packet, &mut context, 0, b"", &mut frame)
+        else {
+            panic!("expected Detach action");
+        };
+        let reply = gdb_stub::decode(&frame[..written]).expect("encoded OK reply");
+        assert_eq!(reply.data(), b"OK");
+        assert!(!session.is_active());
+        assert!(!session.is_stopped());
     }
 }

@@ -1,5 +1,21 @@
 # Stage status
 
+## S05 low-memory matrix requalification - 2026-10-28 - PASSED BOUNDED GATE
+
+The dedicated memory-pressure feature and 256 MiB QEMU low-memory gate passed
+at 1/2/4 CPUs after the OOM victim lock-order correction. Evidence is retained
+under `target/s05-low-memory-{1,2,4}cpu-debug`. This closes the bounded
+software/QEMU gate only; native physical low-memory qualification remains
+outside this host run.
+
+## S05 OOM victim lock-order correction - 2026-10-28 - IMPLEMENTED
+
+OOM victim selection now snapshots scheduler candidates before acquiring the
+process table, eliminating nested process-table acquisition beneath the
+scheduler lock in the allocation-failure path. Target build, target Clippy,
+host Clippy, focused dynamic-TLS tests, and diff checks pass. Physical
+low-memory and full OOM kill/reclaim qualification remain separate gates.
+
 ## Dynamic TLS QEMU qualification - 2026-10-28 - FAILED / FIX INTEGRATED
 
 The first real userspace QEMU attempt reached the dynamic TLS path but exposed
@@ -12236,3 +12252,15 @@ At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
 RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
 read-only image snapshot. This focused repair is not full Stage 20/32 or full
 historical Windows acceptance; the seven failed graphics gates need follow-up.
+## Stage 32.18 GDB owner/binding attachment QEMU gate - 2026-10-28 - ACCEPTED
+
+The owner/binding boot self-test now exercises same-task token reuse,
+cross-task exclusion, generation-safe cleanup, and reacquisition. The live
+trap path still requires a scheduler-owned current task; the boot self-test
+uses a deterministic nonzero identity because it runs before task scheduling
+is active. Host/all-target Clippy and target Clippy with `stage32-18-test`
+pass. QEMU passes with the required marker at 1, 2, and 4 CPUs (exit 33).
+Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
+`target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
+`target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
+

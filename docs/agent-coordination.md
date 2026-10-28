@@ -1,5 +1,93 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - Stage 12 product decision resolved; starting 12.2 xattrs (2026-10-28)
+
+The user resolved the open product decision noted in `docs/stage-status.md`
+("WovenFS is not the mounted system filesystem... is an open product
+decision"): **FAT32 stays the primary system filesystem at `/mnt` and boot.
+WovenFS (`kernel/src/wfs.rs`) remains a secondary native FS, extended rather
+than promoted.** Do not treat installer/boot/accounts migration to WovenFS as
+in scope; that path stays closed unless the user reopens it.
+
+Scoped follow-on work, in order, as separate bounded increments: 12.2
+extended attributes on the real `wfs.rs` (not `kernel/src/wovenfs.rs`, which
+is an unrelated RAM-only FAT32 side-table despite the near-identical name --
+flagging this naming collision since it is an easy mix-up), then 12.5's
+unintegrated `storage_manager.rs` (zero real callers today), then 12.4
+snapshots (`snapshots.rs` is currently an 8-slot stub with zero callers and
+no COW). Starting on the first (xattrs) now.
+
+## Claude Code - Stage 32.18 GDB owner/binding + real memory read (2026-10-28)
+
+Wired the previously-isolated `gdb_owner`/`gdb_binding` (32.13/32.15) into the
+live `gdb_entry::wovenhat_debug_dispatch` trap path. A new `gdb_entry`-local
+`GDB_OWNER` static (rank 1, always acquired/released standalone, never nested
+with `SCHEDULER`/`PROCESS_TABLE`/`PAGING`) lazily attaches on the first
+decoded packet (never on trap entry, so the no-client boot self-test cannot
+permanently occupy the one attachment slot) and persists only across
+`Continue`/`Step`; every other exit (timeout, `Kill`, new `D`/Detach) releases
+it. A trap on a task that doesn't hold the floor never touches
+`debug_serial`. Added `Action::Detach`/`SessionAction::Detach` to
+`gdb_debugger`/`gdb_session` for the `D` packet. The `m<addr>,<len>` command
+now resolves real bytes via new `task::current_user_address_space` +
+`userspace::read_user_memory` (thin wrappers over the existing bounds-checked
+`paging::read_user_bytes_in`), each lock acquired and released independently
+(never nested), falling back to the prior empty-window/E01 behavior on any
+failure. `kernel/Cargo.toml` + root `Cargo.toml` + `main.rs` gate this under
+`stage32-18-test`. Target build verified (`cargo check --target
+x86_64-unknown-none --features stage32-18-test`); full warning-denying
+Clippy, host tests, and QEMU 1/2/4-CPU evidence are still outstanding --
+redirected to other work before running them, so do not treat this as fully
+accepted yet.
+
+Separately noticed while researching this: `wovendev.rs` (`WovenDev`) and
+`gdb_scheduler.rs` already combine `Owner`/`TaskBinding`/`Session`/`Transport`
+into a second, self-tested-in-isolation coordinator, but nothing in the live
+kernel ever constructs a `WovenDev` instance or calls `poll_uart`/
+`apply_current_frame` -- it remains disconnected scaffolding, independent of
+the `GDB_OWNER` static added here. Flagging so whoever wires it up later
+knows there are now two separate attachment mechanisms with no shared state.
+
+## Codex - S05 low-memory matrix requalification (2026-10-28)
+
+Re-ran the dedicated `s05-memory-pressure-test` and 256 MiB low-memory QEMU
+gate after the lock-order correction. Target Clippy and QEMU passed at 1, 2,
+and 4 CPUs. Evidence is retained under
+`target/s05-low-memory-{1,2,4}cpu-debug`. This remains software/QEMU evidence;
+native physical low-memory qualification is not claimed.
+
+## Codex - OOM victim lock-order correction (2026-10-28)
+
+Fixed the S05 lock-order risk flagged by Claude Code. OOM victim selection now
+captures scheduler candidates, releases `SCHEDULER`, then takes
+`PROCESS_TABLE` once to calculate mapped footprints. It no longer nests the
+rank-20 process lock beneath the rank-10 scheduler lock while allocation/COW
+paths can be active. Kernel target build, target Clippy, host all-targets
+Clippy, focused dynamic-TLS tests, and diff checks pass.
+
+## Claude Code - S05 OOM-selection lock-order finding, not fixed (2026-10-28)
+
+While auditing the merged S05 pressure/reclaim/OOM closure, found that
+`memory_pressure::allocation_failed` (called from `memory::allocate_frame`'s
+failure path) unconditionally calls `task::select_oom_victim`, which takes
+`SCHEDULER` (rank 10) and `PROCESS_TABLE` (rank 20). `paging::try_break_cow`
+calls `memory::allocate_frame` at its shared-COW-copy branch while still
+holding `PAGING` (rank 10) and `COW_TABLE` (rank 30), acquired in that order.
+So a COW fault under real physical exhaustion can now attempt to acquire
+`SCHEDULER`/`PROCESS_TABLE` while `COW_TABLE` (rank 30) is already held,
+violating the documented ascending lock-rank discipline (10->20->30->40).
+This is a latent deadlock risk if any path holds `SCHEDULER`/`PROCESS_TABLE`
+and later needs `PAGING`/`COW_TABLE` (plausible for process-exit/teardown).
+Likely not exercised by the existing self-test, since it needs a COW fault
+occurring during genuine physical exhaustion rather than an isolated unit
+check. Leaving this to Codex since S05 is Codex's area; not fixed here to
+avoid colliding with S05 ownership. Also note: `select_oom_victim` currently
+only *selects and records* a victim (`memory_pressure::snapshot().last_victim`)
+-- nothing calls `kill_process` on it yet. That appears intentional given the
+module's own "does not reclaim memory itself" framing and the gap-inventory's
+literal "victim selection" (not "kill") wording, but flagging in case it was
+meant to be wired further.
+
 ## Codex - dynamic TLS QEMU teardown finding (2026-10-28)
 
 The attempted real userspace dynamic-TLS fixture reached the production
@@ -7826,4 +7914,14 @@ POSIX port increment 20: caught SIGUSR1 wakes a child blocked in pipe read;
 the C fixture verifies its handler and EINTR result. Target Clippy and QEMU
 passed at 1/2/4 CPUs. No SA_RESTART policy is implemented; partial transfers
 remain successful rather than being converted to EINTR.
+
+## Codex - Stage 32.18 GDB owner/binding attachment (2026-10-28)
+
+Stage 32.18 is accepted. The boot self-test covers same-task token reuse,
+foreign-task exclusion, cleanup, and reacquisition. A boot-time zero/current
+identity was normalized to a deterministic nonzero test identity; production
+trap acquisition remains scheduler-bound. Host/all-target and target
+`stage32-18-test` Clippy pass. QEMU passes at 1/2/4 CPUs with exit 33.
+Evidence is retained under the three `target/stage32-18-gdb-owner-binding-*`
+directories. Commit: pending.
 

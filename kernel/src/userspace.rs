@@ -6183,6 +6183,15 @@ pub fn sync_file_mapping(space: AddressSpace, mapping: AnonymousMapping, durable
     !durable || crate::task::file_fault_io(|| crate::vfs::persist_mapping(backing.file)).is_ok()
 }
 
+/// Copy a bounded range of user memory for a debug/diagnostic reader (the GDB
+/// memory-read boundary). Delegates entirely to the existing bounds- and
+/// `USER_ACCESSIBLE`-checked `paging::read_user_bytes_in`; this wrapper exists
+/// only because `AddressSpace::paging` is private to this module.
+#[cfg(feature = "gdb-entry")]
+pub(crate) fn read_user_memory(space: AddressSpace, address: u64, out: &mut [u8]) -> bool {
+    paging::read_user_bytes_in(space.paging, address, out).is_ok()
+}
+
 /// Populate one absent page. Callers serialize this with process mapping updates.
 pub fn populate_file_page(
     space: AddressSpace,

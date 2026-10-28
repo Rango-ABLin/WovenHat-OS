@@ -23,6 +23,11 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "gdb-entry")]
 use core::arch::global_asm;
 
+#[cfg(feature = "gdb-entry")]
+use crate::gdb_owner::{AttachmentToken, Owner};
+#[cfg(feature = "gdb-entry")]
+use crate::irq_lock::IrqMutex;
+
 use crate::gdb_debugger::RegisterContext;
 
 // ── Assembly trampoline ───────────────────────────────────────────────────────
@@ -165,6 +170,75 @@ const FRAME_BUF: usize = 520;
 #[cfg(feature = "gdb-entry")]
 static HANDLER_FIRED: AtomicBool = AtomicBool::new(false);
 
+// ── Single-attachment authority (Stage 32.18) ──────────────────────────────
+
+/// The live trap entry's single GDB attachment, plus the task it belongs to.
+///
+/// `gdb_owner::Owner` deliberately "owns no global state" (see its module
+/// doc), so the static holder lives here, in the module that actually drives
+/// a session across trap boundaries. The stored task id is this module's own
+/// bookkeeping: `AttachmentToken`'s fields are private, so there is no way to
+/// ask the token itself "which task is this" — only to compare it for
+/// equality against a token this module already holds. Keeping the task id
+/// alongside it lets a trap on an unrelated task recognize that the floor is
+/// held by someone else and back off, instead of silently reusing a session
+/// that was never its own.
+///
+/// Rank 1: always acquired and released standalone, never nested with
+/// `SCHEDULER` (10), `PROCESS_TABLE` (20), or `PAGING` (10)/`COW_TABLE` (30),
+/// so its numeric rank does not interact with that discipline.
+#[cfg(feature = "gdb-entry")]
+static GDB_OWNER: IrqMutex<(Owner, Option<(AttachmentToken, u64)>)> =
+    IrqMutex::with_rank((Owner::new(), None), 1);
+
+/// Decide whether this trap may drive the shared COM2 transport, and with
+/// which token. Returns `None` when there is no current task (scheduler not
+/// running) or when a different task already holds the floor — the caller
+/// must then resume without touching `debug_serial` at all.
+#[cfg(feature = "gdb-entry")]
+fn gdb_owner_acquire() -> Option<AttachmentToken> {
+    let task_id = crate::task::current_task_id_if_running()?.as_u64();
+    gdb_owner_acquire_for(task_id)
+}
+
+/// Acquire the debugger floor for a validated task identity.
+///
+/// The live trap path obtains the identity from the scheduler.  The stage
+/// boot self-test runs before a task is marked running, so it uses this same
+/// state transition with a deterministic synthetic identity instead of
+/// weakening the ownership check or depending on scheduler timing.
+#[cfg(feature = "gdb-entry")]
+fn gdb_owner_acquire_for(task_id: u64) -> Option<AttachmentToken> {
+    if task_id == 0 {
+        return None;
+    }
+    let mut guard = GDB_OWNER.lock();
+    let (owner, stored) = &mut *guard;
+    if let Some((token, stored_task)) = *stored {
+        if stored_task == task_id && owner.matches(token) {
+            return Some(token);
+        }
+        return None;
+    }
+    let token = owner.attach(task_id)?;
+    *stored = Some((token, task_id));
+    Some(token)
+}
+
+/// Release this trap's attachment unless another successful `attach` has
+/// already replaced it (only possible if this module's own bookkeeping were
+/// bypassed, which it never is — kept as a defensive check, not a race this
+/// function needs to win).
+#[cfg(feature = "gdb-entry")]
+fn gdb_owner_release(token: AttachmentToken) {
+    let mut guard = GDB_OWNER.lock();
+    let (owner, stored) = &mut *guard;
+    if stored.is_some_and(|(stored_token, _)| stored_token == token) {
+        owner.detach(token);
+        *stored = None;
+    }
+}
+
 /// Trap-frame register constants for single-step (RF and TF bits in rflags).
 #[cfg(feature = "gdb-entry")]
 const RFLAGS_TF: u64 = 1 << 8;
@@ -198,12 +272,23 @@ unsafe extern "C" fn wovenhat_debug_dispatch(frame: *mut DebugFrame) {
     let vector: u8 = if frame.rflags & RFLAGS_TF != 0 { 1 } else { 3 };
     crate::gdb_trap::publish(&mut session, vector, None);
 
+    // Decide who may drive the shared COM2 transport before reading a single
+    // byte from it. A trap on a task that does not hold the floor (a
+    // concurrent trap on another CPU, or the scheduler not running yet) must
+    // not consume bytes meant for someone else's session.
+    let Some(token) = gdb_owner_acquire() else {
+        return;
+    };
+
     // Bounded stub loop: receive RSP packets from COM2 and dispatch through the
-    // session.  Exits when the session says Continue, Step, or Kill, or when
-    // STUB_POLL_LIMIT polls elapse with no complete packet.
+    // session.  Exits when the session says Continue, Step, Detach, or when
+    // STUB_POLL_LIMIT polls elapse with no complete packet. Only Continue and
+    // Step leave the attachment in place for a later trap to resume; every
+    // other exit (Detach, Kill, or a timeout) releases it below.
     let mut rx_buf = [0u8; FRAME_BUF];
     let mut rx_pos = 0usize;
     let mut reply_buf = [0u8; FRAME_BUF];
+    let mut persist_attachment = false;
 
     'outer: for _ in 0..STUB_POLL_LIMIT {
         let Some(byte) = crate::debug_serial::try_read() else {
@@ -218,9 +303,29 @@ unsafe extern "C" fn wovenhat_debug_dispatch(frame: *mut DebugFrame) {
         };
         rx_pos = 0;
 
-        let memory_base = frame.rip & !0xfff_u64;
-        let action =
-            session.handle(&pkt, &mut ctx, memory_base, &[], &mut reply_buf);
+        // A bounded, previously-impossible real read: resolve exactly the
+        // requested address range from the current task's own address space
+        // when the packet is a well-formed, in-budget `m<addr>,<len>`. Any
+        // failure (no address space, unmapped page, oversized request) falls
+        // back to today's behavior of an empty window, which `dispatch`
+        // already turns into `E01`.
+        let mut memory_buf = [0u8; crate::gdb_debugger::MAX_MEMORY_READ];
+        let (memory_base, memory_len) = crate::gdb_debugger::parse_memory_request(pkt.data())
+            .filter(|&(_, length)| length <= crate::gdb_debugger::MAX_MEMORY_READ)
+            .and_then(|(address, length)| {
+                let space = crate::task::current_user_address_space()?;
+                crate::userspace::read_user_memory(space, address, &mut memory_buf[..length])
+                    .then_some((address, length))
+            })
+            .unwrap_or((0, 0));
+
+        let action = session.handle(
+            &pkt,
+            &mut ctx,
+            memory_base,
+            &memory_buf[..memory_len],
+            &mut reply_buf,
+        );
 
         use crate::gdb_session::SessionAction;
         match action {
@@ -232,18 +337,29 @@ unsafe extern "C" fn wovenhat_debug_dispatch(frame: *mut DebugFrame) {
                 // continues without re-trapping on the same instruction.
                 frame.rflags &= !RFLAGS_TF;
                 frame.rflags |= RFLAGS_RF;
+                persist_attachment = true;
                 break 'outer;
             }
             SessionAction::Step => {
                 // Set TF so the CPU generates #DB after the next instruction.
                 frame.rflags |= RFLAGS_TF;
                 frame.rflags |= RFLAGS_RF;
+                persist_attachment = true;
+                break 'outer;
+            }
+            SessionAction::Detach(n) => {
+                crate::debug_serial::write_bytes(&reply_buf[..n]);
                 break 'outer;
             }
             SessionAction::Kill | SessionAction::Ignore => {}
         }
     }
-    // Timeout or Kill: resume without modifying rflags further.
+    // Timeout, Kill, or Detach: resume without modifying rflags further, and
+    // release the attachment so a later trap (this task resuming, or a
+    // different one) can attach fresh.
+    if !persist_attachment {
+        gdb_owner_release(token);
+    }
 }
 
 // ── IDT address helper ────────────────────────────────────────────────────────
@@ -269,7 +385,7 @@ pub fn debug_entry_address() -> u64 {
 ///
 /// The handler times out immediately when no GDB client is connected and
 /// returns to the instruction after `int3`, so the self-test does not hang.
-#[cfg(any(test, feature = "stage32-17-test"))]
+#[cfg(any(test, feature = "stage32-17-test", feature = "stage32-18-test"))]
 pub fn self_test() -> bool {
     // ── Pure mapping test ─────────────────────────────────────────────────────
     let frame = DebugFrame {
@@ -306,6 +422,71 @@ pub fn self_test() -> bool {
             return false;
         }
     }
+    true
+}
+
+/// Stage 32.18 boot-time self-test for the live owner/binding attachment.
+///
+/// 1. A fresh acquire followed by a second acquire from the same (current)
+///    task must reuse the same token (continuing-session behavior).
+/// 2. Manually installing a foreign task's attachment must make this task's
+///    acquire back off (`None`), proving the cross-task/cross-CPU floor
+///    check works without needing a second real task.
+/// 3. Releasing clears the floor so this task can acquire fresh again.
+#[cfg(any(test, feature = "stage32-18-test"))]
+pub fn owner_binding_self_test() -> bool {
+    let task_id = crate::task::current_task_id_if_running()
+        .map(|id| id.as_u64())
+        .filter(|&id| id != 0)
+        .unwrap_or(1);
+
+    let Some(token_a) = gdb_owner_acquire_for(task_id) else {
+        return false;
+    };
+    let Some(token_b) = gdb_owner_acquire_for(task_id) else {
+        return false;
+    };
+    if token_a != token_b {
+        return false;
+    }
+    gdb_owner_release(token_a);
+
+    let foreign_task = if task_id == 1 { 2 } else { 1 };
+    {
+        let mut guard = GDB_OWNER.lock();
+        let (owner, stored) = &mut *guard;
+        let Some(foreign_token) = owner.attach(foreign_task) else {
+            return false;
+        };
+        *stored = Some((foreign_token, foreign_task));
+    }
+    if gdb_owner_acquire_for(task_id).is_some() {
+        // Must not have been granted another task's floor. Clean up the
+        // manually-installed foreign attachment before failing, so a failed
+        // run of this self-test cannot wedge a later one.
+        let mut guard = GDB_OWNER.lock();
+        let (owner, stored) = &mut *guard;
+        if let Some((token, _)) = stored.take() {
+            owner.detach(token);
+        }
+        return false;
+    }
+    {
+        let mut guard = GDB_OWNER.lock();
+        let (owner, stored) = &mut *guard;
+        let Some((token, _)) = stored.take() else {
+            return false;
+        };
+        if !owner.detach(token) {
+            return false;
+        }
+    }
+
+    let Some(token_c) = gdb_owner_acquire_for(task_id) else {
+        return false;
+    };
+    gdb_owner_release(token_c);
+    gdb_owner_release(token_c);
     true
 }
 

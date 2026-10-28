@@ -3121,6 +3121,21 @@ pub fn current_process_id() -> u64 {
     CURRENT_PROCESS_IDS[crate::smp::cpu_index()].load(Ordering::Acquire)
 }
 
+/// The current process's address space, if any. Used by debug/diagnostic
+/// paths (the GDB memory-read boundary) that need a bounded, read-only
+/// snapshot of where to translate a user address; never held across a
+/// `paging`/`PAGING` lock acquisition, so it does not change this module's
+/// lock-order contract.
+#[cfg(feature = "gdb-entry")]
+pub(crate) fn current_user_address_space() -> Option<userspace::AddressSpace> {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .and_then(|process| process.address_space)
+}
+
 static FILE_IO_DEPTH: [AtomicU64; crate::smp::MAX_CPUS] =
     [const { AtomicU64::new(0) }; crate::smp::MAX_CPUS];
 static LOCAL_PREEMPT_DEPTH: [AtomicU64; crate::smp::MAX_CPUS] =
@@ -3453,41 +3468,44 @@ pub fn evict_one_mapped_file_page() -> bool {
 /// subsequent signal/teardown operation.
 pub fn select_oom_victim() -> Option<u64> {
     let current = current_task_id();
-    let scheduler = SCHEDULER.lock();
     let mut candidates = [crate::memory_pressure::Candidate::EMPTY; MAX_TASKS];
     let mut count = 0;
-    for task in scheduler.tasks.iter().filter(|task| {
-        !matches!(task.state, TaskState::Empty | TaskState::Dead)
-            && task.process_id.as_u64() != 0
-            && Some(task.id) != Some(current)
-    }) {
-        let mapped_pages = {
-            let mapped_pages = PROCESS_TABLE
-                .lock()
+    {
+        let scheduler = SCHEDULER.lock();
+        for task in scheduler.tasks.iter().filter(|task| {
+            !matches!(task.state, TaskState::Empty | TaskState::Dead)
+                && task.process_id.as_u64() != 0
+                && Some(task.id) != Some(current)
+        }) {
+            if count == candidates.len() {
+                break;
+            }
+            candidates[count] = crate::memory_pressure::Candidate {
+                process_id: task.process_id.as_u64(),
+                task_id: task.id.as_u64(),
+                class_rank: task.class.rank(),
+                mapped_pages: 0,
+            };
+            count += 1;
+        }
+    }
+    {
+        let processes = PROCESS_TABLE.lock();
+        for candidate in &mut candidates[..count] {
+            candidate.mapped_pages = processes
                 .iter()
                 .flatten()
-                .find(|process| process.id == task.process_id)
+                .find(|process| process.id.as_u64() == candidate.process_id)
                 .map(|process| {
                     process
                         .memory_mappings
                         .iter()
                         .flatten()
-                        .map(|m| m.size / 4096)
+                        .map(|mapping| mapping.size / 4096)
                         .sum::<usize>()
                 })
                 .unwrap_or(0);
-            mapped_pages
-        };
-        if count == candidates.len() {
-            break;
         }
-        candidates[count] = crate::memory_pressure::Candidate {
-            process_id: task.process_id.as_u64(),
-            task_id: task.id.as_u64(),
-            class_rank: task.class.rank(),
-            mapped_pages,
-        };
-        count += 1;
     }
     crate::memory_pressure::choose_victim(&candidates[..count])
         .map(|candidate| candidate.process_id)
