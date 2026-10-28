@@ -7204,3 +7204,10 @@ the accepted exit 42. QEMU passed at 1/2/4 CPUs. This is narrow static-libc
 execution only: no TLS/pthread semantics, normal C startup, allocator, or
 POSIX profile acceptance is claimed.
 
+POSIX port increment 4: added the minimal WovenHat CRT assembly/C adapter.
+It consumes the already documented argc/argv initial stack, calls `main`, and
+exits through upstream musl `_Exit`; its fixture preserves the errno assertion
+and verifies argv shape. QEMU passed at 1/2/4 CPUs. This is not a claim of
+musl `__libc_start_main`, TLS, constructors, environment/aux-vector setup, or
+full static-libc acceptance.
+

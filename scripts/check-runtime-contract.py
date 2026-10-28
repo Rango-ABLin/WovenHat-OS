@@ -48,7 +48,7 @@ def check(output):
     missing += [f"transport:{token}" for token in required_transport if token not in transport_text]
     required_musl_transport = ("WH_LINUX_EXIT", "WH_LINUX_CLOSE", "__syscall3", "-WH_ENOSYS")
     missing += [f"musl_transport:{token}" for token in required_musl_transport if token not in musl_transport_text]
-    required_musl_bootstrap = ("vendor/musl/src/unistd/read.c", "vendor/musl/src/unistd/write.c", "syscall_ret.c", "BUILT_NOT_EXECUTED")
+    required_musl_bootstrap = ("crt_start.S", "vendor/musl/src/unistd/read.c", "vendor/musl/src/unistd/write.c", "syscall_ret.c", "BUILT_NOT_EXECUTED")
     missing += [f"musl_bootstrap:{token}" for token in required_musl_bootstrap if token not in musl_bootstrap_text]
     if missing:
         raise RuntimeError(f"C fixture contract missing tokens: {missing}")

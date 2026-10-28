@@ -41,3 +41,11 @@ failure as `errno == EIO` before exiting. Its errno storage is intentionally
 single-threaded: TLS, C startup, allocator, and thread cancellation semantics
 have not yet been implemented. The bridge rejects unmapped calls with ENOSYS;
 it does not discard extra arguments or route them through another authority.
+
+## Bootstrap increment: minimal CRT entry
+
+`ports/musl/src/crt_start.S` consumes WovenHat's established initial stack and
+calls `__wovenhat_start_c`, which invokes `main(argc, argv)` and exits through
+upstream musl `_Exit`. QEMU proves this entry path at 1/2/4 CPUs. It is not
+musl `__libc_start_main`: auxiliary vectors, environment setup, TLS, init/fini
+hooks, locale, and constructors remain explicit prerequisites.

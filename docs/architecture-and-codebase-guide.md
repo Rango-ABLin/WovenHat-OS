@@ -13,6 +13,12 @@ denied-write `-1`/`errno == EIO` path on QEMU. `errno_location.c` is expressly
 a single-threaded temporary cell, not TLS. Startup, allocator, threading and
 the remaining syscall surface must be implemented and qualified later.
 
+The initial WovenHat CRT entry is a separate, deliberately small adapter. It
+uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and
+`argv` directly to `main`, then uses musl `_Exit`. It must not be confused with
+the full musl start-main lifecycle, which requires later TLS and aux-vector
+support.
+
 ## S03 process-lifecycle ABI surface (2026-10-28)
 
 The existing `kernel/src/task.rs` process authority owns parent/child
