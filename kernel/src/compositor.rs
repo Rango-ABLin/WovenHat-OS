@@ -21,6 +21,12 @@ use crate::display::{Damage, Rect, Surface};
 use crate::irq_lock::PreemptMutex as Mutex;
 use crate::user_graphics;
 
+#[cfg(feature = "stage20-14-recovery-test")]
+use core::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(feature = "stage20-14-recovery-test")]
+static INJECT_GPU_FAILURE: AtomicBool = AtomicBool::new(false);
+
 /// Fixed geometry used by the self-tests that reset and re-initialise the
 /// compositor, and as the fallback when no framebuffer exists.
 pub const DEFAULT_WIDTH: u32 = 640;
@@ -33,6 +39,8 @@ pub const DEFAULT_HEIGHT: u32 = 480;
 /// Two 1280-pixel monitors side by side (Stage 20.14b).
 pub const MAX_WIDTH: u32 = 2560;
 pub const MAX_HEIGHT: u32 = 1200;
+const MAX_GPU_OUTPUT_WIDTH: u32 = 1920;
+const MAX_GPU_OUTPUT_HEIGHT: u32 = 1080;
 
 /// Largest integer display scale. At 4 a 1920×1200 framebuffer gives a
 /// 480×300 surface, about as coarse as a usable desktop gets.
@@ -269,7 +277,24 @@ fn present_state(state: &mut State) -> Result<usize, Error> {
         feature = "stage20-14b-test"
     ))]
     if state.gpu.is_some() {
-        return present_gpu(state);
+        // A transient device/queue failure must not strand the desktop with
+        // an owned but unusable scanout. Reprobe and rebuild the bounded
+        // resources once, then retry the same damage without clearing it.
+        return match present_gpu(state) {
+            Ok(written) => Ok(written),
+            Err(_) => {
+                match recover_gpu_outputs_in_state(state) {
+                    Ok(()) => present_gpu(state),
+                    Err(_) => {
+                        // Keep the desktop visible if the device cannot be
+                        // reprobed: the UEFI framebuffer remains the
+                        // authoritative CPU fallback.
+                        state.gpu = None;
+                        present_framebuffer(state)
+                    }
+                }
+            }
+        };
     }
     present_framebuffer(state)
 }
@@ -304,6 +329,10 @@ fn present_gpu(state: &mut State) -> Result<usize, Error> {
     let Some(outputs) = state.gpu.as_mut() else {
         return Ok(0);
     };
+    #[cfg(feature = "stage20-14-recovery-test")]
+    if INJECT_GPU_FAILURE.swap(false, Ordering::AcqRel) {
+        return Err(Error::NoDisplay);
+    }
     let (head_width, head_height) = (outputs.width, outputs.height);
     let mut written = 0usize;
     let mut row = alloc::vec![0u32; head_width as usize];
@@ -356,47 +385,102 @@ fn present_gpu(state: &mut State) -> Result<usize, Error> {
     Ok(written)
 }
 
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+fn configured_gpu_outputs(mut gpu: crate::virtio_gpu::Gpu) -> Result<GpuOutputs, Error> {
+    if gpu.scanouts == 0 {
+        return Err(Error::NoDisplay);
+    }
+    let modes = gpu.display_info().map_err(|_| Error::NoDisplay)?;
+    for (index, mode) in modes.iter().enumerate().filter(|(_, mode)| mode.enabled) {
+        crate::serial::write_line(format_args!(
+            "[DISPLAY] virtio-gpu mode head={} {}x{}",
+            index, mode.width, mode.height
+        ));
+    }
+    let (width, height) = match modes[0] {
+        mode if mode.enabled && mode.width > 0 && mode.height > 0 => (
+            mode.width.min(MAX_GPU_OUTPUT_WIDTH),
+            mode.height.min(MAX_GPU_OUTPUT_HEIGHT),
+        ),
+        _ => (1024, 768),
+    };
+    let heads = (gpu.scanouts as usize)
+        .min(MAX_OUTPUTS)
+        .min((MAX_WIDTH / width) as usize);
+    if heads == 0 {
+        return Err(Error::NoDisplay);
+    }
+    for head in 0..heads {
+        gpu.set_mode(head, width, height)
+            .map_err(|_| Error::NoDisplay)?;
+    }
+    Ok(GpuOutputs {
+        gpu,
+        heads,
+        width,
+        height,
+    })
+}
+
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
+))]
+fn recover_gpu_outputs_in_state(state: &mut State) -> Result<(), Error> {
+    // Drop the failed transport and all resource backing before probing. The
+    // next device instance owns fresh queues and fresh generation state.
+    state.gpu = None;
+    let gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+    state.gpu = Some(configured_gpu_outputs(gpu)?);
+    state.damage.add(state.surface.bounds());
+    Ok(())
+}
+
 /// Use a virtio-gpu as the display, with multiple heads side by side at
-/// head 0's mode (at most 1280x800), or with one head at the GPU's native
-/// mode. A single-output GPU is a valid production display device; the boot
-/// framebuffer remains the fallback when probing or mode setup fails.
+/// head 0's mode (bounded to 1920x1080 per head), or with one head at the
+/// GPU's native mode. A single-output GPU is a valid production display
+/// device; the boot framebuffer remains the fallback when probing or mode
+/// setup fails.
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage20-14-test",
     feature = "stage20-14b-test"
 ))]
 pub fn attach_gpu_outputs() -> Result<usize, Error> {
-    let mut gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
-    if gpu.scanouts == 0 {
-        return Err(Error::NoDisplay);
-    }
-    let modes = gpu.display_info().map_err(|_| Error::NoDisplay)?;
-    let (width, height) = match modes[0] {
-        mode if mode.enabled && mode.width > 0 && mode.height > 0 => {
-            (mode.width.min(1280), mode.height.min(800))
-        }
-        _ => (1024, 768),
-    };
-    let heads = (gpu.scanouts as usize)
-        .min(MAX_OUTPUTS)
-        .min((MAX_WIDTH / width) as usize);
-    for head in 0..heads {
-        gpu.set_mode(head, width, height)
-            .map_err(|_| Error::NoDisplay)?;
-    }
+    let gpu = crate::virtio_gpu::Gpu::probe().map_err(|_| Error::NoDisplay)?;
+    let outputs = configured_gpu_outputs(gpu)?;
+    let heads = outputs.heads;
     let scale = {
         let mut guard = STATE.lock();
         let state = guard.as_mut().ok_or(Error::NotReady)?;
-        state.gpu = Some(GpuOutputs {
-            gpu,
-            heads,
-            width,
-            height,
-        });
+        state.gpu = Some(outputs);
         state.scale
     };
     rescale_to(scale, None)?;
     Ok(heads)
+}
+
+/// Exercise the production recovery transaction with one injected failed
+/// presentation. The failed frame must retain damage, reprobe the GPU, and
+/// become visible after one retry; a failed reprobe is covered by the normal
+/// UEFI framebuffer fallback in `present_state`.
+#[cfg(feature = "stage20-14-recovery-test")]
+pub fn recovery_self_test() -> bool {
+    reset();
+    init(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    if attach_gpu_outputs().is_err() || activate_display().is_err() {
+        return false;
+    }
+    INJECT_GPU_FAILURE.store(true, Ordering::Release);
+    let recovered = present().is_ok();
+    deactivate_display();
+    reset();
+    recovered
 }
 
 /// Stage 20.14S acceptance: exercise the production compositor through a
@@ -415,7 +499,10 @@ pub fn single_output_self_test() -> bool {
         ok
     }
 
-    let already_attached = STATE.lock().as_ref().is_some_and(|state| state.gpu.is_some());
+    let already_attached = STATE
+        .lock()
+        .as_ref()
+        .is_some_and(|state| state.gpu.is_some());
     if !already_attached {
         if let Err(error) = attach_gpu_outputs() {
             crate::serial::write_line(format_args!(
@@ -499,7 +586,7 @@ pub fn presented() -> bool {
 /// Evaluate `check` against the surface only between frames: when everything
 /// drawn has been presented, read under the same lock so a frame the holder
 /// is still drawing cannot be seen. `None` mid-frame.
-#[cfg(feature = "stage20-14b-test")]
+#[cfg(any(feature = "stage20-6-test", feature = "stage20-14b-test"))]
 pub fn between_frames(check: impl Fn(&dyn Fn(i32, i32) -> Option<u32>) -> bool) -> Option<bool> {
     let guard = STATE.lock();
     let state = guard.as_ref()?;

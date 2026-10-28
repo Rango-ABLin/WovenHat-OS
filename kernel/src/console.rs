@@ -1,9 +1,10 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 
+use crate::terminal;
+#[cfg(any(test, feature = "qemu-test"))]
 use crate::{
     display::{self, Damage, Surface},
     gui::Desktop,
-    terminal,
 };
 
 const BG_R: u8 = 4;
@@ -30,12 +31,17 @@ pub struct Console {
     start_x: usize,
     scale: usize,
 
+    /// Production system-app boots show a branded splash while boot work is
+    /// reported to serial, then stay quiet until the desktop owns scanout.
+    quiet: bool,
+
     /// Retained compositing surface for the desktop.
     ///
     /// Allocated on first use rather than at construction, because the console
     /// is created during early boot before the heap can satisfy a
     /// screen-sized buffer. Retaining it across calls is what lets an
     /// unchanged region go uncopied.
+    #[cfg(any(test, feature = "qemu-test"))]
     desktop_surface: Option<Surface>,
 }
 
@@ -49,6 +55,8 @@ impl Console {
             cursor_y: y,
             start_x: x,
             scale,
+            quiet: cfg!(feature = "system-apps"),
+            #[cfg(any(test, feature = "qemu-test"))]
             desktop_surface: None,
         }
     }
@@ -60,6 +68,120 @@ impl Console {
 
         self.cursor_x = self.start_x;
         self.cursor_y = 40;
+    }
+
+    /// Show the short boot-loader handoff screen without exposing the
+    /// diagnostic boot transcript on the normal desktop path.
+    #[cfg(feature = "system-apps")]
+    pub fn show_splash(&mut self) {
+        self.show_splash_frame(0);
+    }
+
+    /// Paint a branded boot frame. The spinner is deliberately composed from
+    /// integer primitives so the loader works before the compositor exists.
+    #[cfg(feature = "system-apps")]
+    pub fn show_splash_frame(&mut self, frame: usize) {
+        let quiet = self.quiet;
+        self.quiet = false;
+        self.clear();
+
+        let centre_x = self.info.width / 2;
+        let centre_y = self.info.height / 2;
+        let ring = [
+            (0isize, -34isize),
+            (17, -29),
+            (29, -17),
+            (34, 0),
+            (29, 17),
+            (17, 29),
+            (0, 34),
+            (-17, 29),
+            (-29, 17),
+            (-34, 0),
+            (-29, -17),
+            (-17, -29),
+        ];
+        for (index, (dx, dy)) in ring.iter().copied().enumerate() {
+            let distance = (index + frame) % ring.len();
+            let (red, green, blue) = match distance {
+                0 => (255, 205, 96),
+                1 | 2 => (105, 232, 225),
+                3 | 4 => (55, 164, 178),
+                _ => (25, 74, 103),
+            };
+            let x = centre_x.saturating_add_signed(dx).saturating_sub(3);
+            let y = centre_y.saturating_add_signed(dy).saturating_sub(3);
+            terminal::with_framebuffer(|buffer, info| {
+                fill_color(buffer, info, x, y, 7, 7, red, green, blue);
+            });
+        }
+
+        // A small woven-hat mark above the wordmark: crown, band and brim.
+        let mark_y = centre_y.saturating_sub(88);
+        terminal::with_framebuffer(|buffer, info| {
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(24),
+                mark_y,
+                48,
+                4,
+                38,
+                128,
+                149,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(17),
+                mark_y.saturating_sub(12),
+                34,
+                13,
+                76,
+                190,
+                188,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(10),
+                mark_y.saturating_sub(19),
+                20,
+                8,
+                255,
+                205,
+                96,
+            );
+            fill_color(
+                buffer,
+                info,
+                centre_x.saturating_sub(30),
+                mark_y + 5,
+                60,
+                5,
+                255,
+                205,
+                96,
+            );
+        });
+
+        let title = "WOVENHAT";
+        let title_width = title.chars().count() * 6 * self.scale;
+        let x = self.info.width.saturating_sub(title_width) / 2;
+        let y = centre_y.saturating_add(48);
+        self.set_cursor_position(x, y);
+        self.print(title);
+        self.newline();
+        self.set_cursor_position(
+            (self.info.width / 2).saturating_sub(12 * self.scale),
+            y + 18 * self.scale,
+        );
+        self.print("Starting desktop");
+        self.quiet = quiet;
+    }
+
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
     }
 
     fn ensure_room(&mut self) {
@@ -89,6 +211,9 @@ impl Console {
     }
 
     pub fn print(&mut self, text: &str) {
+        if self.quiet {
+            return;
+        }
         for c in text.chars() {
             self.put_char(c);
         }
@@ -100,6 +225,9 @@ impl Console {
     }
 
     pub fn put_char(&mut self, character: char) {
+        if self.quiet {
+            return;
+        }
         if character == '\n' {
             self.newline();
             return;
@@ -134,6 +262,9 @@ impl Console {
     }
 
     pub fn backspace(&mut self) {
+        if self.quiet {
+            return;
+        }
         let char_width = 6 * self.scale;
 
         if self.cursor_x <= self.start_x {
@@ -154,6 +285,7 @@ impl Console {
     /// scanning, so every redraw could tear, and it repainted the whole screen
     /// however little moved. The surface is retained between calls so an
     /// unchanged region is never recopied.
+    #[cfg(any(test, feature = "qemu-test"))]
     pub fn render_desktop(&mut self, desktop: &Desktop) {
         let width = self.info.width;
         let height = self.info.height;
@@ -212,6 +344,26 @@ pub(crate) fn fill(
     for row in y..y.saturating_add(height) {
         for column in x..x.saturating_add(width) {
             pixel(buffer, info, column, row, BG_R, BG_G, BG_B);
+        }
+    }
+}
+
+#[cfg(feature = "system-apps")]
+#[allow(clippy::too_many_arguments)]
+fn fill_color(
+    buffer: &mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    red: u8,
+    green: u8,
+    blue: u8,
+) {
+    for row in y..y.saturating_add(height) {
+        for column in x..x.saturating_add(width) {
+            pixel(buffer, info, column, row, red, green, blue);
         }
     }
 }

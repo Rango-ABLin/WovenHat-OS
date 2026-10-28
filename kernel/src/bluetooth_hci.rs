@@ -5974,6 +5974,8 @@ impl SmpKeyDistribution {
     pub fn abort(&mut self) {
         if let Some(mut ltk) = self.ltk.take() {
             for byte in &mut ltk {
+                // SAFETY: `byte` is a valid, aligned `&mut u8` into the live key
+                // material; the volatile write scrubs it and cannot be elided.
                 unsafe {
                     core::ptr::write_volatile(byte, 0);
                 }
@@ -6616,6 +6618,8 @@ impl SmpConfirmState {
         params[12..].copy_from_slice(&stk);
         let len = HciCommand::new(OPCODE_LE_START_ENCRYPTION, &params)?.encode(out);
         for byte in &mut stk {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live key
+            // material; the volatile write scrubs it and cannot be elided.
             unsafe {
                 core::ptr::write_volatile(byte, 0);
             }
@@ -7005,6 +7009,8 @@ impl SmpIdentityDistribution {
     pub fn abort(&mut self) {
         if let Some(mut irk) = self.irk.take() {
             for byte in &mut irk {
+                // SAFETY: `byte` is a valid, aligned `&mut u8` into the live key
+                // material; the volatile write scrubs it and cannot be elided.
                 unsafe {
                     core::ptr::write_volatile(byte, 0);
                 }

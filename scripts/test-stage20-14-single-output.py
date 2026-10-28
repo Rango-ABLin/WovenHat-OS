@@ -17,6 +17,7 @@ import time
 
 READY = "[S20.14S] ready for capture"
 PASS = "[S20.14S] single-output GPU: PASSED"
+RECOVERY_PASS = "[S20.14R] VirtIO presentation recovery: PASSED"
 COLOURS = ((208, 64, 64), (64, 208, 112), (64, 112, 224), (224, 208, 64))
 
 
@@ -78,6 +79,8 @@ def main():
     parser.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe")
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--timeout", type=float, default=300)
+    parser.add_argument("--recovery", action="store_true",
+                        help="run the fault-injected VirtIO recovery gate")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -87,7 +90,9 @@ def main():
     out = root / "audit-artifacts" / f"stage20.14s-{args.cpus}cpu-{time.time_ns()}"
     out.mkdir(parents=True)
     build = subprocess.run(
-        ["cargo", "run", "--quiet", "--features", "stage20-14-single-test", "--", "--print-image"],
+        ["cargo", "run", "--quiet", "--features",
+         "stage20-14-recovery-test" if args.recovery else "stage20-14-single-test",
+         "--", "--print-image"],
         cwd=root, text=True, capture_output=True,
     )
     (out / "build.log").write_text(build.stdout + build.stderr, encoding="utf-8")
@@ -117,7 +122,10 @@ def main():
                     errors.append("timeout")
                     break
                 log = serial.read_text(errors="replace") if serial.exists() else ""
-                if not captured and READY in log:
+                if args.recovery and RECOVERY_PASS in log:
+                    captured = True
+                    break
+                if not args.recovery and not captured and READY in log:
                     captured = True
                     qmp("screendump", filename=str(out / "head0.ppm"), device="gpu0", head=0)
                 time.sleep(0.2)
@@ -129,13 +137,21 @@ def main():
                 process.kill()
                 process.wait()
     log = serial.read_text(errors="replace") if serial.exists() else ""
-    if process.returncode != 33:
+    if args.recovery and RECOVERY_PASS in log:
+        captured = True
+    if not args.recovery and process.returncode != 33:
         errors.append(f"exit code {process.returncode}, expected 33")
-    if PASS not in log:
+    if args.recovery:
+        if RECOVERY_PASS not in log:
+            errors.append(f"missing {RECOVERY_PASS!r}")
+    elif PASS not in log:
         errors.append(f"missing {PASS!r}")
-    if not captured or not (out / "head0.ppm").exists():
+    if args.recovery:
+        if not captured:
+            errors.append("recovery gate did not complete")
+    elif not captured or not (out / "head0.ppm").exists():
         errors.append("single-output scanout was not captured")
-    else:
+    elif not args.recovery:
         width, height, pixels = read_ppm(out / "head0.ppm")
         for x, y, expected in ((width // 4, height // 4, COLOURS[0]),
                                (3 * width // 4, height // 4, COLOURS[1]),
@@ -149,7 +165,8 @@ def main():
         print("\n".join(errors), file=sys.stderr)
         print("FAILED; evidence:", out, file=sys.stderr)
         return 1
-    print(f"Stage 20.14S: PASS ({args.cpus} CPU, single-output pixels verified). Evidence: {out}")
+    detail = "recovery verified" if args.recovery else "single-output pixels verified"
+    print(f"Stage 20.14S: PASS ({args.cpus} CPU, {detail}). Evidence: {out}")
     return 0
 
 

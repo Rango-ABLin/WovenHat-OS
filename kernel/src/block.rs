@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use alloc::{alloc::{alloc_zeroed, Layout}, boxed::Box};
+use alloc::{
+    alloc::{alloc_zeroed, Layout},
+    boxed::Box,
+};
 
 pub const SECTOR_SIZE: usize = 512;
 

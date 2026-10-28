@@ -1,4 +1,6 @@
-use libwoven::{rgb, Canvas, GraphicsSurface};
+use libwoven::layout::Frame;
+use libwoven::ui::{Button, Label, Theme};
+use libwoven::{Canvas, GraphicsSurface, rgb};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -28,8 +30,9 @@ struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_
 // SAFETY: the terminal GUI is single-threaded and owns this buffer exclusively.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
+));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenTerminal: failure\n");
@@ -51,11 +54,23 @@ fn draw(
     status: &[u8],
     pointer: Option<(u16, u16)>,
     pressed: bool,
+    clear: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenTerminal", TEXT);
+    let theme = Theme {
+        surface: PANEL,
+        accent: ACCENT,
+        text: TEXT,
+        disabled: BUTTON,
+        focus: ACCENT,
+    };
+    Label::new(
+        Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
+        "WovenTerminal",
+    )
+    .draw(canvas, theme);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", ACCENT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", TEXT);
@@ -68,18 +83,22 @@ fn draw(
     if let Ok(text) = core::str::from_utf8(status) {
         canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, TEXT);
     }
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
+    clear.draw(canvas, theme);
+    canvas.draw_text(
+        PANEL_X + 10,
+        PANEL_Y + 174,
+        "Enter submits; Backspace edits",
+        MUTED,
     );
-    canvas.draw_text(BUTTON_X + 14, BUTTON_Y + 6, "Clear", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 174, "Enter submits; Backspace edits", MUTED);
     if let Some((x, y)) = pointer {
         let color = if pressed { TEXT } else { POINTER_MARKER };
-        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, color);
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(2),
+            i32::from(y).saturating_sub(2),
+            5,
+            5,
+            color,
+        );
     }
 }
 
@@ -89,6 +108,7 @@ fn render(
     status: &[u8],
     pointer: Option<(u16, u16)>,
     pressed: bool,
+    clear: &Button<'_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -100,7 +120,7 @@ fn render(
     ) else {
         return false;
     };
-    draw(&mut canvas, line, status, pointer, pressed);
+    draw(&mut canvas, line, status, pointer, pressed, clear);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -121,9 +141,18 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
+    let mut clear = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Clear",
+    );
     let line = [0u8; MAX_INPUT];
     let status: &[u8] = b"Ready for a bounded command preview";
-    if !render(&window, &line, status, None, false) {
+    if !render(&window, &line, status, None, false, &clear) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -167,7 +196,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     // expensive pixel upload, so the shell's bounded resize
                     // grace window cannot expire while copying the canvas.
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, &line[..length], status, pointer, pointer_pressed) {
+                        if render(
+                            &resized,
+                            &line[..length],
+                            status,
+                            pointer,
+                            pointer_pressed,
+                            &clear,
+                        ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenTerminal: window resized\n");
@@ -185,7 +221,17 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     u16::from_le_bytes([message[4], message[5]]),
                     u16::from_le_bytes([message[6], message[7]]),
                 ));
-                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                if let Some((x, y)) = pointer {
+                    clear.pointer(i32::from(x), i32::from(y), pointer_pressed);
+                }
+                if !render(
+                    &window,
+                    &line[..length],
+                    status,
+                    pointer,
+                    pointer_pressed,
+                    &clear,
+                ) {
                     fail(9)
                 }
                 let _ = libwoven::print("WovenTerminal: pointer updated\n");
@@ -196,17 +242,19 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer_pressed = message[5] != 0;
                 pointer = Some((local_x, local_y));
-                if !pointer_pressed
-                    && i32::from(local_x) >= BUTTON_X
-                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
-                    && i32::from(local_y) >= BUTTON_Y
-                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
-                {
+                if clear.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     length = 0;
                     status = b"Input cleared by pointer control";
                     let _ = libwoven::print("WovenTerminal: pointer cleared\n");
                 }
-                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                if !render(
+                    &window,
+                    &line[..length],
+                    status,
+                    pointer,
+                    pointer_pressed,
+                    &clear,
+                ) {
                     fail(9)
                 }
                 let _ = libwoven::print("WovenTerminal: pointer updated\n");
@@ -226,14 +274,28 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 }
                 // Redraw after every bounded edit; the shared surface keeps
                 // the compositor's ownership and lifecycle unchanged.
-                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                if !render(
+                    &window,
+                    &line[..length],
+                    status,
+                    pointer,
+                    pointer_pressed,
+                    &clear,
+                ) {
                     fail(9)
                 }
             } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
                 line[length] = message[0];
                 length += 1;
                 status = b"Editing command preview";
-                if !render(&window, &line[..length], status, pointer, pointer_pressed) {
+                if !render(
+                    &window,
+                    &line[..length],
+                    status,
+                    pointer,
+                    pointer_pressed,
+                    &clear,
+                ) {
                     fail(11)
                 }
                 let _ = libwoven::print("WovenTerminal: input updated\n");
@@ -253,7 +315,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         if !digit.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }
