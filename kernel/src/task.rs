@@ -18,6 +18,9 @@ const IDLE_TASK_ID: TaskId = TaskId(1);
 static SCHEDULER: IrqMutex<Scheduler> = IrqMutex::with_rank(Scheduler::empty(), 10);
 static PROCESS_TABLE: IrqMutex<[Option<Process>; MAX_PROCESSES]> =
     IrqMutex::with_rank([const { None }; MAX_PROCESSES], 20);
+const MAX_CONDITION_WAITERS: usize = 64;
+static CONDITION_WAITERS: IrqMutex<[Option<(u64, TaskId)>; MAX_CONDITION_WAITERS]> =
+    IrqMutex::with_rank([const { None }; MAX_CONDITION_WAITERS], 15);
 
 /// Interrupt-safe guard for the global process table.
 ///
@@ -5390,6 +5393,33 @@ pub fn wait_for_event_until(deadline: u64) {
     if interrupts_were_enabled {
         x86_64::instructions::interrupts::enable();
     }
+}
+
+pub fn wait_on_condition(address: u64, deadline: u64) {
+    if address == 0 { return; }
+    let task = current_task_id();
+    {
+        let mut waiters = CONDITION_WAITERS.lock();
+        if let Some(slot) = waiters.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some((address, task));
+        }
+    }
+    wait_for_event_until(deadline);
+    let mut waiters = CONDITION_WAITERS.lock();
+    for slot in waiters.iter_mut() {
+        if slot.is_some_and(|(key, id)| key == address && id == task) {
+            *slot = None;
+            break;
+        }
+    }
+}
+
+pub fn signal_condition(address: u64) -> bool {
+    let target = {
+        let waiters = CONDITION_WAITERS.lock();
+        waiters.iter().flatten().find(|(key, _)| *key == address).map(|(_, id)| *id)
+    };
+    target.is_some_and(signal_event)
 }
 
 pub fn sleep_current(ticks: u64) {

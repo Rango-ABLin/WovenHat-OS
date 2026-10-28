@@ -147,6 +147,7 @@ int pthread_cond_signal(pthread_cond_t *condition)
 {
 	if (!condition) return EINVAL;
 	__sync_add_and_fetch(&condition->__u.__vi[0], 1);
+	(void)wh_syscall1(WH_SYS_THREAD_CONDITION_SIGNAL, (long)(uintptr_t)condition);
 	return 0;
 }
 int pthread_cond_broadcast(pthread_cond_t *condition)
@@ -159,7 +160,7 @@ int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
 	int sequence = condition->__u.__vi[0];
 	if (pthread_mutex_unlock(mutex)) return EINVAL;
 	while (condition->__u.__vi[0] == sequence)
-		(void)wh_syscall1(WH_SYS_THREAD_SLEEP, 1);
+		(void)wh_syscall2(WH_SYS_THREAD_CONDITION_WAIT, (long)(uintptr_t)condition, -1);
 	return pthread_mutex_lock(mutex);
 }
 int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
@@ -173,7 +174,7 @@ int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
 	long deadline_ticks = timeout->tv_sec * 100L + (timeout->tv_nsec + 9999999L) / 10000000L;
 	if (now < 0 || timeout->tv_sec < 0 || deadline_ticks < now) deadline_ticks = now;
 	while (condition->__u.__vi[0] == sequence && wh_syscall0(WH_SYS_GETTICKS) < deadline_ticks)
-		(void)wh_syscall1(WH_SYS_THREAD_SLEEP, 1);
+		(void)wh_syscall2(WH_SYS_THREAD_CONDITION_WAIT, (long)(uintptr_t)condition, deadline_ticks);
 	if (condition->__u.__vi[0] == sequence) {
 		(void)pthread_mutex_lock(mutex);
 		return ETIMEDOUT;
