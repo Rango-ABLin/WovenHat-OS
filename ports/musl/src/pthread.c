@@ -158,7 +158,8 @@ int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
 	if (!condition || !mutex) return EINVAL;
 	int sequence = condition->__u.__vi[0];
 	if (pthread_mutex_unlock(mutex)) return EINVAL;
-	while (condition->__u.__vi[0] == sequence) sched_yield();
+	while (condition->__u.__vi[0] == sequence)
+		(void)wh_syscall1(WH_SYS_THREAD_SLEEP, 1);
 	return pthread_mutex_lock(mutex);
 }
 int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
@@ -172,7 +173,7 @@ int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
 	long deadline_ticks = timeout->tv_sec * 100L + (timeout->tv_nsec + 9999999L) / 10000000L;
 	if (now < 0 || timeout->tv_sec < 0 || deadline_ticks < now) deadline_ticks = now;
 	while (condition->__u.__vi[0] == sequence && wh_syscall0(WH_SYS_GETTICKS) < deadline_ticks)
-		sched_yield();
+		(void)wh_syscall1(WH_SYS_THREAD_SLEEP, 1);
 	if (condition->__u.__vi[0] == sequence) {
 		(void)pthread_mutex_lock(mutex);
 		return ETIMEDOUT;

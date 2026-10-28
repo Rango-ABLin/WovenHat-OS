@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - scheduler-backed condition wait increment (2026-10-28)
+
+Added a dedicated userspace thread-sleep syscall backed by the scheduler's
+sleep queue. `pthread_cond_wait` and `pthread_cond_timedwait` now park between
+sequence checks instead of busy polling; timeout deadlines remain tied to the
+kernel tick clock. The static musl ELF builds and the 1-CPU production loader
+fixture passes. A direct condition-to-waiter wake list and robust owner-death
+mutex recovery remain subsequent ABI work.
+
 ## Codex - kernel-tick clock and timed-wait increment (2026-10-28)
 
 Added a musl `clock_gettime` adapter over the kernel's monotonic 100 Hz tick
@@ -9,6 +18,14 @@ clock result and the timed-wait path; LLVM build/link and the production loader
 gate pass. This is still bounded: it does not yet provide sleep-queue-backed
 condition wait blocking or robust owner-death recovery.
 
+
+## Codex - userspace runtime completion design (2026-10-28)
+
+Added `docs/musl-runtime-completion-design.md`, defining the remaining
+dynamic-module namespace, DTV/general-dynamic TLS, constructor/destructor and
+unload quiescence, detached/cancellation cleanup, kernel-clock timed waits,
+allocator qualification, and ordered acceptance gates. This is a design
+baseline only; it does not claim those unresolved capabilities are complete.
 ## Codex - libc start-main and entropy auxv increment (2026-10-28)
 
 The static CRT now exports a musl-compatible `__libc_start_main` entry,
