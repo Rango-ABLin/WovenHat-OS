@@ -1,5 +1,11 @@
 # Stage status
 
+## Dynamic TLS resource clearing boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Thread teardown now clears dynamic TLS ownership through a validated resource
+API after unmapping. Kernel target build and warning-denying Clippy pass. The
+all-thread allocator still needs its matching install/rollback operation.
+
 ## Dynamic TLS caller-buffer validation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel now validates and copy-checks dynamic TLS initializer buffers before

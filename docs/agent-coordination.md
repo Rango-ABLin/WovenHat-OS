@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS resource clearing boundary (2026-10-28)
+
+Added a used thread-resource API for clearing one dynamic TLS ownership slot
+after its mapping is unmapped. Thread join now validates the mapping address
+before clearing ownership, giving future allocation rollback a single resource
+mutation boundary.
+
 ## Codex - dynamic TLS caller-buffer validation ABI (2026-10-28)
 
 Added a bounded kernel validation syscall that checks initializer length versus
