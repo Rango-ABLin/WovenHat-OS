@@ -3231,3 +3231,49 @@ fn check_refuses_a_free_inode_with_nonzero_timestamps() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// Patch the superblock's `root_inode` field in the active checkpoint slot
+/// (always LBA 0 after a fresh `format()`) and re-seal the superblock checksum.
+///
+/// The superblock layout has `root_inode` at bytes 72..80 and the checksum
+/// (FNV-1a over bytes 0..80) at bytes 80..88.  `mount()` accepts the result
+/// when the new value is in `1..=inode_count`.
+fn patch_superblock_root_inode(image: &CrashDisk, root_inode: u64) {
+    let mut sectors = image.image.borrow_mut();
+    sectors[0][72..80].copy_from_slice(&root_inode.to_le_bytes());
+    let checksum = test_fnv1a(&sectors[0][..80]);
+    sectors[0][80..88].copy_from_slice(&checksum.to_le_bytes());
+}
+
+/// `format()` always writes `sb.root_inode = 1`.  No runtime path modifies the
+/// superblock's `root_inode` field after format; any other value is corruption.
+/// `SuperBlock::valid()` only bounds it to `1..=inode_count`, so a crafted value
+/// in that range passes `mount()` but should be caught by `check()`.
+#[test]
+fn check_refuses_superblock_with_root_inode_other_than_1() {
+    let base = formatted();
+
+    // Both values are in `1..=INODES` (= 1..=32) so `mount()` accepts the
+    // patched superblock and `check()` is the first rejection.
+    for root_inode in [2u64, INODES as u64] {
+        let corrupt = base.fork(None);
+        patch_superblock_root_inode(&corrupt, root_inode);
+
+        let before = corrupt.sectors();
+        let mut volume =
+            Volume::mount(corrupt.clone()).expect("mount should accept in-range root_inode");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse root_inode = {root_inode}"
+        );
+        assert!(
+            corrupt.sectors() == before,
+            "check() must not modify the image (root_inode = {root_inode})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}

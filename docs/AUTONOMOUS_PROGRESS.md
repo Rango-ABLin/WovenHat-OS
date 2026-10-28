@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse superblock with root_inode other than 1
+
+Branch: `auto/wovenhat-development` (base `15338299`). Working tree was clean.
+
+### Defect / gap
+
+`format()` always hardcodes `sb.root_inode = 1`.  No runtime operation (commit,
+write, create, unlink) ever modifies the superblock's `root_inode` field after
+format; the checkpoint mechanism records the superblock verbatim.  Any value
+other than 1 is therefore corruption the runtime cannot have produced.
+
+`SuperBlock::valid()` only requires `root_inode` in `1..=inode_count`, so a
+crafted value such as 2 passes `mount()`.  Without an explicit guard in
+`check()`, that crafted volume enters the root-section checks with the wrong
+inode as the root.  In the simple case (root_inode = 2, inode 2 is free),
+the existing `root.mode != 0o040_755` guard catches it.  In a carefully
+crafted image where inode 2 is made to satisfy every downstream invariant
+(mode, kind, links, data_checksum, created, size, direct), all the root-section
+guards pass and `check()` returns `Ok(())` — wrong.  The `sb.root_inode != 1`
+guard is the only reliable O(1) catch.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — at the start of the function, after
+`let txn = Transaction::new();`, added:
+
+```rust
+// `format()` always hardcodes `sb.root_inode = 1`. The checkpoint
+// mechanism records the superblock verbatim: no commit, write, create,
+// or unlink path ever modifies `root_inode` after format.  Any value
+// other than 1 is therefore corruption the runtime cannot have produced.
+// `SuperBlock::valid()` only requires `root_inode` in `1..=inode_count`,
+// so a crafted value such as 2 passes `mount()` while silently
+// misdirecting every root-section check below to examine the wrong inode.
+if sb.root_inode != 1 {
+    return Err(Error::Corrupt);
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added helper `patch_superblock_root_inode` and
+test `check_refuses_superblock_with_root_inode_other_than_1`:
+
+- `patch_superblock_root_inode(image, root_inode)`: patches bytes 72..80 of
+  LBA 0 (the active checkpoint slot after a fresh format) to the new value and
+  re-seals the FNV-1a checksum at bytes 80..88.
+- Test:
+  1. Formats a fresh volume.
+  2. For each of `2u64` and `INODES as u64` (= 32) — both in `1..=INODES`, so
+     `mount()` accepts the patched superblock:
+     a. Forks the image, patches root_inode via the helper.
+     b. Mounts the patched image (must succeed).
+     c. Asserts `check()` returns `Err(Corrupt)`.
+     d. Asserts `check()` does not modify the image.
+  3. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **63 passed / 0 failed** (was 62; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard is O(1) and catches any `root_inode != 1` before any inode I/O.
+- A crafted superblock with `root_inode` out of `1..=inode_count` is already
+  rejected by `mount()` via `SuperBlock::valid()`; this guard closes the
+  in-range case.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse root directory inode with nonzero created timestamp
 
 Branch: `auto/wovenhat-development` (base `bf2f2810`). Working tree had uncommitted

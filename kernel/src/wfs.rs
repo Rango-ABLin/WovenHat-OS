@@ -1311,6 +1311,17 @@ impl<D: BlockDevice> Volume<D> {
         let sb = self.super_block;
         let txn = Transaction::new();
 
+        // `format()` always hardcodes `sb.root_inode = 1`. The checkpoint
+        // mechanism records the superblock verbatim: no commit, write, create,
+        // or unlink path ever modifies `root_inode` after format.  Any value
+        // other than 1 is therefore corruption the runtime cannot have produced.
+        // `SuperBlock::valid()` only requires `root_inode` in `1..=inode_count`,
+        // so a crafted value such as 2 passes `mount()` while silently
+        // misdirecting every root-section check below to examine the wrong inode.
+        if sb.root_inode != 1 {
+            return Err(Error::Corrupt);
+        }
+
         for number in 1..=u64::from(sb.inode_count) {
             let node = self.inode(number)?;
             if !node.is_used() {
