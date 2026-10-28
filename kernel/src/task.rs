@@ -261,8 +261,8 @@ impl TaskClass {
     const fn for_priority(priority: TaskPriority) -> Self {
         match priority {
             TaskPriority::LOW => Self::Background,
-            TaskPriority::NORMAL => Self::Interactive,
-            TaskPriority::HIGH => Self::Realtime,
+            TaskPriority::NORMAL => Self::Service,
+            TaskPriority::HIGH => Self::Interactive,
             _ => Self::Background,
         }
     }
@@ -420,7 +420,7 @@ impl TaskControlBlock {
             name: "",
             state: TaskState::Empty,
             priority: TaskPriority::NORMAL,
-            class: TaskClass::Service,
+            class: TaskClass::Realtime,
             context: Context { stack_pointer: 0 },
             capabilities: CapabilitySet::empty(),
             capability_lineages: [None; Capability::COUNT],
