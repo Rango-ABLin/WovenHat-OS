@@ -123,6 +123,18 @@ dedicated headless QMP gate enumerates xHCI, injects Ctrl-C through the USB HID
 keyboard, and proves foreground-group SIGINT termination (status 130). Full
 POSIX terminal coverage beyond this bounded ABI remains outside S03.
 
+## S04 scheduler and SMP accounting - 2026-10-28 - IMPLEMENTING
+
+The first S04 closure increment adds bounded scheduler accounting: every live
+task records timer-tick runtime and Ready-to-Running dispatch count, while a
+per-CPU counter records aggregate runtime. Snapshots are copied under the
+scheduler lock and preserve the existing priority, affinity, migration, and
+hotplug authority; accounting is telemetry, not an implicit reservation or
+billing promise. The dedicated `s04-scheduler-accounting-test` passes on 1/2/4
+CPUs with warning-denying target/host Clippy and Python validation. Enforced
+runtime quotas, richer scheduler classes, and multi-node topology qualification
+remain the next S04 work.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,

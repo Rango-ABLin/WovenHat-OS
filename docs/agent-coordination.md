@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S04 scheduler accounting increment (2026-10-28)
+
+Started S04 after S03 closure. Added bounded per-task timer-runtime and
+dispatch accounting plus per-CPU runtime snapshots, with a dedicated
+`s04-scheduler-accounting-test` QEMU gate passing on 1/2/4 CPUs. Existing
+priority, affinity, migration, hotplug, and topology behavior is preserved;
+runtime quota enforcement, richer scheduler classes, and multi-node topology
+qualification remain open.
+
 ## Codex — S03 keyboard/job-control closure increment (2026-10-28)
 
 The dedicated headless QMP gate now boots xHCI with USB keyboard/mouse,

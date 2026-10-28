@@ -4347,6 +4347,17 @@ nearly-full development host without weakening any rollback or digest check.
 
 # SMP scalability and supported resource floor
 
+## S04 scheduler accounting boundary
+
+The scheduler keeps bounded per-task timer-runtime and dispatch counters and
+per-CPU aggregate runtime ticks. `task_accounting()` and
+`cpu_runtime_ticks()` return copied telemetry under the scheduler authority;
+they do not grant CPU reservations or imply billing/quota enforcement. The
+existing priority quantum, hard affinity, Ready-only migration, NUMA-domain
+preference, and hotplug invariants remain authoritative. Runtime quotas,
+richer scheduler classes, and multi-node topology qualification are separate
+S04 work.
+
 ## Hybrid graphics GFX-01 boundary
 
 The versioned `graphics_abi` contract is intentionally an adapter seam over

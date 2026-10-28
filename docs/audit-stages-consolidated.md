@@ -70,6 +70,17 @@ job-control implementation also covers default stop/continue dispositions,
 notification, child reparenting, and PTY hangup EOF/write rejection. Full
 POSIX terminal coverage beyond this bounded ABI remains open.
 
+## S04 scheduler and SMP accounting - 2026-10-28
+
+The first S04 closure increment adds bounded scheduler accounting: live tasks
+record timer-tick runtime and Ready-to-Running dispatch count, and each logical
+CPU records aggregate runtime ticks. The snapshots are scheduler-lock-owned
+copies and do not change the established priority, affinity, migration, or
+hotplug authority. `scripts/test-s04-scheduler-accounting.py` passes on 1/2/4
+CPUs with the `[S04.SCHEDULER] accounting: PASSED` marker and QEMU exit 33.
+Enforced runtime quotas, richer scheduler classes, and multi-node topology
+qualification remain open.
+
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
 Added the reproducible source/linker boundary in
