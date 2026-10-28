@@ -827,6 +827,10 @@ const CHROME_RADIUS: usize = 6;
 /// A smaller radius for compact controls (the window close button) where the
 /// full `CHROME_RADIUS` would look disproportionate.
 const CHROME_RADIUS_SMALL: usize = 3;
+/// Corner radius for the larger sign-in/lock-screen card.
+const CHROME_CARD_RADIUS: usize = 14;
+/// Diameter of the sign-in screen's account avatar circle.
+const AVATAR_DIAMETER: i32 = 48;
 
 fn rect_of(area: Area) -> Rect {
     Rect {
@@ -847,11 +851,26 @@ fn fill_rounded(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32) 
     Renderer::new(canvas).rounded_rect(rect_of(area), radius, color_of(color));
 }
 
+/// A filled rounded rectangle with explicit opacity, for translucent chrome
+/// (the sign-in/lock card) rather than a fully opaque fill.
+fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32, opacity: u8) {
+    Renderer::new(canvas).rounded_rect_blended(rect_of(area), radius, color_of(color), opacity);
+}
+
 /// A top-to-bottom gradient fill in `area`, replacing a flat `fill_rect` call
 /// for chrome that reads better with a subtle highlight (title bars, the
 /// taskbar, the Start button) rather than a single flat colour.
 fn fill_gradient(canvas: &mut Canvas<'_>, area: Area, top: u32, bottom: u32) {
     Renderer::new(canvas).vertical_gradient(rect_of(area), color_of(top), color_of(bottom));
+}
+
+/// A filled circle of `diameter` centred at `(center_x, center_y)`. A circle
+/// is a square rounded rectangle whose radius is half its side, so this
+/// reuses `rounded_rect` rather than adding a second corner-distance
+/// implementation.
+fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
+    let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
+    fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
 }
 
 /// `color`, lightened toward white by `amount` (0..=255) -- used to derive a
@@ -2378,10 +2397,33 @@ impl Desktop {
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
         let catalog = lock_catalog(self.language);
+
+        // A frosted card behind the sign-in/lock content, Windows-11-style,
+        // instead of text floating directly on the dimmed wallpaper.
+        let card = Area::new(self.width / 2 - 140, middle - 120, 280, 170);
+        fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, rgb(10, 14, 24), 170);
+
         if self.mode == LockMode::SignIn {
+            // A circular avatar for the selected account: its initial inside
+            // a filled circle, the same technique used for rounded chrome.
+            let initial = self.accounts[self.chosen]
+                .map(|account| account.name().first().copied().unwrap_or(b'?'))
+                .unwrap_or(b'?')
+                .to_ascii_uppercase();
+            let avatar_y = middle - 85;
+            fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, theme_accent());
+            let glyph = [initial];
+            let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
+            canvas.draw_text(
+                self.width / 2 - font::text_width(glyph) as i32 / 2,
+                avatar_y - 3,
+                glyph,
+                rgb(255, 255, 255),
+            );
+
             // The sign-in prompt, then the accounts, the chosen one marked.
             let text = catalog.lookup("sign_in", "Sign in");
-            canvas.draw_text(centred(text), middle - 60, text, theme_text());
+            canvas.draw_text(centred(text), middle - 52, text, theme_text());
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {
@@ -2391,7 +2433,7 @@ impl Desktop {
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
                 canvas.draw_text(
                     centred(text),
-                    middle - 46 + index as i32 * 10,
+                    middle - 38 + index as i32 * 10,
                     text,
                     theme_text(),
                 );
@@ -2424,9 +2466,15 @@ impl Desktop {
         };
         canvas.draw_text(centred(prompt), middle - 4, prompt, theme_text());
         let dots = self.entry_length as i32;
-        let left = (self.width - (dots * 10 - 4)) / 2;
-        for index in 0..dots {
-            canvas.fill_rect(left + index * 10, middle + 12, 6, 6, theme_text());
+        if dots > 0 {
+            let left = (self.width - (dots * 10 - 4)) / 2;
+            // A rounded pill behind the dots, Windows-11-style, instead of
+            // the digits floating bare on the card.
+            let pill = Area::new(left - 10, middle + 6, dots * 10 - 4 + 20, 20);
+            fill_rounded(canvas, pill, 10, rgb(24, 30, 44));
+            for index in 0..dots {
+                fill_circle(canvas, left + index * 10 + 3, middle + 15, 6, theme_text());
+            }
         }
     }
 
