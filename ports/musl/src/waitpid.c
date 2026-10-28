@@ -2,7 +2,7 @@
 #include <sys/wait.h>
 #include <wovenhat/syscall.h>
 
-/* The current kernel ABI returns a plain child exit code, not a POSIX status. */
+/* Translate the kernel's plain exit code into the POSIX wait-status layout. */
 pid_t waitpid(pid_t pid, int *status, int options)
 {
 	long result;
@@ -21,7 +21,9 @@ pid_t waitpid(pid_t pid, int *status, int options)
 		errno = (int)-result;
 		return -1;
 	}
-	if (status)
-		*status = (int)result;
+	if (status) {
+		int exit_code = (int)result;
+		*status = exit_code >= 128 ? exit_code - 128 : exit_code << 8;
+	}
 	return pid;
 }

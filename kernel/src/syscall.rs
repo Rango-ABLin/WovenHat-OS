@@ -579,6 +579,8 @@ pub fn service_pending() {
 }
 
 const SYSCALL_ERROR: u64 = u64::MAX;
+/// Distinguishes a broken pipe from generic denied/invalid syscall failures.
+const SYSCALL_BROKEN_PIPE: u64 = u64::MAX - 2;
 
 fn sys_mmap(length: u64, flags: u64) -> u64 {
     if flags & !1 != 0 {
@@ -621,7 +623,7 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
             Ok(count) => count,
             Err(crate::task::FileError::BrokenPipe) => {
                 let _ = crate::task::raise_current_signal(13);
-                return SYSCALL_ERROR;
+                return SYSCALL_BROKEN_PIPE;
             }
             Err(_) => return SYSCALL_ERROR,
         };
@@ -686,7 +688,7 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
         }
         Err(crate::task::FileError::BrokenPipe) => {
             let _ = crate::task::raise_current_signal(13);
-            SYSCALL_ERROR
+            SYSCALL_BROKEN_PIPE
         }
         Err(_) => SYSCALL_ERROR,
     }

@@ -35,6 +35,7 @@ SOURCES = (
     "ports/musl/src/fork.c",
     "ports/musl/src/sched_yield.c",
     "ports/musl/src/waitpid.c",
+    "ports/musl/src/signal.c",
 )
 ASSEMBLY_SOURCES = ("ports/musl/src/crt_start.S",)
 FIXTURE = "tools/runtime-fixtures/musl-bootstrap.c"

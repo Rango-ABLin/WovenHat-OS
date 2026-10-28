@@ -1,10 +1,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 static char pipe_buffer[2048];
+_Noreturn void _Exit(int);
+
+static void note_sigpipe(int sig)
+{
+	_Exit(sig == SIGPIPE ? 42 : 99);
+}
 
 int main(int argc, char **argv)
 {
@@ -95,7 +102,33 @@ int main(int argc, char **argv)
 		return write(pipe_fd[1], "S", 1) == -1 ? 111 : 112;
 	}
 	if (close(pipe_fd[0]) != 0 || close(pipe_fd[1]) != 0 || sched_yield() != 0
-		|| waitpid(child, &child_status, 0) != child || child_status != 141)
+		|| waitpid(child, &child_status, 0) != child || !WIFSIGNALED(child_status)
+		|| WTERMSIG(child_status) != SIGPIPE)
 		return 113;
+	/* Ignored and caught SIGPIPE both report EPIPE and preserve the child. */
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 121;
+	if (child == 0) {
+		if (signal(SIGPIPE, SIG_IGN) == SIG_ERR || close(pipe_fd[0]) != 0
+			|| sched_yield() != 0)
+			return 122;
+		return write(pipe_fd[1], "I", 1) == -1 && errno == EPIPE ? 0 : 123;
+	}
+	if (close(pipe_fd[0]) != 0 || close(pipe_fd[1]) != 0 || sched_yield() != 0
+		|| waitpid(child, &child_status, 0) != child || !WIFEXITED(child_status)
+		|| WEXITSTATUS(child_status) != 0)
+		return 124;
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 125;
+	if (child == 0) {
+		if (signal(SIGPIPE, note_sigpipe) == SIG_ERR || close(pipe_fd[0]) != 0
+			|| sched_yield() != 0)
+			return 126;
+		return write(pipe_fd[1], "C", 1) == -1 && errno == EPIPE ? 127 : 129;
+	}
+	if (close(pipe_fd[0]) != 0 || close(pipe_fd[1]) != 0 || sched_yield() != 0
+		|| waitpid(child, &child_status, 0) != child || !WIFEXITED(child_status)
+		|| WEXITSTATUS(child_status) != 42)
+		return 128;
 	return 42;
 }
