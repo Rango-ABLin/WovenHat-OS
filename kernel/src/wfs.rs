@@ -724,6 +724,23 @@ impl<D: BlockDevice> Volume<D> {
         }
         let sb = self.super_block;
         let count = txn.len;
+        // Validate the full transaction before writing even the descriptor.
+        // A rejected request must not leave a commit-shaped partial journal.
+        let journal_end = sb
+            .journal_start
+            .checked_add(u64::from(sb.journal_blocks))
+            .ok_or(Error::Corrupt)?;
+        for (index, block) in txn.blocks[..count].iter().enumerate() {
+            if block.target < 2
+                || block.target >= sb.total_blocks
+                || (block.target >= sb.journal_start && block.target < journal_end)
+                || txn.blocks[..index]
+                    .iter()
+                    .any(|previous| previous.target == block.target)
+            {
+                return Err(Error::Corrupt);
+            }
+        }
         let transaction_id = sb.sequence.wrapping_add(1).max(1);
 
         let mut descriptor = [0u8; SECTOR_SIZE];
