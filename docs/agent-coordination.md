@@ -7151,3 +7151,12 @@ of POSIX conformance, no replacement of the existing loader ABI, and no
 network/third-party import will be treated as accepted until its license,
 revision, build, QEMU, and compatibility evidence are recorded.
 
+POSIX port increment 1: added `ports/musl/include/wovenhat/syscall.h`, a
+three-argument `int 0x80` transport for the WovenHat-compatible read/write,
+close and exit call shapes. Calls requiring four or more arguments return
+`-ENOSYS` locally so no Linux ABI arguments can be truncated at the kernel
+gate. The C fixture now exits through this adapter; contract validation,
+target warning-denying Clippy and QEMU 1-CPU execution passed with exit 33
+(`audit-artifacts/musl-transport-1cpu-639287669541568774`). This is transport
+bring-up only, not static musl linking or POSIX conformance.
+
