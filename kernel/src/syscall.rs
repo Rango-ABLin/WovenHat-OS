@@ -1316,6 +1316,13 @@ fn sys_sync() -> u64 {
 }
 
 fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+    if request == crate::terminal::TIOCGPTN {
+        let Some(number) = crate::task::pty_number_current(fd) else {
+            return SYSCALL_ERROR;
+        };
+        return crate::paging::copy_to_current_user(argument, &number.to_le_bytes())
+            .map_or(SYSCALL_ERROR, |_| 0);
+    }
     if fd != 0 {
         return SYSCALL_ERROR;
     }

@@ -55,6 +55,9 @@ The bounded stop/continue increment now passes SIGSTOP/SIGCONT scheduling and
 reap coverage on 1/2/4 CPUs; full session/job-control semantics remain open.
 The fork probe now exercises the reserved wait-any selector (`waitpid(-1)`) and
 the same exact-child transactional reap path.
+The PTY increment passes the same matrix with fixed-capacity master/slave
+allocation, canonical buffering, echo separation, and stream teardown covered
+by the in-kernel S03 probe.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 

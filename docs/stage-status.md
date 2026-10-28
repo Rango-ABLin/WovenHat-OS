@@ -83,6 +83,10 @@ dispatch, SIGCONT returns stopped tasks to Ready, and the gate verifies
 SIGSTOP -> still-running wait -> SIGCONT -> SIGTERM/reap status 143.
 The wait ABI now also reserves `waitpid(-1)` for bounded wait-any child
 selection and reaping; the fork probe exercises that selector.
+The PTY increment adds fixed-capacity `/dev/ptmx` and `/dev/pts/N` master/slave
+objects, generation validation, descriptor cloning/teardown, and a canonical
+line buffer with echo, erase, EOF, and VINTR handling. The S03 gate exercises
+allocation, buffering, echo separation, and bidirectional transfer.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

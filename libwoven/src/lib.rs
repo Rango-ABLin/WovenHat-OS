@@ -108,6 +108,7 @@ pub mod terminal {
     pub const TCSETS: u64 = 0x5402;
     pub const TIOCGPGRP: u64 = 0x540f;
     pub const TIOCSPGRP: u64 = 0x5410;
+    pub const TIOCGPTN: u64 = 0x8004_5430;
 
     #[repr(C)]
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -14781,6 +14782,19 @@ pub fn set_foreground_process_group(group: u64) -> Result<(), Error> {
         )
     })
     .map(|_| ())
+}
+
+/// Return the bounded PTY number for a master or slave descriptor.
+pub fn pty_number(descriptor: u64) -> Result<u64, Error> {
+    let mut number = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            descriptor,
+            terminal::TIOCGPTN,
+            (&mut number as *mut u64) as u64,
+        )
+    })?;
+    Ok(number)
 }
 
 /// Terminate this process. Never returns.

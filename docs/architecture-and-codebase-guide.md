@@ -63,6 +63,11 @@ on the existing termination path.
 `waitpid(-1)` is a copied-ABI-free wait-any selector: it chooses one exited
 child owned by the caller, reuses the exact-child transactional reap path, and
 returns `WouldBlock` while owned children remain live.
+PTYs use a fixed eight-pair table with generation-tagged handles. Master input
+is canonicalized into a bounded 512-byte line, while slave output is readable
+from the master through a separate bounded stream. `/dev/ptmx` and
+`/dev/pts/N` are capability-gated special opens; no userspace pointer is
+retained by the line discipline.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

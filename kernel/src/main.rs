@@ -137,6 +137,7 @@ pub mod profiler;
 mod permission;
 mod pic;
 mod pipe;
+mod pty;
 mod power;
 mod rtc;
 mod secret_vault;
