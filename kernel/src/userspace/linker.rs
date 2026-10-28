@@ -380,6 +380,69 @@ fn protect_linked_images(
     Some(())
 }
 
+fn map_initial_tls(
+    pending: &mut Pending,
+    plan: TlsPlan,
+    images: &[LinkImage<'_>],
+    stack_guard: u64,
+    mmap_end: u64,
+) -> Option<u64> {
+    let page_table = pending.space.paging();
+    let layout = plan.layout;
+    let template_size = plan.template_size;
+    let template_start = stack_guard.checked_sub(plan.total as u64)?;
+    let start = template_start.checked_add(template_size as u64)?;
+    if template_start < mmap_end
+        || pending.space.mappings[..pending.space.mapping_count]
+            .iter()
+            .any(|mapping| {
+                template_start < mapping.start() + mapping.size() as u64
+                    && mapping.start() < stack_guard
+            })
+    {
+        return None;
+    }
+    if template_size != 0 {
+        paging::map_user_range_in_inactive(page_table, template_start, template_size, true, false)
+            .ok()?;
+        pending.template_mapped = Some((template_start, template_size));
+        paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
+        for (index, image) in images.iter().enumerate() {
+            let Some(tls) = image.image.tls() else { continue };
+            let image_offset = tls_image_offset(images, index)?;
+            copy_tls_bytes(
+                page_table,
+                tls.virtual_address,
+                template_start.checked_add(image_offset as u64)?,
+                tls.file_size,
+            )?;
+        }
+        paging::protect_user_range_in_inactive(page_table, template_start, template_size, false, false)
+            .ok()?;
+    }
+    paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false)
+        .ok()?;
+    let initial = InitialTls {
+        start,
+        layout,
+        template: pending.template_mapped,
+        template_size,
+        module_tpoff: core::array::from_fn(|index| tls_tpoff(images, index, &plan).unwrap_or(0)),
+        module_size: core::array::from_fn(|index| {
+            images
+                .get(index)
+                .and_then(|image| image.image.tls())
+                .map(|tls| tls.memory_size)
+                .unwrap_or(0)
+        }),
+        module_valid: core::array::from_fn(|index| {
+            images.get(index).and_then(|image| image.image.tls()).is_some()
+        }),
+    };
+    pending.space.tls = Some(initial);
+    initialize_tls(page_table, start, initial)
+}
+
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
@@ -525,78 +588,7 @@ pub(super) fn load_with_geometry(
         .ok()?;
     protect_linked_images(&images, page_table)?;
     let tls_base = if let Some(plan) = tls_reservation {
-        let layout = plan.layout;
-        let template_size = plan.template_size;
-        let template_start = stack.guard_base.checked_sub(plan.total as u64)?;
-        let start = template_start.checked_add(template_size as u64)?;
-        if template_start < mmap_end
-            || pending.space.mappings[..pending.space.mapping_count]
-                .iter()
-                .any(|mapping| {
-                    template_start < mapping.start() + mapping.size() as u64
-                        && mapping.start() < stack.guard_base
-                })
-        {
-            return None;
-        }
-        if template_size != 0 {
-            paging::map_user_range_in_inactive(
-                page_table,
-                template_start,
-                template_size,
-                true,
-                false,
-            )
-            .ok()?;
-            pending.template_mapped = Some((template_start, template_size));
-            paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
-            for (index, image) in images.iter().enumerate() {
-                let Some(tls) = image.image.tls() else {
-                    continue;
-                };
-                let image_offset = tls_image_offset(&images, index)?;
-                copy_tls_bytes(
-                    page_table,
-                    tls.virtual_address,
-                    template_start.checked_add(image_offset as u64)?,
-                    tls.file_size,
-                )?;
-            }
-            paging::protect_user_range_in_inactive(
-                page_table,
-                template_start,
-                template_size,
-                false,
-                false,
-            )
-            .ok()?;
-        }
-        paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false)
-            .ok()?;
-        let initial = InitialTls {
-            start,
-            layout,
-            template: pending.template_mapped,
-            template_size,
-            module_tpoff: core::array::from_fn(|index| {
-                tls_tpoff(&images, index, &plan).unwrap_or(0)
-            }),
-            module_size: core::array::from_fn(|index| {
-                images
-                    .get(index)
-                    .and_then(|image| image.image.tls())
-                    .map(|tls| tls.memory_size)
-                    .unwrap_or(0)
-            }),
-            module_valid: core::array::from_fn(|index| {
-                images
-                    .get(index)
-                    .and_then(|image| image.image.tls())
-                    .is_some()
-            }),
-        };
-        pending.space.tls = Some(initial);
-        initialize_tls(page_table, start, initial)?
+        map_initial_tls(&mut pending, plan, &images, stack.guard_base, mmap_end)?
     } else {
         0
     };

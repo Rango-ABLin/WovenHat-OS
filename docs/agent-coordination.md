@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - reusable PT_TLS mapping transaction (2026-10-28)
+
+Extracted template reservation, PT_TLS image copying, per-module metadata, and
+initial TLS mapping into `map_initial_tls`, owned by the unpublished `Pending`
+transaction. Existing template protection, overlap checks, and rollback remain
+unchanged; this is the reusable TLS operation for future live-module expansion.
+
 ## Codex - reusable relocation and W^X transaction helpers (2026-10-28)
 
 Extracted relocation application and final segment/RELRO permission transitions

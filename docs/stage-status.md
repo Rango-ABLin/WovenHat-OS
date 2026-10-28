@@ -1,5 +1,12 @@
 # Stage status
 
+## Reusable PT_TLS mapping transaction - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The startup loader now uses a single `Pending`-owned helper for PT_TLS template
+mapping, image initialization, module offset/size publication, and initial TLS
+base setup. Kernel target build and warning-denying Clippy pass. Live-thread
+TLS expansion and post-start module publication remain open.
+
 ## Reusable relocation and W^X transaction helpers - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Startup ELF loading now uses reusable helpers for relocation application and
