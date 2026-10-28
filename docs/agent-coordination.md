@@ -1,5 +1,21 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - musl TLS, allocator, and pthread core increment (2026-10-28)
+
+The static musl runtime now uses initial-exec TLS for `errno`, adds a bounded
+mapping-backed `malloc`/`calloc`/`realloc`/`free` implementation with reuse and
+overflow checks, and adds bounded `pthread_create`/`pthread_join`/
+`pthread_self`/`pthread_cancel` adapters over the existing generation-safe
+kernel thread ABI. The executable fixture exercises allocation and a worker
+thread returning a joined value. This remains a bounded runtime profile: it is
+not full musl, detached threads, condition variables, robust mutexes, dynamic
+TLS, or general allocator qualification.
+
+Rust target/host Clippy, runtime-contract validation, and focused Python
+harness tests pass. The pinned target Clang/LLVM compiler and linker are not
+available on this host, so C compilation, ELF inspection, and 1/2/4-CPU QEMU
+execution remain required before acceptance.
+
 ## Codex - broader userspace ABI/runtime adapter increment (2026-10-28)
 
 Extended the pinned static musl bootstrap transport for the kernel's existing

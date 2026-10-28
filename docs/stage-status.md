@@ -1,5 +1,22 @@
 # Stage status
 
+## Userspace runtime core increment - 2026-10-28 - IMPLEMENTED, C/QEMU GATE PENDING
+
+Extended the static musl runtime over the existing kernel ABI with
+initial-exec TLS-backed `errno`, a bounded anonymous-mapping allocator
+(`malloc`, `calloc`, `realloc`, `free`), and bounded pthread core adapters for
+create, join, self, and cancellation. The executable fixture now allocates in
+the worker and validates the joined return value. The implementation preserves
+the existing generation-safe kernel thread ownership and TLS-clone boundary.
+
+This does not claim full libc or POSIX runtime compatibility: detached threads,
+mutexes/condition variables, robust cancellation cleanup, dynamic TLS models,
+`dlopen`/`dlsym`, allocator scale/fragmentation qualification, and broad
+toolchain interoperability remain open. Rust target/host Clippy,
+runtime-contract validation, and focused harness tests pass. The target
+Clang/LLVM toolchain is absent on this host, so the C compile/link, ELF, and
+1/2/4-CPU QEMU gate remains pending.
+
 ## Broader userspace ABI/runtime adapter increment - 2026-10-28 - IMPLEMENTED, C GATE PENDING
 
 The static musl bootstrap now maps the kernel's existing identity and working
