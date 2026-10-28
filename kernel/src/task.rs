@@ -2627,6 +2627,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if status != Ok(143) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.JOB] group-term-passed"));
 
     let Some(quit_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2649,6 +2650,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(quit_child.as_u64()) != Ok(131) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.JOB] group-quit-passed"));
 
     let Some(stop_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2679,10 +2681,12 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(stop_child.as_u64()) != Ok(143) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.JOB] stop-cont-passed"));
 
     let Some(foreground_program) = userspace::create_s03_group_process() else {
         return false;
     };
+    crate::serial::write_line(format_args!("[S03.TOSTOP] begin"));
     let Ok((foreground_child, _)) = spawn_user_process("s03-foreground", foreground_program)
     else {
         return false;
@@ -2700,6 +2704,12 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if set_process_group(tostop_child.as_u64(), tostop_child.as_u64()).is_err() {
         return false;
     }
+    if wait_process(tostop_child.as_u64()) != Err(WaitError::StillRunning) {
+        return false;
+    }
+    if kill_process(0u64.wrapping_sub(tostop_child.as_u64()), 18).is_err() {
+        return false;
+    }
     let deadline = timer::ticks().wrapping_add(3000);
     while !process_exited(tostop_child) {
         if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
@@ -2708,10 +2718,12 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         yield_now();
     }
     let tostop_status = wait_process(tostop_child.as_u64());
+    crate::serial::write_line(format_args!("[S03.TOSTOP] status={}", tostop_status.unwrap_or(-999)));
     crate::terminal::set_termios(crate::terminal::Termios::DEFAULT);
-    if tostop_status != Ok(150) {
+    if tostop_status != Ok(13) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.TOSTOP] stop-continue-passed"));
     if kill_process(0u64.wrapping_sub(foreground_child.as_u64()), 15).is_err() {
         return false;
     }
@@ -2725,6 +2737,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(foreground_child.as_u64()) != Ok(143) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.TOSTOP] foreground-clean"));
 
     let Some(orphan_program) = userspace::create_s03_orphan_process() else {
         return false;
@@ -2743,6 +2756,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(orphan_parent.as_u64()) != Ok(0) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.ORPHAN] parent-reaped"));
     let Some(orphan_child) = reparented_group_child(orphan_parent.as_u64()) else {
         return false;
     };
@@ -2756,6 +2770,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(orphan_child) != Ok(129) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.ORPHAN] hup-cont-reaped"));
 
     #[cfg(feature = "s03-keyboard-injection-test")]
     {
@@ -3904,7 +3919,6 @@ fn reparented_group_child(parent: u64) -> Option<u64> {
             process.parent.as_u64() == 0
                 && process.id.as_u64() != parent
                 && process.process_group == process.id.as_u64()
-                && process.state != ProcessState::Exited
         })
         .map(|process| process.id.as_u64())
 }
@@ -6482,7 +6496,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         if action == 1 && sig != 19 {
             continue;
         } // SIG_IGN
-        if sig == 19 {
+        if matches!(sig, 19 | 20 | 21 | 22) {
             if process.state != ProcessState::Exited {
                 process.pending_signal = sig;
                 process.state = ProcessState::Stopped;
