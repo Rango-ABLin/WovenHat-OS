@@ -2352,10 +2352,28 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
         for index in 0..count { if let (Some(thread), Some(mapping)) = installed[index] { let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address); let _ = userspace::unmap_dynamic_anonymous(threads[index].1.unwrap(), mapping); } }
         return false;
     }
-    let mut processes = process_table_lock();
-    let Some(process) = processes.iter_mut().flatten().find(|process| process.id.as_u64() == owner) else { return false; };
-    let Some(space) = process.address_space.as_mut() else { return false; };
-    space.publish_dynamic_module(module, installed[0].1.unwrap().address, size).is_some()
+    let published = {
+        let mut processes = process_table_lock();
+        match processes.iter_mut().flatten().find(|process| process.id.as_u64() == owner) {
+            Some(process) => match process.address_space.as_mut() {
+                Some(space) => space.publish_dynamic_module(module, installed[0].1.unwrap().address, size).is_some(),
+                None => false,
+            },
+            None => false,
+        }
+    };
+    if published { return true; }
+
+    // Descriptor publication is the commit point.  If the process vanished or
+    // rejected the slot, undo every per-thread installation just as the
+    // earlier mapping failures do.
+    for index in 0..count {
+        if let (Some(thread), Some(mapping)) = installed[index] {
+            let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address);
+            let _ = userspace::unmap_dynamic_anonymous(threads[index].1.unwrap(), mapping);
+        }
+    }
+    false
 }
 
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
