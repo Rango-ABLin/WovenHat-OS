@@ -1817,20 +1817,17 @@ pub fn ensure_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     .unwrap_or(Err(Error::Device))
 }
 
-/// Commit a native write and publish its VFS cache image while the native
-/// mutation lock is still held. This prevents a later native writer from
-/// committing and publishing before an earlier writer publishes its cache.
-/// A publication error still follows a durable commit: callers must reconcile
-/// the cache on failure rather than assume the native write was rolled back.
+/// Commit a VFS write directly to native WovenFS and return the new complete
+/// file image in `out`. The caller must refresh its VFS node only after this
+/// returns success; no RAM-only write is reported as durable.
 #[cfg(not(test))]
-pub fn write_vfs_path_at_with_publish<T, E>(
+pub fn write_vfs_path_at(
     path: &str,
     offset: usize,
     bytes: &[u8],
     out: &mut [u8; MAX_FILE_SIZE],
     now: u64,
-    publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
-) -> Result<Result<T, E>, Error> {
+) -> Result<(usize, usize), Error> {
     let _mutation = MUTATION.lock();
     let native = checked_vfs_path(path)?;
     // Reject impossible offsets before creating a new inode on disk.
@@ -1857,8 +1854,7 @@ pub fn write_vfs_path_at_with_publish<T, E>(
         volume.write_file(inode, &out[..length], now)?;
         Ok((bytes.len(), length))
     })
-    .unwrap_or(Err(Error::Device))?;
-    Ok(publish(&out[..length], length, written))
+    .unwrap_or(Err(Error::Device))
 }
 
 /// Remove a single native root file. The VFS entry is removed by the caller
@@ -1947,14 +1943,13 @@ pub fn rename_vfs_path(old: &str, new: &str, now: u64) -> Result<(), Error> {
 }
 
 #[cfg(test)]
-pub fn write_vfs_path_at_with_publish<T, E>(
+pub fn write_vfs_path_at(
     _path: &str,
     _offset: usize,
     _bytes: &[u8],
     _out: &mut [u8; MAX_FILE_SIZE],
     _now: u64,
-    _publish: impl FnOnce(&[u8], usize, usize) -> Result<T, E>,
-) -> Result<Result<T, E>, Error> {
+) -> Result<(usize, usize), Error> {
     Err(Error::Device)
 }
 

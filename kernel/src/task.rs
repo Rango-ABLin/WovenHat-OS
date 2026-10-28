@@ -4543,18 +4543,16 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
                 let path = core::str::from_utf8(&path_bytes[..path_length])
                     .map_err(|_| FileError::BadDescriptor)?;
                 let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
-                return crate::wfs::write_vfs_path_at_with_publish(
+                let (written, length) = crate::wfs::write_vfs_path_at(
                     path,
                     offset,
                     buffer,
                     &mut image,
                     crate::timer::ticks(),
-                    |complete_image, length, written| {
-                        vfs::commit_backend_write(id, offset, complete_image, length, written)
-                            .map_err(|_| FileError::BadDescriptor)
-                    },
                 )
                 .map_err(map_wfs_file_error)?;
+                return vfs::commit_backend_write(id, offset, &image, length, written)
+                    .map_err(|_| FileError::BadDescriptor);
             }
             let under_mnt = vfs::open_file_path_starts_with(id, "/mnt/").unwrap_or(false);
             if under_mnt && !crate::storage::mnt_mounted() {
