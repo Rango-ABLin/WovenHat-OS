@@ -1,5 +1,12 @@
 # Stage status
 
+## Bounded RELA access - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Admitted ELF plans now translate dynamic virtual addresses to file-backed
+offsets and expose checked RELA records. Focused ELF tests and warning-denying
+libwoven Clippy pass. Applying relocations to a live process remains kernel
+loader work.
+
 ## Dynamic-section admission metadata - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The ELF image plan now retains validated dynamic-section metadata needed for

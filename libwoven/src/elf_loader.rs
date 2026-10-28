@@ -35,6 +35,13 @@ pub struct DynamicPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rela {
+    pub offset: u64,
+    pub info: u64,
+    pub addend: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Invalid,
     Unsupported,
@@ -100,6 +107,33 @@ impl ImagePlan {
             return Err(Error::Invalid);
         }
         Ok(plan)
+    }
+
+    pub fn file_offset_for_address(&self, address: u64) -> Option<u64> {
+        self.segments.iter().flatten().find_map(|segment| {
+            let end = segment.virtual_address.checked_add(segment.file_size)?;
+            (address >= segment.virtual_address && address < end)
+                .then_some(segment.file_offset + address - segment.virtual_address)
+        })
+    }
+
+    /// Read one RELA entry from the admitted dynamic table.
+    pub fn rela_at(&self, image: &[u8], index: u64) -> Result<Rela, Error> {
+        let dynamic = self.dynamic.ok_or(Error::Unsupported)?;
+        let (address, size) = dynamic.rela.ok_or(Error::Unsupported)?;
+        let byte_offset = index.checked_mul(dynamic.rela_entry_size).ok_or(Error::Overflow)?;
+        if byte_offset.checked_add(24).ok_or(Error::Overflow)? > size {
+            return Err(Error::Bounds);
+        }
+        let file_address = address.checked_add(byte_offset).ok_or(Error::Overflow)?
+            .checked_add(self.load_bias).ok_or(Error::Overflow)?;
+        let file_offset = usize::try_from(self.file_offset_for_address(file_address).ok_or(Error::Bounds)?)
+            .map_err(|_| Error::Overflow)?;
+        Ok(Rela {
+            offset: read_u64(image, file_offset)?,
+            info: read_u64(image, file_offset + 8)?,
+            addend: read_u64(image, file_offset + 16)? as i64,
+        })
     }
 }
 

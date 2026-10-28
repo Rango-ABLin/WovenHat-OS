@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded RELA access from admitted ELF plans (2026-10-28)
+
+Added file-backed address translation and bounded `rela_at` access to the ELF
+image plan. RELA records are read only when their dynamic range, load segment,
+and file offsets are validated. This supplies relocation consumers without
+granting the runtime parser arbitrary image reads.
+
 ## Codex - dynamic-section admission metadata (2026-10-28)
 
 Extended the ELF admission plan with checked PT_DYNAMIC metadata for RELA
