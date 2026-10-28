@@ -7297,3 +7297,9 @@ capacity, and verifies default SIGPIPE termination (exit 141) after all
 readers close. Target Clippy and QEMU passed at 1/2/4 CPUs. Caught/ignored
 SIGPIPE, POSIX wait-status encoding and restart semantics remain open.
 
+POSIX port increment 19: the bootstrap `signal()` bridge and broken-pipe
+transport prove ignored and caught SIGPIPE return EPIPE, while waitpid
+translates default SIGPIPE and normal exits to POSIX wait-status macros.
+Target Clippy and QEMU passed at 1/2/4 CPUs. Blocked-syscall interruption and
+restart remain separate work.
+

@@ -144,3 +144,14 @@ the resulting write is verified to take the default SIGPIPE termination path
 stdout/stderr console fallback remains covered by the same fixture. This is a
 narrow bootstrap contract: caught/ignored SIGPIPE, POSIX wait-status encoding,
 signal interruption/restart, and general signal API conformance remain open.
+
+## Bootstrap increment: SIGPIPE dispositions and wait status
+
+The musl bootstrap supplies a narrow `signal()` bridge to the existing
+two-argument kernel disposition ABI. Broken-pipe writes now have a distinct
+transport result, so ignored and caught SIGPIPE return `-1` with `EPIPE`; the
+caught-handler fixture exits through its handler to prove delivery. The
+`waitpid()` adapter translates the kernel's plain exit code to POSIX wait
+status, verified through `WIFSIGNALED`/`WTERMSIG` and
+`WIFEXITED`/`WEXITSTATUS`. Target Clippy and C-ELF QEMU passed at 1/2/4 CPUs.
+Blocked-syscall interruption and restart remain outside this bootstrap scope.
