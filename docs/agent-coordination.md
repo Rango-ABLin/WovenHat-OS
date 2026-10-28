@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - scheduler runnable-task parking (2026-10-28)
+
+While a process owns the dynamic-module transaction, scheduler Ready selection
+excludes that process's sibling tasks. The owner can continue, while siblings
+already executing must hand off before transaction completion is accepted.
+This provides cooperative stop-the-world parking without sleeping under the
+scheduler IRQ lock.
+
 ## Codex - conservative transaction quiescence check (2026-10-28)
 
 Dynamic-module transaction end now checks the scheduler under its IRQ-safe lock

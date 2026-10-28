@@ -1166,6 +1166,7 @@ impl Scheduler {
             .iter()
             .filter(|task| {
                 task.state == TaskState::Ready
+                    && self.dynamic_module_task_allowed(task)
                     && task.cpu == crate::smp::cpu_index()
                     && (task.affinity_mask & cpu_bit(crate::smp::cpu_index())) != 0
             })
@@ -1178,6 +1179,7 @@ impl Scheduler {
             .find(|slot| {
                 let task = &self.tasks[*slot];
                 task.state == TaskState::Ready
+                    && self.dynamic_module_task_allowed(task)
                     && task.class.rank() == best_policy.0
                     && task.priority == best_policy.1
                     && task.cpu == crate::smp::cpu_index()
@@ -1242,6 +1244,12 @@ impl Scheduler {
             next_address_space,
             next_fs_base: self.tasks[next_slot].fs_base,
         })
+    }
+
+    fn dynamic_module_task_allowed(&self, task: &TaskControlBlock) -> bool {
+        let Some(owner) = self.dynamic_module_owner else { return true; };
+        task.process_id.as_u64() != owner
+            || task.id == self.tasks[self.current_slot[crate::smp::cpu_index()]].id
     }
     fn finalize_switch(&mut self) {
         let cpu = crate::smp::cpu_index();

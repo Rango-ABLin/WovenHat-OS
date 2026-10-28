@@ -1,5 +1,12 @@
 # Stage status
 
+## Scheduler runnable-task parking - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Dynamic-module transactions now prevent same-process sibling tasks from being
+selected from Ready state. Combined with the transaction-end Running/Switching
+check, this provides cooperative scheduler coordination. Target build and
+warning-denying Clippy pass; all-thread mapping and DTV publication remain.
+
 ## Conservative transaction quiescence check - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Ending a dynamic-module transaction now rejects active same-process sibling
