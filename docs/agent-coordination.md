@@ -20,6 +20,11 @@ serial evidence is `audit-artifacts/current-uefi-qemu-1cpu.log` and reaches the
 eleven signed applications PASS marker. The ISO SHA-256 remains
 `4102e72057702dd37d2ade52d65c36a8b5bc5f01d6776114b4841c512d5af04a`.
 
+The same exact ISO also passed the 2-CPU and 4-CPU artifact gates. Their
+serial evidence is retained in `audit-artifacts/current-uefi-qemu-2cpu.log`
+and `audit-artifacts/current-uefi-qemu-4cpu.log`; both reached the firmware and
+boot-services markers without failure lines.
+
 An attempted rebuild from the newest debug disk image was intentionally
 rejected by `build-uefi-iso.py`: its EFI System Partition contains non-zero
 data beyond El Torito's 65536-sector limit. No truncation or physical-media

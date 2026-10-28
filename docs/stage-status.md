@@ -14,6 +14,9 @@ The repository is synchronized with `origin/master` and has no unresolved
 merge markers. The exact Stage 28 catalog ISO was re-qualified with the local
 x86_64 EDK2 firmware and reached the eleven signed applications PASS marker;
 serial evidence is retained in `audit-artifacts/current-uefi-qemu-1cpu.log`.
+The same exact ISO passed the 2-CPU and 4-CPU QEMU runs, with evidence in
+`audit-artifacts/current-uefi-qemu-2cpu.log` and
+`audit-artifacts/current-uefi-qemu-4cpu.log`.
 The newest debug disk image was not converted because its ESP has non-zero
 bytes beyond the El Torito size limit, which the builder correctly rejects.
 This does not claim a new release image or physical-media qualification.
