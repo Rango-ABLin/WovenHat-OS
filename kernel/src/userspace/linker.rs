@@ -450,19 +450,23 @@ fn map_initial_tls(
         template: pending.template_mapped,
         template_size,
         module_tpoff: core::array::from_fn(|index| tls_tpoff(images, index, &plan).unwrap_or(0)),
-        module_size: core::array::from_fn(|index| {
-            images
-                .get(index)
-                .and_then(|image| image.image.tls())
-                .map(|tls| tls.memory_size)
-                .unwrap_or(0)
-        }),
         module_valid: core::array::from_fn(|index| {
             images.get(index).and_then(|image| image.image.tls()).is_some()
         }),
     };
     pending.space.tls = Some(initial);
-    initialize_tls(page_table, start, initial)
+    let tls_base = initialize_tls(page_table, start, initial)?;
+    for (index, image) in images.iter().enumerate() {
+        let Some(tls) = image.image.tls() else { continue };
+        pending.space.dynamic_modules[index] = DynamicModule {
+            generation: 1,
+            live: true,
+            references: 1,
+            mapping_start: tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
+            mapping_size: tls.memory_size,
+        };
+    }
+    Some(tls_base)
 }
 
 fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
@@ -539,6 +543,7 @@ pub(super) fn load_with_geometry(
             relro: main.image.relro(),
             library_relro: [None; elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
             destructors: [0; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,

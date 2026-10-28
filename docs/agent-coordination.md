@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - AddressSpace dynamic-module descriptors (2026-10-28)
+
+Added a bounded generation/refcounted dynamic-module descriptor array to the
+kernel `AddressSpace`. Startup PT_TLS mappings populate per-module ranges, the
+descriptor state is copied with address-space cloning, and module-range queries
+now use the process-owned descriptors with generation/reference validation.
+
 ## Codex - staged lazy-binding trampoline materialization (2026-10-28)
 
 Extracted lazy PLT trampoline emission into a bounded helper over the staged

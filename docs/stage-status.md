@@ -1,5 +1,13 @@
 # Stage status
 
+## AddressSpace dynamic-module descriptors - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel address space now owns bounded dynamic-module descriptors. Existing
+startup PT_TLS modules publish their mapped ranges into this table, and range
+queries validate liveness, generation, and references. Target build and
+warning-denying Clippy pass. Dynamic insertion/removal and thread-wide TLS
+expansion remain the next live-loader steps.
+
 ## Staged lazy-binding materialization - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Lazy-binding trampoline generation is now isolated in a reusable transaction
