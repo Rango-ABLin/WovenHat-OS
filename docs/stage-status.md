@@ -252,6 +252,12 @@ kernel clock deadline. The rebuilt static ELF passes the production loader
 fixture; direct condition waiter wake lists and robust owner-death recovery
 remain open.
 
+The direct condition ABI is now enabled: the kernel retains only a bounded
+`(condition-address, task-id)` rendezvous, uses the scheduler's latched event
+wake path, and removes the registration after wake or timeout. The musl
+fixture passes with this path enabled. Robust owner-death recovery, dynamic TLS
+module relocation, and the remaining POSIX syscall families remain open.
+
 The synchronization follow-up now exposes `clock_gettime(CLOCK_MONOTONIC)` via
 the kernel's tick counter and makes `pthread_cond_timedwait` use an absolute
 tick deadline. The fixture validates sane monotonic timespec output and the

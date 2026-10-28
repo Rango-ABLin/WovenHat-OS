@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - direct condition waiter wake ABI (2026-10-28)
+
+Added bounded kernel condition wait registration keyed by the userspace
+condition address. `pthread_cond_signal` wakes a registered waiter through the
+scheduler's latched event path, closing the registration race; waits remove
+their registration after wake or timeout. LLVM build/link, target Clippy, and
+the production loader fixture pass. Robust owner-death recovery, dynamic TLS,
+and the remaining POSIX families remain separate increments.
+
 ## Codex - scheduler-backed condition wait increment (2026-10-28)
 
 Added a dedicated userspace thread-sleep syscall backed by the scheduler's
