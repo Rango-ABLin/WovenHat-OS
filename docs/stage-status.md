@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 32.13 GDB generation-bound owner QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority
+with checked generation increments. It rejects zero or duplicate task
+identities, requires the current token for detach, and prevents stale tokens
+from matching after teardown and reattachment. No global task lookup, trap
+handling, or execution control is introduced.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-13-gdb-owner-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live task binding, transport
+ownership, and debugger execution remain open.
+
 ## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_trap.rs`, a bounded translation layer for an already

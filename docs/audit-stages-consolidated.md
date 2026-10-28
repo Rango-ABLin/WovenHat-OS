@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.13 GDB generation-bound owner - 2026-10-28
+
+The single-owner debugger authority passed 1/2/4-CPU QEMU self-tests.
+Nonzero attachment validation, duplicate attach refusal, exact-token detach,
+and stale-token rejection after generation reuse are covered. Target and host
+warning-denying Clippy and Python syntax validation passed. Live task binding,
+transport ownership, and execution control remain outside this acceptance.
+
 ## Stage 32.12 GDB trap-stop boundary - 2026-10-28
 
 The bounded architectural stop classifier passed 1/2/4-CPU QEMU self-tests.

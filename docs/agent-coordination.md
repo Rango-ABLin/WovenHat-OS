@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.13 GDB generation-bound owner (2026-10-28)
+
+Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority
+with checked generation tokens. It rejects zero/duplicate attachments,
+requires the exact current token for detach, and blocks stale events after
+teardown and generation reuse. Target and host warning-denying Clippy, Python
+syntax, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence is under
+`target/stage32-13-gdb-owner-{1,2,4}cpu/`. Stage32.13 is accepted; live task
+and transport integration remain prerequisites for the next slice.
+
 ## Codex - Stage 32.12 GDB trap-stop boundary (2026-10-28)
 
 Added `kernel/src/gdb_trap.rs`, a pure bounded classifier for captured

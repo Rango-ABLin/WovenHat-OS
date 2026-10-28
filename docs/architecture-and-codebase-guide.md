@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev generation-bound owner (2026-10-28)
+
+`kernel/src/gdb_owner.rs` provides a local single-attachment authority. Each
+nonzero opaque task identity receives a checked monotonically increasing
+generation; only the exact current token can match or detach. This prevents
+late asynchronous events from a prior debugger attachment from being applied
+to a reused task/session. The owner remains caller-owned until live task and
+transport integration defines its lock, cancellation, and teardown context.
+
 ## WovenDev trap-stop classification boundary (2026-10-28)
 
 `kernel/src/gdb_trap.rs` converts a captured vector and optional error code
