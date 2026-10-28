@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS template registry foundation (2026-10-28)
+
+Added `libwoven::dynamic_tls`, a fixed-capacity generation-checked registry
+that validates PT_TLS-like initializer/memory/alignment bounds and materializes
+zero-filled per-thread blocks into caller-owned storage. Host tests cover
+initialization, overflow/alignment rejection, and stale module generations.
+Mapping, DTV publication, and `__tls_get_addr` remain loader/kernel work.
+
 ## Codex - unload-safe module namespace foundation (2026-10-28)
 
 Added `libwoven::module_namespace`, a fixed-capacity identity layer for the

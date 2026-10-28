@@ -1,5 +1,14 @@
 # Stage status
 
+## Dynamic TLS template foundation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Added a fixed-capacity `libwoven::dynamic_tls` registry for validated TLS
+templates and generation-safe per-thread initialization. It copies immutable
+initializer bytes, zero-fills the declared memory size, checks alignment and
+capacity, and rejects stale module IDs. Focused tests and all-target Clippy
+pass. This does not yet provide DTV publication, `__tls_get_addr`, runtime
+mapping, or dynamic shared-library TLS.
+
 ## Dynamic module namespace foundation - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Added `libwoven::module_namespace` as the identity/reference boundary for
