@@ -60,6 +60,9 @@ The scheduler/process authority includes a bounded Stopped state. SIGSTOP is
 non-catchable and removes a process's tasks from dispatch; SIGCONT clears the
 state and reschedules them. Address-space teardown and zombie publication stay
 on the existing termination path.
+`waitpid(-1)` is a copied-ABI-free wait-any selector: it chooses one exited
+child owned by the caller, reuses the exact-child transactional reap path, and
+returns `WouldBlock` while owned children remain live.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

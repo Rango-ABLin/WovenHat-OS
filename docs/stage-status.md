@@ -81,6 +81,8 @@ with a Ring-3 process-group SIGQUIT/status-131 check in the S03 gate.
 The scheduler now tracks stopped process/task state: SIGSTOP prevents
 dispatch, SIGCONT returns stopped tasks to Ready, and the gate verifies
 SIGSTOP -> still-running wait -> SIGCONT -> SIGTERM/reap status 143.
+The wait ABI now also reserves `waitpid(-1)` for bounded wait-any child
+selection and reaping; the fork probe exercises that selector.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

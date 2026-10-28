@@ -48,6 +48,8 @@ and status 131; SIGSTOP/SIGCONT scheduler state remains future work.
 The scheduler stop/continue increment is now covered: SIGSTOP transitions the
 process/tasks to Stopped, SIGCONT restores Ready dispatch, and SIGTERM then
 reaps status 143 on the 1/2/4-CPU gate.
+The lifecycle probe now exercises `waitpid(-1)` and `libwoven::wait_any_child`
+provides the safe wrapper; exact-child wait remains available.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

@@ -14675,6 +14675,13 @@ pub fn wait(pid: process::Id) -> Result<u64, Error> {
     check(unsafe { syscall::waitpid(pid.0) })
 }
 
+/// Wait for any child process, reaping one exited child when available.
+/// Returns `Error::WouldBlock` while owned children remain live.
+pub fn wait_any_child() -> Result<u64, Error> {
+    // SAFETY: the reserved all-children selector takes no pointers.
+    check(unsafe { syscall::waitpid(u64::MAX) })
+}
+
 /// Send a bounded signal to a process or process group.
 pub fn kill(target: process::SignalTarget, signal: u8) -> Result<(), Error> {
     if signal > 31 {

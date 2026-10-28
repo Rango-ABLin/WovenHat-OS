@@ -3029,7 +3029,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
-        value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
+        value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {
+            crate::task::wait_any_process()
+        } else {
+            crate::task::wait_process(arg0)
+        } {
             Ok(exit_code) => crate::exit_status::encode(exit_code),
             Err(crate::task::WaitError::StillRunning) => u64::MAX - 1,
             Err(crate::task::WaitError::NoSuchChild) => u64::MAX,

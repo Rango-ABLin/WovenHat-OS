@@ -3621,6 +3621,34 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     Ok(exit_code)
 }
 
+pub fn wait_any_process() -> Result<i32, WaitError> {
+    let parent = ProcessId(current_process_id());
+    let (exited_child, has_child) = {
+        let processes = process_table_lock();
+        let mut exited = None;
+        let mut child = false;
+        for process in processes.iter().flatten() {
+            if process.parent != parent {
+                continue;
+            }
+            child = true;
+            if process.state == ProcessState::Exited {
+                exited = Some(process.id.as_u64());
+                break;
+            }
+        }
+        (exited, child)
+    };
+    if let Some(child) = exited_child {
+        return wait_process(child);
+    }
+    if has_child {
+        Err(WaitError::StillRunning)
+    } else {
+        Err(WaitError::NoSuchChild)
+    }
+}
+
 pub fn zombie_count() -> usize {
     process_table_lock()
         .iter()

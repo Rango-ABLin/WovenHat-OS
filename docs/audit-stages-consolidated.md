@@ -53,6 +53,8 @@ The lifecycle probe also covers default SIGQUIT process-group termination with
 status 131; stop/continue semantics remain open.
 The bounded stop/continue increment now passes SIGSTOP/SIGCONT scheduling and
 reap coverage on 1/2/4 CPUs; full session/job-control semantics remain open.
+The fork probe now exercises the reserved wait-any selector (`waitpid(-1)`) and
+the same exact-child transactional reap path.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
