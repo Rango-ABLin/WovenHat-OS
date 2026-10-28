@@ -15,6 +15,9 @@
 #define WH_SYS_OPEN  2
 #define WH_SYS_EXIT  3
 #define WH_SYS_CLOSE 6
+#define WH_SYS_YIELD 7
+#define WH_SYS_WAITPID 5
+#define WH_SYS_FORK 16
 #define WH_SYS_LSEEK 27
 #define WH_SYS_FILE_WRITE 10
 #define WH_SYS_OPEN_ACCESS 254

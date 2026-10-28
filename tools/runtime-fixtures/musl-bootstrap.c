@@ -1,6 +1,11 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+static char pipe_buffer[2048];
+
 int main(int argc, char **argv)
 {
 	char byte = 'x';
@@ -9,6 +14,8 @@ int main(int argc, char **argv)
 	int duplicate;
 	int replacement;
 	int pipe_fd[2];
+	int child_status;
+	pid_t child;
 
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;
@@ -53,5 +60,42 @@ int main(int argc, char **argv)
 		|| close(pipe_fd[1]) != 0 || read(pipe_fd[0], &byte, 1) != 0
 		|| close(pipe_fd[0]) != 0)
 		return 105;
+	/* A full pipe must block the child until the parent consumes capacity. */
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 106;
+	if (child == 0) {
+		if (close(pipe_fd[0]) != 0 || write(pipe_fd[1], pipe_buffer, 1024) != 1024
+			|| write(pipe_fd[1], pipe_buffer, 1024) != 1024
+			|| write(pipe_fd[1], "B", 1) != 1 || close(pipe_fd[1]) != 0)
+			return 107;
+		return 0;
+	}
+	if (close(pipe_fd[1]) != 0)
+		return 108;
+	if (sched_yield() != 0)
+		return 114;
+	if (read(pipe_fd[0], pipe_buffer, 1024) != 1024)
+		return 115;
+	if (read(pipe_fd[0], pipe_buffer, 1024) != 1024)
+		return 116;
+	if (sched_yield() != 0 || read(pipe_fd[0], &byte, 1) != 1 || byte != 'B')
+		return 120;
+	if (close(pipe_fd[0]) != 0)
+		return 117;
+	if (waitpid(child, &child_status, 0) != child)
+		return 118;
+	if (child_status != 0)
+		return 119;
+	/* With every reader closed, a write uses the default SIGPIPE path. */
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 109;
+	if (child == 0) {
+		if (close(pipe_fd[0]) != 0 || sched_yield() != 0)
+			return 110;
+		return write(pipe_fd[1], "S", 1) == -1 ? 111 : 112;
+	}
+	if (close(pipe_fd[0]) != 0 || close(pipe_fd[1]) != 0 || sched_yield() != 0
+		|| waitpid(child, &child_status, 0) != child || child_status != 141)
+		return 113;
 	return 42;
 }

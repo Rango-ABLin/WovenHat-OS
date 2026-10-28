@@ -617,8 +617,13 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
     // Open descriptors (including files and pipes) take the owned descriptor
     // path. Unopened stdout/stderr remain the capability-gated console.
     if crate::task::descriptor_is_open(descriptor) {
-        let Ok(count) = crate::task::write_current(descriptor, &buffer[..length]) else {
-            return SYSCALL_ERROR;
+        let count = match crate::task::write_current(descriptor, &buffer[..length]) {
+            Ok(count) => count,
+            Err(crate::task::FileError::BrokenPipe) => {
+                let _ = crate::task::raise_current_signal(13);
+                return SYSCALL_ERROR;
+            }
+            Err(_) => return SYSCALL_ERROR,
         };
         IO_COMPLETIONS.fetch_or(IO_WRITE, Ordering::Release);
         if descriptor == 2 {
@@ -672,6 +677,10 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
         Ok(descriptor) => {
             IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release);
             descriptor
+        }
+        Err(crate::task::FileError::BrokenPipe) => {
+            let _ = crate::task::raise_current_signal(13);
+            SYSCALL_ERROR
         }
         Err(_) => SYSCALL_ERROR,
     }

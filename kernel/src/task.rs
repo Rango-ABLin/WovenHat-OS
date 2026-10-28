@@ -822,6 +822,7 @@ pub enum FileError {
     BadDescriptor,
     AlreadyExists,
     NotEmpty,
+    BrokenPipe,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4512,9 +4513,10 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
             }
             written
         }
-        FdKind::PipeWrite(id) => {
-            crate::pipe::write(id, buffer).map_err(|_| FileError::BadDescriptor)
-        }
+        FdKind::PipeWrite(id) => crate::pipe::write(id, buffer).map_err(|error| match error {
+            crate::pipe::Error::Closed => FileError::BrokenPipe,
+            crate::pipe::Error::Full | crate::pipe::Error::Invalid => FileError::BadDescriptor,
+        }),
         FdKind::PipeRead(_) => Err(FileError::BadDescriptor),
         FdKind::PtyMaster(id) => crate::pty::write_master(id, buffer).map_err(|_| FileError::BadDescriptor),
         FdKind::PtySlave(id) => crate::pty::write_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
@@ -6420,6 +6422,12 @@ fn default_terminates(signal: u64) -> bool {
 
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
     signal_processes(pid, sig, SignalSender::Kernel)
+}
+
+/// Queue a standard signal for the calling process through the existing
+/// disposition and scheduler-owned termination path. Callers hold no locks.
+pub fn raise_current_signal(sig: u64) -> Result<(), FileError> {
+    signal_processes(current_process_id(), sig, SignalSender::Kernel)
 }
 
 /// `kill` from Ring 3. Each selected process is checked separately, as POSIX
