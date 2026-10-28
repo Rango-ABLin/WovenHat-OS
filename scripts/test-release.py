@@ -361,7 +361,21 @@ def main():
         app_root = root / 'apps' / app
         sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
     sources += sorted((root / 'scripts').glob('*.py'))
-    manifest = dict(image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
+    # Recheck the source after all builds: tests against a moving tree are not
+    # evidence for the initial commit, even when every individual gate passed.
+    final_sha = subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=root, text=True
+    ).strip()
+    final_changes = subprocess.check_output(
+        ['git', 'status', '--porcelain=v1', '--untracked-files=no'],
+        cwd=root, text=True,
+    ).strip()
+    if final_sha != source_sha or final_changes:
+        raise SystemExit(
+            'Source revision or tracked files changed during acceptance; '
+            'discard the release result and rerun from a clean immutable tree.'
+        )
+    manifest = dict(source_sha=source_sha, image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
                     checks_sha256=hashlib.sha256((out / 'results.json').read_bytes()).hexdigest(),
                     sources={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources})
     (out / 'validated-image.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
