@@ -206,6 +206,7 @@ impl Credentials {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
     Ready,
+    Stopped,
     Exited,
 }
 
@@ -246,6 +247,7 @@ enum TaskState {
     Switching,
     Blocked,
     Sleeping,
+    Stopped,
     Dead,
 }
 
@@ -258,6 +260,7 @@ impl TaskState {
             Self::Switching => "switching",
             Self::Blocked => "blocked",
             Self::Sleeping => "sleeping",
+            Self::Stopped => "stopped",
             Self::Dead => "dead",
         }
     }
@@ -350,6 +353,8 @@ struct TaskControlBlock {
     /// Switching tasks acknowledge this only at a scheduler-owned safe point;
     /// tasks that are not physically executing may be retired immediately.
     termination_signal: u8,
+    /// A SIGSTOP request awaiting scheduler hand-off for a running task.
+    stop_requested: bool,
     /// Exit status latched until a thread has completed its scheduler hand-off.
     thread_exit_code: i32,
     /// Latched scheduler event used by Stage 8.3 wait/wake handshakes.
@@ -392,6 +397,7 @@ impl TaskControlBlock {
             ever_dispatched: false,
             affinity_mask: 1,
             termination_signal: 0,
+            stop_requested: false,
             thread_exit_code: 0,
             event_pending: false,
             event_deadline: None,
@@ -425,6 +431,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -483,6 +490,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -538,6 +546,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -761,7 +770,7 @@ pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinE
         scheduler.tasks[slot].termination_signal = u8::MAX;
         reschedule_cpu = scheduler.tasks[slot].cpu;
         match scheduler.tasks[slot].state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 scheduler.tasks[slot].state = TaskState::Dead;
                 scheduler.tasks[slot].name = "thread-canceled";
                 scheduler.tasks[slot].termination_signal = 0;
@@ -1184,6 +1193,9 @@ impl Scheduler {
             // recycled like the process leader, even if it used to be a
             // scheduler-backed thread.
             self.tasks[outgoing].thread_id = None;
+        } else if self.tasks[outgoing].stop_requested {
+            self.tasks[outgoing].stop_requested = false;
+            self.tasks[outgoing].state = TaskState::Stopped;
         } else {
             self.tasks[outgoing].state = TaskState::Ready;
         }
@@ -1202,7 +1214,7 @@ impl Scheduler {
         self.tasks[slot].termination_signal = signal;
 
         match self.tasks[slot].state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 self.tasks[slot].state = TaskState::Dead;
                 self.tasks[slot].name = "terminated";
                 self.tasks[slot].termination_signal = 0;
@@ -1220,6 +1232,41 @@ impl Scheduler {
             TaskState::Empty | TaskState::Dead => unreachable!(),
         }
         Some(cpu)
+    }
+
+    fn stop_process(&mut self, process_id: ProcessId) -> usize {
+        let mut reschedule_mask = 0;
+        for task in &mut self.tasks {
+            if task.process_id != process_id {
+                continue;
+            }
+            match task.state {
+                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
+                    task.state = TaskState::Stopped;
+                }
+                TaskState::Running | TaskState::Switching => {
+                    task.stop_requested = true;
+                    reschedule_mask |= cpu_bit(task.cpu);
+                }
+                TaskState::Empty | TaskState::Dead => {}
+            }
+        }
+        reschedule_mask
+    }
+
+    fn continue_process(&mut self, process_id: ProcessId) -> usize {
+        let mut reschedule_mask = 0;
+        for task in &mut self.tasks {
+            if task.process_id != process_id {
+                continue;
+            }
+            task.stop_requested = false;
+            if task.state == TaskState::Stopped {
+                task.state = TaskState::Ready;
+                reschedule_mask |= cpu_bit(task.cpu);
+            }
+        }
+        reschedule_mask
     }
 
     fn reap_dead(&mut self) {
@@ -2558,6 +2605,36 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         return false;
     }
 
+    let Some(stop_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((stop_child, _)) = spawn_user_process("s03-stop-continue", stop_program) else {
+        return false;
+    };
+    if set_process_group(stop_child.as_u64(), stop_child.as_u64()).is_err()
+        || kill_process(0u64.wrapping_sub(stop_child.as_u64()), 19).is_err()
+    {
+        return false;
+    }
+    if wait_process(stop_child.as_u64()) != Err(WaitError::StillRunning) {
+        return false;
+    }
+    if kill_process(0u64.wrapping_sub(stop_child.as_u64()), 18).is_err()
+        || kill_process(0u64.wrapping_sub(stop_child.as_u64()), 15).is_err()
+    {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(stop_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(stop_child.as_u64()) != Ok(143) {
+        return false;
+    }
+
     let Some(handler_program) = userspace::create_s03_handler_process() else {
         return false;
     };
@@ -3349,7 +3426,10 @@ pub fn exit_current_process(exit_code: i32) -> ! {
                 continue;
             }
             match sibling_state {
-                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                TaskState::Ready
+                | TaskState::Blocked
+                | TaskState::Sleeping
+                | TaskState::Stopped => {
                     if let Some(thread_id) = sibling_thread {
                         if retired_thread_count < retired_threads.len() {
                             retired_threads[retired_thread_count] = Some(thread_id);
@@ -3466,6 +3546,7 @@ fn process_has_live_tasks(process_id: u64) -> bool {
                     | TaskState::Switching
                     | TaskState::Blocked
                     | TaskState::Sleeping
+                    | TaskState::Stopped
             )
     })
 }
@@ -3540,6 +3621,34 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     Ok(exit_code)
 }
 
+pub fn wait_any_process() -> Result<i32, WaitError> {
+    let parent = ProcessId(current_process_id());
+    let (exited_child, has_child) = {
+        let processes = process_table_lock();
+        let mut exited = None;
+        let mut child = false;
+        for process in processes.iter().flatten() {
+            if process.parent != parent {
+                continue;
+            }
+            child = true;
+            if process.state == ProcessState::Exited {
+                exited = Some(process.id.as_u64());
+                break;
+            }
+        }
+        (exited, child)
+    };
+    if let Some(child) = exited_child {
+        return wait_process(child);
+    }
+    if has_child {
+        Err(WaitError::StillRunning)
+    } else {
+        Err(WaitError::NoSuchChild)
+    }
+}
+
 pub fn zombie_count() -> usize {
     process_table_lock()
         .iter()
@@ -3570,6 +3679,7 @@ pub fn process_info(index: usize) -> Option<ProcessInfo> {
     let process = processes.iter().flatten().nth(index)?;
     let state = match process.state {
         ProcessState::Ready => 1,
+        ProcessState::Stopped => 2,
         ProcessState::Exited => 4,
     };
     Some(ProcessInfo {
@@ -5868,7 +5978,7 @@ fn complete_process_termination(
             continue;
         }
         match task.state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 task.state = TaskState::Dead;
                 task.termination_signal = 0;
                 task.thread_id = None;
@@ -6025,6 +6135,8 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
     let mut matched = false;
     let mut refused = false;
     let mut termination_requests = alloc::vec::Vec::new();
+    let mut stop_requests = alloc::vec::Vec::new();
+    let mut continue_requests = alloc::vec::Vec::new();
     for process in processes.iter_mut().flatten() {
         let selected = if let Some(group) = target_group {
             process.process_group == group
@@ -6043,9 +6155,25 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
             continue;
         }
         let action = process.signal_actions[sig as usize];
-        if action == 1 {
+        if action == 1 && sig != 19 {
             continue;
         } // SIG_IGN
+        if sig == 19 {
+            if process.state != ProcessState::Exited {
+                process.pending_signal = sig;
+                process.state = ProcessState::Stopped;
+                stop_requests.push(process.id);
+            }
+            continue;
+        }
+        if sig == 18 {
+            if process.state == ProcessState::Stopped {
+                process.state = ProcessState::Ready;
+                process.pending_signal = 0;
+                continue_requests.push(process.id);
+            }
+            continue;
+        }
         if action > 1 && sig != 9 {
             process.pending_signal = sig;
             continue;
@@ -6065,8 +6193,17 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
     }
     drop(processes);
 
+    let mut reschedule_mask = 0usize;
+    if !stop_requests.is_empty() || !continue_requests.is_empty() {
+        let mut scheduler = SCHEDULER.lock();
+        for process_id in stop_requests {
+            reschedule_mask |= scheduler.stop_process(process_id);
+        }
+        for process_id in continue_requests {
+            reschedule_mask |= scheduler.continue_process(process_id);
+        }
+    }
     if !termination_requests.is_empty() {
-        let mut reschedule_mask = 0usize;
         {
             let mut scheduler = SCHEDULER.lock();
             for (task_id, signal) in termination_requests {
@@ -6146,7 +6283,7 @@ pub fn process_group_exists(group: u64) -> bool {
         && process_table_lock()
             .iter()
             .flatten()
-            .any(|process| process.process_group == group && process.state == ProcessState::Ready)
+            .any(|process| process.process_group == group && process.state != ProcessState::Exited)
 }
 
 pub fn can_control_foreground_group(group: u64) -> bool {

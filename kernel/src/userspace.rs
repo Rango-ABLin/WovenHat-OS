@@ -206,7 +206,8 @@ global_asm!(
     "jne wovenhat_user_failure",
     "wovenhat_fork_wait:",
     "mov eax, 5",
-    "mov rdi, r12",
+    // `waitpid(-1)` exercises bounded wait-any selection and reaping.
+    "mov rdi, -1",
     "int 0x80",
     "cmp rax, -2",
     "jne wovenhat_fork_reaped",
