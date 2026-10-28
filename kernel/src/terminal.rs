@@ -26,6 +26,7 @@ pub const TCGETS: u64 = 0x5401;
 pub const TCSETS: u64 = 0x5402;
 pub const TIOCGPGRP: u64 = 0x540f;
 pub const TIOCSPGRP: u64 = 0x5410;
+pub const TIOCGPTN: u64 = 0x8004_5430;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]

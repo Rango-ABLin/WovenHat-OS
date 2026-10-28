@@ -50,6 +50,9 @@ process/tasks to Stopped, SIGCONT restores Ready dispatch, and SIGTERM then
 reaps status 143 on the 1/2/4-CPU gate.
 The lifecycle probe now exercises `waitpid(-1)` and `libwoven::wait_any_child`
 provides the safe wrapper; exact-child wait remains available.
+The PTY increment adds generation-checked `/dev/ptmx` and `/dev/pts/N` handles,
+bounded canonical buffering, echo, EOF/VINTR handling, and master/slave stream
+teardown. The S03 probe passes on 1/2/4 CPUs.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

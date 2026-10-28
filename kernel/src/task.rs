@@ -687,6 +687,8 @@ pub enum FdKind {
     },
     PipeRead(crate::pipe::PipeId),
     PipeWrite(crate::pipe::PipeId),
+    PtyMaster(crate::pty::PtyId),
+    PtySlave(crate::pty::PtyId),
 }
 
 #[derive(Clone, Copy)]
@@ -1579,6 +1581,20 @@ fn clone_file_table(
                 })?;
                 child_files[index] = Some(FdKind::PipeWrite(*id));
             }
+            Some(FdKind::PtyMaster(id)) => {
+                crate::pty::clone_master(*id).map_err(|_| {
+                    release_file_table(&mut child_files);
+                    ProcessError::Full
+                })?;
+                child_files[index] = Some(FdKind::PtyMaster(*id));
+            }
+            Some(FdKind::PtySlave(id)) => {
+                crate::pty::clone_slave(*id).map_err(|_| {
+                    release_file_table(&mut child_files);
+                    ProcessError::Full
+                })?;
+                child_files[index] = Some(FdKind::PtySlave(*id));
+            }
             None => {}
         }
     }
@@ -1592,6 +1608,8 @@ fn release_fd(fd: FdKind) {
         }
         FdKind::PipeRead(id) => crate::pipe::close_reader(id),
         FdKind::PipeWrite(id) => crate::pipe::close_writer(id),
+        FdKind::PtyMaster(id) => crate::pty::close_master(id),
+        FdKind::PtySlave(id) => crate::pty::close_slave(id),
     }
 }
 
@@ -1609,6 +1627,12 @@ fn clone_fd(fd: FdKind) -> Result<FdKind, FileError> {
             crate::pipe::clone_writer(id).map_err(|_| FileError::TooManyFiles)?;
             Ok(FdKind::PipeWrite(id))
         }
+        FdKind::PtyMaster(id) => Ok(FdKind::PtyMaster(
+            crate::pty::clone_master(id).map_err(|_| FileError::TooManyFiles)?,
+        )),
+        FdKind::PtySlave(id) => Ok(FdKind::PtySlave(
+            crate::pty::clone_slave(id).map_err(|_| FileError::TooManyFiles)?,
+        )),
     }
 }
 
@@ -2541,6 +2565,9 @@ pub fn process_exited(id: ProcessId) -> bool {
 /// dedicated group and terminated through the process-group signal path.
 #[cfg(feature = "s03-process-lifecycle-test")]
 pub fn s03_process_lifecycle_self_test() -> bool {
+    if !crate::pty::self_test() {
+        return false;
+    }
     let Some(program) = userspace::create_s03_fork_wait_process() else {
         return false;
     };
@@ -3973,11 +4000,45 @@ pub fn anonymous_mapping_count() -> usize {
         .map(|process| process.memory_mappings.iter().flatten().count())
         .sum()
 }
+
+fn install_current_fd(fd: FdKind) -> Result<u64, FileError> {
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    let process = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .ok_or(FileError::NoProcess)?;
+    let descriptor = (3..MAX_FILE_DESCRIPTORS)
+        .find(|descriptor| process.files[*descriptor].is_none())
+        .ok_or(FileError::TooManyFiles)?;
+    process.files[descriptor] = Some(fd);
+    Ok(descriptor as u64)
+}
+
 pub fn open_current(path: &str) -> Result<u64, FileError> {
     open_current_with_access(path, 1, true)
 }
 
 fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Result<u64, FileError> {
+    if path == "/dev/ptmx" {
+        if !current_has(Capability::Console) {
+            return Err(FileError::PermissionDenied);
+        }
+        let id = crate::pty::create().map_err(|_| FileError::TooManyFiles)?;
+        return install_current_fd(FdKind::PtyMaster(id)).inspect_err(|_| {
+            crate::pty::close_master(id);
+        });
+    }
+    if let Some(index) = path.strip_prefix("/dev/pts/").and_then(|value| value.parse().ok()) {
+        if !current_has(Capability::Console) {
+            return Err(FileError::PermissionDenied);
+        }
+        let id = crate::pty::open_slave(index).map_err(|_| FileError::NotFound)?;
+        return install_current_fd(FdKind::PtySlave(id)).inspect_err(|_| {
+            crate::pty::close_slave(id);
+        });
+    }
     let read = access & 1 != 0;
     let write = access & 2 != 0;
     let create = access & 4 != 0;
@@ -4061,6 +4122,20 @@ pub fn descriptor_is_open(descriptor: u64) -> bool {
         .find(|process| process.id.as_u64() == process_id)
         .and_then(|process| process.files.get(descriptor))
         .is_some_and(Option::is_some)
+}
+
+pub fn pty_number_current(descriptor: u64) -> Option<u64> {
+    let descriptor = usize::try_from(descriptor).ok()?;
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .and_then(|process| process.files.get(descriptor).copied().flatten())
+        .and_then(|fd| match fd {
+            FdKind::PtyMaster(id) | FdKind::PtySlave(id) => Some(id.index as u64),
+            _ => None,
+        })
 }
 
 /// Pin the exact open-file description behind a userspace descriptor for an
@@ -4151,6 +4226,8 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
         }
         FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|_| FileError::BadDescriptor),
         FdKind::PipeWrite(_) => Err(FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => crate::pty::read_master(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtySlave(id) => crate::pty::read_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
     }
 }
 
@@ -4214,6 +4291,8 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
             crate::pipe::write(id, buffer).map_err(|_| FileError::BadDescriptor)
         }
         FdKind::PipeRead(_) => Err(FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => crate::pty::write_master(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtySlave(id) => crate::pty::write_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
     }
 }
 
