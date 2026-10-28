@@ -7941,3 +7941,11 @@ disk/partition/filesystem metadata, and publishes mount records through one
 discover-and-mount operation. Host/target Clippy and QEMU 1/2/4 CPU gates
 pass. Evidence is under `target/stage12-5-storage-manager-*`.
 
+## Codex - Stage 12.4 WovenFS snapshots/COW (2026-10-28)
+
+Completed the bounded snapshot implementation after Stage 12.5. The snapshot
+catalog now has a fixed-page copy-on-write image: shared pages clone on write,
+restore swaps roots, and snapshot removal reclaims references. Target/host
+Clippy and QEMU 1/2/4 CPU acceptance pass. Evidence is under
+`target/stage12-4-snapshot-{1,2,4}cpu-*`.
+

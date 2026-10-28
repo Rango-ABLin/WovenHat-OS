@@ -12281,3 +12281,11 @@ after successful FAT32 discovery. The self-test covers removable metadata,
 partition bounds and mount teardown. Host/target warning-denying Clippy and
 QEMU pass at 1/2/4 CPUs. Evidence: `target/stage12-5-storage-manager-*`.
 
+## Stage 12.4 WovenFS snapshots and copy-on-write — 2026-10-28 — ACCEPTED
+
+Replaced the metadata-only snapshot stub with a bounded fixed-page COW image.
+Snapshots retain page roots, writes clone shared pages, restore swaps the live
+roots, and removal releases references back to the bounded pool. Host/target
+warning-denying Clippy and QEMU pass at 1/2/4 CPUs. Evidence:
+`target/stage12-4-snapshot-{1,2,4}cpu-*`.
+
