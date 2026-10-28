@@ -3170,13 +3170,19 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             u64::from(ok)
         }
         value if value == Number::ThreadRobustLock as u64 => {
-            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| crate::thread::robust_lock(id, arg0))
+            let owner = crate::task::current_thread_id()
+                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            crate::thread::robust_lock(owner, arg0)
         }
         value if value == Number::ThreadRobustUnlock as u64 => {
-            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_unlock(id, arg0)))
+            let owner = crate::task::current_thread_id()
+                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            u64::from(crate::thread::robust_unlock(owner, arg0))
         }
         value if value == Number::ThreadRobustConsistent as u64 => {
-            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_consistent(id, arg0)))
+            let owner = crate::task::current_thread_id()
+                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            u64::from(crate::thread::robust_consistent(owner, arg0))
         }
         value if value == Number::ThreadRobustWait as u64 => {
             crate::thread::wait_robust_waiter(arg0, crate::task::current_task_id().as_u64()); 0

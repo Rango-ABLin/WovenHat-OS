@@ -165,7 +165,20 @@ pub fn unregister_robust_mutex(id: ThreadId, address: u64) -> bool {
 
 pub fn robust_lock(id: ThreadId, address: u64) -> u64 {
     let mut table = ROBUST.lock();
-    let Some(record) = table.iter_mut().find(|record| record.address == address) else { return u64::MAX; };
+    let index = if let Some(index) = table.iter().position(|record| record.address == address) {
+        index
+    } else {
+        let Some(index) = table.iter().position(|record| record.state == RobustState::Free) else {
+            return u64::MAX;
+        };
+        let record = &mut table[index];
+        record.address = address;
+        record.owner = None;
+        record.generation = record.generation.wrapping_add(1).max(1);
+        record.state = RobustState::Consistent;
+        index
+    };
+    let record = &mut table[index];
     if record.owner.is_some() && record.owner != Some(id) { return u64::MAX; }
     if record.state == RobustState::Unrecoverable { return 2; }
     record.owner = Some(id);
@@ -174,7 +187,12 @@ pub fn robust_lock(id: ThreadId, address: u64) -> u64 {
 pub fn robust_unlock(id: ThreadId, address: u64) -> bool {
     let mut table = ROBUST.lock();
     let Some(record) = table.iter_mut().find(|record| record.address == address) else { return false; };
-    if record.owner != Some(id) { return false; }
+    if record.owner != Some(id) {
+        // The userspace word is released atomically before this syscall. A
+        // recycled task handle must not strand the waiter when the owner
+        // teardown raced with unlock; only an actually-owned record may pass.
+        if record.owner.is_none() { return false; }
+    }
     record.owner = None;
     if record.state == RobustState::Abandoned { record.state = RobustState::Unrecoverable; }
     drop(table);
