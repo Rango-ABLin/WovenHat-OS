@@ -61,8 +61,10 @@ only recreate disks under `target/storage-regression-*`; the runtime data disk
 is not used by these tests.
 
 The package command verifies the recorded image/source hashes and writes the
-UEFI image, checksum, release notes and validation evidence under
-`target/releases/0.8.0/`. This is local packaging, not publication or signing.
+UEFI disk image, a UEFI ISO9660/El Torito image, checksums, release notes and
+validation evidence under `target/releases/0.8.0/`. The ISO is a file-backed
+artifact and must pass the exact-artifact OVMF/QEMU gate before publication.
+This is local packaging, not publication or physical-media installation.
 
 ## Try the release
 

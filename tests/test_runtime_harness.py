@@ -12,6 +12,83 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_aslr_requires_guard_and_original_thread_gate(self):
+        required = harness.required_markers('11.2-aslr', 1)
+        self.assertIn('[S11.ASLR] arena and stack guard: PASSED', required)
+        self.assertIn('[S11.2] scheduler-backed thread: PASSED', required)
+        self.assertIn('[S11.2] threads/TLS/join: PASSED', required)
+        self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
+    def test_compiler_tls_requires_fresh_threads_and_original_thread_gate(self):
+        required = harness.required_markers('11.2-tls', 4)
+        for marker in ('[S11.TLS] static compiler TLS: PASSED',
+                       '[S11.TLS] fresh child TLS: PASSED',
+                       '[S11.TLS] relocated pointer initializer: PASSED',
+                       '[S11.TLS] biased PIE initializer relocation: PASSED',
+                       '[S11.TLS] compiled fork state and fresh descendant: PASSED',
+                       '[S11.TLS] compiled capacity cancellation and stale joins: PASSED',
+                       '[S11.TLS] compiled owner-exit sibling armed: PASSED',
+                       '[S11.TLS] nonzero congruence TLS: PASSED',
+                       '[S11.TLS] page-edge TCB: PASSED',
+                       '[S11.TLS] template/TCB rollback and fork protection: PASSED',
+                       '[S11.TLS] compiler TLS lifecycle: PASSED',
+                       '[S11.2] threads/TLS/join: PASSED'):
+            self.assertIn(marker, required)
+        for cpu in range(4):
+            self.assertIn(f'[S11.TLS] lifecycle CPU {cpu}: PASSED', required)
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
+    def test_compiler_gate_preserves_all_original_loader_checks(self):
+        required = harness.required_markers('11.5-compiler', 4)
+        for marker in harness.required_markers('11.5', 4):
+            self.assertIn(marker, required)
+        self.assertIn('[S11.COMPILER] signed toolchain PIE: PASSED', required)
+        self.assertIn('[S11.COMPILER] actual shared import and exact owner teardown: PASSED', required)
+        self.assertIn('[S11.COMPILER] nonzero-bias shared PIE and teardown: PASSED', required)
+        self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
+    def test_exit_status_fixture_and_original_thread_gate_are_required(self):
+        required = harness.required_markers('11.2-status', 4)
+        self.assertIn('[S11.PLACEMENT] fixed ET_EXEC at nonzero ASLR candidate: PASSED', required)
+        self.assertIn('[S11.PLACEMENT] PIE executes with nonzero ASLR: PASSED', required)
+        self.assertIn('[S11.2] threads/TLS/join: PASSED', required)
+        self.assertTrue(any('ownership/teardown' in marker for marker in required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
+    def test_shared_library_evidence_is_required(self):
+        required = harness.required_markers('11.5', 4)
+        self.assertTrue(any('Ring-3 import call and owner teardown' in marker for marker in required))
+        self.assertTrue(any('DT_REL runtime relocation' in marker for marker in required))
+        self.assertTrue(any('DT_REL Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('DT_JMPREL DT_REL runtime relocation' in marker for marker in required))
+        self.assertTrue(any('DT_JMPREL DT_REL Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('weak symbol runtime resolution' in marker for marker in required))
+        self.assertTrue(any('weak symbol Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('versioned symbol runtime resolution' in marker for marker in required))
+        self.assertTrue(any('versioned symbol Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('constructors scheduled before Ring-3 entry' in marker for marker in required))
+        self.assertTrue(any('constructors/destructors Ring-3 execution and teardown' in marker for marker in required))
+        self.assertTrue(any('tampered signature rejected' in marker for marker in required))
+        self.assertTrue(any('argv failure rollback' in marker for marker in required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_complete_wifi_evidence_passes(self):
         required = harness.required_markers('13.9', 4)
         self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))

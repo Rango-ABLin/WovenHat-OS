@@ -86,7 +86,7 @@ impl Shell {
             Key::Char(character) => self.push_character(character, console),
             Key::Backspace => self.backspace(console),
             Key::Enter => self.submit(console),
-            Key::Tab | Key::F1 => {}
+            Key::Tab | Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::F12 => {}
         }
     }
 
@@ -130,6 +130,55 @@ impl Shell {
                 }
             }
             "version" | "ver" => console.println("WovenHat kernel 0.8.0 Multicore Foundation"),
+            // Stage 13.20: turn the machine off or reset it.
+            "poweroff" | "shutdown" => {
+                if authorize(Capability::Console, console) {
+                    console.println("powering off...");
+                    let error = crate::power::power_off();
+                    console.println("the machine is still running:");
+                    console.println(match error {
+                        crate::power::Error::NoAcpi => "  ACPI describes no way to turn it off",
+                        crate::power::Error::AcpiModeRefused => {
+                            "  the firmware would not enter ACPI mode"
+                        }
+                        crate::power::Error::StillRunning => {
+                            "  it ignored the request; hold the power button"
+                        }
+                    });
+                }
+            }
+            "reboot" | "restart" => {
+                if authorize(Capability::Console, console) {
+                    console.println("restarting...");
+                    crate::power::reboot();
+                }
+            }
+            // Stage 13.19: a tester's observation, kept in the live-test log.
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "note" => {
+                if authorize(Capability::Console, console) {
+                    if arg.is_empty() {
+                        console.println("usage: note <what you saw>");
+                    } else {
+                        crate::serial::write_line(format_args!("[NOTE] {}", arg));
+                        console.println(if crate::livelog::flush_now() {
+                            "noted; saved to the USB stick"
+                        } else {
+                            "noted (no live-test stick to save it to)"
+                        });
+                    }
+                }
+            }
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "savelog" => {
+                if authorize(Capability::Console, console) {
+                    console.println(if crate::livelog::flush_now() {
+                        "log saved to the USB stick"
+                    } else {
+                        "no live-test stick"
+                    });
+                }
+            }
             "ticks" | "uptime" => {
                 if authorize(Capability::TimerRead, console) {
                     console.print("ticks: ");
@@ -425,6 +474,8 @@ fn print_help(console: &mut Console) {
     console.println("         rename|mv <old> <new>");
     console.println("test:    mmaptest (private/shared mappings, fork, msync), msynctest (disk)");
     console.println("nav:     cd [path]  pwd  echo <text>");
+    console.println("live:    note <text> (kept in the USB stick's log)  savelog");
+    console.println("power:   poweroff|shutdown  reboot|restart");
     console.println("process: run <elf>  sh  init  spawn  user|ring3  kill <pid> [sig]");
     console
         .println("runtime: userland udpecho [port] dhcp <on|off>   (Multicore Foundation runtime)");
@@ -470,6 +521,9 @@ fn cmd_devices(console: &mut Console) {
         "pit",
         "ps2-keyboard",
         "ata0",
+        "nvme0",
+        "ahci0",
+        "xhci0",
         "hda0",
     ] {
         if let Some(dev) = device::find(name) {
@@ -482,8 +536,14 @@ fn cmd_devices(console: &mut Console) {
                 device::DeviceKind::Timer => "timer",
                 device::DeviceKind::Keyboard => "keyboard",
                 device::DeviceKind::Block => "block",
-                #[cfg(feature = "stage13-8-test")]
+                #[cfg(any(
+                    not(feature = "qemu-test"),
+                    feature = "stage13-12-test",
+                    feature = "stage13-8-test"
+                ))]
                 device::DeviceKind::Audio => "audio",
+                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+                device::DeviceKind::UsbHost => "usb-host",
             });
             if let Some(irq) = dev.irq {
                 console.print(" irq=");
@@ -928,6 +988,10 @@ fn cmd_fs(console: &mut Console) {
         print_u64(console, stats.writebacks);
         console.print(" evictions=");
         print_u64(console, stats.evictions);
+        console.print(" retries=");
+        print_u64(console, stats.writeback_retries);
+        console.print(" failures=");
+        print_u64(console, stats.writeback_failures);
         console.newline();
         console.print("sectors: resident=");
         print_u64(console, stats.resident as u64);

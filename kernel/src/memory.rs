@@ -43,6 +43,7 @@ impl FrameRange {
 
 pub struct Stats {
     pub usable_regions: usize,
+    pub usable_bytes: u64,
     pub total_frames: u64,
     pub allocated_frames: u64,
     pub remaining_frames: u64,
@@ -166,6 +167,7 @@ impl PhysicalFrameAllocator {
     fn stats(&self) -> Stats {
         Stats {
             usable_regions: self.range_count,
+            usable_bytes: self.total_frames.saturating_mul(FRAME_SIZE),
             total_frames: self.total_frames,
             allocated_frames: self.allocated_frames,
             remaining_frames: self.total_frames.saturating_sub(self.allocated_frames),
@@ -367,9 +369,12 @@ unsafe impl FrameAllocator<Size4KiB> for PhysicalFrameAllocator {
 }
 
 pub fn init(regions: &[MemoryRegion], physical_memory_offset: u64) -> Result<(), InitError> {
-    ALLOCATOR
+    let result = ALLOCATOR
         .lock()
-        .initialize(regions, &[], physical_memory_offset)
+        .initialize(regions, &[], physical_memory_offset);
+    let stats = stats();
+    crate::memory_pressure::observe(stats.remaining_frames, stats.total_frames);
+    result
 }
 
 pub fn init_with_topology(
@@ -377,21 +382,55 @@ pub fn init_with_topology(
     affinities: &[crate::hal::acpi::MemoryAffinity],
     physical_memory_offset: u64,
 ) -> Result<(), InitError> {
-    ALLOCATOR
+    let result = ALLOCATOR
         .lock()
-        .initialize(regions, affinities, physical_memory_offset)
+        .initialize(regions, affinities, physical_memory_offset);
+    let stats = stats();
+    crate::memory_pressure::observe(stats.remaining_frames, stats.total_frames);
+    result
 }
 
 pub fn allocate_frame() -> Option<PhysFrame<Size4KiB>> {
-    ALLOCATOR.lock().allocate_frame()
+    let (frame, remaining, total) = {
+        let mut allocator = ALLOCATOR.lock();
+        let frame = allocator.allocate_frame();
+        let stats = allocator.stats();
+        (frame, stats.remaining_frames, stats.total_frames)
+    };
+    if frame.is_some() {
+        crate::memory_pressure::observe(remaining, total);
+    } else {
+        crate::memory_pressure::allocation_failed(remaining, total);
+    }
+    frame
 }
 
 pub(crate) fn allocate_contiguous_frames(count: usize) -> Option<PhysFrame<Size4KiB>> {
-    ALLOCATOR.lock().allocate_contiguous_frames(count)
+    let (frame, remaining, total) = {
+        let mut allocator = ALLOCATOR.lock();
+        let frame = allocator.allocate_contiguous_frames(count);
+        let stats = allocator.stats();
+        (frame, stats.remaining_frames, stats.total_frames)
+    };
+    if frame.is_some() {
+        crate::memory_pressure::observe(remaining, total);
+    } else {
+        crate::memory_pressure::allocation_failed(remaining, total);
+    }
+    frame
 }
 
 pub fn deallocate_frame(frame: PhysFrame<Size4KiB>) -> bool {
-    ALLOCATOR.lock().deallocate_frame(frame)
+    let (released, remaining, total) = {
+        let mut allocator = ALLOCATOR.lock();
+        let released = allocator.deallocate_frame(frame);
+        let stats = allocator.stats();
+        (released, stats.remaining_frames, stats.total_frames)
+    };
+    if released {
+        crate::memory_pressure::observe(remaining, total);
+    }
+    released
 }
 
 pub(crate) fn allocator() -> IrqMutexGuard<'static, PhysicalFrameAllocator> {

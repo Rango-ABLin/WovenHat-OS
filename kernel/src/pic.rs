@@ -122,6 +122,10 @@ unsafe fn outb(port: u16, value: u8) {
 }
 
 /// Delay long enough for legacy hardware to observe the previous port write.
+///
+/// # Safety
+/// Performs a write to the POST diagnostic port (0x80); no precondition beyond
+/// running on x86.
 unsafe fn io_wait() {
     // SAFETY: Port 0x80 is the conventional POST delay port and the written
     // value has no effect on the PIC or other kernel state.

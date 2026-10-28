@@ -57,6 +57,12 @@ Prerequisites: the pinned nightly in `rust-toolchain.toml`
 (`nightly-2026-07-10`, which rustup installs automatically), Python 3, and QEMU
 with OVMF firmware.
 
+Supported production desktop configurations require at least 4 GiB of
+physical RAM. The kernel reports the discovered usable-memory total at boot
+and scales its frame allocator and growable heap from the bootloader memory
+map. Smaller QEMU profiles used by regression gates are intentional low-memory
+fixtures; they do not establish production support.
+
 The acceptance launchers keep Cargo's build and target directories inside the
 project, because Windows `%TEMP%` cleanup has previously deleted Cargo's
 intermediates mid-build and failed an entire chain. Use the same settings for
@@ -72,6 +78,19 @@ Boot a release build under QEMU:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run-release.ps1 -Cpus 4
 ```
+
+For an interactive desktop with the signed demo apps and a USB tablet:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\RUN-DESKTOP.ps1
+```
+
+The launcher defaults to Windows hypervisor acceleration (`whpx`); use
+`-Accelerator tcg` where WHPX is unavailable. The demo uses flat composition
+and reduced motion to keep the desktop responsive.
+Sign in as Ada with PIN `1234`. The launcher keeps each run's serial/QEMU
+logs under a unique `target/desktop-interactive-*` directory. Use `-Image`
+to boot an already-built desktop image; self-test images stop after testing.
 
 Build just the kernel, or produce the bootable image:
 
@@ -161,8 +180,9 @@ Explicitly **not** done, and not claimed:
   qualification.
 - Multi-node NUMA, non-contiguous physical CPU hotplug, and APIC IDs above 255.
 - Stateful connection tracking and NAT.
-- Dynamic linking, shared libraries, and TLS image allocation in the ELF
-  loader.
+- Physical release qualification of the dynamic-linking/shared-library/TLS
+  path on real hardware; bounded QEMU/compiler acceptance is complete, while
+  physical qualification remains a later production gate.
 - Measured key provisioning, persistent key storage, and key rotation policy
   for encrypted volumes.
 

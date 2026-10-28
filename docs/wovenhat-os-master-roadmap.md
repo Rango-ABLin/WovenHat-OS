@@ -38,7 +38,7 @@ Corrected against source, not the stale docs:
 | Audit | Privileged-syscall audit log | `audit.rs` |
 | GUI | Framebuffer + basic widget/window primitives, **no compositor, no real desktop shell** | `graphics.rs`, `gui.rs` |
 | Networking | **Present** — virtio-net transport + smoltcp (DHCP, DNS, ICMP ping, UDP/TCP sockets) behind a capability-gated syscall ABI; corrected from an earlier "Absent" claim in this doc, see 2026-09-04 note above | `virtio_net.rs`, `network.rs` |
-| SMP | **Stage-6 bounded SMP maturity implemented**: 1-4 CPUs, Ready-task migration for audited kernel jobs, per-CPU load accounting, automatic rebalancing, reschedule IPIs, LAPIC/IOAPIC and acknowledged TLB shootdowns; userspace/I/O remain BSP-owned | `smp.rs`, `task.rs`, `interrupts.rs`, `docs/stage-6-smp-maturity.md` |
+| SMP | **Stage-6 bounded SMP maturity implemented**: 1-16 CPUs, Ready-task migration for audited kernel jobs, per-CPU load accounting, automatic rebalancing, reschedule IPIs, LAPIC/IOAPIC and acknowledged TLB shootdowns; userspace/I/O remain BSP-owned | `smp.rs`, `task.rs`, `interrupts.rs`, `docs/stage-6-smp-maturity.md` |
 | Drivers | Hard-coded to QEMU (serial, PS/2, PIT, ATA/PIO) | `ata.rs`, `keyboard.rs`, `timer.rs` |
 | CI | `cargo clippy -D warnings` + QEMU boot + exit-code validation | `.github/workflows/kernel.yml` |
 | Self-tests | 31 boot-time subsystem self-tests gating kernel continuation | `main.rs` |
@@ -54,7 +54,7 @@ Corrected against source, not the stale docs:
 0.8.0 implements a bounded foundation; see [release notes](release-0.8.0.md)
 and the [ownership/lock audit](smp-lock-audit.md).
 
-- [x] AP trampoline and 1-4 CPU startup.
+- [x] AP trampoline and 1-16 CPU startup within the bounded static control plane.
 - [x] Per-CPU GDT/TSS/stacks and current-task state (indexed by APIC identity).
 - [x] Calibrated LAPIC timers, IPIs and spurious handling.
 - [x] IOAPIC keyboard routing with ISA overrides; legacy fallback.
@@ -62,7 +62,7 @@ and the [ownership/lock audit](smp-lock-audit.md).
 - [x] Ready-only task migration for explicitly audited migratable kernel jobs.
 - [x] Per-CPU runnable-load accounting excluding idle tasks.
 - [x] Conservative automatic rebalancing with dedicated reschedule IPIs.
-- [x] Rebalancing/reschedule/migration stress tests across the 1/2/4 CPU matrix.
+- [x] Rebalancing/reschedule/migration stress tests across the 1/2/4/8/16 CPU matrix.
 - [x] Acknowledged cross-core TLB shootdowns and stale-translation regression.
 - [x] Bounded ACPI SRAT CPU-domain discovery with domain-local placement and
       rebalancing; see `docs/audit-stage6-numa-2026-09-16.md`.

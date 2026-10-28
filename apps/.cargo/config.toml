@@ -1,0 +1,5 @@
+# The kernel's bounded ELF loader consumes the SysV hash table. Keep every
+# freestanding system application package compatible with that production ABI;
+# LLD otherwise defaults to GNU-hash-only output for this target.
+[target.x86_64-unknown-none]
+rustflags = ["-C", "link-arg=--hash-style=sysv"]

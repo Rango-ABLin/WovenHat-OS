@@ -8,8 +8,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+# A push supersedes an older unstarted matrix on the same ref. Completed runs
+# and their uploaded evidence remain available; this prevents stale maturity
+# runs from starving the latest audited tree in the hosted runner queue.
+concurrency:
+  group: wovenhat-kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   core-foundation:
@@ -113,6 +117,10 @@ jobs:
           path: |
             target/release-validation/
             audit-artifacts/
+            target/shell-regression/**/desktop-before-f12.ppm
+            target/shell-regression/**/desktop-after-f12-return.ppm
+            target/shell-regression/**/serial.log
+            target/shell-regression/**/qemu.log
             target/*regression-*/serial.log
             target/*regression-*/qemu.log
             target/hello-gui-*/serial.log
@@ -248,6 +256,135 @@ jobs:
               echo "Stage 13.8H stress: CPU=$cpu run=$run/3"
               python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
             done
+          done
+      - name: Stage 13.12 boot-time driver bring-up 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings
+          for mode in devices nodisk absent production; do
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage13-12-drivers.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 13.13 USB keyboard and mouse input 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-13-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 13.14 NVMe/AHCI storage 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-14-test -- -D warnings
+          for mode in nvme ahci production; do
+            for cpu in 1 2 4; do
+              python3 scripts/test-stage13-14-storage.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
+      - name: Stage 13.15 WovenAudio playback 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage13-15-audio.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 13.16 report-protocol HID input 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          cargo test --test hid_reports
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-16-test -- -D warnings
+          for cpu in 1 2 4; do
+            python3 scripts/test-stage13-16-hid-reports.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+      - name: Stage 13.17-13.19 live hardware testing 1/2/4-core acceptance
+        shell: bash
+        run: |
+          qemu=/usr/bin/qemu-system-x86_64
+          ovmf_code=
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              ovmf_code="$candidate"
+              break
+            fi
+          done
+          test -n "$ovmf_code"
+          ovmf_vars=
+          for variant in OVMF_VARS_4M.fd OVMF_VARS.fd; do
+            if [ -f "/usr/share/OVMF/$variant" ]; then
+              ovmf_vars="/usr/share/OVMF/$variant"
+              break
+            fi
+          done
+          test -n "$ovmf_vars"
+          cargo test --test usb_msc
+          for feature in stage13-17-test stage13-18-test stage13-19-test; do
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+          done
+          for cpu in 1 2 4; do
+            for mode in nvme ahci production; do
+              python3 scripts/test-stage13-17-foreign-disk.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            done
+            python3 scripts/test-stage13-18-usb-storage.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            for mode in test production unlabelled; do
+              python3 scripts/test-stage13-19-livelog.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            done
+            python3 scripts/test-stage13-19-livelog.py --mode windows-label --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+            for mode in poweroff reboot; do
+              python3 scripts/test-stage13-20-power.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+            python3 scripts/test-stage20-15-session.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
       - name: Stage 13.9 WovenWiFi full-contract 1/2/4-core acceptance
         shell: bash
@@ -843,10 +980,34 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-2-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-3-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-4-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-5-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-6-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-7-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-8-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-9-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-10-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-11-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-12-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-13-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.3 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.4 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.5 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.6 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.7 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.8 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.9 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.10 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.11 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.12 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-stage20-14-monitors.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-stage20-14b-desktop.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve desktop-userspace evidence
         if: always()
@@ -915,3 +1076,294 @@ jobs:
             target/*regression-*/serial.log
             target/*regression-*/qemu.log
             target/hello-gui-*/serial.log
+
+  maturity-release-blockers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Stage 28 and planner host gates
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/test-stage31-randomized-faults.py scripts/test-stage31-packet-corruption.py scripts/test-stage27-5-update-service.py
+          python3 -m unittest tests.test_stage28_disposable_acceptance tests.test_stage31_torture_plan
+          python3 scripts/test-stage28-disposable-acceptance.py --json
+      - name: Stage 28 installer application lint
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          cargo check --release --manifest-path apps/woven-installer/Cargo.toml --target x86_64-unknown-none
+          cargo clippy --release --manifest-path apps/woven-installer/Cargo.toml --target x86_64-unknown-none -- -D warnings
+      - name: GFX-02 kernel lint and host contract
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features gfx02-test -- -D warnings
+          cargo test --test display_compositing
+      - name: Preserve maturity host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maturity-release-blockers-host-evidence
+          if-no-files-found: ignore
+          path: |
+            audit-artifacts/
+            target/*regression-*/serial.log
+            target/*regression-*/qemu.log
+
+  stage31-randomized-matrix:
+    name: Stage 31 randomized fault matrix (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Run seeded randomized Stage 31 matrix
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-stage31-randomized-faults.py \
+            --seed 0x51A7E \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --timeout 600
+      - name: Preserve Stage 31 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage31-randomized-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: |
+            audit-artifacts/stage31-randomized-*/**
+            audit-artifacts/stage31-packet-corruption-*/**
+            target/**/*serial*.log
+            target/**/*qemu*.log
+
+  stage31-low-ram-matrix:
+    name: Stage 31 low-RAM matrix (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Run Stage 31 low-RAM matrix
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-stage31-low-ram.py \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --timeout 180
+      - name: Preserve low-RAM evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage31-low-ram-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: |
+            audit-artifacts/stage31-low-ram-*/**
+            target/memory-regression-*/**
+
+  stage28-gfx-qemu-matrix:
+    name: Stage 28 and GFX-02 QEMU matrix (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Stage 28 installer QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-feature-qemu.py \
+            --feature stage28-installer-test \
+            --name stage28-installer \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --require '[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED' \
+            --require '[BOOT] ALL VALIDATIONS PASSED'
+      - name: GFX-02 QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-feature-qemu.py \
+            --feature gfx02-test \
+            --name gfx02 \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}" \
+            --require '[GFX-02] CPU renderer: PASSED'
+      - name: Preserve Stage 28/GFX-02 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage28-gfx-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: |
+            target/stage28-installer-*/**
+            target/gfx02-*/**
+
+  stage31-service-supervisor-matrix:
+    name: Stage 31 signed service supervisor (${{ matrix.cpus }} CPU)
+    needs: maturity-release-blockers
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: clippy,rust-src,llvm-tools-preview
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      - name: Discover OVMF CODE
+        id: ovmf
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in OVMF_CODE_4M.fd OVMF_CODE.fd; do
+            candidate="/usr/share/OVMF/$variant"
+            if [ -f "$candidate" ]; then
+              echo "code=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No OVMF CODE image found"
+          exit 1
+      - name: Signed service supervisor QEMU acceptance
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          python3 scripts/test-shell-qemu.py \
+            --supervisor-test \
+            --cpus "${{ matrix.cpus }}" \
+            --qemu /usr/bin/qemu-system-x86_64 \
+            --firmware "${{ steps.ovmf.outputs.code }}"
+      - name: Preserve service supervisor evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage31-service-supervisor-${{ matrix.cpus }}cpu-evidence
+          if-no-files-found: ignore
+          path: target/shell-regression/system-apps-*/**

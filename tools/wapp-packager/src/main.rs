@@ -9,6 +9,7 @@ const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
+const RELEASE_MODE: &str = "WOVENHAT_APP_RELEASE_MODE";
 
 fn parse_hex(value: &str) -> [u8; 32] {
     assert!(value.len() == 64, "key must contain 64 hexadecimal digits");
@@ -44,10 +45,22 @@ fn main() {
     }
 
     let image = fs::read(&input).expect("failed to read application ELF");
-    let seed = env::var("WOVENHAT_APP_SIGNING_SEED_HEX")
-        .map(|value| parse_hex(&value))
-        .unwrap_or(TEST_SEED);
+    let release_mode = env::var(RELEASE_MODE)
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    let seed = match env::var("WOVENHAT_APP_SIGNING_SEED_HEX") {
+        Ok(value) => parse_hex(&value),
+        Err(_) if release_mode => {
+            eprintln!("production WAPP packaging requires WOVENHAT_APP_SIGNING_SEED_HEX");
+            process::exit(2);
+        }
+        Err(_) => TEST_SEED,
+    };
     let key_pair = KeyPair::from_seed(Seed::new(seed));
+    if release_mode && env::var("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX").is_err() {
+        eprintln!("production WAPP packaging requires WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX");
+        process::exit(2);
+    }
     if let Ok(value) = env::var("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX") {
         assert_eq!(
             key_pair.pk.as_ref(),

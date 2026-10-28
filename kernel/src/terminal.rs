@@ -9,7 +9,8 @@
 
 use crate::irq_lock::PreemptMutex as Mutex;
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::console::glyph;
 
@@ -20,6 +21,44 @@ const FG_R: u8 = 40;
 const FG_G: u8 = 220;
 const FG_B: u8 = 230;
 const NO_FOREGROUND: u64 = 0;
+
+pub const TCGETS: u64 = 0x5401;
+pub const TCSETS: u64 = 0x5402;
+pub const TIOCGPGRP: u64 = 0x540f;
+pub const TIOCSPGRP: u64 = 0x5410;
+pub const TIOCGPTN: u64 = 0x8004_5430;
+/// Local flag: send SIGTTOU when a background process group writes the
+/// controlling terminal.
+pub const TOSTOP: u32 = 0x0100;
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Termios {
+    pub input_flags: u32,
+    pub output_flags: u32,
+    pub control_flags: u32,
+    pub local_flags: u32,
+    pub control_chars: [u8; 8],
+}
+
+impl Termios {
+    pub const DEFAULT: Self = Self {
+        input_flags: 0x0000_0500,
+        output_flags: 0x0000_0001,
+        control_flags: 0x0000_00b0,
+        local_flags: 0x0000_000b,
+        control_chars: [3, 28, 127, 21, 4, 0, 0, 0],
+    };
+
+    pub const fn is_valid(self) -> bool {
+        self.input_flags & !0x0000_153f == 0
+            && self.output_flags & !0x0000_0001 == 0
+            && self.control_flags & !0x0000_00bf == 0
+            && self.local_flags & !0x0000_8f0b == 0
+    }
+}
+
+static TERMIOS: Mutex<Termios> = Mutex::with_rank(Termios::DEFAULT, 10);
 
 #[derive(Clone, Copy)]
 enum Format {
@@ -254,8 +293,92 @@ impl State {
 static TERMINAL: Mutex<State> = Mutex::with_rank(State::empty(), 10);
 static FOREGROUND_PID: AtomicU64 = AtomicU64::new(NO_FOREGROUND);
 
+// A panic must never take TERMINAL's lock: it may already be held by this
+// CPU, including by the very code that is panicking, and this lock is not
+// reentrant. Keep a separate, lock-free snapshot of the raw framebuffer for
+// the panic handler instead. `init` runs once, early, before SMP starts, so
+// writing this plain global there and only ever reading it afterward needs
+// no further synchronization beyond the ready flag's Acquire/Release pair.
+static PANIC_FB_READY: AtomicBool = AtomicBool::new(false);
+static PANIC_FB_PTR: AtomicUsize = AtomicUsize::new(0);
+static PANIC_FB_LEN: AtomicUsize = AtomicUsize::new(0);
+static mut PANIC_FB_INFO: Option<FrameBufferInfo> = None;
+
 pub fn init(buffer: &mut [u8], info: FrameBufferInfo) {
+    if !PANIC_FB_READY.load(Ordering::Acquire) {
+        PANIC_FB_PTR.store(buffer.as_mut_ptr() as usize, Ordering::Relaxed);
+        PANIC_FB_LEN.store(buffer.len(), Ordering::Relaxed);
+        // SAFETY: `init` is only ever called once, during single-threaded
+        // boot before any AP starts, so there is no concurrent writer.
+        unsafe {
+            PANIC_FB_INFO = Some(info);
+        }
+        PANIC_FB_READY.store(true, Ordering::Release);
+    }
     TERMINAL.lock().init(buffer, info);
+}
+
+struct PanicWriter<'a> {
+    buffer: &'a mut [u8],
+    info: FrameBufferInfo,
+    x: usize,
+    y: usize,
+    scale: usize,
+}
+
+impl core::fmt::Write for PanicWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            if c == '\n' || self.x + 6 * self.scale >= self.info.width {
+                self.x = 8;
+                self.y += 9 * self.scale;
+                if c == '\n' {
+                    continue;
+                }
+            }
+            if self.y + 8 * self.scale >= self.info.height {
+                return Ok(());
+            }
+            crate::console::draw_char(self.buffer, self.info, self.x, self.y, self.scale, c);
+            self.x += 6 * self.scale;
+        }
+        Ok(())
+    }
+}
+
+/// Put the panic message on screen too, not just serial: this kernel's
+/// panics otherwise only ever reach a serial port, which real hardware
+/// usually has nothing attached to, so a panic before `livelog` starts
+/// (which mirrors the serial log to the USB stick) previously looked like a
+/// silent, permanent freeze with no way to diagnose it. Never takes
+/// TERMINAL's lock; see the snapshot comment above. Best-effort: does
+/// nothing before the framebuffer is known, and a torn frame if another CPU
+/// is still drawing is an accepted cosmetic risk for a path that only runs
+/// once, immediately before a permanent halt.
+pub fn panic_screen(message: &dyn core::fmt::Display) {
+    if !PANIC_FB_READY.load(Ordering::Acquire) {
+        return;
+    }
+    let ptr = PANIC_FB_PTR.load(Ordering::Relaxed) as *mut u8;
+    let len = PANIC_FB_LEN.load(Ordering::Relaxed);
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    // SAFETY: `ptr`/`len` describe the bootloader's framebuffer mapping,
+    // resident for the kernel's lifetime, the same mapping `with_framebuffer`
+    // uses. `PANIC_FB_READY` being true means `init` already wrote
+    // `PANIC_FB_INFO` and will never write it again.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(ptr, len) };
+    let info = unsafe { PANIC_FB_INFO }.expect("PANIC_FB_READY implies PANIC_FB_INFO is set");
+    crate::console::fill(&mut *buffer, info, 0, 0, info.width, info.height);
+    let mut writer = PanicWriter {
+        buffer: &mut *buffer,
+        info,
+        x: 8,
+        y: 8,
+        scale: 2,
+    };
+    let _ = write!(writer, "KERNEL PANIC\n\n{message}");
 }
 
 pub fn write_bytes(bytes: &[u8]) {
@@ -338,12 +461,18 @@ pub fn clear() {
 }
 
 pub fn set_foreground(pid: u64) {
-    FOREGROUND_PID.store(pid, Ordering::Release);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    set_foreground_group(group);
 }
 
 pub fn release_foreground(pid: u64) {
-    let _ =
-        FOREGROUND_PID.compare_exchange(pid, NO_FOREGROUND, Ordering::AcqRel, Ordering::Acquire);
+    let group = crate::task::process_group_of(pid).unwrap_or(pid);
+    let _ = FOREGROUND_PID.compare_exchange(
+        group,
+        NO_FOREGROUND,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    );
 }
 
 pub fn foreground_pid() -> Option<u64> {
@@ -355,4 +484,20 @@ pub fn foreground_pid() -> Option<u64> {
 
 pub fn foreground_active() -> bool {
     foreground_pid().is_some()
+}
+
+pub fn termios() -> Termios {
+    *TERMIOS.lock()
+}
+
+pub fn set_termios(value: Termios) -> bool {
+    if !value.is_valid() {
+        return false;
+    }
+    *TERMIOS.lock() = value;
+    true
+}
+
+pub fn set_foreground_group(group: u64) {
+    FOREGROUND_PID.store(group, Ordering::Release);
 }

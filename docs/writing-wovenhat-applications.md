@@ -34,8 +34,10 @@ how an application must be built.
 
 | Loader rule | What it means for you |
 | --- | --- |
-| `e_type` must be `2` (`ET_EXEC`) | A static, non-PIE executable. `relocation-model=static` and `--no-pie`. |
-| `PT_DYNAMIC`, `PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO` are rejected | No dynamic linking, no interpreter, no thread-locals, and `-z norelro`. |
+| The sample uses `ET_EXEC`; bounded `ET_DYN` is also supported | Keep the sample's `relocation-model=static` and `--no-pie` settings unless targeting the separately documented dynamic-loader contract. |
+| `PT_INTERP` remains unsupported | The kernel performs supported eager relocation itself; no external interpreter is started. |
+| `PT_DYNAMIC` uses bounded SysV symbol/string and RELA tables | Signed WAPP shared objects can be loaded from `/lib`; legacy REL/PLT tables, versioning, weak symbols and constructors are unsupported. |
+| Main-image static initial-exec `PT_TLS` and validated `PT_GNU_RELRO` are supported | General compiler/library TLS is not qualified. The existing sample still uses `-z norelro`; no linker-script changes are needed for it. |
 | A segment may not be both writable and executable | Code and data belong in separate page-aligned segments. `link.x` declares explicit `PHDRS` for this. |
 | Entry must be at or above `USER_REGION_START` | Link at `0x4000_0000_0000`. |
 | `e_ehsize` must be 64, machine must be x86-64 | Standard ELF64; nothing to do. |
@@ -148,9 +150,14 @@ the filesystem path rather than assuming either.
 - **No FAT32 round trip yet.** The gate installs into the VFS at `/bin`, which
   is where `exec` resolves bare names. Persisting an application onto a FAT32
   volume and executing it across a reboot is a separate increment.
-- **No shared libraries.** The loader rejects `PT_DYNAMIC` by design, so every
-  application is statically linked.
-- **No thread-locals.** `PT_TLS` is rejected, so `#[thread_local]` cannot be
-  used.
+- **The examples remain statically linked.** The loader now supports a signed
+  startup graph of at most four shared objects under `/lib`, with cross-image
+  relocation and per-image RELRO. Shared objects may use zero-based virtual
+  addresses and no entry; executable images still target `USER_REGION_START`.
+  This is a bounded loader ABI, with further toolchain qualification needed;
+  see [the shared-library audit](audit-stage11-shared-libraries-2026-10-15.md).
+- **General compiler thread-locals remain unqualified.** The kernel supports
+  static initial-exec TLS in the executable, but library TLS and dynamic TLS
+  relocation/module IDs remain unsupported.
 - **No stack size negotiation.** The kernel chooses the stack; an application
   cannot request a larger one.
