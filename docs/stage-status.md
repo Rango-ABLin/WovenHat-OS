@@ -78,6 +78,9 @@ The PS/2 and USB-HID decoder self-tests now verify that Ctrl-C produces the
 configured `VINTR` byte (`0x03`); QEMU keyboard injection remains separate.
 The default signal path now terminates on the common terminating dispositions,
 with a Ring-3 process-group SIGQUIT/status-131 check in the S03 gate.
+The scheduler now tracks stopped process/task state: SIGSTOP prevents
+dispatch, SIGCONT returns stopped tasks to Ready, and the gate verifies
+SIGSTOP -> still-running wait -> SIGCONT -> SIGTERM/reap status 143.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

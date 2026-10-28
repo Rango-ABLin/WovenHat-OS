@@ -45,6 +45,9 @@ PS/2 and USB-HID decoder self-tests now cover Ctrl-C to the configured
 control-byte path; injected QEMU keyboard evidence is still separate.
 The S03 lifecycle probe now covers default SIGQUIT process-group termination
 and status 131; SIGSTOP/SIGCONT scheduler state remains future work.
+The scheduler stop/continue increment is now covered: SIGSTOP transitions the
+process/tasks to Stopped, SIGCONT restores Ready dispatch, and SIGTERM then
+reaps status 143 on the 1/2/4-CPU gate.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

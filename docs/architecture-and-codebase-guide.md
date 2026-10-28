@@ -56,6 +56,10 @@ control-byte conversion without claiming hardware-injected runtime coverage.
 Common default terminating signals now use the same scheduler-safe teardown
 path as SIGINT/SIGTERM; SIGSTOP/SIGCONT state transitions remain outside this
 bounded slice.
+The scheduler/process authority includes a bounded Stopped state. SIGSTOP is
+non-catchable and removes a process's tasks from dispatch; SIGCONT clears the
+state and reschedules them. Address-space teardown and zombie publication stay
+on the existing termination path.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

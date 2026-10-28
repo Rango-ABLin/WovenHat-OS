@@ -51,6 +51,8 @@ PS/2 and USB-HID decoder self-tests cover Ctrl-C to `VINTR`; QEMU keyboard
 injection remains an explicit qualification gap.
 The lifecycle probe also covers default SIGQUIT process-group termination with
 status 131; stop/continue semantics remain open.
+The bounded stop/continue increment now passes SIGSTOP/SIGCONT scheduling and
+reap coverage on 1/2/4 CPUs; full session/job-control semantics remain open.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
