@@ -17,6 +17,8 @@ bench = false
 physical-probe = []
 physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
+s05-memory-pressure-test = ["qemu-test"]
+stage07-webp-test = ["qemu-test"]
 stage6-hotplug-test = ["qemu-test"]
 network-test = ["qemu-test"]
 legacy-pic-test = ["qemu-test"]
@@ -37,6 +39,7 @@ stage11-5-test = ["qemu-test"]
 stage11-compiler-test = ["stage11-5-test"]
 stage11-tls-test = ["stage11-2-test"]
 stage11-aslr-test = ["stage11-2-test"]
+s02-c-abi-test = ["qemu-test"]
 stage12-1-test = ["qemu-test"]
 stage12-2-test = ["qemu-test"]
 stage12-3-test = ["qemu-test"]
@@ -125,6 +128,81 @@ stage27-5-recovery-test = ["qemu-test"]
 stage28-installer-test = ["qemu-test"]
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
+# S03 bounded process lifecycle acceptance: fork/wait/reap and process-group
+# signal teardown. This gate is intentionally independent of later stages.
+s03-process-lifecycle-test = ["qemu-test"]
+# S03 runtime keyboard evidence through the emulated USB HID path.
+s03-keyboard-injection-test = ["qemu-test", "stage13-12-test", "s03-process-lifecycle-test"]
+# S04 scheduler accounting: bounded per-task dispatch/runtime and per-CPU ticks.
+s04-scheduler-accounting-test = ["qemu-test"]
+# Stage 32 WovenDev diagnostics primitive: structured-record boot self-test.
+stage32-1-test = ["qemu-test"]
+# Stage 32 WovenDev diagnostics: structured panic crash-dump emission path.
+stage32-2-test = ["qemu-test"]
+# Enable zero-cost kernel tracing spans built on the diagnostics primitive.
+tracing = []
+# Stage 32 WovenDev tracing: span-begin/end and SpanGuard QEMU gate.
+stage32-3-test = ["qemu-test", "tracing"]
+# Enable allocation-free per-span timing accumulation. Requires tracing.
+profiler = []
+# Stage 32 WovenDev performance profiler QEMU gate.
+stage32-4-test = ["qemu-test", "tracing", "profiler"]
+# Enable bounded circular ring buffer fed by diagnostics::emit().
+log-ring = []
+# Stage 32 WovenDev log ring QEMU gate.
+stage32-5-test = ["qemu-test", "log-ring"]
+# Enable structured panic-context + ring-snapshot debug dump.  Requires log-ring.
+debug-dump = ["log-ring"]
+# Stage 32 WovenDev debug dump QEMU gate.
+stage32-6-test = ["qemu-test", "debug-dump"]
+# Enable minimum-severity filter in diagnostics::emit().
+log-filter = []
+# Stage 32 WovenDev log filter QEMU gate.  Requires log-ring to verify
+# filtering via ring count.
+stage32-7-test = ["qemu-test", "log-filter", "log-ring"]
+# Enable GDB Remote Serial Protocol packet framing.
+gdb-stub = []
+# Stage 32 WovenDev GDB RSP framing QEMU gate.
+stage32-8-test = ["qemu-test", "gdb-stub"]
+# Enable the bounded second-UART debugger transport.
+debug-serial = []
+# Stage 32 WovenDev second COM port loopback and transmit gate.
+stage32-9-test = ["qemu-test", "debug-serial"]
+# Enable bounded GDB register-context and command dispatch.
+gdb-debugger = []
+# Stage 32 WovenDev register context and command dispatch QEMU gate.
+stage32-10-test = ["qemu-test", "gdb-debugger"]
+# Enable the bounded GDB session lifecycle state machine.
+gdb-session = []
+# Stage 32 WovenDev packet/session lifecycle QEMU gate.
+stage32-11-test = ["qemu-test", "gdb-session"]
+gdb-trap = ["gdb-session"]
+# Stage 32 WovenDev trap-stop classification QEMU gate.
+stage32-12-test = ["qemu-test", "gdb-trap"]
+# Enable generation-bound single-owner authority for the debugger.
+gdb-owner = []
+stage32-13-test = ["qemu-test", "gdb-owner"]
+# Enable the owned trap-frame to GDB-context snapshot boundary.
+gdb-frame = ["gdb-debugger"]
+stage32-14-test = ["qemu-test", "gdb-frame"]
+# Enable generation-checked stopped-context binding.
+gdb-binding = ["gdb-frame", "gdb-owner"]
+stage32-15-test = ["qemu-test", "gdb-binding"]
+# Enable bounded byte-to-RSP-packet transport assembly.
+gdb-transport = ["gdb-stub"]
+stage32-16-test = ["qemu-test", "gdb-transport"]
+# Integrated WovenDev debugger path; the acceptance feature enables its boot self-test.
+wovendev = ["gdb-binding", "gdb-transport", "debug-serial"]
+stage32-integrated-test = ["qemu-test", "wovendev-live", "gdb-scheduler"]
+# Enable the interrupt-safe, nonblocking trap handoff.
+wovendev-live = ["wovendev"]
+# Enable scheduler safe-point debugger resume adapters.
+gdb-scheduler = ["wovendev"]
+# Enable live IDT trap entry: assembly trampoline, DebugFrame capture, and
+# bounded GDB stub loop over the debug-serial transport.
+gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]
+# Stage 32 WovenDev IDT trap-frame capture and GDB entry point QEMU gate.
+stage32-17-test = ["qemu-test", "gdb-entry"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
@@ -140,8 +218,14 @@ system-apps = []
 hardware-demo = ["system-apps"]
 # Full printable-ASCII font and text layout.
 stage17-1-test = ["qemu-test"]
+# Bundled OFL TrueType load/raster qualification.
+stage5-font-test = ["qemu-test"]
 # Owner-bound client surface registry for userspace graphics.
 stage18-1-test = ["qemu-test"]
+# Graphics roadmap Stage 08 secure userspace surface/IPC qualification.
+stage08-graphics-test = ["qemu-test"]
+# Graphics roadmap Stage 09 damage, stacking, and composition qualification.
+stage09-compositor-test = ["qemu-test"]
 # A userspace app that drives the graphics syscalls end-to-end.
 stage18-2-test = ["qemu-test"]
 # Kernel-held compositor surface and screen blit syscalls.
@@ -198,11 +282,15 @@ stage20-11-test = ["qemu-test"]
 stage20-12-test = ["qemu-test"]
 # Workspaces: switcher, F3/F4, per-workspace windows.
 stage20-13-test = ["qemu-test"]
+# Isolated pointer capture, workspace cancellation and keyboard focus gate.
+stage20-19-test = ["qemu-test"]
 # Two monitors: modern virtio-pci transport and a multi-scanout virtio-gpu.
 stage20-14-test = ["qemu-test"]
 # Single-output virtio-GPU compositor qualification reuses the GPU transport
 # and presentation implementation without running the two-head gate.
 stage20-14-single-test = ["stage20-14-test"]
+# Fault-injected VirtIO presentation recovery and UEFI fallback qualification.
+stage20-14-recovery-test = ["stage20-14-test"]
 # The desktop across two monitors.
 stage20-14b-test = ["qemu-test"]
 gfx02-test = ["qemu-test"]
@@ -249,7 +337,7 @@ stage24-5-test = ["qemu-test"]
 stage1-5-test = ["qemu-test"]
 
 [dependencies]
-libwoven = { path = "../libwoven" }
+libwoven = { path = "../libwoven", default-features = false }
 bootloader_api = "0.11.17"
 x86_64 = "0.15.5"
 spin = "0.10"

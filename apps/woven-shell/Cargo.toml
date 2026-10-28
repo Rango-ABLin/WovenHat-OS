@@ -17,9 +17,11 @@ libwoven = { path = "../../libwoven" }
 
 [profile.release]
 panic = "abort"
-opt-level = "s"
+# Rendering and the unchanged 100,000-round credential KDF are latency-sensitive
+# under software emulation; optimize execution while retaining stripped/LTO code.
+opt-level = 2
 lto = true
-# The image is installed into the VFS (64 KiB per file); symbols are not
+# The image must fit the bounded VFS executable capacity; symbols are not
 # needed to run it.
 strip = "symbols"
 

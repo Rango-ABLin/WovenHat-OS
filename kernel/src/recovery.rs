@@ -71,4 +71,3 @@ pub fn encode_check(report: &crate::fat32::CheckReport, output: &mut [u8; CHECK_
     output[24..28].copy_from_slice(&report.total_clusters.to_le_bytes());
     output[28..32].copy_from_slice(&report.free_clusters.to_le_bytes());
 }
-

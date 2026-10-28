@@ -132,6 +132,10 @@ pub fn kernel_panic(message: &dyn fmt::Display) -> ! {
     x86_64::instructions::interrupts::disable();
     let context = PanicContext::capture();
     context.print(message);
+    // Emit a machine-readable crash-dump record alongside the text dump so that
+    // a log parser or crash analyser can extract key registers without parsing
+    // the freeform text block. Format accepted by the stage32-2 QEMU gate.
+    crate::diagnostics::emit_panic_dump(context.rip, context.rsp, context.cr2);
     // Real hardware usually has nothing attached to the serial port, so a
     // panic needs to be visible on the framebuffer too, not only on serial.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]

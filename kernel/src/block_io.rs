@@ -348,7 +348,10 @@ pub(crate) fn with_root_install_target<R>(
     operation: impl FnOnce(&mut dyn BlockDevice) -> R,
 ) -> Option<R> {
     let guarded = move |disk: &mut dyn BlockDevice| {
-        operation(&mut Guarded { disk, writable: true })
+        operation(&mut Guarded {
+            disk,
+            writable: true,
+        })
     };
     match root_device() {
         RootDevice::Ata => crate::ata::with_primary_master(|disk| guarded(disk)),
