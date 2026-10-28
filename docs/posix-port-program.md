@@ -88,3 +88,10 @@ The same `/etc/motd` lifecycle now reads all 24 boot-provided bytes through
 upstream musl `read.c` and validates stable content before close. The full
 open/read/close path passed at 1/2/4 CPUs. File offsets, partial reads,
 nonblocking behavior and writable descriptors remain unimplemented.
+
+## Bootstrap increment: descriptor EOF
+
+After the exact MOTD read, the fixture performs a one-byte read on the same
+descriptor and requires zero bytes at EOF before close. This proves sequential
+offset advancement and EOF for the bounded read-only path at 1/2/4 CPUs; seek,
+partial transfer and concurrent-descriptor semantics remain separate gates.

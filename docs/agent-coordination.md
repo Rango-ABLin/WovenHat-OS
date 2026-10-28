@@ -7241,3 +7241,8 @@ POSIX port increment 9: the executable bootstrap reads all 24 bytes of
 closes the descriptor. QEMU passed at 1/2/4 CPUs. Offset, partial-read and
 writable-descriptor semantics remain open.
 
+POSIX port increment 10: after reading `/etc/motd`, the musl fixture reads one
+more byte from the same descriptor and requires EOF (0) before close. QEMU
+passed at 1/2/4 CPUs. This proves bounded sequential offset/EOF behavior only;
+seek, partial transfer and concurrent descriptor behavior remain open.
+

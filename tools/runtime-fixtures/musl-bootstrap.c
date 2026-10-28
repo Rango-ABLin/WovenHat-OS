@@ -25,6 +25,8 @@ int main(int argc, char **argv)
 		|| motd[0] != 'W' || motd[8] != 't' || motd[21] != 'S'
 		|| motd[23] != '\n')
 		return 98;
+	if (read(fd, &byte, 1) != 0)
+		return 99;
 	if (close(fd) != 0)
 		return 97;
 	return 42;
