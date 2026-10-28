@@ -366,6 +366,8 @@ pub enum Number {
     DynamicTlsModuleStart = 142,
     /// TLS module ID -> mapped module block size, or ERROR.
     DynamicTlsModuleSize = 143,
+    DynamicModuleRetain = 144,
+    DynamicModuleRelease = 145,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3134,6 +3136,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::DynamicTlsModuleSize as u64 => crate::task::dynamic_tls_module_range(arg0)
             .and_then(|(_, size)| u64::try_from(size).ok())
             .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::DynamicModuleRetain as u64 => {
+            u64::from(crate::task::retain_dynamic_module(arg0, arg1))
+        }
+        value if value == Number::DynamicModuleRelease as u64 => {
+            crate::task::release_dynamic_module(arg0, arg1).map_or(SYSCALL_ERROR, u64::from)
+        }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {

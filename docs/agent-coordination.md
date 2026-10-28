@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic module retain/release ABI (2026-10-28)
+
+Added generation-checked retain and release operations on the current process's
+dynamic-module table, with syscall and libwoven wrappers. Final release marks a
+descriptor unpublished and invalidates its generation; physical mapping teardown
+is intentionally a later transaction step.
+
 ## Codex - generation-safe dynamic module publication (2026-10-28)
 
 Startup PT_TLS publication now goes through `AddressSpace::publish_dynamic_module`,

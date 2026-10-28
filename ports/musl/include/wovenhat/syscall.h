@@ -46,6 +46,8 @@
 #define WH_SYS_DYNAMIC_TLS_ADDR 141
 #define WH_SYS_DYNAMIC_TLS_MODULE_START 142
 #define WH_SYS_DYNAMIC_TLS_MODULE_SIZE 143
+#define WH_SYS_DYNAMIC_MODULE_RETAIN 144
+#define WH_SYS_DYNAMIC_MODULE_RELEASE 145
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38

@@ -1,5 +1,12 @@
 # Stage status
 
+## Dynamic module retain/release ABI - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now exposes generation-checked dynamic-module retain/release
+operations and the libwoven ABI wrappers. Final release invalidates the
+descriptor generation while leaving physical teardown for the mapping
+transaction. Kernel and libwoven warning-denying Clippy pass.
+
 ## Generation-safe dynamic module publication - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The startup TLS mapper now publishes each module through the address-space

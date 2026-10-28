@@ -2215,6 +2215,30 @@ pub fn dynamic_tls_module_range(module: u64) -> Option<(u64, usize)> {
         .and_then(|space| space.dynamic_tls_module_range(module, tls_base))
 }
 
+pub fn retain_dynamic_module(module: u64, generation: u64) -> bool {
+    let Ok(index) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return false; };
+    let Ok(generation) = u32::try_from(generation) else { return false; };
+    let mut processes = process_table_lock();
+    processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+        .and_then(|process| process.address_space.as_mut())
+        .is_some_and(|space| space.retain_dynamic_module(index, generation))
+}
+
+pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
+    let index = usize::try_from(module.checked_sub(1)?).ok()?;
+    let generation = u32::try_from(generation).ok()?;
+    let mut processes = process_table_lock();
+    processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+        .and_then(|process| process.address_space.as_mut())
+        .and_then(|space| space.release_dynamic_module(index, generation))
+}
+
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
 /// generation-tagged handle is reused.
 pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {

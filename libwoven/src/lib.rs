@@ -12369,6 +12369,23 @@ pub mod syscall {
         unsafe { invoke(143, module, 0, 0) }
     }
 
+    /// Retain a generation-checked dynamic module handle.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_retain(module: u64, generation: u64) -> u64 {
+        unsafe { invoke(144, module, generation, 0) }
+    }
+
+    /// Release a dynamic module handle; returns one when the final reference
+    /// was dropped and the mapping is ready for teardown.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_release(module: u64, generation: u64) -> u64 {
+        unsafe { invoke(145, module, generation, 0) }
+    }
+
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
     ///

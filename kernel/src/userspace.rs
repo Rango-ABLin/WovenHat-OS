@@ -4926,6 +4926,28 @@ impl AddressSpace {
         Some(descriptor.generation)
     }
 
+    pub fn retain_dynamic_module(&mut self, index: usize, generation: u32) -> bool {
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
+        if !descriptor.live || descriptor.generation != generation { return false; }
+        let Some(references) = descriptor.references.checked_add(1) else { return false; };
+        descriptor.references = references;
+        true
+    }
+
+    pub fn release_dynamic_module(&mut self, index: usize, generation: u32) -> Option<bool> {
+        let descriptor = self.dynamic_modules.get_mut(index)?;
+        if !descriptor.live || descriptor.generation != generation || descriptor.references == 0 {
+            return None;
+        }
+        descriptor.references -= 1;
+        if descriptor.references != 0 { return Some(false); }
+        descriptor.live = false;
+        descriptor.mapping_start = 0;
+        descriptor.mapping_size = 0;
+        descriptor.generation = descriptor.generation.saturating_add(1).max(1);
+        Some(true)
+    }
+
     pub fn paging(self) -> paging::AddressSpace {
         self.paging
     }
