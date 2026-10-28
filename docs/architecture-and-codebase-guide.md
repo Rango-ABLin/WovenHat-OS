@@ -4368,6 +4368,19 @@ nearly-full development host without weakening any rollback or digest check.
 
 # SMP scalability and supported resource floor
 
+## S04 scheduler accounting boundary
+
+The scheduler keeps bounded per-task timer-runtime and dispatch counters and
+per-CPU aggregate runtime ticks. Fixed classes rank work above the existing
+quantum priority, and an opt-in task policy can enforce a bounded runtime
+quota within a bounded period by moving the task to a timed sleep until the
+next period. Policy configuration is pre-dispatch and scheduler-owned;
+`task_accounting()` and `cpu_runtime_ticks()` return copied telemetry. The
+existing hard affinity, Ready-only migration, NUMA-domain preference, and
+hotplug invariants remain authoritative. This is bounded software/QEMU policy,
+not native NUMA latency, cgroup-like dynamic classes, or an unbounded quota
+promise.
+
 ## Hybrid graphics GFX-01 boundary
 
 The versioned `graphics_abi` contract is intentionally an adapter seam over
@@ -4619,3 +4632,14 @@ there are no new locks, objects, unsafe blocks or asynchronous pointers.
 
 Software acceptance and native/accelerated limitations are recorded in
 [the acceptance audit](graphics/desktop-acceptance-2026-10-27.md).
+## S05 deterministic memory-pressure boundary (2026-10-28)
+
+`kernel/src/memory_pressure.rs` is the allocation boundary's lock-free,
+bounded pressure signal. It classifies the allocator's current remaining-frame
+snapshot using fixed watermarks (>20% Normal, 6-20% Moderate, 1-5% Critical,
+and zero Exhausted), publishes the latest counts, increments transitions, and
+records failed frame allocations as explicit OOM decisions. `memory::allocate_frame`
+and `memory::deallocate_frame` take the allocator snapshot while holding the
+allocator lock, then publish it after releasing that lock; pressure observers
+therefore never run under the allocator lock. This slice is notification and
+accounting only: reclaimers still own eviction/writeback and task teardown.

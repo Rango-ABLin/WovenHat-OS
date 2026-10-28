@@ -722,6 +722,30 @@ pub fn topology_domains() -> u16 {
     }
     count.max(1)
 }
+
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn topology_qualification_self_test() -> bool {
+    let online = online_mask();
+    if online == 0 || topology_domains() == 0 {
+        return false;
+    }
+    let mut seen = [u32::MAX; MAX_CPUS];
+    let mut count = 0usize;
+    for cpu in 0..MAX_CPUS {
+        if online & (1usize << cpu) == 0 {
+            continue;
+        }
+        let domain = cpu_domain(cpu);
+        if !seen[..count].contains(&domain) {
+            if count == seen.len() {
+                return false;
+            }
+            seen[count] = domain;
+            count += 1;
+        }
+    }
+    count == usize::from(topology_domains())
+}
 pub fn x2apic_active() -> bool {
     X2APIC_ACTIVE.load(Ordering::Acquire)
 }

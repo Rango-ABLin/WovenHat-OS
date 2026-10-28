@@ -29,6 +29,23 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-wovenfs-p
 ```
 
 **Status: READY TO RUN** — requires elevated PowerShell + 15 GB USB drive plugged in.
+## S05 deterministic memory-pressure boundary - 2026-10-28 - ACCEPTED BOUNDED
+
+Added `kernel/src/memory_pressure.rs` as the physical-frame allocation
+boundary's explicit policy signal. Remaining frames are classified
+deterministically as Normal (>20%), Moderate (6-20%), Critical (1-5%), or
+Exhausted (0); level transitions and allocation failures are counted with
+atomics. Every successful frame allocation/deallocation publishes the current
+snapshot, and a failed allocation records an explicit OOM decision. The policy
+does not reclaim or kill tasks, so existing paging/COW/swap ownership and
+teardown rules remain unchanged.
+
+The independently guarded `s05-memory-pressure-test` passed target and host
+warning-denying Clippy, 193 `libwoven` tests, and executable QEMU at 1/2/4
+CPUs (exit 33). Evidence: `target/s05-memory-pressure-{1,2,4}cpu-debug/`.
+This closes the deterministic software pressure-notification/OOM accounting
+slice; reclaim ordering, writeback retry policy, task selection, and physical
+low-memory qualification remain separate prerequisites.
 
 ## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
 
@@ -152,6 +169,27 @@ notification, child reparenting, and PTY hangup EOF/write rejection. A
 dedicated headless QMP gate enumerates xHCI, injects Ctrl-C through the USB HID
 keyboard, and proves foreground-group SIGINT termination (status 130). Full
 POSIX terminal coverage beyond this bounded ABI remains outside S03.
+
+## S04 scheduler and SMP accounting - 2026-10-28 - ACCEPTED BOUNDED
+
+S04 now has a bounded scheduler policy contract. Every live task records
+timer-tick runtime and dispatch count; fixed scheduler classes rank work above
+the existing quantum priority; and opt-in per-task runtime quotas enforce a
+bounded budget within a bounded period by throttling until the next period.
+Quota configuration is accepted only before first dispatch, retains no
+userspace pointers, and never turns telemetry into an implicit reservation.
+The existing hard affinity, Ready-only migration, NUMA-domain preference, and
+hotplug invariants remain authoritative.
+
+The dedicated `s04-scheduler-accounting-test` passes on 1/2/4 CPUs with
+warning-denying target/host Clippy and Python validation. Its 2/4-CPU QEMU
+profiles create two explicit NUMA nodes, verify topology publication, and
+prove Realtime and Background 2/8-tick quota enforcement and recovery. Evidence:
+`audit-artifacts/s04-scheduler-accounting-{1,2,4}cpu-*`.
+
+This closes S04's bounded software/QEMU scope. Physical CPU hotplug, native
+NUMA latency/placement, cgroup-like dynamic classes, and unbounded quota
+policy remain outside this stage.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

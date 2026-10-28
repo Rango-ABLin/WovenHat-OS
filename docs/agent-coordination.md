@@ -10,6 +10,26 @@ or privileged mutation. Do not concurrently modify `libwoven::semantic_search`,
 the new search IPC module, `apps/woven-search`, or its focused acceptance
 harness. QEMU acceptance remains serialized; no full acceptance chain will be
 started while another owner reservation is present.
+## Codex - S05 deterministic memory-pressure boundary (2026-10-28)
+
+Added the atomic frame-pressure policy and explicit allocation-failure
+accounting in `kernel/src/memory_pressure.rs`, wired to the physical allocator,
+plus the independently guarded `s05-memory-pressure-test` QEMU gate. Target and
+host warning-denying Clippy, 193 `libwoven` tests, and QEMU 1/2/4 CPUs pass.
+The bounded slice covers pressure classification/notification and OOM evidence;
+reclaim ordering, writeback retry policy, task selection, and physical
+low-memory qualification remain open. Do not overlap edits to the allocator or
+S05 docs without coordinating here.
+
+## Codex - S04 scheduler, quota, class, and topology closure (2026-10-28)
+
+Closed S04's bounded software/QEMU scope after S03. Added per-task runtime
+and dispatch accounting, fixed scheduler classes above quantum priority,
+pre-dispatch opt-in runtime quotas with timed throttling/recovery, and explicit
+two-node QEMU NUMA qualification. The dedicated S04 gate passes on 1/2/4 CPUs;
+target/host warning-denying Clippy and Python validation pass. Physical CPU
+hotplug/NUMA latency, dynamic cgroup-like classes, and unbounded quota policy
+remain outside S04.
 
 ## Codex — S03 keyboard/job-control closure increment (2026-10-28)
 

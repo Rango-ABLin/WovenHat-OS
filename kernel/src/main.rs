@@ -100,6 +100,7 @@ mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
 mod memory;
+pub mod memory_pressure;
 mod mouse;
 mod network;
 mod notifications;
@@ -321,6 +322,8 @@ static PREEMPTION_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static FAIR_TASK_A_RUNS: AtomicU64 = AtomicU64::new(0);
 static FAIR_TASK_B_RUNS: AtomicU64 = AtomicU64::new(0);
 static FAIR_TASKS_COMPLETED: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "s04-scheduler-accounting-test")]
+static S04_QUOTA_STOP: AtomicBool = AtomicBool::new(false);
 
 #[allow(unreachable_code)]
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
@@ -2122,6 +2125,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         halt();
     }
 
+    #[cfg(feature = "s05-memory-pressure-test")]
+    if memory_pressure::self_test() {
+        serial::write_line(format_args!(
+            "[S05.MEMORY] deterministic pressure/OOM policy: PASSED"
+        ));
+    } else {
+        serial::write_line(format_args!(
+            "[S05.MEMORY] deterministic pressure/OOM policy: FAILED"
+        ));
+        halt();
+    }
+
     if page_cache::self_test() {
         serial::write_line(format_args!("[FILE PAGES] regression tests: PASSED"));
     } else {
@@ -3101,6 +3116,95 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial::write_line(format_args!(
         "[BOOT] priority round-robin fairness and per-task quanta verified"
     ));
+
+    #[cfg(feature = "s04-scheduler-accounting-test")]
+    {
+        let accounting = task::task_accounting(task::summary().current_id);
+        let cpu_ticks = task::cpu_runtime_ticks();
+        let cpu = smp::cpu_index();
+        let accounting_passed = accounting.is_some_and(|item| {
+            item.priority <= 2
+                && item.dispatches > 0
+                && item.runtime_ticks > 0
+                && item.affinity_mask & (1usize << cpu) != 0
+        }) && cpu_ticks[cpu] > 0;
+        if !accounting_passed {
+            serial::write_line(format_args!(
+                "[S04.SCHEDULER] accounting: FAILED cpu={} ticks={}",
+                cpu, cpu_ticks[cpu]
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S04.SCHEDULER] accounting: PASSED cpu={} ticks={}",
+            cpu, cpu_ticks[cpu]
+        ));
+        if !smp::topology_qualification_self_test() {
+            serial::write_line(format_args!("[S04.TOPOLOGY] qualification: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S04.TOPOLOGY] qualification: PASSED domains={} mask={:#x}",
+            smp::topology_domains(),
+            smp::online_mask()
+        ));
+
+        S04_QUOTA_STOP.store(false, Ordering::Release);
+        let realtime = task::spawn_with_policy(
+            "s04-realtime",
+            s04_quota_worker,
+            task::TaskPriority::NORMAL,
+            task::TaskClass::Realtime,
+            2,
+            8,
+        );
+        let background = task::spawn_with_policy(
+            "s04-background",
+            s04_quota_worker,
+            task::TaskPriority::NORMAL,
+            task::TaskClass::Background,
+            2,
+            8,
+        );
+        let (Ok(realtime), Ok(background)) = (realtime, background) else {
+            serial::write_line(format_args!("[S04.SCHEDULER] quota: FAILED spawn"));
+            qemu_test_exit_failure();
+        };
+        let deadline = timer::ticks().saturating_add(40);
+        while timer::ticks() < deadline {
+            task::yield_now();
+        }
+        let realtime_accounting = task::task_accounting(realtime);
+        let background_accounting = task::task_accounting(background);
+        let quota_passed = realtime_accounting.is_some_and(|item| {
+            item.class == task::TaskClass::Realtime
+                && item.quota_ticks == 2
+                && item.quota_period == 8
+                && item.runtime_ticks > 0
+                && item.runtime_ticks <= 12
+        }) && background_accounting.is_some_and(|item| {
+            item.class == task::TaskClass::Background
+                && item.quota_ticks == 2
+                && item.quota_period == 8
+                && item.runtime_ticks > 0
+                && item.runtime_ticks <= 12
+        });
+        S04_QUOTA_STOP.store(true, Ordering::Release);
+        let stop_deadline = timer::ticks().saturating_add(32);
+        while (task::task_live(realtime) || task::task_live(background))
+            && timer::ticks() < stop_deadline
+        {
+            task::yield_now();
+        }
+        if !quota_passed || task::task_live(realtime) || task::task_live(background) {
+            serial::write_line(format_args!("[S04.SCHEDULER] quota/classes: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S04.SCHEDULER] quota/classes: PASSED realtime=2/8 background=2/8"
+        ));
+        qemu_test_exit_success();
+    }
 
     console.println("TIMER IRQ: OK");
 
@@ -6401,6 +6505,15 @@ fn fairness_probe_b() -> ! {
     FAIR_TASKS_COMPLETED.fetch_add(1, Ordering::Release);
     task::exit_current_task()
 }
+
+#[cfg(feature = "s04-scheduler-accounting-test")]
+fn s04_quota_worker() -> ! {
+    while !S04_QUOTA_STOP.load(Ordering::Acquire) {
+        task::yield_now();
+    }
+    task::exit_current_task()
+}
+
 fn preemption_probe_task() -> ! {
     task::sleep_current(2);
     PREEMPTION_PROBE_BLOCKED.store(true, Ordering::Release);
