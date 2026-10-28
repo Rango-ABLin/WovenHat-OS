@@ -12,8 +12,12 @@ pub mod irq_lock {
 }
 
 pub mod userspace {
+    pub const MAX_DYNAMIC_MODULES: usize = 8;
+
     #[derive(Clone, Copy)]
-    pub struct AnonymousMapping;
+    pub struct AnonymousMapping {
+        pub address: u64,
+    }
 }
 
 #[path = "../kernel/src/thread.rs"]

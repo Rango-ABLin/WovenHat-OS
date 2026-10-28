@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - host test-double compatibility for dynamic TLS resources (2026-10-28)
+
+Updated the `thread_registry` host double to expose the production mapping
+address and dynamic-module capacity contract. Full workspace tests and
+warning-denying all-targets host Clippy now pass; this change is test-only and
+does not broaden kernel behavior.
+
 ## Codex - dynamic TLS publication rollback completion (2026-10-28)
 
 Closed the final transaction tail in `map_dynamic_tls_all`: descriptor

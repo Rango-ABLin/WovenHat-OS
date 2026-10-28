@@ -1,5 +1,11 @@
 # Stage status
 
+## Host validation compatibility - 2026-10-28 - CLOSED
+
+The host `thread_registry` test double now matches the production
+`AnonymousMapping` address field and dynamic-module capacity constant. Full
+workspace tests pass and all-targets warning-denying host Clippy passes.
+
 ## Dynamic TLS publication rollback - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The all-thread dynamic TLS mapper now treats descriptor publication as its
