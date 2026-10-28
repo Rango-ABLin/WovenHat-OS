@@ -2916,6 +2916,8 @@ pub fn input_self_test() -> bool {
     let shifted = keyboard_presses([0x02, 0, 0x1e, 0, 0, 0, 0, 0], &mut held);
     let before_rollover = held;
     let rollover = keyboard_presses([0, 0, 1, 1, 1, 1, 1, 1], &mut held);
+    let mut control_held = [0u8; 6];
+    let control_c = keyboard_presses([0x11, 0, 0x06, 0, 0, 0, 0, 0], &mut control_held);
     let decoding = press[0] == Some(Key::Char('a'))
         && press[1..].iter().all(Option::is_none)
         && repeat.iter().all(Option::is_none)
@@ -2923,6 +2925,7 @@ pub fn input_self_test() -> bool {
         && second[1] == Some(Key::Enter)
         && released.iter().all(Option::is_none)
         && shifted[0] == Some(Key::Char('!'))
+        && control_c[0] == Some(Key::Char('\u{3}'))
         && rollover.iter().all(Option::is_none)
         && held == before_rollover;
     if !step(
