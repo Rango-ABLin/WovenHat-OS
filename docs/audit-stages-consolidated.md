@@ -16438,3 +16438,24 @@ QEMU at 1/2/4 CPUs all pass. Evidence is retained under
 `target/s05-memory-pressure-{1,2,4}cpu-debug/`. This is bounded software
 pressure/OOM evidence; reclaim ordering, writeback retry, OOM victim policy,
 and physical low-memory qualification remain unclaimed.
+
+The follow-up now closes the bounded policy gaps. File-frame reclamation walks
+the oldest unpinned cache entry first and repeats until no eligible entry
+remains. Dirty buffer-cache writeback has exactly three attempts per eviction
+or flush; retries are counted, and a final error leaves the data dirty and
+resident. OOM victim selection uses a fixed candidate array, excludes the
+currently executing task, prefers lower scheduler classes, then larger mapped
+footprints, and finally the lowest stable task ID. The selected process ID is
+published with the pressure snapshot without terminating while allocator or
+scheduler metadata is held.
+
+The S05 feature gate and the dedicated 256 MiB low-memory runner pass at 1/2/4
+CPUs with exit 33. Evidence: `target/s05-low-memory-{1,2,4}cpu-debug/`.
+Target/host warning-denying Clippy and 193 `libwoven` tests pass. This is
+software/QEMU qualification of the physical-frame path; native hardware below
+the supported 4 GiB production floor remains outside the evidence.
+The read-only host inventory
+`audit-artifacts/physical-host-20261028-112453-065/host.json` was refreshed
+after the QEMU matrix. It reports 8.21 GiB installed RAM and
+`PhysicalTestPerformed=false`; it changes no firmware, boot configuration,
+disk, or device state and cannot substitute for an authorized native test.

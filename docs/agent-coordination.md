@@ -10,6 +10,23 @@ or privileged mutation. Do not concurrently modify `libwoven::semantic_search`,
 the new search IPC module, `apps/woven-search`, or its focused acceptance
 harness. QEMU acceptance remains serialized; no full acceptance chain will be
 started while another owner reservation is present.
+## Codex - S05 reclaim, writeback, OOM selection, and low-memory qualification (2026-10-28)
+
+Completed the remaining bounded S05 implementation: unpinned file-frame
+reclaim is oldest-first, dirty block-cache writeback makes three deterministic
+attempts and preserves dirty state after final failure, and OOM selection
+excludes the current task then ranks class, mapped footprint, and stable task
+ID. Added `scripts/test-s05-low-memory.py`; the S05 feature and 256 MiB
+low-memory QEMU matrix pass at 1/2/4 CPUs. Native hardware below the 4 GiB
+production floor is not claimed. Do not overlap these allocator/cache/task/S05
+docs edits without coordinating here.
+
+The subsequent read-only physical-host preflight is retained at
+`audit-artifacts/physical-host-20261028-112453-065/host.json`. It identifies
+the current HP Pavilion x360, 8.21 GiB installed RAM, a hypervisor-present
+Windows host, and `PhysicalTestPerformed=false`; no native low-memory target or
+authorized physical test session is available.
+
 ## Codex - S05 deterministic memory-pressure boundary (2026-10-28)
 
 Added the atomic frame-pressure policy and explicit allocation-failure

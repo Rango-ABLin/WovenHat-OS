@@ -15,6 +15,8 @@ pub struct Stats {
     pub capacity: usize,
     pub resident: usize,
     pub dirty: usize,
+    pub writeback_retries: u64,
+    pub writeback_failures: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -45,7 +47,11 @@ pub struct CachedDevice<D: BlockDevice, const N: usize = 16> {
     evictions: u64,
     hits: u64,
     misses: u64,
+    writeback_retries: u64,
+    writeback_failures: u64,
 }
+
+const WRITEBACK_ATTEMPTS: usize = 3;
 
 impl<D: BlockDevice, const N: usize> CachedDevice<D, N> {
     pub fn new(inner: D) -> Self {
@@ -56,6 +62,8 @@ impl<D: BlockDevice, const N: usize> CachedDevice<D, N> {
             evictions: 0,
             hits: 0,
             misses: 0,
+            writeback_retries: 0,
+            writeback_failures: 0,
         }
     }
 
@@ -95,9 +103,22 @@ impl<D: BlockDevice, const N: usize> CachedDevice<D, N> {
         if self.entries[index].valid && self.entries[index].dirty {
             let lba = self.entries[index].lba;
             let data = self.entries[index].data;
-            self.inner.write_sector(lba, &data)?;
-            self.entries[index].dirty = false;
-            self.writebacks = self.writebacks.saturating_add(1);
+            let mut last_error = None;
+            for attempt in 0..WRITEBACK_ATTEMPTS {
+                if attempt != 0 {
+                    self.writeback_retries = self.writeback_retries.saturating_add(1);
+                }
+                match self.inner.write_sector(lba, &data) {
+                    Ok(()) => {
+                        self.entries[index].dirty = false;
+                        self.writebacks = self.writebacks.saturating_add(1);
+                        return Ok(());
+                    }
+                    Err(error) => last_error = Some(error),
+                }
+            }
+            self.writeback_failures = self.writeback_failures.saturating_add(1);
+            return Err(last_error.unwrap_or(Error::DeviceFault));
         }
         Ok(())
     }
@@ -143,6 +164,8 @@ impl<D: BlockDevice, const N: usize> CachedDevice<D, N> {
             capacity: N,
             resident: self.entries.iter().filter(|e| e.valid).count(),
             dirty: self.entries.iter().filter(|e| e.valid && e.dirty).count(),
+            writeback_retries: self.writeback_retries,
+            writeback_failures: self.writeback_failures,
         }
     }
 }
@@ -220,6 +243,7 @@ struct Probe {
     flushes: usize,
     fail_read: bool,
     fail_write: bool,
+    write_failures_remaining: usize,
     fail_flush: bool,
 }
 
@@ -232,6 +256,7 @@ impl Probe {
             flushes: 0,
             fail_read: false,
             fail_write: false,
+            write_failures_remaining: 0,
             fail_flush: false,
         }
     }
@@ -253,7 +278,8 @@ impl BlockDevice for Probe {
     }
     fn write_sector(&mut self, lba: u64, data: &[u8]) -> Result<(), Error> {
         self.writes += 1;
-        if self.fail_write {
+        if self.fail_write || self.write_failures_remaining != 0 {
+            self.write_failures_remaining = self.write_failures_remaining.saturating_sub(1);
             return Err(Error::DeviceFault);
         }
         self.disk.write_sector(lba, data)
@@ -333,6 +359,20 @@ fn failure_recovery_test() -> bool {
         || cache.stats().dirty != 0
         || cache.inner.disk.read_sector(0, &mut out).is_err()
         || out != data
+    {
+        return false;
+    }
+    if cache.stats().writeback_retries != 6 || cache.stats().writeback_failures != 3 {
+        return false;
+    }
+    let mut transient = CachedDevice::<_, 1>::new(Probe::new());
+    if transient.write_sector(0, &data).is_err() {
+        return false;
+    }
+    transient.inner.write_failures_remaining = 2;
+    if transient.flush().is_err()
+        || transient.stats().writeback_retries != 2
+        || transient.stats().writeback_failures != 0
     {
         return false;
     }

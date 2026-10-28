@@ -3223,6 +3223,44 @@ pub fn evict_one_mapped_file_page() -> bool {
     false
 }
 
+/// Select a deterministic OOM victim without terminating it while scheduler
+/// metadata is locked. Background tasks are preferred, then the task with the
+/// largest mapped-process footprint; task id breaks ties. The caller owns the
+/// subsequent signal/teardown operation.
+pub fn select_oom_victim() -> Option<u64> {
+    let current = current_task_id();
+    let scheduler = SCHEDULER.lock();
+    let mut candidates = [crate::memory_pressure::Candidate::EMPTY; MAX_TASKS];
+    let mut count = 0;
+    for task in scheduler.tasks.iter().filter(|task| {
+        !matches!(task.state, TaskState::Empty | TaskState::Dead)
+            && task.process_id.as_u64() != 0
+            && Some(task.id) != Some(current)
+    }) {
+        let mapped_pages = {
+            let mapped_pages = PROCESS_TABLE
+                .lock()
+                .iter()
+                .flatten()
+                .find(|process| process.id == task.process_id)
+                .map(|process| process.memory_mappings.iter().flatten().map(|m| m.size / 4096).sum::<usize>())
+                .unwrap_or(0);
+            mapped_pages
+        };
+        if count == candidates.len() {
+            break;
+        }
+        candidates[count] = crate::memory_pressure::Candidate {
+            process_id: task.process_id.as_u64(),
+            task_id: task.id.as_u64(),
+            class_rank: task.class.rank(),
+            mapped_pages,
+        };
+        count += 1;
+    }
+    crate::memory_pressure::choose_victim(&candidates[..count]).map(|candidate| candidate.process_id)
+}
+
 /// Attempt to resolve a user write fault via copy-on-write.
 /// Returns true if the fault was handled and the process may resume.
 pub fn try_handle_cow_fault(fault_address: u64) -> bool {
