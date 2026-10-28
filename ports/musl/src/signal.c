@@ -4,9 +4,9 @@
 
 void (*signal(int sig, void (*handler)(int)))(int)
 {
-	/* signal() has SA_RESTART semantics; bit 63 is the private ABI flag. */
+	/* signal() has SA_RESTART semantics; bit 62 is the private ABI flag. */
 	long result = wh_syscall2(WH_SYS_SIGACTION, sig,
-		(long)((unsigned long)handler | (1UL << 63)));
+		(long)((unsigned long)handler | (1UL << 62)));
 	if (result < 0) {
 		errno = (int)-result;
 		return SIG_ERR;

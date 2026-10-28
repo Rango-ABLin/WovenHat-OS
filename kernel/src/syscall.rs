@@ -1484,7 +1484,9 @@ fn sys_fork(frame: *const UserForkFrame) -> u64 {
     }
 }
 fn sys_sigaction(sig: u64, handler: u64) -> u64 {
-    const RESTART: u64 = 1 << 63;
+    // Bit 62 is outside the bounded userspace image range and leaves the
+    // existing bit-63 invalid-handler probes distinguishable.
+    const RESTART: u64 = 1 << 62;
     crate::task::sigaction_current(sig, handler & !RESTART, handler & RESTART != 0)
         .unwrap_or(SYSCALL_ERROR)
 }

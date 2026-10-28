@@ -156,6 +156,17 @@ status, verified through `WIFSIGNALED`/`WTERMSIG` and
 `WIFEXITED`/`WEXITSTATUS`. Target Clippy and C-ELF QEMU passed at 1/2/4 CPUs.
 Blocked-syscall interruption and restart remain outside this bootstrap scope.
 
+## Bootstrap increment: restartable caught-signal pipe read
+
+The bootstrap `signal()` bridge marks caught handlers restartable. A private,
+validated ABI marker records that disposition independently of the executable
+handler address; the existing invalid-handler ABI probes remain distinct. When
+such a signal wakes a blocked pipe read, the operation continues waiting and
+the normal handler-delivery path runs immediately before the successful return.
+The fixture signals a blocked child, writes its awaited byte, and verifies the
+same `read` returns that byte. Its explicit no-restart hook preserves the
+separate EINTR test. Target Clippy and C-ELF QEMU passed at 1/2/4 CPUs.
+
 ## Bootstrap increment: interrupted pipe read
 
 A caught signal now wakes a task blocked on a pipe endpoint without consuming
