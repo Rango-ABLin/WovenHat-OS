@@ -12,7 +12,8 @@ packet assembly, session lifecycle, trap classification, generation ownership,
 frame snapshots, task binding, register writes, UART polling, and developer
 artifacts. The breakpoint ISR handoff is live and nonblocking; physical GDB
 qualification and scheduler-owned resume/register mutation remain explicitly
-outside this boundary.
+outside this boundary. The latter requires a safe-point adapter over the
+kernel's saved user stack/context representation.
 
 ## Stage 32.16 GDB transport pump - 2026-10-28
 

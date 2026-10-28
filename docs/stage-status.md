@@ -13,9 +13,11 @@ surfaces through `kernel/src/wovendev.rs`. The single integrated gate is
 The breakpoint IDT path now also has an interrupt-safe live handoff under the
 integrated feature: it records one packed vector/error event atomically and
 returns without locks, sleeping, or switching tasks. The event is consumed
-later through `gdb_live::take()`. Physical GDB qualification and continue/step
-mutation of the scheduler-owned saved task context remain explicit
-prerequisites.
+later through `gdb_live::take()`. The remaining continue/step mutation is
+intentionally not claimed: this kernel stores user execution state in
+scheduler-owned saved stacks/context structures and needs a dedicated safe
+point adapter before GDB may mutate it. Physical GDB qualification also
+remains separate.
 
 ## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
 
