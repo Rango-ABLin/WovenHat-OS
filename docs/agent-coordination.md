@@ -7971,3 +7971,11 @@ handles fail closed, and successful invalidation advances the generation. The
 full Stage 13.10 1/2/4-CPU runtime gate passes. Physical controller recovery
 and radio qualification remain separate.
 
+## Codex - Stage 13.11A BLE SMP pairing foundation (2026-10-28)
+
+Closed the Stage 13.11A boundary using its designed `stage13-10-test` feature
+chain. Pairing parameter validation, fixed-channel enforcement, key-size and
+distribution policy, handle binding, and fail-closed stale/malformed traffic
+pass host/target Clippy and QEMU 1/2/4 CPUs. Later 13.11 increments remain
+open.
+

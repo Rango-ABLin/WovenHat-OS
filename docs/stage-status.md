@@ -12316,3 +12316,13 @@ generation advances only on successful invalidation. The full Stage 13.10
 runtime gate passes at 1/2/4 CPUs with exit 33. Physical controller recovery
 and radio qualification remain outside this deterministic gate.
 
+## Stage 13.11A BLE SMP pairing/fixed-channel foundation — 2026-10-28 — ACCEPTED
+
+The chained Stage 13.11 runtime gate accepts bounded Pairing Request/Response
+validation, negotiated key-size and distribution flags, fixed L2CAP CID
+`0x0006`, handle-bound pairing state, and fail-closed malformed/stale traffic.
+Host/target warning-denying Clippy and QEMU pass at 1/2/4 CPUs with exit 33.
+Evidence: `audit-artifacts/stage13.11-{1,2,4}cpu-*`. Later SMP key
+distribution, cryptographic confirmation, encryption, identity and lifecycle
+increments remain separate.
+
