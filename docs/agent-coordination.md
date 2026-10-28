@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - reusable relocation and W^X transaction helpers (2026-10-28)
+
+Extracted relocation application and final segment/RELRO permission transitions
+from the startup loader into helpers operating on the unpublished address-space
+transaction. The existing relocation, lazy-binding, and W^X ordering is
+unchanged; the helpers now form the complete map-populate-relocate-protect
+pipeline needed by future live-module loading.
+
 ## Codex - reusable transactional segment mapper (2026-10-28)
 
 Refactored the startup ELF linker so verified segment mapping and file-byte

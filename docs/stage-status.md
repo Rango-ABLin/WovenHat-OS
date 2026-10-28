@@ -1,5 +1,12 @@
 # Stage status
 
+## Reusable relocation and W^X transaction helpers - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Startup ELF loading now uses reusable helpers for relocation application and
+final segment/RELRO protection. Relocations still occur before publication and
+W^X is restored afterward. Kernel target build and warning-denying Clippy pass;
+live-process invocation and module lifecycle publication remain open.
+
 ## Reusable transactional segment mapper - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Extracted startup PT_LOAD mapping and image-byte population into a reusable

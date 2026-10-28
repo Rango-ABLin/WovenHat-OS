@@ -337,6 +337,49 @@ fn map_linked_segments(
     (pending.space.mapping_count < MAX_IMAGE_MAPPINGS).then_some(())
 }
 
+fn relocate_linked_images(
+    images: &[LinkImage<'_>],
+    scope: &SymbolScope<'_>,
+    page_table: paging::AddressSpace,
+    space: &mut AddressSpace,
+    tls_plan: Option<&TlsPlan>,
+) -> Option<()> {
+    for (image_index, linked) in images.iter().enumerate() {
+        relocate(
+            linked,
+            image_index,
+            scope,
+            page_table,
+            space,
+            tls_plan,
+            images,
+        )?;
+    }
+    Some(())
+}
+
+fn protect_linked_images(
+    images: &[LinkImage<'_>],
+    page_table: paging::AddressSpace,
+) -> Option<()> {
+    for linked in images {
+        for segment in linked.image.segments() {
+            paging::protect_user_range_in_inactive(
+                page_table,
+                segment.mapping_start,
+                segment.mapping_size,
+                segment.writable,
+                segment.executable,
+            )
+            .ok()?;
+        }
+        if let Some((start, size)) = linked.image.relro() {
+            paging::protect_user_range_in_inactive(page_table, start, size, false, false).ok()?;
+        }
+    }
+    Some(())
+}
+
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
@@ -456,17 +499,13 @@ pub(super) fn load_with_geometry(
     pending.space.lifecycle_trampoline = lifecycle_trampoline;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
-    for (image_index, linked) in images.iter().enumerate() {
-        relocate(
-            linked,
-            image_index,
-            &scope,
-            page_table,
-            &mut pending.space,
-            tls_reservation.as_ref(),
-            &images,
-        )?;
-    }
+    relocate_linked_images(
+        &images,
+        &scope,
+        page_table,
+        &mut pending.space,
+        tls_reservation.as_ref(),
+    )?;
     for (index, binding) in pending.space.lazy_bindings[..pending.space.lazy_binding_count]
         .iter()
         .copied()
@@ -484,21 +523,7 @@ pub(super) fn load_with_geometry(
     }
     paging::protect_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, false, true)
         .ok()?;
-    for linked in &images {
-        for segment in linked.image.segments() {
-            paging::protect_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                segment.writable,
-                segment.executable,
-            )
-            .ok()?;
-        }
-        if let Some((start, size)) = linked.image.relro() {
-            paging::protect_user_range_in_inactive(page_table, start, size, false, false).ok()?;
-        }
-    }
+    protect_linked_images(&images, page_table)?;
     let tls_base = if let Some(plan) = tls_reservation {
         let layout = plan.layout;
         let template_size = plan.template_size;
