@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse directory entry with non-zero reserved padding bytes
+
+Branch: `auto/wovenhat-development` (base `26751c10`). Working tree was clean.
+
+### Defect / gap
+
+`DirEntry::encode` writes an on-disk layout of 64 bytes per entry:
+- bytes 0..8: `inode`
+- bytes 8..10: `name_len`
+- bytes 10..12: `kind`
+- bytes 12..16: **4-byte reserved padding** (always zeroed by `fill(0)`)
+- bytes 16..64: `name` (48 bytes)
+
+`DirEntry::decode` does not capture bytes 12..16 — they are dropped.
+`check()` worked entirely with decoded `DirEntry` structs and therefore
+had no way to observe those 4 bytes.  A crafted image with any non-zero
+byte at offsets 12..16 passed all existing guards and `check()` returned
+`Ok(())` — wrong.
+
+This was explicitly noted as an open item in the previous session's entry.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — after the per-live-entry validation
+loop, added a raw-block pass:
+
+```rust
+// The DirEntry on-disk layout has a 4-byte reserved gap at raw bytes
+// 12..16, between `kind` (10..12) and `name` (16..64).
+// `DirEntry::encode` calls `raw[..DIR_ENTRY_SIZE].fill(0)` before
+// writing any field, so those 4 bytes are always zero on a
+// correctly-written filesystem.  The decoded `DirEntry` struct drops
+// those bytes; `check()` must inspect the raw block directly.
+for block in root.direct.iter().copied().filter(|&b| b != 0) {
+    let sector = self.read_block_staged(&txn, block)?;
+    for index in 0..DIR_ENTRIES_PER_BLOCK {
+        let at = index * DIR_ENTRY_SIZE;
+        if sector[at + 12..at + 16].iter().any(|&b| b != 0) {
+            return Err(Error::Corrupt);
+        }
+    }
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_directory_entry_with_nonzero_reserved_padding`:
+1. Formats a fresh volume with `a.txt` and `b.txt`.
+2. For each of the 4 padding byte offsets (12, 13, 14, 15 within the entry):
+   a. Forks the image.
+   b. Patches that byte to a non-zero value via `patch_dir_entry`.
+   c. Asserts `check()` returns `Err(Corrupt)`.
+   d. Asserts `check()` does not modify the image.
+   e. Asserts `b.txt` remains readable.
+3. Control: the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **57 passed / 0 failed** (was 56; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+Commit: `f6aa692b`
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Padding is verified for all entries (live and free) in the directory block
+  — `encode()` zeroes the full 64-byte slot unconditionally, so non-zero
+  padding in a free slot is also corruption.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse directory entry with non-zero bytes beyond name_len
 
 Branch: `auto/wovenhat-development` (base `f81d6001`). Working tree was clean.
