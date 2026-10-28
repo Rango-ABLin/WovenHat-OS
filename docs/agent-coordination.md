@@ -41,6 +41,8 @@ TaskControl capability, and background console reads fail closed. PTY
 multiplexing and complete job-control semantics remain.
 The bounded input path now consumes the configured `VINTR` byte and sends
 SIGINT to the foreground group; PTY line buffering remains open.
+PS/2 and USB-HID decoder self-tests now cover Ctrl-C to the configured
+control-byte path; injected QEMU keyboard evidence is still separate.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 

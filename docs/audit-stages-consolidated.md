@@ -47,6 +47,8 @@ against the caller's group or TaskControl capability, and background console
 reads are rejected; the 1/2/4-CPU gate remains green.
 The input path also consumes the configured `VINTR` byte and targets SIGINT at
 the foreground group.
+PS/2 and USB-HID decoder self-tests cover Ctrl-C to `VINTR`; QEMU keyboard
+injection remains an explicit qualification gap.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 
