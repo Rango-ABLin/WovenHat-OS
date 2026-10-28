@@ -4,6 +4,7 @@ use crate::userspace::AnonymousMapping;
 
 pub const MAX_THREADS: usize = 64;
 pub const MAX_ROBUST_ENTRIES: usize = 16;
+const MAX_ROBUST_RECORDS: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ThreadId(u64);
@@ -81,6 +82,13 @@ impl Table {
 }
 static TABLE: Mutex<Table> = Mutex::with_rank(Table::new(), 10);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RobustState { Free, Consistent, Abandoned, Unrecoverable }
+#[derive(Clone, Copy)]
+struct RobustRecord { address: u64, owner: Option<ThreadId>, generation: u32, state: RobustState }
+static ROBUST: Mutex<[RobustRecord; MAX_ROBUST_RECORDS]> = Mutex::with_rank(
+    [RobustRecord { address: 0, owner: None, generation: 1, state: RobustState::Free }; MAX_ROBUST_RECORDS], 11);
+
 fn lookup(table: &mut Table, id: ThreadId) -> Option<&mut Record> {
     let slot = (id.0 & 0xffff_ffff) as usize;
     let generation = (id.0 >> 32) as u32;
@@ -133,6 +141,30 @@ pub fn unregister_robust_mutex(id: ThreadId, address: u64) -> bool {
     record.robust_mutexes[index..count].rotate_left(1);
     record.robust_count -= 1;
     record.robust_mutexes[record.robust_count as usize] = 0;
+    true
+}
+
+pub fn robust_lock(id: ThreadId, address: u64) -> u64 {
+    let mut table = ROBUST.lock();
+    let Some(record) = table.iter_mut().find(|record| record.address == address) else { return u64::MAX; };
+    if record.owner.is_some() && record.owner != Some(id) { return u64::MAX; }
+    if record.state == RobustState::Unrecoverable { return 2; }
+    record.owner = Some(id);
+    if record.state == RobustState::Abandoned { 1 } else { 0 }
+}
+pub fn robust_unlock(id: ThreadId, address: u64) -> bool {
+    let mut table = ROBUST.lock();
+    let Some(record) = table.iter_mut().find(|record| record.address == address) else { return false; };
+    if record.owner != Some(id) { return false; }
+    record.owner = None;
+    if record.state == RobustState::Abandoned { record.state = RobustState::Unrecoverable; }
+    true
+}
+pub fn robust_consistent(id: ThreadId, address: u64) -> bool {
+    let mut table = ROBUST.lock();
+    let Some(record) = table.iter_mut().find(|record| record.address == address) else { return false; };
+    if record.owner != Some(id) || record.state != RobustState::Abandoned { return false; }
+    record.state = RobustState::Consistent;
     true
 }
 

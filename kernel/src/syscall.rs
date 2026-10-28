@@ -368,6 +368,9 @@ pub enum Number {
     DynamicTlsModuleSize = 143,
     /// current thread, validated mutex address, operation (1 add, 0 remove)
     ThreadRobustRegister = 144,
+    ThreadRobustLock = 145,
+    ThreadRobustUnlock = 146,
+    ThreadRobustConsistent = 147,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3127,7 +3130,19 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             } else if arg1 == 1 {
                 crate::thread::register_robust_mutex(thread, arg0)
             } else { false };
+            if ok && arg1 == 1 {
+                let _ = crate::thread::robust_lock(thread, arg0);
+            }
             u64::from(ok)
+        }
+        value if value == Number::ThreadRobustLock as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| crate::thread::robust_lock(id, arg0))
+        }
+        value if value == Number::ThreadRobustUnlock as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_unlock(id, arg0)))
+        }
+        value if value == Number::ThreadRobustConsistent as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_consistent(id, arg0)))
         }
         value if value == Number::ThreadSleep as u64 => {
             crate::task::sleep_current(arg0);
