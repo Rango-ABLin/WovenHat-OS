@@ -1,5 +1,16 @@
 # Stage status
 
+## S02 freestanding C ABI build boundary - 2026-10-28 - IMPLEMENTING
+
+Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
+The builder records the source/linker/compiler provenance, produces a static
+ELF64 validation record when a target-qualified clang/lld is available, and
+returns `NOT_AVAILABLE` rather than passing when the compiler is absent. On
+this host the build returned exit 2 because no target-qualified clang was
+installed. Source-shape and Rust-fixture inventory checks pass, but C ELF
+build, WovenHat loader execution, and QEMU exit-status evidence remain open;
+S02 is not accepted.
+
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 
 The integrated Stage 32 change set connects the bounded diagnostics/logging,

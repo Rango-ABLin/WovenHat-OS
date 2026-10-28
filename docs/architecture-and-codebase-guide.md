@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## S02 freestanding C ABI boundary (2026-10-28)
+
+`tools/runtime-fixtures/c-abi.c` is a deliberately bounded no-libc C entry
+fixture. `scripts/build-c-abi-fixture.py` compiles it for
+`x86_64-unknown-none`, links it with `tools/runtime-fixtures/link.x`, and
+checks the resulting ELF header and user-region entry point. The fixture does
+not claim libc, pthread, locale, math, destructor, TLS, allocator, or shared
+library compatibility. Build success is separate from loader/QEMU execution
+acceptance. The current Windows host has no target-qualified clang, so the
+builder records `NOT_AVAILABLE` and S02 remains open.
+
 ## Integrated WovenDev software boundary (2026-10-28)
 
 `kernel/src/wovendev.rs` composes the Stage 32 primitives in one caller-owned
