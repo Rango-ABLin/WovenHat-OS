@@ -2033,6 +2033,67 @@ fn check_refuses_a_directory_entry_whose_name_is_not_valid_utf8() {
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
 
+/// `check()` must refuse a directory entry that has non-zero bytes beyond its
+/// declared `name_len`.
+///
+/// `stage_create` builds entries with `DirEntry::empty()`, which zeroes the
+/// full 48-byte name array, then copies only `name[..name.len()]` bytes.  The
+/// bytes at `name[name_len..]` are therefore always zero on a correctly-written
+/// filesystem.  `DirEntry::encode` writes the entire `self.name` array to disk
+/// (48 bytes), so trailing zeros are always flushed; no runtime path plants a
+/// non-zero byte there.  `matches()` only inspects `name[..name_len]`, so a
+/// crafted entry with non-zero bytes beyond `name_len` passes all runtime
+/// operations undetected — only `check()` can surface this invariant violation.
+#[test]
+fn check_refuses_a_directory_entry_with_nonzero_bytes_beyond_name_len() {
+    use wfs::MAX_NAME;
+
+    let (base, block, index) = two_file_root();
+    let b_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "b.txt")
+        .expect("b.txt")
+        .inode;
+
+    // a.txt has name_len = 5; its name field occupies raw entry bytes 16..64.
+    // Bytes 16..21 hold "a.txt"; bytes 21..64 are always zero.  Patch each of
+    // three positions beyond name_len to a non-zero byte: the first trailing
+    // byte, a mid-range byte, and the last byte of the name field.
+    let name_len = 5usize; // "a.txt"
+    let cases: &[(usize, &[u8], &str)] = &[
+        (16 + name_len,           &[0xFF], "first byte beyond name_len (offset 21)"),
+        (16 + name_len + 10,      &[0x01], "mid-range byte beyond name_len (offset 31)"),
+        (16 + MAX_NAME - 1,       &[0x80], "last byte of the name field (offset 63)"),
+    ];
+
+    for &(at, patch, label) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, index, at, patch);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse an entry with non-zero bytes beyond name_len ({label})"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+        let mut buf = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(b_inode, &mut buf),
+            Ok(5),
+            "b.txt must remain readable ({label})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
+
 #[test]
 fn check_refuses_duplicate_directory_entry_names() {
     use wfs::DIR_ENTRIES_PER_BLOCK;

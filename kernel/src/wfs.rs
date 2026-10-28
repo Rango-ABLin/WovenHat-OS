@@ -1554,6 +1554,18 @@ impl<D: BlockDevice> Volume<D> {
             if core::str::from_utf8(&entry.name[..name_len]).is_err() {
                 return Err(Error::Corrupt);
             }
+            // `stage_create` builds every new entry via `DirEntry::empty()`,
+            // which zeroes the full `MAX_NAME`-byte name array, then copies
+            // exactly `name.len()` bytes into `name[..name_len]`.  The bytes
+            // at `name[name_len..]` are therefore always zero on a
+            // correctly-written filesystem.  `DirEntry::encode` copies the
+            // full `self.name` array (including those trailing zeros) to disk,
+            // so no runtime write ever plants a non-zero byte past `name_len`.
+            // A crafted entry with non-zero bytes beyond `name_len` is
+            // corruption that the runtime cannot have produced.
+            if entry.name[name_len..].iter().any(|&b| b != 0) {
+                return Err(Error::Corrupt);
+            }
         }
         // No two live entries may share the same name. `stage_create` rejects
         // duplicates, so any duplicate pair is corruption; the second entry

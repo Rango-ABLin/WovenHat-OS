@@ -1,5 +1,76 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse directory entry with non-zero bytes beyond name_len
+
+Branch: `auto/wovenhat-development` (base `f81d6001`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` builds every new `DirEntry` via `DirEntry::empty()`, which
+zeroes the full 48-byte `name` array, then copies only `name[..name.len()]`
+bytes.  `DirEntry::encode` writes the entire `self.name` array (all 48 bytes)
+to disk — including the trailing zeros from `empty()`.  Therefore
+`entry.name[name_len..]` is always zero on a correctly-written filesystem.
+
+`check()` validated `entry.name[..name_len]` for null bytes, `/`, `\\`,
+`.`/`..`, and non-UTF-8, but did not verify that the bytes beyond `name_len`
+are zero.  A crafted image with `0xFF` (or any non-zero byte) at a position
+past `name_len` passed all existing guards and `check()` returned `Ok(())` —
+wrong.
+
+`matches()` only compares `name[..name_len]` against the caller-supplied key,
+so the crafted entry is still fully reachable at runtime.  The deviation is
+only detectable by `check()`.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — after the existing UTF-8 guard, added:
+
+```rust
+// `stage_create` builds every new entry via `DirEntry::empty()`,
+// which zeroes the full `MAX_NAME`-byte name array, then copies
+// exactly `name.len()` bytes into `name[..name_len]`.  The bytes
+// at `name[name_len..]` are therefore always zero on a
+// correctly-written filesystem.  `DirEntry::encode` copies the
+// full `self.name` array (including those trailing zeros) to disk,
+// so no runtime write ever plants a non-zero byte past `name_len`.
+// A crafted entry with non-zero bytes beyond `name_len` is
+// corruption that the runtime cannot have produced.
+if entry.name[name_len..].iter().any(|&b| b != 0) {
+    return Err(Error::Corrupt);
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_directory_entry_with_nonzero_bytes_beyond_name_len`:
+1. Formats a fresh volume with `a.txt` and `b.txt`.
+2. For each of three positions beyond `name_len` (`name[5]` = offset 21,
+   `name[15]` = offset 31, `name[47]` = offset 63):
+   a. Forks the image.
+   b. Patches that raw byte in a.txt's directory entry to a non-zero value.
+   c. Asserts `check()` returns `Err(Corrupt)`.
+   d. Asserts `check()` does not modify the image.
+   e. Asserts `b.txt` remains readable.
+3. Control: the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **56 passed / 0 failed** (was 55; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard covers trailing bytes in the `name` field only; the 4-byte
+  padding gap between `kind` and `name` (raw entry bytes 12..16) is always
+  zero from `encode()` but is not yet explicitly verified by `check()`.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse directory entry with non-UTF-8 name
 
 Branch: `auto/wovenhat-development` (base `393cb925`). Working tree was clean.
