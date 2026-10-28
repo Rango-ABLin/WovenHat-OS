@@ -7949,3 +7949,10 @@ restore swaps roots, and snapshot removal reclaims references. Target/host
 Clippy and QEMU 1/2/4 CPU acceptance pass. Evidence is under
 `target/stage12-4-snapshot-{1,2,4}cpu-*`.
 
+## Codex - Stage 13.10T outbound BLE notification key-size gate (2026-10-28)
+
+Closed the pending Stage 13.10T acceptance. The full runtime chain, including
+weak/strong outbound notification authorization, passes at 1/2/4 CPUs; host
+and target warning-denying Clippy also pass. Evidence is retained under
+`audit-artifacts/stage13.10-{1,2,4}cpu-*`.
+

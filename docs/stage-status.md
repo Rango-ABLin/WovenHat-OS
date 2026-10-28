@@ -12289,3 +12289,12 @@ roots, and removal releases references back to the bounded pool. Host/target
 warning-denying Clippy and QEMU pass at 1/2/4 CPUs. Evidence:
 `target/stage12-4-snapshot-{1,2,4}cpu-*`.
 
+## Stage 13.10T outbound BLE notification key-size gate — 2026-10-28 — ACCEPTED
+
+The outbound notification authorization contract is now qualified in the full
+Stage 13.10 runtime chain. Weak authenticated sessions are rejected before
+notification encoding, while sessions meeting the 16-byte key-size policy are
+accepted. Host and target warning-denying Clippy pass; QEMU passes at 1/2/4
+CPUs with exit 33. Evidence is under
+`audit-artifacts/stage13.10-{1,2,4}cpu-*`.
+
