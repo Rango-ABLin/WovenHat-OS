@@ -28,6 +28,7 @@ use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
 pub const MAX_DYNAMIC_MODULES: usize = crate::elf::MAX_SCOPE_IMAGES;
+pub const DYNAMIC_MMAP_SLOT_BASE: usize = MAX_ANONYMOUS_MAPPINGS - MAX_DYNAMIC_MODULES;
 
 const USER_REGION_START: u64 = 0x0000_4000_0000_0000;
 const USER_STACK_OFFSET: u64 = 0x1f_0000;

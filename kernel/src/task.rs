@@ -4287,6 +4287,7 @@ pub fn mmap_current(length: u64, writable: bool) -> Result<u64, MemoryError> {
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
             .memory_mappings
+            [..userspace::DYNAMIC_MMAP_SLOT_BASE]
             .iter()
             .position(Option::is_none)
             .ok_or(MemoryError::Full)?;

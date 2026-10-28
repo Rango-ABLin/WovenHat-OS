@@ -1,5 +1,12 @@
 # Stage status
 
+## Reserved dynamic TLS mapping slots - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The anonymous allocator now reserves a dedicated tail range for dynamic TLS
+module mappings. Ordinary mappings cannot consume those slots, establishing a
+collision-free address/slot boundary for the upcoming all-thread allocator.
+Kernel target build and warning-denying Clippy pass.
+
 ## Scheduler runnable-task parking - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Dynamic-module transactions now prevent same-process sibling tasks from being

@@ -1,5 +1,11 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - reserved dynamic TLS mapping slots (2026-10-28)
+
+Reserved the tail of the anonymous mapping-slot range for per-thread dynamic
+TLS modules. Ordinary `mmap` allocation now stops before that tail, preventing
+future dynamic TLS allocations from colliding with process mappings.
+
 ## Codex - scheduler runnable-task parking (2026-10-28)
 
 While a process owns the dynamic-module transaction, scheduler Ready selection
