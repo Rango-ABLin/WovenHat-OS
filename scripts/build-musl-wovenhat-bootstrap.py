@@ -24,6 +24,7 @@ SOURCES = (
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
     "ports/musl/src/malloc.c",
+    "ports/musl/src/memory.c",
     "ports/musl/src/pthread.c",
     "ports/musl/src/open.c",
     "vendor/musl/src/exit/_Exit.c",
