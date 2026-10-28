@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=45)
     parser.add_argument("--feature", default="stage32-19-test")
     parser.add_argument("--name", default=None)
-    parser.add_argument("--command", default="c", choices=("c", "D"))
+    parser.add_argument("--command", default="c", choices=("c", "D", "k"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -72,8 +72,8 @@ def main() -> int:
         # the scheduler-owned qualification hook; early UART bytes are not
         # buffered by the kernel's bounded polling path.
         ready_marker = (
-            "[S32.20] live GDB detach: READY"
-            if args.command == "D"
+            f"[S32.{20 if args.command == 'D' else 21}] live GDB {'detach' if args.command == 'D' else 'kill'}: READY"
+            if args.command in ("D", "k")
             else "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED"
         )
         while time.monotonic() < deadline:
@@ -127,7 +127,8 @@ def main() -> int:
     log = serial.read_text(encoding="utf-8", errors="replace")
     errors = validation_errors(process.returncode, log, [
         f"[SMP] online={args.cpus} expected={args.cpus}",
-        f"[S32.20] live GDB detach: PASSED" if args.command == "D" else "[S32.19] live GDB COM2 client qualification: PASSED",
+        (f"[S32.{20 if args.command == 'D' else 21}] live GDB {'detach' if args.command == 'D' else 'kill'}: PASSED"
+         if args.command in ("D", "k") else "[S32.19] live GDB COM2 client qualification: PASSED"),
     ])
     if errors:
         print("\n".join(errors), file=sys.stderr)

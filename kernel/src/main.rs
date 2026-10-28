@@ -5629,6 +5629,25 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S32.20] live GDB detach: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage32-21-test")]
+    {
+        if task::spawn("gdb-kill-test", gdb_entry::live_kill_task_entry).is_err() {
+            serial::write_line(format_args!("[S32.21] live GDB kill: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.21] live GDB kill: READY"));
+        let mut waited = 0u32;
+        while !gdb_entry::live_kill_task_done() && waited < 2_000_000 {
+            task::yield_now();
+            waited += 1;
+        }
+        if !gdb_entry::live_kill_task_done() {
+            serial::write_line(format_args!("[S32.21] live GDB kill: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.21] live GDB kill: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
