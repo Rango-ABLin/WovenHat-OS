@@ -74,6 +74,10 @@ The input path also consumes the configured `VINTR` byte and sends SIGINT to
 the foreground group; it is not returned as ordinary stdin data. The current
 QEMU fixture does not inject keyboard bytes, so this behavior still needs a
 dedicated runtime acceptance probe.
+The PS/2 and USB-HID decoder self-tests now verify that Ctrl-C produces the
+configured `VINTR` byte (`0x03`); QEMU keyboard injection remains separate.
+The default signal path now terminates on the common terminating dispositions,
+with a Ring-3 process-group SIGQUIT/status-131 check in the S03 gate.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

@@ -186,6 +186,11 @@ pub fn self_test() -> bool {
         && keyboard
             .decode(0x1c)
             .is_some_and(|key| matches!(key, Key::Enter))
+        && keyboard.decode(0x1d).is_none()
+        && keyboard
+            .decode(0x2e)
+            .is_some_and(|key| matches!(key, Key::Char('\u{3}')))
+        && keyboard.decode(0x9d).is_none()
 }
 
 pub fn handle_interrupt() {
