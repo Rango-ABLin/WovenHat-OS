@@ -65,6 +65,13 @@ def main() -> int:
                 time.sleep(0.05)
         if client is None:
             raise RuntimeError("QEMU COM2 TCP endpoint did not open")
+        # Do not transmit before the guest has initialized COM2 and reached
+        # the scheduler-owned qualification hook; early UART bytes are not
+        # buffered by the kernel's bounded polling path.
+        while time.monotonic() < deadline:
+            if "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED" in serial.read_text(encoding="utf-8", errors="replace"):
+                break
+            time.sleep(0.02)
         # The INT3 self-test polls COM2. Ask for the stop reason, verify the
         # reply, then continue so the kernel can publish its acceptance marker.
         client.sendall(packet(b"?"))
