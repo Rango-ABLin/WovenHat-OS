@@ -1,16 +1,14 @@
 /*
- * Bootstrap errno storage before WovenHat has musl TLS and pthread state.
- *
- * This is intentionally one process-wide cell.  It is sufficient only for
- * the single-threaded static-libc bring-up fixture; it must be replaced by
- * the upstream pthread/TLS implementation before threads are enabled.
+ * Bootstrap errno storage backed by the loader's initial-exec PT_TLS area.
+ * This supplies per-thread errno without claiming pthread creation or the
+ * rest of musl's TLS runtime.
  */
 #include <errno.h>
 
+static __thread int errno_value = 0x1234;
+
 int *__errno_location(void)
 {
-	static int errno_value;
-
 	return &errno_value;
 }
 

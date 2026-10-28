@@ -162,7 +162,12 @@ start-main or TLS acceptance. The process-identity increment rebuilds cleanly
 with LLVM and runs through the production loader on 1/2/4 CPUs using the
 independent `musl-bootstrap-test` gate. Evidence is retained in
 `target/musl-process-identity-final-{1,2,4}cpu.serial.log` and the rebuilt
-ELF manifest is under `target/musl-process-identity-bootstrap6/`.
+ELF manifest is under `target/musl-process-identity-bootstrap6/`. The TLS
+errno increment then converted the cell to initial-exec PT_TLS and
+page-aligned the writable image segment so it no longer overlaps `.rodata`;
+the production loader gate passes on 1/2/4 CPUs with evidence in
+`target/musl-tls-fixed-{1,2,4}cpu.serial.log`. Allocator, pthread creation,
+and full musl start-main/TLS runtime remain open.
 
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 

@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - musl initial-exec TLS errno increment (2026-10-28)
+
+The musl bootstrap now uses an initial-exec `__thread` errno cell. The custom
+fixture linker script page-aligns the writable PT_LOAD before emitting PT_TLS,
+avoiding overlap with `.rodata`; the independent loader gate passes on 1/2/4
+CPUs. This is a bounded TLS cell, not pthread creation or full musl startup.
+
 ## Codex - Stage 7 bounded process-environment closure (2026-10-28)
 
 Added the independently guarded `stage7-test` gate for deterministic process

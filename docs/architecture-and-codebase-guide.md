@@ -10,8 +10,11 @@ temporary cancellation-point transport boundary; it contains no cancellation
 claim. The reproducible bootstrap builder compiles genuine upstream `read.c`,
 `write.c`, and `syscall_ret.c`, then links a static ELF. Its fixture proves the
 denied-write `-1`/`errno == EIO` path on QEMU. `errno_location.c` is expressly
-a single-threaded temporary cell, not TLS. Startup, allocator, threading and
-the remaining syscall surface must be implemented and qualified later.
+a single-threaded temporary cell, not TLS. The bounded TLS increment now uses
+an initial-exec `__thread` errno cell and a page-separated PT_TLS linker
+segment; the production loader/QEMU gate passes on 1/2/4 CPUs. Startup,
+allocator, threading and the remaining syscall surface must be implemented
+and qualified later.
 
 The initial WovenHat CRT entry is a separate, deliberately small adapter. It
 uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and

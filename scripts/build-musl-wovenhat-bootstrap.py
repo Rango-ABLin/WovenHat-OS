@@ -172,7 +172,7 @@ def main() -> int:
         "elf": str(elf.relative_to(root)),
         "elf_sha256": sha256(elf),
         "objects": {str(path.relative_to(root)): sha256(path) for path in objects},
-        "reason": "Static errno/write link passed; TLS, allocator, threads and loader/QEMU execution are separate gates",
+        "reason": "Static errno/TLS/write link passed; allocator, threads and broader loader/QEMU coverage are separate gates",
     })
     (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
