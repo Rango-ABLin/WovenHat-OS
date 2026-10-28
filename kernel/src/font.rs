@@ -145,6 +145,7 @@ pub fn glyph(character: char) -> [u8; HEIGHT] {
 ///
 /// Newlines reset the measurement, so the result is the width of the widest
 /// line.
+#[allow(dead_code)]
 pub fn text_width(text: &str) -> usize {
     let mut widest = 0usize;
     let mut current = 0usize;
@@ -154,15 +155,16 @@ pub fn text_width(text: &str) -> usize {
             current = 0;
             continue;
         }
-        current += ADVANCE as usize;
+        current = current.saturating_add(ADVANCE as usize);
     }
     widest = widest.max(current);
     widest.saturating_sub(ADVANCE as usize - WIDTH)
 }
 
 /// Number of lines `text` occupies.
+#[allow(dead_code)]
 pub fn line_count(text: &str) -> usize {
-    1 + text.chars().filter(|character| *character == '\n').count()
+    1usize.saturating_add(text.chars().filter(|character| *character == '\n').count())
 }
 
 #[cfg(feature = "stage17-1-test")]

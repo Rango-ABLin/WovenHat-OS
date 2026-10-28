@@ -8,10 +8,14 @@ if (-not $OutputDirectory) {
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+$minimumRamBytes = 4GB
+$computer = Get-CimInstance Win32_ComputerSystem
+$installedRamBytes = [uint64]$computer.TotalPhysicalMemory
 $report = [ordered]@{
     TimeUtc = (Get-Date).ToUniversalTime().ToString('o')
     Elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    Computer = Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model,HypervisorPresent
+    Computer = $computer | Select-Object Manufacturer,Model,HypervisorPresent
+    Memory = @{MinimumSupportedBytes=$minimumRamBytes; InstalledBytes=$installedRamBytes; MeetsMinimum=($installedRamBytes -ge $minimumRamBytes)}
     OS = Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version
     Adapters = @(Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.PNPDeviceID -like 'PCI*' } | Select-Object Name,PNPDeviceID,NetEnabled)
     Disks = @(Get-Disk | Select-Object Number,FriendlyName,BusType,PartitionStyle,IsBoot,IsSystem,Size)

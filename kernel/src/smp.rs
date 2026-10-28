@@ -8,11 +8,21 @@ use core::{
 };
 use x86_64::{registers::model_specific::Msr, structures::paging::PageTable};
 
-pub const MAX_CPUS: usize = 4;
+/// Maximum CPUs represented by the static per-CPU control plane. The current
+/// acceptance matrix exercises 1/2/4/8/16 CPUs; larger machines fail closed
+/// with an explicit topology truncation diagnostic until the per-CPU storage
+/// becomes dynamically allocated.
+pub const MAX_CPUS: usize = 16;
 pub const TIMER_VECTOR: u8 = 0xe0;
 pub const RESCHEDULE_VECTOR: u8 = 0xe1;
 pub const SPURIOUS_VECTOR: u8 = 0xff;
 static IDS: [AtomicU32; MAX_CPUS] = [const { AtomicU32::new(u32::MAX) }; MAX_CPUS];
+
+/// The boot CPU's local APIC ID, the destination for device interrupts.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn bsp_apic_id() -> u32 {
+    IDS[0].load(Ordering::Acquire)
+}
 static DOMAINS: [AtomicU32; MAX_CPUS] = [const { AtomicU32::new(0) }; MAX_CPUS];
 static ONLINE: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
 // 0=initial online, 1=offline requested, 2=offline transitioning,
@@ -29,6 +39,7 @@ static LAPIC: AtomicU64 = AtomicU64::new(0);
 static X2APIC_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X2APIC_ACTIVE: AtomicBool = AtomicBool::new(false);
 static BOOT_PAGE: AtomicU64 = AtomicU64::new(0);
+static WAKE_PAGE: AtomicU64 = AtomicU64::new(0);
 static COUNT: AtomicUsize = AtomicUsize::new(1);
 static IOAPIC: AtomicU64 = AtomicU64::new(0);
 static TIMER_COUNT: AtomicU32 = AtomicU32::new(1_000_000);
@@ -56,6 +67,10 @@ struct Stack(UnsafeCell<[u8; 131072]>);
 // Each AP exclusively owns its bootstrap stack for its entire lifetime.
 unsafe impl Sync for Stack {}
 static STACKS: [Stack; MAX_CPUS] = [const { Stack(UnsafeCell::new([0; 131072])) }; MAX_CPUS];
+#[repr(align(16))]
+struct WakeStack(UnsafeCell<[u8; 16384]>);
+unsafe impl Sync for WakeStack {}
+static WAKE_STACK: WakeStack = WakeStack(UnsafeCell::new([0; 16384]));
 global_asm!(include_str!("ap_start.S"));
 unsafe extern "C" {
     static ap_start: u8;
@@ -67,6 +82,116 @@ unsafe extern "C" {
     static ap_far: u8;
     static ap_long: u8;
     static ap_gdt: u8;
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WakeTrampoline {
+    root: u64,
+    pdpt: u64,
+    pd: u64,
+}
+
+/// Clone the kernel root into a low-memory identity-mapped root and install
+/// the existing AP transition image on the reserved wake page. The image is
+/// not published to firmware here; the caller owns the returned page-table
+/// frames and must either retain or release them transactionally.
+pub(crate) fn install_wake_trampoline(entry: u64) -> Option<WakeTrampoline> {
+    let page = wake_page()?;
+    let offset = paging::physical_memory_offset()?;
+    let real_root = paging::kernel_address_space()?.root_address();
+    let root = memory::allocate_frame()?.start_address().as_u64();
+    let Some(pdpt_frame) = memory::allocate_frame() else {
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
+        return None;
+    };
+    let pdpt = pdpt_frame.start_address().as_u64();
+    let Some(pd_frame) = memory::allocate_frame() else {
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
+        return None;
+    };
+    let pd = pd_frame.start_address().as_u64();
+    if root >= 1u64 << 32 {
+        let _ = memory::deallocate_frame(pd_frame);
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
+        return None;
+    }
+    let (base, size) = unsafe {
+        let base = &ap_start as *const u8 as usize;
+        let size = &ap_end as *const u8 as usize - base;
+        (base, size)
+    };
+    if size >= 4096 {
+        let _ = memory::deallocate_frame(pd_frame);
+        let _ = memory::deallocate_frame(pdpt_frame);
+        let _ = memory::deallocate_frame(
+            x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(root))
+                .ok()?,
+        );
+        return None;
+    }
+    // SAFETY: the bootloader's physical-memory mapping covers the validated
+    // allocator frames and reserved low page. The copied root is private and
+    // the wake image is not reachable by firmware until a later commit step.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            (offset + real_root) as *const u8,
+            (offset + root) as *mut u8,
+            4096,
+        );
+        let table = &mut *((offset + root) as *mut PageTable);
+        let flags = x86_64::structures::paging::PageTableFlags::PRESENT
+            | x86_64::structures::paging::PageTableFlags::WRITABLE;
+        table[0].set_addr(x86_64::PhysAddr::new(pdpt), flags);
+        core::ptr::write_bytes((offset + pdpt) as *mut u8, 0, 4096);
+        core::ptr::write_bytes((offset + pd) as *mut u8, 0, 4096);
+        (&mut *((offset + pdpt) as *mut PageTable))[0].set_addr(x86_64::PhysAddr::new(pd), flags);
+        (&mut *((offset + pd) as *mut PageTable))[0].set_addr(
+            x86_64::PhysAddr::new(0),
+            flags | x86_64::structures::paging::PageTableFlags::HUGE_PAGE,
+        );
+        core::ptr::copy_nonoverlapping(base as *const u8, (offset + page) as *mut u8, size);
+        let patch = |symbol: *const u8| (offset + page + symbol as u64 - base as u64) as *mut u8;
+        patch(&ap_root).cast::<u64>().write_unaligned(root);
+        patch(&ap_entry).cast::<u64>().write_unaligned(entry);
+        patch(&ap_stack)
+            .cast::<u64>()
+            .write_unaligned(WAKE_STACK.0.get() as u64 + 16384);
+        patch(&ap_gdt_ptr)
+            .add(2)
+            .cast::<u32>()
+            .write_unaligned((page + &ap_gdt as *const u8 as u64 - base as u64) as u32);
+        patch(&ap_far)
+            .cast::<u32>()
+            .write_unaligned((page + &ap_long as *const u8 as u64 - base as u64) as u32);
+    }
+    Some(WakeTrampoline { root, pdpt, pd })
+}
+
+pub(crate) fn release_wake_trampoline(trampoline: WakeTrampoline) -> bool {
+    let root = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.root,
+    ));
+    let pdpt = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.pdpt,
+    ));
+    let pd = x86_64::structures::paging::PhysFrame::from_start_address(x86_64::PhysAddr::new(
+        trampoline.pd,
+    ));
+    let root_released = root.is_ok_and(memory::deallocate_frame);
+    let pdpt_released = pdpt.is_ok_and(memory::deallocate_frame);
+    let pd_released = pd.is_ok_and(memory::deallocate_frame);
+    root_released && pdpt_released && pd_released
 }
 
 pub fn cpu_index() -> usize {
@@ -316,6 +441,75 @@ pub fn request_cpu_online(cpu: usize) -> bool {
     }
 }
 
+/// The BSP-owned record of secondary CPUs taken through the established
+/// scheduler-safe hotplug path for a future firmware transition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CpuSuspendBarrier {
+    original_mask: usize,
+    offline_mask: usize,
+}
+
+/// Evacuate and park every currently online secondary CPU. The BSP remains
+/// online to execute the firmware transition and to run rollback. Existing
+/// hotplug ownership and generation checks provide the scheduler-safe
+/// checkpoint; a partial failure immediately restores the completed prefix.
+pub(crate) fn suspend_other_cpus() -> Option<CpuSuspendBarrier> {
+    if cpu_index() != 0 {
+        return None;
+    }
+    let original_mask = online_mask();
+    let mut offline_mask = 0_usize;
+    for cpu in 1..MAX_CPUS {
+        if original_mask & (1 << cpu) == 0 {
+            continue;
+        }
+        if request_cpu_offline(cpu) {
+            offline_mask |= 1 << cpu;
+            continue;
+        }
+        let partial = CpuSuspendBarrier {
+            original_mask,
+            offline_mask,
+        };
+        let _ = resume_suspended_cpus(partial);
+        return None;
+    }
+    if online_mask() != (original_mask & 1) {
+        let partial = CpuSuspendBarrier {
+            original_mask,
+            offline_mask,
+        };
+        let _ = resume_suspended_cpus(partial);
+        return None;
+    }
+    Some(CpuSuspendBarrier {
+        original_mask,
+        offline_mask,
+    })
+}
+
+/// Reverse a CPU suspend barrier, restoring the exact online mask captured by
+/// `suspend_other_cpus`. Every requested CPU is attempted even if one wake
+/// fails, preserving bounded cleanup and an accurate boolean result.
+pub(crate) fn resume_suspended_cpus(barrier: CpuSuspendBarrier) -> bool {
+    let mut restored = true;
+    for cpu in (1..MAX_CPUS).rev() {
+        if barrier.offline_mask & (1 << cpu) != 0 && !request_cpu_online(cpu) {
+            restored = false;
+        }
+    }
+    restored && online_mask() == barrier.original_mask
+}
+
+#[cfg(feature = "stage25-10-test")]
+pub fn cpu_suspend_barrier_self_test() -> bool {
+    let Some(barrier) = suspend_other_cpus() else {
+        return false;
+    };
+    let parked = online_mask() == (barrier.original_mask & 1);
+    parked && resume_suspended_cpus(barrier) && online_mask() == barrier.original_mask
+}
+
 /// CPU-local checkpoint called by `idle_task`. On success this function never
 /// returns a second time on that CPU: the caller parks with interrupts masked.
 pub fn offline_checkpoint(cpu: usize) -> bool {
@@ -528,9 +722,42 @@ pub fn topology_domains() -> u16 {
     }
     count.max(1)
 }
+
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn topology_qualification_self_test() -> bool {
+    let online = online_mask();
+    if online == 0 || topology_domains() == 0 {
+        return false;
+    }
+    let mut seen = [u32::MAX; MAX_CPUS];
+    let mut count = 0usize;
+    for cpu in 0..MAX_CPUS {
+        if online & (1usize << cpu) == 0 {
+            continue;
+        }
+        let domain = cpu_domain(cpu);
+        if !seen[..count].contains(&domain) {
+            if count == seen.len() {
+                return false;
+            }
+            seen[count] = domain;
+            count += 1;
+        }
+    }
+    count == usize::from(topology_domains())
+}
 pub fn x2apic_active() -> bool {
     X2APIC_ACTIVE.load(Ordering::Acquire)
 }
+
+/// A firmware-reachable low-memory page reserved before the frame allocator
+/// starts. It is distinct from the AP startup page and is never returned to
+/// the general allocator.
+pub fn wake_page() -> Option<u64> {
+    let page = WAKE_PAGE.load(Ordering::Acquire);
+    (page != 0).then_some(page)
+}
+
 pub fn prepare(regions: &[MemoryRegion]) {
     IDS[0].store(__cpuid(1).ebx >> 24, Ordering::Relaxed);
     DOMAINS[0].store(0, Ordering::Release);
@@ -541,12 +768,23 @@ pub fn prepare(regions: &[MemoryRegion]) {
             continue;
         };
         let start = aligned & !4095;
-        if region.kind == MemoryRegionKind::Usable
-            && start
-                .checked_add(4096)
-                .is_some_and(|end| end <= region.end.min(0xa0000))
-        {
+        if region.kind != MemoryRegionKind::Usable {
+            continue;
+        }
+        let limit = region.end.min(0xa0000);
+        if !start.checked_add(4096).is_some_and(|end| end <= limit) {
+            continue;
+        }
+        if BOOT_PAGE.load(Ordering::Relaxed) == 0 {
             BOOT_PAGE.store(start, Ordering::Relaxed);
+            // Prefer a second page from the same usable range. If the range
+            // contains only one page, the next usable range supplies it.
+            if start.checked_add(8192).is_some_and(|end| end <= limit) {
+                WAKE_PAGE.store(start + 4096, Ordering::Relaxed);
+                break;
+            }
+        } else if WAKE_PAGE.load(Ordering::Relaxed) == 0 {
+            WAKE_PAGE.store(start, Ordering::Relaxed);
             break;
         }
     }
@@ -575,7 +813,7 @@ fn write(reg: u64, value: u32) {
 /// Stage Z deliberately routes device interrupts to the BSP. This keeps the
 /// first physical-device interrupt path deterministic while preserving the
 /// existing per-CPU LAPIC/SMP architecture.
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn device_irq_destination() -> Option<u32> {
     if !cpu_is_online(0) {
         return None;
@@ -681,25 +919,57 @@ pub fn reschedule_ipi_count() -> u64 {
     RESCHEDULE_IPIS.load(Ordering::Relaxed)
 }
 // PIT channel 2 provides a hardware interval independent of IRQ enable state.
+// Some physical firmware leaves the speaker/PIT gate unavailable after UEFI
+// handoff. Keep the delay bounded there as well: AP startup must never turn a
+// missing legacy timer into a multi-second spin for every SIPI.
+//
+// Once unavailable, it stays unavailable for the rest of this boot: it is a
+// static firmware trait, not a transient glitch. AP bring-up calls this once
+// per INIT/SIPI step per AP (up to roughly a dozen times on `MAX_CPUS`
+// hardware), so re-running the full ~5 s "is the PIT there" probe on every
+// call turned a missing PIT into a boot that looked hung for tens of seconds
+// at "starting CPU and interrupt setup" even though it was bounded. Caching
+// the answer after the first call means only that first call pays the probe;
+// every later call goes straight to the fast port-0x80 fallback.
+static PIT_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 fn delay_10ms() {
     use x86_64::instructions::port::Port;
     unsafe {
-        let mut speaker = Port::<u8>::new(0x61);
-        let saved = speaker.read();
-        speaker.write(saved & !3);
-        Port::<u8>::new(0x43).write(0xb0);
-        Port::<u8>::new(0x42).write(11932u16 as u8);
-        Port::<u8>::new(0x42).write((11932u16 >> 8) as u8);
-        speaker.write((saved & !2) | 1);
-        let start = core::arch::x86_64::_rdtsc();
-        while speaker.read() & 0x20 == 0 {
-            assert!(
-                core::arch::x86_64::_rdtsc().wrapping_sub(start) < 5_000_000_000,
-                "PIT calibration timeout"
-            );
-            core::hint::spin_loop();
+        if !PIT_UNAVAILABLE.load(Ordering::Relaxed) {
+            let mut speaker = Port::<u8>::new(0x61);
+            let saved = speaker.read();
+            speaker.write(saved & !3);
+            Port::<u8>::new(0x43).write(0xb0);
+            Port::<u8>::new(0x42).write(11932u16 as u8);
+            Port::<u8>::new(0x42).write((11932u16 >> 8) as u8);
+            speaker.write((saved & !2) | 1);
+            let start = core::arch::x86_64::_rdtsc();
+            let mut pit_ready = false;
+            while speaker.read() & 0x20 == 0 {
+                if core::arch::x86_64::_rdtsc().wrapping_sub(start) >= 5_000_000_000 {
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+            if speaker.read() & 0x20 != 0 {
+                pit_ready = true;
+            }
+            speaker.write(saved);
+            if pit_ready {
+                return;
+            }
+            PIT_UNAVAILABLE.store(true, Ordering::Relaxed);
+            serial::write_line(format_args!(
+                "[SMP] PIT channel-2 settle unavailable; using port-0x80 delay fallback for the remaining boot"
+            ));
         }
-        speaker.write(saved);
+        // Port 0x80 is the architectural legacy I/O delay port. Four reads
+        // are used elsewhere for a short device delay; repeat it enough
+        // times to retain an approximate 10 ms APIC settle delay without
+        // depending on the PIT speaker gate.
+        for _ in 0..2_500 {
+            asm!("out 0x80, al", in("al") 0u8, options(nomem, nostack));
+        }
     }
 }
 fn start_timer() {
@@ -739,10 +1009,27 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
     if !topology.apic || topology.processor_count == 0 {
         return;
     }
-    assert!(
-        !topology.truncated && topology.processor_count <= MAX_CPUS,
-        "unsupported CPU topology"
-    );
+    // Real hardware frequently reports more logical processors than this
+    // kernel's static per-CPU arrays (`MAX_CPUS`) are sized for -- nearly
+    // any modern multi-core or hyperthreaded machine exceeds the
+    // deliberately small `MAX_CPUS` default. Requiring an exact fit used to
+    // be a fatal, silent (serial-only) panic at the very start of CPU
+    // bring-up, before any AP, PS/2, or livelog setup -- indistinguishable
+    // on a real screen from the boot simply hanging right after "starting
+    // CPU and interrupt setup". The AP loop below already self-limits to
+    // `MAX_CPUS` slots (the BSP plus up to `MAX_CPUS - 1` APs it finds in
+    // `topology.processor_ids`), so boot with that subset and log the rest
+    // instead of refusing to boot at all. `topology.truncated` only means
+    // the firmware reported even more processors than the 16-entry
+    // `hal::acpi::Summary` could track in the first place, which is already
+    // far more than `MAX_CPUS` and does not affect the processors actually
+    // used here.
+    if topology.truncated || topology.processor_count > MAX_CPUS {
+        serial::write_line(format_args!(
+            "[SMP] topology reports {} processors (truncated={}), more than MAX_CPUS={MAX_CPUS}; using the first {MAX_CPUS}",
+            topology.processor_count, topology.truncated
+        ));
+    }
     X2APIC_REQUESTED.store(
         topology.processor_ids[..topology.processor_count]
             .iter()
@@ -771,7 +1058,18 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
         "LAPIC timer calibration"
     );
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
-    assert_eq!(topology.io_apics, 1, "one IOAPIC required");
+    //
+    // Some real hardware reports more than one IOAPIC in its ACPI MADT (a
+    // second one behind a PCIe root complex, for example), which this used
+    // to treat as fatal even though it is irrelevant here: `hal::acpi`'s
+    // summary only ever records the first IOAPIC's address/GSI base (see
+    // `update_madt_summary`), the one conventionally covering the legacy ISA
+    // IRQs this code actually routes, regardless of how many others exist.
+    // Requiring exactly one turned a benign topology difference into a
+    // silent (serial-only) panic early in `start`, before any AP, PS/2, or
+    // livelog setup -- indistinguishable on a real screen from the boot
+    // simply hanging at "starting CPU and interrupt setup".
+    assert!(topology.io_apics >= 1, "at least one IOAPIC required");
     let io = paging::map_mmio(u64::from(topology.io_apic_address)).expect("IOAPIC mapping");
     let max = (io_read(io, 1) >> 16) & 0xff;
     for pin in 0..=max {
@@ -880,6 +1178,13 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
                 if *id == IDS[0].load(Ordering::Relaxed) {
                     continue;
                 }
+                // Stop once every AP slot this build supports is either
+                // filled or attempted; a topology with more real processors
+                // than `MAX_CPUS` is handled above by using only this many,
+                // not by growing these fixed-size per-CPU arrays.
+                if cpu >= MAX_CPUS {
+                    break;
+                }
                 IDS[cpu].store(*id, Ordering::Release);
                 let domain = topology.processor_ids[..topology.processor_count]
                     .iter()
@@ -905,8 +1210,21 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
                     }
                     delay_10ms();
                 }
-                assert!(ONLINE[cpu].load(Ordering::Acquire), "AP startup timeout");
-                cpu += 1;
+                // A real machine's firmware/topology can promise an APIC ID
+                // that never answers SIPI (seen on some physical hardware,
+                // never reproduced in QEMU). Treat that the same way a
+                // missing topology is already treated above: boot with
+                // fewer CPUs rather than making one unresponsive AP a fatal,
+                // silent (serial-only) panic that strands the user before
+                // the live-log worker has even started. The BSP (cpu 0) is
+                // unaffected, and this slot is simply not counted.
+                if ONLINE[cpu].load(Ordering::Acquire) {
+                    cpu += 1;
+                } else {
+                    serial::write_line(format_args!(
+                        "[SMP] AP startup timeout apic_id={id} slot={cpu}; continuing without this CPU"
+                    ));
+                }
             }
             COUNT.store(cpu, Ordering::Release);
         }
@@ -1036,9 +1354,7 @@ pub fn self_test() {
         return;
     }
     for cpu in 0..online_count() {
-        unsafe { task::spawn_on(cpu, "smp-probe", parallel_probe) }
-            .ok()
-            .expect("SMP probe slots");
+        unsafe { task::spawn_on(cpu, "smp-probe", parallel_probe) }.expect("SMP probe slots");
     }
     let deadline = crate::timer::ticks() + 500;
     while FINISHED.load(Ordering::Acquire) < online_count() {
@@ -1054,9 +1370,7 @@ pub fn self_test() {
         (32 * online_count()) as u64
     );
     // SAFETY: This job touches only an atomic and the CPU-owned scheduler.
-    unsafe { task::spawn_parallel("balanced-probe", balanced_probe) }
-        .ok()
-        .expect("balanced probe slot");
+    unsafe { task::spawn_parallel("balanced-probe", balanced_probe) }.expect("balanced probe slot");
     let deadline = crate::timer::ticks() + 500;
     while !BALANCED_DONE.load(Ordering::Acquire) {
         assert!(crate::timer::ticks() < deadline, "balanced job timeout");
@@ -1099,9 +1413,7 @@ fn translation_reader() -> ! {
 fn stale_translation_test() {
     paging::map_range(TEST_PAGE, 4096).expect("SMP test mapping");
     for cpu in 1..online_count() {
-        unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }
-            .ok()
-            .expect("TLB reader slot");
+        unsafe { task::spawn_on(cpu, "tlb-reader", translation_reader) }.expect("TLB reader slot");
     }
     for phase in 1..=8 {
         paging::replace_smp_test_page(TEST_PAGE, phase as u64);
@@ -1133,10 +1445,15 @@ fn cpu_bound_probe() -> ! {
     let cpu = cpu_index();
     PREEMPT_STARTED[cpu].store(true, Ordering::Release);
     let start = unsafe { core::arch::x86_64::_rdtsc() };
+    // The probe deliberately performs no cooperative yield.  On a large SMP
+    // profile, host TCG must emulate more AP timer/IPI traffic before the
+    // peer can be scheduled, so the diagnostic budget scales with the
+    // bounded online topology rather than treating that work as a hang.
+    let tsc_budget = 10_000_000_000_u64.saturating_add(online_count() as u64 * 2_000_000_000);
     // No yield: only a hardware timer can schedule the peer on this CPU.
     while !PREEMPT_PEER[cpu].load(Ordering::Acquire) {
         assert!(
-            unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(start) < 10_000_000_000,
+            unsafe { core::arch::x86_64::_rdtsc() }.wrapping_sub(start) < tsc_budget,
             "AP timer preemption timeout"
         );
         core::hint::spin_loop();
@@ -1154,14 +1471,12 @@ fn preemption_peer() -> ! {
 }
 fn preemption_test() {
     for cpu in 0..online_count() {
-        unsafe { task::spawn_on(cpu, "cpu-bound", cpu_bound_probe) }
-            .ok()
-            .expect("CPU-bound slot");
+        unsafe { task::spawn_on(cpu, "cpu-bound", cpu_bound_probe) }.expect("CPU-bound slot");
         unsafe { task::spawn_on(cpu, "preempt-peer", preemption_peer) }
-            .ok()
             .expect("preemption peer slot");
     }
-    let deadline = crate::timer::ticks() + 500;
+    let deadline =
+        crate::timer::ticks().saturating_add(500_u64.saturating_add(online_count() as u64 * 64));
     while PREEMPT_DONE.load(Ordering::Acquire) < online_count() {
         assert!(
             crate::timer::ticks() < deadline,
@@ -1196,7 +1511,6 @@ fn affinity_foundation_test() {
         // SAFETY: The probe uses only atomics plus yield/exit and retains no
         // CPU-local state across scheduling points.
         let id = unsafe { task::spawn_migratable_on(0, "affinity-probe", affinity_probe) }
-            .ok()
             .expect("affinity probe slot");
 
         assert_eq!(
@@ -1297,7 +1611,6 @@ fn ready_migration_test() {
         // CPU 0 while BSP interrupts are disabled guarantees it remains Ready
         // until the scheduler lock transfers ownership to CPU 1.
         let id = unsafe { task::spawn_migratable_on(0, "migration-probe", migration_probe) }
-            .ok()
             .expect("migration probe slot");
         assert_eq!(task::task_cpu(id), Some(0));
         task::migrate_ready_task(id, target).expect("ready task migration");
@@ -1341,9 +1654,7 @@ fn runnable_load_accounting_test() {
             // SAFETY: This probe is deliberately pinned to `cpu`. It uses
             // only atomics plus yield/exit and keeps no CPU-local state
             // across scheduling points.
-            unsafe { task::spawn_on(cpu, "load-probe", load_probe) }
-                .ok()
-                .expect("load probe slot");
+            unsafe { task::spawn_on(cpu, "load-probe", load_probe) }.expect("load probe slot");
         }
     }
 
@@ -1406,12 +1717,20 @@ fn automatic_rebalance_test() {
     AUTO_BALANCE_DONE.store(0, Ordering::Release);
     AUTO_BALANCE_MASK.store(0, Ordering::Release);
     let jobs = online_count() * 3;
+    // Keep one probe pinned to CPU 0 so the execution-coverage assertion is
+    // not made impossible by the very rebalance under test moving every
+    // migratable probe away from the CPU running this harness. The remaining
+    // probes still exercise automatic migration and must cover every other
+    // online CPU.
+    // SAFETY: The probe uses only atomics plus yield/exit and retains no
+    // CPU-local state across scheduling points.
+    unsafe { task::spawn_on(0, "rebalance-cpu0-anchor", auto_balance_probe) }
+        .expect("automatic rebalance CPU0 anchor slot");
     x86_64::instructions::interrupts::without_interrupts(|| {
         for _ in 0..jobs {
             // SAFETY: Probe state is atomic-only and obeys the restricted
             // migratable-kernel-job contract.
             unsafe { task::spawn_migratable_on(0, "rebalance-probe", auto_balance_probe) }
-                .ok()
                 .expect("automatic rebalance probe slot");
         }
     });
@@ -1445,7 +1764,7 @@ fn automatic_rebalance_test() {
 
     AUTO_BALANCE_RELEASE.store(true, Ordering::Release);
     let deadline = crate::timer::ticks() + 500;
-    while AUTO_BALANCE_DONE.load(Ordering::Acquire) < jobs {
+    while AUTO_BALANCE_DONE.load(Ordering::Acquire) < jobs + 1 {
         assert!(
             crate::timer::ticks() < deadline,
             "automatic rebalance completion timeout"
@@ -1480,9 +1799,7 @@ fn reschedule_ipi_test() {
     IPI_PROBE_DONE.store(false, Ordering::Release);
     let before = reschedule_ipi_count();
     // SAFETY: The probe only stores to an atomic and exits.
-    unsafe { task::spawn_on(1, "ipi-probe", ipi_probe) }
-        .ok()
-        .expect("IPI probe slot");
+    unsafe { task::spawn_on(1, "ipi-probe", ipi_probe) }.expect("IPI probe slot");
     let deadline = crate::timer::ticks() + 500;
     while !IPI_PROBE_DONE.load(Ordering::Acquire) {
         assert!(crate::timer::ticks() < deadline, "reschedule IPI timeout");
@@ -1544,7 +1861,6 @@ fn migration_stress_test() {
         // SAFETY: The coverage probe only updates atomics and exits, and
         // spawn_on keeps it pinned to the requested online CPU.
         unsafe { task::spawn_on(cpu, "migration-coverage", migration_stress_coverage_probe) }
-            .ok()
             .expect("migration coverage slots");
     }
     let coverage_deadline = crate::timer::ticks() + 500;
@@ -1565,21 +1881,37 @@ fn migration_stress_test() {
 
     let jobs = online_count() * 4;
     let mut ids = [None; MAX_CPUS * 4];
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        for id in ids.iter_mut().take(jobs) {
+    // Coverage probes have exited, but their scheduler slots are reclaimed
+    // by a later scheduling pass. Wait for that bounded reclamation instead
+    // of racing the fixed task table; the stress workload itself remains
+    // unchanged and still fails hard if capacity cannot be recovered.
+    let slot_deadline = crate::timer::ticks() + 500;
+    for id in ids.iter_mut().take(jobs) {
+        loop {
             // SAFETY: Atomic-only probe; no CPU-local pointer or unsafe service
             // is retained across yield points. Starting every probe on CPU 0
             // deliberately creates migration pressure.
-            *id = Some(
-                unsafe { task::spawn_migratable_on(0, "migration-stress", migration_stress_probe) }
-                    .ok()
-                    .expect("migration stress slots"),
-            );
+            match unsafe {
+                task::spawn_migratable_on(0, "migration-stress", migration_stress_probe)
+            } {
+                Ok(task_id) => {
+                    *id = Some(task_id);
+                    break;
+                }
+                Err(task::SpawnError::Full) if crate::timer::ticks() < slot_deadline => {
+                    task::yield_now();
+                }
+                Err(error) => panic!("migration stress slots: {:?}", error),
+            }
         }
-    });
+    }
 
     let mut migrations = 0usize;
-    let deadline = crate::timer::ticks() + 500;
+    // The probe count grows linearly with the online CPU count. Keep the
+    // bounded assertion, but scale its wall-clock budget with that explicit
+    // workload so 8/16-CPU runs are not rejected merely for doing more work.
+    let stress_budget = 500_u64.saturating_add((jobs as u64).saturating_mul(64));
+    let deadline = crate::timer::ticks().saturating_add(stress_budget);
     for round in 0..64usize {
         for (slot, id) in ids.iter().take(jobs).enumerate() {
             if let Some(id) = *id {
@@ -1606,9 +1938,10 @@ fn migration_stress_test() {
     );
 
     STRESS_RELEASE.store(true, Ordering::Release);
+    let completion_deadline = crate::timer::ticks().saturating_add(500);
     while STRESS_DONE.load(Ordering::Acquire) < jobs {
         assert!(
-            crate::timer::ticks() < deadline,
+            crate::timer::ticks() < completion_deadline,
             "migration stress completion timeout"
         );
         task::yield_now();

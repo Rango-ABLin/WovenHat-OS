@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "purpose": "Deterministic virtual-hardware qualification contract; not physical certification.",
+  "status_values": [
+    "EMULATED_PASS",
+    "SOFTWARE_ONLY_PASS",
+    "PHYSICAL_NOT_TESTED",
+    "BLOCKED"
+  ],
+  "cpu_counts": [1, 2, 4],
+  "future_cpu_counts": [8, 16],
+  "ram_mib": [256, 1024, 4096],
+  "evidence": [
+    "seed",
+    "profile",
+    "cpu_count",
+    "ram_mib",
+    "build_id",
+    "image_sha256",
+    "serial_log",
+    "qemu_log",
+    "result_json"
+  ],
+  "profiles": [
+    {"id": "input.ps2_keyboard", "class": "input", "backend": "qemu", "physical_claim": false},
+    {"id": "input.usb_hid_keyboard_mouse", "class": "input", "backend": "qemu", "backend_requirements": ["usb-hid", "qmp-injection"], "physical_claim": false},
+    {"id": "storage.gpt_fat32_efi", "class": "storage", "backend": "disposable-image", "faults": ["read-only", "short-io", "delayed-completion", "media-error", "disk-full"], "physical_claim": false},
+    {"id": "storage.device-reset-recovery", "class": "storage", "backend": "qemu", "faults": ["queue-reset", "hot-removal", "flush-loss"], "physical_claim": false},
+    {"id": "graphics.framebuffer", "class": "graphics", "backend": "qemu", "backend_requirements": ["framebuffer-checksum", "stride-validation", "cursor"], "physical_claim": false},
+    {"id": "network.link-and-packet-faults", "class": "network", "backend": "qemu", "faults": ["link-flap", "drop", "duplicate", "corrupt", "reorder", "delay"], "physical_claim": false},
+    {"id": "audio.hda-deterministic", "class": "audio", "backend": "qemu-null-sink", "faults": ["underrun", "overrun", "controller-reset"], "physical_claim": false},
+    {"id": "wifi.protocol-fixtures", "class": "wifi", "backend": "software-fixture", "faults": ["malformed-frame", "firmware-corruption", "auth-timeout", "rekey"], "physical_claim": false},
+    {"id": "bluetooth.hci-controller-model", "class": "bluetooth", "backend": "software-fixture", "faults": ["credit-exhaustion", "event-timeout", "acl-fragmentation", "transport-reset"], "physical_claim": false},
+    {"id": "recovery.sudden-power-loss", "class": "recovery", "backend": "persistent-overlay", "faults": ["journal-checkpoint", "metadata-checkpoint", "unclean-reboot"], "physical_claim": false},
+    {"id": "recovery.driver-service-restart", "class": "recovery", "backend": "fault-injection", "faults": ["request-phase", "dma-quiesce", "interrupt-stale", "completion-stale"], "physical_claim": false},
+    {"id": "faults.seeded-full-stack", "class": "reliability", "backend": "qemu", "faults": ["scheduler", "memory", "ipc", "storage", "network", "input", "graphics", "audio", "service"], "physical_claim": false}
+  ],
+  "physical_qualification": {
+    "allowed_status": "PHYSICAL_NOT_TESTED",
+    "required_evidence": ["device_identity", "firmware_versions", "measured_logs", "repeatable_procedure", "operator_approval"],
+    "certification_requires": "actual hardware execution; QEMU and software fixtures never satisfy this field"
+  }
+}

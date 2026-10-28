@@ -1,11 +1,14 @@
 """Run live DHCP/DNS/ICMP/UDP/TCP regressions against QEMU user networking."""
 import argparse
+import json
 import os
 from pathlib import Path
+import random
 import shutil
 import socket
 import subprocess
 import sys
+from qemu_validation import validation_errors
 import time
 
 
@@ -71,16 +74,80 @@ def tcp_round_trip(port):
     raise RuntimeError(f"TCP host-forward connection failed: {last_error}")
 
 
+def qmp_command(port, execute, arguments=None):
+    """Execute one QMP command and fail closed on an error response."""
+    with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+        sock.settimeout(4)
+        # QEMU sends a JSON greeting before accepting commands.
+        greeting = b""
+        while b"\n" not in greeting:
+            greeting += sock.recv(4096)
+        sock.sendall(b'{"execute":"qmp_capabilities"}\n')
+        capabilities = json.loads(_qmp_line(sock))
+        if "error" in capabilities:
+            raise RuntimeError(f"QMP capabilities failed: {capabilities}")
+        request = {"execute": execute}
+        if arguments is not None:
+            request["arguments"] = arguments
+        sock.sendall((json.dumps(request) + "\n").encode())
+        response = json.loads(_qmp_line(sock))
+        if "error" in response:
+            raise RuntimeError(f"QMP {execute} failed: {response}")
+        return response
+
+
+def _qmp_line(sock):
+    response = b""
+    while b"\n" not in response:
+        response += sock.recv(4096)
+    line, _, _ = response.partition(b"\n")
+    return line.decode("utf-8")
+
+
+def build_link_fault_plan(seed, count):
+    if count < 1 or count > 8:
+        raise ValueError('link-loss count must be between 1 and 8')
+    rng = random.Random(seed)
+    return [rng.randint(100, 500) for _ in range(count)]
+
+
+def flap_link(port, downtime_ms):
+    qmp_command(port, "set_link", {"name": "net0", "up": False})
+    time.sleep(downtime_ms / 1000.0)
+    qmp_command(port, "set_link", {"name": "net0", "up": True})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
-    parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=4)
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=4)
     parser.add_argument('--timeout', type=float, default=240)
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--feature', default='network-test')
+    parser.add_argument(
+        '--link-loss',
+        action='store_true',
+        help='flap the QEMU virtio-net link after UDP and require TCP recovery',
+    )
+    parser.add_argument(
+        '--link-loss-count',
+        type=int,
+        default=1,
+        help='number of deterministic link flaps (1-8; requires --link-loss)',
+    )
+    parser.add_argument(
+        '--fault-seed',
+        type=lambda value: int(value, 0),
+        default=0x51A7E,
+        help='seed for bounded link-loss downtime selection',
+    )
     args = parser.parse_args()
+    if args.link_loss_count < 1 or args.link_loss_count > 8:
+        parser.error('--link-loss-count must be between 1 and 8')
+    if args.link_loss_count != 1 and not args.link_loss:
+        parser.error('--link-loss-count requires --link-loss')
 
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -108,6 +175,20 @@ def main():
         shutil.copyfile(firmware_vars, vars_copy)
     tcp_port = reserve_tcp_port()
     udp_port = reserve_udp_port()
+    qmp_port = reserve_tcp_port() if args.link_loss else None
+    link_fault_plan = build_link_fault_plan(args.fault_seed, args.link_loss_count) if args.link_loss else []
+    (out / 'link-fault-plan.json').write_text(
+        json.dumps({
+            'schema': 'wovenhat.stage31.network-link-fault/v1',
+            'seed': args.fault_seed,
+            'flaps': [
+                {'index': index, 'downtime_ms': downtime_ms}
+                for index, downtime_ms in enumerate(link_fault_plan, 1)
+            ],
+            'physical_access': 'none',
+        }, indent=2) + '\n',
+        encoding='utf-8',
+    )
 
     netdev = (
         f'user,id=net0,'
@@ -124,6 +205,7 @@ def main():
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
         '-device', 'virtio-net-pci,netdev=net0,disable-modern=on',
         '-netdev', netdev,
+        *(['-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off'] if qmp_port is not None else []),
     ]
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     qemu_log = out / 'qemu.log'
@@ -168,6 +250,16 @@ def main():
                 ('[NETTEST] UDP: TIMEOUT', '[NETTEST] runtime regression: FAILED'),
             )
             print('      UDP: PASS', flush=True)
+
+            if args.link_loss:
+                print(
+                    f'      Injecting {len(link_fault_plan)} seeded QEMU virtio-net link loss/recovery fault(s)...',
+                    flush=True,
+                )
+                for index, downtime_ms in enumerate(link_fault_plan, 1):
+                    flap_link(qmp_port, downtime_ms)
+                    print(f'      Link flap {index}: PASS ({downtime_ms} ms down)', flush=True)
+                print('      Link loss/recovery: PASS', flush=True)
 
             print('[5/6] Verifying host <-> WovenHat TCP round trip...', flush=True)
             wait_for_marker(
@@ -244,7 +336,9 @@ def main():
             *(['[S14.5C] refused mutation auditing PASS'] if args.feature in ('stage14-5c-test', 'stage14-5d-test') else []),
             *(['[S14.5D] firewall parser/transport hardening PASSED'] if args.feature == 'stage14-5d-test' else []),
         ])
-    if result != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
         print(qemu_log.read_text(errors='replace')[-4000:], file=sys.stderr)
         return 1

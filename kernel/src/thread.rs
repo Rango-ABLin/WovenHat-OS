@@ -56,6 +56,12 @@ impl Record {
         resources: None,
         waiter: None,
     };
+
+    fn reusable(&self) -> bool {
+        // MAX is a permanent retirement sentinel. Saturating release paths
+        // must never make an exhausted slot allocatable under the same tag.
+        self.state == State::Free && self.generation != u32::MAX
+    }
 }
 
 struct Table {
@@ -83,7 +89,7 @@ pub fn create(owner: u64) -> Option<ThreadId> {
         .records
         .iter_mut()
         .enumerate()
-        .find(|(_, r)| r.state == State::Free)?;
+        .find(|(_, r)| r.reusable())?;
     record.state = State::Running;
     record.owner = owner;
     record.exit = 0;
@@ -261,8 +267,128 @@ pub fn errno(id: ThreadId) -> Option<i32> {
     lookup(&mut t, id).map(|r| r.errno)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn isolated(test: impl FnOnce()) {
+        // A failed regression must not prevent independent cases from running.
+        // Each case starts with a fresh host-only table; assertions still fail.
+        let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+        *TABLE.lock() = Table::new();
+        test();
+        *TABLE.lock() = Table::new();
+    }
+
+    fn exhaust(retire: fn(ThreadId)) {
+        isolated(|| {
+            for record in &mut TABLE.lock().records {
+                record.generation = u32::MAX - 1;
+            }
+            let mut retired = [0_u64; MAX_THREADS];
+            for index in 0..MAX_THREADS {
+                let id = create(77).expect("one final generation per available slot");
+                assert!(
+                    !retired[..index].contains(&id.raw()),
+                    "retired handle reissued: {}",
+                    id.raw()
+                );
+                assert_eq!(id.raw() >> 32, u64::from(u32::MAX - 1));
+                assert!(set_tls(id, 123));
+                assert!(set_errno(id, 9));
+                retire(id);
+                assert!(tls(id).is_none());
+                assert!(errno(id).is_none());
+                assert!(!set_tls(id, 456));
+                assert!(!terminate(id, 0));
+                assert!(join(77, id) == Err(JoinError::Invalid));
+                retired[index] = id.raw();
+            }
+            assert!(create(77).is_none(), "exhausted slots must remain retired");
+        });
+    }
+
+    #[test]
+    fn join_permanently_retires_exhausted_generations() {
+        exhaust(|id| {
+            assert!(terminate(id, 42));
+            assert!(join(77, id) == Ok(42));
+        });
+    }
+
+    #[test]
+    fn abort_permanently_retires_exhausted_generations() {
+        exhaust(|id| assert!(abort(id)));
+    }
+
+    #[test]
+    fn owner_reaping_permanently_retires_exhausted_generations() {
+        exhaust(|_| assert_eq!(reap_owner(77), 1));
+    }
+
+    #[test]
+    fn ordinary_reuse_preserves_owner_and_waiter_boundaries() {
+        isolated(|| {
+            let id = create(7).unwrap();
+            assert!(set_tls(id, 123));
+            assert!(set_errno(id, 9));
+            assert!(join(8, id) == Err(JoinError::NotOwner));
+            assert!(register_waiter(8, id, 99) == Err(JoinError::NotOwner));
+            assert!(register_waiter(7, id, 99) == Ok(false));
+            assert!(register_waiter(7, id, 100) == Err(JoinError::Invalid));
+            assert!(terminate(id, 42));
+            assert!(register_waiter(7, id, 99) == Ok(true));
+            assert_eq!(take_waiter(id), Some(99));
+            assert_eq!(take_waiter(id), None);
+            assert!(join(7, id) == Ok(42));
+            assert!(tls(id).is_none());
+            let fresh = create(8).unwrap();
+            assert_eq!(fresh.raw() & 0xffff_ffff, id.raw() & 0xffff_ffff);
+            assert_ne!(fresh.raw(), id.raw());
+            assert_eq!(tls(fresh), Some(0));
+            assert_eq!(errno(fresh), Some(0));
+            assert_eq!(reap_owner(7), 0);
+            assert!(joinable(8, fresh) == Ok(false));
+            assert!(abort(fresh));
+            assert!(tls(fresh).is_none());
+        });
+    }
+
+    #[test]
+    fn ordinary_capacity_is_preserved_across_full_reuse() {
+        isolated(|| {
+            let first: Vec<_> = (0..MAX_THREADS).map(|_| create(7).unwrap()).collect();
+            assert!(create(7).is_none());
+            for id in &first {
+                assert!(abort(*id));
+            }
+            let second: Vec<_> = (0..MAX_THREADS).map(|_| create(8).unwrap()).collect();
+            assert!(create(8).is_none());
+            for (old, fresh) in first.iter().zip(&second) {
+                assert_eq!(old.raw() & 0xffff_ffff, fresh.raw() & 0xffff_ffff);
+                assert_ne!(old.raw(), fresh.raw());
+                assert!(tls(*old).is_none());
+            }
+            assert_eq!(reap_owner(8), MAX_THREADS);
+        });
+    }
+}
+
 #[cfg(feature = "stage11-2-test")]
 pub fn structural_self_test() -> bool {
+    let exhausted = Record {
+        generation: u32::MAX,
+        ..Record::EMPTY
+    };
+    let final_generation = Record {
+        generation: u32::MAX - 1,
+        ..Record::EMPTY
+    };
+    if exhausted.reusable() || !final_generation.reusable() {
+        return false;
+    }
     let Some(id) = create(1) else { return false };
     set_tls(id, 0xfeed_beef)
         && set_errno(id, 37)
@@ -286,6 +412,10 @@ pub fn structural_self_test() -> bool {
             set_tls(stale, 0x1234)
                 && reap_owner(9) == 1
                 && tls(stale).is_none()
-                && create(9).is_some_and(|fresh| fresh != stale)
+                && create(9).is_some_and(|fresh| {
+                    let distinct = fresh != stale;
+                    let cleaned = terminate(fresh, 0) && join(9, fresh) == Ok(0);
+                    distinct && cleaned
+                })
         }
 }

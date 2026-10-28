@@ -5,7 +5,25 @@ global_asm!(include_str!("stage10_8.S"));
 #[cfg(feature = "stage10-9-test")]
 global_asm!(include_str!("stage10_9.S"));
 
-use crate::config::MAX_ELF_SEGMENTS;
+#[cfg(feature = "stage11-aslr-test")]
+mod aslr_acceptance;
+mod linker;
+mod tls_layout;
+#[cfg(feature = "stage11-aslr-test")]
+pub fn aslr_geometry_self_test() -> bool {
+    aslr_acceptance::run()
+}
+#[cfg(feature = "stage11-tls-test")]
+mod tls_acceptance;
+
+#[cfg(feature = "stage11-tls-test")]
+pub fn compiler_tls_self_test() -> bool {
+    tls_acceptance::run()
+}
+
+const MAX_IMAGE_MAPPINGS: usize =
+    crate::config::MAX_ELF_SEGMENTS * crate::elf::MAX_SCOPE_IMAGES + 1;
+pub(crate) const MAX_LAZY_BINDINGS: usize = 8;
 use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
@@ -44,6 +62,250 @@ fn aslr_mmap_base() -> Option<u64> {
 }
 const USER_CODE_SIZE: usize = 4096;
 
+#[cfg(feature = "stage31-process-crash-test")]
+global_asm!(
+    ".global wovenhat_stage31_process_crash_start",
+    ".global wovenhat_stage31_process_crash_end",
+    "wovenhat_stage31_process_crash_start:",
+    // This address is outside the process image and stack. The user-mode
+    // page-fault handler must terminate this process, not the kernel.
+    "mov rax, 0x400000300000",
+    "mov byte ptr [rax], 1",
+    // Unreachable if fault containment is working; retain a clean fallback.
+    "mov eax, 3",
+    "xor edi, edi",
+    "int 0x80",
+    "wovenhat_stage31_process_crash_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_fork_wait_start",
+    ".global wovenhat_s03_fork_wait_end",
+    "wovenhat_s03_fork_wait_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    "test rax, rax",
+    "jz 1f",
+    "mov r12, rax",
+    "0:",
+    "mov eax, 5",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, -2",
+    "je 0b",
+    "cmp rax, 42",
+    "jne 2f",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_fork_wait_end:",
+    ".global wovenhat_s03_group_start",
+    ".global wovenhat_s03_group_end",
+    "wovenhat_s03_group_start:",
+    "0:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 0b",
+    "wovenhat_s03_group_end:",
+    ".global wovenhat_s03_handler_start",
+    ".global wovenhat_s03_handler_end",
+    "wovenhat_s03_handler_start:",
+    // Round-trip the bounded termios ABI through the caller-owned stack.
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 34",
+    "mov edi, 10",
+    "lea rsi, [rip + wovenhat_s03_handler]",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 10",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler:",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "4:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_handler_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_session_start",
+    ".global wovenhat_s03_session_end",
+    "wovenhat_s03_session_start:",
+    // setsid must create a session/process group for a non-group-leader.
+    "mov eax, 245",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "mov r12, rax",
+    "mov eax, 244",
+    "xor edi, edi",
+    "int 0x80",
+    "cmp rax, r12",
+    "jne 3f",
+    "mov edi, 42",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov edi, 11",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "mov edi, 12",
+    "mov eax, 3",
+    "int 0x80",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_session_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_tostop_start",
+    ".global wovenhat_s03_tostop_end",
+    "wovenhat_s03_tostop_start:",
+    "mov eax, 33",
+    "xor edi, edi",
+    "mov esi, 0x5401",
+    "mov rdx, 0x4000001fffe0",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    // Termios::local_flags is the fourth u32 in the bounded record.
+    "or dword ptr [rdx + 12], 0x100",
+    "mov eax, 33",
+    "mov esi, 0x5402",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 4f",
+    // A background write with TOSTOP enabled must receive SIGTTOU.
+    "mov eax, 1",
+    "mov edi, 1",
+    "mov rsi, rdx",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 5f",
+    "mov edi, 14",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "mov edi, 11",
+    "mov eax, 3",
+    "int 0x80",
+    "4:",
+    "mov edi, 12",
+    "mov eax, 3",
+    "int 0x80",
+    "5:",
+    "mov edi, 13",
+    "mov eax, 3",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "wovenhat_s03_tostop_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_orphan_start",
+    ".global wovenhat_s03_orphan_end",
+    "wovenhat_s03_orphan_start:",
+    "mov eax, 16",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 3f",
+    "test rax, rax",
+    "jz 1f",
+    // The parent exits, leaving the stopped child to the init surrogate.
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "1:",
+    "mov eax, 4",
+    "int 0x80",
+    "mov r12, rax",
+    "mov eax, 36",
+    "xor edi, edi",
+    "xor esi, esi",
+    "int 0x80",
+    "mov eax, 26",
+    "mov rdi, r12",
+    "mov esi, 19",
+    "int 0x80",
+    "2:",
+    "mov eax, 7",
+    "int 0x80",
+    "jmp 2b",
+    "3:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_orphan_end:",
+);
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_vintr_start",
+    ".global wovenhat_s03_vintr_end",
+    "wovenhat_s03_vintr_start:",
+    "1:",
+    "mov eax, 0",
+    "xor edi, edi",
+    "mov rsi, 0x4000001fffe0",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "test rax, rax",
+    "jz 1b",
+    "cmp byte ptr [rsi], 3",
+    "je 2f",
+    "jmp 1b",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_vintr_end:",
+);
+
 global_asm!(
     ".global wovenhat_user_program_start",
     ".global wovenhat_user_program_end",
@@ -55,9 +317,17 @@ global_asm!(
     "test rax, rax",
     "jz wovenhat_fork_child",
     "mov r12, rax",
+    // A parent may signal its own child (signal 0 probes without delivering).
+    "mov eax, 26",
+    "mov rdi, r12",
+    "xor esi, esi",
+    "int 0x80",
+    "test rax, rax",
+    "jne wovenhat_user_failure",
     "wovenhat_fork_wait:",
     "mov eax, 5",
-    "mov rdi, r12",
+    // `waitpid(-1)` exercises bounded wait-any selection and reaping.
+    "mov rdi, -1",
     "int 0x80",
     "cmp rax, -2",
     "jne wovenhat_fork_reaped",
@@ -69,6 +339,16 @@ global_asm!(
     "jne wovenhat_user_failure",
     "jmp wovenhat_fork_parent",
     "wovenhat_fork_child:",
+    // A child may not signal its parent: kill(getppid(), 0) must fail. Any
+    // other result exits 1, which the parent rejects (it expects 42).
+    "mov eax, 25",
+    "int 0x80",
+    "mov rdi, rax",
+    "xor esi, esi",
+    "mov eax, 26",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
     "mov edi, 42",
     "mov eax, 3",
     "int 0x80",
@@ -128,6 +408,62 @@ global_asm!(
     "mov esi, 4096",
     "int 0x80",
     "test rax, rax",
+    "jne wovenhat_user_failure",
+    // Pointers outside the canonical user half must fail with -1 and leave
+    // the kernel running: non-canonical, kernel-half, and a range crossing
+    // the top of user space, through both a buffer and a path argument.
+    "mov eax, 1",
+    "mov edi, 1",
+    "mov rsi, 0x0001000000000000",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    "mov eax, 1",
+    "mov edi, 1",
+    "mov rsi, 0xffff800000000000",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    "mov eax, 1",
+    "mov edi, 1",
+    "mov rsi, 0x00007fffffffffff",
+    "mov edx, 2",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    "mov eax, 2",
+    "mov rdi, 0x8000000000000000",
+    "mov esi, 9",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    // A signal handler must be executable user code: a non-canonical or
+    // kernel-half handler is refused. Ignore (1) and default (0) still work.
+    "mov eax, 34",
+    "mov edi, 10",
+    "mov rsi, 0x8000000000000000",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    "mov eax, 34",
+    "mov edi, 10",
+    "mov rsi, 0xffff800000000000",
+    "int 0x80",
+    "cmp rax, -1",
+    "jne wovenhat_user_failure",
+    "mov eax, 34",
+    "mov edi, 10",
+    "mov esi, 1",
+    "int 0x80",
+    "test rax, rax",
+    "jne wovenhat_user_failure",
+    "mov eax, 34",
+    "mov edi, 10",
+    "xor esi, esi",
+    "int 0x80",
+    "cmp rax, 1",
     "jne wovenhat_user_failure",
     "mov eax, 13",
     "int 0x80",
@@ -341,6 +677,40 @@ global_asm!(
     "je wovenhat_stage11_2_yield",
     "cmp rax, 17",
     "jne wovenhat_stage11_2_fail",
+    // Cancel a sibling before it exits itself; join must observe the
+    // requested status and reclaim its stack/TLS mappings.
+    "lea rdi, [rip + wovenhat_stage11_2_canceled_worker]",
+    "mov esi, 16384",
+    "mov eax, 130",
+    "int 0x80",
+    "cmp rax, -1",
+    "je wovenhat_stage11_2_fail",
+    "mov r12, rax",
+    "mov rdi, r12",
+    "mov esi, 23",
+    "mov eax, 136",
+    "int 0x80",
+    "cmp rax, -1",
+    "je wovenhat_stage11_2_fail",
+    "mov eax, 132",
+    "mov rdi, r12",
+    "int 0x80",
+    "cmp rax, 23",
+    "jne wovenhat_stage11_2_fail",
+    // Exit the process with an unjoined sibling. The parent wait must not
+    // destroy this process address space until the sibling is retired.
+    "lea rdi, [rip + wovenhat_stage11_2_cleanup_worker]",
+    "mov esi, 16384",
+    "mov eax, 130",
+    "int 0x80",
+    "cmp rax, -1",
+    "je wovenhat_stage11_2_fail",
+    "xor edi, edi",
+    "mov eax, 3",
+    "int 0x80",
+    "3:",
+    "pause",
+    "jmp 3b",
     "xor edi, edi",
     "mov eax, 3",
     "int 0x80",
@@ -359,6 +729,14 @@ global_asm!(
     "2:",
     "hlt",
     "jmp 2b",
+    "wovenhat_stage11_2_canceled_worker:",
+    "4:",
+    "pause",
+    "jmp 4b",
+    "wovenhat_stage11_2_cleanup_worker:",
+    "5:",
+    "pause",
+    "jmp 5b",
     "wovenhat_stage11_2_program_end:",
 );
 
@@ -4203,7 +4581,10 @@ pub struct UserStack {
 
 impl UserStack {
     pub const GUARD_SIZE: usize = 4096;
-    pub const SIZE: usize = 4096 * 2;
+    /// The desktop and system applications keep large render/input frames
+    /// outside this stack. Sixteen pages retain the guard page while giving
+    /// codec, browser, and compositor call paths room for bounded nested work.
+    pub const SIZE: usize = 4096 * 16;
 
     pub fn new(base: u64) -> Self {
         Self {
@@ -4318,10 +4699,26 @@ pub fn setup_argv_stack(
 const USER_MMAP_START: u64 = USER_REGION_START + 0x0e_0000;
 const USER_MMAP_STRIDE: u64 = 0x10_000;
 const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
+const USER_MMAP_ARENA_SIZE: u64 = MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE;
 
-fn page_align_up(value: u64) -> Option<u64> {
-    value.checked_add(4095).map(|value| value & !4095)
+/// Keep the mmap arena, optional TLS reservation, guard page and stack
+/// disjoint. Independent ASLR draws must not be allowed to overlap.
+fn plan_stack_base(requested: u64, mmap_base: u64, tls_size: u64) -> Option<u64> {
+    if !requested.is_multiple_of(ASLR_PAGE)
+        || !mmap_base.is_multiple_of(ASLR_PAGE)
+        || !tls_size.is_multiple_of(ASLR_PAGE)
+    {
+        return None;
+    }
+    let mmap_end = mmap_base.checked_add(USER_MMAP_ARENA_SIZE)?;
+    let floor = mmap_end
+        .checked_add(tls_size)?
+        .checked_add(UserStack::GUARD_SIZE as u64)?;
+    let stack_base = requested.max(floor);
+    let stack_top = stack_base.checked_add(UserStack::SIZE as u64)?;
+    (stack_top <= USER_REGION_START + 0x1000_0000).then_some(stack_base)
 }
+
 const USER_MMAP_PAGES: usize = USER_MMAP_MAX_SIZE / 4096;
 const _: () = assert!(
     USER_MMAP_START + MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE
@@ -4367,30 +4764,86 @@ struct LazyFile {
 }
 #[derive(Clone, Copy)]
 struct UserMapping {
-    start: u64,
-    size: usize,
+    // Image windows are page-aligned and bounded by the loader. Store page
+    // offsets/counts instead of repeating full 64-bit addresses in every copy
+    // of process metadata (notably the unoptimized fork syscall path).
+    start_page: u32,
+    page_count: u16,
     writable: bool,
     executable: bool,
 }
 
 impl UserMapping {
     const EMPTY: Self = Self {
-        start: 0,
-        size: 0,
+        start_page: 0,
+        page_count: 0,
         writable: false,
         executable: false,
     };
+
+    fn new(start: u64, size: usize, writable: bool, executable: bool) -> Option<Self> {
+        if !start.is_multiple_of(4096) || size == 0 || !size.is_multiple_of(4096) {
+            return None;
+        }
+        Some(Self {
+            start_page: u32::try_from(start.checked_sub(USER_REGION_START)? / 4096).ok()?,
+            page_count: u16::try_from(size / 4096).ok()?,
+            writable,
+            executable,
+        })
+    }
+
+    fn start(self) -> u64 {
+        USER_REGION_START + u64::from(self.start_page) * 4096
+    }
+    fn size(self) -> usize {
+        usize::from(self.page_count) * 4096
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<UserMapping>() == 8);
+
+#[derive(Clone, Copy)]
+struct InitialTls {
+    start: u64,
+    layout: tls_layout::Layout,
+    template: Option<(u64, usize)>,
+    template_size: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct LazyBinding {
+    pub(crate) slot: u64,
+    pub(crate) target: u64,
+}
+
+impl LazyBinding {
+    pub(crate) const EMPTY: Self = Self { slot: 0, target: 0 };
+}
+
+impl InitialTls {
+    fn range(self) -> (u64, usize) {
+        (self.start, self.layout.mapping_size)
+    }
 }
 
 #[derive(Clone, Copy)]
 pub struct AddressSpace {
     paging: paging::AddressSpace,
-    stack_base: u64,
+    pub(crate) stack_base: u64,
     mmap_base: u64,
-    mappings: [UserMapping; MAX_ELF_SEGMENTS],
+    mappings: [UserMapping; MAX_IMAGE_MAPPINGS],
     mapping_count: usize,
     relro: Option<(u64, usize)>,
-    tls: Option<(u64, usize)>,
+    library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
+    tls: Option<InitialTls>,
+    pub(crate) destructors:
+        [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+    pub(crate) destructor_count: usize,
+    pub(crate) destructor_pending: bool,
+    pub(crate) lifecycle_trampoline: u64,
+    pub(crate) lazy_bindings: [LazyBinding; MAX_LAZY_BINDINGS],
+    pub(crate) lazy_binding_count: usize,
 }
 
 impl AddressSpace {
@@ -4410,14 +4863,14 @@ impl AddressSpace {
     pub fn contains_executable(self, address: u64) -> bool {
         self.mappings[..self.mapping_count].iter().any(|mapping| {
             mapping.executable
-                && address >= mapping.start
-                && address < mapping.start.saturating_add(mapping.size as u64)
+                && address >= mapping.start()
+                && address < mapping.start().saturating_add(mapping.size() as u64)
         })
     }
 
     /// Return the static initial-exec TLS image range, if this image has one.
     pub fn tls_range(self) -> Option<(u64, usize)> {
-        self.tls
+        self.tls.map(InitialTls::range)
     }
 
     /// Returns whether `address` falls in a logically writable mapping
@@ -4432,22 +4885,23 @@ impl AddressSpace {
         }
         for mapping in &self.mappings[..self.mapping_count] {
             if mapping.writable
-                && address >= mapping.start
-                && address < mapping.start + mapping.size as u64
+                && address >= mapping.start()
+                && address < mapping.start() + mapping.size() as u64
             {
                 if self
                     .relro
-                    .is_some_and(|(start, size)| address >= start && address < start + size as u64)
+                    .into_iter()
+                    .chain(self.library_relro.into_iter().flatten())
+                    .any(|(start, size)| address >= start && address < start + size as u64)
                 {
                     return false;
                 }
                 return true;
             }
         }
-        if self
-            .tls
-            .is_some_and(|(start, size)| address >= start && address < start + size as u64)
-        {
+        if self.tls.is_some_and(|tls| {
+            address >= tls.start && address < tls.start + tls.layout.mapping_size as u64
+        }) {
             return true;
         }
         for mapping in anonymous.iter().flatten() {
@@ -4465,6 +4919,7 @@ impl AddressSpace {
 #[derive(Clone, Copy)]
 pub struct UserProgram {
     pub image: UserImage,
+    pub initial_entry: u64,
     pub stack: UserStack,
     pub address_space: AddressSpace,
     pub tls_base: u64,
@@ -4478,6 +4933,9 @@ pub fn elf_loader_self_test() -> bool {
     const PT_TLS: u32 = 7;
     const PT_GNU_RELRO: u32 = 0x6474_e552;
 
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -4590,6 +5048,10 @@ pub fn elf_loader_self_test() -> bool {
             write_u64(&mut elf, PROGRAM_HEADER_OFFSET + 40, 4096)?;
             let strtab = elf.get_mut(STRTAB_OFFSET..STRTAB_OFFSET + 7)?;
             strtab.copy_from_slice(b"\0local\0");
+            // This region initially contains copied machine code. Initialize both
+            // complete ELF symbol records, including type/visibility/size, before
+            // populating the fields below.
+            elf.get_mut(SYMTAB_OFFSET..SYMTAB_OFFSET + 48)?.fill(0);
             let data_address = USER_REGION_START + USER_CODE_SIZE as u64;
             let dynamic_header = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_SIZE;
             let data_header = dynamic_header + PROGRAM_HEADER_SIZE;
@@ -4659,6 +5121,7 @@ pub fn elf_loader_self_test() -> bool {
             }
             let dependency_fixture = {
                 let mut dependency_elf = elf.clone();
+                *dependency_elf.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
                 write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 128, 1)?;
                 write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 136, 1)?;
                 write_u64(&mut dependency_elf, DYNAMIC_OFFSET + 144, 0)?;
@@ -4668,25 +5131,76 @@ pub fn elf_loader_self_test() -> bool {
                 .ok()
                 .and_then(|image| image.dynamic())
                 .is_some_and(|dynamic| dynamic.needed_count == 1 && dynamic.needed_offsets[0] == 1);
+            let cross_image_scope = (|| -> Option<bool> {
+                let mut main_bytes = dependency_fixture.clone();
+                // The main image imports `local`; the dependency fixture above
+                // exports it as a global symbol at USER_REGION_START + 32.
+                write_u16(&mut main_bytes, SYMTAB_OFFSET + 24 + 6, 0)?;
+                let main_image = crate::elf::parse(&main_bytes).ok()?;
+                let mut dependency_export = elf.clone();
+                *dependency_export.get_mut(SYMTAB_OFFSET + 24 + 4)? = 0x10;
+                let dependency_image = crate::elf::parse(&dependency_export)
+                    .ok()?
+                    .relocated(4096)?;
+                let mut scope =
+                    alloc::boxed::Box::new(crate::elf::SymbolScope::new(&main_image, &main_bytes));
+                scope
+                    .add_dependency(b"local", &dependency_image, &dependency_export)
+                    .ok()?;
+                scope.validate_dependencies().ok()?;
+                let exact_resolution = scope.resolve(b"local")
+                    == Some(USER_REGION_START + 4096 + 32)
+                    && scope.resolve(b"local-extra").is_none();
+                let duplicate_rejected = scope
+                    .add_dependency(b"local", &dependency_image, &dependency_export)
+                    .is_err();
+                let empty_name_rejected = scope
+                    .add_dependency(b"", &dependency_image, &dependency_export)
+                    .is_err();
+                let capacity_rejected = scope
+                    .add_dependency(b"a", &dependency_image, &dependency_export)
+                    .is_ok()
+                    && scope
+                        .add_dependency(b"b", &dependency_image, &dependency_export)
+                        .is_ok()
+                    && scope
+                        .add_dependency(b"c", &dependency_image, &dependency_export)
+                        .is_ok()
+                    && scope
+                        .add_dependency(b"d", &dependency_image, &dependency_export)
+                        .is_err();
+                Some(
+                    exact_resolution
+                        && duplicate_rejected
+                        && empty_name_rejected
+                        && capacity_rejected,
+                )
+            })()
+            .unwrap_or(false);
             let dependency_fail_closed = load_elf(&dependency_fixture).is_none();
             let program = load_elf(&elf)?;
             let mut relocated = [0u8; 16];
-            let expected = aslr_image_delta().checked_add(0x20)?;
+            // Observe this loaded image's actual bias. Drawing fresh entropy here
+            // would compare the relocation against a different random placement
+            // on a production boot (qemu-test fixes every draw at zero).
+            let load_bias = program.image.entry.checked_sub(image.entry)?;
+            let expected = load_bias.checked_add(0x20)?;
             let applied = paging::read_user_bytes_in(
                 program.address_space.paging(),
-                data_address.checked_add(aslr_image_delta())?,
+                data_address.checked_add(load_bias)?,
                 &mut relocated,
             )
             .is_ok()
                 && u64::from_le_bytes(relocated[..8].try_into().ok()?) == expected
                 && u64::from_le_bytes(relocated[8..].try_into().ok()?)
-                    == aslr_image_delta() + USER_REGION_START + 32;
+                    == load_bias + USER_REGION_START + 32;
             let destroyed = destroy(program.address_space);
             Some(
                 dynamic.rela_size == 48
                     && dynamic.rela_entry_size == 24
                     && dynamic.symbol_count == 2
                     && dependency_metadata
+                    && cross_image_scope
                     && dependency_fail_closed
                     && applied
                     && destroyed,
@@ -4700,6 +5214,7 @@ pub fn elf_loader_self_test() -> bool {
             if write_u16(&mut elf, 56, 2).is_none()
                 || write_u32(&mut elf, tls_header, PT_TLS).is_none()
                 || write_u64(&mut elf, tls_header + 8, 4096).is_none()
+                || write_u64(&mut elf, tls_header + 16, USER_REGION_START).is_none()
                 || write_u64(&mut elf, tls_header + 32, 4).is_none()
                 || write_u64(&mut elf, tls_header + 40, 4096).is_none()
                 || write_u64(&mut elf, tls_header + 48, 4096).is_none()
@@ -4770,6 +5285,9 @@ pub fn mmap_w_xor_x_self_test(address_space: AddressSpace) -> bool {
 }
 
 pub fn create_stub_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -4777,6 +5295,128 @@ pub fn create_stub_process() -> Option<UserProgram> {
     };
     let elf = build_stub_elf(stub)?;
     load_elf(&elf)
+}
+
+/// Build the deterministic Stage 31 process-fault probe. It intentionally
+/// writes to an unmapped user address and must be reaped with `-11`.
+#[cfg(feature = "stage31-process-crash-test")]
+pub fn create_stage31_process_crash_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_stage31_process_crash_start: u8;
+        static wovenhat_stage31_process_crash_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_stage31_process_crash_start as *const u8;
+        let end = &wovenhat_stage31_process_crash_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_fork_wait_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_fork_wait_start: u8;
+        static wovenhat_s03_fork_wait_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_fork_wait_start as *const u8;
+        let end = &wovenhat_s03_fork_wait_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_group_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_group_start: u8;
+        static wovenhat_s03_group_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_group_start as *const u8;
+        let end = &wovenhat_s03_group_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_handler_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_handler_start: u8;
+        static wovenhat_s03_handler_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_handler_start as *const u8;
+        let end = &wovenhat_s03_handler_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_session_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_session_start: u8;
+        static wovenhat_s03_session_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_session_start as *const u8;
+        let end = &wovenhat_s03_session_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_tostop_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_tostop_start: u8;
+        static wovenhat_s03_tostop_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_tostop_start as *const u8;
+        let end = &wovenhat_s03_tostop_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_orphan_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_orphan_start: u8;
+        static wovenhat_s03_orphan_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_orphan_start as *const u8;
+        let end = &wovenhat_s03_orphan_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_vintr_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_vintr_start: u8;
+        static wovenhat_s03_vintr_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_vintr_start as *const u8;
+        let end = &wovenhat_s03_vintr_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
 }
 
 #[cfg(feature = "stage10-8-test")]
@@ -4800,6 +5440,9 @@ pub fn create_stage10_9_process() -> Option<UserProgram> {
         static wovenhat_stage10_9_start: u8;
         static wovenhat_stage10_9_end: u8;
     }
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_9_start as *const u8;
         let end = &wovenhat_stage10_9_end as *const u8;
@@ -4809,6 +5452,9 @@ pub fn create_stage10_9_process() -> Option<UserProgram> {
 }
 
 pub fn install_stub_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_user_program_start as *const u8;
         let end = &wovenhat_user_program_end as *const u8;
@@ -4820,6 +5466,9 @@ pub fn install_stub_executable() -> bool {
 
 #[cfg(feature = "stage10-4-test")]
 pub fn create_stage10_4_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_4_program_start as *const u8;
         let end = &wovenhat_stage10_4_program_end as *const u8;
@@ -4831,6 +5480,9 @@ pub fn create_stage10_4_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-5-test")]
 pub fn create_stage10_5_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_5_program_start as *const u8;
         let end = &wovenhat_stage10_5_program_end as *const u8;
@@ -4842,6 +5494,9 @@ pub fn create_stage10_5_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-6-test")]
 pub fn create_stage10_6_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_6_program_start as *const u8;
         let end = &wovenhat_stage10_6_program_end as *const u8;
@@ -4853,6 +5508,9 @@ pub fn create_stage10_6_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage10-7-test")]
 pub fn create_stage10_7_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage10_7_program_start as *const u8;
         let end = &wovenhat_stage10_7_program_end as *const u8;
@@ -4864,6 +5522,9 @@ pub fn create_stage10_7_process() -> Option<UserProgram> {
 
 #[cfg(feature = "stage11-2-test")]
 pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_stage11_2_program_start as *const u8;
         let end = &wovenhat_stage11_2_program_end as *const u8;
@@ -4873,6 +5534,9 @@ pub fn create_stage11_2_thread_process() -> Option<UserProgram> {
 }
 
 pub fn create_exec_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_exec_program_start as *const u8;
         let end = &wovenhat_exec_program_end as *const u8;
@@ -4884,6 +5548,9 @@ pub fn create_exec_process() -> Option<UserProgram> {
 
 /// Spawnable userspace init process (`argv[0] == "/init"`).
 pub fn create_init_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_init_program_start as *const u8;
         let end = &wovenhat_init_program_end as *const u8;
@@ -4895,6 +5562,9 @@ pub fn create_init_process() -> Option<UserProgram> {
 
 /// Install `/bin/init` into the VFS for later `exec`.
 pub fn install_init_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_init_program_start as *const u8;
         let end = &wovenhat_init_program_end as *const u8;
@@ -4905,6 +5575,9 @@ pub fn install_init_executable() -> bool {
 
 /// Interactive userspace shell (`argv[0] == "/bin/sh"`).
 pub fn create_shell_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sh_program_start as *const u8;
         let end = &wovenhat_sh_program_end as *const u8;
@@ -4920,6 +5593,9 @@ pub fn create_shell_process() -> Option<UserProgram> {
 /// pinned-AP userspace execution proof without exercising BSP-owned file,
 /// network, pager or device-service paths.
 pub fn create_true_process() -> Option<UserProgram> {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_true_program_start as *const u8;
         let end = &wovenhat_true_program_end as *const u8;
@@ -4930,6 +5606,9 @@ pub fn create_true_process() -> Option<UserProgram> {
 }
 /// Install `/bin/true` into the VFS.
 pub fn install_true_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_true_program_start as *const u8;
         let end = &wovenhat_true_program_end as *const u8;
@@ -4939,6 +5618,9 @@ pub fn install_true_executable() -> bool {
 }
 
 pub fn install_false_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_false_program_start as *const u8;
         let end = &wovenhat_false_program_end as *const u8;
@@ -4948,6 +5630,9 @@ pub fn install_false_executable() -> bool {
 }
 
 pub fn install_ls_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_ls_program_start as *const u8;
         let end = &wovenhat_ls_program_end as *const u8;
@@ -4957,6 +5642,9 @@ pub fn install_ls_executable() -> bool {
 }
 
 pub fn install_sleep_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sleepbin_program_start as *const u8;
         let end = &wovenhat_sleepbin_program_end as *const u8;
@@ -4966,6 +5654,9 @@ pub fn install_sleep_executable() -> bool {
 }
 
 pub fn install_cat_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_cat_program_start as *const u8;
         let end = &wovenhat_cat_program_end as *const u8;
@@ -4975,6 +5666,9 @@ pub fn install_cat_executable() -> bool {
 }
 
 pub fn install_echo_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_echo_program_start as *const u8;
         let end = &wovenhat_echo_program_end as *const u8;
@@ -4984,6 +5678,9 @@ pub fn install_echo_executable() -> bool {
 }
 
 pub fn install_pwd_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_pwd_program_start,
@@ -4995,6 +5692,9 @@ pub fn install_pwd_executable() -> bool {
 }
 
 pub fn install_mkdir_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_mkdir_program_start,
@@ -5006,6 +5706,9 @@ pub fn install_mkdir_executable() -> bool {
 }
 
 pub fn install_rm_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         core::slice::from_raw_parts(
             &wovenhat_rm_program_start,
@@ -5017,6 +5720,9 @@ pub fn install_rm_executable() -> bool {
 }
 
 pub fn install_shell_executable() -> bool {
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_sh_program_start as *const u8;
         let end = &wovenhat_sh_program_end as *const u8;
@@ -5036,6 +5742,7 @@ fn is_kernel_trusted_executable(path: &str) -> bool {
         "/bin/init"
             | "/bin/sh"
             | "/bin/woven-shell"
+            | "/bin/wovenhat-recovery"
             | "/bin/hello-gui"
             | "/bin/true"
             | "/bin/false"
@@ -5080,398 +5787,50 @@ pub fn load_elf_with_argv_verified(bytes: &[u8], args: &[&str]) -> Option<UserPr
     }
 }
 
+#[cfg(feature = "stage27-5-recovery-test")]
+pub fn load_elf_with_argv_verified_at_bias(
+    bytes: &[u8],
+    args: &[&str],
+    bias: u64,
+) -> Option<UserProgram> {
+    let verified = crate::signed_app::verify_package(bytes).ok()?;
+    linker::load_with_candidate_bias(verified.bytes(), args, bias)
+}
+
 pub fn load_elf(bytes: &[u8]) -> Option<UserProgram> {
-    let image = crate::elf::parse(bytes)
-        .ok()?
-        .relocated(aslr_image_delta())?;
-    // Dependency names are parsed and bounds-checked by the ELF layer, but
-    // this loader still has no dependency namespace or cross-image teardown.
-    // Refuse them explicitly until that authority is implemented.
-    if image
-        .dynamic()
-        .is_some_and(|dynamic| dynamic.needed_count != 0)
-    {
-        return None;
-    }
-    let mmap_base = aslr_mmap_base()?;
-    let page_table = paging::create_user_address_space(image.entry)?;
-    let mut mappings = [UserMapping::EMPTY; MAX_ELF_SEGMENTS];
-    let mut mapping_count = 0;
+    linker::load(bytes, &["a.out"])
+}
 
-    let stack_base = aslr_stack_base()?;
-    let relro = image.relro();
-    let tls_image = image.tls();
-    let stack = UserStack::new(stack_base);
-    let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
-    for segment in image.segments() {
-        let mapping_end = segment
-            .mapping_start
-            .checked_add(segment.mapping_size as u64)?;
-        if segment.mapping_start < USER_REGION_START
-            || mapping_end > stack.guard_base
-            || (segment.mapping_start < mmap_end && mmap_base < mapping_end)
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        if mapping_count == mappings.len()
-            || paging::map_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                true,
-                false,
-            )
-            .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        mappings[mapping_count] = UserMapping {
-            start: segment.mapping_start,
-            size: segment.mapping_size,
-            writable: segment.writable,
-            executable: segment.executable,
-        };
-        mapping_count += 1;
+#[cfg(feature = "stage11-exit-status-test")]
+pub fn load_fixed_placement_probe(bytes: &[u8]) -> Option<UserProgram> {
+    // Exercise the same production loader with a definitely nonzero ASLR draw.
+    // Other boot probes keep their established deterministic placements.
+    linker::load_with_candidate_bias(bytes, &["exit-status-fixture"], 0x30_000)
+}
 
-        let file_end = segment.file_offset.checked_add(segment.file_size)?;
-        let memory_end = segment
-            .virtual_address
-            .checked_add(segment.memory_size as u64)?;
-        if memory_end
-            > segment
-                .mapping_start
-                .checked_add(segment.mapping_size as u64)?
-            || paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
-                .is_err()
-            || paging::write_user_bytes(
-                page_table,
-                segment.virtual_address,
-                bytes.get(segment.file_offset..file_end)?,
-            )
-            .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
+#[cfg(feature = "stage11-exit-status-test")]
+pub fn load_pie_placement_probe() -> Option<UserProgram> {
+    // Position-independent x86-64 scalar Exit(37), followed by an unreachable
+    // trap. No absolute address or TLS is involved in this placement probe.
+    let mut bytes = build_stub_elf(&[0xbf, 37, 0, 0, 0, 0xb8, 3, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b])?;
+    write_u16(&mut bytes, 16, 3)?;
+    linker::load_with_candidate_bias(&bytes, &["pie-placement"], 0x30_000)
+}
 
-    if let Some(dynamic) = image.dynamic().filter(|dynamic| dynamic.rela_size != 0) {
-        let Some(rela_end) = dynamic.rela_file_offset.checked_add(dynamic.rela_size) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(rela_bytes) = bytes.get(dynamic.rela_file_offset..rela_end) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        for entry in rela_bytes.chunks_exact(dynamic.rela_entry_size) {
-            let Some(target) = entry
-                .get(..8)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let Some(addend) = entry
-                .get(16..24)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(i64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let Some(info) = entry
-                .get(8..16)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u64::from_le_bytes)
-            else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let relocation_type = info as u32;
-            let symbol_index = (info >> 32) as usize;
-            let Some(target) = target.checked_add(image.load_bias()) else {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            };
-            let symbol_value = if symbol_index == 0 {
-                None
-            } else {
-                if symbol_index >= dynamic.symbol_count {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                }
-                let resolved = (|| {
-                    let symbol_offset = dynamic
-                        .symtab_file_offset
-                        .checked_add(symbol_index.checked_mul(dynamic.symtab_entry_size)?)?;
-                    let symbol = bytes.get(symbol_offset..symbol_offset.checked_add(24)?)?;
-                    let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?) as usize;
-                    let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
-                    let value = u64::from_le_bytes(symbol[8..16].try_into().ok()?);
-                    if section == 0
-                        || !image.segments().any(|segment| {
-                            value >= segment.virtual_address
-                                && value
-                                    < segment
-                                        .virtual_address
-                                        .saturating_add(segment.memory_size as u64)
-                        })
-                    {
-                        // Undefined symbols require a dependency scope. That
-                        // scope is deliberately not guessed from the main image.
-                        return None;
-                    }
-                    let name_start = dynamic.strtab_file_offset.checked_add(name_offset)?;
-                    let name_end = dynamic
-                        .strtab_file_offset
-                        .checked_add(dynamic.strtab_size)?;
-                    if name_start >= name_end
-                        || bytes
-                            .get(name_start..name_end)?
-                            .iter()
-                            .position(|byte| *byte == 0)
-                            .is_none()
-                    {
-                        return None;
-                    }
-                    image.load_bias().checked_add(value)
-                })();
-                let Some(resolved) = resolved else {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                };
-                Some(resolved)
-            };
-            let value = match relocation_type {
-                crate::elf::R_X86_64_RELATIVE => {
-                    if symbol_index != 0 {
-                        release_partial(page_table, &mappings[..mapping_count]);
-                        return None;
-                    }
-                    if addend >= 0 {
-                        let Some(value) = image.load_bias().checked_add(addend as u64) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    } else {
-                        let Some(value) = image.load_bias().checked_sub(addend.unsigned_abs())
-                        else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    }
-                }
-                crate::elf::R_X86_64_64
-                | crate::elf::R_X86_64_GLOB_DAT
-                | crate::elf::R_X86_64_JUMP_SLOT => {
-                    let Some(symbol_value) = symbol_value else {
-                        release_partial(page_table, &mappings[..mapping_count]);
-                        return None;
-                    };
-                    if addend >= 0 {
-                        let Some(value) = symbol_value.checked_add(addend as u64) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    } else {
-                        let Some(value) = symbol_value.checked_sub(addend.unsigned_abs()) else {
-                            release_partial(page_table, &mappings[..mapping_count]);
-                            return None;
-                        };
-                        value
-                    }
-                }
-                _ => {
-                    release_partial(page_table, &mappings[..mapping_count]);
-                    return None;
-                }
-            };
-            if paging::write_user_bytes(page_table, target, &value.to_le_bytes()).is_err() {
-                release_partial(page_table, &mappings[..mapping_count]);
-                return None;
-            }
-        }
-    }
+#[cfg(feature = "stage11-5-test")]
+pub fn shared_library_self_test() -> bool {
+    linker::shared_library_self_test()
+}
 
-    for segment in image.segments() {
-        if paging::protect_user_range_in_inactive(
-            page_table,
-            segment.mapping_start,
-            segment.mapping_size,
-            segment.writable,
-            segment.executable,
-        )
-        .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
-
-    if let Some((relro_start, relro_size)) = relro {
-        if paging::protect_user_range_in_inactive(page_table, relro_start, relro_size, false, false)
-            .is_err()
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-    }
-
-    // Static TLS is placed below the stack guard.  The initial-exec ABI uses
-    // the end of this block as FS, so keeping the block page aligned makes
-    // fork's existing COW address-space clone sufficient for the initial
-    // thread image. Dynamic TLS/shared libraries remain intentionally outside
-    // this loader's contract.
-    let (tls, tls_base) = if let Some(tls_image) = tls_image {
-        let Some(tls_size) =
-            page_align_up(tls_image.memory_size as u64).and_then(|size| usize::try_from(size).ok())
-        else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(tls_start) = stack.guard_base.checked_sub(tls_size as u64) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        let Some(tls_file_end) = tls_image.file_offset.checked_add(tls_image.file_size) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        if tls_start < mmap_end
-            || mappings[..mapping_count].iter().any(|mapping| {
-                tls_start < mapping.start + mapping.size as u64 && mapping.start < stack.guard_base
-            })
-        {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        }
-        let Some(tls_bytes) = bytes.get(tls_image.file_offset..tls_file_end) else {
-            release_partial(page_table, &mappings[..mapping_count]);
-            return None;
-        };
-        if paging::map_user_range_in_inactive(page_table, tls_start, tls_size, true, false).is_err()
-            || paging::zero_user_range_in(page_table, tls_start, tls_size).is_err()
-            || paging::write_user_bytes(page_table, tls_start, tls_bytes).is_err()
-        {
-            release_partial_with_tls(
-                page_table,
-                &mappings[..mapping_count],
-                (tls_start, tls_size),
-            );
-            return None;
-        }
-        let Some(tls_base) = tls_start.checked_add(tls_size as u64) else {
-            release_partial_with_tls(
-                page_table,
-                &mappings[..mapping_count],
-                (tls_start, tls_size),
-            );
-            return None;
-        };
-        (Some((tls_start, tls_size)), tls_base)
-    } else {
-        (None, 0)
-    };
-
-    if paging::map_user_range_in_inactive(page_table, stack_base, UserStack::SIZE, true, false)
-        .is_err()
-    {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-    if paging::zero_user_range_in(page_table, stack_base, UserStack::SIZE).is_err() {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-
-    if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
-        || !paging::user_range_has_protection_in(page_table, stack.base, stack.size, true, false)
-    {
-        release_with_stack(page_table, stack_base, tls, &mappings[..mapping_count]);
-        return None;
-    }
-
-    // Default argv so every loaded image starts with a valid C-style stack.
-    let stack_top = setup_argv_stack(page_table, stack, &["a.out"])?;
-
-    Some(UserProgram {
-        image: UserImage {
-            entry: image.entry,
-            stack_top,
-            image_size: bytes.len() as u64,
-            load_segments: image.segment_count(),
-        },
-        stack,
-        address_space: AddressSpace {
-            paging: page_table,
-            stack_base,
-            mmap_base,
-            mappings,
-            mapping_count,
-            relro,
-            tls,
-        },
-        tls_base,
-    })
+#[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
+pub fn compiler_loader_self_test() -> bool {
+    linker::compiler_loader_self_test()
 }
 
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    let mut program = load_elf(bytes)?;
-    // Rebuild argv over the default one.
-    let stack_top = setup_argv_stack(program.address_space.paging(), program.stack, args)?;
-    program.image.stack_top = stack_top;
-    Some(program)
-}
-
-fn release_with_stack(
-    page_table: paging::AddressSpace,
-    stack_base: u64,
-    tls: Option<(u64, usize)>,
-    mappings: &[UserMapping],
-) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
-    ranges[0] = (stack_base, UserStack::SIZE);
-    for (range, mapping) in ranges[1..].iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    let mut count = mappings.len() + 1;
-    if let Some(tls) = tls {
-        ranges[count] = tls;
-        count += 1;
-    }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..count]);
-}
-fn release_partial(page_table: paging::AddressSpace, mappings: &[UserMapping]) {
-    if mappings.is_empty() {
-        let _ = paging::discard_empty_user_address_space(page_table);
-        return;
-    }
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS];
-    for (range, mapping) in ranges.iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len()]);
-}
-
-fn release_partial_with_tls(
-    page_table: paging::AddressSpace,
-    mappings: &[UserMapping],
-    tls: (u64, usize),
-) {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 1];
-    for (range, mapping) in ranges[..mappings.len()].iter_mut().zip(mappings) {
-        *range = (mapping.start, mapping.size);
-    }
-    ranges[mappings.len()] = tls;
-    let _ = paging::destroy_user_address_space(page_table, &ranges[..mappings.len() + 1]);
+    linker::load(bytes, args)
 }
 
 pub fn map_anonymous(
@@ -5508,35 +5867,56 @@ pub fn map_anonymous(
     })
 }
 
-/// Clone the current process's bounded initial-exec TLS image for a new
-/// scheduler task.  The clone gets private writable pages and therefore a
-/// thread cannot mutate another thread's `errno` or compiler TLS variables.
-pub fn clone_initial_tls(address_space: AddressSpace, slot: usize) -> Option<AnonymousMapping> {
-    let (source, size) = address_space.tls_range()?;
-    let mapping = map_anonymous(address_space, slot, size, true)?;
+/// Initialize a private TLS allocation from the immutable relocated template.
+/// New threads never inherit mutable parent-thread values or its self pointer.
+pub fn clone_initial_tls(
+    address_space: AddressSpace,
+    slot: usize,
+) -> Option<(AnonymousMapping, u64)> {
+    let tls = address_space.tls?;
+    let mapping = map_anonymous(address_space, slot, tls.layout.mapping_size, true)?;
+    let pointer = initialize_tls(address_space.paging, mapping.address, tls);
+    if let Some(pointer) = pointer {
+        Some((mapping, pointer))
+    } else {
+        let _ = unmap_anonymous(address_space, mapping);
+        None
+    }
+}
+
+fn copy_tls_bytes(
+    space: paging::AddressSpace,
+    source: u64,
+    target: u64,
+    size: usize,
+) -> Option<()> {
     let mut buffer = [0u8; 512];
     let mut offset = 0usize;
     while offset < size {
         let count = buffer.len().min(size - offset);
-        if paging::read_user_bytes_in(
-            address_space.paging,
+        paging::read_user_bytes_in(
+            space,
             source.checked_add(offset as u64)?,
             &mut buffer[..count],
         )
-        .is_err()
-            || paging::write_user_bytes(
-                address_space.paging,
-                mapping.address.checked_add(offset as u64)?,
-                &buffer[..count],
-            )
-            .is_err()
-        {
-            let _ = unmap_anonymous(address_space, mapping);
-            return None;
-        }
+        .ok()?;
+        paging::write_user_bytes(space, target.checked_add(offset as u64)?, &buffer[..count])
+            .ok()?;
         offset += count;
     }
-    Some(mapping)
+    Some(())
+}
+
+fn initialize_tls(space: paging::AddressSpace, start: u64, tls: InitialTls) -> Option<u64> {
+    paging::zero_user_range_in(space, start, tls.layout.mapping_size).ok()?;
+    if let Some((template, _)) = tls.template {
+        copy_tls_bytes(space, template, start, tls.template_size)?;
+    } else if tls.template_size != 0 {
+        return None;
+    }
+    let pointer = start.checked_add(tls.layout.thread_pointer_offset as u64)?;
+    paging::write_user_bytes(space, pointer, &pointer.to_le_bytes()).ok()?;
+    Some(pointer)
 }
 
 /// Populate private NX pages without advancing the file offset.
@@ -5835,18 +6215,23 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_ELF_SEGMENTS + 2];
+    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
-    for (range, mapping) in ranges[1..]
-        .iter_mut()
-        .zip(&address_space.mappings[..address_space.mapping_count])
-    {
-        *range = (mapping.start, mapping.size);
+    for (range, mapping) in ranges[1..].iter_mut().zip(
+        address_space.mappings[..address_space.mapping_count]
+            .iter()
+            .rev(),
+    ) {
+        *range = (mapping.start(), mapping.size());
     }
     let mut count = address_space.mapping_count + 1;
     if let Some(tls) = address_space.tls {
-        ranges[count] = tls;
+        ranges[count] = tls.range();
         count += 1;
+        if let Some(template) = tls.template {
+            ranges[count] = template;
+            count += 1;
+        }
     }
     paging::destroy_user_address_space(address_space.paging, &ranges[..count]).is_ok()
 }
@@ -5863,9 +6248,16 @@ pub fn clone_address_space(
         mappings: source.mappings,
         mapping_count: source.mapping_count,
         relro: source.relro,
+        library_relro: source.library_relro,
         tls: source.tls,
+        destructors: source.destructors,
+        destructor_count: source.destructor_count,
+        destructor_pending: source.destructor_pending,
+        lifecycle_trampoline: source.lifecycle_trampoline,
+        lazy_bindings: source.lazy_bindings,
+        lazy_binding_count: source.lazy_binding_count,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_ELF_SEGMENTS + 2 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -5873,8 +6265,8 @@ pub fn clone_address_space(
         if paging::share_user_range_in(
             source.paging,
             destination.paging,
-            mapping.start,
-            mapping.size,
+            mapping.start(),
+            mapping.size(),
             mapping.writable,
             mapping.executable,
         )
@@ -5883,7 +6275,7 @@ pub fn clone_address_space(
             release_clone(destination.paging, &completed[..completed_count]);
             return None;
         }
-        completed[completed_count] = (mapping.start, mapping.size);
+        completed[completed_count] = (mapping.start(), mapping.size());
         completed_count += 1;
     }
     if paging::share_user_range_in(
@@ -5902,7 +6294,8 @@ pub fn clone_address_space(
     completed[completed_count] = (source.stack_base, UserStack::SIZE);
     completed_count += 1;
 
-    if let Some((tls_start, tls_size)) = source.tls {
+    if let Some(tls) = source.tls {
+        let (tls_start, tls_size) = tls.range();
         if paging::share_user_range_in(
             source.paging,
             destination.paging,
@@ -5918,6 +6311,23 @@ pub fn clone_address_space(
         }
         completed[completed_count] = (tls_start, tls_size);
         completed_count += 1;
+        if let Some((start, size)) = tls.template {
+            if paging::share_user_range_in(
+                source.paging,
+                destination.paging,
+                start,
+                size,
+                false,
+                false,
+            )
+            .is_err()
+            {
+                release_clone(destination.paging, &completed[..completed_count]);
+                return None;
+            }
+            completed[completed_count] = (start, size);
+            completed_count += 1;
+        }
     }
 
     for mapping in anonymous.iter().flatten() {
@@ -5995,6 +6405,10 @@ fn stage5_program(start: *const u8, end: *const u8) -> Option<&'static [u8]> {
     if len == 0 {
         return None;
     }
+    // SAFETY: callers pass the linker-provided start/end symbols that bound an
+    // immutable byte blob embedded in the kernel image. `len = end - start` was
+    // computed with a checked subtraction and is non-zero, so the slice covers
+    // exactly that in-image region, which is valid and lives for `'static`.
     Some(unsafe { core::slice::from_raw_parts(start, len) })
 }
 
@@ -6186,10 +6600,17 @@ pub fn shared_disk_mmap_self_test() -> bool {
             paging: root,
             stack_base: 0,
             mmap_base: USER_MMAP_START,
-            mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+            mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
             mapping_count: 0,
             relro: None,
+            library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+            destructor_count: 0,
+            destructor_pending: false,
+            lifecycle_trampoline: 0,
+            lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+            lazy_binding_count: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6241,10 +6662,17 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             paging: root,
             stack_base: 0,
             mmap_base: USER_MMAP_START,
-            mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+            mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
             mapping_count: 0,
             relro: None,
+            library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
+            destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+            destructor_count: 0,
+            destructor_pending: false,
+            lifecycle_trampoline: 0,
+            lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+            lazy_binding_count: 0,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6287,10 +6715,17 @@ pub fn shared_file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6373,10 +6808,17 @@ pub fn lazy_file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -6460,10 +6902,17 @@ pub fn private_lazy_swap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6531,10 +6980,17 @@ pub fn file_mmap_self_test() -> bool {
         paging: root,
         stack_base: 0,
         mmap_base: USER_MMAP_START,
-        mappings: [UserMapping::EMPTY; MAX_ELF_SEGMENTS],
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
         mapping_count: 0,
         relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {
@@ -7064,6 +7520,9 @@ pub fn install_file_mmap_test() -> bool {
         static wovenhat_file_mmap_start: u8;
         static wovenhat_file_mmap_end: u8;
     }
+    // SAFETY: `wovenhat_*_start`/`_end` are linker symbols bounding an
+    // immutable byte blob embedded in the kernel image (`end >= start`),
+    // so the slice covers exactly that in-image region and lives for `'static`.
     let stub = unsafe {
         let start = &wovenhat_file_mmap_start as *const u8;
         let end = &wovenhat_file_mmap_end as *const u8;

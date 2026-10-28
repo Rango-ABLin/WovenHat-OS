@@ -151,7 +151,23 @@ pub fn handle_interrupt() {
 #[cfg(any(
     feature = "stage19-12-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test",
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test",
+    feature = "stage20-9-test",
+    feature = "stage20-10-test",
+    feature = "stage20-18-test",
+    feature = "stage20-11-test",
+    feature = "stage20-12-test",
+    feature = "stage20-13-test",
+    feature = "stage20-19-test",
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "stage20-17-test",
+    feature = "stage24-59-test"
 ))]
 pub fn loopback(byte: u8) -> bool {
     loopback_through(0xd3, byte)
@@ -162,7 +178,22 @@ pub fn loopback(byte: u8) -> bool {
 #[cfg(any(
     feature = "stage19-12-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test",
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test",
+    feature = "stage20-9-test",
+    feature = "stage20-10-test",
+    feature = "stage20-18-test",
+    feature = "stage20-11-test",
+    feature = "stage20-12-test",
+    feature = "stage20-13-test",
+    feature = "stage20-19-test",
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "stage24-59-test"
 ))]
 pub fn keyboard_loopback(byte: u8) -> bool {
     loopback_through(0xd2, byte)
@@ -171,7 +202,23 @@ pub fn keyboard_loopback(byte: u8) -> bool {
 #[cfg(any(
     feature = "stage19-12-test",
     feature = "stage20-2-test",
-    feature = "stage20-3-test"
+    feature = "stage20-3-test",
+    feature = "stage20-4-test",
+    feature = "stage20-5-test",
+    feature = "stage20-6-test",
+    feature = "stage20-7-test",
+    feature = "stage20-8-test",
+    feature = "stage20-9-test",
+    feature = "stage20-10-test",
+    feature = "stage20-18-test",
+    feature = "stage20-11-test",
+    feature = "stage20-12-test",
+    feature = "stage20-13-test",
+    feature = "stage20-19-test",
+    feature = "stage20-14b-test",
+    feature = "stage20-15-test",
+    feature = "stage20-17-test",
+    feature = "stage24-59-test"
 ))]
 fn loopback_through(command_byte: u8, byte: u8) -> bool {
     // The output buffer holds one byte: wait for the previous one to be taken
@@ -241,7 +288,12 @@ pub fn decoder_self_test() -> bool {
     resync && first && second && overflow && third
 }
 
+/// # Safety
+/// Performs i8042 port I/O; call serialized with other i8042 users so command
+/// and data bytes are not interleaved.
 unsafe fn command(byte: u8) -> bool {
+    // SAFETY: waits for the input buffer to drain, then writes `byte` to the
+    // fixed i8042 command port, per this fn's serialization contract.
     unsafe {
         wait_input_empty() && {
             outb(STATUS_PORT, byte);
@@ -250,7 +302,11 @@ unsafe fn command(byte: u8) -> bool {
     }
 }
 
+/// # Safety
+/// Performs i8042 port I/O; call serialized with other i8042 users.
 unsafe fn write_data(byte: u8) -> bool {
+    // SAFETY: waits for the input buffer to drain, then writes `byte` to the
+    // fixed i8042 data port.
     unsafe {
         wait_input_empty() && {
             outb(DATA_PORT, byte);
@@ -259,11 +315,15 @@ unsafe fn write_data(byte: u8) -> bool {
     }
 }
 
+/// # Safety
+/// Reads the i8042 status port; call serialized with other i8042 users.
 unsafe fn wait_input_empty() -> bool {
     for _ in 0..POLL_ITERATIONS {
+        // SAFETY: read of the fixed i8042 status port.
         if unsafe { inb(STATUS_PORT) } & STATUS_INPUT_FULL == 0 {
             return true;
         }
+        // SAFETY: POST-port I/O delay.
         unsafe { io_delay() };
     }
     false
@@ -271,15 +331,21 @@ unsafe fn wait_input_empty() -> bool {
 
 /// Next auxiliary byte. A keyboard byte arriving meanwhile is discarded:
 /// initialisation runs before input is meaningful.
+///
+/// # Safety
+/// i8042 status/data port I/O; call serialized with other i8042 users.
 unsafe fn read_aux() -> Option<u8> {
     for _ in 0..POLL_ITERATIONS {
+        // SAFETY: read of the fixed i8042 status port.
         let status = unsafe { inb(STATUS_PORT) };
         if status & STATUS_OUTPUT_FULL != 0 {
+            // SAFETY: output buffer full, so a byte is readable at the data port.
             let byte = unsafe { inb(DATA_PORT) };
             if status & STATUS_AUX_DATA != 0 {
                 return Some(byte);
             }
         }
+        // SAFETY: POST-port I/O delay.
         unsafe { io_delay() };
     }
     None
@@ -287,29 +353,45 @@ unsafe fn read_aux() -> Option<u8> {
 
 /// Next controller byte, auxiliary or not (command responses such as the
 /// configuration byte arrive on the keyboard side).
+///
+/// # Safety
+/// i8042 status/data port I/O; call serialized with other i8042 users.
 unsafe fn read_any() -> Option<u8> {
     for _ in 0..POLL_ITERATIONS {
+        // SAFETY: read of the fixed i8042 status port.
         if unsafe { inb(STATUS_PORT) } & STATUS_OUTPUT_FULL != 0 {
+            // SAFETY: output buffer full, so a byte is readable at the data port.
             return Some(unsafe { inb(DATA_PORT) });
         }
+        // SAFETY: POST-port I/O delay.
         unsafe { io_delay() };
     }
     None
 }
 
+/// # Safety
+/// Writes the POST diagnostic port (0x80) as a short, side-effect-free delay.
 unsafe fn io_delay() {
+    // SAFETY: a write to the POST port 0x80 is the conventional ~1us I/O delay.
     unsafe { outb(0x80, 0) };
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed i8042 ports).
 unsafe fn inb(port: u16) -> u8 {
     let value: u8;
+    // SAFETY: `in al, dx` reads one byte from the valid I/O port in `dx`.
     unsafe {
         asm!("in al, dx", out("al") value, in("dx") port, options(nomem, nostack, preserves_flags));
     }
     value
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed i8042 or POST
+/// ports).
 unsafe fn outb(port: u16, value: u8) {
+    // SAFETY: `out dx, al` writes one byte to the valid I/O port in `dx`.
     unsafe {
         asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack, preserves_flags));
     }

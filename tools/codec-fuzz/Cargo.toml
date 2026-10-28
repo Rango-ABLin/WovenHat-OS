@@ -1,0 +1,10 @@
+[package]
+name = "wovenhat-codec-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libwoven = { path = "../../libwoven", default-features = false }

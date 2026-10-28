@@ -1,3 +1,10 @@
+#![cfg_attr(
+    any(not(feature = "qemu-test"), feature = "stage13-12-test"),
+    expect(
+        dead_code,
+        reason = "production initializes the bound controller (init_at); self-tests and probing are exercised by the Stage 13.3 gate"
+    )
+)]
 use core::{
     ptr,
     sync::atomic::{fence, Ordering},
@@ -169,6 +176,9 @@ impl Queue {
 }
 
 pub struct NvmeController {
+    address: Address,
+    registers: u64,
+    original_command: u16,
     namespace_id: u32,
     sectors: u64,
     io: Queue,
@@ -281,6 +291,9 @@ impl NvmeController {
         let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         rollback.enabled = false;
         Ok(Self {
+            address,
+            registers,
+            original_command,
             namespace_id: 1,
             sectors: namespace_size,
             io,
@@ -314,6 +327,21 @@ impl NvmeController {
             sector.copy_from_slice(&self.transfer.bytes_mut()[..SECTOR_SIZE]);
         }
         Ok(())
+    }
+
+    /// Stop controller DMA before the PCI owner is released.  The caller has
+    /// already quiesced the driver's external users and interrupt lease; this
+    /// method owns only the NVMe controller state and its DMA pages.
+    fn shutdown_hardware(&mut self) -> Result<(), InitError> {
+        let cc = mmio_read32(self.registers + 0x14)?;
+        mmio_write32(self.registers + 0x14, cc & !1)?;
+        let ready = wait_ready(self.registers, false).is_ok();
+        let command = pci::restore_command(self.address, self.original_command);
+        if ready && command {
+            Ok(())
+        } else {
+            Err(InitError::ControllerTimeout)
+        }
     }
 }
 
@@ -366,11 +394,23 @@ impl BlockDevice for NvmeController {
 }
 
 pub fn init() -> Result<u64, InitError> {
+    if let Some(sectors) = CONTROLLER
+        .lock()
+        .as_ref()
+        .map(|controller| controller.sectors)
+    {
+        return Ok(sectors);
+    }
+    init_at(find_controller().ok_or(InitError::MissingController)?)
+}
+
+/// Initialize the controller at `device`, the function its driver is bound
+/// to. An already initialized controller is kept.
+pub fn init_at(device: pci::Device) -> Result<u64, InitError> {
     let mut slot = CONTROLLER.lock();
     if let Some(controller) = slot.as_ref() {
         return Ok(controller.sectors);
     }
-    let device = find_controller().ok_or(InitError::MissingController)?;
     let controller = NvmeController::initialize(device)?;
     let sectors = controller.sectors;
     *slot = Some(controller);
@@ -379,6 +419,25 @@ pub fn init() -> Result<u64, InitError> {
 
 pub fn with_controller<R>(operation: impl FnOnce(&mut NvmeController) -> R) -> Option<R> {
     CONTROLLER.lock().as_mut().map(operation)
+}
+
+/// Remove the owned controller only after bounded hardware quiescence.  The
+/// returned object is dropped outside the global controller lock so its DMA
+/// pages can safely return to the frame allocator.
+pub fn shutdown() -> Result<(), InitError> {
+    let Some(mut controller) = CONTROLLER.lock().take() else {
+        return Ok(());
+    };
+    match controller.shutdown_hardware() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // Keep the binding and controller object together on a failed
+            // quiescence attempt; dropping DMA pages while hardware may still
+            // be active would be unsafe.
+            CONTROLLER.lock().replace(controller);
+            Err(error)
+        }
+    }
 }
 
 pub fn probe() -> bool {

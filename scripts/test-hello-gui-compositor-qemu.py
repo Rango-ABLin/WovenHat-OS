@@ -1,4 +1,4 @@
-"""Stage 19.2: hello-gui presents a window through the compositor.
+"""Stage 19.2: hello-gui presents a WovenGraphics frame through the compositor.
 
 With --stage 19.4 the same image runs the compositor authority gate: an
 unprivileged --probe run that must be refused, then a run with DisplayIo.
@@ -11,6 +11,8 @@ import argparse, os, shutil, subprocess, sys
 from pathlib import Path
 APP='wovenhat-hello-gui'
 STAGES={
+    '08': ('stage08-graphics-test', '[S08] secure userspace graphics surfaces: PASSED', 'stage08-graphics', 'secure userspace graphics surfaces'),
+    '09': ('stage09-compositor-test', '[S09] compositor scheduler: PASSED', 'stage09-compositor', 'compositor scheduler'),
     '19.2': ('stage19-2-test', '[S19.2] hello-gui through the compositor: PASSED', 'hello-gui-compositor', 'hello-gui compositor'),
     '19.4': ('stage19-4-test', '[S19.4] compositor authority: PASSED', 'hello-gui-authority', 'compositor authority'),
     '19.5': ('stage19-5-test', '[S19.5] input focus: PASSED', 'hello-gui-input', 'input focus'),
@@ -22,6 +24,12 @@ STAGES={
     '19.12': ('stage19-12-test', '[S19.12] pointer input: PASSED', 'hello-gui-pointer', 'pointer input'),
     '19.13': ('stage19-13-test', '[S19.13] translucency and shadows: PASSED', 'hello-gui-alpha', 'translucency and shadows'),
     '19.14': ('stage19-14-test', '[S19.14] display scaling and frame pacing: PASSED', 'hello-gui-scaled', 'display scaling and frame pacing'),
+    '20.16': ('stage20-16-test', '[S20.16] textured 3D chrome demo: PASSED', 'hello-gui-3d-chrome', 'textured 3D chrome demo'),
+    '30.1': ('stage30-1-test', '[S30.1] syscall benchmark: PASSED', 'hello-gui-syscall-benchmark', 'syscall latency benchmark'),
+    '30.2': ('stage30-2-test', '[S30.2] ipc benchmark: PASSED', 'hello-gui-ipc-benchmark', 'IPC latency benchmark'),
+    '30.3': ('stage30-3-test', '[S30.3] fs benchmark: PASSED', 'hello-gui-fs-benchmark', 'filesystem latency benchmark'),
+    '30.4': ('stage30-4-test', '[S30.4] compositor benchmark: PASSED', 'hello-gui-compositor-benchmark', 'compositor frame-present latency benchmark'),
+    '30.5': ('stage30-5-test', '[S30.5] scheduler benchmark: PASSED', 'hello-gui-scheduler-benchmark', 'scheduler yield latency benchmark'),
 }
 
 def app_build_env(app_dir):
@@ -82,8 +90,11 @@ def main():
             print(f'QEMU timeout. Evidence: {out}',file=sys.stderr); return 1
     text=serial.read_text(errors='replace') if serial.exists() else ''
     for line in text.splitlines():
-        if '[S19.' in line or 'hello-gui' in line: print('  '+line.strip())
-    if code != 33 or marker not in text:
+        if '[S16G' in line or '[S19.' in line or 'hello-gui' in line: print('  '+line.strip())
+    visual_marker = '[S16G] WovenGraphics visual frame: PASSED'
+    visual_marker_2d = '[S16G2] WovenGraphics 2D frame: PASSED'
+    visual_marker_3d = '[S16G3D] WovenGraphics software 3D frame: PASSED'
+    if code != 33 or marker not in text or (a.stage == '19.2' and (visual_marker not in text or visual_marker_2d not in text or visual_marker_3d not in text)):
         print(f'FAILED (exit {code}). Evidence: {out}',file=sys.stderr)
         print(text[-3000:],file=sys.stderr); return 1
     print(f'{label}: PASS ({a.cpus} CPU, exit 33). Evidence: {out}')

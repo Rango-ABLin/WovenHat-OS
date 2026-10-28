@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 use crate::block::BlockDevice;
-use crate::{ata, block_io, fat32, gpt, partition, swap, vfs};
+use crate::{block_io, fat32, gpt, partition, swap, vfs};
 
 const READ_ONLY_ATTRIBUTE: u8 = 0x01;
 const DIRECTORY_ATTRIBUTE: u8 = 0x10;
@@ -87,7 +87,7 @@ pub enum SpaceError {
     NotFat32,
     Failed,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountStatus {
     NoDevice,
     NotFat32,
@@ -187,8 +187,22 @@ fn unavailable_space_error() -> SpaceError {
         _ => SpaceError::Unmounted,
     }
 }
+/// Mount the FAT32 volume of the selected primary device (ATA unless a
+/// boot selected NVMe or AHCI; see `block_io::select_root`) at /mnt.
 pub fn mount_ata_root() -> MountStatus {
-    let status = ata::with_primary_master(|disk| {
+    // Stage 13.17: decide whether the device is WovenHat's own before
+    // mounting, so a foreign disk is imported read-only and never written.
+    let owned = block_io::with_root(|disk| {
+        let mut disk = disk;
+        fat32_label(&mut disk)
+    })
+    .flatten()
+    .is_some_and(|label| block_io::OWNED_LABELS.iter().any(|owned| **owned == label));
+    block_io::set_root_owned(owned);
+    let status = block_io::with_root(|disk| {
+        // A sized handle for the generic mount helpers.
+        let mut disk = disk;
+        let disk = &mut disk;
         let direct = mount_device(disk);
         if direct != MountStatus::NotFat32 {
             if matches!(direct, MountStatus::Mounted(_)) {
@@ -221,6 +235,27 @@ pub fn mount_ata_root() -> MountStatus {
     .unwrap_or(MountStatus::NoDevice);
     record_mount_status(status);
     status
+}
+
+/// The boot-sector label of the FAT32 volume the mount finds on `device`:
+/// the whole device, else an MBR partition, else a GPT partition.
+fn fat32_label(device: &mut impl crate::block::BlockDevice) -> Option<[u8; 11]> {
+    fn label(device: &mut impl crate::block::BlockDevice) -> Option<[u8; 11]> {
+        fat32::mount(device).ok()?;
+        let mut sector = [0u8; crate::block::SECTOR_SIZE];
+        device.read_sector(0, &mut sector).ok()?;
+        sector[71..82].try_into().ok()
+    }
+    if let Some(found) = label(device) {
+        return Some(found);
+    }
+    let partition = match partition::find_fat32(device) {
+        Ok(Some(partition)) => partition,
+        Ok(None) => gpt::find_fat_partition(device).ok().flatten()?,
+        Err(_) => return None,
+    };
+    let mut view = partition::PartitionDevice::new(device, partition).ok()?;
+    label(&mut view)
 }
 
 fn mount_partition(
@@ -283,6 +318,13 @@ fn mount_device(device: &mut impl crate::block::BlockDevice) -> MountStatus {
         && (recover_batch_journal(device, volume).is_err()
             || recover_data_journal(device, volume).is_err())
     {
+        return MountStatus::Failed;
+    }
+
+    // FSINFO is advisory metadata.  A sudden stop can commit a FAT entry
+    // before its matching hint update; repair it from the FAT before any
+    // allocator or VFS import observes the stale count.
+    if writable_import && fat32::repair_fs_info(device, volume).is_err() {
         return MountStatus::Failed;
     }
 
@@ -386,7 +428,7 @@ fn import_directory(
             .ok()
             .flatten()
         {
-            let mut bytes = [0u8; vfs::NODE_CAPACITY];
+            let mut bytes = alloc::vec![0u8; vfs::NODE_CAPACITY];
             let checksum_ok = fat32::resolve_path(device, volume, &path[5..])
                 .ok()
                 .and_then(|entry| fat32::read_file(device, volume, entry, &mut bytes).ok())
@@ -898,7 +940,7 @@ fn recover_data_journal(
         if version == DATA_JOURNAL_VERSION {
             let expected_len = read_u32(&record, 14) as usize;
             let expected_checksum = read_u64(&record, 26);
-            let mut current = [0u8; vfs::NODE_CAPACITY];
+            let mut current = alloc::vec![0u8; vfs::NODE_CAPACITY];
             let current_len = match fat32::resolve_path(device, volume, relative) {
                 Ok(entry) if entry.attributes & DIRECTORY_ATTRIBUTE == 0 => {
                     Some(fat32::read_file(device, volume, entry, &mut current)?)
@@ -1587,7 +1629,7 @@ pub enum LiveMutationTestStatus {
 /// sequence for mkdir/write/persist/directory rename/delete and skips when the
 /// boot has no writable FAT32 ATA mount.
 pub fn live_mutation_self_test() -> LiveMutationTestStatus {
-    if !block_io::primary_ata_present() || vfs::stat("/mnt").is_err() {
+    if !block_io::primary_ata_present() || !mnt_mounted() || vfs::stat("/mnt").is_err() {
         return LiveMutationTestStatus::Skipped;
     }
 
@@ -1814,8 +1856,8 @@ fn live_batch_recovery_self_test() -> Result<(), &'static str> {
                       expected_metadata_b: fat32::FileMetadata|
      -> Result<(), &'static str> {
         let mut disk = block_io::primary_ata();
-        // Heap, not stack. TASK_STACK_SIZE is 128 KiB and vfs::NODE_CAPACITY is
-        // 64 KiB, so two of these as locals would consume the entire task stack
+        // Heap, not stack. TASK_STACK_SIZE is 256 KiB and vfs::NODE_CAPACITY is
+        // 128 KiB, so two of these as locals would consume the entire task stack
         // before this frame's own overhead or the callee's. The journal record
         // buffer in read_data_journal_record is heap-allocated for the same
         // reason.
@@ -2115,7 +2157,7 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
         {
             return Err(PersistError::BadName);
         }
-        let mut old = [0u8; vfs::NODE_CAPACITY];
+        let mut old = alloc::vec![0u8; vfs::NODE_CAPACITY];
         let mut disk = block_io::primary_ata();
         let old_length = read_existing_file_on_device(&mut disk, &path[5..], &mut old)
             .map_err(|_| PersistError::Failed)?;
@@ -2226,7 +2268,7 @@ pub fn persist_path(path: &str) -> Result<(), PersistError> {
     }
 
     // Heap, not stack. This function needs two NODE_CAPACITY buffers live at
-    // once, and NODE_CAPACITY is 64 KiB against a 128 KiB TASK_STACK_SIZE, so
+    // once, and NODE_CAPACITY is 128 KiB against a 256 KiB TASK_STACK_SIZE, so
     // as locals they would occupy the entire task stack with no margin for this
     // frame or any callee.
     let mut data = alloc::vec![0_u8; vfs::NODE_CAPACITY];

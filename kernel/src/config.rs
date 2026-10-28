@@ -2,34 +2,52 @@
 //!
 //! Raising these values is the first step of Phase A (scalability).
 //! Keep them power-of-two friendly where it helps alignment, but the
-//! primary goal is to remove the artificial 8-slot ceilings that
-//! currently prevent real multi-process workloads.
+//! primary goal is to keep the bounded kernel usable for real multi-process
+//! workloads while retaining explicit fail-closed resource limits.
 
 /// Maximum number of tasks the scheduler can track (including kernel + idle).
-pub const MAX_TASKS: usize = 32;
+pub const MAX_TASKS: usize = 128;
+
+/// Minimum physical RAM for a supported production installation. Smaller
+/// machines remain useful for bounded CI/QEMU regression fixtures, but are
+/// not a supported desktop configuration.
+pub const MIN_SUPPORTED_RAM_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub const MIN_SUPPORTED_RAM_GIB: u64 = 4;
 
 /// Maximum number of processes (user + kernel).
-pub const MAX_PROCESSES: usize = 32;
+pub const MAX_PROCESSES: usize = 128;
 
 /// Maximum open file descriptors per process.
 /// Descriptors 0, 1, 2 are reserved for stdin / stdout / stderr.
-pub const MAX_FILE_DESCRIPTORS: usize = 16;
+pub const MAX_FILE_DESCRIPTORS: usize = 64;
 
 /// Kernel stack size reserved for each task (bytes).
 // Debug fork copies bounded process metadata and walks sparse mappings.
-// Reserve room for nested calls and fault population on the same entry stack.
-pub const TASK_STACK_SIZE: usize = 4096 * 32;
+// The package authority also carries two bounded WovenStore snapshots while
+// crossing the native WovenFS boundary, so service-enabled builds reserve the
+// larger stack explicitly rather than allowing a transaction to overrun the
+// canary-protected 64-KiB baseline. The 256 MiB Stage 24.59 regression fixture
+// is intentionally tighter: its bounded system-app image set must boot without
+// spending 128 MiB on idle task stacks, while 256 KiB still leaves four times
+// the ordinary stack budget for the Change-PIN path.
+pub const TASK_STACK_SIZE: usize = if cfg!(feature = "stage24-59-test") {
+    4096 * 64
+} else if cfg!(any(feature = "stage22-5-test", feature = "system-apps")) {
+    4096 * 256
+} else {
+    4096 * 64
+};
 
 /// Maximum IPC endpoints (one per process is typical).
 pub const MAX_IPC_ENDPOINTS: usize = 32;
 
 /// Stage 8.1 global kernel IPC object-table capacity. Endpoint objects are
 /// addressed internally by opaque object IDs rather than process IDs.
-pub const MAX_IPC_OBJECTS: usize = 64;
+pub const MAX_IPC_OBJECTS: usize = 256;
 
 /// Stage 8.1 process-local IPC handle capacity. Handles are generation-tagged
 /// so a stale closed handle cannot alias a later object in the same slot.
-pub const MAX_IPC_HANDLES_PER_PROCESS: usize = 16;
+pub const MAX_IPC_HANDLES_PER_PROCESS: usize = 64;
 
 /// Stage 8.6 bounded global service-registry capacity. Each published service
 /// pins one endpoint object until it is explicitly unpublished or its owner
@@ -66,8 +84,12 @@ pub const MAX_IO_SIZE: usize = 1024;
 /// Maximum VFS nodes (files) that can exist simultaneously.
 pub const MAX_VFS_NODES: usize = 64;
 
-/// Capacity of each VFS node data buffer (bytes).
-pub const VFS_NODE_CAPACITY: usize = 64 * 1024;
+/// Capacity of each VFS node data buffer (bytes). This is also the largest
+/// executable image `exec` reads from the VFS. The system-app catalog now
+/// includes the signed WovenImages package (166,248 bytes), so the capacity
+/// must cover that package while remaining a bounded per-node allocation.
+/// Never put a buffer of this size on a kernel stack.
+pub const VFS_NODE_CAPACITY: usize = 256 * 1024;
 
 /// Maximum ELF loadable segments accepted by the loader.
 pub const MAX_ELF_SEGMENTS: usize = 8;

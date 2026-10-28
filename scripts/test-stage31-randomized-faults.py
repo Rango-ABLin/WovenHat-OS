@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Run a seeded, fail-closed cross-subsystem Stage 31 fault matrix.
+
+This is an orchestration boundary, not a production fault injector. It runs
+the existing isolated fault/recovery gates in a deterministic pseudo-random
+order, one process at a time, and preserves every command, result, and child
+output. Physical disks and firmware variables are never selected. The report
+therefore proves randomized scenario scheduling and cross-subsystem evidence;
+it does not claim arbitrary in-guest fault injection.
+The matrix includes network link loss, low-RAM boot recovery, a disposable
+QEMU block read fault, the signed update-service restart slice, production
+service-supervisor recovery, and controller-owned driver restart acceptance.
+It remains an orchestrator of bounded child gates, not an arbitrary in-guest
+fault injector.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import random
+import subprocess
+import sys
+import time
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCENARIOS = {
+    "memory": ["scripts/test-memory-qemu.py"],
+    "low-ram": ["scripts/test-stage31-low-ram.py"],
+    "storage-read-fault": ["scripts/test-stage31-storage-read-fault.py"],
+    "storage-write-fault": ["scripts/test-stage31-storage-write-fault.py"],
+    "process-crash": ["scripts/test-stage31-process-crash.py"],
+    "packet-corruption": ["scripts/test-stage31-packet-corruption.py"],
+    "network-loss": ["scripts/test-network-qemu.py"],
+    "sudden-shutdown": ["scripts/test-sudden-shutdown-qemu.py"],
+    "service-restart": ["scripts/test-stage27-5-update-service.py"],
+    "service-supervisor": ["scripts/test-shell-qemu.py"],
+    "driver-restart": ["scripts/test-stage13-12-drivers.py"],
+}
+
+
+def allocate_evidence(root, seed, cpus, count):
+    suffix = "" if count == 8 else f"-{count}scenarios"
+    base = root / "audit-artifacts" / f"stage31-randomized-{seed:x}-{cpus}cpu{suffix}"
+    evidence = base
+    if base.exists() and any(base.iterdir()):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        evidence = base.with_name(f"{base.name}-rerun-{stamp}")
+    evidence.mkdir(parents=True, exist_ok=False)
+    return evidence
+
+
+def write_plan(evidence, seed, cpus, order, status):
+    (evidence / "plan.json").write_text(
+        json.dumps(
+            {
+                "schema": "wovenhat.stage31.randomized-faults/v1",
+                "seed": seed,
+                "cpus": cpus,
+                "order": order,
+                "physical_access": "none",
+                "status": status,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def scenario_command(scenario, args):
+    command = [sys.executable, str(ROOT / SCENARIOS[scenario][0]), "--cpus", str(args.cpus)]
+    if scenario in {"memory", "process-crash", "sudden-shutdown", "packet-corruption", "low-ram", "storage-read-fault", "storage-write-fault"}:
+        command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
+    elif scenario == "network-loss":
+        command.extend([
+            "--qemu", args.qemu,
+            "--firmware", str(args.firmware),
+            "--link-loss",
+            "--link-loss-count", "3",
+            "--fault-seed", hex(args.seed),
+        ])
+    elif scenario == "service-restart":
+        command.extend(["--qemu", args.qemu, "--firmware", str(args.firmware)])
+    elif scenario == "service-supervisor":
+        command.extend([
+            "--supervisor-test",
+            "--qemu", args.qemu,
+            "--firmware", str(args.firmware),
+        ])
+    elif scenario == "driver-restart":
+        command.extend([
+            "--mode", "restart",
+            "--qemu", args.qemu,
+            "--firmware", str(args.firmware),
+        ])
+    return command
+
+
+def run(args: argparse.Namespace) -> int:
+    if not 1 <= args.count <= len(SCENARIOS):
+        raise SystemExit(f"--count must be between 1 and {len(SCENARIOS)}")
+    rng = random.Random(args.seed)
+    order = list(SCENARIOS)
+    rng.shuffle(order)
+    order = order[: args.count]
+    evidence = allocate_evidence(ROOT, args.seed, args.cpus, args.count)
+    write_plan(evidence, args.seed, args.cpus, order, "running")
+    results = []
+    for index, scenario in enumerate(order, 1):
+        command = scenario_command(scenario, args)
+        run_dir = evidence / f"run-{index:02d}-{scenario}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "command.json").write_text(
+            json.dumps({"scenario": scenario, "command": command}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=args.timeout,
+            )
+            output = completed.stdout or ""
+            returncode = completed.returncode
+            error = None
+        except subprocess.TimeoutExpired as exc:
+            output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+            returncode = 124
+            error = f"timeout after {args.timeout}s"
+        (run_dir / "stdout-stderr.log").write_text(output, encoding="utf-8")
+        result = {
+            "scenario": scenario,
+            "returncode": returncode,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "error": error,
+        }
+        (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        results.append(result)
+        print(f"[{index}/{len(order)}] {scenario}: exit={returncode}", flush=True)
+        if returncode != 0:
+            write_plan(evidence, args.seed, args.cpus, order, "failed")
+            (evidence / "result.json").write_text(
+                json.dumps({"valid": False, "seed": args.seed, "cpus": args.cpus, "order": order, "runs": results}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            print(f"randomized Stage 31 matrix failed; evidence: {evidence}", file=sys.stderr)
+            return 1
+    write_plan(evidence, args.seed, args.cpus, order, "passed")
+    report = {"valid": True, "seed": args.seed, "cpus": args.cpus, "order": order, "runs": results}
+    (evidence / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"randomized Stage 31 scenario matrix: PASS ({args.cpus} CPU, seed={args.seed:#x})")
+    print(f"Evidence: {evidence}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=lambda value: int(value, 0), default=0x51A7E)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
+    parser.add_argument("--count", type=int, default=len(SCENARIOS))
+    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--qemu", default="qemu-system-x86_64")
+    parser.add_argument("--firmware", required=True, help="OVMF CODE file passed to every child gate")
+    args = parser.parse_args()
+    if args.timeout < 1:
+        parser.error("--timeout must be positive")
+    return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

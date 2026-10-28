@@ -1,6 +1,13 @@
+extern crate alloc;
+
+use alloc::{
+    alloc::{alloc_zeroed, Layout},
+    boxed::Box,
+};
+
 pub const SECTOR_SIZE: usize = 512;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     OutOfBounds,
     InvalidBuffer,
@@ -54,6 +61,24 @@ impl<const SECTORS: usize> RamDisk<SECTORS> {
 
     pub fn set_read_only(&mut self, read_only: bool) {
         self.read_only = read_only;
+    }
+
+    /// Allocate a large disposable RAM disk without constructing its backing
+    /// array on the caller's small kernel stack.
+    pub fn boxed_zeroed() -> Option<Box<Self>> {
+        let layout = Layout::new::<Self>();
+        // SAFETY: `alloc_zeroed` returns a pointer aligned and sized for the
+        // exact `Self` layout. `Box::from_raw` takes ownership and will use
+        // the same layout when the returned box is dropped. Zero is the
+        // valid initial state for every byte of `RamDisk`.
+        let pointer = unsafe { alloc_zeroed(layout) }.cast::<Self>();
+        if pointer.is_null() {
+            None
+        } else {
+            // SAFETY: the allocation is non-null, fully initialized to zero,
+            // and has the layout required by `Self`.
+            Some(unsafe { Box::from_raw(pointer) })
+        }
     }
 }
 

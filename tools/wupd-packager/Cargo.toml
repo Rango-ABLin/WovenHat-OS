@@ -1,0 +1,13 @@
+[package]
+name = "wovenhat-wupd-packager"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+
+[lints.rust]
+warnings = "deny"

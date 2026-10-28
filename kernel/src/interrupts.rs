@@ -25,16 +25,68 @@ static PCI_DEVICE_IRQS: [core::sync::atomic::AtomicU64; PCI_VECTOR_COUNT] =
 static PCI_DEVICE_WORK: [AtomicBool; PCI_VECTOR_COUNT] =
     [const { AtomicBool::new(false) }; PCI_VECTOR_COUNT];
 
+/// The task, if any, woken through the scheduler event latch when a vector
+/// fires (0 = none). Raw task IDs: the handler must not take locks beyond the
+/// scheduler's own.
+static PCI_DEVICE_WAITER: [core::sync::atomic::AtomicU64; PCI_VECTOR_COUNT] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; PCI_VECTOR_COUNT];
+
 fn dispatch_pci_device_vector(vector: u8) {
     let index = usize::from(vector - PCI_VECTOR_FIRST);
     PCI_DEVICE_IRQS[index].fetch_add(1, Ordering::Relaxed);
     PCI_DEVICE_WORK[index].store(true, Ordering::Release);
     crate::smp::eoi();
+    // After publishing the work flag: a worker that drained and is about to
+    // wait either sees the flag or receives this latched signal.
+    let waiter = PCI_DEVICE_WAITER[index].load(Ordering::Acquire);
+    if waiter != 0 {
+        let _ = task::signal_event(task::TaskId::from_u64(waiter));
+    }
 }
 
-#[expect(
-    dead_code,
-    reason = "consumed by Stage 13.2 driver binding/unbinding integration"
+/// Wake `task` whenever `vector` fires. One waiter per vector; a vector
+/// outside the PCI range, or one that already has a waiter, is refused.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn set_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WAITER[usize::from(vector - PCI_VECTOR_FIRST)]
+        .compare_exchange(0, task.as_u64(), Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// Remove `task` as the waiter of `vector`; another task's registration is
+/// left alone.
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn clear_pci_vector_waiter(vector: u8, task: task::TaskId) -> bool {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return false;
+    }
+    PCI_DEVICE_WAITER[usize::from(vector - PCI_VECTOR_FIRST)]
+        .compare_exchange(task.as_u64(), 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// How many times `vector` has fired.
+#[cfg(any(
+    feature = "stage13-13-test",
+    feature = "stage13-15-test",
+    feature = "stage13-16-test"
+))]
+pub fn pci_device_irq_count(vector: u8) -> u64 {
+    if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
+        return 0;
+    }
+    PCI_DEVICE_IRQS[usize::from(vector - PCI_VECTOR_FIRST)].load(Ordering::Acquire)
+}
+
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "consumed by Stage 13.2 driver binding/unbinding integration"
+    )
 )]
 pub fn take_pci_device_work(vector: u8) -> bool {
     if !(PCI_VECTOR_FIRST..=PCI_VECTOR_LAST).contains(&vector) {
@@ -127,17 +179,17 @@ pub const WIFI_DEVICE_VECTOR: u8 = 0xd0;
 static WIFI_DEVICE_IRQS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 static WIFI_DEVICE_WORK: AtomicBool = AtomicBool::new(false);
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn wifi_device_irq_count() -> u64 {
     WIFI_DEVICE_IRQS.load(Ordering::Acquire)
 }
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn take_wifi_device_work() -> bool {
     WIFI_DEVICE_WORK.swap(false, Ordering::AcqRel)
 }
 
-#[cfg(feature = "stage13-9-test")]
+#[cfg(any(feature = "stage13-9-test", feature = "physical-wifi"))]
 pub fn publish_wifi_device_work_for_test() {
     WIFI_DEVICE_WORK.store(true, Ordering::Release);
 }
@@ -155,7 +207,19 @@ pub fn init() {
     let idt = IDT.call_once(|| {
         let mut idt = InterruptDescriptorTable::new();
 
+        #[cfg(not(feature = "gdb-entry"))]
         idt.breakpoint.set_handler_fn(breakpoint_handler);
+        // SAFETY: wovenhat_debug_entry saves all GPRs, calls
+        // wovenhat_debug_dispatch, and returns via iretq.  Neither vector 1
+        // nor 3 pushes an error code, so the frame layout is identical for
+        // both and the trampoline can handle either.
+        #[cfg(feature = "gdb-entry")]
+        unsafe {
+            idt.breakpoint
+                .set_handler_addr(VirtAddr::new(crate::gdb_entry::debug_entry_address()));
+            idt.debug
+                .set_handler_addr(VirtAddr::new(crate::gdb_entry::debug_entry_address()));
+        }
         idt.non_maskable_interrupt.set_handler_fn(tlb_nmi_handler);
         idt[crate::smp::TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
         idt[crate::smp::RESCHEDULE_VECTOR].set_handler_fn(reschedule_ipi_handler);
@@ -197,6 +261,8 @@ pub fn breakpoint_reached() -> bool {
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
     BREAKPOINT_REACHED.store(true, Ordering::SeqCst);
+    #[cfg(feature = "wovendev-live")]
+    crate::gdb_live::record(3, None);
 }
 
 fn dump_exception_context(label: &str, stack_frame: &InterruptStackFrame, error_code: Option<u64>) {

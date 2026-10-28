@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from qemu_validation import validation_errors
 
 
 def main():
@@ -12,7 +13,9 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--firmware-vars', type=Path, help='matching writable OVMF VARS template')
-    parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=2)
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8, 16), default=2)
+    parser.add_argument('--memory', default='256M',
+                        help='guest RAM size; the default preserves the low-memory regression fixture')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--legacy-irq', action='store_true')
@@ -44,7 +47,7 @@ def main():
     if firmware_vars is not None:
         vars_copy = out / 'OVMF_VARS.fd'
         shutil.copyfile(firmware_vars, vars_copy)
-    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
+    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', args.memory, '-smp', str(args.cpus),
                '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
                '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
                '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',
@@ -79,7 +82,9 @@ def main():
         ]
     else:
         required = ['[BOOT] ALL VALIDATIONS PASSED', '[S6.PAGING] table allocation rollback: PASSED', '[S6.HEAP] unbounded live metadata: PASSED', '[S6.HEAP] runtime growth: PASSED', '[S6.MEMORY] reclaimed overflow/double-free: PASSED', f'[SMP] online={args.cpus} expected={args.cpus}', '[SMP] scheduler/barrier: PASSED', '[SMP] acknowledged TLB shootdowns: PASSED', '[SMP] remote stale-translation/refree: PASSED', '[SMP] per-CPU timer preemption: PASSED', '[SMP] automatic rebalancing: PASSED', '[SMP] reschedule IPI: PASSED', '[SMP] migration stress: PASSED']
-    if result.returncode != 33 or any(marker not in log for marker in required):
+    errors = validation_errors(result.returncode, log, required)
+    if errors:
+        print('\n'.join(errors), file=sys.stderr)
         print(log[-10000:], file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return 1

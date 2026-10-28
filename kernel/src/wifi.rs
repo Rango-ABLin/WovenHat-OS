@@ -80,6 +80,9 @@ impl Manager {
     pub fn scan_count(&self) -> usize {
         self.scan_count
     }
+    pub fn scan_result(&self, index: usize) -> Option<AccessPoint> {
+        self.scan.get(index).copied().flatten()
+    }
     pub fn associated(&self) -> Option<AccessPoint> {
         self.associated
     }

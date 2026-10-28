@@ -1,8 +1,11 @@
 use core::arch::asm;
 use core::fmt::{self, Write};
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 const COM1: u16 = 0x3f8;
 const LINE_STATUS_TRANSMITTER_EMPTY: u8 = 1 << 5;
+/// Never let an absent or wedged legacy UART hold up kernel progress.
+const TX_POLL_LIMIT: u16 = 4096;
 
 pub fn init() {
     // SAFETY: WovenHat owns the machine at this point in kernel startup. These
@@ -18,23 +21,128 @@ pub fn init() {
     }
 }
 
+/// The kernel log: every byte written to the serial port, the newest
+/// [`LOG_BYTES`] of them kept, so the log can be saved where there is no
+/// serial line, such as the live-test log on the WovenHat USB stick
+/// (Stage 13.19).
+pub const LOG_BYTES: usize = 256 * 1024;
+static LOG: [AtomicU8; LOG_BYTES] = [const { AtomicU8::new(0) }; LOG_BYTES];
+/// Bytes logged since boot; the next byte goes to `LOG[LOG_HEAD % LOG_BYTES]`.
+static LOG_HEAD: AtomicUsize = AtomicUsize::new(0);
+
+fn record(byte: u8) {
+    let at = LOG_HEAD.fetch_add(1, Ordering::Relaxed);
+    LOG[at % LOG_BYTES].store(byte, Ordering::Release);
+}
+
+/// Bytes logged since boot.
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
+))]
+pub fn log_position() -> usize {
+    LOG_HEAD.load(Ordering::Acquire)
+}
+
+/// Copy logged bytes, starting at position `from`, into `out`. Returns the
+/// position actually copied from (later than `from` when older bytes have
+/// been overwritten) and the number of bytes copied. A byte being written
+/// concurrently may read as its predecessor; readers re-read the tail.
+#[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
+    feature = "stage27-5-recovery-test",
+    feature = "system-apps"
+))]
+pub fn read_log(from: usize, out: &mut [u8]) -> (usize, usize) {
+    let head = LOG_HEAD.load(Ordering::Acquire);
+    let start = from.max(head.saturating_sub(LOG_BYTES)).min(head);
+    let count = (head - start).min(out.len());
+    for (offset, byte) in out[..count].iter_mut().enumerate() {
+        *byte = LOG[(start + offset) % LOG_BYTES].load(Ordering::Acquire);
+    }
+    (start, count)
+}
+
+/// CPU (index + 1) currently writing a log record; 0 when free.
+///
+/// Every public writer holds this for its whole record, so a task preempted
+/// mid-line, or another CPU logging at the same time, cannot splice its bytes
+/// into the middle of someone else's line. Gates parse marker lines from the
+/// serial log, and a spliced line reads as a missing marker.
+///
+/// This is deliberately not a ranked kernel mutex: the kernel logs while
+/// holding many other locks, from any context, and the log must never be the
+/// reason the kernel stops. So the lock is held with interrupts disabled (no
+/// same-CPU IRQ can contend), a writer re-entering on the CPU that already
+/// holds it (an exception or panic mid-line) proceeds without waiting, and a
+/// writer that cannot get it within [`LINE_LOCK_SPIN_LIMIT`] writes anyway.
+static LINE_OWNER: AtomicUsize = AtomicUsize::new(0);
+/// Last byte sent to the port (a newline before any). A kernel line that would
+/// otherwise continue a userspace write left without its newline (a shell
+/// prompt, say) starts on a fresh line instead, so marker lines always begin
+/// at column 0.
+static LAST_BYTE: AtomicU8 = AtomicU8::new(b'\n');
+/// Bounded wait for [`LINE_OWNER`]: far longer than any one record takes to
+/// transmit, short enough that a wedged holder cannot hang the kernel.
+const LINE_LOCK_SPIN_LIMIT: u32 = 1 << 24;
+
+fn with_line_lock(write: impl FnOnce()) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let me = crate::smp::lock_cpu_index() + 1;
+        if LINE_OWNER.load(Ordering::Acquire) == me {
+            write();
+            return;
+        }
+        let mut spins = 0u32;
+        let acquired = loop {
+            if LINE_OWNER
+                .compare_exchange_weak(0, me, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                break true;
+            }
+            spins += 1;
+            if spins == LINE_LOCK_SPIN_LIMIT {
+                break false;
+            }
+            core::hint::spin_loop();
+        };
+        write();
+        if acquired {
+            LINE_OWNER.store(0, Ordering::Release);
+        }
+    });
+}
+
 pub fn write_fmt(arguments: fmt::Arguments<'_>) {
-    let _ = SerialPort.write_fmt(arguments);
+    with_line_lock(|| {
+        let _ = SerialPort.write_fmt(arguments);
+    });
 }
 
 pub fn write_line(arguments: fmt::Arguments<'_>) {
-    let _ = SerialPort.write_fmt(arguments);
-    let _ = SerialPort.write_str("\n");
+    with_line_lock(|| {
+        if LAST_BYTE.load(Ordering::Relaxed) != b'\n' {
+            let _ = SerialPort.write_str("\n");
+        }
+        let _ = SerialPort.write_fmt(arguments);
+        let _ = SerialPort.write_str("\n");
+    });
 }
 
 pub fn write_bytes(bytes: &[u8]) {
-    let mut port = SerialPort;
-    for &byte in bytes {
-        if byte == b'\n' {
-            port.write_byte(b'\r');
+    with_line_lock(|| {
+        let mut port = SerialPort;
+        for &byte in bytes {
+            if byte == b'\n' {
+                port.write_byte(b'\r');
+            }
+            port.write_byte(byte);
         }
-        port.write_byte(byte);
-    }
+    });
 }
 struct SerialPort;
 
@@ -54,18 +162,18 @@ impl Write for SerialPort {
 
 impl SerialPort {
     fn write_byte(&mut self, byte: u8) {
-        // The physical inventory target may have no usable legacy UART.
-        // Its framebuffer is authoritative: never hang that diagnostic on
-        // serial readiness. Ordinary/test builds retain their existing path.
-        #[cfg(feature = "physical-probe")]
+        // The line ending's carriage return is for terminals, not the log.
+        if byte != b'\r' {
+            record(byte);
+            LAST_BYTE.store(byte, Ordering::Relaxed);
+        }
         let mut polls = 0u16;
+        // SAFETY: reads the COM1 line-status register (COM1+5), a fixed UART I/O
+        // port initialized during kernel startup.
         while unsafe { inb(COM1 + 5) } & LINE_STATUS_TRANSMITTER_EMPTY == 0 {
-            #[cfg(feature = "physical-probe")]
-            {
-                polls += 1;
-                if polls == 4096 {
-                    return;
-                }
+            polls += 1;
+            if polls == TX_POLL_LIMIT {
+                return;
             }
             core::hint::spin_loop();
         }
@@ -82,7 +190,7 @@ impl SerialPort {
 ///
 /// The caller must ensure that `port` is valid and that WovenHat owns the
 /// associated device.
-unsafe fn inb(port: u16) -> u8 {
+pub(crate) unsafe fn inb(port: u16) -> u8 {
     let value: u8;
 
     // SAFETY: The caller upholds the port-I/O requirements above.
@@ -104,7 +212,7 @@ unsafe fn inb(port: u16) -> u8 {
 ///
 /// The caller must ensure that `port` is valid and that WovenHat owns the
 /// associated device.
-unsafe fn outb(port: u16, value: u8) {
+pub(crate) unsafe fn outb(port: u16, value: u8) {
     // SAFETY: The caller upholds the port-I/O requirements above.
     unsafe {
         asm!(

@@ -166,9 +166,12 @@ impl MmioEntry {
 
 /// An owner-scoped device-register mapping. Raw [`map_mmio`] mappings are
 /// intentionally not represented by this token and are never revoked.
-#[expect(
-    dead_code,
-    reason = "host kernel targets do not instantiate PCI driver lifecycle"
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "host kernel targets do not instantiate PCI driver lifecycle"
+    )
 )]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct OwnedMmioMapping {
@@ -187,9 +190,12 @@ impl OwnedMmioMapping {
     pub const fn physical_address(self) -> u64 {
         self.physical
     }
-    #[expect(
-        dead_code,
-        reason = "used by PCI driver lifecycle on freestanding target"
+    #[cfg_attr(
+        not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+        expect(
+            dead_code,
+            reason = "used by PCI driver lifecycle on freestanding target"
+        )
     )]
     pub const fn virtual_address(self) -> u64 {
         self.virtual_address
@@ -290,7 +296,9 @@ fn map_to_reclaim_on_failure(
         let mut recorder = TableFrameRecorder::new(allocator, table_frame_limit);
         // SAFETY: The caller supplied a unique data frame and the recorder
         // forwards unique table frames from the physical allocator.
-        let result = unsafe { mapper.map_to(page, frame, flags, &mut recorder) };
+        let result = unsafe {
+            mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut recorder)
+        };
         (result, recorder.frames)
     };
     match result {
@@ -531,6 +539,18 @@ fn user_flags(writable: bool, executable: bool) -> PageTableFlags {
     flags
 }
 
+fn ancestor_flags(leaf: PageTableFlags) -> PageTableFlags {
+    // Leaf W^X/RELRO/COW policy is unchanged. Ancestor W permits independent
+    // user leaves to enforce their own policies, including a later COW break.
+    PageTableFlags::from_bits_truncate(crate::page_permissions::ancestor_bits(leaf.bits()))
+}
+
+const _: () = assert!(
+    PageTableFlags::PRESENT.bits() == 1
+        && PageTableFlags::WRITABLE.bits() == 2
+        && PageTableFlags::USER_ACCESSIBLE.bits() == 4
+);
+
 fn page_range(start: u64, size: usize) -> Result<(Page<Size4KiB>, Page<Size4KiB>), MapRangeError> {
     if size == 0
         || !start.is_multiple_of(Size4KiB::SIZE)
@@ -765,6 +785,11 @@ pub fn clone_user_range_in(
                 .checked_add(destination_physical)
                 .ok_or(MapRangeError::InvalidRange)?
                 as *mut u8;
+            // SAFETY: both pointers are direct-map addresses (physical_memory_offset
+            // + a distinct physical frame) formed with checked_add; source and
+            // destination are different frames of one 4 KiB page each, kept live
+            // by the PAGING lock, so copying Size4KiB::SIZE bytes is in bounds
+            // and non-overlapping.
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     source_pointer,
@@ -863,7 +888,18 @@ pub fn share_user_range_in(
             return Err(MapRangeError::OutOfFrames);
         }
         // Map destination to the same frame.
-        match unsafe { destination_mapper.map_to(page, frame, flags, &mut *allocator) } {
+        // SAFETY: held under PAGING; `page` was verified unmapped in the
+        // destination, `frame` is the source's user frame whose COW reference
+        // was just reserved, and the allocator hands out unique table frames.
+        match unsafe {
+            destination_mapper.map_to_with_table_flags(
+                page,
+                frame,
+                flags,
+                ancestor_flags(flags),
+                &mut *allocator,
+            )
+        } {
             Ok(flush) => {
                 flush.ignore();
                 crate::smp::shootdown();
@@ -884,6 +920,8 @@ pub fn share_user_range_in(
         // Strip write permission from the source page when the range is logically writable.
         if writable && source_flags.contains(PageTableFlags::WRITABLE) {
             let ro_flags = user_flags(false, executable);
+            // SAFETY: `page` is the mapped, user-accessible source page under
+            // PAGING; demoting it to read-only cannot introduce aliasing.
             if let Ok(flush) = unsafe { source_mapper.update_flags(page, ro_flags) } {
                 flush.flush();
                 crate::smp::shootdown();
@@ -965,6 +1003,8 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
 
     if refs <= 1 {
         // Sole owner: just restore write permission. Keep the frame.
+        // SAFETY: `page` is the present, read-only COW page under PAGING and the
+        // process is its sole owner (refs <= 1), so re-adding WRITABLE is sound.
         match unsafe { mapper.update_flags(page, new_flags) } {
             Ok(flush) => {
                 flush.flush();
@@ -994,6 +1034,9 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
         let _ = memory::deallocate_frame(new_frame);
         return false;
     }
+    // SAFETY: both pointers are non-null direct-map addresses (checked above) of
+    // distinct physical frames — the shared old frame and the freshly allocated
+    // private frame — so copying one 4 KiB page is in bounds and non-overlapping.
     unsafe {
         core::ptr::copy_nonoverlapping(
             source_pointer,
@@ -1011,14 +1054,35 @@ pub fn try_break_cow(address_space: AddressSpace, fault_address: u64) -> bool {
     crate::smp::shootdown();
 
     let mut allocator = memory::allocator();
-    match unsafe { mapper.map_to(page, new_frame, new_flags, &mut *allocator) } {
+    // SAFETY: held under PAGING; `page` was just unmapped, `new_frame` is a
+    // freshly allocated unique frame, and the allocator supplies unique table
+    // frames.
+    match unsafe {
+        mapper.map_to_with_table_flags(
+            page,
+            new_frame,
+            new_flags,
+            ancestor_flags(new_flags),
+            &mut *allocator,
+        )
+    } {
         Ok(flush) => {
             flush.flush();
             crate::smp::shootdown();
         }
         Err(_) => {
             // Best-effort restore of the old mapping.
-            let _ = unsafe { mapper.map_to(page, old_frame, flags, &mut *allocator) };
+            // SAFETY: `page` is unmapped and `old_frame` is the still-live
+            // shared frame; held under PAGING with a unique-table allocator.
+            let _ = unsafe {
+                mapper.map_to_with_table_flags(
+                    page,
+                    old_frame,
+                    flags,
+                    ancestor_flags(flags),
+                    &mut *allocator,
+                )
+            };
             let _ = memory::deallocate_frame(new_frame);
             return false;
         }
@@ -1054,6 +1118,8 @@ fn protect_user_range_in_impl(
     let flags = user_flags(writable, executable);
 
     for page in Page::range_inclusive(start_page, end_page) {
+        // SAFETY: `mapper` is this address space's table under PAGING; each
+        // `page` in the validated range exists and gets the computed user flags.
         let flush =
             unsafe { mapper.update_flags(page, flags) }.map_err(|_| MapRangeError::NotMapped)?;
         if synchronize_tlb {
@@ -1092,6 +1158,10 @@ pub fn write_user_bytes(
             .physical_memory_offset
             .checked_add(physical_address.as_u64())
             .ok_or(MapRangeError::InvalidRange)? as *mut u8;
+        // SAFETY: `destination` is the direct-map address of the frame backing
+        // `virtual_address`; `count` is clamped to the remainder of that single
+        // page, so the write stays within the translated frame, which the PAGING
+        // lock keeps live. `bytes` is a disjoint kernel slice.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes[copied..].as_ptr(), destination, count);
         }
@@ -1122,7 +1192,10 @@ pub(crate) fn read_user_bytes_in(
             .physical_memory_offset
             .checked_add(physical)
             .ok_or(MapRangeError::InvalidRange)? as *const u8;
-        // The paging lock keeps the translated, allocated frame live while copying.
+        // SAFETY: `source` is the direct-map address of the frame backing
+        // `address` (verified USER_ACCESSIBLE above); `count` is clamped to that
+        // single page, and the PAGING lock keeps the translated frame live while
+        // copying. `output` is a disjoint kernel slice.
         unsafe {
             core::ptr::copy_nonoverlapping(source, output[copied..].as_mut_ptr(), count);
         }
@@ -1154,6 +1227,9 @@ pub fn zero_user_range_in(
             .physical_memory_offset
             .checked_add(physical_address.as_u64())
             .ok_or(MapRangeError::InvalidRange)? as *mut u8;
+        // SAFETY: `destination` is the direct-map address of the frame backing
+        // `virtual_address`; `count` is clamped to the remainder of that single
+        // page, kept live by the PAGING lock, so zeroing stays in bounds.
         unsafe { core::ptr::write_bytes(destination, 0, count) };
         cleared += count;
     }
@@ -1210,6 +1286,25 @@ pub fn destroy_user_address_space(
     }
 
     let paging = PAGING.lock();
+    if address_space.root_address() == paging.level_4_frame {
+        return Err(MapRangeError::MappingFailed);
+    }
+    // Refuse copied kernel branches before unmapping any page. A process root
+    // owns only its distinct user branches, even though it can translate the
+    // shared kernel mappings copied at creation.
+    for &(start, size) in ranges {
+        let (first, last) = page_range(start, size)?;
+        let first = usize::from(first.p4_index());
+        let last = usize::from(last.p4_index());
+        if first > last {
+            return Err(MapRangeError::InvalidRange);
+        }
+        for index in first..=last {
+            if private_root_branch(&paging, address_space, index)?.is_none() {
+                return Err(MapRangeError::MappingFailed);
+            }
+        }
+    }
     let mut mapper = mapper_for(&paging, address_space)?;
     for &(start, size) in ranges {
         let (start_page, end_page) = page_range(start, size)?;
@@ -1225,37 +1320,100 @@ pub fn destroy_user_address_space(
         }
     }
 
-    let first_page = Page::<Size4KiB>::containing_address(VirtAddr::new(ranges[0].0));
-    let root = page_table_at_mut(
-        paging.physical_memory_offset,
-        address_space.level_4_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p3_frame = root[first_page.p4_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
-    let p3 = page_table_at_mut(
-        paging.physical_memory_offset,
-        p3_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p2_frame = p3[first_page.p3_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
-    let p2 = page_table_at_mut(
-        paging.physical_memory_offset,
-        p2_frame.start_address().as_u64(),
-    )
-    .ok_or(MapRangeError::MappingFailed)?;
-    let p1_frame = p2[first_page.p2_index()]
-        .frame()
-        .map_err(|_| MapRangeError::MappingFailed)?;
+    reclaim_retired_user_root(&paging, address_space)
+}
 
-    root[first_page.p4_index()].set_unused();
-    for frame in [p1_frame, p2_frame, p3_frame, address_space.level_4_frame] {
-        if !memory::deallocate_frame(frame) {
-            return Err(MapRangeError::MappingFailed);
+/// Identify tables owned by this process, never the copied kernel branches.
+fn private_root_branch(
+    paging: &PagingState,
+    space: AddressSpace,
+    index: usize,
+) -> Result<Option<PhysFrame<Size4KiB>>, MapRangeError> {
+    let root = page_table_at(paging.physical_memory_offset, space.root_address())
+        .ok_or(MapRangeError::MappingFailed)?;
+    let entry = &root[index];
+    if entry.is_unused() {
+        return Ok(None);
+    }
+    let kernel = page_table_at(paging.physical_memory_offset, paging.level_4_frame)
+        .ok_or(MapRangeError::MappingFailed)?;
+    if entry.addr() == kernel[index].addr() {
+        return Ok(None);
+    }
+    if !entry.flags().contains(PageTableFlags::USER_ACCESSIBLE)
+        || entry.flags().contains(PageTableFlags::HUGE_PAGE)
+    {
+        return Err(MapRangeError::MappingFailed);
+    }
+    Ok(Some(
+        entry.frame().map_err(|_| MapRangeError::MappingFailed)?,
+    ))
+}
+
+fn user_tables_are_empty(offset: u64, frame: PhysFrame<Size4KiB>, level: u8) -> bool {
+    let Some(table) = page_table_at(offset, frame.start_address().as_u64()) else {
+        return false;
+    };
+    for entry in table.iter().filter(|entry| !entry.is_unused()) {
+        if level == 1 || entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+            return false;
         }
+        let Ok(child) = entry.frame() else {
+            return false;
+        };
+        if !user_tables_are_empty(offset, child, level - 1) {
+            return false;
+        }
+    }
+    true
+}
+
+fn free_empty_user_tables(
+    offset: u64,
+    frame: PhysFrame<Size4KiB>,
+    level: u8,
+) -> Result<(), MapRangeError> {
+    if level > 1 {
+        let table = page_table_at(offset, frame.start_address().as_u64())
+            .ok_or(MapRangeError::MappingFailed)?;
+        for entry in table.iter().filter(|entry| !entry.is_unused()) {
+            let child = entry.frame().map_err(|_| MapRangeError::MappingFailed)?;
+            free_empty_user_tables(offset, child, level - 1)?;
+        }
+    }
+    if !memory::deallocate_frame(frame) {
+        return Err(MapRangeError::MappingFailed);
+    }
+    Ok(())
+}
+
+/// The scheduler has retired the root on every CPU. PAGING serializes the
+/// validation/free passes; no new mapping can appear between them. Validate
+/// every branch before freeing anything, so omitted live ranges fail closed.
+fn reclaim_retired_user_root(
+    paging: &PagingState,
+    space: AddressSpace,
+) -> Result<(), MapRangeError> {
+    if space.root_address() == paging.level_4_frame || Cr3::read().0 == space.level_4_frame {
+        return Err(MapRangeError::MappingFailed);
+    }
+    for index in 0..512 {
+        if let Some(frame) = private_root_branch(paging, space, index)? {
+            if !user_tables_are_empty(paging.physical_memory_offset, frame, 3) {
+                return Err(MapRangeError::MappingFailed);
+            }
+        }
+    }
+    for index in 0..512 {
+        if let Some(frame) = private_root_branch(paging, space, index)? {
+            page_table_at_mut(paging.physical_memory_offset, space.root_address())
+                .ok_or(MapRangeError::MappingFailed)?[index]
+                .set_unused();
+            free_empty_user_tables(paging.physical_memory_offset, frame, 3)?;
+        }
+    }
+    if !memory::deallocate_frame(space.level_4_frame) {
+        return Err(MapRangeError::MappingFailed);
     }
     Ok(())
 }
@@ -1301,12 +1459,15 @@ pub fn discard_empty_user_address_space(address_space: AddressSpace) -> bool {
     if Cr3::read().0 == address_space.level_4_frame {
         return false;
     }
-    memory::deallocate_frame(address_space.level_4_frame)
+    reclaim_retired_user_root(&PAGING.lock(), address_space).is_ok()
 }
 pub fn switch_to(address_space: AddressSpace) {
     if Cr3::read().0 == address_space.level_4_frame {
         return;
     }
+    // SAFETY: `address_space.level_4_frame` names a valid level-4 page-table
+    // frame for an address space this kernel owns; loading it into CR3 switches
+    // to a complete, correct hierarchy.
     unsafe { Cr3::write(address_space.level_4_frame, Cr3Flags::empty()) };
 }
 
@@ -1319,16 +1480,23 @@ fn mapper_for(
         address_space.level_4_frame.start_address().as_u64(),
     )
     .ok_or(MapRangeError::MappingFailed)?;
+    // SAFETY: `table` is the uniquely borrowed level-4 table of `address_space`
+    // (see `page_table_at_mut`) and the offset is the bootloader direct-map base.
     Ok(unsafe { OffsetPageTable::new(table, VirtAddr::new(paging.physical_memory_offset)) })
 }
 
 fn page_table_at(offset: u64, physical: u64) -> Option<&'static PageTable> {
     let address = offset.checked_add(physical)?;
+    // SAFETY: `offset` is the bootloader direct-map base and `physical` is a
+    // page-table frame address, so `address` points at that table, which lives
+    // for the whole kernel lifetime; borrowed shared.
     Some(unsafe { &*(address as *const PageTable) })
 }
 
 fn page_table_at_mut(offset: u64, physical: u64) -> Option<&'static mut PageTable> {
     let address = offset.checked_add(physical)?;
+    // SAFETY: as `page_table_at`, but callers hold the PAGING lock so this
+    // `&mut` is the only live mutable view of that page table.
     Some(unsafe { &mut *(address as *mut PageTable) })
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1338,11 +1506,21 @@ pub enum UserMemoryError {
     PermissionDenied,
 }
 
+/// Reject a syscall range that leaves the canonical lower half before any
+/// page-table walk, like Linux's `access_ok()`.
+fn check_current_user_range(start: u64, length: usize) -> Result<(), UserMemoryError> {
+    crate::user_address::check_user_range(start, length).map_err(|error| match error {
+        crate::user_address::RangeError::Overflow => UserMemoryError::AddressOverflow,
+        crate::user_address::RangeError::OutsideUser => UserMemoryError::PermissionDenied,
+    })
+}
+
 pub fn copy_from_current_user(start: u64, destination: &mut [u8]) -> Result<(), UserMemoryError> {
     copy_current_user(start, destination, false)
 }
 
 pub fn copy_to_current_user(start: u64, source: &[u8]) -> Result<(), UserMemoryError> {
+    check_current_user_range(start, source.len())?;
     let mut copied = 0;
     while copied < source.len() {
         let paging = PAGING.lock();
@@ -1381,6 +1559,10 @@ pub fn copy_to_current_user(start: u64, source: &[u8]) -> Result<(), UserMemoryE
             .physical_memory_offset
             .checked_add(physical_address)
             .ok_or(UserMemoryError::AddressOverflow)? as *mut u8;
+        // SAFETY: the range was access_ok-checked, the page is USER_ACCESSIBLE
+        // and WRITABLE (verified above), `count` is clamped to this one page, and
+        // the PAGING lock keeps its frame live; `destination` is its direct-map
+        // address and `source` is a disjoint kernel slice.
         unsafe {
             core::ptr::copy_nonoverlapping(source[copied..].as_ptr(), destination, count);
         }
@@ -1394,6 +1576,7 @@ fn copy_current_user(
     destination: &mut [u8],
     require_writable: bool,
 ) -> Result<(), UserMemoryError> {
+    check_current_user_range(start, destination.len())?;
     let mut copied = 0;
     while copied < destination.len() {
         let paging = PAGING.lock();
@@ -1425,6 +1608,10 @@ fn copy_current_user(
             .physical_memory_offset
             .checked_add(physical_address)
             .ok_or(UserMemoryError::AddressOverflow)? as *const u8;
+        // SAFETY: the range was access_ok-checked, the page is USER_ACCESSIBLE
+        // (and WRITABLE when required, verified above), `count` is clamped to
+        // this one page, and the PAGING lock keeps its frame live; `source` is
+        // its direct-map address and `destination` is a disjoint kernel slice.
         unsafe {
             core::ptr::copy_nonoverlapping(source, destination[copied..].as_mut_ptr(), count);
         }
@@ -1438,7 +1625,10 @@ fn translated_chunk(
     virtual_address: u64,
     remaining: usize,
 ) -> Result<(u64, usize, PageTableFlags), UserMemoryError> {
-    match mapper.translate(VirtAddr::new(virtual_address)) {
+    // Callers bound the range first; never panic on a non-canonical address.
+    let address =
+        VirtAddr::try_new(virtual_address).map_err(|_| UserMemoryError::PermissionDenied)?;
+    match mapper.translate(address) {
         TranslateResult::Mapped {
             frame,
             offset,
@@ -1488,6 +1678,9 @@ pub fn allocate_file_frame(bytes: &[u8; 4096]) -> Option<u64> {
     let physical = frame.start_address().as_u64();
     let paging = PAGING.lock();
     let destination = paging.physical_memory_offset.checked_add(physical)? as *mut u8;
+    // SAFETY: `destination` is the direct-map address of the freshly allocated
+    // frame (held live under PAGING); `bytes` is exactly one 4 KiB page and
+    // disjoint from the frame, so the copy is in bounds and non-overlapping.
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, 4096);
     }
@@ -1524,11 +1717,20 @@ pub fn map_private_frame_from_bytes(
         let _ = memory::deallocate_frame(frame);
         return false;
     };
+    // SAFETY: `destination` is the direct-map address of the freshly allocated
+    // frame (held live under PAGING); `bytes` is exactly one 4 KiB page and
+    // disjoint from the frame.
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, 4096);
     }
     let mut allocator = memory::allocator();
-    match unsafe { mapper.map_to(page, frame, user_flags(writable, false), &mut *allocator) } {
+    let flags = user_flags(writable, false);
+    // SAFETY: held under PAGING; `page` was verified unmapped, `frame` is the
+    // freshly allocated unique frame just filled, and the allocator supplies
+    // unique table frames.
+    match unsafe {
+        mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut *allocator)
+    } {
         Ok(flush) => {
             if Cr3::read().0 == space.level_4_frame {
                 flush.flush();
@@ -1557,6 +1759,9 @@ pub fn release_file_frame(frame: u64) -> bool {
 pub fn read_file_frame(frame: u64, offset: usize, bytes: &mut [u8]) {
     assert!(offset <= 4096 && bytes.len() <= 4096 - offset);
     let paging = PAGING.lock();
+    // SAFETY: `offset + bytes.len() <= 4096` (asserted above), so the source
+    // stays within the single direct-mapped `frame`, which the PAGING lock keeps
+    // live; `bytes` is a disjoint kernel slice.
     unsafe {
         core::ptr::copy_nonoverlapping(
             (paging.physical_memory_offset + frame + offset as u64) as *const u8,
@@ -1568,6 +1773,9 @@ pub fn read_file_frame(frame: u64, offset: usize, bytes: &mut [u8]) {
 pub fn write_file_frame(frame: u64, offset: usize, bytes: &[u8]) {
     assert!(offset <= 4096 && bytes.len() <= 4096 - offset);
     let paging = PAGING.lock();
+    // SAFETY: `offset + bytes.len() <= 4096` (asserted above), so the
+    // destination stays within the single direct-mapped `frame`, which the
+    // PAGING lock keeps live; `bytes` is a disjoint kernel slice.
     unsafe {
         core::ptr::copy_nonoverlapping(
             bytes.as_ptr(),
@@ -1595,7 +1803,13 @@ pub fn map_file_frame(space: AddressSpace, address: u64, physical: u64, writable
     if refs.share(physical).is_err() {
         return false;
     }
-    match unsafe { mapper.map_to(page, frame, user_flags(writable, false), &mut *allocator) } {
+    let flags = user_flags(writable, false);
+    // SAFETY: held under PAGING; `page` was verified unmapped, `frame` is the
+    // shared file frame whose reference was just taken, and the allocator
+    // supplies unique table frames.
+    match unsafe {
+        mapper.map_to_with_table_flags(page, frame, flags, ancestor_flags(flags), &mut *allocator)
+    } {
         Ok(flush) => {
             if Cr3::read().0 == space.level_4_frame {
                 flush.flush();
@@ -1708,6 +1922,10 @@ pub fn map_mmio(physical: u64) -> Result<u64, MapRangeError> {
         return Err(MapRangeError::AlreadyMapped);
     }
     let mut allocator = memory::allocator();
+    // SAFETY: held under PAGING; the MMIO `page` was verified unmapped and
+    // `frame` is the caller's device-register frame. The flags map it
+    // non-cacheable, writable and no-execute, and the allocator supplies unique
+    // table frames.
     unsafe {
         mapper.map_to(
             page,
@@ -1750,9 +1968,12 @@ fn mmio_virtual_address(physical_page: u64, slot: usize) -> Result<u64, MapRange
 /// A page already mapped through the legacy shared API is rejected. This
 /// conservative rule prevents an owner from later unmapping a translation
 /// whose users are not represented by the owner token.
-#[expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
 )]
 pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, MapRangeError> {
     if owner == 0 {
@@ -1779,6 +2000,9 @@ pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, Map
         return Err(MapRangeError::AlreadyMapped);
     }
     let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(physical_page));
+    // SAFETY: held under PAGING; the MMIO `page` was verified unmapped and
+    // `frame` is the owner's device-register frame. Mapped non-cacheable,
+    // writable and no-execute with a unique-table allocator.
     unsafe {
         mapper.map_to(
             page,
@@ -1810,9 +2034,12 @@ pub fn map_mmio_owned(physical: u64, owner: u32) -> Result<OwnedMmioMapping, Map
 }
 
 /// Release one owner-scoped device-register mapping after device quiescence.
-#[expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
 )]
 pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError> {
     let mut state = PAGING.lock();
@@ -1850,9 +2077,12 @@ pub fn release_mmio_owned(mapping: OwnedMmioMapping) -> Result<(), MapRangeError
 }
 
 /// Revoke every owner-scoped MMIO page before releasing a PCI function.
-#[expect(
-    dead_code,
-    reason = "used by PCI driver lifecycle on freestanding target"
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "used by PCI driver lifecycle on freestanding target"
+    )
 )]
 pub fn revoke_mmio_owner(owner: u32) -> Result<(), MapRangeError> {
     if owner == 0 {
@@ -1900,12 +2130,18 @@ pub fn replace_smp_test_page(address: u64, value: u64) {
         let mapper = state.mapper.as_mut().expect("paging initialized");
         let mut allocator = memory::allocator();
         let replacement = allocator.allocate_frame().expect("SMP replacement frame");
+        // SAFETY: the direct-map address of the freshly allocated `replacement`
+        // frame is valid and 8-byte aligned (page-aligned), so the volatile u64
+        // write is in bounds.
         unsafe {
             ((offset + replacement.start_address().as_u64()) as *mut u64).write_volatile(value);
         }
         let page = Page::<Size4KiB>::containing_address(VirtAddr::new(address));
         let (old, flush) = mapper.unmap(page).expect("SMP test page mapped");
         flush.ignore();
+        // SAFETY: held under PAGING; `page` was just unmapped and `replacement`
+        // is the freshly allocated unique frame filled above, mapped with a
+        // unique-table allocator.
         unsafe {
             mapper.map_to(
                 page,

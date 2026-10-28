@@ -1,4 +1,8 @@
 //! Bounded WovenDriver manager: discovery, matching, binding, and power state.
+#![expect(
+    dead_code,
+    reason = "production binds through register_pci/bind_pci/unbind_pci_resources; QEMU feature gates compile the shared suspend model without bringing up production hardware"
+)]
 use crate::device::DeviceKind;
 use crate::irq_lock::IrqMutex as Mutex;
 const MAX: usize = 32;
@@ -39,7 +43,7 @@ impl PciMatch {
             || self.prog_if.is_some()
     }
 
-    fn matches(self, device: crate::hal::pci::Device) -> bool {
+    pub(crate) fn matches(self, device: crate::hal::pci::Device) -> bool {
         self.vendor_id.is_none_or(|value| value == device.vendor_id)
             && self.device_id.is_none_or(|value| value == device.device_id)
             && self.class.is_none_or(|value| value == device.class)
@@ -67,6 +71,59 @@ enum PciInterrupt {
 /// Bounded driver binding table. Device discovery happens before this lock;
 /// rank 10 therefore covers only the local binding transaction.
 static TABLE: Mutex<[Option<Entry>; MAX]> = Mutex::with_rank([None; MAX], 10);
+
+/// A successful, bounded driver-quiescence transaction. Names are static
+/// registration identities; a suspended entry cannot be unbound or rebound
+/// until this plan is resumed.
+#[derive(Clone, Copy)]
+pub struct SuspendPlan {
+    names: [&'static str; MAX],
+    count: usize,
+}
+
+/// Suspend every currently bound driver, rolling back already-suspended
+/// drivers in reverse registration order if any participant refuses. The
+/// table is sampled before any device transition so no table lock is held
+/// across driver or PCI hardware operations.
+pub fn suspend_all() -> Option<SuspendPlan> {
+    let mut names = [""; MAX];
+    let count = {
+        let table = TABLE.lock();
+        let mut count = 0;
+        for entry in table.iter().flatten() {
+            if entry.state == State::Bound {
+                if count == MAX {
+                    return None;
+                }
+                names[count] = entry.name;
+                count += 1;
+            }
+        }
+        count
+    };
+    for index in 0..count {
+        if !suspend(names[index]) {
+            for rollback in (0..index).rev() {
+                let _ = resume(names[rollback]);
+            }
+            return None;
+        }
+    }
+    Some(SuspendPlan { names, count })
+}
+
+/// Resume a previously successful suspend plan. Every participant is
+/// attempted even if one resume fails so later drivers are not abandoned
+/// silently.
+pub fn resume_all(plan: SuspendPlan) -> bool {
+    let mut restored = true;
+    for index in (0..plan.count).rev() {
+        if !resume(plan.names[index]) {
+            restored = false;
+        }
+    }
+    restored
+}
 pub fn register(name: &'static str, kind: DeviceKind) -> bool {
     register_inner(name, kind, None)
 }
@@ -93,6 +150,8 @@ fn register_inner(name: &'static str, kind: DeviceKind, pci_match: Option<PciMat
 /// not claim hardware until [`bind_matching_pci`] is called.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -113,6 +172,8 @@ pub fn register_pci(name: &'static str, kind: DeviceKind, matcher: PciMatch) -> 
 /// function. Registration order is deterministic and bounded.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -614,6 +675,8 @@ pub enum PciInterruptError {
 /// already own a live vector/table entry that must be torn down explicitly.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -968,9 +1031,42 @@ pub fn pci_driver_name(
         .map(|entry| entry.name)
 }
 
+/// The PCI function a driver is bound to, if it is bound to one.
+pub fn pci_binding(name: &'static str) -> Option<crate::hal::pci::Address> {
+    TABLE
+        .lock()
+        .iter()
+        .flatten()
+        .find(|entry| entry.name == name && entry.state == State::Bound)
+        .and_then(|entry| entry.pci)
+        .map(|binding| binding.address)
+}
+
+/// How many MMIO BAR leases a bound driver holds.
+pub fn pci_bar_leases(name: &'static str) -> usize {
+    TABLE
+        .lock()
+        .iter()
+        .flatten()
+        .find(|entry| entry.name == name)
+        .and_then(|entry| entry.pci)
+        .map_or(0, |binding| binding.bars.iter().flatten().count())
+}
+
 /// Hot-remove a bound PCI function using the same ordered resource teardown as
 /// explicit driver unbind, then invalidate the topology generation before the
 /// slot can be reused.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn remove_pci_function(
     function: crate::hal::pci::topology::FunctionHandle,
 ) -> Result<(), PciUnbindError> {
@@ -990,6 +1086,17 @@ pub fn remove_pci_function(
     crate::hal::pci::teardown_function(function, owner).map_err(PciUnbindError::Topology)
 }
 
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 #[derive(Clone, Copy)]
 pub struct PciHotplugReport {
     pub summary: crate::hal::pci::Summary,
@@ -1103,6 +1210,17 @@ pub fn stage13_2_legacy_lifecycle_self_test() -> bool {
 
 /// Driver-aware PCI hotplug reconciliation. The HAL only detects removals;
 /// this layer owns driver teardown policy, preserving dependency direction.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
     Ok(hotplug_rescan_report()?.summary)
 }
@@ -1111,6 +1229,17 @@ pub fn hotplug_rescan() -> Result<crate::hal::pci::Summary, PciUnbindError> {
 /// before publication; newly present functions are returned only after the
 /// refreshed topology and bridge routing have succeeded. Unknown functions
 /// remain unclaimed.
+#[cfg(any(
+    feature = "stage13-1-test",
+    feature = "stage13-2-test",
+    feature = "stage13-3-test",
+    feature = "stage13-4-test",
+    feature = "stage13-5-test",
+    feature = "stage13-6-test",
+    feature = "stage13-7-test",
+    feature = "stage13-8-test",
+    feature = "stage13-9-test"
+))]
 pub fn hotplug_rescan_report() -> Result<PciHotplugReport, PciUnbindError> {
     let mut additions = [None; crate::hal::pci::topology::MAX_FUNCTIONS];
     let added_count = crate::hal::pci::rescan_added(&mut additions)
@@ -1377,6 +1506,20 @@ pub fn stage13_2_lifecycle_self_test() -> bool {
         clean, interrupt_ready
     ));
     crate::serial::write_line(format_args!("[S13.2] owner-mmio unbind={}", clean));
+    // A restart must acquire a new owner transaction after the previous
+    // generation has fully released its BAR and interrupt obligations. This
+    // is still a lifecycle acceptance, not a production crash supervisor:
+    // the caller explicitly requests the rebind and the same PCI identity is
+    // used only after the first teardown completed.
+    let restarted = clean
+        && bind_matching_pci(address, OWNER.wrapping_add(1)).is_some_and(|result| result.is_ok());
+    crate::serial::write_line(format_args!("[S13.2] driver restart bind={}", restarted));
+    let restarted_clean = restarted && unbind_pci_resources(NAME).is_ok();
+    crate::serial::write_line(format_args!(
+        "[S13.2] driver restart teardown={} leases={}",
+        restarted_clean,
+        pci_bar_leases(NAME)
+    ));
     let high_mmio = if clean {
         match crate::paging::map_mmio_owned(0x2000_0000_0000, OWNER.wrapping_add(3)) {
             Ok(mapping) => {
@@ -1419,7 +1562,7 @@ pub fn stage13_2_lifecycle_self_test() -> bool {
             }
         }
     };
-    if !clean || !remapped || !interrupt_ready || !high_mmio {
+    if !clean || !restarted_clean || !remapped || !interrupt_ready || !high_mmio {
         return false;
     }
     let rescan = hotplug_rescan().is_ok();

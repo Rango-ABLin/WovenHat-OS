@@ -21,7 +21,7 @@ const MAX_DEVICES: usize = 64;
 const MAX_ECAM_REGIONS: usize = crate::hal::acpi::MAX_MCFG_ALLOCATIONS;
 const MAX_CAPABILITY_STEPS: usize = 48;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Address {
     pub segment: u16,
     pub bus: u8,
@@ -171,7 +171,12 @@ static ADMISSION_READY: AtomicBool = AtomicBool::new(false);
 /// has a validated bridge-forwarding configuration. Bridge-free systems are
 /// admitted after discovery; a routing failure leaves admission fail-closed.
 #[cfg_attr(
-    not(any(feature = "stage13-1-test", feature = "stage13-2-test")),
+    not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
+        feature = "stage13-1-test",
+        feature = "stage13-2-test"
+    )),
     expect(
         dead_code,
         reason = "used by production driver admission and stage feature gates"
@@ -276,6 +281,8 @@ struct PersistentBarAllocation {
     address: Address,
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -405,6 +412,8 @@ pub enum PersistentBarError {
     Capacity,
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -461,6 +470,8 @@ pub enum PersistentBarError {
     Rebalance(RebalanceError),
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -517,6 +528,8 @@ pub enum PersistentBarError {
     Disable(BarProgramError),
     #[cfg_attr(
         not(any(
+            not(feature = "qemu-test"),
+            feature = "stage13-12-test",
             feature = "qemu-test",
             feature = "stage1-5-test",
             feature = "stage13-1-test",
@@ -577,6 +590,8 @@ pub enum PersistentBarError {
 
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -622,6 +637,8 @@ fn refresh_published_bars(address: Address) -> bool {
 /// function's BAR set would require a device-specific quiescence protocol.
 #[cfg_attr(
     not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
         feature = "stage13-1-test",
         feature = "stage13-2-test",
         feature = "stage13-3-test",
@@ -1128,7 +1145,10 @@ pub fn rescan_added(
     Ok(count)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     let published = PUBLISHED.lock();
     for slot in 0..topology::MAX_FUNCTIONS {
@@ -1155,7 +1175,10 @@ pub fn topology_handle(address: Address) -> Option<topology::FunctionHandle> {
     None
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub(crate) fn function_device(
     handle: topology::FunctionHandle,
 ) -> Option<(topology::NodeSnapshot, Device)> {
@@ -1176,7 +1199,10 @@ pub(crate) fn function_device(
     Some((snapshot, device))
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn claim_function(handle: topology::FunctionHandle, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.claim(handle, owner)
 }
@@ -1201,7 +1227,10 @@ pub fn topology_owner(handle: topology::FunctionHandle) -> Result<u32, topology:
         .unwrap_or(topology::NO_OWNER))
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn release_function(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1209,7 +1238,10 @@ pub fn release_function(
     PUBLISHED.lock().topology.release(handle, owner)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn lease_bar(
     handle: topology::FunctionHandle,
     owner: u32,
@@ -1255,12 +1287,18 @@ pub fn lease_bar(
         .lease_mmio(handle, owner, bar_index, bar.address, probe.size)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn validate_bar_lease(lease: topology::MmioLease, owner: u32) -> bool {
     PUBLISHED.lock().topology.validate_mmio(lease, owner)
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn release_bar_lease(lease: topology::MmioLease, owner: u32) -> Result<(), topology::Error> {
     PUBLISHED.lock().topology.release_mmio(lease, owner)
 }
@@ -1343,20 +1381,6 @@ pub struct PowerCheckpoint {
 /// Disable I/O, memory, and bus-master decoding for an owned function and
 /// return the exact command value for resume. Configuration access is kept
 /// outside the topology lock to preserve lock order.
-#[cfg_attr(
-    not(any(
-        feature = "stage13-1-test",
-        feature = "stage13-2-test",
-        feature = "stage13-3-test",
-        feature = "stage13-4-test",
-        feature = "stage13-5-test",
-        feature = "stage13-6-test",
-        feature = "stage13-7-test",
-        feature = "stage13-8-test",
-        feature = "stage13-9-test"
-    )),
-    expect(dead_code, reason = "used by production PCI suspend/resume")
-)]
 pub fn suspend_owned(
     function: topology::FunctionHandle,
     owner: u32,
@@ -1406,20 +1430,6 @@ pub fn suspend_owned(
 }
 
 /// Restore a previously checkpointed PCI command value for an owned function.
-#[cfg_attr(
-    not(any(
-        feature = "stage13-1-test",
-        feature = "stage13-2-test",
-        feature = "stage13-3-test",
-        feature = "stage13-4-test",
-        feature = "stage13-5-test",
-        feature = "stage13-6-test",
-        feature = "stage13-7-test",
-        feature = "stage13-8-test",
-        feature = "stage13-9-test"
-    )),
-    expect(dead_code, reason = "used by production PCI suspend/resume")
-)]
 pub fn resume_owned(
     function: topology::FunctionHandle,
     owner: u32,
@@ -1471,6 +1481,8 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 /// Enable MMIO decoding and DMA bus mastering for a PCI/PCIe function.
 /// Returns false if the configuration transaction cannot be completed.
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-3-test",
     feature = "stage13-4-test",
     feature = "stage13-5-test",
@@ -1478,7 +1490,9 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
     feature = "stage13-7-test",
     feature = "stage13-8-test",
     feature = "stage13-9-test",
-    feature = "stage13-10-test"
+    feature = "stage13-10-test",
+    feature = "stage20-14-test",
+    feature = "stage20-14b-test"
 ))]
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
@@ -1493,6 +1507,8 @@ pub fn enable_memory_bus_master(address: Address) -> bool {
 /// device.  This is deliberately narrow: callers must own the function and
 /// must have quiesced all DMA before restoring bus mastering.
 #[cfg(any(
+    not(feature = "qemu-test"),
+    feature = "stage13-12-test",
     feature = "stage13-3-test",
     feature = "stage13-4-test",
     feature = "stage13-5-test",
@@ -2143,9 +2159,12 @@ pub enum RebalanceError {
     RollbackFailed,
 }
 
-#[expect(
-    dead_code,
-    reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(
+        dead_code,
+        reason = "Stage 13.2 firmware BAR rebalance is an explicit recovery/admission path, not unconditional normal bind"
+    )
 )]
 pub fn rebalance_bars_from_firmware(
     address: Address,
@@ -2186,7 +2205,11 @@ pub fn rebalance_bars_from_firmware(
 /// allocation remains authoritative so its address cannot be reused while the
 /// device may still decode it.
 #[cfg_attr(
-    not(feature = "stage13-2-test"),
+    not(any(
+        not(feature = "qemu-test"),
+        feature = "stage13-12-test",
+        feature = "stage13-2-test"
+    )),
     expect(
         dead_code,
         reason = "explicit hot-remove/admission teardown API is dormant until live BAR admission is wired"
@@ -2296,7 +2319,10 @@ pub fn release_bars_from_firmware(address: Address) -> Result<(), PersistentBarE
     Ok(())
 }
 
-#[expect(dead_code)]
+#[cfg_attr(
+    not(any(not(feature = "qemu-test"), feature = "stage13-12-test")),
+    expect(dead_code)
+)]
 pub fn rebalance_bars(
     address: Address,
     header_type: u8,
@@ -2592,11 +2618,17 @@ fn read_config_unlocked(address: Address, offset: u16) -> Option<u32> {
         let virtual_address = crate::paging::map_mmio(physical)
             .ok()?
             .checked_add(page_offset)?;
+        // SAFETY: `virtual_address` is the MMIO mapping of the ECAM config dword
+        // for a validated address (offset dword-aligned and in range,
+        // device < 32, function < 8); a volatile `u32` read is in bounds.
         return Some(unsafe { ptr::read_volatile(virtual_address as *const u32) });
     }
     if address.segment != 0 || offset > 0xfc {
         return None;
     }
+    // SAFETY: legacy PCI config mechanism on the fixed config I/O ports — write
+    // the selected address to CONFIG_ADDRESS, then read the dword from
+    // CONFIG_DATA. Callers hold CONFIG_LOCK.
     unsafe {
         outl(
             CONFIG_ADDRESS,
@@ -2618,12 +2650,18 @@ fn write_config_unlocked(address: Address, offset: u16, value: u32) -> bool {
         else {
             return false;
         };
+        // SAFETY: `virtual_address` is the MMIO mapping of the ECAM config dword
+        // for a validated address (as in `read_config_unlocked`); a volatile
+        // `u32` write is in bounds.
         unsafe { ptr::write_volatile(virtual_address as *mut u32, value) };
         return true;
     }
     if address.segment != 0 || offset > 0xfc {
         return false;
     }
+    // SAFETY: legacy PCI config mechanism on the fixed config I/O ports — select
+    // the address via CONFIG_ADDRESS, then write the dword to CONFIG_DATA.
+    // Callers hold CONFIG_LOCK.
     unsafe {
         outl(
             CONFIG_ADDRESS,
@@ -2638,6 +2676,9 @@ fn ecam_physical(address: Address, offset: u16) -> Option<u64> {
     // Caller holds CONFIG_LOCK (all callers are *_config_unlocked helpers).
     // Copy the fixed-capacity state so no reference to mutable static storage
     // escapes this critical section.
+    // SAFETY: every caller holds CONFIG_LOCK (all are `*_config_unlocked`
+    // helpers), so there is no concurrent writer; `CONFIG` is `Copy` and only a
+    // copy is taken, so no reference to the static escapes.
     let state = unsafe { CONFIG };
     let allocation = state.ecam[..state.ecam_count]
         .iter()
@@ -2902,15 +2943,24 @@ fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -
         .checked_add(u64::from(offset))
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed PCI
+/// CONFIG_ADDRESS/CONFIG_DATA ports). The read may have device-visible effects.
 unsafe fn inl(port: u16) -> u32 {
     let value: u32;
+    // SAFETY: `in eax, dx` reads one dword from the valid I/O port in `dx`;
+    // `nomem` is correct as it touches no memory.
     unsafe {
         asm!("in eax, dx", in("dx") port, out("eax") value, options(nomem, nostack, preserves_flags));
     }
     value
 }
 
+/// # Safety
+/// See [`inl`]: `port` must be a valid I/O port; the write may have
+/// device-visible effects.
 unsafe fn outl(port: u16, value: u32) {
+    // SAFETY: `out dx, eax` writes one dword to the valid I/O port in `dx`.
     unsafe {
         asm!("out dx, eax", in("dx") port, in("eax") value, options(nomem, nostack, preserves_flags));
     }
