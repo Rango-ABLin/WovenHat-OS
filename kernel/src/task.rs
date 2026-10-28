@@ -2335,6 +2335,7 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
         }
         threads
     };
+    if threads[0].0.is_none() { return false; }
     let size = match memory_size.checked_add(4095).map(|value| value & !4095) { Some(size) => size, None => return false };
     let slot = userspace::DYNAMIC_MMAP_SLOT_BASE + module;
     let mut installed = [(None, None); crate::thread::MAX_THREADS];
