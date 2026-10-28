@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev GDB session lifecycle boundary (2026-10-28)
+
+`kernel/src/gdb_session.rs` owns only the bounded stopped/running/active
+state around the pure command dispatcher. It emits protocol stop replies,
+ignores commands while running, and exposes continue, step, and kill as
+actions for a future trap/task owner. It does not poll UART, dereference
+guest memory, mutate registers, or switch tasks; those authorities remain
+separate and must be integrated with explicit teardown and cancellation
+rules.
+
 ## WovenDev GDB context and command boundary (2026-10-28)
 
 `kernel/src/gdb_debugger.rs` keeps GDB command parsing separate from UART and

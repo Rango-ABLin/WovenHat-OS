@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 32.11 GDB session state machine QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_session.rs`, a bounded lifecycle owner around the Stage
+32.10 command boundary. It tracks active/stopped state and stop signals,
+returns `Sxx` stop replies, refuses commands while running, and translates
+continue, step, and kill into explicit actions without executing them in the
+parser layer. Session state is local to the caller and does not dereference
+guest pointers or introduce task ownership.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-11-gdb-session-{1,2,4}cpu/`. Target and host warning-denying
+Clippy, host tests, and Python syntax validation pass. Live trap ownership,
+task binding, register mutation, transport polling, and actual continue/step
+execution remain open.
+
 ## Stage 32.10 GDB register context and command dispatch QEMU gate - 2026-10-28 — ACCEPTED
 
 Added `kernel/src/gdb_debugger.rs`, a pure bounded command boundary over the

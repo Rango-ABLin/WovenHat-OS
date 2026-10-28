@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.11 GDB session state machine (2026-10-28)
+
+Added the bounded `kernel/src/gdb_session.rs` lifecycle layer above the Stage
+32.10 dispatcher. It owns active/stopped state and stop replies, refuses
+commands while running, and classifies continue/step/kill without transport,
+trap, task, or guest-memory authority. Target and host `-D warnings` Clippy,
+host tests, Python syntax, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence
+is under `target/stage32-11-gdb-session-{1,2,4}cpu/`. Stage32.11 is accepted;
+live trap ownership and execution-control integration remain prerequisites for
+the next slice.
+
 ## QEMU acceptance reservation - Codex step 1
 
 Codex isolated revision 31703c6f has passed build, 30 kernel Clippy configs,

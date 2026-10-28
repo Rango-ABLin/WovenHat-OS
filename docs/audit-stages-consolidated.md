@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.11 GDB session state machine - 2026-10-28
+
+The bounded session lifecycle passed 1/2/4-CPU QEMU self-tests. Stop replies,
+running-state command refusal, continue/step action translation, and kill
+deactivation are covered. Target and host warning-denying Clippy, host tests,
+and Python syntax validation passed. Trap ownership, task binding, transport
+integration, and execution control remain outside this acceptance.
+
 ## Stage 32.10 GDB register context and command dispatch - 2026-10-28
 
 The pure GDB command boundary passed 1/2/4-CPU QEMU self-tests. Register
