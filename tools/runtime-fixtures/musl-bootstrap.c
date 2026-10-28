@@ -23,6 +23,7 @@ int main(int argc, char **argv)
 {
 	char byte = 'x';
 	char motd[24];
+	char cwd[256];
 	int fd;
 	int duplicate;
 	int replacement;
@@ -34,6 +35,10 @@ int main(int argc, char **argv)
 		return 89;
 	if (getppid() < 0)
 		return 90;
+	if (getuid() != 0 || getgid() != 0)
+		return 88;
+	if (!getcwd(cwd, sizeof cwd) || cwd[0] != '/')
+		return 87;
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;
 	if (write(1, &byte, 1) != 1)
