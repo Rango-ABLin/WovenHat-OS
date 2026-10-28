@@ -35,7 +35,7 @@ int main(int argc, char **argv)
 		return 89;
 	if (getppid() < 0)
 		return 90;
-	if (getuid() != 0 || getgid() != 0)
+	if (getuid() != 1000 || getgid() != 1000)
 		return 88;
 	if (!getcwd(cwd, sizeof cwd) || cwd[0] != '/')
 		return 87;

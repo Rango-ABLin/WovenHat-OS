@@ -31,7 +31,7 @@ SOURCES = (
     "vendor/musl/src/unistd/getuid.c",
     "vendor/musl/src/unistd/getgid.c",
     "ports/musl/src/chdir.c",
-    "vendor/musl/src/unistd/getcwd.c",
+    "ports/musl/src/getcwd.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
     "vendor/musl/src/unistd/close.c",
