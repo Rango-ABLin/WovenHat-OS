@@ -70,16 +70,27 @@ job-control implementation also covers default stop/continue dispositions,
 notification, child reparenting, and PTY hangup EOF/write rejection. Full
 POSIX terminal coverage beyond this bounded ABI remains open.
 
-## S04 scheduler and SMP accounting - 2026-10-28
+## S04 scheduler, quotas, classes, and SMP topology - 2026-10-28
 
-The first S04 closure increment adds bounded scheduler accounting: live tasks
-record timer-tick runtime and Ready-to-Running dispatch count, and each logical
-CPU records aggregate runtime ticks. The snapshots are scheduler-lock-owned
-copies and do not change the established priority, affinity, migration, or
-hotplug authority. `scripts/test-s04-scheduler-accounting.py` passes on 1/2/4
-CPUs with the `[S04.SCHEDULER] accounting: PASSED` marker and QEMU exit 33.
-Enforced runtime quotas, richer scheduler classes, and multi-node topology
-qualification remain open.
+S04 now has a bounded scheduler policy contract. Live tasks record timer-tick
+runtime and dispatch count, fixed classes rank work above quantum priority, and
+pre-dispatch policy configuration can enforce a per-task runtime quota within a
+bounded period. Once exhausted, the task is throttled into a timed sleep and
+returns to Ready at the next period; zero quota preserves legacy unlimited
+behavior. The scheduler retains hard affinity, Ready-only migration,
+NUMA-domain preference, and hotplug authority.
+
+`scripts/test-s04-scheduler-accounting.py` passes on 1/2/4 CPUs with QEMU exit
+33. The 2/4-CPU command lines create two explicit 2-GiB NUMA nodes and the
+guest verifies the published two-domain topology. The guest also configures
+Realtime and Background workers with 2/8-tick budgets, observes bounded runtime
+and class identity, then verifies both workers stop cleanly after quota-period
+recovery. Evidence is retained under
+`audit-artifacts/s04-scheduler-accounting-{1,2,4}cpu-*`.
+
+S04 is accepted for this bounded software/QEMU scope. Physical CPU hotplug,
+native NUMA latency/placement, dynamic cgroup-like classes, and unbounded quota
+policy remain outside the stage.
 
 ## S02 freestanding C ABI build boundary - 2026-10-28
 

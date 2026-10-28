@@ -238,6 +238,36 @@ impl TaskPriority {
     }
 }
 
+/// Scheduler class is the policy tier; priority remains the round-robin
+/// quantum within a class. Classes are deliberately fixed and allocation-free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TaskClass {
+    Background,
+    Service,
+    Interactive,
+    Realtime,
+}
+
+impl TaskClass {
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Background => 0,
+            Self::Service => 1,
+            Self::Interactive => 2,
+            Self::Realtime => 3,
+        }
+    }
+
+    const fn for_priority(priority: TaskPriority) -> Self {
+        match priority {
+            TaskPriority::LOW => Self::Background,
+            TaskPriority::NORMAL => Self::Interactive,
+            TaskPriority::HIGH => Self::Realtime,
+            _ => Self::Background,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TaskState {
     Empty,
@@ -324,6 +354,7 @@ struct TaskControlBlock {
     name: &'static str,
     state: TaskState,
     priority: TaskPriority,
+    class: TaskClass,
     context: Context,
     capabilities: CapabilitySet,
     /// Optional WovenGuard provenance for each currently delegated capability.
@@ -340,6 +371,10 @@ struct TaskControlBlock {
     remaining_ticks: u8,
     runtime_ticks: u64,
     dispatches: u64,
+    quota_ticks: u64,
+    quota_period: u64,
+    quota_used: u64,
+    quota_epoch: u64,
     cpu: usize,
     migratable: bool,
     /// True once the scheduler has selected this task for execution at least once.
@@ -385,6 +420,7 @@ impl TaskControlBlock {
             name: "",
             state: TaskState::Empty,
             priority: TaskPriority::NORMAL,
+            class: TaskClass::Service,
             context: Context { stack_pointer: 0 },
             capabilities: CapabilitySet::empty(),
             capability_lineages: [None; Capability::COUNT],
@@ -398,6 +434,10 @@ impl TaskControlBlock {
             remaining_ticks: 0,
             runtime_ticks: 0,
             dispatches: 0,
+            quota_ticks: 0,
+            quota_period: 0,
+            quota_used: 0,
+            quota_epoch: 0,
             cpu: 0,
             migratable: false,
             ever_dispatched: false,
@@ -425,6 +465,7 @@ impl TaskControlBlock {
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = priority;
+        self.class = TaskClass::for_priority(priority);
         self.entry = Some(entry);
         self.wake_tick = 0;
         self.capabilities = CapabilitySet::empty();
@@ -435,6 +476,10 @@ impl TaskControlBlock {
         self.remaining_ticks = priority.quantum();
         self.runtime_ticks = 0;
         self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.migratable = false;
         self.ever_dispatched = false;
         self.affinity_mask = 1;
@@ -484,6 +529,7 @@ impl TaskControlBlock {
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
+        self.class = TaskClass::Service;
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = Some(context);
@@ -492,6 +538,10 @@ impl TaskControlBlock {
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
         self.runtime_ticks = 0;
         self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.capabilities = CapabilitySet::userspace();
         self.capability_lineages = [None; Capability::COUNT];
         self.security_domain = wovenguard::SecurityDomain::User;
@@ -542,6 +592,7 @@ impl TaskControlBlock {
         self.name = "fork-child";
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
+        self.class = TaskClass::Service;
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = None;
@@ -550,6 +601,10 @@ impl TaskControlBlock {
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
         self.runtime_ticks = 0;
         self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.capabilities = security.capabilities;
         self.capability_lineages = security.capability_lineages;
         self.security_domain = security.security_domain;
@@ -879,13 +934,18 @@ pub struct CpuRunLoad {
 /// Runtime is counted in timer ticks and dispatches count Ready-to-Running
 /// selections; neither value is a reservation or a billing guarantee.
 #[cfg(feature = "s04-scheduler-accounting-test")]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TaskAccounting {
     pub priority: u8,
+    pub class: TaskClass,
     pub cpu: usize,
     pub affinity_mask: usize,
     pub runtime_ticks: u64,
     pub dispatches: u64,
+    pub quota_ticks: u64,
+    pub quota_period: u64,
+    pub quota_used: u64,
+    pub throttled: bool,
 }
 
 impl CpuRunLoad {
@@ -912,6 +972,7 @@ pub enum SpawnError {
     Full,
     OfflineCpu,
     InvalidAffinity,
+    InvalidQuota,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1093,7 +1154,7 @@ impl Scheduler {
         self.reap_dead();
         self.validate_affinity_invariants();
 
-        let best_priority = self
+        let best_policy = self
             .tasks
             .iter()
             .filter(|task| {
@@ -1101,16 +1162,17 @@ impl Scheduler {
                     && task.cpu == crate::smp::cpu_index()
                     && (task.affinity_mask & cpu_bit(crate::smp::cpu_index())) != 0
             })
-            .map(|task| task.priority)
+            .map(|task| (task.class.rank(), task.priority))
             .max()?;
-        let priority_index = best_priority.index();
+        let priority_index = best_policy.1.index();
         let start = self.last_selected[crate::smp::cpu_index()][priority_index];
         let next_slot = (1..=MAX_TASKS)
             .map(|offset| (start + offset) % MAX_TASKS)
             .find(|slot| {
                 let task = &self.tasks[*slot];
                 task.state == TaskState::Ready
-                    && task.priority == best_priority
+                    && task.class.rank() == best_policy.0
+                    && task.priority == best_policy.1
                     && task.cpu == crate::smp::cpu_index()
                     && (task.affinity_mask & cpu_bit(crate::smp::cpu_index())) != 0
             })?;
@@ -4892,6 +4954,32 @@ pub fn spawn_with_priority(
     entry: fn() -> !,
     priority: TaskPriority,
 ) -> Result<TaskId, SpawnError> {
+    spawn_with_policy(
+        name,
+        entry,
+        priority,
+        TaskClass::for_priority(priority),
+        0,
+        0,
+    )
+}
+
+/// Spawn a kernel task with a fixed scheduler class and optional runtime
+/// quota. Quota policy is installed while the new task is still Ready, so it
+/// cannot execute outside the policy transaction.
+pub fn spawn_with_policy(
+    name: &'static str,
+    entry: fn() -> !,
+    priority: TaskPriority,
+    class: TaskClass,
+    quota_ticks: u64,
+    period_ticks: u64,
+) -> Result<TaskId, SpawnError> {
+    if quota_ticks != 0
+        && (period_ticks < 2 || quota_ticks > period_ticks || period_ticks > 1_000_000)
+    {
+        return Err(SpawnError::InvalidQuota);
+    }
     let mut scheduler = SCHEDULER.lock();
     assert!(scheduler.task_count != 0, "scheduler not initialized");
 
@@ -4903,6 +4991,10 @@ pub fn spawn_with_priority(
 
     let id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
     scheduler.tasks[slot].initialize(slot, id, name, entry, priority);
+    scheduler.tasks[slot].class = class;
+    scheduler.tasks[slot].quota_ticks = quota_ticks;
+    scheduler.tasks[slot].quota_period = if quota_ticks == 0 { 0 } else { period_ticks };
+    scheduler.tasks[slot].quota_epoch = timer::ticks();
     scheduler.task_count += 1;
     Ok(id)
 }
@@ -5033,6 +5125,20 @@ pub fn tick() {
     }
     task.runtime_ticks = task.runtime_ticks.saturating_add(1);
     CPU_RUNTIME_TICKS[crate::smp::cpu_index()].fetch_add(1, Ordering::Relaxed);
+    let now = timer::ticks();
+    if task.quota_ticks != 0 {
+        if now.wrapping_sub(task.quota_epoch) >= task.quota_period {
+            task.quota_epoch = now;
+            task.quota_used = 0;
+        }
+        task.quota_used = task.quota_used.saturating_add(1);
+        if task.quota_used >= task.quota_ticks {
+            task.state = TaskState::Sleeping;
+            task.wake_tick = task.quota_epoch.saturating_add(task.quota_period);
+            PREEMPTION_REQUESTED[crate::smp::cpu_index()].store(true, Ordering::Release);
+            return;
+        }
+    }
     if task.remaining_ticks > 1 {
         task.remaining_ticks -= 1;
     } else {
@@ -7346,10 +7452,15 @@ pub fn task_accounting(id: TaskId) -> Option<TaskAccounting> {
         .find(|task| task.id == id && task.state != TaskState::Empty)
         .map(|task| TaskAccounting {
             priority: task.priority.as_u8(),
+            class: task.class,
             cpu: task.cpu,
             affinity_mask: task.affinity_mask,
             runtime_ticks: task.runtime_ticks,
             dispatches: task.dispatches,
+            quota_ticks: task.quota_ticks,
+            quota_period: task.quota_period,
+            quota_used: task.quota_used,
+            throttled: task.state == TaskState::Sleeping && task.quota_ticks != 0,
         })
 }
 

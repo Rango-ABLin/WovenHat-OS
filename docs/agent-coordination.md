@@ -1,13 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
-## Codex - S04 scheduler accounting increment (2026-10-28)
+## Codex - S04 scheduler, quota, class, and topology closure (2026-10-28)
 
-Started S04 after S03 closure. Added bounded per-task timer-runtime and
-dispatch accounting plus per-CPU runtime snapshots, with a dedicated
-`s04-scheduler-accounting-test` QEMU gate passing on 1/2/4 CPUs. Existing
-priority, affinity, migration, hotplug, and topology behavior is preserved;
-runtime quota enforcement, richer scheduler classes, and multi-node topology
-qualification remain open.
+Closed S04's bounded software/QEMU scope after S03. Added per-task runtime
+and dispatch accounting, fixed scheduler classes above quantum priority,
+pre-dispatch opt-in runtime quotas with timed throttling/recovery, and explicit
+two-node QEMU NUMA qualification. The dedicated S04 gate passes on 1/2/4 CPUs;
+target/host warning-denying Clippy and Python validation pass. Physical CPU
+hotplug/NUMA latency, dynamic cgroup-like classes, and unbounded quota policy
+remain outside S04.
 
 ## Codex — S03 keyboard/job-control closure increment (2026-10-28)
 

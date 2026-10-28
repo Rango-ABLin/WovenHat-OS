@@ -123,17 +123,26 @@ dedicated headless QMP gate enumerates xHCI, injects Ctrl-C through the USB HID
 keyboard, and proves foreground-group SIGINT termination (status 130). Full
 POSIX terminal coverage beyond this bounded ABI remains outside S03.
 
-## S04 scheduler and SMP accounting - 2026-10-28 - IMPLEMENTING
+## S04 scheduler and SMP accounting - 2026-10-28 - ACCEPTED BOUNDED
 
-The first S04 closure increment adds bounded scheduler accounting: every live
-task records timer-tick runtime and Ready-to-Running dispatch count, while a
-per-CPU counter records aggregate runtime. Snapshots are copied under the
-scheduler lock and preserve the existing priority, affinity, migration, and
-hotplug authority; accounting is telemetry, not an implicit reservation or
-billing promise. The dedicated `s04-scheduler-accounting-test` passes on 1/2/4
-CPUs with warning-denying target/host Clippy and Python validation. Enforced
-runtime quotas, richer scheduler classes, and multi-node topology qualification
-remain the next S04 work.
+S04 now has a bounded scheduler policy contract. Every live task records
+timer-tick runtime and dispatch count; fixed scheduler classes rank work above
+the existing quantum priority; and opt-in per-task runtime quotas enforce a
+bounded budget within a bounded period by throttling until the next period.
+Quota configuration is accepted only before first dispatch, retains no
+userspace pointers, and never turns telemetry into an implicit reservation.
+The existing hard affinity, Ready-only migration, NUMA-domain preference, and
+hotplug invariants remain authoritative.
+
+The dedicated `s04-scheduler-accounting-test` passes on 1/2/4 CPUs with
+warning-denying target/host Clippy and Python validation. Its 2/4-CPU QEMU
+profiles create two explicit NUMA nodes, verify topology publication, and
+prove Realtime and Background 2/8-tick quota enforcement and recovery. Evidence:
+`audit-artifacts/s04-scheduler-accounting-{1,2,4}cpu-*`.
+
+This closes S04's bounded software/QEMU scope. Physical CPU hotplug, native
+NUMA latency/placement, cgroup-like dynamic classes, and unbounded quota
+policy remain outside this stage.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

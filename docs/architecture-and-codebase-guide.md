@@ -4350,13 +4350,15 @@ nearly-full development host without weakening any rollback or digest check.
 ## S04 scheduler accounting boundary
 
 The scheduler keeps bounded per-task timer-runtime and dispatch counters and
-per-CPU aggregate runtime ticks. `task_accounting()` and
-`cpu_runtime_ticks()` return copied telemetry under the scheduler authority;
-they do not grant CPU reservations or imply billing/quota enforcement. The
-existing priority quantum, hard affinity, Ready-only migration, NUMA-domain
-preference, and hotplug invariants remain authoritative. Runtime quotas,
-richer scheduler classes, and multi-node topology qualification are separate
-S04 work.
+per-CPU aggregate runtime ticks. Fixed classes rank work above the existing
+quantum priority, and an opt-in task policy can enforce a bounded runtime
+quota within a bounded period by moving the task to a timed sleep until the
+next period. Policy configuration is pre-dispatch and scheduler-owned;
+`task_accounting()` and `cpu_runtime_ticks()` return copied telemetry. The
+existing hard affinity, Ready-only migration, NUMA-domain preference, and
+hotplug invariants remain authoritative. This is bounded software/QEMU policy,
+not native NUMA latency, cgroup-like dynamic classes, or an unbounded quota
+promise.
 
 ## Hybrid graphics GFX-01 boundary
 

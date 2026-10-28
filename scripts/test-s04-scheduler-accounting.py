@@ -46,6 +46,13 @@ def main() -> int:
         "-drive", f"if=none,id=boot,format=raw,readonly=on,file={build.stdout.strip()}",
         "-device", "virtio-blk-pci,drive=boot,bootindex=1",
     ]
+    if args.cpus >= 2:
+        command.extend([
+            "-object", "memory-backend-ram,id=mem0,size=2G",
+            "-object", "memory-backend-ram,id=mem1,size=2G",
+            "-numa", "node,nodeid=0,cpus=0-" + str((args.cpus // 2) - 1) + ",memdev=mem0",
+            "-numa", "node,nodeid=1,cpus=" + str(args.cpus // 2) + "-" + str(args.cpus - 1) + ",memdev=mem1",
+        ])
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
         with (out / "qemu.log").open("w", encoding="utf-8") as output:
@@ -61,8 +68,11 @@ def main() -> int:
         log,
         [f"[SMP] online={args.cpus} expected={args.cpus}",
          "[BOOT] priority round-robin fairness and per-task quanta verified",
-         "[S04.SCHEDULER] accounting: PASSED"],
+         "[S04.SCHEDULER] accounting: PASSED",
+         "[S04.TOPOLOGY] qualification: PASSED"],
     )
+    if args.cpus >= 2 and f"[S04.TOPOLOGY] qualification: PASSED domains=2" not in log:
+        errors.append("multi-node topology marker missing")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
