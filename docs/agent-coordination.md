@@ -7286,3 +7286,8 @@ POSIX port increment 16: added musl pipe() packed-fd adapter and generic
 open-descriptor Write routing. Pipe write/read/close passed QEMU at 1/2/4
 CPUs. Blocking, EOF and SIGPIPE semantics remain open.
 
+POSIX port increment 17: the static musl fixture closes its pipe writer and
+verifies that the remaining reader observes EOF. QEMU passed at 1/2/4 CPUs.
+Scheduler-blocked read/write, buffer-capacity and SIGPIPE semantics remain
+separate work.
+

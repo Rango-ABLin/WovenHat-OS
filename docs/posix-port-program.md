@@ -123,3 +123,12 @@ user-pointer syscall ABI. Generic Write dispatches owned descriptors through
 the task file table while preserving the unopened stdout/stderr console
 fallback. Pipe write/read/close passed at 1/2/4 CPUs; blocking, EOF-after-close
 and SIGPIPE semantics remain separate work.
+
+## Bootstrap increment: pipe EOF after writer close
+
+The static musl fixture now closes its pipe writer after consuming one byte and
+requires a subsequent read on the still-open reader to return zero. This
+proves the user-visible EOF transition after the final writer closes, alongside
+the prior generic unopened stdout/stderr fallback regression, at 1/2/4 CPUs.
+It does not certify a scheduler-blocked read/write, bounded-buffer saturation,
+or broken-pipe signal/error behavior.
