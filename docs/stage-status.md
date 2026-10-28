@@ -1,5 +1,12 @@
 # Stage status
 
+## Bounded dynamic ELF image admission - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Added a fixed-capacity ELF64 image plan that validates loadable segments,
+entry/load span, PT_TLS, file bounds, and dynamic metadata before mapping.
+Focused parser tests and warning-denying libwoven Clippy pass. The plan is not
+itself post-start page mapping, relocation, constructor execution, or `dlopen`.
+
 ## Bounded ELF PT_TLS runtime ingestion - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The runtime module manager can now ingest a verified ELF64 PT_TLS program

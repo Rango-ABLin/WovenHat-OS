@@ -146,6 +146,7 @@ pub mod identity;
 pub mod installer_ipc;
 pub mod media;
 pub mod dynamic_tls;
+pub mod elf_loader;
 pub mod module_namespace;
 pub mod runtime_modules;
 pub mod package;

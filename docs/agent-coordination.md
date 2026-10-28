@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded dynamic ELF image admission plan (2026-10-28)
+
+Added `libwoven::elf_loader::ImagePlan` for checked ELF64 image admission.
+It validates loadable segment bounds, entry/load-span geometry, PT_TLS, and
+dynamic metadata with a fixed segment cap before process mutation. It is an
+input contract for the kernel's future post-start mapper and does not map or
+execute untrusted bytes itself.
+
 ## Codex - bounded ELF PT_TLS runtime ingestion (2026-10-28)
 
 Added `RuntimeModules::load_elf_tls`, a checked ELF64 little-endian PT_TLS
