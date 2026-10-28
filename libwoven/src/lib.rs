@@ -12411,15 +12411,6 @@ pub mod syscall {
         unsafe { invoke(148, initializer, packed, 0) }
     }
 
-    /// Atomically map and install a dynamic TLS block for all live threads.
-    ///
-    /// # Safety
-    /// The caller must own the dynamic-module transaction and provide readable
-    /// userspace initializer memory.
-    pub unsafe fn dynamic_tls_map_all(module: u64, initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
-        let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
-        unsafe { invoke(149, module, initializer, packed) }
-    }
 
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
