@@ -3,6 +3,7 @@ use crate::irq_lock::IrqMutex as Mutex;
 use crate::userspace::AnonymousMapping;
 
 pub const MAX_THREADS: usize = 64;
+pub const MAX_ROBUST_ENTRIES: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ThreadId(u64);
@@ -43,6 +44,8 @@ struct Record {
     tls: u64,
     resources: Option<Resources>,
     waiter: Option<u64>,
+    robust_count: u8,
+    robust_mutexes: [u64; MAX_ROBUST_ENTRIES],
 }
 
 impl Record {
@@ -55,6 +58,8 @@ impl Record {
         tls: 0,
         resources: None,
         waiter: None,
+        robust_count: 0,
+        robust_mutexes: [0; MAX_ROBUST_ENTRIES],
     };
 
     fn reusable(&self) -> bool {
@@ -97,7 +102,38 @@ pub fn create(owner: u64) -> Option<ThreadId> {
     record.tls = 0;
     record.resources = None;
     record.waiter = None;
+    record.robust_count = 0;
+    record.robust_mutexes = [0; MAX_ROBUST_ENTRIES];
     Some(ThreadId::new(slot, record.generation))
+}
+
+pub fn register_robust_mutex(id: ThreadId, address: u64) -> bool {
+    if address == 0 || !address.is_multiple_of(core::mem::align_of::<u32>() as u64) {
+        return false;
+    }
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    if record.robust_mutexes[..record.robust_count as usize].contains(&address) {
+        return true;
+    }
+    let index = record.robust_count as usize;
+    if index >= MAX_ROBUST_ENTRIES { return false; }
+    record.robust_mutexes[index] = address;
+    record.robust_count += 1;
+    true
+}
+
+pub fn unregister_robust_mutex(id: ThreadId, address: u64) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let count = record.robust_count as usize;
+    let Some(index) = record.robust_mutexes[..count].iter().position(|entry| *entry == address) else {
+        return false;
+    };
+    record.robust_mutexes[index..count].rotate_left(1);
+    record.robust_count -= 1;
+    record.robust_mutexes[record.robust_count as usize] = 0;
+    true
 }
 
 pub fn terminate(id: ThreadId, exit: i32) -> bool {

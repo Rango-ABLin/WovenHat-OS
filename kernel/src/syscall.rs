@@ -366,6 +366,8 @@ pub enum Number {
     DynamicTlsModuleStart = 142,
     /// TLS module ID -> mapped module block size, or ERROR.
     DynamicTlsModuleSize = 143,
+    /// current thread, validated mutex address, operation (1 add, 0 remove)
+    ThreadRobustRegister = 144,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3113,6 +3115,19 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             .unwrap_or(SYSCALL_ERROR),
         value if value == Number::ThreadCancel as u64 => {
             crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        value if value == Number::ThreadRobustRegister as u64 => {
+            let Some(thread) = crate::task::current_thread_id() else { return SYSCALL_ERROR; };
+            let mut probe = [0_u8; 4];
+            if crate::paging::copy_from_current_user(arg0, &mut probe).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let ok = if arg1 == 0 {
+                crate::thread::unregister_robust_mutex(thread, arg0)
+            } else if arg1 == 1 {
+                crate::thread::register_robust_mutex(thread, arg0)
+            } else { false };
+            u64::from(ok)
         }
         value if value == Number::ThreadSleep as u64 => {
             crate::task::sleep_current(arg0);
