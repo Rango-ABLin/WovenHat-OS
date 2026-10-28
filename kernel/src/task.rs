@@ -1522,6 +1522,8 @@ fn create_process(
     let mut inherited_group = None;
     let mut inherited_session = None;
     let mut inherited_environment = ProcessEnvironment::defaults();
+    let fallback_group = current_process_group();
+    let fallback_session = current_session_id();
     {
         let processes = process_table_lock();
         if let Some(parent_proc) = processes.iter().flatten().find(|p| p.id == parent) {
@@ -1547,8 +1549,8 @@ fn create_process(
         cwd,
         cwd_len,
         pending_signal: 0,
-        process_group: inherited_group.unwrap_or(id.as_u64()),
-        session_id: inherited_session.unwrap_or(id.as_u64()),
+        process_group: inherited_group.unwrap_or(fallback_group),
+        session_id: inherited_session.unwrap_or(fallback_session),
         signal_actions: [0; 32],
         environment: inherited_environment,
     }
