@@ -60,13 +60,22 @@ def main() -> int:
         env=build_env,
         check=True,
     )
+    # Compile the host packager separately and invoke the actual executable.
+    # Do not conflate a Cargo launcher crash with a packager SIGSEGV.
+    wpkg_env = dict(build_env)
+    wpkg_env["CARGO_TARGET_DIR"] = str(root / "target" / "wpkg-packager")
+    subprocess.run(
+        ["cargo", "build", "--manifest-path",
+         str(root / "tools" / "wpkg-packager" / "Cargo.toml")],
+        cwd=root, env=wpkg_env, check=True,
+    )
+    packager_binary = (
+        Path(wpkg_env["CARGO_TARGET_DIR"]) / "debug"
+        / ("wovenhat-wpkg-packager.exe" if os.name == "nt" else "wovenhat-wpkg-packager")
+    )
     subprocess.run(
         [
-            "cargo",
-            "run",
-            "--quiet",
-            "--manifest-path",
-            str(root / "tools" / "wpkg-packager" / "Cargo.toml"),
+            str(packager_binary),
             "--",
             str(elf),
             str(fixture),
@@ -76,7 +85,7 @@ def main() -> int:
             "1",
         ],
         cwd=root,
-        env=build_env,
+        env=wpkg_env,
         check=True,
     )
     build_env["WOVENHAT_PACKAGE_IMAGE"] = str(broker_image)

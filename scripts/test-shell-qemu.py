@@ -228,7 +228,24 @@ def main():
                 deadline = time.monotonic() + 240
                 while marker not in serial.read_text(errors='replace'):
                     if process.poll() is not None or time.monotonic() > deadline:
-                        raise RuntimeError('Service supervisor recovery gate failed; inspect shell-regression logs')
+                        evidence = serial.read_text(errors='replace')
+                        supervisor_lines = [
+                            line for line in evidence.splitlines()
+                            if '[STAGE31 SUPERVISOR]' in line
+                            or 'panic' in line.lower()
+                            or 'security violation' in line.lower()
+                        ]
+                        reason = ('QEMU exited with status ' + str(process.poll())
+                                  if process.poll() is not None else 'recovery marker timeout')
+                        raise RuntimeError(
+                            'Service supervisor recovery gate failed: ' + reason
+                            + '\\nSupervisor/fatal serial evidence:\\n'
+                            + '\\n'.join(supervisor_lines[-40:])
+                            + '\\nLast serial lines:\\n'
+                            + '\\n'.join(evidence.splitlines()[-35:])
+                            + '\\nSerial log: ' + str(serial)
+                            + '\\nQEMU log: ' + str(out / 'qemu.log')
+                        )
                     time.sleep(0.1)
                 exit_status = process.wait(timeout=5)
                 evidence = serial.read_text(errors='replace')
