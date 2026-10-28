@@ -1,5 +1,74 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse directory entry with non-UTF-8 name
+
+Branch: `auto/wovenhat-development` (base `393cb925`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` accepts file names only through `checked_native_name(name: &str)`.
+Rust's type system guarantees every `&str` is valid UTF-8, so no runtime path
+can store a name whose bytes are not valid UTF-8.
+
+An entry with invalid UTF-8 bytes in its name is permanently unreachable:
+`DirEntry::matches` compares caller-supplied `&str` bytes against the stored
+bytes directly.  A crafted byte sequence (e.g. `0xFF`) can never equal any
+valid UTF-8 string, so `lookup` and `unlink` can never find the entry.
+Neither the inode slot nor its data blocks can be freed through the normal
+path; the file is a permanent space leak invisible to the user.
+
+`check()` already validates `name_len`, null bytes, `/`, `\\`, and `.`/`..`,
+but did not call `core::str::from_utf8` on the stored bytes.  A crafted image
+with any non-UTF-8 byte in the name field (e.g. `0xFF`, `0xC0`, `0x80`)
+passed all existing guards and `check()` returned `Ok(())` — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — after the existing dot/dotdot guard,
+added:
+
+```rust
+// `stage_create` accepts names only as `&str`, which Rust guarantees
+// to be valid UTF-8.  No runtime path can therefore store a name
+// whose bytes are not valid UTF-8.  An entry with a non-UTF-8 name
+// is permanently unreachable: every lookup converts the caller-
+// supplied name through `&str`, so the stored byte sequence can
+// never compare equal to any valid lookup argument.  The file and
+// its data blocks cannot be freed through any normal path either.
+if core::str::from_utf8(&entry.name[..name_len]).is_err() {
+    return Err(Error::Corrupt);
+}
+```
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_directory_entry_whose_name_is_not_valid_utf8`:
+1. Formats a fresh volume with two files (`a.txt`, `b.txt`).
+2. For each of three invalid UTF-8 byte values (`0xFF`, `0xC0`, `0x80`):
+   a. Forks the image.
+   b. Patches the first name byte of `a.txt`'s directory entry to the invalid byte.
+   c. Asserts `check()` returns `Err(Corrupt)`.
+   d. Asserts `check()` does not modify the image.
+   e. Asserts `b.txt` remains readable.
+3. Control: the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **55 passed / 0 failed** (was 54; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard covers names at creation time; existing data blocks are not affected.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- The orphan scan and bitmap→inode scan are O(n²); acceptable for a consistency
+  check but not for a hot path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse KIND_FILE inode with size above MAX_FILE_SIZE
 
 Branch: `auto/wovenhat-development` (base `0382eb7b`). Working tree was clean.

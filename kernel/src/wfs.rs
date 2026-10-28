@@ -1544,6 +1544,16 @@ impl<D: BlockDevice> Volume<D> {
             if entry.name[..name_len] == b"."[..] || entry.name[..name_len] == b".."[..] {
                 return Err(Error::Corrupt);
             }
+            // `stage_create` accepts names only as `&str`, which Rust guarantees
+            // to be valid UTF-8.  No runtime path can therefore store a name
+            // whose bytes are not valid UTF-8.  An entry with a non-UTF-8 name
+            // is permanently unreachable: every lookup converts the caller-
+            // supplied name through `&str`, so the stored byte sequence can
+            // never compare equal to any valid lookup argument.  The file and
+            // its data blocks cannot be freed through any normal path either.
+            if core::str::from_utf8(&entry.name[..name_len]).is_err() {
+                return Err(Error::Corrupt);
+            }
         }
         // No two live entries may share the same name. `stage_create` rejects
         // duplicates, so any duplicate pair is corruption; the second entry
