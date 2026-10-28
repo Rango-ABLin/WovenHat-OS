@@ -30,6 +30,14 @@ impl TaskBinding {
     pub fn context(self, owner: &Owner) -> Option<RegisterContext> {
         self.is_current(owner).then_some(self.context)
     }
+
+    pub fn context_mut(&mut self, owner: &Owner) -> Option<&mut RegisterContext> {
+        self.is_current(owner).then_some(&mut self.context)
+    }
+
+    pub fn release(self, owner: &mut Owner) -> bool {
+        owner.detach(self.token)
+    }
 }
 
 #[cfg(any(test, feature = "stage32-15-test"))]

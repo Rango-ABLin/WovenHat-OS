@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
+
+Per user direction, the remaining Stage 32 work was consolidated into one
+change set rather than further 32.x increments. `kernel/src/wovendev.rs` now
+connects owner, copied frame, RSP transport pump, session dispatch, bounded
+register writes, and optional COM2 polling. SDK/API guidance, an application
+example path, and a reusable application template were added. Target and host
+warning-denying Clippy, Python validation, and the integrated QEMU 1/2/4-CPU
+gate pass with exit 33. This is a repository-level software boundary; live
+IDT safe-point wiring, scheduler-owned continue/step mutation, and physical
+GDB qualification are deliberately not claimed.
+
 ## Codex - Stage 32.16 GDB transport pump (2026-10-28)
 
 Added `kernel/src/gdb_transport.rs`, a fixed-size COM2/RSP byte assembler with

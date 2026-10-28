@@ -125,6 +125,8 @@ pub mod gdb_owner;
 pub mod gdb_frame;
 pub mod gdb_binding;
 pub mod gdb_transport;
+#[cfg(feature = "wovendev")]
+pub mod wovendev;
 pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
@@ -5286,6 +5288,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.16] GDB transport pump: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-integrated-test")]
+    {
+        if !wovendev::WovenDev::self_test() {
+            serial::write_line(format_args!("[S32] WovenDev integrated path: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32] WovenDev integrated path: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]
