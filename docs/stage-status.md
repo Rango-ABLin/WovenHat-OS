@@ -1,5 +1,13 @@
 # Stage status
 
+## Atomic all-thread dynamic TLS mapping - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now exposes a transaction-owned all-thread mapper. It validates the
+bounded initializer, allocates private mappings in each live thread paging
+space, installs resource ownership, and rolls back partial work. Descriptor
+publication occurs after all installations succeed. Kernel/libwoven target
+checks and warning-denying Clippy pass; QEMU multi-CPU qualification remains.
+
 ## Dynamic TLS resource clearing boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Thread teardown now clears dynamic TLS ownership through a validated resource

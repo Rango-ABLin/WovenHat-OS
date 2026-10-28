@@ -2306,6 +2306,57 @@ pub fn validate_dynamic_tls_initializer(user_ptr: u64, initializer_len: u64, mem
     initializer_len as u64
 }
 
+pub fn dynamic_module_transaction_owned() -> bool {
+    SCHEDULER.lock().dynamic_module_owner == Some(current_process_id())
+}
+
+pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) -> bool {
+    if !dynamic_module_transaction_owned() || initializer.is_empty() || initializer.len() > memory_size || memory_size > 4096 { return false; }
+    let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return false; };
+    if module >= userspace::MAX_DYNAMIC_MODULES { return false; }
+    let owner = current_process_id();
+    let mmap_base = {
+        let processes = process_table_lock();
+        let Some(process) = processes.iter().flatten().find(|process| process.id.as_u64() == owner) else { return false; };
+        let Some(space) = process.address_space else { return false; };
+        if space.dynamic_tls_module_range((module as u64) + 1, 0).is_some() { return false; }
+        space.mmap_base()
+    };
+    let threads = {
+        let scheduler = SCHEDULER.lock();
+        let mut threads = [(None, None); crate::thread::MAX_THREADS];
+        let mut count = 0;
+        for task in &scheduler.tasks {
+            if task.process_id.as_u64() == owner && task.thread_id.is_some() && !matches!(task.state, TaskState::Empty | TaskState::Dead) {
+                if count == threads.len() { return false; }
+                threads[count] = (task.thread_id, task.address_space);
+                count += 1;
+            }
+        }
+        threads
+    };
+    let size = match memory_size.checked_add(4095).map(|value| value & !4095) { Some(size) => size, None => return false };
+    let slot = userspace::DYNAMIC_MMAP_SLOT_BASE + module;
+    let mut installed = [(None, None); crate::thread::MAX_THREADS];
+    let mut count = 0;
+    while count < threads.len() && threads[count].0.is_some() {
+        let thread = threads[count].0.unwrap();
+        let address_space = threads[count].1.unwrap();
+        let Some(mapping) = userspace::map_dynamic_anonymous(address_space, mmap_base, slot, size) else { break };
+        if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err() || !crate::thread::install_dynamic_tls(thread, module, mapping) { let _ = userspace::unmap_dynamic_anonymous(address_space, mapping); break; }
+        installed[count] = (Some(thread), Some(mapping));
+        count += 1;
+    }
+    if count != threads.iter().filter(|entry| entry.0.is_some()).count() {
+        for index in 0..count { if let (Some(thread), Some(mapping)) = installed[index] { let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address); let _ = userspace::unmap_dynamic_anonymous(threads[index].1.unwrap(), mapping); } }
+        return false;
+    }
+    let mut processes = process_table_lock();
+    let Some(process) = processes.iter_mut().flatten().find(|process| process.id.as_u64() == owner) else { return false; };
+    let Some(space) = process.address_space.as_mut() else { return false; };
+    space.publish_dynamic_module(module, installed[0].1.unwrap().address, size).is_some()
+}
+
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
 /// generation-tagged handle is reused.
 pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {

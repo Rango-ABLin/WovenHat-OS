@@ -4910,6 +4910,7 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
+    pub fn mmap_base(self) -> u64 { self.mmap_base }
     pub fn dynamic_tls_module_range(self, module: u64, _tls_base: u64) -> Option<(u64, usize)> {
         let index = usize::try_from(module.checked_sub(1)?).ok()?;
         let descriptor = self.dynamic_modules.get(index)?;
@@ -5020,6 +5021,31 @@ impl AddressSpace {
         }
         false
     }
+}
+
+pub fn map_dynamic_anonymous(
+    address_space: paging::AddressSpace,
+    mmap_base: u64,
+    slot: usize,
+    size: usize,
+) -> Option<AnonymousMapping> {
+    if !(DYNAMIC_MMAP_SLOT_BASE..MAX_ANONYMOUS_MAPPINGS).contains(&slot)
+        || size == 0
+        || !size.is_multiple_of(4096)
+    {
+        return None;
+    }
+    let address = mmap_base.checked_add((slot as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+    paging::map_user_range_in(address_space, address, size, true, false).ok()?;
+    if paging::zero_user_range_in(address_space, address, size).is_err() {
+        let _ = paging::unmap_user_range_in(address_space, address, size);
+        return None;
+    }
+    Some(AnonymousMapping { address, size, writable: true, lazy: None, resident: 0, dirty: 0, swap_slots: [None; USER_MMAP_PAGES] })
+}
+
+pub fn unmap_dynamic_anonymous(address_space: paging::AddressSpace, mapping: AnonymousMapping) -> bool {
+    paging::unmap_user_range_in(address_space, mapping.address, mapping.size).is_ok()
 }
 
 #[derive(Clone, Copy)]

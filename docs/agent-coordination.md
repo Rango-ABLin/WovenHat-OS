@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - atomic all-thread dynamic TLS mapping (2026-10-28)
+
+Added the transaction-gated `DynamicTlsMapAll` operation. It snapshots live
+thread paging spaces, maps the reserved per-module slot in each, copies the
+validated initializer, installs ownership in each thread resource record, and
+rolls back prior mappings/resources if any step fails. The process descriptor
+publishes only after every thread succeeds.
+
 ## Codex - dynamic TLS resource clearing boundary (2026-10-28)
 
 Added a used thread-resource API for clearing one dynamic TLS ownership slot

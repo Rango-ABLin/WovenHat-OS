@@ -202,6 +202,16 @@ pub fn clear_dynamic_tls(id: ThreadId, slot: usize, address: u64) -> bool {
     true
 }
 
+pub fn install_dynamic_tls(id: ThreadId, slot: usize, mapping: AnonymousMapping) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let Some(resources) = record.resources.as_mut() else { return false; };
+    let Some(destination) = resources.dynamic_tls.get_mut(slot) else { return false; };
+    if destination.is_some() { return false; }
+    *destination = Some(mapping);
+    true
+}
+
 
 pub fn joinable(owner: u64, id: ThreadId) -> Result<bool, JoinError> {
     let mut table = TABLE.lock();

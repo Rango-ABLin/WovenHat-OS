@@ -372,6 +372,7 @@ pub enum Number {
     DynamicModuleTransactionEnd = 147,
     /// user initializer pointer, packed initializer/memory lengths -> length or ERROR
     DynamicTlsValidate = 148,
+    DynamicTlsMapAll = 149,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3159,6 +3160,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
                 0 => SYSCALL_ERROR,
                 length => length,
             }
+        }
+        value if value == Number::DynamicTlsMapAll as u64 => {
+            let initializer_len = usize::try_from(arg2 >> 32).ok();
+            let memory_size = usize::try_from(arg2 & 0xffff_ffff).ok();
+            let (Some(initializer_len), Some(memory_size)) = (initializer_len, memory_size) else { return SYSCALL_ERROR; };
+            if initializer_len == 0 || initializer_len > memory_size || initializer_len > 4096 { return SYSCALL_ERROR; }
+            let mut initializer = [0u8; 4096];
+            if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len]).is_err() || !crate::task::map_dynamic_tls_all(arg0, &initializer[..initializer_len], memory_size) { SYSCALL_ERROR } else { 0 }
         }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
