@@ -1584,11 +1584,23 @@ impl<D: BlockDevice> Volume<D> {
         // writing any field, so those 4 bytes are always zero on a
         // correctly-written filesystem.  The decoded `DirEntry` struct drops
         // those bytes; `check()` must inspect the raw block directly.
+        // A free entry (inode == 0, bytes 0..8 all zero) must have all
+        // remaining fields zeroed too.  `encode` fills the whole 64-byte slot
+        // with zeros before writing any field, and `stage_dir_entry` always
+        // passes `DirEntry::empty()` (all zeros) when clearing a freed slot.
+        // Any non-zero byte in `name_len` (8..10), `kind` (10..12), or `name`
+        // (16..64) in a free slot is corruption that no runtime path can produce.
         for block in root.direct.iter().copied().filter(|&b| b != 0) {
             let sector = self.read_block_staged(&txn, block)?;
             for index in 0..DIR_ENTRIES_PER_BLOCK {
                 let at = index * DIR_ENTRY_SIZE;
                 if sector[at + 12..at + 16].iter().any(|&b| b != 0) {
+                    return Err(Error::Corrupt);
+                }
+                if sector[at..at + 8].iter().all(|&b| b == 0)
+                    && (sector[at + 8..at + 12].iter().any(|&b| b != 0)
+                        || sector[at + 16..at + DIR_ENTRY_SIZE].iter().any(|&b| b != 0))
+                {
                     return Err(Error::Corrupt);
                 }
             }

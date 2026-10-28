@@ -2954,3 +2954,57 @@ fn check_refuses_a_live_inode_with_unknown_kind() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a free directory entry whose non-inode fields are not
+/// all zero.
+///
+/// `DirEntry::encode` calls `raw[..DIR_ENTRY_SIZE].fill(0)` before writing any
+/// field; `DirEntry::empty()` produces all zeros; every runtime write of a freed
+/// slot calls `stage_dir_entry` with `DirEntry::empty()`.  A free entry (inode
+/// == 0, bytes 0..8 all zero) therefore always has all 64 bytes zeroed on a
+/// correctly-written filesystem.  Non-zero `name_len` (bytes 8..10), `kind`
+/// (bytes 10..12), or any `name` byte (bytes 16..64) in a free slot is
+/// corruption no runtime path can produce.
+#[test]
+fn check_refuses_a_free_directory_entry_with_nonzero_fields() {
+    let base = formatted();
+    // In a freshly formatted volume the root directory block is written with
+    // all zeros by `format()`, so every directory entry is a free slot.
+    let block = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(1)
+        .expect("root inode")
+        .direct[0];
+
+    // Each case patches one field in free entry 0 to a non-zero value; all
+    // are offsets within the 64-byte entry.
+    let cases: &[(usize, &[u8], &str)] = &[
+        (8, &1u16.to_le_bytes(), "name_len lo byte (offset 8)"),
+        (9, &[0x01], "name_len hi byte (offset 9)"),
+        (10, &1u16.to_le_bytes(), "kind lo byte (offset 10)"),
+        (11, &[0x01], "kind hi byte (offset 11)"),
+        (16, &[0xFF], "first name byte (offset 16)"),
+        (63, &[0x01], "last name byte (offset 63)"),
+    ];
+
+    for &(at, val, label) in cases {
+        let image = base.fork(None);
+        patch_dir_entry(&image, block, 0, at, val);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free entry with non-zero {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

@@ -1,5 +1,77 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse free directory entry with nonzero fields
+
+Branch: `auto/wovenhat-development` (base `d9f4a826`). Working tree was clean.
+
+### Defect / gap
+
+`check()` already verifies that the 4-byte reserved padding (raw entry bytes
+12..16) is zero for every directory entry, live or free (added in the previous
+session). But the check covered only those 4 bytes.
+
+A free directory entry (inode == 0, bytes 0..8 all zero) must have ALL remaining
+fields zeroed:
+
+- `DirEntry::encode` calls `raw[..DIR_ENTRY_SIZE].fill(0)` before writing any
+  field, so a freshly encoded free entry is 64 zero bytes.
+- `DirEntry::empty()` returns all-zero fields.
+- `stage_dir_entry` is always called with `DirEntry::empty()` when freeing a
+  slot, so no runtime path ever leaves non-zero bytes in the `name_len` (bytes
+  8..10), `kind` (bytes 10..12), or `name` (bytes 16..64) fields of a free
+  slot.
+
+`check()` only validated bytes 12..16 for free entries. A crafted image with a
+non-zero `name_len`, `kind`, or any `name` byte in a free slot passed all
+existing guards and `check()` returned `Ok(())` — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — in the existing raw-block pass, after the
+reserved-padding check (bytes 12..16), added a second guard inside the per-entry
+loop:
+
+```rust
+if sector[at..at + 8].iter().all(|&b| b == 0)
+    && (sector[at + 8..at + 12].iter().any(|&b| b != 0)
+        || sector[at + 16..at + DIR_ENTRY_SIZE].iter().any(|&b| b != 0))
+{
+    return Err(Error::Corrupt);
+}
+```
+
+If bytes 0..8 are all zero (free entry) and any byte in 8..12 (`name_len` +
+`kind`) or 16..64 (`name`) is non-zero, `check()` returns `Err(Corrupt)`.
+Together with the existing padding check, this means every non-inode byte in a
+free slot is verified.
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_free_directory_entry_with_nonzero_fields`:
+1. Formats a fresh volume (all directory entries are free, all bytes zero).
+2. Reads `root.direct[0]` to find the directory block.
+3. For each of six cases — `name_len` lo/hi (offsets 8, 9), `kind` lo/hi
+   (offsets 10, 11), first name byte (offset 16), last name byte (offset 63) —
+   forks the image, patches entry 0 at that offset to a non-zero value, and
+   asserts `check()` returns `Err(Corrupt)` and does not modify the image.
+4. Control: the unpatched image passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **59 passed / 0 failed** (was 58; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The new guard covers `name_len`, `kind`, and `name` in free slots; the
+  padding bytes (12..16) were already covered by the prior session's check.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse live inode with unknown kind
 
 Branch: `auto/wovenhat-development` (base `78e92220`). Working tree was clean.
