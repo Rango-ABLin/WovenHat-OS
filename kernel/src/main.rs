@@ -121,6 +121,7 @@ pub mod gdb_stub;
 pub mod gdb_debugger;
 pub mod gdb_session;
 pub mod gdb_trap;
+pub mod gdb_entry;
 pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
@@ -5246,6 +5247,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.12] GDB trap boundary: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-13-test")]
+    {
+        if !gdb_entry::self_test() {
+            serial::write_line(format_args!("[S32.13] GDB trap entry: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.13] GDB trap entry: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

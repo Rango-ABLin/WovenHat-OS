@@ -1,5 +1,19 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code — Stage 32.13 IDT trap-frame capture and GDB entry point (2026-10-28)
+
+Added `kernel/src/gdb_entry.rs`: assembly trampoline (`wovenhat_debug_entry`),
+`DebugFrame` struct, `to_register_context()`, and bounded `wovenhat_debug_dispatch`
+with a 65536-poll COM2 stub loop. IDT vectors 1 and 3 wired via `set_handler_addr`
+in `interrupts::init` under `#[cfg(feature = "gdb-entry")]`; existing
+`breakpoint_handler` path preserved for lower features. Feature chain:
+`gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]`,
+`stage32-13-test = ["qemu-test", "gdb-entry"]`. Target and host `-D warnings`
+Clippy, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence under
+`target/stage32-13-gdb-entry-{1,2,4}cpu/`. Stage 32.13 accepted; stopped-task
+ownership, per-register write commands (`P`/`X`), breakpoint table management,
+and multi-client lifecycle remain open.
+
 ## Codex - Stage 32.12 GDB trap-stop boundary (2026-10-28)
 
 Added `kernel/src/gdb_trap.rs`, a pure bounded classifier for captured

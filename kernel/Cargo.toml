@@ -170,6 +170,11 @@ stage32-11-test = ["qemu-test", "gdb-session"]
 gdb-trap = ["gdb-session"]
 # Stage 32 WovenDev trap-stop classification QEMU gate.
 stage32-12-test = ["qemu-test", "gdb-trap"]
+# Enable live IDT trap entry: assembly trampoline, DebugFrame capture, and
+# bounded GDB stub loop over the debug-serial transport.
+gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]
+# Stage 32 WovenDev IDT trap-frame capture and GDB entry point QEMU gate.
+stage32-13-test = ["qemu-test", "gdb-entry"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

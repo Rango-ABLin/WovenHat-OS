@@ -1,5 +1,25 @@
 # Stage status
 
+## Stage 32.13 IDT trap-frame capture and GDB entry point — 2026-10-28 — ACCEPTED
+
+Added `kernel/src/gdb_entry.rs`: a `global_asm!` trampoline (`wovenhat_debug_entry`)
+that saves all 15 GPRs on the kernel stack, calls `wovenhat_debug_dispatch`, and
+returns via `iretq`. The `DebugFrame` struct captures the saved GPRs plus the
+CPU-pushed exception frame; `to_register_context()` maps them to the 24-register
+GDB x86-64 order. The dispatch function drives a bounded stub loop (65536 COM2
+polls) over `debug_serial`, `gdb_stub`, and `gdb_session`, sets TF for step and RF
+for resume, and times out cleanly when no GDB client connects. IDT vectors 1 (#DB)
+and 3 (INT3) are wired to the trampoline in `interrupts::init` via
+`set_handler_addr` when `gdb-entry` is active; the existing `breakpoint_handler`
+path is preserved for all lower-stage gates. Feature chain:
+`gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]`.
+Self-test: pure register-mapping check plus a live INT3 via `HANDLER_FIRED`.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-13-gdb-entry-{1,2,4}cpu/`. Target (stage32-13-test and
+stage32-12-test) and host warning-denying Clippy pass. No intermediate live
+GDB client needed; the stub loop timeout path is sufficient for gate acceptance.
+
 ## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_trap.rs`, a bounded translation layer for an already
