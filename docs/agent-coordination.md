@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded ELF PT_TLS runtime ingestion (2026-10-28)
+
+Added `RuntimeModules::load_elf_tls`, a checked ELF64 little-endian PT_TLS
+parser that validates program-header bounds, file/memory sizes, alignment, and
+initializer range before transactional TLS registration. It feeds the existing
+namespace/DTV lifecycle and does not map executable segments or relocate code.
+
 ## Codex - runtime module symbol boundary (2026-10-28)
 
 Exposed verified symbol publication and generation-checked lookup through the

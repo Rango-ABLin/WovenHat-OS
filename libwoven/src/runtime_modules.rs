@@ -8,6 +8,8 @@ pub const MAX_MODULES: usize = crate::dynamic_tls::MAX_MODULES;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Capacity,
+    InvalidImage,
+    MissingTls,
     Namespace(NamespaceError),
     Tls(TlsError),
     Stale,
@@ -53,6 +55,40 @@ impl RuntimeModules {
         Ok(namespace)
     }
 
+    /// Parse and register the bounded PT_TLS payload from an ELF64 image.
+    /// Code mapping and relocation remain kernel loader responsibilities.
+    pub fn load_elf_tls(&mut self, image: &[u8]) -> Result<ModuleId, Error> {
+        const PT_TLS: u32 = 7;
+        if image.len() < 64 || &image[..4] != b"\x7fELF" || image[4] != 2 || image[5] != 1 {
+            return Err(Error::InvalidImage);
+        }
+        let phoff = read_u64(image, 32).ok_or(Error::InvalidImage)? as usize;
+        let phentsize = read_u16(image, 54).ok_or(Error::InvalidImage)? as usize;
+        let phnum = read_u16(image, 56).ok_or(Error::InvalidImage)? as usize;
+        if phentsize < 56 || phnum > 64 {
+            return Err(Error::InvalidImage);
+        }
+        for index in 0..phnum {
+            let header = phoff.checked_add(index.checked_mul(phentsize).ok_or(Error::InvalidImage)?).ok_or(Error::InvalidImage)?;
+            if header.checked_add(56).ok_or(Error::InvalidImage)? > image.len() {
+                return Err(Error::InvalidImage);
+            }
+            if read_u32(image, header) != Some(PT_TLS) {
+                continue;
+            }
+            let offset = read_u64(image, header + 8).ok_or(Error::InvalidImage)? as usize;
+            let filesz = read_u64(image, header + 32).ok_or(Error::InvalidImage)? as usize;
+            let memory_size = read_u64(image, header + 40).ok_or(Error::InvalidImage)? as usize;
+            let alignment = read_u64(image, header + 48).ok_or(Error::InvalidImage)? as usize;
+            let end = offset.checked_add(filesz).ok_or(Error::InvalidImage)?;
+            if end > image.len() || filesz > memory_size || memory_size == 0 {
+                return Err(Error::InvalidImage);
+            }
+            return self.load(&image[offset..end], memory_size, alignment.max(1));
+        }
+        Err(Error::MissingTls)
+    }
+
     pub fn retain(&mut self, id: ModuleId) -> Result<(), Error> {
         self.namespace.retain(id).map_err(Error::Namespace)
     }
@@ -94,6 +130,18 @@ impl RuntimeModules {
     }
 }
 
+fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(bytes.get(offset..offset + 8)?.try_into().ok()?))
+}
+
 impl Default for RuntimeModules { fn default() -> Self { Self::new() } }
 
 #[cfg(test)]
@@ -119,5 +167,26 @@ mod tests {
         modules.unload(id).unwrap();
         assert_eq!(modules.tls_addr(&mut first, id, 0), Err(Error::Stale));
         assert_eq!(modules.lookup_symbol(b"tls_value"), Err(Error::Stale));
+    }
+
+    #[test]
+    fn parses_bounded_elf_tls_template() {
+        let mut image = vec![0u8; 0x120];
+        image[..4].copy_from_slice(b"\x7fELF");
+        image[4] = 2;
+        image[5] = 1;
+        image[32..40].copy_from_slice(&64u64.to_le_bytes());
+        image[54..56].copy_from_slice(&56u16.to_le_bytes());
+        image[56..58].copy_from_slice(&1u16.to_le_bytes());
+        image[64..68].copy_from_slice(&7u32.to_le_bytes());
+        image[72..80].copy_from_slice(&0x100u64.to_le_bytes());
+        image[96..104].copy_from_slice(&3u64.to_le_bytes());
+        image[104..112].copy_from_slice(&8u64.to_le_bytes());
+        image[112..120].copy_from_slice(&8u64.to_le_bytes());
+        image[0x100..0x103].copy_from_slice(b"tls");
+        let mut modules = RuntimeModules::new();
+        let id = modules.load_elf_tls(&image).unwrap();
+        let mut dtv = Dtv::new();
+        assert_eq!(*modules.tls_addr(&mut dtv, id, 0).unwrap(), b't');
     }
 }

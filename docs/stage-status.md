@@ -1,5 +1,13 @@
 # Stage status
 
+## Bounded ELF PT_TLS runtime ingestion - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The runtime module manager can now ingest a verified ELF64 PT_TLS program
+header, validate its initializer and memory bounds, and register it
+transactionally for per-thread DTV access. Focused parser/lifecycle tests and
+warning-denying libwoven Clippy pass. Full post-start ELF segment mapping,
+relocation, constructors, and `dlopen` remain kernel loader work.
+
 ## Runtime module symbol boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The runtime module manager now publishes and resolves verified symbols through
