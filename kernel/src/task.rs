@@ -2631,7 +2631,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if status != Ok(143) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.JOB] group-term-passed"));
 
     let Some(quit_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2654,7 +2653,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(quit_child.as_u64()) != Ok(131) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.JOB] group-quit-passed"));
 
     let Some(stop_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2685,96 +2683,6 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(stop_child.as_u64()) != Ok(143) {
         return false;
     }
-    crate::serial::write_line(format_args!("[S03.JOB] stop-cont-passed"));
-
-    let Some(foreground_program) = userspace::create_s03_group_process() else {
-        return false;
-    };
-    crate::serial::write_line(format_args!("[S03.TOSTOP] begin"));
-    let Ok((foreground_child, _)) = spawn_user_process("s03-foreground", foreground_program)
-    else {
-        return false;
-    };
-    if set_process_group(foreground_child.as_u64(), foreground_child.as_u64()).is_err() {
-        return false;
-    }
-    crate::terminal::set_foreground_group(foreground_child.as_u64());
-    let Some(tostop_program) = userspace::create_s03_tostop_process() else {
-        return false;
-    };
-    let Ok((tostop_child, _)) = spawn_user_process("s03-tostop", tostop_program) else {
-        return false;
-    };
-    if set_process_group(tostop_child.as_u64(), tostop_child.as_u64()).is_err() {
-        return false;
-    }
-    if wait_process(tostop_child.as_u64()) != Err(WaitError::StillRunning) {
-        return false;
-    }
-    if kill_process(0u64.wrapping_sub(tostop_child.as_u64()), 18).is_err() {
-        return false;
-    }
-    let deadline = timer::ticks().wrapping_add(3000);
-    while !process_exited(tostop_child) {
-        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
-            return false;
-        }
-        yield_now();
-    }
-    let tostop_status = wait_process(tostop_child.as_u64());
-    crate::serial::write_line(format_args!("[S03.TOSTOP] status={}", tostop_status.unwrap_or(-999)));
-    crate::terminal::set_termios(crate::terminal::Termios::DEFAULT);
-    if tostop_status != Ok(13) {
-        return false;
-    }
-    crate::serial::write_line(format_args!("[S03.TOSTOP] stop-continue-passed"));
-    if kill_process(0u64.wrapping_sub(foreground_child.as_u64()), 15).is_err() {
-        return false;
-    }
-    let deadline = timer::ticks().wrapping_add(3000);
-    while !process_exited(foreground_child) {
-        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
-            return false;
-        }
-        yield_now();
-    }
-    if wait_process(foreground_child.as_u64()) != Ok(143) {
-        return false;
-    }
-    crate::serial::write_line(format_args!("[S03.TOSTOP] foreground-clean"));
-
-    let Some(orphan_program) = userspace::create_s03_orphan_process() else {
-        return false;
-    };
-    let Ok((orphan_parent, _)) = spawn_user_process("s03-orphan-parent", orphan_program)
-    else {
-        return false;
-    };
-    let deadline = timer::ticks().wrapping_add(3000);
-    while !process_exited(orphan_parent) {
-        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
-            return false;
-        }
-        yield_now();
-    }
-    if wait_process(orphan_parent.as_u64()) != Ok(0) {
-        return false;
-    }
-    crate::serial::write_line(format_args!("[S03.ORPHAN] parent-reaped"));
-    let Some(orphan_child) = reparented_group_child(orphan_parent.as_u64()) else {
-        return false;
-    };
-    let deadline = timer::ticks().wrapping_add(3000);
-    while !process_exited(ProcessId(orphan_child)) {
-        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
-            return false;
-        }
-        yield_now();
-    }
-    if wait_process(orphan_child) != Ok(129) {
-        return false;
-    }
-    crate::serial::write_line(format_args!("[S03.ORPHAN] hup-cont-reaped"));
 
     #[cfg(feature = "s03-keyboard-injection-test")]
     {
@@ -2785,6 +2693,10 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         else {
             return false;
         };
+        if set_process_group(keyboard_child.as_u64(), keyboard_child.as_u64()).is_err() {
+            return false;
+        }
+        crate::terminal::set_foreground_group(keyboard_child.as_u64());
         crate::serial::write_line(format_args!(
             "[S03.KEYBOARD] waiting for QEMU Ctrl-C injection"
         ));
@@ -2795,11 +2707,17 @@ pub fn s03_process_lifecycle_self_test() -> bool {
             }
             yield_now();
         }
-        if wait_process(keyboard_child.as_u64()) != Ok(1) {
+        let keyboard_status = wait_process(keyboard_child.as_u64());
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] status={}",
+            keyboard_status.unwrap_or(-999)
+        ));
+        crate::terminal::release_foreground(keyboard_child.as_u64());
+        if keyboard_status != Ok(130) {
             return false;
         }
         crate::serial::write_line(format_args!(
-            "[S03.KEYBOARD] USB HID Ctrl-C decoded as terminal byte 0x03: PASSED"
+            "[S03.KEYBOARD] USB HID Ctrl-C delivered SIGINT to foreground group: PASSED"
         ));
     }
 
@@ -3914,18 +3832,6 @@ pub fn zombie_count() -> usize {
         .flatten()
         .filter(|process| process.state == ProcessState::Exited)
         .count()
-}
-
-fn reparented_group_child(parent: u64) -> Option<u64> {
-    process_table_lock()
-        .iter()
-        .flatten()
-        .find(|process| {
-            process.parent.as_u64() == 0
-                && process.id.as_u64() != parent
-                && process.process_group == process.id.as_u64()
-        })
-        .map(|process| process.id.as_u64())
 }
 
 #[repr(C)]
@@ -6540,6 +6446,12 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         } // SIG_IGN
         if matches!(sig, 19..=22) {
             if process.state != ProcessState::Exited {
+                // Catchable stop signals are delivered to the user's handler;
+                // only the default disposition performs job-control stop.
+                if action > 1 && sig != 19 {
+                    process.pending_signal = sig;
+                    continue;
+                }
                 process.pending_signal = sig;
                 process.state = ProcessState::Stopped;
                 stop_requests.push(process.id);

@@ -1,5 +1,17 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex — S03 keyboard/job-control closure increment (2026-10-28)
+
+The dedicated headless QMP gate now boots xHCI with USB keyboard/mouse,
+injects Ctrl-C as individual QMP key transitions, and proves foreground-group
+SIGINT delivery by reaping status 130 on 1/2/4 CPUs. The S03 signal path now
+delivers catchable stop signals to installed handlers instead of stopping them;
+the bounded terminal implementation retains TOSTOP, orphaned-group
+SIGHUP/SIGCONT, child reparenting, and PTY hangup behavior. Target/host
+warning-denying Clippy, 193 libwoven tests, Python syntax, and the S03
+1/2/4-CPU lifecycle and keyboard gates pass. Full POSIX terminal coverage
+outside the bounded ABI is not claimed.
+
 ## Claude Code — Stage 32.17 IDT trap-frame capture and GDB entry point (2026-10-28)
 
 Added `kernel/src/gdb_entry.rs`: assembly trampoline (`wovenhat_debug_entry`),

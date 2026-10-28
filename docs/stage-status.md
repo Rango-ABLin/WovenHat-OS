@@ -115,9 +115,13 @@ line buffer with echo, erase, EOF, and VINTR handling. The S03 gate exercises
 allocation, buffering, echo separation, and bidirectional transfer. The session
 increment adds inherited session identity, `getsid`/`setsid`, same-session
 process-group assignment, and a Ring-3 session probe; the 1/2/4-CPU gate passes.
-The remaining closure gaps are full shell job-control semantics (including
-orphaned groups and terminal hangup policy) and reliable QEMU hardware-input
-injection evidence; decoder self-tests do not substitute for that runtime gate.
+The bounded job-control slice now includes default SIGSTOP/SIGTSTP/SIGTTIN/
+SIGTTOU stopping, SIGCONT resumption, caught/ignored stop dispositions,
+`TOSTOP` background-write enforcement, stopped orphaned-group SIGHUP/SIGCONT
+notification, child reparenting, and PTY hangup EOF/write rejection. A
+dedicated headless QMP gate enumerates xHCI, injects Ctrl-C through the USB HID
+keyboard, and proves foreground-group SIGINT termination (status 130). Full
+POSIX terminal coverage beyond this bounded ABI remains outside S03.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

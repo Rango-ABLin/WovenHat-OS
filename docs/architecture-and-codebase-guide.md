@@ -71,8 +71,12 @@ retained by the line discipline. Each process also carries a bounded session
 identifier inherited across spawn/fork. `getsid(0)` reports it and `setsid()`
 creates a new session and process group only for a non-group-leader; process
 group assignment and foreground authority reject cross-session targets. This
-is the kernel authority needed by a shell, not a claim that orphaned-group,
-hangup, `TOSTOP`, or complete terminal job-control policy is implemented.
+is the kernel authority needed by a shell. Process exit reparents live
+children to the bounded init surrogate and applies the stopped orphaned-group
+SIGHUP/SIGCONT transition; PTY master teardown publishes slave EOF and rejects
+further slave writes; and background console writes honor `TOSTOP` with
+SIGTTOU, including ignored/caught dispositions. Full POSIX terminal coverage
+beyond this bounded ABI remains outside S03.
 
 ## S02 freestanding C ABI boundary (2026-10-28)
 

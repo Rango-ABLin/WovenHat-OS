@@ -644,12 +644,6 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let termios = crate::terminal::termios();
-    crate::serial::write_line(format_args!(
-        "[S03.TOSTOP-DIAG] flags={:#x} group={} fg={:?}",
-        termios.local_flags,
-        crate::task::current_process_group(),
-        crate::terminal::foreground_pid()
-    ));
     if termios.local_flags & crate::terminal::TOSTOP != 0 {
         if let Some(group) = crate::terminal::foreground_pid() {
             if crate::task::current_process_group() != group
