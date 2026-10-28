@@ -53,17 +53,17 @@ pub const KIND_DIR: u16 = 2;
 /// Extended-attribute name/value bound. Names reuse the directory-entry
 /// bound; values are capped so one bounded 512-byte block always holds the
 /// header, checksum, and at least one maximally-sized entry.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 pub const MAX_XATTR_NAME: usize = MAX_NAME;
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 pub const MAX_XATTR_VALUE: usize = 256;
 /// `entry_count` (2) + packed entries region (502) + checksum (8) = 512.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 const XATTR_BLOCK_HEADER: usize = 2;
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 const XATTR_BLOCK_CHECKSUM_AT: usize = SECTOR_SIZE - 8;
 /// `[name_len: u8][value_len: u16]` precedes each entry's bytes.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 const XATTR_ENTRY_HEADER: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,7 +121,7 @@ fn read_u64(bytes: &[u8], at: usize) -> u64 {
 /// Decode one packed entry at `at`, returning its name, value, and the
 /// offset of the following entry. Fails closed on any length that would
 /// read past the checksum rather than guessing at corrupt data.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 fn xattr_entry_at(sector: &[u8], at: usize) -> Option<(&[u8], &[u8], usize)> {
     if at + XATTR_ENTRY_HEADER > XATTR_BLOCK_CHECKSUM_AT {
         return None;
@@ -147,7 +147,7 @@ fn xattr_verify(sector: &[u8]) -> Result<(), Error> {
 
 /// Append one entry to `out` at `*at`, advancing it. Bounded by the packed
 /// entries region; a full block fails closed with `Error::NoSpace`.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 fn xattr_append(
     out: &mut [u8; SECTOR_SIZE],
     at: &mut usize,
@@ -175,7 +175,7 @@ fn xattr_append(
 /// `new_value` is `None`, removing) `name` and leaving every other entry
 /// untouched and in its original order. Returns the rebuilt sector and
 /// whether `name` was found among the existing entries.
-#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
 fn xattr_rebuild(
     sector: &[u8; SECTOR_SIZE],
     name: &[u8],
@@ -1471,6 +1471,7 @@ impl<D: BlockDevice> Volume<D> {
     /// Remove one extended attribute, as one transaction. Frees the xattr
     /// block (mirroring `write_file`'s block-free path) when it was the last
     /// attribute, so a deleted attribute never leaks an allocated block.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
     pub fn remove_xattr(&mut self, inode: u64, name: &str, now: u64) -> Result<(), Error> {
         Self::valid_xattr_name(name)?;
         let mut txn = Transaction::new();
@@ -1598,6 +1599,7 @@ impl<D: BlockDevice> Volume<D> {
                     seen_len += 1;
                 }
             }
+            #[cfg(any(test, feature = "stage12-2-xattr-test"))]
             if node.xattr_block != 0 {
                 let block = node.xattr_block;
                 if block < sb.data_start || block >= sb.total_blocks {

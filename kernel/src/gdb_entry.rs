@@ -204,13 +204,13 @@ fn gdb_owner_acquire() -> Option<AttachmentToken> {
     // Task slot zero is a valid scheduler identity, while Owner reserves zero
     // as the invalid sentinel. Encode the live identity one-based at this
     // boundary so the production trap path can bind the idle/first task too.
-    #[cfg(feature = "stage32-19-test")]
+    #[cfg(any(feature = "stage32-19-test", feature = "stage32-20-test"))]
     let task_id = crate::task::current_task_id_if_running()
         .map(|id| id.as_u64())
         .filter(|&id| id != u64::MAX)
         .unwrap_or(0)
         .checked_add(1)?;
-    #[cfg(not(feature = "stage32-19-test"))]
+    #[cfg(not(any(feature = "stage32-19-test", feature = "stage32-20-test")))]
     let task_id = crate::task::current_task_id_if_running()?
         .as_u64()
         .checked_add(1)?;
@@ -429,7 +429,7 @@ pub fn self_test() -> bool {
     // ── Live INT3 test (QEMU only; skipped in host unit-test builds) ─────────
     #[cfg(not(test))]
     {
-        #[cfg(feature = "stage32-19-test")]
+        #[cfg(any(feature = "stage32-19-test", feature = "stage32-20-test"))]
         {
             // Give the host-side COM2 client a bounded window to connect
             // before the qualification trap is raised. This is test-only
@@ -536,6 +536,9 @@ pub fn live_task_done() -> bool {
 #[cfg(feature = "stage32-20-test")]
 pub fn live_detach_task_entry() -> ! {
     HANDLER_FIRED.store(false, Ordering::SeqCst);
+    for _ in 0..2_000_000 {
+        core::hint::spin_loop();
+    }
     unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
     LIVE_DETACH_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
     loop { crate::task::yield_now(); }

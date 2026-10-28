@@ -713,11 +713,15 @@ fn xattr_lifecycle_and_block_reuse() {
     assert_eq!(volume.get_xattr(inode, "user.note", &mut out), Ok(5));
     assert_eq!(&out[..5], b"draft");
 
+    let replacement = b"a much longer replacement value";
     volume
-        .set_xattr(inode, "user.note", b"a much longer replacement value", 3)
+        .set_xattr(inode, "user.note", replacement, 3)
         .expect("overwrite with a different length");
-    assert_eq!(volume.get_xattr(inode, "user.note", &mut out), Ok(32));
-    assert_eq!(&out[..32], b"a much longer replacement value");
+    assert_eq!(
+        volume.get_xattr(inode, "user.note", &mut out),
+        Ok(replacement.len())
+    );
+    assert_eq!(&out[..replacement.len()], replacement);
 
     let oversized = vec![0u8; 257];
     assert_eq!(
@@ -805,7 +809,7 @@ fn set_xattr_is_atomic_across_every_crash_point() {
 
         let mut out = vec![0u8; 512];
         match recovered.get_xattr(inode, "user.note", &mut out) {
-            Ok(5) => assert_eq!(&out[..5], b"value"),
+            Ok(length) => assert_eq!(&out[..length], b"value", "crash at {cut}: torn value"),
             Err(Error::NotFound) => {}
             Err(error) => panic!("crash at {cut}: unexpected get_xattr error: {error:?}"),
         }
@@ -844,8 +848,8 @@ fn remove_xattr_is_atomic_across_every_crash_point() {
         let node = recovered.inode(inode).expect("inode");
         let mut out = vec![0u8; 512];
         match recovered.get_xattr(inode, "user.note", &mut out) {
-            Ok(5) => {
-                assert_eq!(&out[..5], b"value");
+            Ok(length) => {
+                assert_eq!(&out[..length], b"value", "crash at {cut}: torn value");
                 assert_ne!(node.xattr_block, 0);
             }
             Err(Error::NotFound) => assert_eq!(node.xattr_block, 0),
