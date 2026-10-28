@@ -371,7 +371,7 @@ pub fn debug_entry_address() -> u64 {
 ///
 /// The handler times out immediately when no GDB client is connected and
 /// returns to the instruction after `int3`, so the self-test does not hang.
-#[cfg(any(test, feature = "stage32-17-test"))]
+#[cfg(any(test, feature = "stage32-17-test", feature = "stage32-18-test"))]
 pub fn self_test() -> bool {
     // ── Pure mapping test ─────────────────────────────────────────────────────
     let frame = DebugFrame {

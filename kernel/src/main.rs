@@ -5573,6 +5573,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S32.17] GDB trap entry: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage32-18-test")]
+    {
+        if !gdb_entry::self_test() || !gdb_entry::owner_binding_self_test() {
+            serial::write_line(format_args!(
+                "[S32.18] GDB owner/binding attachment: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S32.18] GDB owner/binding attachment: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
