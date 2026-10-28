@@ -35,6 +35,8 @@ stage11-exit-status-test = ["stage11-2-test"]
 stage11-3-test = ["qemu-test"]
 stage11-4-test = ["qemu-test"]
 stage11-5-test = ["qemu-test"]
+# Stage 11.6: ModulePlan, per-thread StagedSegments, and rollback fixture.
+stage11-6-test = ["qemu-test"]
 # Execute unmodified compiler output before the unchanged loader gate exits.
 stage11-compiler-test = ["stage11-5-test"]
 stage11-tls-test = ["stage11-2-test"]

@@ -5,7 +5,7 @@ use super::*;
 use crate::elf::{self, Image, SymbolScope};
 use alloc::{borrow::Cow, vec::Vec};
 
-#[cfg(feature = "stage11-5-test")]
+#[cfg(any(feature = "stage11-5-test", feature = "stage11-6-test"))]
 mod acceptance;
 
 #[cfg(feature = "stage11-5-test")]
@@ -18,6 +18,12 @@ pub(super) fn shared_library_self_test() -> bool {
 #[inline(never)]
 pub(super) fn compiler_loader_self_test() -> bool {
     acceptance::compiler_run()
+}
+
+#[cfg(feature = "stage11-6-test")]
+#[inline(never)]
+pub(super) fn module_staging_self_test() -> bool {
+    acceptance::module_staging_run()
 }
 
 const LIBRARY_START: u64 = USER_REGION_START + 0x1000_0000;
@@ -295,6 +301,158 @@ impl Pending {
         validate_relocation_plan(images)?;
         relocate_linked_images(images, scope, self.space.paging(), &mut self.space, tls_plan)
     }
+}
+
+/// A verified, owned ELF image ready to be staged into any address space.
+///
+/// The bytes are copied and segment bounds plus admitted relocation types are
+/// checked at plan time, before any pages are mapped, so that staging is
+/// fail-closed.  The load bias is fixed when the plan is built; the caller
+/// selects a free slot in the dynamic-module table before calling `new`.
+#[cfg(feature = "stage11-6-test")]
+pub(super) struct ModulePlan {
+    pub(super) bytes: Vec<u8>,
+    pub(super) image: elf::Image,
+    /// Index into `AddressSpace::dynamic_modules`.
+    pub(super) slot: usize,
+    /// Base virtual address (lowest segment `mapping_start` after bias).
+    pub(super) mapping_start: u64,
+    /// Total byte span from `mapping_start` to the end of the last segment.
+    pub(super) mapping_size: usize,
+}
+
+#[cfg(feature = "stage11-6-test")]
+impl ModulePlan {
+    /// Build a plan for `bytes` at dynamic-module `slot` with the given load
+    /// `bias`.  Returns `None` if the image is not a valid shared library, any
+    /// segment falls outside the user region after bias, or any relocation type
+    /// is not in the admitted set.
+    ///
+    /// `parse_shared` is called twice: once through a temporary `LinkImage` to
+    /// validate relocation types, and once to store the owned `Image` in the
+    /// plan, avoiding a self-referential borrow.
+    pub(super) fn new(bytes: Vec<u8>, slot: usize, bias: u64) -> Option<Self> {
+        {
+            let image = elf::parse_shared(&bytes).ok()?.relocated(bias)?;
+            let link = LinkImage { name: None, bytes: Cow::Borrowed(&bytes), image };
+            validate_relocation_plan(core::slice::from_ref(&link))?;
+        }
+        let image = elf::parse_shared(&bytes).ok()?.relocated(bias)?;
+        let mapping_start = image.segments().map(|s| s.mapping_start).min()?;
+        let mapping_end = image
+            .segments()
+            .filter_map(|s| s.mapping_start.checked_add(s.mapping_size as u64))
+            .max()?;
+        let mapping_size = usize::try_from(mapping_end.checked_sub(mapping_start)?).ok()?;
+        if mapping_size == 0 {
+            return None;
+        }
+        Some(Self { bytes, image, slot, mapping_start, mapping_size })
+    }
+}
+
+/// Staged (mapped but unpublished) segments for one `ModulePlan` in one
+/// address space.  Pages are physically present but the module generation is
+/// not published; callers must call `commit` before any thread can observe the
+/// new module, or drop the guard to roll back all mapped pages.
+#[cfg(feature = "stage11-6-test")]
+#[cfg(feature = "stage11-6-test")]
+pub(super) struct StagedSegments<'a> {
+    space: &'a mut AddressSpace,
+    mapping_start: u64,
+    mapping_size: usize,
+    slot: usize,
+    committed: bool,
+}
+
+#[cfg(feature = "stage11-6-test")]
+impl Drop for StagedSegments<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = paging::unmap_user_range_in(
+                self.space.paging(),
+                self.mapping_start,
+                self.mapping_size,
+            );
+        }
+    }
+}
+
+#[cfg(feature = "stage11-6-test")]
+#[cfg(feature = "stage11-6-test")]
+impl<'a> StagedSegments<'a> {
+    /// Apply relocations to the staged pages, reusing the same
+    /// `validate_relocation_plan` + `relocate_linked_images` path used by
+    /// `Pending::relocate_staged`.  Returns `None` on any unsupported
+    /// relocation or invalid target; the guard then rolls back on drop.
+    ///
+    /// Private to this module and its submodules; `LinkImage` and `TlsPlan`
+    /// are not re-exported.
+    fn relocate_staged(
+        &mut self,
+        images: &[LinkImage<'_>],
+        scope: &SymbolScope<'_>,
+        tls_plan: Option<&TlsPlan>,
+    ) -> Option<()> {
+        validate_relocation_plan(images)?;
+        relocate_linked_images(images, scope, self.space.paging(), self.space, tls_plan)
+    }
+
+    /// Publish the module generation only after all staged pages are confirmed.
+    /// Returns the new generation number, or `None` if the slot is already live
+    /// or the mapping size is zero.
+    pub(super) fn commit(mut self) -> Option<u32> {
+        let generation = self
+            .space
+            .publish_dynamic_module(self.slot, self.mapping_start, self.mapping_size)?;
+        self.committed = true;
+        Some(generation)
+    }
+}
+
+/// Map every segment from `plan` into `space` without publishing the module.
+/// On partial failure, any already-mapped pages are immediately unmapped before
+/// returning `None`.  On success the returned `StagedSegments` guard rolls back
+/// via `Drop` unless `commit` is called first.
+#[cfg(feature = "stage11-6-test")]
+pub(super) fn stage_module_segments<'a>(
+    space: &'a mut AddressSpace,
+    plan: &ModulePlan,
+) -> Option<StagedSegments<'a>> {
+    let page_table = space.paging();
+    let result = (|| -> Option<()> {
+        for segment in plan.image.segments() {
+            paging::map_user_range_in(
+                page_table,
+                segment.mapping_start,
+                segment.mapping_size,
+                true,
+                false,
+            )
+            .ok()?;
+            paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
+                .ok()?;
+            let file_end = segment.file_offset.checked_add(segment.file_size)?;
+            paging::write_user_bytes(
+                page_table,
+                segment.virtual_address,
+                plan.bytes.get(segment.file_offset..file_end)?,
+            )
+            .ok()?;
+        }
+        Some(())
+    })();
+    if result.is_none() {
+        let _ = paging::unmap_user_range_in(page_table, plan.mapping_start, plan.mapping_size);
+        return None;
+    }
+    Some(StagedSegments {
+        space,
+        mapping_start: plan.mapping_start,
+        mapping_size: plan.mapping_size,
+        slot: plan.slot,
+        committed: false,
+    })
 }
 
 /// Validate relocation metadata before the first staged write. This keeps a

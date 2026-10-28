@@ -5634,6 +5634,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S11.5] loader hardening: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage11-6-test")]
+    {
+        if !userspace::module_staging_self_test() {
+            serial::write_line(format_args!("[S11.6] module staging rollback: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S11.6] module staging rollback: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage10-9-test")]
     {
         if !async_events::structural_self_test()

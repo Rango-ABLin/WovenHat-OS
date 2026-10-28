@@ -5960,6 +5960,12 @@ pub fn compiler_loader_self_test() -> bool {
     linker::compiler_loader_self_test()
 }
 
+#[cfg(feature = "stage11-6-test")]
+#[inline(never)]
+pub fn module_staging_self_test() -> bool {
+    linker::module_staging_self_test()
+}
+
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     linker::load(bytes, args)
