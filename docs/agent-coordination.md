@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S05 deterministic memory-pressure boundary (2026-10-28)
+
+Added the atomic frame-pressure policy and explicit allocation-failure
+accounting in `kernel/src/memory_pressure.rs`, wired to the physical allocator,
+plus the independently guarded `s05-memory-pressure-test` QEMU gate. Target and
+host warning-denying Clippy, 193 `libwoven` tests, and QEMU 1/2/4 CPUs pass.
+The bounded slice covers pressure classification/notification and OOM evidence;
+reclaim ordering, writeback retry policy, task selection, and physical
+low-memory qualification remain open. Do not overlap edits to the allocator or
+S05 docs without coordinating here.
+
 ## Codex - S04 scheduler, quota, class, and topology closure (2026-10-28)
 
 Closed S04's bounded software/QEMU scope after S03. Added per-task runtime

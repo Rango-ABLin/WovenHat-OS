@@ -17,6 +17,7 @@ bench = false
 physical-probe = []
 physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
+s05-memory-pressure-test = ["qemu-test"]
 stage07-webp-test = ["qemu-test"]
 stage6-hotplug-test = ["qemu-test"]
 network-test = ["qemu-test"]

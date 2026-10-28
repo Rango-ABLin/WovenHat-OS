@@ -16422,3 +16422,19 @@ source/evidence provenance, stronger completed-frame pixel assertions,
 close-time repaint recovery, and validation limits. This closes software
 desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
 graphics mandate or the full historical Windows acceptance chain.
+## S05 deterministic memory-pressure boundary (2026-10-28)
+
+The physical-frame boundary now publishes a deterministic pressure level after
+each successful allocation or release and records every failed allocation as an
+explicit OOM decision. The policy is fixed and bounded: Normal above 20%
+remaining frames, Moderate at 6-20%, Critical at 1-5%, and Exhausted at zero.
+Atomic state carries the latest counts and transition/failure counters without
+holding the allocator lock during observation. The feature-guarded QEMU probe
+also exercises the policy thresholds and transition publication.
+
+Verification: target warning-denying Clippy for `s05-memory-pressure-test`,
+host all-targets warning-denying Clippy, 193 `libwoven` tests, and executable
+QEMU at 1/2/4 CPUs all pass. Evidence is retained under
+`target/s05-memory-pressure-{1,2,4}cpu-debug/`. This is bounded software
+pressure/OOM evidence; reclaim ordering, writeback retry, OOM victim policy,
+and physical low-memory qualification remain unclaimed.

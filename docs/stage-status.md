@@ -1,5 +1,23 @@
 # Stage status
 
+## S05 deterministic memory-pressure boundary - 2026-10-28 - ACCEPTED BOUNDED
+
+Added `kernel/src/memory_pressure.rs` as the physical-frame allocation
+boundary's explicit policy signal. Remaining frames are classified
+deterministically as Normal (>20%), Moderate (6-20%), Critical (1-5%), or
+Exhausted (0); level transitions and allocation failures are counted with
+atomics. Every successful frame allocation/deallocation publishes the current
+snapshot, and a failed allocation records an explicit OOM decision. The policy
+does not reclaim or kill tasks, so existing paging/COW/swap ownership and
+teardown rules remain unchanged.
+
+The independently guarded `s05-memory-pressure-test` passed target and host
+warning-denying Clippy, 193 `libwoven` tests, and executable QEMU at 1/2/4
+CPUs (exit 33). Evidence: `target/s05-memory-pressure-{1,2,4}cpu-debug/`.
+This closes the deterministic software pressure-notification/OOM accounting
+slice; reclaim ordering, writeback retry policy, task selection, and physical
+low-memory qualification remain separate prerequisites.
+
 ## Stage 1–10 host CI fix — 2026-10-28 — SOFTWARE GATES PASS / HARDWARE BLOCKED
 
 Five host Python tests (`test_disk_install_executor`, `test_file_image_filesystem`,

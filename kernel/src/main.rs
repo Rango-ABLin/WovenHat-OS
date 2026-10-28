@@ -100,6 +100,7 @@ mod keyboard;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod livelog;
 mod memory;
+pub mod memory_pressure;
 mod mouse;
 mod network;
 mod notifications;
@@ -2121,6 +2122,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     } else {
         console.println("SWAP BACKING: FAILED");
         serial::write_line(format_args!("[SWAP] disk-backed policy tests: FAILED"));
+        halt();
+    }
+
+    #[cfg(feature = "s05-memory-pressure-test")]
+    if memory_pressure::self_test() {
+        serial::write_line(format_args!(
+            "[S05.MEMORY] deterministic pressure/OOM policy: PASSED"
+        ));
+    } else {
+        serial::write_line(format_args!(
+            "[S05.MEMORY] deterministic pressure/OOM policy: FAILED"
+        ));
         halt();
     }
 
