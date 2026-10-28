@@ -281,6 +281,62 @@ impl Drop for Pending {
     }
 }
 
+/// Map and populate verified image segments into an unpublished address space.
+/// Keeping this operation on `Pending` preserves rollback if any segment fails.
+fn map_linked_segments(
+    pending: &mut Pending,
+    images: &[LinkImage<'_>],
+    stack_guard: u64,
+    mmap_base: u64,
+) -> Option<()> {
+    let page_table = pending.space.paging();
+    let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
+    for (index, linked) in images.iter().enumerate() {
+        for segment in linked.image.segments() {
+            let end = segment.mapping_start.checked_add(segment.mapping_size as u64)?;
+            if segment.mapping_start < USER_REGION_START
+                || (index == 0 && end > stack_guard)
+                || (segment.mapping_start < mmap_end && mmap_base < end)
+                || pending.space.mappings[..pending.space.mapping_count]
+                    .iter()
+                    .any(|mapping| {
+                        segment.mapping_start < mapping.start() + mapping.size() as u64
+                            && mapping.start() < end
+                    })
+                || pending.space.mapping_count == MAX_IMAGE_MAPPINGS
+            {
+                return None;
+            }
+            let mapping = UserMapping::new(
+                segment.mapping_start,
+                segment.mapping_size,
+                segment.writable,
+                segment.executable,
+            )?;
+            paging::map_user_range_in_inactive(
+                page_table,
+                segment.mapping_start,
+                segment.mapping_size,
+                true,
+                false,
+            )
+            .ok()?;
+            pending.space.mappings[pending.space.mapping_count] = mapping;
+            pending.space.mapping_count += 1;
+            paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
+                .ok()?;
+            let file_end = segment.file_offset.checked_add(segment.file_size)?;
+            paging::write_user_bytes(
+                page_table,
+                segment.virtual_address,
+                linked.bytes.get(segment.file_offset..file_end)?,
+            )
+            .ok()?;
+        }
+    }
+    (pending.space.mapping_count < MAX_IMAGE_MAPPINGS).then_some(())
+}
+
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
@@ -368,53 +424,8 @@ pub(super) fn load_with_geometry(
         if index != 0 {
             pending.space.library_relro[index - 1] = linked.image.relro();
         }
-        for segment in linked.image.segments() {
-            let end = segment
-                .mapping_start
-                .checked_add(segment.mapping_size as u64)?;
-            if segment.mapping_start < USER_REGION_START
-                || (index == 0 && end > stack.guard_base)
-                || (segment.mapping_start < mmap_end && mmap_base < end)
-                || pending.space.mappings[..pending.space.mapping_count]
-                    .iter()
-                    .any(|mapping| {
-                        segment.mapping_start < mapping.start() + mapping.size() as u64
-                            && mapping.start() < end
-                    })
-                || pending.space.mapping_count == MAX_IMAGE_MAPPINGS
-            {
-                return None;
-            }
-            let mapping = UserMapping::new(
-                segment.mapping_start,
-                segment.mapping_size,
-                segment.writable,
-                segment.executable,
-            )?;
-            paging::map_user_range_in_inactive(
-                page_table,
-                segment.mapping_start,
-                segment.mapping_size,
-                true,
-                false,
-            )
-            .ok()?;
-            pending.space.mappings[pending.space.mapping_count] = mapping;
-            pending.space.mapping_count += 1;
-            paging::zero_user_range_in(page_table, segment.mapping_start, segment.mapping_size)
-                .ok()?;
-            let file_end = segment.file_offset.checked_add(segment.file_size)?;
-            paging::write_user_bytes(
-                page_table,
-                segment.virtual_address,
-                linked.bytes.get(segment.file_offset..file_end)?,
-            )
-            .ok()?;
-        }
     }
-    if pending.space.mapping_count == MAX_IMAGE_MAPPINGS {
-        return None;
-    }
+    map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
     let mut image_end = LIFECYCLE_TRAMPOLINE;
     for mapping in &pending.space.mappings[..pending.space.mapping_count] {
         image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);

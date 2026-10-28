@@ -1,5 +1,13 @@
 # Stage status
 
+## Reusable transactional segment mapper - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Extracted startup PT_LOAD mapping and image-byte population into a reusable
+`Pending`-owned kernel helper. Existing overlap, capacity, address, and
+rollback behavior is preserved. Kernel target build and warning-denying Clippy
+pass. Live-process invocation, relocation publication, and per-thread mapping
+remain subsequent work.
+
 ## Prepared ELF module transaction - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Runtime ELF loading now has an unpublished prepare phase and an explicit commit

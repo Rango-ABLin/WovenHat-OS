@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - reusable transactional segment mapper (2026-10-28)
+
+Refactored the startup ELF linker so verified segment mapping and file-byte
+population run through `map_linked_segments`, owned by the unpublished
+`Pending` transaction. Existing overlap, address, capacity, and bounds checks
+remain in the helper, and any failure is still reclaimed by `Pending::drop`.
+This is the reusable kernel primitive for a later live-module transaction.
+
 ## Codex - prepared ELF module transaction (2026-10-28)
 
 Added prepare/commit APIs to the runtime module manager. ELF validation and
