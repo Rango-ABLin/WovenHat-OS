@@ -1,5 +1,26 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 6 bounded SMP/hotplug closure (2026-10-28)
+
+Stage 6 target Clippy passed with `stage6-hotplug-test`. The hotplug gate passed
+at 2 and 4 CPUs, with two offline/online cycles per lane and cancellation,
+evacuation, rejection recovery, timeout recovery, and non-contiguous middle-CPU
+coverage at 4 CPUs. Evidence is retained under
+`audit-artifacts/stage6-hotplug-{2,4}cpu-*`. Physical hotplug, high APIC-ID,
+native NUMA, unrestricted multicore I/O, broader lock stress, priority
+inheritance, and sudden guarded heap demand remain deferred; this is bounded
+software/QEMU closure only.
+
+## Codex - S05 bounded-scope closure (2026-10-28)
+
+S05 is closed for its bounded software/QEMU and physical-storage scope. The
+S05 memory-pressure, reclaim, writeback, OOM, and 256 MiB QEMU gates passed at
+1/2/4 CPUs. The authorized USB storage qualification also passed at 1/2/4
+CPUs, including write, remount, VFS publication/invalidation, rejection, and
+durability checks. True physical low-memory qualification and controlled
+power-loss/torn-sector testing remain explicitly deferred release prerequisites;
+no production-readiness claim is made for those items.
+
 ## Codex - musl process identity increment (2026-10-28)
 
 The freestanding musl bootstrap now maps `getpid()` and `getppid()` to the
