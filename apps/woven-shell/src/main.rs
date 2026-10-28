@@ -2181,13 +2181,7 @@ impl Desktop {
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
             let fill = theme_entry(index == self.workspace);
-            canvas.fill_rect(
-                area.x,
-                area.y,
-                area.width as usize,
-                area.height as usize,
-                fill,
-            );
+            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let digit = [b'1' + index as u8];
             canvas.draw_text(
                 area.x + 3,
@@ -2207,25 +2201,13 @@ impl Desktop {
         // The Quick Settings button.
         let button = self.qs_button();
         let fill = theme_entry(self.qs_open);
-        canvas.fill_rect(
-            button.x,
-            button.y,
-            button.width as usize,
-            button.height as usize,
-            fill,
-        );
+        fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
         canvas.draw_text(button.x + 5, self.text_y(), "Q", theme_text());
 
         // The unread badge, just left of the clock: a count up to 9.
         if self.unread > 0 {
             let badge = self.badge_area();
-            canvas.fill_rect(
-                badge.x,
-                badge.y,
-                badge.width as usize,
-                badge.height as usize,
-                theme_accent(),
-            );
+            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
             let digit = [b'0' + self.unread.min(9) as u8];
             canvas.draw_text(
                 badge.x + 3,
