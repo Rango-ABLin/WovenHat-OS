@@ -1,5 +1,14 @@
 # Stage status
 
+## Transactional runtime module/TLS lifecycle - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Added a bounded runtime module manager joining namespace identity, TLS template
+registration, and per-thread DTV storage. It provides transactional load,
+reference-gated unload, isolated thread-local blocks, and stale-handle failure.
+Focused runtime-module tests, libwoven all-target warning-denying Clippy, and
+diff checks pass. ELF parsing/mapping for arbitrary post-start `dlopen` remains
+the next loader integration boundary.
+
 ## Per-module TLS mapping publication - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Each startup-loaded PT_TLS image now retains its TP-relative offset and mapped

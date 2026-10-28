@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - transactional runtime module/TLS lifecycle (2026-10-28)
+
+Added `libwoven::runtime_modules`, which joins the bounded module namespace,
+TLS template registry, and per-thread DTV. Load is transactional with rollback,
+references gate unload, TLS storage is isolated per thread, and stale handles
+cannot resolve after teardown. This is the runtime lifecycle contract for a
+future ELF `dlopen` adapter; it does not itself parse or map arbitrary ELF
+images after process start.
+
 ## Codex - per-module TLS mapping publication (2026-10-28)
 
 Extended the loader's retained PT_TLS metadata with each module's mapped

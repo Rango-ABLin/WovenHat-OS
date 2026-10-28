@@ -147,6 +147,7 @@ pub mod installer_ipc;
 pub mod media;
 pub mod dynamic_tls;
 pub mod module_namespace;
+pub mod runtime_modules;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
