@@ -12264,3 +12264,11 @@ Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
 `target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
 `target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
 
+## Stage 12.2 WovenFS extended attributes — 2026-10-28 — ACCEPTED
+
+Completed the bounded real-WovenFS xattr implementation: one checksummed
+attribute block per inode, validated names and values, get/list/set/remove,
+transactional inode/bitmap updates, unlink cleanup, remount persistence, and
+crash-recovery enumeration. Target and host warning-denying Clippy pass.
+QEMU passes at 1/2/4 CPUs. Evidence: `target/stage12-2-xattr-{1,2,4}cpu-*`.
+

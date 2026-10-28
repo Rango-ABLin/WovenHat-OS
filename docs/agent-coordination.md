@@ -7925,3 +7925,11 @@ trap acquisition remains scheduler-bound. Host/all-target and target
 Evidence is retained under the three `target/stage32-18-gdb-owner-binding-*`
 directories. Commit: pending.
 
+## Codex - Stage 12.2 WovenFS xattrs (2026-10-28)
+
+Finished Claude's xattr slice on the real `kernel/src/wfs.rs`. The bounded
+checksummed attribute block, transactional lifecycle, unlink/free behavior,
+remount persistence, and crash-recovery checks pass. Target and host
+warning-denying Clippy pass; QEMU passes at 1/2/4 CPUs. Evidence is under
+`target/stage12-2-xattr-{1,2,4}cpu-*`.
+
