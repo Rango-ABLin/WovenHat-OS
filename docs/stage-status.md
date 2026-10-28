@@ -1,5 +1,13 @@
 # Stage status
 
+## S05 OOM victim lock-order correction - 2026-10-28 - IMPLEMENTED
+
+OOM victim selection now snapshots scheduler candidates before acquiring the
+process table, eliminating nested process-table acquisition beneath the
+scheduler lock in the allocation-failure path. Target build, target Clippy,
+host Clippy, focused dynamic-TLS tests, and diff checks pass. Physical
+low-memory and full OOM kill/reclaim qualification remain separate gates.
+
 ## Dynamic TLS QEMU qualification - 2026-10-28 - FAILED / FIX INTEGRATED
 
 The first real userspace QEMU attempt reached the dynamic TLS path but exposed
