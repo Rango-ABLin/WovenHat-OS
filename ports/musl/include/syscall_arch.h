@@ -13,6 +13,10 @@
 #define WH_LINUX_GETPID     39
 #define WH_LINUX_CLOSE      3
 #define WH_LINUX_GETPPID    110
+#define WH_LINUX_GETUID     102
+#define WH_LINUX_GETGID     104
+#define WH_LINUX_CHDIR      80
+#define WH_LINUX_GETCWD     79
 #define WH_LINUX_LSEEK      8
 #define WH_LINUX_DUP        32
 #define WH_LINUX_DUP2       33
@@ -26,6 +30,10 @@ static __inline long __syscall0(long number)
 		return wh_syscall0(WH_SYS_GETPID);
 	case WH_LINUX_GETPPID:
 		return wh_syscall0(WH_SYS_GETPPID);
+	case WH_LINUX_GETUID:
+		return wh_syscall0(WH_SYS_GETUID);
+	case WH_LINUX_GETGID:
+		return wh_syscall0(WH_SYS_GETGID);
 	default:
 		return -WH_ENOSYS;
 	}
@@ -41,6 +49,9 @@ static __inline long __syscall1(long number, long arg0)
 	case WH_LINUX_EXIT:
 	case WH_LINUX_EXIT_GROUP:
 		return wh_syscall1(WH_SYS_EXIT, arg0);
+	case WH_LINUX_CHDIR:
+		/* WovenHat's path ABI carries an explicit byte length. */
+		return -WH_ENOSYS;
 	default:
 		return -WH_ENOSYS;
 	}
@@ -48,7 +59,11 @@ static __inline long __syscall1(long number, long arg0)
 
 static __inline long __syscall2(long number, long arg0, long arg1)
 {
-	return number == WH_LINUX_DUP2 ? wh_syscall2(WH_SYS_DUP2, arg0, arg1) : -WH_ENOSYS;
+	if (number == WH_LINUX_DUP2)
+		return wh_syscall2(WH_SYS_DUP2, arg0, arg1);
+	if (number == WH_LINUX_GETCWD)
+		return wh_syscall2(WH_SYS_GETCWD, arg0, arg1);
+	return -WH_ENOSYS;
 }
 
 static __inline long __syscall3(long number, long arg0, long arg1, long arg2)
