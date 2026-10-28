@@ -7227,3 +7227,8 @@ and QEMU fixture assertion that `O_WRONLY` fails locally with ENOSYS. Build,
 target Clippy and QEMU 1/2/4 CPUs pass. This prevents flag loss but is not a
 successful-open/create or broader POSIX open claim.
 
+POSIX port increment 8: the fixture opens the boot-provided `/etc/motd` using
+the restricted O_RDONLY adapter, requires fd >= 3, then closes it through
+upstream musl close.c. QEMU passed at 1/2/4 CPUs. Only the read-only open/close
+lifecycle is claimed; create/write/offset/dup semantics remain open.
+

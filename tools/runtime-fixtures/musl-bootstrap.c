@@ -4,6 +4,7 @@
 int main(int argc, char **argv)
 {
 	char byte = 'x';
+	int fd;
 
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
 		return 92;
@@ -16,5 +17,10 @@ int main(int argc, char **argv)
 		return 93;
 	if (open("/not-a-wovenhat-open-fixture", O_WRONLY) != -1 || errno != 38)
 		return 95;
+	fd = open("/etc/motd", O_RDONLY);
+	if (fd < 3)
+		return 96;
+	if (close(fd) != 0)
+		return 97;
 	return 42;
 }

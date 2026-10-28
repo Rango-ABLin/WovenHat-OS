@@ -73,3 +73,11 @@ every flag other than `O_RDONLY`, fail locally with `ENOSYS`; flags and mode
 are never discarded. The executable fixture verifies `O_WRONLY` rejection at
 1/2/4 CPUs. A stable readable VFS fixture and a kernel flags/mode ABI are
 required before successful open/create semantics can be certified.
+
+## Bootstrap increment: read-only open/close lifecycle
+
+The fixture opens the boot-provided `/etc/motd` with `O_RDONLY`, requires a
+non-standard descriptor, and closes it through upstream musl `close.c`.
+The entire lifecycle passed at 1/2/4 CPUs. This certifies only the existing
+read-only path-plus-length kernel contract; create, write modes, offsets and
+descriptor duplication remain separate work.
