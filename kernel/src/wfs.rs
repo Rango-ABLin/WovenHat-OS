@@ -2088,21 +2088,30 @@ pub fn xattr_self_test() -> bool {
     }
     crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 5: bounds checks"));
 
-    // Removing the last attribute frees its block: the bitmap bit used by
-    // the (now sole) xattr block must clear, not merely the inode's pointer.
+    // Removing one of two attributes must not free the block -- the other
+    // attribute still lives there.
     if mounted.remove_xattr(file, "user.tag", 16).is_err() {
         return false;
     }
     let Ok(node) = mounted.inode(file) else {
         return false;
     };
-    if node.xattr_block != 0 {
+    if node.xattr_block == 0 {
         return false;
     }
+    // Removing the last remaining attribute frees its block: the bitmap bit
+    // used by the (now sole) xattr block must clear, not merely the inode's
+    // pointer.
     if mounted.remove_xattr(file, "user.note", 17).is_err()
         || mounted.get_xattr(file, "user.note", &mut buf) != Err(Error::NotFound)
         || mounted.check().is_err()
     {
+        return false;
+    }
+    let Ok(node) = mounted.inode(file) else {
+        return false;
+    };
+    if node.xattr_block != 0 {
         return false;
     }
     crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 6: remove_xattr frees block"));
