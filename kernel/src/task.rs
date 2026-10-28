@@ -2384,6 +2384,13 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
         process.memory_mappings[slot] = None;
         process.memory_mapping_scopes[slot] = None;
     }
+    for (slot, mapping) in resources.dynamic_tls.into_iter().enumerate() {
+        if let Some(mapping) = mapping {
+            if !crate::thread::clear_dynamic_tls(id, slot, mapping.address) {
+                return Err(ThreadJoinError::Invalid);
+            }
+        }
+    }
     drop(processes);
     let (exit, _) = crate::thread::join_with_resources(owner, id).map_err(|error| match error {
         crate::thread::JoinError::Invalid => ThreadJoinError::Invalid,
