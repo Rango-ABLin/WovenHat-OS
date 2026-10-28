@@ -1,5 +1,13 @@
 # Stage status
 
+## Prepared ELF module transaction - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Runtime ELF loading now has an unpublished prepare phase and an explicit commit
+phase. Validation failures leave namespace/TLS state unchanged, and successful
+commit uses the existing transactional module lifecycle. Focused tests and
+warning-denying libwoven Clippy pass. Kernel live-process mapping and
+relocation publication remain required for full dynamic loading.
+
 ## Bounded RELA access - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Admitted ELF plans now translate dynamic virtual addresses to file-backed

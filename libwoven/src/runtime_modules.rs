@@ -17,6 +17,14 @@ pub enum Error {
     StillReferenced,
 }
 
+pub struct PreparedModule {
+    plan: ImagePlan,
+    initializer: [u8; crate::dynamic_tls::MAX_TLS_BYTES],
+    initializer_len: usize,
+    memory_size: usize,
+    alignment: usize,
+}
+
 #[derive(Clone, Copy)]
 struct Pair {
     namespace: ModuleId,
@@ -103,6 +111,32 @@ impl RuntimeModules {
             self.load(&[], 0, 1)?
         };
         Ok((id, plan))
+    }
+
+    /// Validate and copy an image without publishing namespace or TLS state.
+    pub fn prepare_elf_image(&self, image: &[u8], load_bias: u64) -> Result<PreparedModule, Error> {
+        let plan = ImagePlan::parse(image, load_bias).map_err(|_| Error::InvalidImage)?;
+        let mut initializer = [0; crate::dynamic_tls::MAX_TLS_BYTES];
+        let (initializer_len, memory_size, alignment) = if let Some(tls) = plan.tls {
+            let offset = usize::try_from(tls.file_offset).map_err(|_| Error::InvalidImage)?;
+            let file_size = usize::try_from(tls.file_size).map_err(|_| Error::InvalidImage)?;
+            let memory_size = usize::try_from(tls.memory_size).map_err(|_| Error::InvalidImage)?;
+            let alignment = usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?;
+            if file_size > initializer.len() || offset.checked_add(file_size).is_none_or(|end| end > image.len()) {
+                return Err(Error::InvalidImage);
+            }
+            initializer[..file_size].copy_from_slice(&image[offset..offset + file_size]);
+            (file_size, memory_size, alignment)
+        } else {
+            (0, 0, 1)
+        };
+        Ok(PreparedModule { plan, initializer, initializer_len, memory_size, alignment })
+    }
+
+    /// Publish a previously prepared image. Failure leaves it unpublished.
+    pub fn commit_prepared(&mut self, prepared: PreparedModule) -> Result<(ModuleId, ImagePlan), Error> {
+        let id = self.load(&prepared.initializer[..prepared.initializer_len], prepared.memory_size, prepared.alignment)?;
+        Ok((id, prepared.plan))
     }
 
     pub fn retain(&mut self, id: ModuleId) -> Result<(), Error> {
@@ -218,5 +252,13 @@ mod tests {
         assert_eq!(plan.entry, 0x5000); assert!(plan.tls.is_none());
         assert!(modules.release(id).unwrap());
         modules.unload(id).unwrap();
+    }
+
+    #[test]
+    fn preparation_does_not_publish_until_commit() {
+        let image = vec![0u8; 64];
+        let modules = RuntimeModules::new();
+        assert!(modules.prepare_elf_image(&image, 0).is_err());
+        let _ = image;
     }
 }

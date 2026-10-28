@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - prepared ELF module transaction (2026-10-28)
+
+Added prepare/commit APIs to the runtime module manager. ELF validation and
+TLS initializer copying occur before namespace or registry publication; commit
+performs bounded registration, so failed preparation cannot leave a visible
+module. This is the userspace contract mirrored by the planned kernel mapping
+transaction.
+
 ## Codex - bounded RELA access from admitted ELF plans (2026-10-28)
 
 Added file-backed address translation and bounded `rela_at` access to the ELF
