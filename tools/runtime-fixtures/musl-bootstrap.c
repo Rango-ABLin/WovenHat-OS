@@ -27,6 +27,8 @@ int main(int argc, char **argv)
 		return 98;
 	if (read(fd, &byte, 1) != 0)
 		return 99;
+	if (lseek(fd, 7, SEEK_SET) != 7 || read(fd, &byte, 1) != 1 || byte != ' ')
+		return 100;
 	if (close(fd) != 0)
 		return 97;
 	return 42;

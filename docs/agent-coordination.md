@@ -7254,3 +7254,7 @@ seek, partial transfer and concurrent descriptor behavior remain open.
 POSIX port increment 11: split MOTD reads of 7 then 17 bytes validate partial
 transfer and offset advance before EOF. QEMU passed at 1/2/4 CPUs.
 
+POSIX port increment 12: upstream musl lseek.c now supports only SEEK_SET via
+the existing absolute-offset kernel syscall; fixture rewind/read passed QEMU
+at 1/2/4 CPUs. SEEK_CUR and SEEK_END remain ENOSYS.
+

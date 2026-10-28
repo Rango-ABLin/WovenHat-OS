@@ -100,3 +100,10 @@ partial transfer and concurrent-descriptor semantics remain separate gates.
 
 The MOTD fixture reads 7 bytes followed by 17 bytes, validates the joined
 content, then checks EOF. This proves sequential partial reads at 1/2/4 CPUs.
+
+## Bootstrap increment: absolute seek
+
+Upstream musl `lseek.c` now maps `SEEK_SET` to the existing bounded WovenHat
+absolute-offset syscall. The fixture seeks from EOF to offset 7 and reads the
+expected byte; QEMU passed at 1/2/4 CPUs. Relative and end-based seeks remain
+explicitly rejected with ENOSYS.

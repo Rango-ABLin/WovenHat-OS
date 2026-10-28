@@ -11,6 +11,7 @@
 #define WH_LINUX_READ       0
 #define WH_LINUX_WRITE      1
 #define WH_LINUX_CLOSE      3
+#define WH_LINUX_LSEEK      8
 #define WH_LINUX_EXIT       60
 #define WH_LINUX_EXIT_GROUP 231
 
@@ -47,6 +48,8 @@ static __inline long __syscall3(long number, long arg0, long arg1, long arg2)
 		return wh_syscall3(WH_SYS_READ, arg0, arg1, arg2);
 	case WH_LINUX_WRITE:
 		return wh_syscall3(WH_SYS_WRITE, arg0, arg1, arg2);
+	case WH_LINUX_LSEEK:
+		return arg2 == 0 ? wh_syscall2(WH_SYS_LSEEK, arg0, arg1) : -WH_ENOSYS;
 	default:
 		return -WH_ENOSYS;
 	}

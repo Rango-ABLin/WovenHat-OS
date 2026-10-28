@@ -7,5 +7,6 @@
 #define SYS_close      3
 #define SYS_exit       60
 #define SYS_exit_group 231
+#define SYS_lseek      8
 
 #endif
