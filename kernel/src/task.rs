@@ -709,6 +709,7 @@ pub struct Process {
     cwd_len: usize,
     pending_signal: u64,
     process_group: u64,
+    session_id: u64,
     signal_actions: [u64; 32],
     environment: ProcessEnvironment,
 }
@@ -1519,6 +1520,7 @@ fn create_process(
     cwd[0] = b'/';
     let mut cwd_len = 1usize;
     let mut inherited_group = None;
+    let mut inherited_session = None;
     let mut inherited_environment = ProcessEnvironment::defaults();
     {
         let processes = process_table_lock();
@@ -1526,6 +1528,7 @@ fn create_process(
             cwd = parent_proc.cwd;
             cwd_len = parent_proc.cwd_len;
             inherited_group = Some(parent_proc.process_group);
+            inherited_session = Some(parent_proc.session_id);
             inherited_environment = parent_proc.environment;
         }
     }
@@ -1545,6 +1548,7 @@ fn create_process(
         cwd_len,
         pending_signal: 0,
         process_group: inherited_group.unwrap_or(id.as_u64()),
+        session_id: inherited_session.unwrap_or(id.as_u64()),
         signal_actions: [0; 32],
         environment: inherited_environment,
     }
@@ -2585,6 +2589,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if first_status != Ok(0) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.DIAG] fork-wait ok"));
 
     let Some(group_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2592,10 +2597,14 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     let Ok((group_child, _)) = spawn_user_process("s03-process-group", group_program) else {
         return false;
     };
-    if set_process_group(group_child.as_u64(), group_child.as_u64()).is_err() {
+    let group_set = set_process_group(group_child.as_u64(), group_child.as_u64());
+    crate::serial::write_line(format_args!("[S03.DIAG] term group set={}", group_set.is_ok()));
+    if group_set.is_err() {
         return false;
     }
-    if kill_process(0u64.wrapping_sub(group_child.as_u64()), 15).is_err() {
+    let group_kill = kill_process(0u64.wrapping_sub(group_child.as_u64()), 15);
+    crate::serial::write_line(format_args!("[S03.DIAG] term group kill={}", group_kill.is_ok()));
+    if group_kill.is_err() {
         return false;
     }
     let deadline = timer::ticks().wrapping_add(3000);
@@ -2606,9 +2615,11 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         yield_now();
     }
     let status = wait_process(group_child.as_u64());
+    crate::serial::write_line(format_args!("[S03.DIAG] term status={}", status.unwrap_or(-999)));
     if status != Ok(143) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.DIAG] term group ok"));
 
     let Some(quit_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2631,6 +2642,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     if wait_process(quit_child.as_u64()) != Ok(131) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S03.DIAG] quit group ok"));
 
     let Some(stop_program) = userspace::create_s03_group_process() else {
         return false;
@@ -2659,6 +2671,30 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         yield_now();
     }
     if wait_process(stop_child.as_u64()) != Ok(143) {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S03.DIAG] stop continue ok"));
+
+    let Some(session_program) = userspace::create_s03_session_process() else {
+        return false;
+    };
+    let Ok((session_child, _)) = spawn_user_process("s03-session", session_program) else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(session_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    let session_status = wait_process(session_child.as_u64());
+    crate::serial::write_line(format_args!(
+        "[S03.SESSION] success={} status={}",
+        session_status == Ok(42),
+        session_status.unwrap_or(-999)
+    ));
+    if session_status != Ok(42) {
         return false;
     }
 
@@ -3336,6 +3372,7 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         cwd_len: parent.cwd_len,
         pending_signal: 0,
         process_group: parent.process_group,
+        session_id: parent.session_id,
         signal_actions: parent.signal_actions,
         environment: parent.environment,
     });
@@ -6349,6 +6386,50 @@ pub fn current_process_group() -> u64 {
     group.unwrap_or_else(current_process_id)
 }
 
+pub fn current_session_id() -> u64 {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .map(|process| process.session_id)
+        .unwrap_or(process_id)
+}
+
+pub fn session_of(pid: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == pid)
+        .map(|process| process.session_id)
+}
+
+pub fn process_group_session(group: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.process_group == group && process.state != ProcessState::Exited)
+        .map(|process| process.session_id)
+}
+
+pub fn create_session_current() -> Result<u64, FileError> {
+    let current = current_process_id();
+    let mut processes = process_table_lock();
+    let process = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current)
+        .ok_or(FileError::NoProcess)?;
+    if process.process_group == current {
+        return Err(FileError::PermissionDenied);
+    }
+    process.session_id = current;
+    process.process_group = current;
+    drop(processes);
+    crate::terminal::release_foreground(current);
+    Ok(current)
+}
+
 pub fn process_group_of(pid: u64) -> Option<u64> {
     process_table_lock()
         .iter()
@@ -6367,6 +6448,7 @@ pub fn process_group_exists(group: u64) -> bool {
 
 pub fn can_control_foreground_group(group: u64) -> bool {
     group != 0
+        && process_group_session(group) == Some(current_session_id())
         && (current_has(crate::capability::Capability::TaskControl)
             || current_process_group() == group)
 }
@@ -6376,6 +6458,19 @@ pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
     let target = if pid == 0 { caller } else { pid };
     let group = if pgid == 0 { target } else { pgid };
     let mut processes = process_table_lock();
+    let caller_session = processes
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == caller)
+        .map(|process| process.session_id)
+        .ok_or(FileError::NoProcess)?;
+    if processes
+        .iter()
+        .flatten()
+        .any(|process| process.process_group == group && process.session_id != caller_session)
+    {
+        return Err(FileError::PermissionDenied);
+    }
     let process = processes
         .iter_mut()
         .flatten()

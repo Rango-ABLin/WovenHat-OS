@@ -12024,6 +12024,8 @@ pub mod syscall {
     pub const SIGACTION: u64 = 34;
     pub const GETPGRP: u64 = 35;
     pub const SETPGID: u64 = 36;
+    pub const GETSID: u64 = 244;
+    pub const SETSID: u64 = 245;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
     pub const ENV_COUNT: u64 = 53;
@@ -12252,6 +12254,22 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn setpgid(pid: u64, group: u64) -> u64 {
         unsafe { invoke(SETPGID, pid, group, 0) }
+    }
+
+    /// Return the session containing `pid`; zero selects the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getsid(pid: u64) -> u64 {
+        unsafe { invoke(GETSID, pid, 0, 0) }
+    }
+
+    /// Create a new session and process group for the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setsid() -> u64 {
+        unsafe { invoke(SETSID, 0, 0, 0) }
     }
 
     /// Apply a bounded terminal control request.
@@ -14732,6 +14750,16 @@ pub fn set_process_group(process_id: Option<process::Id>, group: Option<u64>) ->
     }
     check(unsafe { syscall::setpgid(process_id.map_or(0, |id| id.0), group.unwrap_or(0)) })
         .map(|_| ())
+}
+
+/// Return the caller's session identifier.
+pub fn session() -> Result<u64, Error> {
+    check(unsafe { syscall::getsid(0) })
+}
+
+/// Start a new terminal session and process group for the caller.
+pub fn create_session() -> Result<process::Id, Error> {
+    check(unsafe { syscall::setsid() }).map(process::Id)
 }
 
 /// Read the bounded terminal settings for standard input.

@@ -163,6 +163,10 @@ pub enum Number {
     Getpgrp = 35,
     /// pid, pgid (0 follows POSIX current/default conventions)
     Setpgid = 36,
+    /// -> current session identifier
+    Getsid = 244,
+    /// -> new session/process-group identifier, or ERROR
+    Setsid = 245,
     /// kind: 1=UDP, 2=TCP -> process-owned network descriptor
     Socket = 37,
     /// socket, local port
@@ -3065,6 +3069,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::Sigaction as u64 => sys_sigaction(arg0, arg1),
         value if value == Number::Getpgrp as u64 => crate::task::current_process_group(),
         value if value == Number::Setpgid as u64 => sys_setpgid(arg0, arg1),
+        value if value == Number::Getsid as u64 => crate::task::session_of(if arg0 == 0 {
+            crate::task::current_process_id()
+        } else {
+            arg0
+        })
+        .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::Setsid as u64 => crate::task::create_session_current()
+            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::Socket as u64 => sys_socket(arg0),
         value if value == Number::Bind as u64 => sys_net_bind(arg0, arg1),
         value if value == Number::Connect as u64 => sys_net_connect(arg0, arg1),
