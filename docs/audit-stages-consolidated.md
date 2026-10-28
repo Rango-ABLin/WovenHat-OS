@@ -4,6 +4,14 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 32.16 GDB transport pump - 2026-10-28
+
+The bounded RSP byte pump passed 1/2/4-CPU QEMU self-tests. Acknowledgement
+handling, packet assembly, checksum verification, malformed rejection, and
+oversize reset are covered. Target and host warning-denying Clippy and Python
+syntax validation passed. Live UART polling and session dispatch remain
+outside this acceptance.
+
 ## Stage 32.15 GDB generation-checked task binding - 2026-10-28
 
 The stopped-context binding passed 1/2/4-CPU QEMU self-tests. It covers

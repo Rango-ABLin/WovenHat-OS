@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_transport.rs`, a bounded byte pump for COM2/RSP input.
+It recognizes acknowledgements, assembles one bounded frame, validates the
+checksum through `gdb_stub`, exposes a packet only through an explicit take
+operation, and resets on malformed or oversized input. It does not poll UART
+or own debugger/session state.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-16-gdb-transport-{1,2,4}cpu/`. Target and host
+warning-denying Clippy plus Python syntax validation pass. Live UART loop,
+session dispatch, and task execution control remain open.
+
 ## Stage 32.15 GDB generation-checked task binding QEMU gate - 2026-10-28 - ACCEPTED
 
 Added `kernel/src/gdb_binding.rs`, which binds an owned trap-frame snapshot to

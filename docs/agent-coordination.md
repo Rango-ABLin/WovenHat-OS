@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 32.16 GDB transport pump (2026-10-28)
+
+Added `kernel/src/gdb_transport.rs`, a fixed-size COM2/RSP byte assembler with
+acknowledgement handling and checksum-verified packet handoff. Oversized or
+malformed input resets the local pump; no global transport/session state is
+introduced. Target and host warning-denying Clippy, Python syntax, and QEMU
+1/2/4-CPU gates pass with exit 33. Evidence is under
+`target/stage32-16-gdb-transport-{1,2,4}cpu/`. Stage32.16 is accepted; live
+UART polling and session dispatch remain next.
+
 ## Codex - Stage 32.15 GDB generation-checked task binding (2026-10-28)
 
 Added `kernel/src/gdb_binding.rs`, binding a copied trap-frame context to the

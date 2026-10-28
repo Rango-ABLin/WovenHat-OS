@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenDev bounded transport pump (2026-10-28)
+
+`kernel/src/gdb_transport.rs` keeps COM2 byte assembly separate from UART
+polling and debugger lifecycle. It has a fixed frame bound, handles `+`/`-`
+acknowledgements, validates complete packets through `gdb_stub`, and exposes
+verified packets only once. Malformed and oversized input resets the local
+pump; no packet, UART, task, or session state is retained globally.
+
 ## WovenDev generation-checked task binding (2026-10-28)
 
 `kernel/src/gdb_binding.rs` combines the current owner token with a copied
