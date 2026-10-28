@@ -151,6 +151,47 @@ fn mount_consistent(image: &CrashDisk, context: &str) -> Volume<CrashDisk> {
 }
 
 #[test]
+fn replay_rejects_reserved_journal_targets_without_touching_metadata() {
+    // A forged descriptor plus matching transaction ID must not be allowed
+    // to overwrite the superblock pair or the journal's own sectors.
+    for target_kind in 0..3 {
+        let disk = formatted();
+        let sb = {
+            let volume = Volume::mount(disk.clone()).expect("baseline mount");
+            *volume.super_block()
+        };
+        let target = match target_kind {
+            0 => 0,
+            1 => 1,
+            _ => sb.journal_start,
+        };
+        let original_superblocks = {
+            let image = disk.image.borrow();
+            [image[0], image[1]]
+        };
+        {
+            let mut image = disk.image.borrow_mut();
+            let mut descriptor = [0u8; SECTOR_SIZE];
+            descriptor[..8].copy_from_slice(wfs::JOURNAL_DESC_MAGIC);
+            descriptor[8..16].copy_from_slice(&999_u64.to_le_bytes());
+            descriptor[16..20].copy_from_slice(&1_u32.to_le_bytes());
+            descriptor[24..32].copy_from_slice(&target.to_le_bytes());
+            image[sb.journal_start as usize] = descriptor;
+            let mut commit = [0u8; SECTOR_SIZE];
+            commit[..8].copy_from_slice(wfs::JOURNAL_COMMIT_MAGIC);
+            commit[8..16].copy_from_slice(&999_u64.to_le_bytes());
+            image[(sb.journal_start + 2) as usize] = commit;
+        }
+        assert!(
+            matches!(Volume::mount(disk.clone()), Err(Error::Corrupt)),
+            "reserved target {target} must be refused"
+        );
+        let image = disk.image.borrow();
+        assert_eq!([image[0], image[1]], original_superblocks);
+    }
+}
+
+#[test]
 fn format_produces_a_consistent_mountable_volume() {
     let image = formatted();
     let mut volume = mount_consistent(&image, "fresh format");
