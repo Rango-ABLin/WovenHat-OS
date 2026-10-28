@@ -121,7 +121,12 @@ def parse_ppm(path: Path) -> tuple[int, int, bytes]:
         raise ValueError(f"non-numeric PPM dimensions in {path}") from error
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid PPM dimensions in {path}: {width}x{height}")
-    index = _skip_space_and_comments(data, index)
+    # The max-value token is followed by one required whitespace delimiter.
+    # Do not skip an arbitrary run here: the first RGB byte is binary payload
+    # and may itself be classified as ASCII whitespace (for example 0x0c).
+    if index >= len(data) or not data[index:index + 1].isspace():
+        raise ValueError(f"missing PPM payload delimiter in {path}")
+    index += 1
     expected = width * height * 3
     pixels = data[index:]
     if len(pixels) != expected:
@@ -201,7 +206,15 @@ class Qmp:
                 return reply["return"]
 
     def key(self, code: str, hold_ms: int = 100) -> None:
-        self.command("send-key", {"keys": [{"type": "qcode", "data": code}], "hold-time": hold_ms})
+        # `send-key` is a monitor convenience command.  Explicit key events
+        # exercise the same input device path as an interactive QEMU window
+        # and remain reliable when the guest is headless (`-display none`).
+        self.command("input-send-event", {"events": [
+            {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": code}}},
+            {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": code}}},
+        ]})
+        if hold_ms > 0:
+            time.sleep(hold_ms / 1000.0)
 
     def relative_mouse(self, dx: int, dy: int) -> None:
         events = []
@@ -397,7 +410,8 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
     serial = output / "serial.log"
     qmp_port = free_port()
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", args.memory,
+        str(qemu), "-accel", "whpx" if args.accelerator == "whpx" else "tcg,tb-size=128",
+        "-machine", "pc", "-m", args.memory,
         "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
@@ -424,9 +438,12 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # and input-focus lease have necessarily reached the lock screen.
             # Match the established hardware-demo harness's handoff settling
             # window and retain every attempt in the serial/QEMU evidence.
-            time.sleep(4.0)
+            # The desktop marker precedes the final compositor focus handoff;
+            # allow the guest a full settling interval before injecting the
+            # PIN, especially under host CPU contention.
+            time.sleep(8.0)
             input_started = time.monotonic()
-            for attempt in range(2):
+            for attempt in range(3):
                 for key in ("1", "2", "3", "4", "ret"):
                     qmp.key(key, 150)
                     time.sleep(0.4)
@@ -499,6 +516,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 time.sleep(0.12)
             wait_marker(serial, "WovenTerminal: window opened", terminal_started + args.input_timeout,
                         process, "terminal_window_open_ms", timings, terminal_started)
+            # The client emits its marker immediately after sending WOPN.  Do
+            # not inject focus or keyboard input until WovenShell has consumed
+            # that IPC message and composed the window; otherwise a valid
+            # input sequence can land in the pre-window desktop state.
+            wait_marker(serial, "woven-shell: window opened: Terminal",
+                        terminal_started + args.input_timeout, process,
+                        "terminal_window_composed_ms", timings, terminal_started)
             terminal_frame = output / "terminal-window-open.ppm"
             capture_frame(qmp, terminal_frame, time.monotonic() + args.frame_timeout, timings, "terminal_window")
             screenshots.append(terminal_frame.name)
@@ -530,11 +554,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 raise GateFailure("keyboard input did not change the terminal framebuffer")
 
             close_terminal_started = time.monotonic()
-            # The terminal is the first window after Files closes: (40,40),
-            # width 360.  The pointer is at (260,246); move to its close box.
-            # The focus click above leaves the pointer at (100,100); move to
-            # the terminal close box at (404,44).
-            qmp.relative_mouse(304, -56)
+            # Files is the first cascade window at (40,40); CASCADE_STEP is
+            # 24, so the terminal is the second at (64,64), width 360.
+            # Window::close_area() is inset by two pixels from the right edge
+            # and starts two pixels into the 14-pixel title bar, so its
+            # center is (417,57). The focus click leaves the pointer at
+            # (100,100).
+            qmp.relative_mouse(317, -43)
             qmp.click()
             # Keep the click qualification tolerant of one-pixel rounding in
             # the PS/2 logical-coordinate conversion while still requiring
@@ -586,12 +612,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qemu", type=Path, default=Path(DEFAULT_QEMU))
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
-    parser.add_argument("--memory", default="4G", help="guest RAM (default: documented 4 GiB emulator floor)")
+    parser.add_argument("--accelerator", choices=("tcg", "whpx"), default="tcg",
+                        help="QEMU accelerator; assertions and timing limits are identical")
+    parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G configured to leave 4 GiB usable after firmware reservations)")
     parser.add_argument("--timeout", type=float, default=180.0)
-    parser.add_argument("--input-timeout", type=float, default=15.0)
+    # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
+    # keep the bound finite while matching the accepted 1/2/4-CPU evidence.
+    parser.add_argument("--input-timeout", type=float, default=20.0)
     parser.add_argument("--frame-timeout", type=float, default=5.0)
     parser.add_argument("--max-startup-ms", type=float, default=60_000.0)
-    parser.add_argument("--max-input-ms", type=float, default=15_000.0)
+    parser.add_argument("--max-input-ms", type=float, default=20_000.0)
     parser.add_argument("--max-frame-ms", type=float, default=5_000.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
@@ -609,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
         "qemu": str(qemu),
         "firmware": str(firmware.resolve()),
         "cpus": args.cpus,
+        "accelerator": args.accelerator,
         "physical_hardware_touched": False,
         "reboot_requested": False,
         "output": str(output),

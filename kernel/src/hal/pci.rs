@@ -2618,11 +2618,17 @@ fn read_config_unlocked(address: Address, offset: u16) -> Option<u32> {
         let virtual_address = crate::paging::map_mmio(physical)
             .ok()?
             .checked_add(page_offset)?;
+        // SAFETY: `virtual_address` is the MMIO mapping of the ECAM config dword
+        // for a validated address (offset dword-aligned and in range,
+        // device < 32, function < 8); a volatile `u32` read is in bounds.
         return Some(unsafe { ptr::read_volatile(virtual_address as *const u32) });
     }
     if address.segment != 0 || offset > 0xfc {
         return None;
     }
+    // SAFETY: legacy PCI config mechanism on the fixed config I/O ports — write
+    // the selected address to CONFIG_ADDRESS, then read the dword from
+    // CONFIG_DATA. Callers hold CONFIG_LOCK.
     unsafe {
         outl(
             CONFIG_ADDRESS,
@@ -2644,12 +2650,18 @@ fn write_config_unlocked(address: Address, offset: u16, value: u32) -> bool {
         else {
             return false;
         };
+        // SAFETY: `virtual_address` is the MMIO mapping of the ECAM config dword
+        // for a validated address (as in `read_config_unlocked`); a volatile
+        // `u32` write is in bounds.
         unsafe { ptr::write_volatile(virtual_address as *mut u32, value) };
         return true;
     }
     if address.segment != 0 || offset > 0xfc {
         return false;
     }
+    // SAFETY: legacy PCI config mechanism on the fixed config I/O ports — select
+    // the address via CONFIG_ADDRESS, then write the dword to CONFIG_DATA.
+    // Callers hold CONFIG_LOCK.
     unsafe {
         outl(
             CONFIG_ADDRESS,
@@ -2664,6 +2676,9 @@ fn ecam_physical(address: Address, offset: u16) -> Option<u64> {
     // Caller holds CONFIG_LOCK (all callers are *_config_unlocked helpers).
     // Copy the fixed-capacity state so no reference to mutable static storage
     // escapes this critical section.
+    // SAFETY: every caller holds CONFIG_LOCK (all are `*_config_unlocked`
+    // helpers), so there is no concurrent writer; `CONFIG` is `Copy` and only a
+    // copy is taken, so no reference to the static escapes.
     let state = unsafe { CONFIG };
     let allocation = state.ecam[..state.ecam_count]
         .iter()
@@ -2928,15 +2943,24 @@ fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -
         .checked_add(u64::from(offset))
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed PCI
+/// CONFIG_ADDRESS/CONFIG_DATA ports). The read may have device-visible effects.
 unsafe fn inl(port: u16) -> u32 {
     let value: u32;
+    // SAFETY: `in eax, dx` reads one dword from the valid I/O port in `dx`;
+    // `nomem` is correct as it touches no memory.
     unsafe {
         asm!("in eax, dx", in("dx") port, out("eax") value, options(nomem, nostack, preserves_flags));
     }
     value
 }
 
+/// # Safety
+/// See [`inl`]: `port` must be a valid I/O port; the write may have
+/// device-visible effects.
 unsafe fn outl(port: u16, value: u32) {
+    // SAFETY: `out dx, eax` writes one dword to the valid I/O port in `dx`.
     unsafe {
         asm!("out dx, eax", in("dx") port, in("eax") value, options(nomem, nostack, preserves_flags));
     }

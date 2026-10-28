@@ -119,6 +119,7 @@ impl Rect {
 pub const TRANSPARENT_KEY: u32 = 0x00ff_00ff;
 
 /// Pack a colour into the surface's `0x00RRGGBB` representation.
+#[allow(dead_code)]
 pub const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
     ((red as u32) << 16) | ((green as u32) << 8) | blue as u32
 }
@@ -569,6 +570,7 @@ const fn blend_channel(over: u32, under: u32, opacity: u8, shift: u32) -> u32 {
 /// The pixel format is resolved once per run of pixels instead of once per
 /// pixel, and only damaged rows are touched. Returns framebuffer pixels
 /// written.
+#[allow(dead_code)]
 pub fn present(
     surface: &Surface,
     damage: &Damage,

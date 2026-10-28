@@ -1,13 +1,36 @@
+use libwoven::layout::Frame;
+use libwoven::ui::{Button, Label, Theme};
 use libwoven::{rgb, Canvas, GraphicsSurface};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ThemeMode {
+    Dark,
+    Light,
+    HighContrast,
+}
+
+impl ThemeMode {
+    fn shared(self) -> Theme {
+        match self {
+            Self::Dark => Theme::DARK,
+            Self::Light => Theme::LIGHT,
+            Self::HighContrast => Theme::HIGH_CONTRAST,
+        }
+    }
+
+    fn background(self) -> u32 {
+        match self {
+            Self::Dark => BACKGROUND,
+            Self::Light => rgb(248, 250, 253),
+            Self::HighContrast => rgb(0, 0, 0),
+        }
+    }
+}
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 190;
 const BUTTON_WIDTH: usize = 90;
@@ -25,8 +48,9 @@ struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_
 // SAFETY: the GUI process is single-threaded and takes this buffer once.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
+));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenSettings: failure\n");
@@ -47,11 +71,12 @@ fn draw_number(
     label: &str,
     value: u64,
     digits: &mut [u8; 20],
+    theme: Theme,
 ) {
-    canvas.draw_text(x, y, label, TEXT);
+    canvas.draw_text(x, y, label, theme.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, ACCENT);
+        canvas.draw_text(x + label.len() as i32 * 6, y, text, theme.accent);
     }
 }
 
@@ -61,13 +86,54 @@ fn draw_clock(
     y: i32,
     time: libwoven::DateTime,
     digits: &mut [u8; 20],
+    theme: Theme,
 ) {
-    draw_number(canvas, x, y, "Year ", u64::from(time.year), digits);
-    draw_number(canvas, x + 100, y, "Month ", u64::from(time.month), digits);
-    draw_number(canvas, x + 210, y, "Day ", u64::from(time.day), digits);
-    draw_number(canvas, x, y + 16, "Hour ", u64::from(time.hour), digits);
-    draw_number(canvas, x + 100, y + 16, "Min ", u64::from(time.minute), digits);
-    draw_number(canvas, x + 210, y + 16, "Sec ", u64::from(time.second), digits);
+    draw_number(canvas, x, y, "Year ", u64::from(time.year), digits, theme);
+    draw_number(
+        canvas,
+        x + 100,
+        y,
+        "Month ",
+        u64::from(time.month),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x + 210,
+        y,
+        "Day ",
+        u64::from(time.day),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x,
+        y + 16,
+        "Hour ",
+        u64::from(time.hour),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x + 100,
+        y + 16,
+        "Min ",
+        u64::from(time.minute),
+        digits,
+        theme,
+    );
+    draw_number(
+        canvas,
+        x + 210,
+        y + 16,
+        "Sec ",
+        u64::from(time.second),
+        digits,
+        theme,
+    );
 }
 
 fn draw_settings(
@@ -75,12 +141,28 @@ fn draw_settings(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    mode: ThemeMode,
 ) {
-    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenSettings", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 32, "Identity", ACCENT);
+    let shared = mode.shared();
+    let panel = shared.surface;
+    let accent = shared.accent;
+    let text = shared.text;
+    canvas.fill_rect(0, 0, canvas.width(), canvas.height(), mode.background());
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, panel);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, accent);
+    let title_theme = shared;
+    Label::new(
+        Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
+        "WovenSettings",
+    )
+    .draw(canvas, title_theme);
+    Label::new(Frame::new(PANEL_X + 10, PANEL_Y + 32, 120, 16), "Identity").draw(
+        canvas,
+        Theme {
+            text: accent,
+            ..title_theme
+        },
+    );
     let mut digits = [0u8; 20];
     // SAFETY: argument-free identity queries.
     draw_number(
@@ -90,6 +172,7 @@ fn draw_settings(
         "UID ",
         unsafe { libwoven::syscall::getuid() },
         &mut digits,
+        shared,
     );
     // SAFETY: argument-free identity queries.
     draw_number(
@@ -99,14 +182,22 @@ fn draw_settings(
         "GID ",
         unsafe { libwoven::syscall::getgid() },
         &mut digits,
+        shared,
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
-        draw_clock(canvas, PANEL_X + 10, PANEL_Y + 96, time, &mut digits);
+        draw_clock(
+            canvas,
+            PANEL_X + 10,
+            PANEL_Y + 96,
+            time,
+            &mut digits,
+            shared,
+        );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -115,6 +206,7 @@ fn draw_settings(
             "W ",
             u64::from(info.width),
             &mut digits,
+            shared,
         );
         draw_number(
             canvas,
@@ -123,6 +215,7 @@ fn draw_settings(
             "H ",
             u64::from(info.height),
             &mut digits,
+            shared,
         );
         draw_number(
             canvas,
@@ -131,9 +224,10 @@ fn draw_settings(
             "Scale ",
             u64::from(info.scale),
             &mut digits,
+            shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
     }
     let mut refresh_digits = [0u8; 20];
     draw_number(
@@ -143,17 +237,27 @@ fn draw_settings(
         "Refreshes ",
         u64::from(refresh_count),
         &mut refresh_digits,
+        shared,
     );
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
+    let mut refresh = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Refresh",
     );
-    canvas.draw_text(BUTTON_X + 12, BUTTON_Y + 7, "Refresh", TEXT);
+    refresh.pressed = pressed;
+    refresh.draw(canvas, shared);
     if let Some((x, y)) = pointer {
-        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(2),
+            i32::from(y).saturating_sub(2),
+            5,
+            5,
+            if pressed { text } else { POINTER_MARKER },
+        );
     }
 }
 
@@ -162,6 +266,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
+    mode: ThemeMode,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -173,7 +278,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_settings(&mut canvas, pointer, pressed, refresh_count);
+    draw_settings(&mut canvas, pointer, pressed, refresh_count, mode);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -188,12 +293,12 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
 
 /// Open a read-only Settings window through WovenShell's WOPN protocol.
 /// The shell PID is supplied by the catalog's `%p` token.
-pub fn run(shell: Option<&[u8]>) -> ! {
+pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    if !render(&window, None, false, 0) {
+    if !render(&window, None, false, 0, mode) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -226,11 +331,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 break;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
-                let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
-                let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
+                let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
+                    .min(MAX_SURFACE_WIDTH as u32);
+                let height = u32::from(u16::from_le_bytes([message[6], message[7]]))
+                    .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count) {
+                        if render(&resized, pointer, pointer_pressed, refresh_count, mode) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenSettings: window resized\n");
@@ -242,8 +349,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     }
                 }
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
-                pointer = Some((u16::from_le_bytes([message[4], message[5]]), u16::from_le_bytes([message[6], message[7]])));
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                pointer = Some((
+                    u16::from_le_bytes([message[4], message[5]]),
+                    u16::from_le_bytes([message[6], message[7]]),
+                ));
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
@@ -259,7 +371,9 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSettings: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count) { fail(8) }
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
+                    fail(8)
+                }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
             }
         }
@@ -277,7 +391,9 @@ fn parse_u64(text: &[u8]) -> Option<u64> {
         if !digit.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }

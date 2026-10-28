@@ -54,6 +54,9 @@ pub struct AtaPio {
 
 impl AtaPio {
     fn identify() -> Option<Self> {
+        // SAFETY: issues the IDENTIFY command to the fixed primary ATA channel
+        // ports and reads the 256-word response; runs during single-threaded
+        // init before the channel is shared.
         unsafe {
             outb(DRIVE, 0xa0);
             io_delay();
@@ -93,9 +96,13 @@ impl BlockDevice for AtaPio {
         }
 
         for _ in 0..ATA_RETRIES {
+            // SAFETY: `&mut self` holds the channel (reached via
+            // `with_primary_master` under PRIMARY_MASTER); `lba` and
+            // `sector.len()` were bounds-checked above.
             if unsafe { read_sector_once(lba, sector) }.is_ok() {
                 return Ok(());
             }
+            // SAFETY: ATA alternate-status I/O delay on the held channel.
             unsafe { io_delay() };
         }
         Err(Error::DeviceFault)
@@ -110,15 +117,22 @@ impl BlockDevice for AtaPio {
         }
 
         for _ in 0..ATA_RETRIES {
+            // SAFETY: `&mut self` holds the channel (reached via
+            // `with_primary_master` under PRIMARY_MASTER); `lba` and
+            // `sector.len()` were bounds-checked above.
             if unsafe { write_sector_once(lba, sector) }.is_ok() {
                 return Ok(());
             }
+            // SAFETY: ATA alternate-status I/O delay on the held channel.
             unsafe { io_delay() };
         }
         Err(Error::DeviceFault)
     }
 }
 
+/// # Safety
+/// Programs the fixed primary ATA channel registers; call with the channel
+/// (`PRIMARY_MASTER`) held or during single-threaded init.
 unsafe fn select_lba(lba: u64) -> Result<(), Error> {
     if !poll_not_busy() {
         return Err(Error::DeviceFault);
@@ -132,6 +146,9 @@ unsafe fn select_lba(lba: u64) -> Result<(), Error> {
     Ok(())
 }
 
+/// # Safety
+/// Operates the fixed primary ATA channel; call with the channel
+/// (`PRIMARY_MASTER`) held. `sector` is filled from `SECTOR_SIZE/2` PIO words.
 unsafe fn read_sector_once(lba: u64, sector: &mut [u8]) -> Result<(), Error> {
     select_lba(lba)?;
     outb(STATUS_COMMAND, COMMAND_READ_SECTORS);
@@ -147,6 +164,9 @@ unsafe fn read_sector_once(lba: u64, sector: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 
+/// # Safety
+/// Operates the fixed primary ATA channel; call with the channel
+/// (`PRIMARY_MASTER`) held. `sector` supplies `SECTOR_SIZE/2` PIO words.
 unsafe fn write_sector_once(lba: u64, sector: &[u8]) -> Result<(), Error> {
     select_lba(lba)?;
     outb(STATUS_COMMAND, COMMAND_WRITE_SECTORS);
@@ -220,6 +240,8 @@ unsafe fn poll_until(ready: impl Fn(u8) -> bool) -> bool {
     let start = crate::timer::ticks();
     let mut spins: usize = 0;
     loop {
+        // SAFETY: read of the fixed ATA status/command port under this fn's
+        // channel-held contract.
         let status = unsafe { inb(STATUS_COMMAND) };
         if status & (STATUS_ERR | STATUS_DF) != 0 {
             return false;
@@ -241,36 +263,60 @@ unsafe fn poll_until(ready: impl Fn(u8) -> bool) -> bool {
     }
 }
 
+/// # Safety
+/// Reads the ATA status port; call with the channel held (see [`poll_until`]).
 unsafe fn poll_not_busy() -> bool {
+    // SAFETY: forwards to poll_until under this fn's channel-held contract.
     unsafe { poll_until(|status| status & STATUS_BSY == 0) }
 }
 
+/// # Safety
+/// Reads the ATA status port; call with the channel held (see [`poll_until`]).
 unsafe fn poll_data_ready() -> bool {
+    // SAFETY: forwards to poll_until under this fn's channel-held contract.
     unsafe { poll_until(|status| status & STATUS_BSY == 0 && status & STATUS_DRQ != 0) }
 }
 
+/// # Safety
+/// Reads the ATA alternate-status port four times as a ~400ns settle delay;
+/// call with the channel held.
 unsafe fn io_delay() {
     for _ in 0..4 {
+        // SAFETY: read of the fixed ATA alternate-status port (no side effects
+        // beyond the deliberate delay).
         let _ = inb(ALT_STATUS);
     }
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (callers pass the fixed primary ATA
+/// channel ports).
 unsafe fn inb(port: u16) -> u8 {
     let value: u8;
+    // SAFETY: `in al, dx` reads one byte from the valid I/O port in `dx`.
     asm!("in al, dx", in("dx") port, out("al") value, options(nomem, nostack, preserves_flags));
     value
 }
 
+/// # Safety
+/// `port` must be a valid I/O port (the ATA DATA port for PIO transfers).
 unsafe fn inw(port: u16) -> u16 {
     let value: u16;
+    // SAFETY: `in ax, dx` reads one word from the valid I/O port in `dx`.
     asm!("in ax, dx", in("dx") port, out("ax") value, options(nomem, nostack, preserves_flags));
     value
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port (the fixed primary ATA channel ports).
 unsafe fn outb(port: u16, value: u8) {
+    // SAFETY: `out dx, al` writes one byte to the valid I/O port in `dx`.
     asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack, preserves_flags));
 }
 
+/// # Safety
+/// `port` must be a valid I/O port (the ATA DATA port for PIO transfers).
 unsafe fn outw(port: u16, value: u16) {
+    // SAFETY: `out dx, ax` writes one word to the valid I/O port in `dx`.
     asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
 }

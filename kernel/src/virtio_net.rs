@@ -167,6 +167,9 @@ fn reserve_dma() -> Result<DmaReservation, InitError> {
         .ok_or(InitError::DmaNotContiguous)?;
     DMA_PHYSICAL.store(physical, Ordering::Release);
     DMA_VIRTUAL.store(virtual_address, Ordering::Release);
+    // SAFETY: `virtual_address` is the direct-map address of the DMA_PAGES
+    // physically-contiguous frames just reserved for this driver, so the whole
+    // `DMA_BYTES` span is mapped, writable and not aliased by any other owner.
     unsafe {
         core::ptr::write_bytes(virtual_address as *mut u8, 0, DMA_BYTES);
     }
@@ -251,21 +254,24 @@ pub fn init() -> Result<(), InitError> {
     let io_base = pci::bar0_io_base(location.bus, location.device, location.function)
         .ok_or(InitError::NoIoBar)?;
 
+    // SAFETY: `io_base` is this device's BAR0 I/O-port base from
+    // `pci::bar0_io_base`, and `VIRTIO_PCI_STATUS` is the fixed legacy
+    // virtio-pci status register within that BAR. Writing reset (0) then the
+    // ACKNOWLEDGE/DRIVER handshake is the spec-defined bring-up sequence.
     unsafe {
         outb(io_base + VIRTIO_PCI_STATUS, 0);
-    }
-    unsafe {
         outb(io_base + VIRTIO_PCI_STATUS, STATUS_ACKNOWLEDGE);
-    }
-    unsafe {
         outb(
             io_base + VIRTIO_PCI_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER,
         );
     }
 
+    // SAFETY: host-features register read on the validated I/O BAR.
     let host_features = unsafe { inl(io_base + VIRTIO_PCI_HOST_FEATURES) };
     // Start conservatively: no checksum/GSO/event-index/indirect features.
+    // SAFETY: writing the negotiated (empty) guest feature set to the validated
+    // I/O BAR.
     unsafe {
         outl(io_base + VIRTIO_PCI_GUEST_FEATURES, 0);
     }
@@ -297,10 +303,15 @@ pub fn init() -> Result<(), InitError> {
     // VIRTIO_NET_F_MAC is feature bit 5. QEMU normally exposes it.
     if host_features & (1 << 5) != 0 {
         for (i, byte) in mac.iter_mut().enumerate() {
+            // SAFETY: VIRTIO_NET_F_MAC was negotiated, so the 6-byte MAC lives
+            // at CONFIG+i (i < 6) in the device-config space of the validated
+            // I/O BAR.
             *byte = unsafe { inb(io_base + VIRTIO_PCI_CONFIG + i as u16) };
         }
     }
 
+    // SAFETY: final DRIVER_OK status write on the validated I/O BAR completes
+    // device bring-up.
     unsafe {
         outb(
             io_base + VIRTIO_PCI_STATUS,
@@ -374,6 +385,8 @@ pub fn poll() {
     reap_tx(&mut t);
     // Reading ISR acknowledges any pending legacy interrupt. We still use the
     // used-ring indices as the source of truth, so polling remains race-safe.
+    // SAFETY: `t.io_base` was validated during init; reading the legacy ISR
+    // register acknowledges a pending interrupt line.
     let _ = unsafe { inb(t.io_base + VIRTIO_PCI_ISR) };
 }
 
@@ -383,6 +396,8 @@ pub fn receive_into(out: &mut [u8]) -> Option<usize> {
         return None;
     }
     let mem = dma_ptr(RX_QUEUE_OFFSET);
+    // SAFETY: `mem` is the RX queue sub-region of the DMA reservation, so
+    // `used_idx_ptr` lands within it; accessed under the TRANSPORT lock.
     let used_idx = unsafe { read_u16(used_idx_ptr(mem, t.rx_queue_size)) };
     if used_idx == t.rx_last_used {
         return None;
@@ -390,6 +405,9 @@ pub fn receive_into(out: &mut [u8]) -> Option<usize> {
 
     fence(Ordering::Acquire);
     let ring_slot = (t.rx_last_used as usize) % t.rx_queue_size as usize;
+    // SAFETY: `ring_slot < rx_queue_size`, so `used_elem_ptr` addresses a
+    // VirtqUsedElem inside the RX used ring; the Acquire fence orders this read
+    // after the device's write of the element.
     let elem = unsafe { core::ptr::read_volatile(used_elem_ptr(mem, t.rx_queue_size, ring_slot)) };
     t.rx_last_used = t.rx_last_used.wrapping_add(1);
 
@@ -410,6 +428,10 @@ pub fn receive_into(out: &mut [u8]) -> Option<usize> {
         return None;
     }
     let packet = dma_ptr(RX_PACKETS_OFFSET + id * PACKET_BYTES) as *const u8;
+    // SAFETY: `id < ACTIVE_RX_DESCRIPTORS`, so `packet` is that descriptor's
+    // 2048-byte RX buffer in the DMA region; `frame_len` was clamped to both the
+    // buffer payload and `out.len()`, so source and destination are each valid
+    // for `frame_len` bytes and the kernel buffer cannot overlap the caller's.
     unsafe {
         core::ptr::copy_nonoverlapping(
             packet.add(VIRTIO_NET_HDR_BYTES),
@@ -437,6 +459,10 @@ pub fn transmit(frame: &[u8]) -> bool {
     }
 
     let packet = dma_ptr(TX_PACKET_OFFSET);
+    // SAFETY: `packet` is the single PACKET_BYTES-long TX buffer in the DMA
+    // region; `frame.len() <= MAX_FRAME` was checked above, so the 10-byte
+    // header zero-fill and the frame copy both stay within it, and `frame` is a
+    // caller slice that cannot overlap the kernel DMA region.
     unsafe {
         core::ptr::write_bytes(packet, 0, VIRTIO_NET_HDR_BYTES);
         core::ptr::copy_nonoverlapping(
@@ -446,15 +472,21 @@ pub fn transmit(frame: &[u8]) -> bool {
         );
     }
     let mem = dma_ptr(TX_QUEUE_OFFSET);
+    // SAFETY: `mem` is the TX queue region and descriptor 0 is the sole TX
+    // descriptor within it. We hold the TRANSPORT lock and `tx_outstanding` is
+    // false, so the device does not own it and no other reference aliases it.
     let desc = unsafe { &mut *desc_ptr(mem, 0) };
     desc.len = (VIRTIO_NET_HDR_BYTES + frame.len()) as u32;
     desc.flags = 0;
     desc.next = 0;
 
+    // SAFETY: `mem`/`t.tx_queue_size` describe the TX queue and descriptor 0 is
+    // valid (see push_avail's contract).
     unsafe {
         push_avail(mem, t.tx_queue_size, 0);
     }
     fence(Ordering::SeqCst);
+    // SAFETY: QUEUE_NOTIFY write on the validated I/O BAR kicks the TX queue.
     unsafe {
         outw(t.io_base + VIRTIO_PCI_QUEUE_NOTIFY, TX_QUEUE);
     }
@@ -464,9 +496,11 @@ pub fn transmit(frame: &[u8]) -> bool {
 }
 
 fn setup_queue(io_base: u16, queue: u16) -> Result<u16, InitError> {
+    // SAFETY: selecting a queue via QUEUE_SEL on the validated I/O BAR.
     unsafe {
         outw(io_base + VIRTIO_PCI_QUEUE_SEL, queue);
     }
+    // SAFETY: reading the selected queue's size via QUEUE_NUM on the same BAR.
     let size = unsafe { inw(io_base + VIRTIO_PCI_QUEUE_NUM) };
     if size == 0 {
         fail(io_base);
@@ -488,6 +522,9 @@ fn setup_queue(io_base: u16, queue: u16) -> Result<u16, InitError> {
         TX_QUEUE_OFFSET
     };
     let ptr = dma_ptr(offset);
+    // SAFETY: `ptr` is the start of this queue's QUEUE_MEMORY_BYTES sub-region
+    // in the DMA reservation (`offset` is RX_QUEUE_OFFSET or TX_QUEUE_OFFSET),
+    // so zeroing exactly that span stays in bounds.
     unsafe {
         core::ptr::write_bytes(ptr, 0, QUEUE_MEMORY_BYTES);
     }
@@ -496,6 +533,9 @@ fn setup_queue(io_base: u16, queue: u16) -> Result<u16, InitError> {
         fail(io_base);
         return Err(InitError::DmaNotContiguous);
     }
+    // SAFETY: programming the queue's page-frame number into QUEUE_PFN on the
+    // validated I/O BAR; `phys` is page-aligned (checked just above) and names
+    // the zeroed queue region.
     unsafe {
         outl(io_base + VIRTIO_PCI_QUEUE_PFN, (phys >> 12) as u32);
     }
@@ -507,6 +547,9 @@ fn post_initial_rx(io_base: u16, qsize: u16) -> Result<(), InitError> {
     for id in 0..ACTIVE_RX_DESCRIPTORS {
         let packet_offset = RX_PACKETS_OFFSET + id * PACKET_BYTES;
         let phys = dma_phys(packet_offset);
+        // SAFETY: `id < ACTIVE_RX_DESCRIPTORS <= qsize`, so `desc_ptr` lands on
+        // RX descriptor `id` within the queue region; init() runs
+        // single-threaded here and the device is not yet started.
         let desc = unsafe { &mut *desc_ptr(mem, id) };
         *desc = VirtqDesc {
             addr: phys,
@@ -514,11 +557,13 @@ fn post_initial_rx(io_base: u16, qsize: u16) -> Result<(), InitError> {
             flags: DESC_F_WRITE,
             next: 0,
         };
+        // SAFETY: `mem`/`qsize` describe the RX queue and `id < qsize`.
         unsafe {
             push_avail(mem, qsize, id as u16);
         }
     }
     fence(Ordering::SeqCst);
+    // SAFETY: notify the RX queue on the validated I/O BAR.
     unsafe {
         outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, RX_QUEUE);
     }
@@ -528,6 +573,8 @@ fn post_initial_rx(io_base: u16, qsize: u16) -> Result<(), InitError> {
 fn setup_tx_descriptor(_qsize: u16) -> Result<(), InitError> {
     let mem = dma_ptr(TX_QUEUE_OFFSET);
     let phys = dma_phys(TX_PACKET_OFFSET);
+    // SAFETY: `mem` is the TX queue region; descriptor 0 lies within it and is
+    // written only here during single-threaded init.
     unsafe {
         *desc_ptr(mem, 0) = VirtqDesc {
             addr: phys,
@@ -541,10 +588,13 @@ fn setup_tx_descriptor(_qsize: u16) -> Result<(), InitError> {
 
 fn repost_rx(t: &mut Transport, id: u16) {
     let mem = dma_ptr(RX_QUEUE_OFFSET);
+    // SAFETY: `mem`/`t.rx_queue_size` describe the RX queue and `id` is a
+    // descriptor index returned by the device (< queue size).
     unsafe {
         push_avail(mem, t.rx_queue_size, id);
     }
     fence(Ordering::SeqCst);
+    // SAFETY: notify the RX queue on the validated I/O BAR.
     unsafe {
         outw(t.io_base + VIRTIO_PCI_QUEUE_NOTIFY, RX_QUEUE);
     }
@@ -555,6 +605,8 @@ fn reap_tx(t: &mut Transport) {
         return;
     }
     let mem = dma_ptr(TX_QUEUE_OFFSET);
+    // SAFETY: `mem` is the TX queue region; `used_idx_ptr` lands in its used
+    // ring. Called under the TRANSPORT lock.
     let used_idx = unsafe { read_u16(used_idx_ptr(mem, t.tx_queue_size)) };
     if used_idx != t.tx_last_used {
         fence(Ordering::Acquire);
@@ -590,42 +642,82 @@ const fn queue_total_bytes(qsize: u16) -> usize {
     used_offset(qsize) + 6 + size_of::<VirtqUsedElem>() * qsize as usize
 }
 
+/// # Safety
+/// `mem` must point at the base of a virtqueue region within the DMA
+/// reservation and `id` must be a valid descriptor index (`id < qsize`), so the
+/// returned pointer stays inside that queue's descriptor table.
 unsafe fn desc_ptr(mem: *mut u8, id: usize) -> *mut VirtqDesc {
+    // SAFETY: by the contract above `id * size_of::<VirtqDesc>()` is within the
+    // descriptor table, so the offset pointer is in bounds.
     unsafe { mem.add(id * size_of::<VirtqDesc>()) as *mut VirtqDesc }
 }
+/// # Safety
+/// `mem`/`qsize` must describe a virtqueue region in the DMA reservation laid
+/// out by [`queue_total_bytes`].
 unsafe fn avail_idx_ptr(mem: *mut u8, qsize: u16) -> *mut u16 {
-    let _ = qsize;
+    // SAFETY: the available-ring index sits at `desc_table + 2` within the
+    // queue region described by the contract above.
     unsafe { mem.add(size_of::<VirtqDesc>() * qsize as usize + 2) as *mut u16 }
 }
+/// # Safety
+/// `mem`/`qsize` must describe a virtqueue region and `slot < qsize`.
 unsafe fn avail_ring_ptr(mem: *mut u8, qsize: u16, slot: usize) -> *mut u16 {
+    // SAFETY: entry `slot` (`slot < qsize`) of the available ring lies at
+    // `desc_table + 4 + slot*2`, inside the queue region.
     unsafe { mem.add(size_of::<VirtqDesc>() * qsize as usize + 4 + slot * 2) as *mut u16 }
 }
+/// # Safety
+/// `mem`/`qsize` must describe a virtqueue region in the DMA reservation.
 unsafe fn used_idx_ptr(mem: *mut u8, qsize: u16) -> *mut u16 {
+    // SAFETY: the used-ring index sits at `used_offset(qsize) + 2`, inside the
+    // queue region.
     unsafe { mem.add(used_offset(qsize) + 2) as *mut u16 }
 }
+/// # Safety
+/// `mem`/`qsize` must describe a virtqueue region and `slot < qsize`.
 unsafe fn used_elem_ptr(mem: *mut u8, qsize: u16, slot: usize) -> *mut VirtqUsedElem {
+    // SAFETY: used element `slot` (`slot < qsize`) lies at
+    // `used_offset(qsize) + 4 + slot*size_of::<VirtqUsedElem>()`, inside the
+    // queue region whose total size is bounded by `queue_total_bytes`.
     unsafe {
         mem.add(used_offset(qsize) + 4 + slot * size_of::<VirtqUsedElem>()) as *mut VirtqUsedElem
     }
 }
 
+/// # Safety
+/// `mem`/`qsize` must describe a virtqueue region in the DMA reservation and
+/// `descriptor` must be a valid descriptor index for it. Call under the
+/// `TRANSPORT` lock so the available ring has a single writer.
 unsafe fn push_avail(mem: *mut u8, qsize: u16, descriptor: u16) {
+    // SAFETY: the sub-pointers are derived from the same valid queue region and
+    // `slot < qsize`; the Release fence publishes the ring entry before the
+    // index bump so the device observes a consistent available ring.
     let idx_ptr = unsafe { avail_idx_ptr(mem, qsize) };
     let idx = unsafe { read_u16(idx_ptr) };
     let slot = idx as usize % qsize as usize;
+    // SAFETY: `slot < qsize`, so `avail_ring_ptr` is in bounds of the ring.
     unsafe {
         core::ptr::write_volatile(avail_ring_ptr(mem, qsize, slot), descriptor);
     }
     fence(Ordering::Release);
+    // SAFETY: `idx_ptr` is the available-ring index within the same queue; the
+    // Release fence above published the entry before this index bump.
     unsafe {
         core::ptr::write_volatile(idx_ptr, idx.wrapping_add(1));
     }
 }
+/// # Safety
+/// `ptr` must be valid and aligned for a `u16` read (ring indices live in the
+/// DMA reservation, which satisfies both).
 unsafe fn read_u16(ptr: *mut u16) -> u16 {
+    // SAFETY: guaranteed valid/aligned by the contract above; volatile because
+    // the device writes the same location.
     unsafe { core::ptr::read_volatile(ptr) }
 }
 
 fn fail(io_base: u16) {
+    // SAFETY: `io_base` is this device's validated I/O BAR base; writing
+    // STATUS_FAILED to the legacy status register signals driver failure.
     unsafe {
         outb(io_base + VIRTIO_PCI_STATUS, STATUS_FAILED);
     }
@@ -638,38 +730,61 @@ pub fn self_test() -> bool {
         && ACTIVE_RX_DESCRIPTORS <= MAX_QUEUE_SIZE
 }
 
+/// # Safety
+/// `port` must be a valid x86 I/O port this driver is permitted to access
+/// (callers pass `io_base + <known virtio register offset>`). Port reads can
+/// have device-visible side effects.
 unsafe fn inb(port: u16) -> u8 {
     let value: u8;
+    // SAFETY: `in al, dx` reads one byte from the I/O port in `dx`; sound for a
+    // valid port per the contract above. `nomem` is correct as it touches no
+    // memory.
     unsafe {
         core::arch::asm!("in al, dx", in("dx") port, out("al") value, options(nomem, nostack, preserves_flags));
     }
     value
 }
+/// # Safety
+/// See [`inb`]: `port` must be a valid I/O port.
 unsafe fn inw(port: u16) -> u16 {
     let value: u16;
+    // SAFETY: `in ax, dx` reads one word from the valid I/O port in `dx`.
     unsafe {
         core::arch::asm!("in ax, dx", in("dx") port, out("ax") value, options(nomem, nostack, preserves_flags));
     }
     value
 }
+/// # Safety
+/// See [`inb`]: `port` must be a valid I/O port.
 unsafe fn inl(port: u16) -> u32 {
     let value: u32;
+    // SAFETY: `in eax, dx` reads one dword from the valid I/O port in `dx`.
     unsafe {
         core::arch::asm!("in eax, dx", in("dx") port, out("eax") value, options(nomem, nostack, preserves_flags));
     }
     value
 }
+/// # Safety
+/// See [`inb`]: `port` must be a valid I/O port; the write may have
+/// device-visible side effects.
 unsafe fn outb(port: u16, value: u8) {
+    // SAFETY: `out dx, al` writes one byte to the valid I/O port in `dx`.
     unsafe {
         core::arch::asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack, preserves_flags));
     }
 }
+/// # Safety
+/// See [`inb`]: `port` must be a valid I/O port.
 unsafe fn outw(port: u16, value: u16) {
+    // SAFETY: `out dx, ax` writes one word to the valid I/O port in `dx`.
     unsafe {
         core::arch::asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
     }
 }
+/// # Safety
+/// See [`inb`]: `port` must be a valid I/O port.
 unsafe fn outl(port: u16, value: u32) {
+    // SAFETY: `out dx, eax` writes one dword to the valid I/O port in `dx`.
     unsafe {
         core::arch::asm!("out dx, eax", in("dx") port, in("eax") value, options(nomem, nostack, preserves_flags));
     }

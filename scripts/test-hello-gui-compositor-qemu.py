@@ -11,6 +11,8 @@ import argparse, os, shutil, subprocess, sys
 from pathlib import Path
 APP='wovenhat-hello-gui'
 STAGES={
+    '08': ('stage08-graphics-test', '[S08] secure userspace graphics surfaces: PASSED', 'stage08-graphics', 'secure userspace graphics surfaces'),
+    '09': ('stage09-compositor-test', '[S09] compositor scheduler: PASSED', 'stage09-compositor', 'compositor scheduler'),
     '19.2': ('stage19-2-test', '[S19.2] hello-gui through the compositor: PASSED', 'hello-gui-compositor', 'hello-gui compositor'),
     '19.4': ('stage19-4-test', '[S19.4] compositor authority: PASSED', 'hello-gui-authority', 'compositor authority'),
     '19.5': ('stage19-5-test', '[S19.5] input focus: PASSED', 'hello-gui-input', 'input focus'),

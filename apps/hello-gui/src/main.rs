@@ -1466,6 +1466,13 @@ fn alpha_compositor() -> ! {
 
 /// An application on the WovenShell desktop.
 fn desktop_client(args: &Args) -> ! {
+    fn probe_pixel(surface: &GraphicsSurface, x: u16, color: u32) {
+        if surface.fill_rect(x, 2, 1, 1, color).is_err()
+            || surface.damage(x, 2, 1, 1).is_err()
+        {
+            fail(190);
+        }
+    }
     let Some(shell) = args.get(2).and_then(parse_u64).map(libwoven::process::Id) else {
         fail(180)
     };
@@ -1475,6 +1482,7 @@ fn desktop_client(args: &Args) -> ! {
             Some(b"b") => (b"Beta", 100, 60, rgb(60, 60, 200), b'y', false),
             Some(b"c") => (b"Wide", 400, 260, rgb(60, 160, 90), b'z', false),
             Some(b"n") => (b"Notes", 100, 60, rgb(150, 120, 40), b'n', false),
+            Some(b"p") => (b"Pointer probe", 120, 80, rgb(200, 60, 60), b'x', false),
             Some(b"q") => (b"Quiet", 100, 60, rgb(90, 170, 170), b'q', false),
             _ => fail(181),
         };
@@ -1546,6 +1554,9 @@ fn desktop_client(args: &Args) -> ! {
     // bytes). A message larger than the buffer is refused and stays queued,
     // so an undersized buffer would spin on it and never see the key.
     let mut key = [0u8; 16];
+    let mut probe_presses = 0u8;
+    let mut probe_releases = 0u8;
+    let mut probe_barriers = 0u8;
     loop {
         match libwoven::wait_any(libwoven::wait::MESSAGE, Some(deadline)) {
             Ok(0) | Err(_) => fail(188),
@@ -1592,6 +1603,11 @@ fn desktop_client(args: &Args) -> ! {
             // desktop client that only wants its one key has nothing to do
             // with its own pointer coordinates.
             if sender == shell && length == 8 && &key[..4] == b"WPMV" {
+                if args.get(3) == Some(b"p") {
+                    let x = u16::from_le_bytes([key[4], key[5]]).min(255) as u8;
+                    let y = u16::from_le_bytes([key[6], key[7]]).min(255) as u8;
+                    probe_pixel(&window, 8, rgb(x, y, 85));
+                }
                 continue;
             }
             // Likewise a primary-button edge: a click in the body captures
@@ -1599,6 +1615,17 @@ fn desktop_client(args: &Args) -> ! {
             // (`forward_pointer_button`). Focus is the shell's job; this
             // client still waits for its key.
             if sender == shell && length == 10 && &key[..4] == b"WPBT" {
+                if args.get(3) == Some(b"p") {
+                    if key[5] != 0 { probe_presses = probe_presses.saturating_add(1); }
+                    else { probe_releases = probe_releases.saturating_add(1); }
+                    probe_pixel(&window, 2, rgb(probe_presses, probe_releases, 85));
+                }
+                continue;
+            }
+            // An ordered keyboard barrier for the pointer-protocol fixture.
+            if sender == shell && length == 1 && key[0] == b's' && args.get(3) == Some(b"p") {
+                probe_barriers = probe_barriers.saturating_add(1);
+                probe_pixel(&window, 10, rgb(20, 40, probe_barriers));
                 continue;
             }
             if sender != shell || length != 1 || key[0] != expected {

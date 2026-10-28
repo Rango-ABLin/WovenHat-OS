@@ -1034,6 +1034,9 @@ fn validate_sdt_checksum(
     let mut sum = 0_u8;
     for index in 0..length {
         let pointer = (virtual_address as *const u8).wrapping_add(index);
+        // SAFETY: `validate_range` confirmed `[address, address+length)` lies in
+        // a reported memory region, so this direct-map byte (`index < length`)
+        // is mapped and valid to read.
         sum = sum.wrapping_add(unsafe { pointer.read_volatile() });
     }
     if sum == 0 {
@@ -1055,6 +1058,9 @@ fn read_physical(
         .ok_or(Error::AddressOverflow)?;
     for (index, byte) in output.iter_mut().enumerate() {
         let pointer = (virtual_address as *const u8).wrapping_add(index);
+        // SAFETY: `validate_range` confirmed `[address, address+output.len())`
+        // lies in a reported memory region, so this direct-map byte
+        // (`index < output.len()`) is mapped and valid to read.
         *byte = unsafe { pointer.read_volatile() };
     }
     Ok(())
@@ -1672,6 +1678,9 @@ fn aml_table_body(
     // ACPI tables are firmware-owned, checksum-validated before retention, and
     // remain mapped during early HAL discovery. Borrow the validated body
     // directly instead of copying up to 64 KiB onto the kernel stack.
+    // SAFETY: `validate_range` confirmed `[body_address, body_address+body_length)`
+    // lies in a reported region, so `virtual_address` (its direct map) is valid
+    // for `body_length` read-only bytes that stay mapped for the borrow.
     Ok(unsafe { core::slice::from_raw_parts(virtual_address as *const u8, body_length) })
 }
 
