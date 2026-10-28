@@ -368,6 +368,8 @@ pub enum Number {
     DynamicTlsModuleSize = 143,
     DynamicModuleRetain = 144,
     DynamicModuleRelease = 145,
+    DynamicModuleTransactionBegin = 146,
+    DynamicModuleTransactionEnd = 147,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3141,6 +3143,12 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::DynamicModuleRelease as u64 => {
             crate::task::release_dynamic_module(arg0, arg1).map_or(SYSCALL_ERROR, u64::from)
+        }
+        value if value == Number::DynamicModuleTransactionBegin as u64 => {
+            u64::from(crate::task::begin_dynamic_module_transaction())
+        }
+        value if value == Number::DynamicModuleTransactionEnd as u64 => {
+            u64::from(crate::task::end_dynamic_module_transaction())
         }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),

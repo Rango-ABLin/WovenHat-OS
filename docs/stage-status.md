@@ -1,5 +1,13 @@
 # Stage status
 
+## Scheduler dynamic-module transaction gate - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The scheduler now owns a process-scoped, depth-counted dynamic-module
+transaction gate. Kernel and libwoven ABIs expose begin/end operations, with
+cross-process ownership rejection and nested-owner support. Target build and
+warning-denying Clippy pass. Stop-the-world coordination and all-thread
+allocation remain the next implementation step.
+
 ## Per-thread dynamic TLS ownership - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Thread resources now own bounded dynamic TLS mapping slots independently from

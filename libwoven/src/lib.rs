@@ -12386,6 +12386,22 @@ pub mod syscall {
         unsafe { invoke(145, module, generation, 0) }
     }
 
+    /// Begin the process-wide dynamic-module transaction.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_transaction_begin() -> u64 {
+        unsafe { invoke(146, 0, 0, 0) }
+    }
+
+    /// End the current process's dynamic-module transaction.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_module_transaction_end() -> u64 {
+        unsafe { invoke(147, 0, 0, 0) }
+    }
+
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
     ///

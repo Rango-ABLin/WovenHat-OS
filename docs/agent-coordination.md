@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - scheduler dynamic-module transaction gate (2026-10-28)
+
+Added an IRQ-safe scheduler-owned transaction gate with process ownership and
+reentrant depth. New syscalls and libwoven wrappers serialize dynamic-module
+operations across processes and require the owner to release the gate. This
+coordinates the future all-thread mapping transaction; it does not yet stop
+threads or allocate their private mappings.
+
 ## Codex - per-thread dynamic TLS ownership (2026-10-28)
 
 Extended thread resources with independently reclaimable dynamic TLS mapping

@@ -1079,6 +1079,8 @@ struct Scheduler {
     /// Slot whose CPU->CPU hand-off is physically in progress. `MAX_TASKS`
     /// means no outgoing runnable task is awaiting finalization.
     switching_out: [usize; crate::smp::MAX_CPUS],
+    dynamic_module_owner: Option<u64>,
+    dynamic_module_depth: u16,
 }
 
 impl Scheduler {
@@ -1090,6 +1092,8 @@ impl Scheduler {
             context_switches: 0,
             last_selected: [[0; 3]; crate::smp::MAX_CPUS],
             switching_out: [MAX_TASKS; crate::smp::MAX_CPUS],
+            dynamic_module_owner: None,
+            dynamic_module_depth: 0,
         }
     }
 
@@ -2185,6 +2189,35 @@ pub fn create_user_thread(
 pub fn current_thread_id() -> Option<crate::thread::ThreadId> {
     let scheduler = SCHEDULER.lock();
     scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].thread_id
+}
+
+/// Acquire the process-wide dynamic-module transaction gate.
+pub fn begin_dynamic_module_transaction() -> bool {
+    let owner = current_process_id();
+    let mut scheduler = SCHEDULER.lock();
+    match scheduler.dynamic_module_owner {
+        None => {
+            scheduler.dynamic_module_owner = Some(owner);
+            scheduler.dynamic_module_depth = 1;
+            true
+        }
+        Some(existing) if existing == owner => {
+            let Some(depth) = scheduler.dynamic_module_depth.checked_add(1) else { return false; };
+            scheduler.dynamic_module_depth = depth;
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+/// Release the dynamic-module transaction gate owned by the current process.
+pub fn end_dynamic_module_transaction() -> bool {
+    let owner = current_process_id();
+    let mut scheduler = SCHEDULER.lock();
+    if scheduler.dynamic_module_owner != Some(owner) { return false; }
+    scheduler.dynamic_module_depth = scheduler.dynamic_module_depth.saturating_sub(1);
+    if scheduler.dynamic_module_depth == 0 { scheduler.dynamic_module_owner = None; }
+    true
 }
 
 /// Resolve a general-dynamic TLS index against the current process's mapped
