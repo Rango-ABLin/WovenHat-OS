@@ -1,5 +1,16 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic TLS QEMU teardown finding (2026-10-28)
+
+The attempted real userspace dynamic-TLS fixture reached the production
+loader, transaction, and mapping path but exposed a cleanup defect: live
+dynamic-module ranges were not included in `userspace::destroy`, causing
+process reaping to fail with `failed to release reaped process address space`.
+`destroy` now includes all live dynamic-module ranges in its bounded teardown
+list. Kernel target build, target Clippy, host all-targets Clippy, and diff
+checks pass. The fixture changes were reverted after the run failed, so
+multi-thread visibility and rollback are not yet qualified.
+
 ## Codex - dynamic TLS resource-boundary host coverage (2026-10-28)
 
 Added host coverage for dynamic TLS resource installation, duplicate-install

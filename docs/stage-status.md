@@ -1,5 +1,14 @@
 # Stage status
 
+## Dynamic TLS QEMU qualification - 2026-10-28 - FAILED / FIX INTEGRATED
+
+The first real userspace QEMU attempt reached the dynamic TLS path but exposed
+a teardown defect: live dynamic-module ranges were omitted from address-space
+destruction, causing process reaping to panic. The bounded destroy-range fix is
+integrated and passes target build plus Clippy. The experimental fixture was
+reverted after failure; multi-thread visibility and rollback qualification
+remain open and are not claimed as passed.
+
 ## Dynamic TLS resource-boundary host coverage - 2026-10-28 - CLOSED
 
 Host coverage now exercises dynamic TLS install, duplicate rejection,

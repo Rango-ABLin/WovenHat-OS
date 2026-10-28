@@ -6347,7 +6347,7 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3];
+    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3 + MAX_DYNAMIC_MODULES];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..].iter_mut().zip(
         address_space.mappings[..address_space.mapping_count]
@@ -6364,6 +6364,10 @@ pub fn destroy(address_space: AddressSpace) -> bool {
             ranges[count] = template;
             count += 1;
         }
+    }
+    for module in address_space.dynamic_modules.iter().filter(|module| module.live) {
+        ranges[count] = (module.mapping_start, module.mapping_size);
+        count += 1;
     }
     paging::destroy_user_address_space(address_space.paging, &ranges[..count]).is_ok()
 }
