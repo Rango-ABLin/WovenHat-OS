@@ -192,6 +192,26 @@ pub fn resources(owner: u64, id: ThreadId) -> Option<Resources> {
     record.resources
 }
 
+pub fn install_dynamic_tls(id: ThreadId, slot: usize, mapping: AnonymousMapping) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let Some(resources) = record.resources.as_mut() else { return false; };
+    let Some(destination) = resources.dynamic_tls.get_mut(slot) else { return false; };
+    if destination.is_some() { return false; }
+    *destination = Some(mapping);
+    true
+}
+
+pub fn remove_dynamic_tls(id: ThreadId, slot: usize, mapping: AnonymousMapping) -> bool {
+    let mut table = TABLE.lock();
+    let Some(record) = lookup(&mut table, id) else { return false; };
+    let Some(resources) = record.resources.as_mut() else { return false; };
+    let Some(destination) = resources.dynamic_tls.get_mut(slot) else { return false; };
+    if destination.is_none_or(|current| current.address != mapping.address) { return false; }
+    *destination = None;
+    true
+}
+
 pub fn joinable(owner: u64, id: ThreadId) -> Result<bool, JoinError> {
     let mut table = TABLE.lock();
     let record = lookup(&mut table, id).ok_or(JoinError::Invalid)?;
