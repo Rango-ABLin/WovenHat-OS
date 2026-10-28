@@ -57,6 +57,21 @@ impl RuntimeModules {
         self.namespace.retain(id).map_err(Error::Namespace)
     }
 
+    /// Publish one verified symbol into the module namespace.
+    pub fn publish_symbol(&mut self, id: ModuleId, name: &[u8], address: u64) -> Result<(), Error> {
+        self.namespace
+            .publish_symbol(id, name, address)
+            .map_err(Error::Namespace)
+    }
+
+    /// Resolve a symbol while retaining the namespace's generation check.
+    pub fn lookup_symbol(&self, name: &[u8]) -> Result<(ModuleId, u64), Error> {
+        self.namespace.lookup(name).map_err(|error| match error {
+            NamespaceError::NotFound => Error::Stale,
+            other => Error::Namespace(other),
+        })
+    }
+
     pub fn release(&mut self, id: ModuleId) -> Result<bool, Error> {
         self.namespace.release(id).map_err(Error::Namespace)
     }
@@ -90,6 +105,8 @@ mod tests {
     fn lifecycle_is_transactional_and_tls_is_per_thread() {
         let mut modules = RuntimeModules::new();
         let id = modules.load(b"abc", 4, 4).unwrap();
+        modules.publish_symbol(id, b"tls_value", 0x1234).unwrap();
+        assert_eq!(modules.lookup_symbol(b"tls_value").unwrap(), (id, 0x1234));
         let mut first = Dtv::new();
         let mut second = Dtv::new();
         *modules.tls_addr(&mut first, id, 3).unwrap() = 7;
@@ -101,5 +118,6 @@ mod tests {
         assert!(modules.release(id).unwrap());
         modules.unload(id).unwrap();
         assert_eq!(modules.tls_addr(&mut first, id, 0), Err(Error::Stale));
+        assert_eq!(modules.lookup_symbol(b"tls_value"), Err(Error::Stale));
     }
 }

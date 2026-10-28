@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - runtime module symbol boundary (2026-10-28)
+
+Exposed verified symbol publication and generation-checked lookup through the
+transactional runtime module manager. Symbol invalidation now follows the same
+unload boundary as TLS storage, with tests covering lookup before and after
+teardown. ELF symbol-table parsing and relocation remain loader responsibilities.
+
 ## Codex - transactional runtime module/TLS lifecycle (2026-10-28)
 
 Added `libwoven::runtime_modules`, which joins the bounded module namespace,

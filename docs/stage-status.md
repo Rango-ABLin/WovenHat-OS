@@ -1,5 +1,13 @@
 # Stage status
 
+## Runtime module symbol boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The runtime module manager now publishes and resolves verified symbols through
+the same generation-checked namespace used by TLS modules. Unload invalidates
+both symbol and TLS handles. Focused lifecycle tests and warning-denying
+libwoven Clippy pass. ELF symbol parsing, relocation, constructors, and actual
+post-start image mapping remain the next loader boundary.
+
 ## Transactional runtime module/TLS lifecycle - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Added a bounded runtime module manager joining namespace identity, TLS template
