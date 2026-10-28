@@ -603,9 +603,6 @@ fn sys_munmap(address: u64, length: u64) -> u64 {
     }
 }
 fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
-    if !matches!(descriptor, 1 | 2) {
-        return SYSCALL_ERROR;
-    }
     let Ok(length) = usize::try_from(length) else {
         return SYSCALL_ERROR;
     };
@@ -617,8 +614,8 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         return SYSCALL_ERROR;
     }
 
-    // If stdout/stderr has been explicitly redirected with dup2(), honor the
-    // process file table. Otherwise these descriptors remain the console.
+    // Open descriptors (including files and pipes) take the owned descriptor
+    // path. Unopened stdout/stderr remain the capability-gated console.
     if crate::task::descriptor_is_open(descriptor) {
         let Ok(count) = crate::task::write_current(descriptor, &buffer[..length]) else {
             return SYSCALL_ERROR;
@@ -628,6 +625,10 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
             IO_COMPLETIONS.fetch_or(IO_STDERR, Ordering::Release);
         }
         return count as u64;
+    }
+
+    if !matches!(descriptor, 1 | 2) {
+        return SYSCALL_ERROR;
     }
 
     if !crate::task::current_has(crate::capability::Capability::Console) {

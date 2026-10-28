@@ -7278,3 +7278,11 @@ POSIX port increment 14: genuine musl dup() now verifies a shared VFS open
 file description. After original fd reads `W`, duplicate fd reads the next
 byte `e` even after original close; QEMU passed at 1/2/4 CPUs.
 
+POSIX port increment 15: genuine musl dup2() maps to the bounded atomic
+replacement syscall. Replacement survives original close and reads expected
+data; QEMU passed at 1/2/4 CPUs.
+
+POSIX port increment 16: added musl pipe() packed-fd adapter and generic
+open-descriptor Write routing. Pipe write/read/close passed QEMU at 1/2/4
+CPUs. Blocking, EOF and SIGPIPE semantics remain open.
+
