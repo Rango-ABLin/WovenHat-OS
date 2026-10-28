@@ -18,6 +18,9 @@ extern crate alloc;
 #[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
+mod pager_queue;
+mod vm_handoff;
+mod vm_generation;
 mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
@@ -154,6 +157,12 @@ mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
+#[cfg(feature = "wovenweb-cxx-test")]
+mod wovenweb_cxx_gate;
+#[cfg(feature = "wovenweb-memory-test")]
+mod wovenweb_memory_gate;
+#[cfg(feature = "wovenweb-net-test")]
+mod wovenweb_net_gate;
 // Stage 12.3 acceptance exercises the encrypted-mount path that lives here, so
 // this module is required by both the 12.3 and 12.5 gates. The features
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
@@ -2700,7 +2709,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(all(
         feature = "qemu-test",
         not(feature = "stage10-6-test"),
-        not(feature = "stage10-7-test")
+        not(feature = "stage10-7-test"),
+        not(feature = "wovenweb-net-test")
     ))]
     {
         match network::init() {
@@ -5843,6 +5853,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "wovenweb-cxx-test")]
+    {
+        if wovenweb_cxx_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB-CXX] native ABI platform: PASSED"));
+            qemu_test_exit_success();
+        } else {
+            serial::write_line(format_args!("[WOVENWEB-CXX] native ABI platform: FAILED"));
+            qemu_test_exit_failure();
+        }
+    }
+    #[cfg(feature = "wovenweb-memory-test")]
+    {
+        if !wovenweb_memory_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "wovenweb-net-test")]
+    {
+        if !wovenweb_net_gate::run() {
+            serial::write_line(format_args!("[WOVENWEB] native network platform: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB] native network platform: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage10-7-test")]
     {
         if network::init().is_err() {
@@ -6239,6 +6277,32 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!(
             "[S7.6] fork-affinity baseline preserved on single CPU"
         ));
+    }
+    #[cfg(feature = "wovenweb-vm-test")]
+    {
+        const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_WEB_NET_PROBE_IMAGE"));
+        if !task::vm_handoff_reaping_self_test() {
+            serial::write_line(format_args!("[WOVENWEB-VM] physical handoff reaping guard: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !task::pager_reap_lifetime_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !task::pager_thread_publication_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] sibling-thread publication: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !task::pager_queued_publication_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] queued publication: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !task::pager_remap_lifetime_self_test(IMAGE) {
+            serial::write_line(format_args!("[WOVENWEB-VM] remap generation: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[WOVENWEB-VM] pager owner lifetime: PASSED"));
+        qemu_test_exit_success();
     }
     console.println("KEYBOARD IRQ: READY");
 

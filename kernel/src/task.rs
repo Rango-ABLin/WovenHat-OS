@@ -93,6 +93,8 @@ static PAGER: IrqMutex<PagerQueue> = IrqMutex::with_rank(PagerQueue::empty(), 10
 static PAGER_TASK: IrqMutex<Option<TaskId>> = IrqMutex::with_rank(None, 10);
 static PAGER_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static PAGER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "wovenweb-vm-test")]
+static PAGER_REAP_TEST_PAUSED: AtomicBool = AtomicBool::new(false);
 // Stage 7.1.4: narrow scheduler tracing enabled only around the pager acceptance loop.
 static YIELD_TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
 static YIELD_TRACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1018,55 +1020,8 @@ struct PagerRequest {
     write: bool,
 }
 
-#[derive(Clone, Copy)]
-struct PagerCompletion {
-    task: TaskId,
-    address: u64,
-    succeeded: bool,
-}
-
-struct PagerQueue {
-    entries: [Option<PagerRequest>; MAX_PAGER_REQUESTS],
-    completions: [Option<PagerCompletion>; MAX_PAGER_REQUESTS],
-}
-
-impl PagerQueue {
-    const fn empty() -> Self {
-        Self {
-            entries: [None; MAX_PAGER_REQUESTS],
-            completions: [None; MAX_PAGER_REQUESTS],
-        }
-    }
-
-    fn push(&mut self, request: PagerRequest) -> bool {
-        let Some(slot) = self.entries.iter_mut().find(|entry| entry.is_none()) else {
-            return false;
-        };
-        *slot = Some(request);
-        true
-    }
-
-    fn pop(&mut self) -> Option<PagerRequest> {
-        self.entries.iter_mut().find_map(Option::take)
-    }
-
-    fn finish(&mut self, completion: PagerCompletion) -> bool {
-        let Some(slot) = self.completions.iter_mut().find(|entry| entry.is_none()) else {
-            return false;
-        };
-        *slot = Some(completion);
-        true
-    }
-
-    fn take_completion(&mut self, task: TaskId, address: u64) -> Option<bool> {
-        let slot = self.completions.iter().position(|entry| {
-            entry.is_some_and(|completion| completion.task == task && completion.address == address)
-        })?;
-        self.completions[slot]
-            .take()
-            .map(|completion| completion.succeeded)
-    }
-}
+type PagerQueue = crate::pager_queue::Queue<PagerRequest, MAX_PAGER_REQUESTS>;
+type PagerWork = crate::pager_queue::Work<PagerRequest>;
 struct Scheduler {
     tasks: [TaskControlBlock; MAX_TASKS],
     current_slot: [usize; crate::smp::MAX_CPUS],
@@ -1076,6 +1031,8 @@ struct Scheduler {
     /// Slot whose CPU->CPU hand-off is physically in progress. `MAX_TASKS`
     /// means no outgoing runnable task is awaiting finalization.
     switching_out: [usize; crate::smp::MAX_CPUS],
+    // Covers every outgoing state, including Dead/Blocked before assembly.
+    vm_handoffs: crate::vm_handoff::Handoffs<{ crate::smp::MAX_CPUS }>,
 }
 
 impl Scheduler {
@@ -1087,6 +1044,7 @@ impl Scheduler {
             context_switches: 0,
             last_selected: [[0; 3]; crate::smp::MAX_CPUS],
             switching_out: [MAX_TASKS; crate::smp::MAX_CPUS],
+            vm_handoffs: crate::vm_handoff::Handoffs::empty(),
         }
     }
 
@@ -1192,6 +1150,11 @@ impl Scheduler {
             TASK_STACKS[previous_slot].canary_intact(),
             "kernel task stack canary corrupted"
         );
+        assert!(
+            self.vm_handoffs
+                .begin(cpu, self.tasks[previous_slot].process_id.as_u64()),
+            "nested physical address-space handoff"
+        );
         if self.tasks[previous_slot].state == TaskState::Running {
             // Do NOT publish the outgoing task as Ready yet. The Rust guard is
             // dropped before the assembly stack switch, so another CPU could
@@ -1240,6 +1203,7 @@ impl Scheduler {
         let cpu = crate::smp::cpu_index();
         let outgoing = self.switching_out[cpu];
         if outgoing == MAX_TASKS {
+            let _ = self.vm_handoffs.finish(cpu);
             return;
         }
         assert!(
@@ -1294,6 +1258,7 @@ impl Scheduler {
             self.tasks[outgoing].state = TaskState::Ready;
         }
         self.switching_out[cpu] = MAX_TASKS;
+        let _ = self.vm_handoffs.finish(cpu);
     }
 
     /// Request scheduler-owned termination of one task. The scheduler may
@@ -1758,6 +1723,28 @@ pub fn spawn_user_process_with_sandbox(
     program: userspace::UserProgram,
     sandbox_profile: wovenguard::SandboxProfile,
 ) -> Result<(ProcessId, UserTaskContext), ProcessError> {
+    spawn_user_process_with_sandbox_and_capabilities(
+        name,
+        program,
+        sandbox_profile,
+        CapabilitySet::userspace(),
+    )
+}
+
+/// Publish a user task with its effective capability set already installed.
+///
+/// The scheduler may run a Ready task on another CPU as soon as the scheduler
+/// lock is released. Package launches therefore must not initialize with the
+/// ordinary user ceiling and narrow the task in a second critical section: a
+/// short-lived task could otherwise issue a privileged syscall before the
+/// package declaration is installed. Callers must derive `sandbox_profile`
+/// from `capabilities` before invoking this helper.
+fn spawn_user_process_with_sandbox_and_capabilities(
+    name: &'static str,
+    program: userspace::UserProgram,
+    sandbox_profile: wovenguard::SandboxProfile,
+    capabilities: CapabilitySet,
+) -> Result<(ProcessId, UserTaskContext), ProcessError> {
     if !program.image.is_valid() {
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
@@ -1815,6 +1802,8 @@ pub fn spawn_user_process_with_sandbox(
         program.address_space.paging(),
     );
     scheduler.tasks[task_slot].process_id = process_id;
+    scheduler.tasks[task_slot].capabilities = capabilities;
+    scheduler.tasks[task_slot].capability_lineages = [None; Capability::COUNT];
     scheduler.tasks[task_slot].sandbox_profile = sandbox_profile;
     scheduler.task_count += 1;
     processes[process_slot] = Some(process);
@@ -1844,20 +1833,7 @@ pub fn spawn_user_process_with_package_capabilities(
         let _ = userspace::destroy(program.address_space);
         return Err(ProcessError::Full);
     };
-    let result = spawn_user_process_with_sandbox(name, program, profile);
-    if let Ok((process_id, context)) = result {
-        let mut scheduler = SCHEDULER.lock();
-        if let Some(task) = scheduler
-            .tasks
-            .iter_mut()
-            .find(|task| task.process_id == process_id)
-        {
-            task.capabilities = capabilities;
-            return Ok((process_id, context));
-        }
-        return Err(ProcessError::Full);
-    }
-    result
+    spawn_user_process_with_sandbox_and_capabilities(name, program, profile, capabilities)
 }
 
 /// Redirect one normal user exit through the image destructors. The callback
@@ -2650,12 +2626,19 @@ pub fn spawn_migratable_user_probe(
     Ok((process_id, task_id, context))
 }
 
+/// Nonblocking exit observation includes scheduler handoff acknowledgement.
+/// Zombie metadata alone can precede the exiting CPU's physical stack switch.
+/// Pager work still has its separate drain gate in wait_process.
 pub fn process_exited(id: ProcessId) -> bool {
-    process_table_lock()
-        .iter()
-        .flatten()
-        .find(|process| process.id == id)
-        .is_some_and(|process| process.state == ProcessState::Exited)
+    let exited = {
+        process_table_lock()
+            .iter()
+            .flatten()
+            .find(|process| process.id == id)
+            .is_some_and(|process| process.state == ProcessState::Exited)
+    };
+    // Release the higher-ranked process-table guard before scheduler inspection.
+    exited && !process_has_live_tasks(id.as_u64())
 }
 
 /// S03 bounded process-lifecycle acceptance: the real Ring-3 stub exercises
@@ -3004,12 +2987,14 @@ pub fn try_handle_file_fault(address: u64, write: bool) -> bool {
             Some(id) => id,
             None => return false,
         };
+        let mut queue = PAGER.lock();
+        let owner = current_process_id();
         let (space, slot, mapping) = {
             let processes = process_table_lock();
             let Some(process) = processes
                 .iter()
                 .flatten()
-                .find(|p| p.id.as_u64() == current_process_id())
+                .find(|p| p.id.as_u64() == owner && p.state == ProcessState::Ready)
             else {
                 return false;
             };
@@ -3031,14 +3016,19 @@ pub fn try_handle_file_fault(address: u64, write: bool) -> bool {
             (space, slot, mapping)
         };
 
-        if !PAGER.lock().push(PagerRequest {
-            task: task_id,
-            space,
-            slot,
-            mapping,
+        if !queue.push(
+            owner,
+            task_id.as_u64(),
             address,
-            write,
-        }) {
+            PagerRequest {
+                task: task_id,
+                space,
+                slot,
+                mapping,
+                address,
+                write,
+            },
+        ) {
             return false;
         }
         PAGER_REQUESTS.fetch_add(1, Ordering::Relaxed);
@@ -3052,16 +3042,19 @@ pub fn try_handle_file_fault(address: u64, write: bool) -> bool {
         // requester subsequently blocks forever. Atomic state publication
         // makes the wake/block handshake correct for both today's pinned
         // userspace and the multicore/migration stages that follow.
-        block_current_and_wake_pager_from_exception(pager_task);
+        block_current_and_wake_pager_from_exception(pager_task, queue);
 
         PAGER
             .lock()
-            .take_completion(task_id, address)
+            .take_completion(task_id.as_u64(), address)
             .unwrap_or(false)
     })
 }
 
-fn block_current_and_wake_pager_from_exception(pager_id: TaskId) {
+fn block_current_and_wake_pager_from_exception(
+    pager_id: TaskId,
+    queue: IrqMutexGuard<'_, PagerQueue>,
+) {
     let (switch, pager_cpu) = {
         let mut scheduler = SCHEDULER.lock();
         let cpu = crate::smp::cpu_index();
@@ -3087,6 +3080,10 @@ fn block_current_and_wake_pager_from_exception(pager_id: TaskId) {
         (scheduler.prepare_switch(), pager_cpu)
     };
 
+    // The requester is now Blocked (or handing off). A worker cannot consume
+    // the newly queued request before this publication. Release every IRQ lock
+    // before IPI delivery or a context switch.
+    drop(queue);
     // A remote pager may need an IPI. For a local pager prepare_switch() has
     // already reconsidered the run queue, while request_reschedule is harmless
     // and ensures a promptly-ready pager if another task won the first pick.
@@ -3105,7 +3102,7 @@ fn block_current_and_wake_pager_from_exception(pager_id: TaskId) {
     }
 }
 
-fn pager_wait_for_request() -> PagerRequest {
+fn pager_wait_for_request() -> PagerWork {
     loop {
         let interrupts_were_enabled = x86_64::instructions::interrupts::are_enabled();
         x86_64::instructions::interrupts::disable();
@@ -3114,7 +3111,15 @@ fn pager_wait_for_request() -> PagerRequest {
         // A producer must acquire PAGER to enqueue first, so it cannot slip a
         // request into the old check/sleep window and then have its wake lost.
         let mut queue = PAGER.lock();
-        if let Some(request) = queue.pop() {
+        #[cfg(feature = "wovenweb-vm-test")]
+        let next = if PAGER_REAP_TEST_PAUSED.load(Ordering::Acquire) {
+            None
+        } else {
+            queue.pop()
+        };
+        #[cfg(not(feature = "wovenweb-vm-test"))]
+        let next = queue.pop();
+        if let Some(request) = next {
             drop(queue);
             if interrupts_were_enabled {
                 x86_64::instructions::interrupts::enable();
@@ -3153,29 +3158,62 @@ fn pager_wait_for_request() -> PagerRequest {
 
 fn pager_task() -> ! {
     loop {
-        let request = pager_wait_for_request();
-        let mut mapping = request.mapping;
-        let succeeded = userspace::populate_file_page(
-            request.space,
-            &mut mapping,
-            request.address,
-            request.write,
-        );
-        if succeeded {
-            let mut processes = process_table_lock();
-            if let Some(process) = processes
-                .iter_mut()
+        let work = pager_wait_for_request();
+        let request = work.payload;
+        // Admission snapshots can be stale by the time this single worker
+        // reaches a second fault from the same mapping. Refresh under the
+        // canonical owner lock, then perform all page I/O outside that lock.
+        let current = {
+            let table = process_table_lock();
+            table
+                .iter()
                 .flatten()
-                .find(|p| p.task_id == request.task)
-            {
-                process.memory_mappings[request.slot] = Some(mapping);
+                .find(|p| {
+                    p.id.as_u64() == work.key.owner
+                        && p.address_space.is_some_and(|space| {
+                            space.root_address() == request.space.root_address()
+                        })
+                })
+                .and_then(|p| p.memory_mappings[request.slot])
+                .filter(|mapping| mapping.same_file_binding(&request.mapping))
+        };
+        let succeeded = if let Some(mut mapping) = current {
+            if mapping.file_page_resident(request.address, request.write) {
+                // Another queued fault already installed this page. Completing
+                // this requester requires neither a second map nor publication.
+                true
+            } else {
+                let before = mapping;
+                if userspace::populate_file_page(
+                    request.space,
+                    &mut mapping,
+                    request.address,
+                    request.write,
+                ) {
+                    let mut table = process_table_lock();
+                    table
+                        .iter_mut()
+                        .flatten()
+                        .find(|p| {
+                            p.id.as_u64() == work.key.owner
+                                && p.address_space.is_some_and(|space| {
+                                    space.root_address() == request.space.root_address()
+                                })
+                        })
+                        .and_then(|p| p.memory_mappings[request.slot].as_mut())
+                        .is_some_and(|current| {
+                            current.publish_file_page(before, mapping, request.address)
+                        })
+                } else {
+                    false
+                }
             }
-        }
-        let recorded = PAGER.lock().finish(PagerCompletion {
-            task: request.task,
-            address: request.address,
-            succeeded,
-        });
+        } else {
+            false
+        };
+        // No page access follows completion: releasing active work permits a
+        // quiesced owner to be reaped. Stale completion keys cannot drop a pin.
+        let recorded = PAGER.lock().finish(work.key, succeeded);
         PAGER_COMPLETIONS.fetch_add(1, Ordering::Relaxed);
         if recorded {
             let _ = wake_task(request.task);
@@ -3771,7 +3809,7 @@ pub fn exit_current_process(exit_code: i32) -> ! {
 
 fn process_has_live_tasks(process_id: u64) -> bool {
     let scheduler = SCHEDULER.lock();
-    scheduler.tasks.iter().any(|task| {
+    scheduler.vm_handoffs.retains(process_id) || scheduler.tasks.iter().any(|task| {
         task.process_id.as_u64() == process_id
             && matches!(
                 task.state,
@@ -3871,6 +3909,12 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
         }
     }
     if process_has_live_tasks(child_id) {
+        return Err(WaitError::StillRunning);
+    }
+    // The worker is a kernel task outside the child process. Its queued and
+    // active requests keep the child's address space alive after user exit.
+    // This lower-ranked pager lock is released before PROCESS_TABLE is taken.
+    if !PAGER.lock().release_quiescent_owner(child_id) {
         return Err(WaitError::StillRunning);
     }
     let (exit_code, deferred_space, mut detached_files) = {
@@ -7617,4 +7661,514 @@ pub unsafe fn spawn_parallel(name: &'static str, entry: fn() -> !) -> Result<Tas
     // `spawn_migratable_on` (forwarded by this fn's own `# Safety` contract),
     // and `cpu` is a schedulable CPU chosen just above.
     unsafe { spawn_migratable_on(cpu, name, entry) }
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_reap_lifetime_self_test(image: &[u8]) -> bool {
+    let frames = crate::memory::stats().allocated_frames;
+    let mappings = anonymous_mapping_count();
+    let processes = process_count();
+    let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", "--vm-reap"])
+    else {
+        return false;
+    };
+    let Ok((pid, _)) = spawn_user_process_with_sandbox(
+        "pager-reap-lifetime",
+        program,
+        wovenguard::SandboxProfile::new(0x575a, CapabilitySet::only(Capability::Console)),
+    ) else {
+        return false;
+    };
+    let start = timer::ticks();
+    while !process_exited(pid) || process_has_live_tasks(pid.as_u64()) {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    let (space, slot, mapping, child_task) = {
+        let table = process_table_lock();
+        let Some(child) = table.iter().flatten().find(|p| p.id == pid) else {
+            return false;
+        };
+        let Some(space) = child.address_space else {
+            return false;
+        };
+        let Some((slot, mapping)) = child
+            .memory_mappings
+            .iter()
+            .enumerate()
+            .find_map(|(slot, entry)| entry.map(|mapping| (slot, mapping)))
+        else {
+            return false;
+        };
+        (space, slot, mapping, child.task_id)
+    };
+    if PAGER_REAP_TEST_PAUSED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    struct Pause;
+    impl Drop for Pause {
+        fn drop(&mut self) {
+            PAGER_REAP_TEST_PAUSED.store(false, Ordering::Release);
+        }
+    }
+    let _pause = Pause;
+    // This queue entry is an ownership interleaving fixture, not a page read.
+    // The ordinary Ring-3 lazy fault fixture already ran before this gate.
+    if !PAGER.lock().push(
+        pid.as_u64(),
+        child_task.as_u64(),
+        mapping.address,
+        PagerRequest {
+            task: child_task,
+            space,
+            slot,
+            mapping,
+            address: mapping.address,
+            write: false,
+        },
+    ) {
+        return false;
+    }
+    if wait_process(pid.as_u64()) != Err(WaitError::StillRunning)
+        || !process_table_lock()
+            .iter()
+            .flatten()
+            .any(|p| p.id == pid && p.address_space.is_some())
+    {
+        return false;
+    }
+    let Some(work) = PAGER.lock().pop() else {
+        return false;
+    };
+    if work.key.owner != pid.as_u64()
+        || wait_process(pid.as_u64()) != Err(WaitError::StillRunning)
+        || !process_table_lock()
+            .iter()
+            .flatten()
+            .any(|p| p.id == pid && p.address_space.is_some())
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] queued + active pager work retains zombie address space: PASSED"
+    ));
+    if !PAGER.lock().finish(work.key, false) {
+        return false;
+    }
+    if wait_process(pid.as_u64()) != Ok(0)
+        || PAGER
+            .lock()
+            .take_completion(child_task.as_u64(), mapping.address)
+            .is_some()
+        || anonymous_mapping_count() != mappings
+        || crate::memory::stats().allocated_frames != frames
+        || process_count() != processes
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] completion owner cleanup + exact reaping baseline: PASSED"
+    ));
+    true
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_thread_publication_self_test(image: &[u8]) -> bool {
+    const PATH: &str = "/tmp/wovenweb-pager-thread";
+    let _ = crate::file_frames::reclaim_unused();
+    let frames = crate::memory::stats().allocated_frames;
+    let mappings = anonymous_mapping_count();
+    let processes = process_count();
+    let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+    let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+    if crate::vfs::create_read_only(PATH, &[0x71; 8192]).is_err() {
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", "--vm-thread"])
+    else {
+        return false;
+    };
+    let Ok((pid, _)) = spawn_user_process_with_sandbox(
+        "pager-thread-publication",
+        program,
+        wovenguard::SandboxProfile::new(
+            0x575b,
+            CapabilitySet::only(Capability::Console).with(Capability::FileRead),
+        ),
+    ) else {
+        return false;
+    };
+    let start = timer::ticks();
+    while !process_exited(pid) || process_has_live_tasks(pid.as_u64()) {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    let resident = {
+        let table = process_table_lock();
+        let Some(child) = table.iter().flatten().find(|p| p.id == pid) else {
+            return false;
+        };
+        child
+            .memory_mappings
+            .iter()
+            .flatten()
+            .map(userspace::AnonymousMapping::file_resident_pages)
+            .sum::<u32>()
+    };
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] sibling-thread canonical resident pages={} expected=2",
+        resident
+    ));
+    if resident != 2
+        || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 2
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 2
+        || wait_process(pid.as_u64()) != Ok(0)
+    {
+        return false;
+    }
+    if crate::vfs::remove(PATH).is_err() {
+        return false;
+    }
+    let _ = crate::file_frames::reclaim_unused();
+    let passed = crate::memory::stats().allocated_frames == frames
+        && anonymous_mapping_count() == mappings
+        && process_count() == processes;
+    if passed {
+        crate::serial::write_line(format_args!(
+            "[WOVENWEB-VM] sibling-thread lazy faults + canonical publication + exact cleanup: PASSED"
+        ));
+    }
+    passed
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn vm_handoff_reaping_self_test() -> bool {
+    // Isolated scheduler metadata: no fake stack switch, task or process-table
+    // entry is injected into the live scheduler. All real boot switches use
+    // the same production guard and incoming-stack finalization paths.
+    let mut scheduler = Scheduler::empty();
+    let cpu = crate::smp::cpu_index();
+    scheduler.tasks[0].process_id = ProcessId(7);
+    for state in [TaskState::Dead, TaskState::Blocked, TaskState::Sleeping] {
+        scheduler.tasks[0].state = state;
+        if !scheduler.vm_handoffs.begin(cpu, 7) || !scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+        scheduler.tasks[0].state = TaskState::Dead;
+        if !scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+        scheduler.finalize_switch();
+        if scheduler.process_has_live_tasks(7) {
+            return false;
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] physical handoff reaping guard: PASSED"
+    ));
+    true
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_queued_publication_self_test(image: &[u8]) -> bool {
+    const PATH: &str = "/tmp/wovenweb-queued-pager";
+    for (mode, expected) in [("--vm-queued", 2), ("--vm-duplicate", 1)] {
+        let _ = crate::file_frames::reclaim_unused();
+        let frames = crate::memory::stats().allocated_frames;
+        let mappings = anonymous_mapping_count();
+        let processes = process_count();
+        let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+        let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+        if crate::vfs::create_read_only(PATH, &[0x71; 8192]).is_err() {
+            return false;
+        }
+        let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", mode])
+        else {
+            return false;
+        };
+        if PAGER_REAP_TEST_PAUSED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+        struct Pause;
+        impl Drop for Pause {
+            fn drop(&mut self) {
+                PAGER_REAP_TEST_PAUSED.store(false, Ordering::Release);
+            }
+        }
+        let pause = Pause;
+        let Ok((pid, _)) = spawn_user_process_with_sandbox(
+            "queued-pager-publication",
+            program,
+            wovenguard::SandboxProfile::new(
+                0x575c,
+                CapabilitySet::only(Capability::Console).with(Capability::FileRead),
+            ),
+        ) else {
+            return false;
+        };
+        let start = timer::ticks();
+        while PAGER_REQUESTS.load(Ordering::Relaxed) < requests + 2 {
+            if timer::ticks().wrapping_sub(start) > 200 {
+                return false;
+            }
+            yield_now();
+        }
+        let resident = |id| {
+            let table = process_table_lock();
+            table.iter().flatten().find(|p| p.id == id).map(|child| {
+                child
+                    .memory_mappings
+                    .iter()
+                    .flatten()
+                    .map(userspace::AnonymousMapping::file_resident_pages)
+                    .sum::<u32>()
+            })
+        };
+        if resident(pid) != Some(0) || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions {
+            return false;
+        }
+        drop(pause);
+        let Some(pager) = *PAGER_TASK.lock() else {
+            return false;
+        };
+        let _ = wake_task(pager);
+        let start = timer::ticks();
+        while !process_exited(pid) {
+            if timer::ticks().wrapping_sub(start) > 200 {
+                return false;
+            }
+            yield_now();
+        }
+        let observed = resident(pid);
+        crate::serial::write_line(format_args!(
+            "[WOVENWEB-VM] queued mode={} resident={:?} expected={} requests={} completed={}",
+            mode,
+            observed,
+            expected,
+            PAGER_REQUESTS.load(Ordering::Relaxed) - requests,
+            PAGER_COMPLETIONS.load(Ordering::Relaxed) - completions
+        ));
+        let delta_ok = {
+            let table = process_table_lock();
+            table
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .and_then(|p| {
+                    p.memory_mappings
+                        .iter()
+                        .flatten()
+                        .find(|m| m.file_resident_pages() != 0)
+                        .copied()
+                })
+                .is_some_and(userspace::file_page_delta_self_test)
+        };
+        if !delta_ok
+            || observed != Some(expected)
+            || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 2
+            || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 2
+            || wait_process(pid.as_u64()) != Ok(0)
+        {
+            return false;
+        }
+        if crate::vfs::remove(PATH).is_err() {
+            return false;
+        }
+        let _ = crate::file_frames::reclaim_unused();
+        if crate::memory::stats().allocated_frames != frames
+            || anonymous_mapping_count() != mappings
+            || process_count() != processes
+        {
+            return false;
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] queued sibling page deltas + duplicate coalescing + exact cleanup: PASSED"
+    ));
+    true
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+pub fn pager_remap_lifetime_self_test(image: &[u8]) -> bool {
+    const FILE: &str = "/tmp/wovenweb-remap-pager";
+    const DONE: &str = "/tmp/wovenweb-remap-done";
+    let _ = crate::file_frames::reclaim_unused();
+    let frames = crate::memory::stats().allocated_frames;
+    let mappings = anonymous_mapping_count();
+    let processes = process_count();
+    let requests = PAGER_REQUESTS.load(Ordering::Relaxed);
+    let completions = PAGER_COMPLETIONS.load(Ordering::Relaxed);
+    if crate::vfs::create_read_only(FILE, &[0x71; 8192]).is_err()
+        || crate::vfs::write_file(DONE, &[]).is_err()
+    {
+        return false;
+    }
+    let Some(program) = userspace::load_elf_with_argv(image, &["wovenweb-vm-probe", "--vm-remap"])
+    else {
+        return false;
+    };
+    if PAGER_REAP_TEST_PAUSED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    struct Pause;
+    impl Drop for Pause {
+        fn drop(&mut self) {
+            PAGER_REAP_TEST_PAUSED.store(false, Ordering::Release);
+        }
+    }
+    let pause = Pause;
+    let Ok((pid, _)) = spawn_user_process_with_sandbox(
+        "pager-remap-lifetime",
+        program,
+        wovenguard::SandboxProfile::new(
+            0x575d,
+            CapabilitySet::only(Capability::Console)
+                .with(Capability::FileRead)
+                .with(Capability::FileWrite),
+        ),
+    ) else {
+        return false;
+    };
+    let start = timer::ticks();
+    while PAGER_REQUESTS.load(Ordering::Relaxed) < requests + 1 {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    crate::serial::write_line(format_args!("[WOVENWEB-VM] remap phase=old-fault-queued"));
+    let old = {
+        let table = process_table_lock();
+        let Some(mapping) = table.iter().flatten().find(|p| p.id == pid).and_then(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .find(|m| m.size == 8192)
+                .copied()
+        }) else {
+            return false;
+        };
+        mapping
+    };
+    if old.file_resident_pages() != 0
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions
+        || crate::vfs::write_file(DONE, b"r").is_err()
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] remap phase=ready-file-published"
+    ));
+    let start = timer::ticks();
+    while {
+        let mut byte = [0];
+        crate::vfs::read_all(DONE, &mut byte) != Ok(1) || byte != *b"x"
+    } {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            let child = process_table_lock()
+                .iter()
+                .flatten()
+                .find(|p| p.id == pid)
+                .map(|p| (p.state == ProcessState::Exited, p.exit_code));
+            crate::serial::write_line(format_args!(
+                "[WOVENWEB-VM] remap done timeout child={:?}",
+                child
+            ));
+            return false;
+        }
+        yield_now();
+    }
+    let replacement = {
+        let table = process_table_lock();
+        let Some(mapping) = table.iter().flatten().find(|p| p.id == pid).and_then(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .find(|m| m.address == old.address)
+                .copied()
+        }) else {
+            return false;
+        };
+        mapping
+    };
+    if replacement.size != old.size
+        || replacement.writable != old.writable
+        || replacement.file_resident_pages() != 0
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] remap lifetimes old={} new={}",
+        old.lifetime_id(),
+        replacement.lifetime_id()
+    ));
+    if old.lifetime_id() == replacement.lifetime_id() {
+        return false;
+    }
+    drop(pause);
+    let Some(pager) = *PAGER_TASK.lock() else {
+        return false;
+    };
+    let _ = wake_task(pager);
+    let start = timer::ticks();
+    while !process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 200 {
+            return false;
+        }
+        yield_now();
+    }
+    let resident = {
+        let table = process_table_lock();
+        table.iter().flatten().find(|p| p.id == pid).map(|p| {
+            p.memory_mappings
+                .iter()
+                .flatten()
+                .map(userspace::AnonymousMapping::file_resident_pages)
+                .sum::<u32>()
+        })
+    };
+    let status = wait_process(pid.as_u64());
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] stale queued remap exit={:?} resident={:?} expected=-11/0 requests={} completed={}",
+        status.ok(),
+        resident,
+        PAGER_REQUESTS.load(Ordering::Relaxed) - requests,
+        PAGER_COMPLETIONS.load(Ordering::Relaxed) - completions
+    ));
+    if status != Ok(-11)
+        || resident != Some(0)
+        || PAGER_REQUESTS.load(Ordering::Relaxed) != requests + 1
+        || PAGER_COMPLETIONS.load(Ordering::Relaxed) != completions + 1
+    {
+        return false;
+    }
+    for path in [FILE, DONE] {
+        if crate::vfs::remove(path).is_err() {
+            return false;
+        }
+    }
+    let _ = crate::file_frames::reclaim_unused();
+    if crate::memory::stats().allocated_frames != frames
+        || anonymous_mapping_count() != mappings
+        || process_count() != processes
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[WOVENWEB-VM] same-file remap generation refusal + exact cleanup: PASSED"
+    ));
+    true
 }

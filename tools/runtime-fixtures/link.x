@@ -6,7 +6,7 @@ PHDRS {
 }
 SECTIONS {
   . = 0x400000000000;
-  .text : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.text .text.*) } :text
+  .text : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.text.start) *(.text .text.*) } :text
   .rodata : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.rodata .rodata.*) } :rodata
   .data : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.data .data.*) } :data
   .bss : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.bss .bss.*) *(COMMON) } :data

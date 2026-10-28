@@ -4607,6 +4607,8 @@ impl UserStack {
 pub const MAX_ARGV: usize = 8;
 /// Maximum total bytes for all argv string data (including NULs).
 pub const MAX_ARGV_BYTES: usize = 512;
+/// Maximum environment strings placed on an initial user stack.
+pub const MAX_ENV: usize = 8;
 
 /// Minimal crt0 contract expected by the kernel stack layout:
 ///
@@ -4644,11 +4646,29 @@ pub fn setup_argv_stack(
     stack: UserStack,
     args: &[&str],
 ) -> Option<u64> {
-    if args.len() > MAX_ARGV {
+    setup_argv_env_stack(address_space, stack, args, &[])
+}
+
+/// Build a System V-style initial stack with bounded argv and envp vectors.
+///
+/// This is a loader primitive only. Existing process and syscall entry points
+/// continue to call [`setup_argv_stack`] and therefore receive an empty envp.
+/// Callers that opt into `env` must supply complete `KEY=VALUE` strings; this
+/// routine neither inherits the parent's environment nor interprets names.
+pub fn setup_argv_env_stack(
+    address_space: paging::AddressSpace,
+    stack: UserStack,
+    args: &[&str],
+    env: &[&str],
+) -> Option<u64> {
+    if args.len() > MAX_ARGV || env.len() > MAX_ENV {
         return None;
     }
     let mut string_bytes = 0usize;
-    for arg in args {
+    for arg in args.iter().chain(env.iter()) {
+        if !arg.is_ascii() || arg.as_bytes().contains(&0) {
+            return None;
+        }
         string_bytes = string_bytes.checked_add(arg.len().checked_add(1)?)?;
     }
     if string_bytes > MAX_ARGV_BYTES {
@@ -4661,9 +4681,9 @@ pub fn setup_argv_stack(
     }
 
     let mut cursor = strings_start;
-    let mut argv_ptrs = [0u64; MAX_ARGV];
-    for (i, arg) in args.iter().enumerate() {
-        argv_ptrs[i] = cursor;
+    let mut pointers = [0u64; MAX_ARGV + MAX_ENV];
+    for (index, arg) in args.iter().chain(env.iter()).enumerate() {
+        pointers[index] = cursor;
         let mut buf = [0u8; 256];
         if arg.len() >= buf.len() {
             return None;
@@ -4673,9 +4693,9 @@ pub fn setup_argv_stack(
         cursor = cursor.checked_add(arg.len() as u64 + 1)?;
     }
 
-    // argc + argv... + NULL + envp NULL
+    // argc + argv... + NULL + envp... + NULL
     let argc = args.len() as u64;
-    let pointer_words = 1 + args.len() + 1 + 1;
+    let pointer_words = 1 + args.len() + 1 + env.len() + 1;
     let pointer_bytes = pointer_words * 8;
     let mut rsp = strings_start.checked_sub(pointer_bytes as u64)?;
     rsp &= !0xfu64;
@@ -4684,13 +4704,18 @@ pub fn setup_argv_stack(
     }
 
     paging::write_user_bytes(address_space, rsp, &argc.to_le_bytes()).ok()?;
-    for (i, pointer) in argv_ptrs.iter().enumerate().take(args.len()) {
+    for (i, pointer) in pointers.iter().enumerate().take(args.len()) {
         let addr = rsp + 8 + (i as u64) * 8;
         paging::write_user_bytes(address_space, addr, &pointer.to_le_bytes()).ok()?;
     }
     let argv_null = rsp + 8 + (args.len() as u64) * 8;
     paging::write_user_bytes(address_space, argv_null, &0u64.to_le_bytes()).ok()?;
-    let envp_null = argv_null + 8;
+    let envp = argv_null + 8;
+    for (index, pointer) in pointers.iter().skip(args.len()).take(env.len()).enumerate() {
+        let addr = envp + (index as u64) * 8;
+        paging::write_user_bytes(address_space, addr, &pointer.to_le_bytes()).ok()?;
+    }
+    let envp_null = envp + (env.len() as u64) * 8;
     paging::write_user_bytes(address_space, envp_null, &0u64.to_le_bytes()).ok()?;
 
     Some(rsp)
@@ -4743,8 +4768,11 @@ fn release_mapping_swap_slots(mapping: AnonymousMapping) {
         let _ = crate::swap::release_page(slot);
     }
 }
+static MAPPING_LIFETIMES: crate::vm_generation::Issuer = crate::vm_generation::Issuer::new();
+
 #[derive(Clone, Copy)]
 pub struct AnonymousMapping {
+    lifetime: core::num::NonZeroU64,
     pub address: u64,
     pub size: usize,
     pub writable: bool,
@@ -4754,7 +4782,71 @@ pub struct AnonymousMapping {
     swap_slots: [Option<crate::swap::Handle>; USER_MMAP_PAGES],
 }
 
-#[derive(Clone, Copy)]
+impl AnonymousMapping {
+    /// Lifetime lineage plus immutable file binding; owner/root are checked
+    /// by the caller. This tag does not reserve or pin an active mapping.
+    pub(crate) fn same_file_binding(&self, other: &Self) -> bool {
+        self.lazy.is_some()
+            && self.lifetime == other.lifetime
+            && self.address == other.address
+            && self.size == other.size
+            && self.writable == other.writable
+            && self.lazy == other.lazy
+    }
+    fn file_page_index(&self, address: u64, write: bool) -> Option<usize> {
+        self.lazy?;
+        if write && !self.writable {
+            return None;
+        }
+        let offset = address.checked_sub(self.address)?;
+        if offset >= self.size as u64 {
+            return None;
+        }
+        let index = (offset / 4096) as usize;
+        (index < USER_MMAP_PAGES).then_some(index)
+    }
+    pub(crate) fn file_page_resident(&self, address: u64, write: bool) -> bool {
+        self.file_page_index(address, write)
+            .is_some_and(|index| self.resident & (1 << index) != 0)
+    }
+    /// Publish only the completed page. Never overwrite another page's newer
+    /// metadata with an admission-time snapshot. Caller holds PROCESS_TABLE.
+    pub(crate) fn publish_file_page(&mut self, before: Self, after: Self, address: u64) -> bool {
+        if !self.same_file_binding(&before) || !after.same_file_binding(&before) {
+            return false;
+        }
+        let Some(index) = before.file_page_index(address, false) else {
+            return false;
+        };
+        let bit = 1 << index;
+        if (self.resident ^ before.resident) & bit != 0
+            || (self.dirty ^ before.dirty) & bit != 0
+            || self.swap_slots[index] != before.swap_slots[index]
+        {
+            return false;
+        }
+        self.resident = (self.resident & !bit) | (after.resident & bit);
+        self.dirty = (self.dirty & !bit) | (after.dirty & bit);
+        self.swap_slots[index] = after.swap_slots[index];
+        true
+    }
+}
+
+#[cfg(feature = "wovenweb-vm-test")]
+impl AnonymousMapping {
+    pub(crate) fn lifetime_id(&self) -> u64 {
+        self.lifetime.get()
+    }
+    pub(crate) fn file_resident_pages(&self) -> u32 {
+        if self.lazy.is_some() {
+            self.resident.count_ones()
+        } else {
+            0
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct LazyFile {
     shared: bool,
     file: crate::vfs::OpenFileId,
@@ -4762,6 +4854,53 @@ struct LazyFile {
     offset: usize,
     length: usize,
 }
+#[cfg(feature = "wovenweb-vm-test")]
+pub(crate) fn file_page_delta_self_test(mapping: AnonymousMapping) -> bool {
+    if mapping.lazy.is_none() || mapping.size < 8192 {
+        return false;
+    }
+    let mut before = mapping;
+    before.resident = 0;
+    before.dirty = 0;
+    before.swap_slots = [None; USER_MMAP_PAGES];
+    let mut after = before;
+    after.resident = 1;
+    after.dirty = 1;
+    let mut canonical = before;
+    canonical.resident = 2;
+    canonical.dirty = 2;
+    if !canonical.publish_file_page(before, after, before.address)
+        || canonical.resident != 3
+        || canonical.dirty != 3
+    {
+        return false;
+    }
+    let unchanged = canonical;
+    if canonical.publish_file_page(before, after, before.address)
+        || canonical.resident != unchanged.resident
+        || canonical.dirty != unchanged.dirty
+    {
+        return false;
+    }
+    let mut wrong = before;
+    let Some(backing) = wrong.lazy.as_mut() else {
+        return false;
+    };
+    let Some(offset) = backing.offset.checked_add(4096) else {
+        return false;
+    };
+    backing.offset = offset;
+    if canonical.publish_file_page(wrong, after, before.address)
+        || canonical.resident != 3
+        || canonical.dirty != 3
+    {
+        return false;
+    }
+    !canonical.file_page_resident(u64::MAX, false)
+        && !canonical.file_page_resident(before.address.wrapping_sub(1), false)
+        && (mapping.writable || !canonical.file_page_resident(before.address, true))
+}
+
 #[derive(Clone, Copy)]
 struct UserMapping {
     // Image windows are page-aligned and bounded by the loader. Store page
@@ -5830,7 +5969,15 @@ pub fn compiler_loader_self_test() -> bool {
 
 /// Load an ELF and place a custom argv vector on the user stack.
 pub fn load_elf_with_argv(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
-    linker::load(bytes, args)
+    load_elf_with_argv_env(bytes, args, &[])
+}
+
+/// Load an ELF with an explicit bounded argv and initial environment.
+///
+/// This remains a kernel loader API only. The process syscalls do not expose
+/// environment inheritance or arbitrary environment injection.
+pub fn load_elf_with_argv_env(bytes: &[u8], args: &[&str], env: &[&str]) -> Option<UserProgram> {
+    linker::load_with_env(bytes, args, env)
 }
 
 pub fn map_anonymous(
@@ -5849,6 +5996,7 @@ pub fn map_anonymous(
     let address = address_space
         .mmap_base
         .checked_add((slot as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+    let lifetime = MAPPING_LIFETIMES.issue()?;
     if paging::map_user_range_in(address_space.paging, address, size, writable, false).is_err() {
         return None;
     }
@@ -5857,6 +6005,7 @@ pub fn map_anonymous(
         return None;
     }
     Some(AnonymousMapping {
+        lifetime,
         address,
         size,
         writable,
@@ -5971,8 +6120,10 @@ pub fn map_file_lazy(
         return None;
     }
     let generation = crate::vfs::file_generation(file).ok()?;
+    let lifetime = MAPPING_LIFETIMES.issue()?;
     let file = crate::vfs::clone_open_file(file).ok()?;
     Some(AnonymousMapping {
+        lifetime,
         address,
         size,
         writable,

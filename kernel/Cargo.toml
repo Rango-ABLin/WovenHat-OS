@@ -14,6 +14,10 @@ test = false
 bench = false
 
 [features]
+wovenweb-vm-test = ["qemu-test"]
+wovenweb-cxx-test = ["qemu-test"]
+wovenweb-memory-test = ["qemu-test"]
+wovenweb-net-test = ["qemu-test"]
 physical-probe = []
 physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []

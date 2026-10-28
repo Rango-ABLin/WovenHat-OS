@@ -173,6 +173,7 @@ def required_markers(stage, cpus):
             '[S11.5] shared libraries constructors/destructors Ring-3 execution and teardown: PASSED',
             '[S11.5] shared libraries unresolved import rollback: PASSED',
             '[S11.5] shared libraries argv failure rollback: PASSED',
+            '[S11.5] shared libraries bounded initial argv/envp delivery and rollback: PASSED',
         ])
     if stage == '13.11':
         required.extend([

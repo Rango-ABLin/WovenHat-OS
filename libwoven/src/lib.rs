@@ -20,68 +20,22 @@
 
 extern crate alloc;
 
-#[cfg(all(feature = "userspace-allocator", not(test)))]
-mod userspace_allocator {
-    use core::alloc::{GlobalAlloc, Layout};
-    use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(all(
+    feature = "userspace-allocator",
+    not(feature = "reclaiming-allocator"),
+    target_os = "none",
+    not(test)
+))]
+mod legacy_allocator;
 
-    const ARENA_BYTES: u64 = 64 * 1024;
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    static END: AtomicU64 = AtomicU64::new(0);
+pub mod heap;
+#[cfg(any(test, all(feature = "reclaiming-allocator", target_os = "none")))]
+mod heap_allocator;
 
-    struct Arena;
-
-    unsafe impl GlobalAlloc for Arena {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            if layout.size() == 0 {
-                return layout.align() as *mut u8;
-            }
-            let mut next = NEXT.load(Ordering::Acquire);
-            loop {
-                if next == 0 {
-                    // SAFETY: mmap returns a private writable mapping for this
-                    // process and takes no userspace pointers.
-                    let base = unsafe { crate::syscall::invoke(8, ARENA_BYTES, 1, 0) };
-                    if base == crate::syscall::ERROR {
-                        return core::ptr::null_mut();
-                    }
-                    if NEXT
-                        .compare_exchange(0, base, Ordering::AcqRel, Ordering::Acquire)
-                        .is_err()
-                    {
-                        next = NEXT.load(Ordering::Acquire);
-                        continue;
-                    }
-                    END.store(base.saturating_add(ARENA_BYTES), Ordering::Release);
-                    next = base;
-                }
-                let aligned = match next.checked_add(layout.align() as u64 - 1) {
-                    Some(value) => value & !(layout.align() as u64 - 1),
-                    None => return core::ptr::null_mut(),
-                };
-                let end = match aligned.checked_add(layout.size() as u64) {
-                    Some(value) => value,
-                    None => return core::ptr::null_mut(),
-                };
-                if end > END.load(Ordering::Acquire) {
-                    return core::ptr::null_mut();
-                }
-                if NEXT
-                    .compare_exchange(next, end, Ordering::AcqRel, Ordering::Acquire)
-                    .is_ok()
-                {
-                    return aligned as *mut u8;
-                }
-                next = NEXT.load(Ordering::Acquire);
-            }
-        }
-
-        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
-    }
-
-    #[global_allocator]
-    static ALLOCATOR: Arena = Arena;
-}
+#[cfg(all(feature = "reclaiming-allocator", target_os = "none", not(test)))]
+#[global_allocator]
+static USER_HEAP: heap_allocator::RuntimeHeap<heap_allocator::NativeVm> =
+    heap_allocator::RuntimeHeap::new(heap_allocator::NativeVm);
 
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -249,6 +203,26 @@ macro_rules! entry {
         }
     };
 }
+/// Define a raw x86-64 native thread entry that calls a C-ABI Rust body.
+/// The kernel starts at an aligned stack top without a return address. This
+/// trampoline establishes the SysV call-frame alignment before entering Rust.
+/// The body must be `extern "C" fn() -> !` and terminate through thread_exit.
+#[macro_export]
+macro_rules! thread_entry {
+    ($name:ident, $body:path) => {
+        const _: extern "C" fn() -> ! = $body;
+        #[unsafe(naked)]
+        unsafe extern "C" fn $name() -> ! {
+            core::arch::naked_asm!(
+                "and rsp, -16",
+                "call {body}",
+                "ud2",
+                body = sym $body,
+            );
+        }
+    };
+}
+
 pub mod thread {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
@@ -274,10 +248,8 @@ pub mod fs {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Handle(pub u64);
 }
-pub mod net {
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub struct Socket(pub u64);
-}
+pub mod net;
+pub mod socks5;
 pub mod ipc {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Handle(pub u64);
@@ -13035,12 +13007,13 @@ pub fn event_close(handle: u64) -> Result<(), Error> {
 
 /// Wait on up to eight timer/event objects. The source records are copied by
 /// the kernel before registration; no userspace pointer is retained while the
-/// task sleeps.
+/// task sleeps. Each source needs a unique single-bit mask at bit 3 or above;
+/// bits 0-2 are reserved by the ordinary input/message/damage wait interface.
 pub fn wait_any_objects(
     sources: &[WaitObject],
     deadline: Option<time::Ticks>,
 ) -> Result<u64, Error> {
-    if sources.is_empty() || sources.len() > 8 {
+    if !valid_wait_objects(sources) {
         return Err(Error::Failed);
     }
     let mut packed = [0u8; 8 * 24];
@@ -13059,6 +13032,20 @@ pub fn wait_any_objects(
             deadline.unwrap_or(u64::MAX),
         )
     })
+}
+
+fn valid_wait_objects(sources: &[WaitObject]) -> bool {
+    if sources.is_empty() || sources.len() > 8 {
+        return false;
+    }
+    let mut used = 0u64;
+    for source in sources {
+        if source.mask < (1 << 3) || !source.mask.is_power_of_two() || source.mask & used != 0 {
+            return false;
+        }
+        used |= source.mask;
+    }
+    true
 }
 
 /// Sleep until any source in `mask` is ready, or until the timer reaches
@@ -14859,6 +14846,40 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
 // these run on the build machine.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn object_wait_masks_reject_reserved_duplicate_and_non_single_bits() {
+        use crate::{Error, WaitObject, wait_any_objects};
+        for mask in [0, 1, 2, 4, 9] {
+            assert_eq!(
+                wait_any_objects(
+                    &[WaitObject {
+                        handle: 1,
+                        timer: false,
+                        mask
+                    }],
+                    None
+                ),
+                Err(Error::Failed)
+            );
+        }
+        let source = WaitObject {
+            handle: 1,
+            timer: false,
+            mask: 8,
+        };
+        assert_eq!(
+            wait_any_objects(&[source, source], None),
+            Err(Error::Failed)
+        );
+        assert!(crate::valid_wait_objects(&[
+            source,
+            WaitObject {
+                handle: 2,
+                timer: true,
+                mask: 16
+            }
+        ]));
+    }
     #[test]
     fn wovengraphics_colors_pack_and_rectangles_clip() {
         use crate::graphics::{Color, Rect};

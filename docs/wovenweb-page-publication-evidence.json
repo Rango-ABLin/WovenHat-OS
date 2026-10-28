@@ -1,0 +1,263 @@
+{
+  "scope": "Production canonical refresh, duplicate resident-page coalescing and per-page metadata publication; not full VM transactions or browser acceptance",
+  "negative_control": {
+    "path": "audit-artifacts/wovenweb-vm-1792958138171194900-1cpu",
+    "result": {
+      "passed": false,
+      "cpus": 1,
+      "exit": 35,
+      "real_pager_faults": [
+        8,
+        8
+      ]
+    },
+    "provenance": {
+      "image_sha256": "0569adfe2040f71e4c87759de8272cef89d02bde033165865a398105aaae6dcc",
+      "source_sha256": {
+        "kernel/src/task.rs": "5ce398250da68e25d0ff0c76471a232e01e6fdea26bf25645dd620f55da4355b",
+        "kernel/src/userspace.rs": "7306204684aea3002d00ecf9308f13586471f2658841ccde7d0b4e69cc68cdcc",
+        "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+        "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+        "kernel/src/main.rs": "b6513229b447094171cd7bddb7f53040308b9557f17b5f515cd90e51e0c304a6",
+        "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+        "tools/wovenweb-net-probe/src/main.rs": "d074c30170c20859f1ce2c650e1e51b86581d2ebedb5d43e4444ceea42ac3346"
+      }
+    },
+    "serial_sha256": "4e9113b8031ec3ef2cebf8145619adefa8d5331cffcd599e4236a9292b782997",
+    "observed": "Old worker overwrote the other queued page: resident=1, expected=2, requests=2 completed=2"
+  },
+  "vm_runs": [
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792958271071116900-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "7c6eef316b5e6a070faf25d6360353c828a95dbc67f80d7e18026b4ee67456cd",
+        "source_sha256": {
+          "kernel/src/task.rs": "b46a88eecf08a70a22e502a1077c13a1f313c36e3939f257968787eaf48cdeeb",
+          "kernel/src/userspace.rs": "1c2f3478cdcd2fe418085b94b60cfa7b2e1e546e39d7eaff9714a738e3ce54b6",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "b6513229b447094171cd7bddb7f53040308b9557f17b5f515cd90e51e0c304a6",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "d074c30170c20859f1ce2c650e1e51b86581d2ebedb5d43e4444ceea42ac3346"
+        }
+      },
+      "serial_sha256": "0a3eb77ca6c948c3f73b96c23bf42849afa027ef9cd5394eb514ee8e7b8ebed0"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792958357580145200-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "7c6eef316b5e6a070faf25d6360353c828a95dbc67f80d7e18026b4ee67456cd",
+        "source_sha256": {
+          "kernel/src/task.rs": "b46a88eecf08a70a22e502a1077c13a1f313c36e3939f257968787eaf48cdeeb",
+          "kernel/src/userspace.rs": "1c2f3478cdcd2fe418085b94b60cfa7b2e1e546e39d7eaff9714a738e3ce54b6",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "b6513229b447094171cd7bddb7f53040308b9557f17b5f515cd90e51e0c304a6",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "d074c30170c20859f1ce2c650e1e51b86581d2ebedb5d43e4444ceea42ac3346"
+        }
+      },
+      "serial_sha256": "fed826dd5ab82bd905b510b3b33b346f6d336583f70346ff9c8fc85c3ae67967"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-vm-1792958376014616500-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "real_pager_faults": [
+          8,
+          8
+        ]
+      },
+      "provenance": {
+        "image_sha256": "7c6eef316b5e6a070faf25d6360353c828a95dbc67f80d7e18026b4ee67456cd",
+        "source_sha256": {
+          "kernel/src/task.rs": "b46a88eecf08a70a22e502a1077c13a1f313c36e3939f257968787eaf48cdeeb",
+          "kernel/src/userspace.rs": "1c2f3478cdcd2fe418085b94b60cfa7b2e1e546e39d7eaff9714a738e3ce54b6",
+          "kernel/src/pager_queue.rs": "ede1a1e5336ee5dcbd274fbd463c91636b60a5fbe72a6cc58aaaf8f6e1b617c6",
+          "kernel/src/vm_handoff.rs": "51c8ef98e941d280981ba485f5a66fef38d7902ce6bf6b8d582faa7ebecd9531",
+          "kernel/src/main.rs": "b6513229b447094171cd7bddb7f53040308b9557f17b5f515cd90e51e0c304a6",
+          "kernel/Cargo.toml": "d1dec16999cfe4dae8e30ec0fd27a9b7d20ef855cea2a982a9d95a40d9b108aa",
+          "tools/wovenweb-net-probe/src/main.rs": "d074c30170c20859f1ce2c650e1e51b86581d2ebedb5d43e4444ceea42ac3346"
+        }
+      },
+      "serial_sha256": "9d42198212baff0076aafe3416db9aa5c18d29e67cb6972bffe0488b1b1877ab"
+    }
+  ],
+  "metadata_fixture": "Production delta method on local copies of a real mapping: preserves unrelated resident/dirty bits, refuses stale target and wrong binding, bounds and readonly-write resident checks. No fake page I/O.",
+  "placement": "Actual queued sibling faults use existing default placement; surrounding real pager separately exercises remote leader faults on SMP.",
+  "preceding_hosted_revision": {
+    "revision": "830d8886f99cfed0a380b018b60bc677fa5fc0df",
+    "pager_jobs": [
+      121261447116,
+      121261447409,
+      121261447693
+    ],
+    "sdk_job": 121261447468,
+    "codeql_check": 121261598747,
+    "core_foundation_job": 121261446933,
+    "conclusion": "all success; historical, not current-source qualification"
+  },
+  "probe_release_clippy": "passed --locked -- -D warnings",
+  "limits": [
+    "No mapping generations or same-file remap ABA protection",
+    "Root/binding checks do not pin against exec/raw unmap or prove physical rollback",
+    "Fast dirty/COW faults, eviction and cancellation need coherent transaction admission/recovery",
+    "Windows root host policy blocks remain unchanged; full release desktop pixel assertions unresolved"
+  ],
+  "hosted_current": "pending publication",
+  "regressions": [
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792958398220265900-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "serial_sha256": "13d08477c3099952477ed9ba3594a866b43585307eb37f912d90cb21feb604ef"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792958433825835400-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "serial_sha256": "dd544eb0d5d47a65d39635aef75b110d711bc3ad66086d6e06e93e079d9711b1"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-memory-1792958455814055300-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "serial_sha256": "6aa4d8d228c4ec04d798de55b07cc097b489537ae5731b1b34d91b5b90afe274"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792958482675808800-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 55
+      },
+      "serial_sha256": "7a3dbbc440ce06d37f0b5911c8e4e17ee46c004ca5b60922c1006f258c33488f"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792958525781644900-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 55
+      },
+      "serial_sha256": "128531bcf204c4e3fe75f4cdec6035b712a1940871023b59a37f6eb615bb71ac"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-network-1792958556121984400-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33,
+        "ipv4_dns_packets": 0,
+        "ipv4_tcp_packets": 53
+      },
+      "serial_sha256": "9ec2f4bb6e370b9be6a3e1e8e4642facd3ec2637a41f9706c6557d2521ce67a3"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792958589160972300-1cpu",
+      "result": {
+        "passed": true,
+        "cpus": 1,
+        "exit": 33
+      },
+      "serial_sha256": "55745cb802a1ffb2d1eb18cd12817140252a2f18aab02c102d423ec63249b383"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792958623832030700-2cpu",
+      "result": {
+        "passed": true,
+        "cpus": 2,
+        "exit": 33
+      },
+      "serial_sha256": "6b15816637ad89b74b6f91c48862271efcf31e034ff171c7cec8863e8911dcf2"
+    },
+    {
+      "path": "audit-artifacts/wovenweb-cxx-1792958647255008500-4cpu",
+      "result": {
+        "passed": true,
+        "cpus": 4,
+        "exit": 33
+      },
+      "serial_sha256": "45b876f3c73e1c06022cb047c9ddbbed613bc8384f4ef5dd5d0c76444a2f82a2"
+    }
+  ],
+  "kernel_clippy": {
+    "path": "audit-artifacts/wovenweb-sibling-checks-1792958671037252900",
+    "result": {
+      "passed": true,
+      "features": [
+        "production",
+        "wovenweb-vm-test",
+        "wovenweb-memory-test",
+        "wovenweb-net-test",
+        "wovenweb-cxx-test"
+      ]
+    },
+    "log_sha256": {
+      "production.log": "4b0bb1da64a550d0f99575ba4c363209dd91dd2f8ceed70dd7fe0b294c50ece7",
+      "wovenweb-cxx-test.log": "557e7bcd6836e4d4912a3eed9b9c28864cf6413afafe15a3b997e82ea9c7122d",
+      "wovenweb-memory-test.log": "b085ebbd60961e2ba8d1d566d1ca760ba8dc6b5784b4e6c2d948016b5c92c59c",
+      "wovenweb-net-test.log": "c86a88ec420252d3d2725c37527d0198df7680b3d447a3acb0661102f826245a",
+      "wovenweb-vm-test.log": "c681855d6ca00923d62e9e3e62f5bcb73b352996ac973c5eeff5badd2fd4ff31"
+    }
+  },
+  "legacy_gui": {
+    "path": "audit-artifacts/wovenweb-legacy-gui-1792958754269751200",
+    "result": {
+      "image_sha256": "98a4b71bb53e56e6411fee78f38a3c56370f3c45739c4714a867719a4642cd9b",
+      "runs": [
+        {
+          "cpus": 1,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "0580e6ab0e36708bc17eacd84a5c1c92da63c594ce46c1ee136206a55e3e40aa"
+        },
+        {
+          "cpus": 2,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "7fee7a981f5043c20d99dddfd0215ffeaba5ee0c2984da8e03c51610c551b345"
+        },
+        {
+          "cpus": 4,
+          "exit": 33,
+          "passed": true,
+          "serial_sha256": "41a12307680dd9cf7e3eeb8b508c51b834c2fb0a7a477efd5d12befdca550b52"
+        }
+      ]
+    }
+  }
+}

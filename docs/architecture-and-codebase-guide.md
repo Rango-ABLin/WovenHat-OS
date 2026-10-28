@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## WovenWeb native network SDK - 2026-10-25
+
+`libwoven::net` owns native async TCP sockets and borrowed pending operations,
+including completion-port deadlines and cancellation. `libwoven::socks5` adds
+bounded remote-name CONNECT without local DNS/direct fallback. The isolated
+`wovenweb-net-test` boots a separately compiled Ring-3 probe and checks native
+I/O/teardown on 1/2/4 CPUs; this is separate from Ladybird engine/UI integration.
+See [the platform route](wovenweb-native-port.md) and
+[acceptance evidence](wovenweb-network-acceptance.md).
+
+## WovenWeb host integration - 2026-10-25
+
+`integrations/wovenweb` contains a pinned Ladybird source patch, preparation
+script and Tor-configured host launcher. This is separate from the native
+bounded browser/WebView substrate; no native application, ABI or VPN is added.
+See [the integration audit](wovenweb-integration.md) for dependencies and tests.
 ## POSIX static-libc bootstrap (2026-10-28)
 
 The POSIX port uses pinned upstream musl 1.2.6 and keeps WovenHat adaptation
@@ -204,7 +220,6 @@ helpers make progress across the complete caller buffer without introducing a
 second artificial application limit. A zero-progress result stops the stream
 to avoid hangs. These APIs provide scalability without weakening the kernel's
 memory-safety boundary.
-
 ## Graphics roadmap Stage 07 image/asset increment (2026-10-25)
 
 `libwoven::media` owns the bounded image decode boundary. It rejects dimensions
@@ -4529,6 +4544,170 @@ complete native coverage is Tier 1, and incomplete native coverage without a
 failure is Tier 2. This separates evidence collection from policy and keeps
 the release claim fail-closed until real hardware records exist.
 
+## Experimental reclaiming heap follow-up (2026-10-25)
+
+An opt-in reclaiming Rust allocator and native memory fixture are implemented.
+Default SDK applications retain the legacy allocator. The bounded VM window
+is unchanged; full runtime acceptance remains open because Clippy/fresh builds
+were blocked by Windows Application Control and network/GUI regressions remain
+incomplete. See [heap evidence and limits](wovenweb-heap-acceptance.md).
+
+## WovenWeb regression follow-up (2026-10-25)
+
+Fresh current-source heap, opt-in heap networking and default-allocator legacy
+GUI matrices pass on 1/2/4 CPUs. Selected SDK/kernel/probe/GUI Clippy gates pass;
+root workspace Clippy remains policy-blocked. The VM transaction state machine
+is host-tested scaffolding only; production integration and larger VM limits
+remain open. See wovenweb-heap-acceptance.md, wovenweb-heap-evidence.json and
+wovenweb-vm-transactions.md. No native browser completion is claimed.
+
+## Native C++ ABI fixture (2026-10-25)
+
+A header-free Clang C++23/Rust Ring-3 probe passes on 1/2/4 CPUs with exact
+resource cleanup. It covers integer/aggregate calls, guarded local static
+initialization, aligned virtual objects and destructors; selected Clippy gates
+pass. This is a controlled ABI fixture, not libc++, an engine build or full
+runtime acceptance. Production VM integration remains open. Evidence and limits:
+[Native C++ ABI fixture](wovenweb-cxx-acceptance.md).
+
+## VM cancellation journal model (2026-10-25)
+
+The host-only lease model now has a bounded cancellation journal retaining
+operation intent across executor and cleanup-worker death. It rejects stale
+completions and quarantines uncertain cleanup. Production mapping/pager/lifecycle
+integration remains open. See [VM ownership](wovenweb-vm-transactions.md).
+Three CodeQL heap-test pointer alerts remain under review; a missing null
+assertion in one test has been added without suppressing the remaining alerts.
+
+## Allocator pointer-origin follow-up (2026-10-25)
+
+Payload resolution now belongs to the VM backend. Host pointers derive from the
+original System allocation with checked extents; native foreign memory conversion
+is explicit. Zero-size requests return null. Hosted SDK tests and a fresh CodeQL
+scan remain required because Windows blocked the SDK unit executable. Native
+fixture evidence and limits: [pointer-origin follow-up](wovenweb-pointer-origin.md).
+This does not integrate production VM leases or qualify a complete browser.
+
+## Confirmed allocator follow-up (2026-10-25)
+
+Hosted SDK checks on 0b8e3158 passed 179 unit tests, three compile-fail checks
+and all-feature/all-target Clippy. Complete Rust CodeQL finished and its PR
+check reports success: no new alerts in changed code, zero annotations. No
+manual dismissal or suppression was used. Production VM integration and full
+browser acceptance remain open. See wovenweb-pointer-origin-evidence.json.
+
+## Pager ownership qualification (2026-10-25)
+
+Production queued/active pager work now prevents exited-owner reaping, with
+sequence-qualified completion and bounded reserved result capacity. Seven host
+queue tests and the real-pager plus focused zombie fixture pass on 1/2/4 CPUs;
+heap/network/C++ regressions also pass on all three CPU counts. Default and
+affected kernel Clippy gates pass. Full VM transactions, exec/unmap/fork races,
+thread-fault publication and native browser acceptance remain open. Local root
+host checks remain signing-policy blocked; new hosted queue lint is pending.
+See [pager lifetime evidence and limits](wovenweb-pager-lifetime.md).
+
+Hosted pager follow-up on 3695a253: SDK 179+3, production queue 7, both lints
+and complete Rust/PR CodeQL checks passed. Broader release jobs failed Stage20.2
+taskbar and Stage20.15 launcher pixel assertions; full release is not accepted.
+The portable pager harness and Linux 1/2/4-CPU CI matrix are added, awaiting
+hosted qualification. See wovenweb-pager-lifetime.md and evidence JSON.
+
+## Sibling pager publication follow-up (2026-10-25)
+
+The worker now publishes through retained process ownership instead of assuming
+the faulting task is the leader. A real two-page sibling-thread fixture fails
+the old lookup with zero canonical resident pages and passes the corrected
+lookup with two, two completed faults and exact reaping/cache cleanup on 1/2/4
+CPUs. Earlier portable Linux matrix dac3686e passed all three guest jobs, SDK
+and Rust/PR CodeQL checks; this new source revision still needs hosted checks.
+VM generations and exec/unmap/fork races remain open. See pager lifetime
+evidence and limits in wovenweb-pager-lifetime.md.
+
+## Physical handoff retention qualification (2026-10-25)
+
+Production reaping now includes an outgoing process pin for every prepared CPU
+context switch, released only on the incoming stack. Dead/Blocked metadata no
+longer stands in for physical departure. The internal nonblocking exit observer
+requires scheduler acknowledgement after dropping PROCESS_TABLE; syscall ABI
+and process-info state encoding remain unchanged. An unchanged Stage7.4 assertion
+first exposed the observer race; its failure log is retained. Six production
+module host tests, metadata fixture plus real boot/pager/sibling tests and
+heap/network/C++/legacy-GUI regressions pass on 1/2/4 CPUs. Default and affected
+kernel lints pass. Hosted current-head qualification is pending; full VM journal,
+wake/migration/thread-stack lifetime, exec/unmap/fork and browser work remain
+open. See wovenweb-handoff-lifetime.md and wovenweb-handoff-evidence.json.
+
+## Queued pager page-state qualification (2026-10-25)
+
+Worker execution now refreshes canonical owner/root/file binding and publishes
+only a single completed page delta, preserving unrelated page metadata. Already
+resident queued duplicates complete without a second map. The old snapshot
+overwrite is reproduced with one resident for two completed disjoint faults;
+new disjoint/duplicate fixtures and metadata checks pass with exact cleanup on
+1/2/4 CPUs. Heap/network/C++/legacy GUI regressions and selected lints also pass.
+830d8886 hosted guest/SDK/CodeQL/core-foundation checks succeeded; this expanded
+source awaits new hosted qualification. Same-file ABA, exec/raw-unmap/fork,
+fast fault/eviction/cancellation recovery and complete VM journal admission
+remain open, as do browser/runtime/Tor and full release acceptance. See
+wovenweb-page-publication.md and wovenweb-page-publication-evidence.json.
+
+## Mapping lineage source integration (2026-10-26)
+
+Fresh mapping constructors now issue checked nonzero lineage IDs, included in
+pager binding validation with existing owner/root identity. A real same-file
+unmap/remap fixture and isolated Linux mutation control are added. This source
+is NOT qualified yet: four Python parser checks pass; Rust and guest checks
+await hosted CI because Windows now blocks clippy-driver and dependency build
+scripts (4551). No policy bypass or repeated blocked invocation is attempted.
+Initial fixture failures before worker release are retained without claiming
+a reproduced stale fault. Current negative control must show precise acceptance
+with only the tag comparison removed. ABI/capabilities/limits stay fixed; active
+work lifetime and full VM journal integration remain open. See
+wovenweb-mapping-generations.md and its evidence JSON.
+
+## Focused mapping generation qualification (2026-10-26)
+
+5a710a1f hosted positive remap/cleanup checks pass on 1/2/4 CPUs. The isolated
+negative control reproduces exit0/resident1 with only the tag comparison removed;
+production gives -11/resident0 with exact cleanup. Four issuer tests, SDK179+3,
+queue7, handoff6 and their lints pass. Artifacts are archived; hosted source
+hashes match canonical Git LF blobs (local CRLF differences are documented).
+This qualifies the lineage boundary only. CodeQL summary is currently neutral.
+Linux portable heap/network/C++ and legacy GUI matrices plus selected lints
+are added pending qualification because Windows builds remain policy-blocked.
+Fourteen local Python checks pass. See mapping generation docs/evidence.
+
+## Linux runtime baseline and static TLS experiment (2026-10-26)
+
+58938b7e Linux heap/network/C++/legacy Stage19.2 GUI matrices and default/selected
+kernel plus probe lints pass on 1/2/4 CPUs. SDK/pager/generation mutation gates
+and PR CodeQL succeed (no new alerts, zero annotations). Artifacts match Git LF
+blobs; compiler/serial/image evidence is archived in wovenweb-linux-native-evidence.json.
+Next, the controlled C++ fixture adds PT_TLS/local-exec initialized/zero words,
+64-byte alignment, two sibling templates/isolated values across yields, and
+main FS restoration. All prior C++/cleanup assertions remain. This extension is
+UNQUALIFIED pending hosted compilation/guest checks; fourteen local Python
+checks pass only. Console-only authority, ABI and VM limits remain unchanged.
+See wovenweb-cxx-static-tls.md; general runtime and browser/Tor work stay open.
+
+## Controlled static compiler TLS qualification (2026-10-26)
+
+92328129 hosted C++ static thread-local-storage (not HTTPS TLS) checks pass on
+1/2/4 CPUs: initialized/zero words, alignment, two sibling templates/addresses,
+values across 64 yields each and main FS/value restoration after joins. Existing
+ABI/guard/512-object/destructor/heap and exact kernel cleanup checks remain.
+Heap/network/Stage19.2 GUI and selected lints also pass; SDK/pager gates pass.
+Canonical source/serial/compiler evidence is archived. New CodeQL summary is
+neutral; holding this documentation update locally until full scan collection
+to avoid repeatedly cancelling it. No dynamic TLS/destructors, concurrent
+guards, cross-CPU migration, FP or general runtime/browser acceptance follows.
+See wovenweb-cxx-static-tls.md and its evidence JSON.
+
+Static-thread-local fixture scan collected: complete Rust analysis and PR
+CodeQL on 92328129 succeeded, no new alerts in changed code and zero PR
+annotations. Publishing the held qualification/evidence update now; no pending
+neutral summary is treated as clean. Full runtime/browser boundaries remain.
 ## Graphics Stage 11 motion and pacing boundary (2026-10-25)
 
 WovenShell's spring animation remains userspace-owned and advances only from

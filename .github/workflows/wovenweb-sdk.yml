@@ -1,0 +1,213 @@
+name: WovenWeb SDK checks
+
+on:
+  push:
+    paths:
+      - '.github/workflows/wovenweb-sdk.yml'
+      - 'libwoven/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'kernel/Cargo.toml'
+      - 'kernel/src/main.rs'
+      - 'kernel/src/userspace.rs'
+      - 'kernel/src/userspace/linker/**'
+      - 'scripts/test-wovenweb-vm-qemu.py'
+      - 'scripts/test-wovenweb-network-qemu.py'
+      - 'scripts/test-wovenweb-memory-qemu.py'
+      - 'scripts/test-wovenweb-cxx-qemu.py'
+      - 'tests/test_wovenweb_firmware.py'
+      - 'tests/test_wovenweb_cxx_lifecycle.py'
+      - 'kernel/src/pager_queue.rs'
+      - 'kernel/src/task.rs'
+      - 'tests/pager_queue.rs'
+      - 'tests/vm_handoff.rs'
+      - 'tests/vm_generation.rs'
+      - 'kernel/src/vm_generation.rs'
+      - 'scripts/test-wovenweb-generation-baseline.py'
+      - 'scripts/test-stage10-runtime.py'
+      - 'tests/test_wovenweb_generation_baseline.py'
+      - 'tests/test_runtime_harness.py'
+      - 'kernel/src/vm_handoff.rs'
+      - 'tools/wovenweb-*/**'
+  pull_request:
+    paths:
+      - '.github/workflows/wovenweb-sdk.yml'
+      - 'libwoven/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'kernel/Cargo.toml'
+      - 'kernel/src/main.rs'
+      - 'kernel/src/userspace.rs'
+      - 'kernel/src/userspace/linker/**'
+      - 'scripts/test-wovenweb-vm-qemu.py'
+      - 'scripts/test-wovenweb-network-qemu.py'
+      - 'scripts/test-wovenweb-memory-qemu.py'
+      - 'scripts/test-wovenweb-cxx-qemu.py'
+      - 'tests/test_wovenweb_firmware.py'
+      - 'tests/test_wovenweb_cxx_lifecycle.py'
+      - 'kernel/src/pager_queue.rs'
+      - 'kernel/src/task.rs'
+      - 'tests/pager_queue.rs'
+      - 'tests/vm_handoff.rs'
+      - 'tests/vm_generation.rs'
+      - 'kernel/src/vm_generation.rs'
+      - 'scripts/test-wovenweb-generation-baseline.py'
+      - 'scripts/test-stage10-runtime.py'
+      - 'tests/test_wovenweb_generation_baseline.py'
+      - 'tests/test_runtime_harness.py'
+      - 'kernel/src/vm_handoff.rs'
+      - 'tools/wovenweb-*/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wovenweb-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: SDK unit tests and compile-fail ownership checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p libwoven --all-features --locked 2>&1 | tee sdk-tests.log
+      - name: SDK warning-denying lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy -p libwoven --all-features --all-targets --locked -- -D warnings 2>&1 | tee sdk-clippy.log
+      - name: Negative-control evidence parser checks
+        run: python3 -m unittest discover -s tests -p 'test_wovenweb_*.py'
+      - name: Pager queue and physical handoff ownership checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --test pager_queue --test vm_handoff --test vm_generation --locked 2>&1 | tee pager-queue-tests.log
+          cargo clippy --test pager_queue --test vm_handoff --test vm_generation --locked -- -D warnings 2>&1 | tee pager-queue-clippy.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-sdk-checks
+          path: |
+            sdk-tests.log
+            sdk-clippy.log
+            pager-queue-tests.log
+            pager-queue-clippy.log
+
+  pager-guest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Production pager ownership and reaping
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=/usr/share/OVMF/OVMF_CODE_4M.fd
+          vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -f "$code"
+          test -f "$vars"
+          python3 scripts/test-wovenweb-vm-qemu.py --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-pager-${{ matrix.cpus }}cpu
+          path: audit-artifacts/wovenweb-vm-*/
+
+  generation-negative-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Reproduce stale remap with only tag comparison removed
+        run: python3 scripts/test-wovenweb-generation-baseline.py --qemu /usr/bin/qemu-system-x86_64 --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-generation-negative
+          path: audit-artifacts/wovenweb-generation-negative-*/
+
+  native-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    env:
+      WOVENWEB_CLANG: /usr/bin/clang
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-10
+          components: clippy,rust-src,llvm-tools-preview
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+      - name: Install guest and C++ compiler dependencies
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang
+      - name: Heap, networking, C++ ABI, loader and legacy GUI regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=/usr/share/OVMF/OVMF_CODE_4M.fd
+          vars=/usr/share/OVMF/OVMF_VARS_4M.fd
+          runtime_c_dir="$PWD/target/wovenweb-runtime-c"
+          for fixture in memory network cxx; do
+            runtime_c_args=()
+            if [[ "$fixture" == cxx ]]; then
+              runtime_c_args=(--runtime-c-output "$runtime_c_dir")
+            fi
+            python3 "scripts/test-wovenweb-${fixture}-qemu.py" --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars" "${runtime_c_args[@]}"
+          done
+          python3 scripts/test-stage10-runtime.py --stage 11.5 --cpus ${{ matrix.cpus }} --timeout 180 --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+          python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.2 --cpus ${{ matrix.cpus }} --qemu /usr/bin/qemu-system-x86_64 --firmware "$code" --firmware-vars "$vars"
+          export WOVENHAT_WEB_NET_PROBE_IMAGE="$PWD/tools/wovenweb-net-probe/target/x86_64-unknown-none/release/wovenweb-net-probe"
+          export WOVENHAT_WEB_CXX_PROBE_IMAGE="$PWD/tools/wovenweb-cxx-probe/target/x86_64-unknown-none/release/wovenweb-cxx-probe"
+          export WOVENHAT_RUNTIME_C_ABI_ELF="$runtime_c_dir/runtime-c-abi"
+          export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --locked -- -D warnings
+          for feature in wovenweb-memory-test wovenweb-net-test wovenweb-cxx-test stage11-5-test stage19-2-test; do
+            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" --locked -- -D warnings
+          done
+          for probe in wovenweb-net-probe wovenweb-cxx-probe; do
+            (cd "tools/$probe" && env -u CARGO_BUILD_BUILD_DIR CARGO_TARGET_DIR="$PWD/target" cargo clippy --release --locked -- -D warnings)
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wovenweb-native-${{ matrix.cpus }}cpu
+          path: |
+            audit-artifacts/wovenweb-memory-*/
+            audit-artifacts/wovenweb-network-*/
+            audit-artifacts/wovenweb-cxx-*/
+            audit-artifacts/stage11.5-*/
+            target/hello-gui-compositor-*/
