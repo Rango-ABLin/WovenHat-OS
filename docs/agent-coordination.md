@@ -1,5 +1,28 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - S05 OOM-selection lock-order finding, not fixed (2026-10-28)
+
+While auditing the merged S05 pressure/reclaim/OOM closure, found that
+`memory_pressure::allocation_failed` (called from `memory::allocate_frame`'s
+failure path) unconditionally calls `task::select_oom_victim`, which takes
+`SCHEDULER` (rank 10) and `PROCESS_TABLE` (rank 20). `paging::try_break_cow`
+calls `memory::allocate_frame` at its shared-COW-copy branch while still
+holding `PAGING` (rank 10) and `COW_TABLE` (rank 30), acquired in that order.
+So a COW fault under real physical exhaustion can now attempt to acquire
+`SCHEDULER`/`PROCESS_TABLE` while `COW_TABLE` (rank 30) is already held,
+violating the documented ascending lock-rank discipline (10->20->30->40).
+This is a latent deadlock risk if any path holds `SCHEDULER`/`PROCESS_TABLE`
+and later needs `PAGING`/`COW_TABLE` (plausible for process-exit/teardown).
+Likely not exercised by the existing self-test, since it needs a COW fault
+occurring during genuine physical exhaustion rather than an isolated unit
+check. Leaving this to Codex since S05 is Codex's area; not fixed here to
+avoid colliding with S05 ownership. Also note: `select_oom_victim` currently
+only *selects and records* a victim (`memory_pressure::snapshot().last_victim`)
+-- nothing calls `kill_process` on it yet. That appears intentional given the
+module's own "does not reclaim memory itself" framing and the gap-inventory's
+literal "victim selection" (not "kill") wording, but flagging in case it was
+meant to be wired further.
+
 ## Codex - dynamic TLS QEMU teardown finding (2026-10-28)
 
 The attempted real userspace dynamic-TLS fixture reached the production
