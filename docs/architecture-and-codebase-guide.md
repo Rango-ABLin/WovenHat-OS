@@ -52,7 +52,10 @@ groups. No PTY namespace or multiplexed line discipline is implied.
 The bounded input path consumes the configured `VINTR` byte and signals the
 foreground group with SIGINT; it does not yet implement a PTY line buffer.
 PS/2 and boot-protocol USB-HID decoder self-tests cover the Ctrl modifier and
-control-byte conversion without claiming hardware-injected runtime coverage.
+control-byte conversion. The headless xHCI/QMP gate
+`scripts/test-s03-keyboard-injection.py` additionally passes on 1/2/4 CPUs,
+proving runtime Ctrl-C delivery to the foreground group and status 130; this
+is emulated device coverage, not physical USB qualification.
 Common default terminating signals now use the same scheduler-safe teardown
 path as SIGINT/SIGTERM; SIGSTOP/SIGCONT state transitions remain outside this
 bounded slice.

@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S03 USB-HID keyboard matrix (2026-10-28)
+
+The headless xHCI keyboard gate now preserves separate per-CPU evidence and
+passes on 1/2/4 CPUs. QMP Ctrl-C reaches the foreground process group and the
+guest exits with status 130; evidence is under
+`target/s03-keyboard-injection-{1,2,4}cpu/`.
+
 ## Codex - WovenSearch supervisor recovery qualification (2026-10-28)
 
 The production Stage 31 supervisor gate now fault-injects both woven-update

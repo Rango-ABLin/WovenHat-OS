@@ -3841,11 +3841,13 @@ pass on immediate retry -- a timing margin in the *test*, not the feature.
 The dedicated deterministic Change-PIN self-test is accepted as Stage 24.59
 above. It opens Quick Settings, enters old/new/confirmation PINs, verifies the
 durable record, rejects the old PIN after relock, and unlocks with the new PIN.
-The existing Stage 20.15-style kernel self-tests drive WovenShell through
-kernel-internal input injection rather than QMP key events specifically
-because QMP timing is flaky (as just observed); a correct test here should
-follow that pattern, not add another QMP-driven gate. This is the next
-concrete follow-up if work returns to this feature.
+The dedicated `scripts/test-s03-keyboard-injection.py` gate now drives the
+real xHCI USB keyboard through QMP and passes on 1/2/4 CPUs, proving Ctrl-C
+delivery to the foreground process group and status 130. Evidence is retained
+under `target/s03-keyboard-injection-{1,2,4}cpu/`. The existing Stage 20.15
+desktop self-tests continue to use kernel-internal input injection for stable
+window journeys; that is complementary to, not a substitute for, this device
+boundary gate.
 
 ## Stage 24.58 physical TPM broker boot activation (2026-10-21)
 
