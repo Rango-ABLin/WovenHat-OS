@@ -229,6 +229,13 @@ still a bounded static profile: full musl start-main/aux-vector startup,
 detached/cancellation cleanup, dynamic TLS, timed/robust synchronization,
 and the remaining POSIX syscall surface remain open.
 
+The next startup increment exports a musl-compatible `__libc_start_main`
+wrapper, passes `envp` into `main`, and adds optional init/fini hooks. The
+loader now emits an `AT_RANDOM` aux-vector entry backed by kernel entropy; the
+fixture validates the envp pointer and random bytes. The rebuilt ELF passes
+the production loader gate (exit 33) and retains the prior 1/2/4-CPU evidence.
+This remains a static startup profile rather than full dynamic musl.
+
 The startup/thread follow-up now publishes a bounded initial aux-vector
 (`AT_PAGESZ`, `AT_UID`, `AT_GID`) after the inherited argv/envp layout. The
 fixture validates those entries, exercises detached-thread reclamation, and
