@@ -168,6 +168,21 @@ pub fn robust_consistent(id: ThreadId, address: u64) -> bool {
     true
 }
 
+/// Mark every robust mutex owned by a terminating thread as abandoned. The
+/// record remains generation-bound so a recycled thread handle cannot inherit
+/// ownership accidentally.
+pub fn mark_robust_owner_dead(id: ThreadId) {
+    let mut table = ROBUST.lock();
+    for record in table.iter_mut() {
+        if record.owner == Some(id) {
+            record.owner = None;
+            if record.state == RobustState::Consistent {
+                record.state = RobustState::Abandoned;
+            }
+        }
+    }
+}
+
 pub fn terminate(id: ThreadId, exit: i32) -> bool {
     let mut table = TABLE.lock();
     let Some(record) = lookup(&mut table, id) else {
