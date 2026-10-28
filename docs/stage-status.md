@@ -1,5 +1,16 @@
 # Stage status
 
+## Loader-backed dynamic TLS address ABI - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel now retains PT_TLS module TP-relative offsets for each loaded image,
+checks module IDs and offsets against the current thread's mapped TLS range,
+and exposes the `DynamicTlsAddr` syscall. The musl port exports
+`__tls_get_addr` and includes it in the bootstrap runtime archive. Kernel
+target Clippy, workspace compilation, and the LLVM runtime build pass. This
+integrates general-dynamic lookup for shared libraries loaded at process start;
+post-start `dlopen` mapping, DTV growth, and unload-safe dynamic module
+lifecycle remain outside this bounded loader gate.
+
 ## Bounded DTV publication and address lookup - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Extended `libwoven::dynamic_tls` with a fixed-capacity per-thread DTV. Dynamic

@@ -43,6 +43,7 @@
 #define WH_SYS_THREAD_SLEEP 138
 #define WH_SYS_THREAD_CONDITION_WAIT 139
 #define WH_SYS_THREAD_CONDITION_SIGNAL 140
+#define WH_SYS_DYNAMIC_TLS_ADDR 141
 
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38

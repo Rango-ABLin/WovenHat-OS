@@ -360,6 +360,8 @@ pub enum Number {
     ThreadSleep = 138,
     ThreadConditionWait = 139,
     ThreadConditionSignal = 140,
+    /// TLS module ID (1-based), module-relative offset -> checked address.
+    DynamicTlsAddr = 141,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -653,7 +655,10 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
             if crate::task::current_process_group() != group
                 && !crate::task::current_signal_ignored(22)
             {
-                let _ = crate::task::kill_process(0u64.wrapping_sub(crate::task::current_process_group()), 22);
+                let _ = crate::task::kill_process(
+                    0u64.wrapping_sub(crate::task::current_process_group()),
+                    22,
+                );
                 return SYSCALL_ERROR;
             }
         }
@@ -695,13 +700,29 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
 }
 
 fn sys_open_access(user_path: u64, length: u64, access: u64) -> u64 {
-    let Ok(length) = usize::try_from(length) else { return SYSCALL_ERROR; };
-    if length == 0 || length > MAX_PATH_SIZE || access & !7 != 0 || access & 3 == 0 || (access & 4 != 0 && access & 2 == 0) { return SYSCALL_ERROR; }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0
+        || length > MAX_PATH_SIZE
+        || access & !7 != 0
+        || access & 3 == 0
+        || (access & 4 != 0 && access & 2 == 0)
+    {
+        return SYSCALL_ERROR;
+    }
     let mut path = [0_u8; MAX_PATH_SIZE];
-    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() { return SYSCALL_ERROR; }
-    let Ok(path) = core::str::from_utf8(&path[..length]) else { return SYSCALL_ERROR; };
+    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() {
+        return SYSCALL_ERROR;
+    }
+    let Ok(path) = core::str::from_utf8(&path[..length]) else {
+        return SYSCALL_ERROR;
+    };
     match crate::task::open_current_access(path, access) {
-        Ok(descriptor) => { IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release); descriptor }
+        Ok(descriptor) => {
+            IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release);
+            descriptor
+        }
         Err(_) => SYSCALL_ERROR,
     }
 }
@@ -3100,6 +3121,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadConditionSignal as u64 => {
             u64::from(crate::task::signal_condition(arg0))
         }
+        value if value == Number::DynamicTlsAddr as u64 => {
+            crate::task::dynamic_tls_address(arg0, arg1)
+        }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {
@@ -3137,8 +3161,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             arg0
         })
         .unwrap_or(SYSCALL_ERROR),
-        value if value == Number::Setsid as u64 => crate::task::create_session_current()
-            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::Setsid as u64 => {
+            crate::task::create_session_current().unwrap_or(SYSCALL_ERROR)
+        }
         value if value == Number::Socket as u64 => sys_socket(arg0),
         value if value == Number::Bind as u64 => sys_net_bind(arg0, arg1),
         value if value == Number::Connect as u64 => sys_net_connect(arg0, arg1),

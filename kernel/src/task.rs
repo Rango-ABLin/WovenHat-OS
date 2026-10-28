@@ -1338,7 +1338,10 @@ impl Scheduler {
                 continue;
             }
             match task.state {
-                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
+                TaskState::Ready
+                | TaskState::Blocked
+                | TaskState::Sleeping
+                | TaskState::Stopped => {
                     task.state = TaskState::Stopped;
                 }
                 TaskState::Running | TaskState::Switching => {
@@ -2180,6 +2183,26 @@ pub fn current_thread_id() -> Option<crate::thread::ThreadId> {
     scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].thread_id
 }
 
+/// Resolve a general-dynamic TLS index against the current process's mapped
+/// initial TLS image. The loader records one checked TP-relative offset per
+/// PT_TLS image; this path never accepts an address outside that mapping.
+pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
+    let Some(thread) = current_thread_id() else {
+        return u64::MAX;
+    };
+    let Some(tls_base) = crate::thread::tls(thread) else {
+        return u64::MAX;
+    };
+    let processes = process_table_lock();
+    processes
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+        .and_then(|process| process.address_space)
+        .and_then(|space| space.dynamic_tls_address(module, offset, tls_base))
+        .unwrap_or(u64::MAX)
+}
+
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
 /// generation-tagged handle is reused.
 pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
@@ -2692,8 +2715,8 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     // The exact-child reap must remove the zombie and a second wait must not
     // observe a phantom child.
     let second_wait = wait_process(child.as_u64());
-    let reap_clean = second_wait == Err(WaitError::NoSuchChild)
-        && zombie_count() == zombie_baseline;
+    let reap_clean =
+        second_wait == Err(WaitError::NoSuchChild) && zombie_count() == zombie_baseline;
     crate::serial::write_line(format_args!("[S03.WAIT] exact-reap-clean={}", reap_clean));
     if !reap_clean {
         return false;
@@ -2782,8 +2805,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
         let Some(keyboard_program) = userspace::create_s03_vintr_process() else {
             return false;
         };
-        let Ok((keyboard_child, _)) = spawn_user_process("s03-keyboard", keyboard_program)
-        else {
+        let Ok((keyboard_child, _)) = spawn_user_process("s03-keyboard", keyboard_program) else {
             return false;
         };
         if set_process_group(keyboard_child.as_u64(), keyboard_child.as_u64()).is_err() {
@@ -2835,8 +2857,7 @@ pub fn s03_process_lifecycle_self_test() -> bool {
     let Some(handler_program) = userspace::create_s03_handler_process() else {
         return false;
     };
-    let Ok((handler_child, _)) = spawn_user_process("s03-signal-handler", handler_program)
-    else {
+    let Ok((handler_child, _)) = spawn_user_process("s03-signal-handler", handler_program) else {
         return false;
     };
     let deadline = timer::ticks().wrapping_add(3000);
@@ -3248,7 +3269,14 @@ pub fn select_oom_victim() -> Option<u64> {
                 .iter()
                 .flatten()
                 .find(|process| process.id == task.process_id)
-                .map(|process| process.memory_mappings.iter().flatten().map(|m| m.size / 4096).sum::<usize>())
+                .map(|process| {
+                    process
+                        .memory_mappings
+                        .iter()
+                        .flatten()
+                        .map(|m| m.size / 4096)
+                        .sum::<usize>()
+                })
                 .unwrap_or(0);
             mapped_pages
         };
@@ -3263,7 +3291,8 @@ pub fn select_oom_victim() -> Option<u64> {
         };
         count += 1;
     }
-    crate::memory_pressure::choose_victim(&candidates[..count]).map(|candidate| candidate.process_id)
+    crate::memory_pressure::choose_victim(&candidates[..count])
+        .map(|candidate| candidate.process_id)
 }
 
 /// Attempt to resolve a user write fault via copy-on-write.
@@ -4348,7 +4377,11 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
     open_current_with_access(path, 1, true)
 }
 
-fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Result<u64, FileError> {
+fn open_current_with_access(
+    path: &str,
+    access: u64,
+    legacy_create: bool,
+) -> Result<u64, FileError> {
     if path == "/dev/ptmx" {
         if !current_has(Capability::Console) {
             return Err(FileError::PermissionDenied);
@@ -4358,7 +4391,10 @@ fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Res
             crate::pty::close_master(id);
         });
     }
-    if let Some(index) = path.strip_prefix("/dev/pts/").and_then(|value| value.parse().ok()) {
+    if let Some(index) = path
+        .strip_prefix("/dev/pts/")
+        .and_then(|value| value.parse().ok())
+    {
         if !current_has(Capability::Console) {
             return Err(FileError::PermissionDenied);
         }
@@ -4370,7 +4406,9 @@ fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Res
     let read = access & 1 != 0;
     let write = access & 2 != 0;
     let create = access & 4 != 0;
-    if access & !7 != 0 || !read && !write || create && !write
+    if access & !7 != 0
+        || !read && !write
+        || create && !write
         || (read && !current_has(Capability::FileRead))
         || (write && !current_has(Capability::FileWrite))
     {
@@ -4554,11 +4592,17 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
         }
         FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|error| match error {
             crate::pipe::Error::Interrupted => FileError::Interrupted,
-            crate::pipe::Error::Full | crate::pipe::Error::Invalid | crate::pipe::Error::Closed => FileError::BadDescriptor,
+            crate::pipe::Error::Full | crate::pipe::Error::Invalid | crate::pipe::Error::Closed => {
+                FileError::BadDescriptor
+            }
         }),
         FdKind::PipeWrite(_) => Err(FileError::BadDescriptor),
-        FdKind::PtyMaster(id) => crate::pty::read_master(id, buffer).map_err(|_| FileError::BadDescriptor),
-        FdKind::PtySlave(id) => crate::pty::read_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => {
+            crate::pty::read_master(id, buffer).map_err(|_| FileError::BadDescriptor)
+        }
+        FdKind::PtySlave(id) => {
+            crate::pty::read_slave(id, buffer).map_err(|_| FileError::BadDescriptor)
+        }
     }
 }
 
@@ -4624,8 +4668,12 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
             crate::pipe::Error::Full | crate::pipe::Error::Invalid => FileError::BadDescriptor,
         }),
         FdKind::PipeRead(_) => Err(FileError::BadDescriptor),
-        FdKind::PtyMaster(id) => crate::pty::write_master(id, buffer).map_err(|_| FileError::BadDescriptor),
-        FdKind::PtySlave(id) => crate::pty::write_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => {
+            crate::pty::write_master(id, buffer).map_err(|_| FileError::BadDescriptor)
+        }
+        FdKind::PtySlave(id) => {
+            crate::pty::write_slave(id, buffer).map_err(|_| FileError::BadDescriptor)
+        }
     }
 }
 
@@ -5396,7 +5444,9 @@ pub fn wait_for_event_until(deadline: u64) {
 }
 
 pub fn wait_on_condition(address: u64, deadline: u64) {
-    if address == 0 { return; }
+    if address == 0 {
+        return;
+    }
     let task = current_task_id();
     {
         let mut waiters = CONDITION_WAITERS.lock();
@@ -5417,7 +5467,11 @@ pub fn wait_on_condition(address: u64, deadline: u64) {
 pub fn signal_condition(address: u64) -> bool {
     let target = {
         let waiters = CONDITION_WAITERS.lock();
-        waiters.iter().flatten().find(|(key, _)| *key == address).map(|(_, id)| *id)
+        waiters
+            .iter()
+            .flatten()
+            .find(|(key, _)| *key == address)
+            .map(|(_, id)| *id)
     };
     target.is_some_and(signal_event)
 }
@@ -6593,10 +6647,7 @@ impl SignalSender {
 }
 
 fn default_terminates(signal: u64) -> bool {
-    matches!(
-        signal,
-        1 | 2 | 3 | 4 | 6 | 8 | 9 | 11 | 12 | 13 | 14 | 15
-    )
+    matches!(signal, 1 | 2 | 3 | 4 | 6 | 8 | 9 | 11 | 12 | 13 | 14 | 15)
 }
 
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
@@ -6626,10 +6677,15 @@ pub fn current_has_caught_signal() -> bool {
 /// Whether the pending caught signal requests the supported restart policy.
 pub fn current_caught_signal_restarts() -> bool {
     let process_id = current_process_id();
-    process_table_lock().iter().flatten().find(|process| process.id.as_u64() == process_id)
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
         .is_some_and(|process| {
             let sig = process.pending_signal;
-            sig > 0 && sig <= 31 && process.signal_actions[sig as usize] > 1
+            sig > 0
+                && sig <= 31
+                && process.signal_actions[sig as usize] > 1
                 && process.signal_restart[sig as usize]
         })
 }

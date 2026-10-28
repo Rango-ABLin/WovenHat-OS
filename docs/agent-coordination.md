@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - loader-backed dynamic TLS address ABI (2026-10-28)
+
+Added checked per-process PT_TLS module metadata to the kernel's existing
+eagerly mapped TLS image, a `DynamicTlsAddr` syscall, and the musl
+`__tls_get_addr` export. The resolver validates the 1-based loader module ID,
+module-relative offset, current thread TLS base, and final address against the
+mapped TLS range. Shared-library PT_TLS images already loaded by the bounded
+ELF linker are now addressable through the general-dynamic ABI. This does not
+add post-start `dlopen` mapping or unloadable module publication.
+
 ## Codex - bounded DTV publication and address lookup (2026-10-28)
 
 Extended `libwoven::dynamic_tls` with a fixed-capacity per-thread DTV. Modules

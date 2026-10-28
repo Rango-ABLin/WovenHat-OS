@@ -23,6 +23,7 @@ SOURCES = (
     "ports/musl/src/crt_start.c",
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
+    "ports/musl/src/tls_get_addr.c",
     "ports/musl/src/string.c",
     "ports/musl/src/clock_gettime.c",
     "ports/musl/src/malloc.c",

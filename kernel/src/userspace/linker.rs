@@ -542,6 +542,15 @@ pub(super) fn load_with_geometry(
             layout,
             template: pending.template_mapped,
             template_size,
+            module_tpoff: core::array::from_fn(|index| {
+                tls_tpoff(&images, index, &plan).unwrap_or(0)
+            }),
+            module_valid: core::array::from_fn(|index| {
+                images
+                    .get(index)
+                    .and_then(|image| image.image.tls())
+                    .is_some()
+            }),
         };
         pending.space.tls = Some(initial);
         initialize_tls(page_table, start, initial)?

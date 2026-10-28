@@ -4691,8 +4691,16 @@ pub fn setup_argv_stack(
     const AT_GID: u64 = 12;
     const AT_RANDOM: u64 = 25;
     let auxv = [
-        AT_PAGESZ, 4096, AT_UID, 1000, AT_GID, 1000,
-        AT_RANDOM, random_start, AT_NULL, 0,
+        AT_PAGESZ,
+        4096,
+        AT_UID,
+        1000,
+        AT_GID,
+        1000,
+        AT_RANDOM,
+        random_start,
+        AT_NULL,
+        0,
     ];
     let pointer_words = 1 + args.len() + 1 + 1 + auxv.len();
     let pointer_bytes = pointer_words * 8;
@@ -4832,6 +4840,8 @@ struct InitialTls {
     layout: tls_layout::Layout,
     template: Option<(u64, usize)>,
     template_size: usize,
+    module_tpoff: [i64; crate::elf::MAX_SCOPE_IMAGES],
+    module_valid: [bool; crate::elf::MAX_SCOPE_IMAGES],
 }
 
 #[derive(Clone, Copy)]
@@ -4847,6 +4857,19 @@ impl LazyBinding {
 impl InitialTls {
     fn range(self) -> (u64, usize) {
         (self.start, self.layout.mapping_size)
+    }
+
+    fn address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {
+        let index = usize::try_from(module.checked_sub(1)?).ok()?;
+        if !self.module_valid.get(index).copied().unwrap_or(false) {
+            return None;
+        }
+        let address = tls_base
+            .checked_add_signed(self.module_tpoff[index])?
+            .checked_add(offset)?;
+        (address >= self.start
+            && address.checked_add(1)? <= self.start + self.layout.mapping_size as u64)
+            .then_some(address)
     }
 }
 
@@ -4894,6 +4917,10 @@ impl AddressSpace {
     /// Return the static initial-exec TLS image range, if this image has one.
     pub fn tls_range(self) -> Option<(u64, usize)> {
         self.tls.map(InitialTls::range)
+    }
+
+    pub fn dynamic_tls_address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {
+        self.tls?.address(module, offset, tls_base)
     }
 
     /// Returns whether `address` falls in a logically writable mapping
