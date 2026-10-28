@@ -19,7 +19,10 @@ uses the existing `userspace::setup_argv_stack` layout, passes its `argc` and
 the full musl start-main lifecycle, which requires later TLS and aux-vector
 support. The current syscall adapter also exposes the bounded native process
 identity calls as musl `getpid()`/`getppid()`; this does not imply a complete
-Linux syscall-number compatibility layer.
+Linux syscall-number compatibility layer. The independent `musl-bootstrap-test`
+loads the resulting static ELF through the production loader and passes on
+1/2/4 CPUs, including process teardown and the existing I/O, pipe, signal,
+and wait fixture checks.
 
 ## S03 process-lifecycle ABI surface (2026-10-28)
 
