@@ -19,6 +19,7 @@
 #define WH_SYS_WAITPID 5
 #define WH_SYS_FORK 16
 #define WH_SYS_SIGACTION 34
+#define WH_SYS_KILL 26
 #define WH_SYS_LSEEK 27
 #define WH_SYS_FILE_WRITE 10
 #define WH_SYS_OPEN_ACCESS 254
@@ -29,13 +30,14 @@
 /* Linux-compatible negative result used when a mapping is not implemented. */
 #define WH_ENOSYS 38
 #define WH_EPIPE 32
+#define WH_EINTR 4
 
 static __inline long wh_syscall0(long number)
 {
 	unsigned long result;
 	__asm__ __volatile__("int $0x80"
 		: "=a"(result) : "a"(number) : "memory");
-	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : (long)result;
+	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : result == ~0UL-3 ? -WH_EINTR : (long)result;
 }
 
 static __inline long wh_syscall1(long number, long arg0)
@@ -43,7 +45,7 @@ static __inline long wh_syscall1(long number, long arg0)
 	unsigned long result;
 	__asm__ __volatile__("int $0x80"
 		: "=a"(result) : "a"(number), "D"(arg0) : "memory");
-	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : (long)result;
+	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : result == ~0UL-3 ? -WH_EINTR : (long)result;
 }
 
 static __inline long wh_syscall2(long number, long arg0, long arg1)
@@ -51,7 +53,7 @@ static __inline long wh_syscall2(long number, long arg0, long arg1)
 	unsigned long result;
 	__asm__ __volatile__("int $0x80"
 		: "=a"(result) : "a"(number), "D"(arg0), "S"(arg1) : "memory");
-	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : (long)result;
+	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : result == ~0UL-3 ? -WH_EINTR : (long)result;
 }
 
 static __inline long wh_syscall3(long number, long arg0, long arg1, long arg2)
@@ -61,7 +63,7 @@ static __inline long wh_syscall3(long number, long arg0, long arg1, long arg2)
 		: "=a"(result)
 		: "a"(number), "D"(arg0), "S"(arg1), "d"(arg2)
 		: "memory");
-	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : (long)result;
+	return result == ~0UL ? -5 : result == ~0UL-2 ? -WH_EPIPE : result == ~0UL-3 ? -WH_EINTR : (long)result;
 }
 
 /* Never discard ABI arguments. Higher-arity mappings require a dedicated ABI. */

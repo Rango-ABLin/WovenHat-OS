@@ -7303,3 +7303,8 @@ translates default SIGPIPE and normal exits to POSIX wait-status macros.
 Target Clippy and QEMU passed at 1/2/4 CPUs. Blocked-syscall interruption and
 restart remain separate work.
 
+POSIX port increment 20: caught SIGUSR1 wakes a child blocked in pipe read;
+the C fixture verifies its handler and EINTR result. Target Clippy and QEMU
+passed at 1/2/4 CPUs. No SA_RESTART policy is implemented; partial transfers
+remain successful rather than being converted to EINTR.
+

@@ -581,6 +581,7 @@ pub fn service_pending() {
 const SYSCALL_ERROR: u64 = u64::MAX;
 /// Distinguishes a broken pipe from generic denied/invalid syscall failures.
 const SYSCALL_BROKEN_PIPE: u64 = u64::MAX - 2;
+const SYSCALL_INTERRUPTED: u64 = u64::MAX - 3;
 
 fn sys_mmap(length: u64, flags: u64) -> u64 {
     if flags & !1 != 0 {
@@ -625,6 +626,7 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
                 let _ = crate::task::raise_current_signal(13);
                 return SYSCALL_BROKEN_PIPE;
             }
+            Err(crate::task::FileError::Interrupted) => return SYSCALL_INTERRUPTED,
             Err(_) => return SYSCALL_ERROR,
         };
         IO_COMPLETIONS.fetch_or(IO_WRITE, Ordering::Release);
@@ -1052,8 +1054,10 @@ fn sys_read(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         IO_COMPLETIONS.fetch_or(IO_STDIN, Ordering::Release);
         return count as u64;
     }
-    let Ok(count) = crate::task::read_current(descriptor, &mut buffer[..length]) else {
-        return SYSCALL_ERROR;
+    let count = match crate::task::read_current(descriptor, &mut buffer[..length]) {
+        Ok(count) => count,
+        Err(crate::task::FileError::Interrupted) => return SYSCALL_INTERRUPTED,
+        Err(_) => return SYSCALL_ERROR,
     };
     if crate::paging::copy_to_current_user(user_buffer, &buffer[..count]).is_err() {
         return SYSCALL_ERROR;

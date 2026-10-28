@@ -155,3 +155,14 @@ caught-handler fixture exits through its handler to prove delivery. The
 status, verified through `WIFSIGNALED`/`WTERMSIG` and
 `WIFEXITED`/`WEXITSTATUS`. Target Clippy and C-ELF QEMU passed at 1/2/4 CPUs.
 Blocked-syscall interruption and restart remain outside this bootstrap scope.
+
+## Bootstrap increment: interrupted pipe read
+
+A caught signal now wakes a task blocked on a pipe endpoint without consuming
+the pending signal. The pipe operation returns a dedicated interruption result,
+which the syscall transport maps to musl `EINTR`; normal syscall return then
+installs the existing userspace handler frame. A forked C fixture blocks a
+child in `read`, signals it with SIGUSR1, and verifies handler delivery plus
+`read() == -1` and `errno == EINTR`. Target Clippy and C-ELF QEMU passed at
+1/2/4 CPUs. This establishes interruption, not automatic restart: `signal()`
+does not yet encode SA_RESTART and partial transfers remain successful.

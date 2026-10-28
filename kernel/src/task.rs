@@ -823,6 +823,7 @@ pub enum FileError {
     AlreadyExists,
     NotEmpty,
     BrokenPipe,
+    Interrupted,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4464,7 +4465,10 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
             }
             vfs::read(id, buffer).map_err(|_| FileError::BadDescriptor)
         }
-        FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|error| match error {
+            crate::pipe::Error::Interrupted => FileError::Interrupted,
+            crate::pipe::Error::Full | crate::pipe::Error::Invalid | crate::pipe::Error::Closed => FileError::BadDescriptor,
+        }),
         FdKind::PipeWrite(_) => Err(FileError::BadDescriptor),
         FdKind::PtyMaster(id) => crate::pty::read_master(id, buffer).map_err(|_| FileError::BadDescriptor),
         FdKind::PtySlave(id) => crate::pty::read_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
@@ -4529,6 +4533,7 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
         }
         FdKind::PipeWrite(id) => crate::pipe::write(id, buffer).map_err(|error| match error {
             crate::pipe::Error::Closed => FileError::BrokenPipe,
+            crate::pipe::Error::Interrupted => FileError::Interrupted,
             crate::pipe::Error::Full | crate::pipe::Error::Invalid => FileError::BadDescriptor,
         }),
         FdKind::PipeRead(_) => Err(FileError::BadDescriptor),
@@ -6444,6 +6449,20 @@ pub fn raise_current_signal(sig: u64) -> Result<(), FileError> {
     signal_processes(current_process_id(), sig, SignalSender::Kernel)
 }
 
+/// Whether a caught signal is pending for this task's process. It is not
+/// consumed here; syscall return retains ownership of handler delivery.
+pub fn current_has_caught_signal() -> bool {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| {
+            let sig = process.pending_signal;
+            sig > 0 && sig <= 31 && process.signal_actions[sig as usize] > 1
+        })
+}
+
 /// `kill` from Ring 3. Each selected process is checked separately, as POSIX
 /// does for process groups. Processes the caller may not signal are skipped;
 /// if every match is refused, the call fails with `PermissionDenied`.
@@ -6481,6 +6500,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
     let mut matched = false;
     let mut refused = false;
     let mut termination_requests = alloc::vec::Vec::new();
+    let mut caught_wakeups = alloc::vec::Vec::new();
     let mut stop_requests = alloc::vec::Vec::new();
     let mut continue_requests = alloc::vec::Vec::new();
     for process in processes.iter_mut().flatten() {
@@ -6522,6 +6542,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         }
         if action > 1 && sig != 9 {
             process.pending_signal = sig;
+            caught_wakeups.push(process.task_id);
             continue;
         }
         if default_terminates(sig) {
@@ -6538,6 +6559,10 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         }
     }
     drop(processes);
+
+    for task_id in caught_wakeups {
+        let _ = signal_event(task_id);
+    }
 
     let mut reschedule_mask = 0usize;
     if !stop_requests.is_empty() || !continue_requests.is_empty() {

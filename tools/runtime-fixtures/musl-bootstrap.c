@@ -13,6 +13,11 @@ static void note_sigpipe(int sig)
 	_Exit(sig == SIGPIPE ? 42 : 99);
 }
 
+static void resume_after_signal(int sig)
+{
+	(void)sig;
+}
+
 int main(int argc, char **argv)
 {
 	char byte = 'x';
@@ -130,5 +135,17 @@ int main(int argc, char **argv)
 		|| waitpid(child, &child_status, 0) != child || !WIFEXITED(child_status)
 		|| WEXITSTATUS(child_status) != 42)
 		return 128;
+	/* A caught non-terminal signal wakes a reader and returns EINTR. */
+	if (pipe(pipe_fd) != 0 || (child = fork()) < 0)
+		return 130;
+	if (child == 0) {
+		if (signal(SIGUSR1, resume_after_signal) == SIG_ERR || close(pipe_fd[1]) != 0)
+			return 131;
+		return read(pipe_fd[0], &byte, 1) == -1 && errno == EINTR ? 0 : 132;
+	}
+	if (close(pipe_fd[0]) != 0 || sched_yield() != 0 || kill(child, SIGUSR1) != 0
+		|| waitpid(child, &child_status, 0) != child || !WIFEXITED(child_status)
+		|| WEXITSTATUS(child_status) != 0 || close(pipe_fd[1]) != 0)
+		return 133;
 	return 42;
 }
