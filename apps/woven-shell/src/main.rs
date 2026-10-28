@@ -136,6 +136,7 @@
 
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use libwoven::graphics::{Camera, DepthBuffer, Renderer, Vertex3, Vertex3Field, Vertex3Tex};
 use libwoven::layout::{self, Frame};
@@ -233,7 +234,6 @@ const CASCADE_STEP: i32 = 24;
 const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
 const TOAST_MARGIN: i32 = 8;
-const TOAST_FILL: u32 = rgb(30, 34, 46);
 const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
@@ -241,30 +241,23 @@ const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
 /// The pointer: `B` black outline, `W` white fill, `.` transparent. The tip
 /// is the top-left pixel.
 const CURSOR: [&[u8; 7]; 10] = [
-    b"B......",
-    b"BB.....",
-    b"BWB....",
-    b"BWWB...",
-    b"BWWWB..",
-    b"BWWWWB.",
-    b"BWWWWWB",
-    b"BWWBBBB",
-    b"BWB....",
-    b"BB.....",
+    b"B......", b"BB.....", b"BWB....", b"BWWB...", b"BWWWB..", b"BWWWWB.", b"BWWWWWB", b"BWWBBBB",
+    b"BWB....", b"BB.....",
 ];
 const CURSOR_WIDTH: i32 = 7;
 const CURSOR_HEIGHT: i32 = 10;
 
 /// The application catalog: one `*.app` file per application.
 const CATALOG: &str = "/share/applications";
-// Production system-apps publishes ten bounded catalog entries. Keep the
-// launcher capacity aligned with that manifest so alphabetical loading does
-// not silently drop the last applications (notably Update and Terminal).
-const MAX_APPS: usize = 10;
+// The launcher stores catalog metadata in process-owned memory rather than
+// truncating the production catalog at its old ten-entry fixture size. This
+// is a generous staging capacity; the kernel still validates every catalog
+// entry and rejects malformed or resource-exhausting inputs.
+const MAX_APPS: usize = 64;
 const MAX_APP_NAME: usize = 20;
 const MAX_EXEC: usize = 96;
 const MAX_QUERY: usize = 16;
-const MAX_CHILDREN: usize = 8;
+const MAX_CHILDREN: usize = 32;
 
 const PANEL_X: i32 = 4;
 const PANEL_WIDTH: i32 = 160;
@@ -272,6 +265,80 @@ const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
 const PANEL_OPACITY: u8 = 216;
 const PANEL_TITLE: &str = "WovenStart";
+
+static THEME_MODE: AtomicU8 = AtomicU8::new(0);
+
+fn high_contrast() -> bool {
+    THEME_MODE.load(Ordering::Relaxed) != 0
+}
+
+fn theme_accent() -> u32 {
+    if high_contrast() {
+        rgb(255, 255, 0)
+    } else {
+        ACCENT
+    }
+}
+
+fn theme_text() -> u32 {
+    TEXT
+}
+
+fn theme_panel() -> u32 {
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        PANEL_FILL
+    }
+}
+
+fn theme_taskbar() -> u32 {
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        TASKBAR
+    }
+}
+
+fn theme_toast() -> u32 {
+    theme_panel()
+}
+
+fn theme_title(focused: bool) -> u32 {
+    if high_contrast() {
+        if focused {
+            theme_accent()
+        } else {
+            rgb(80, 80, 80)
+        }
+    } else if focused {
+        TITLE_ACTIVE
+    } else {
+        TITLE_INACTIVE
+    }
+}
+
+fn theme_start_fill() -> u32 {
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        START_FILL
+    }
+}
+
+fn theme_entry(active: bool) -> u32 {
+    if high_contrast() {
+        if active {
+            theme_accent()
+        } else {
+            rgb(0, 0, 0)
+        }
+    } else if active {
+        ENTRY_ACTIVE
+    } else {
+        ENTRY_INACTIVE
+    }
+}
 
 /// The first desktop release keeps a small, curated set of shortcuts visible
 /// so the desktop feels useful before the launcher is opened. The catalog
@@ -348,13 +415,24 @@ fn shared_icon_id(icon: AppIcon) -> libwoven::icons::IconId {
 
 /// Draw a compact, legible app tile. The glyphs are deliberately geometric so
 /// they stay crisp in both the flat and 3D launcher textures.
-fn draw_app_icon(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i32, selected: bool) {
+fn draw_app_icon(
+    canvas: &mut Canvas<'_>,
+    x: i32,
+    y: i32,
+    icon: AppIcon,
+    size: i32,
+    selected: bool,
+) {
     let (fill, ink) = icon_colors(icon);
     canvas.fill_rect(x + 1, y + 2, size as usize, size as usize, rgb(0, 0, 0));
     canvas.fill_rect(x, y, size as usize, size as usize, fill);
     canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
     if selected {
-        outline(canvas, Area::new(x - 1, y - 1, size + 2, size + 2), ACCENT);
+        outline(
+            canvas,
+            Area::new(x - 1, y - 1, size + 2, size + 2),
+            theme_accent(),
+        );
     }
     let left = x + size / 4;
     let top = y + size / 3;
@@ -590,7 +668,10 @@ static DESKTOP: DesktopState = DesktopState(UnsafeCell::new(Desktop::INITIAL));
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("woven-shell: failure at step ");
     let mut digits = [0u8; 20];
-    let _ = libwoven::write(libwoven::syscall::STDOUT, libwoven::format_u64(code, &mut digits));
+    let _ = libwoven::write(
+        libwoven::syscall::STDOUT,
+        libwoven::format_u64(code, &mut digits),
+    );
     let _ = libwoven::print("\n");
     libwoven::exit(code)
 }
@@ -608,7 +689,11 @@ fn log(parts: &[&[u8]]) {
 fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     let span = (height - 1).max(1);
     let t = (y.clamp(0, span) * 255 / span) as u8;
-    let base = blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+    let base = if high_contrast() {
+        0
+    } else {
+        blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t)
+    };
     let over = (x / WEAVE_PITCH + y / WEAVE_PITCH) % 2 == 0;
     let tint = if over { WEAVE } else { WEAVE_SHADE };
     let woven = blend(tint, base, WEAVE_TINT_OPACITY);
@@ -715,7 +800,11 @@ fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::
 fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
     let length = bytes.len().min(limit).min(buffer.len());
     for (slot, byte) in buffer.iter_mut().zip(&bytes[..length]) {
-        *slot = if (b' '..=b'~').contains(byte) { *byte } else { b'?' };
+        *slot = if (b' '..=b'~').contains(byte) {
+            *byte
+        } else {
+            b'?'
+        };
     }
     length
 }
@@ -740,7 +829,12 @@ struct Area {
 
 impl Area {
     const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     const fn is_empty(self) -> bool {
@@ -797,7 +891,10 @@ struct Dirty {
 
 impl Dirty {
     const fn new() -> Self {
-        Self { areas: [Area::new(0, 0, 0, 0); DIRTY_AREAS], len: 0 }
+        Self {
+            areas: [Area::new(0, 0, 0, 0); DIRTY_AREAS],
+            len: 0,
+        }
     }
 
     fn of(area: Area) -> Self {
@@ -888,7 +985,12 @@ impl Window {
     /// repaint when it opens, closes, moves or changes elevation.
     fn footprint(&self) -> Area {
         let frame = self.frame();
-        frame.union(Area::new(frame.x + SHADOW_REACH, frame.y + SHADOW_REACH, frame.width, frame.height))
+        frame.union(Area::new(
+            frame.x + SHADOW_REACH,
+            frame.y + SHADOW_REACH,
+            frame.width,
+            frame.height,
+        ))
     }
 
     /// The close control, or nothing on a window too narrow to carry one.
@@ -896,7 +998,12 @@ impl Window {
         if self.width < 4 * CLOSE_SIZE {
             return Area::new(0, 0, 0, 0);
         }
-        Area::new(self.x + self.width - CLOSE_SIZE - 2, self.y - TITLE_HEIGHT + 2, CLOSE_SIZE, CLOSE_SIZE)
+        Area::new(
+            self.x + self.width - CLOSE_SIZE - 2,
+            self.y - TITLE_HEIGHT + 2,
+            CLOSE_SIZE,
+            CLOSE_SIZE,
+        )
     }
 }
 
@@ -960,7 +1067,9 @@ impl App {
                 index += 1;
                 &exec[index - 1..index]
             };
-            buffer.get_mut(length..length + part.len())?.copy_from_slice(part);
+            buffer
+                .get_mut(length..length + part.len())?
+                .copy_from_slice(part);
             length += part.len();
         }
         core::str::from_utf8(&buffer[..length]).ok()
@@ -991,8 +1100,12 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
         path[..prefix.len()].copy_from_slice(prefix);
         path[prefix.len()] = b'/';
         path[prefix.len() + 1..total].copy_from_slice(&name[..length]);
-        let Ok(path) = core::str::from_utf8(&path[..total]) else { continue };
-        let Ok(descriptor) = libwoven::open(path) else { continue };
+        let Ok(path) = core::str::from_utf8(&path[..total]) else {
+            continue;
+        };
+        let Ok(descriptor) = libwoven::open(path) else {
+            continue;
+        };
         let mut text = [0u8; 256];
         let read = libwoven::read(descriptor, &mut text);
         let _ = libwoven::close(descriptor);
@@ -1001,7 +1114,8 @@ fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
         };
         // Insertion sort by name, so the list reads alphabetically.
         let mut position = count;
-        while position > 0 && apps[position - 1].is_some_and(|other: App| other.name() > app.name()) {
+        while position > 0 && apps[position - 1].is_some_and(|other: App| other.name() > app.name())
+        {
             apps[position] = apps[position - 1];
             position -= 1;
         }
@@ -1067,7 +1181,10 @@ impl Painter<'_> {
                     height: height as u16,
                 };
                 if self.staging.write_canvas(&canvas).is_err()
-                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                    || self
+                        .staging
+                        .present_region_blended(region, x, y, opacity)
+                        .is_err()
                 {
                     fail(17);
                 }
@@ -1133,7 +1250,10 @@ impl Painter<'_> {
                     height: height as u16,
                 };
                 if self.staging.write_canvas(&canvas).is_err()
-                    || self.staging.present_region_blended(region, x, y, opacity).is_err()
+                    || self
+                        .staging
+                        .present_region_blended(region, x, y, opacity)
+                        .is_err()
                 {
                     fail(13);
                 }
@@ -1336,13 +1456,15 @@ impl Desktop {
     /// repainting the full 1280x800 wallpaper for every key on SMP boots.
     fn lock_account_area(&self) -> Area {
         let middle = self.height / 2;
-        self.screen().intersect(Area::new(0, middle - 50, self.desktop_width, 80))
+        self.screen()
+            .intersect(Area::new(0, middle - 50, self.desktop_width, 80))
     }
 
     /// The prompt and masked PIN dots change independently of the wallpaper.
     fn lock_input_area(&self) -> Area {
         let middle = self.height / 2;
-        self.screen().intersect(Area::new(0, middle - 8, self.desktop_width, 32))
+        self.screen()
+            .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
     }
 
     fn taskbar_top(&self) -> i32 {
@@ -1360,7 +1482,12 @@ impl Desktop {
     }
 
     fn clock_area(&self) -> Area {
-        Area::new(self.width - CLOCK_WIDTH, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
+        Area::new(
+            self.width - CLOCK_WIDTH,
+            self.taskbar_top(),
+            CLOCK_WIDTH,
+            TASKBAR_HEIGHT,
+        )
     }
 
     fn entry_area(&self, index: usize) -> Area {
@@ -1374,7 +1501,12 @@ impl Desktop {
     }
 
     fn toast_area(&self) -> Area {
-        Area::new(self.width - TOAST_WIDTH - TOAST_MARGIN, TOAST_MARGIN, TOAST_WIDTH, TOAST_HEIGHT)
+        Area::new(
+            self.width - TOAST_WIDTH - TOAST_MARGIN,
+            TOAST_MARGIN,
+            TOAST_WIDTH,
+            TOAST_HEIGHT,
+        )
     }
 
     fn cursor_area(&self) -> Area {
@@ -1399,7 +1531,12 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        Area::new(START_X, self.taskbar_top() + 4, START_WIDTH as i32, START_HEIGHT as i32)
+        Area::new(
+            START_X,
+            self.taskbar_top() + 4,
+            START_WIDTH as i32,
+            START_HEIGHT as i32,
+        )
     }
 
     /// The launcher panel, sized to its rows, above the start button; empty
@@ -1410,7 +1547,12 @@ impl Desktop {
         }
         let rows = 2 + self.filtered().1.max(1) as i32;
         let height = rows * PANEL_ROW + 2;
-        Area::new(PANEL_X, self.taskbar_top() - 2 - height, PANEL_WIDTH, height)
+        Area::new(
+            PANEL_X,
+            self.taskbar_top() - 2 - height,
+            PANEL_WIDTH,
+            height,
+        )
     }
 
     /// The perspective card can leave a few pixels outside its flat source
@@ -1423,7 +1565,12 @@ impl Desktop {
             return panel;
         }
         panel
-            .union(Area::new(panel.x - 24, panel.y - 24, panel.width + 48, panel.height + 28))
+            .union(Area::new(
+                panel.x - 24,
+                panel.y - 24,
+                panel.width + 48,
+                panel.height + 28,
+            ))
             .intersect(self.screen())
     }
 
@@ -1436,31 +1583,40 @@ impl Desktop {
     fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        outline(canvas, area, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, START_FILL);
+        outline(canvas, area, theme_accent());
+        canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, theme_start_fill());
         draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
-        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, TEXT);
+        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_text());
 
         let mut search = [0u8; MAX_QUERY + 3];
         search[..2].copy_from_slice(b"> ");
         search[2..2 + self.query_length].copy_from_slice(&self.query[..self.query_length]);
         search[2 + self.query_length] = b'_';
         let text = core::str::from_utf8(&search[..3 + self.query_length]).unwrap_or("");
-        canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, text, TEXT);
+        canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, text, theme_text());
 
         let (found, count) = self.filtered();
         if count == 0 {
-            canvas.draw_text(x + 6, y + 1 + 2 * PANEL_ROW + 4, "No matches", TEXT);
+            canvas.draw_text(x + 6, y + 1 + 2 * PANEL_ROW + 4, "No matches", theme_text());
         }
         for (row, &index) in found[..count].iter().enumerate() {
-            let Some(app) = &self.apps[index] else { continue };
+            let Some(app) = &self.apps[index] else {
+                continue;
+            };
             let row_y = y + 1 + (2 + row as i32) * PANEL_ROW;
             if row == self.selected {
-                canvas.fill_rect(x + 1, row_y, inner, PANEL_ROW as usize, ENTRY_ACTIVE);
+                canvas.fill_rect(x + 1, row_y, inner, PANEL_ROW as usize, theme_entry(true));
             }
-            draw_app_icon(canvas, x + 4, row_y + 1, app_icon(app.name()), 12, row == self.selected);
+            draw_app_icon(
+                canvas,
+                x + 4,
+                row_y + 1,
+                app_icon(app.name()),
+                12,
+                row == self.selected,
+            );
             let text = core::str::from_utf8(app.name()).unwrap_or("?");
-            canvas.draw_text(x + 22, row_y + 4, text, TEXT);
+            canvas.draw_text(x + 22, row_y + 4, text, theme_text());
         }
     }
 
@@ -1483,9 +1639,13 @@ impl Desktop {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let texture_pixels = unsafe { &mut *LAUNCHER_PANEL_TEXTURE.0.get() };
-        let Some(mut texture) =
-            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
-        else {
+        let Some(mut texture) = Canvas::new(
+            texture_pixels,
+            0,
+            0,
+            area.width as usize,
+            area.height as usize,
+        ) else {
             return self.paint_panel_content(canvas, area);
         };
         // The content painter intentionally draws only the panel's visible
@@ -1496,7 +1656,7 @@ impl Desktop {
         // next projected frame.
         texture.shade(|x, y| {
             blend(
-                PANEL_FILL,
+                theme_panel(),
                 wallpaper(area.x + x, area.y + y, self.height),
                 PANEL_OPACITY,
             )
@@ -1530,14 +1690,19 @@ impl Desktop {
         ) else {
             return self.paint_panel_content(canvas, area);
         };
-        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        let vertex =
+            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return self.paint_panel_content(canvas, area);
         };
         depth.clear(u16::MAX);
@@ -1564,7 +1729,10 @@ impl Desktop {
         let mut before = self.panel_damage_area();
         if !self.launcher_open && (self.center_open || self.qs_open) {
             // Only one panel at a time.
-            before = before.union(self.center_area()).union(self.qs_area()).union(self.qs_button());
+            before = before
+                .union(self.center_area())
+                .union(self.qs_area())
+                .union(self.qs_button());
             self.center_open = false;
             self.qs_open = false;
         }
@@ -1585,7 +1753,9 @@ impl Desktop {
     /// reported in a toast. Returns the area to repaint.
     fn launch(&mut self, index: usize) -> Area {
         let mut dirty = self.toggle_launcher();
-        let Some(app) = self.apps[index] else { return dirty };
+        let Some(app) = self.apps[index] else {
+            return dirty;
+        };
         let slot = self.children.iter().position(Option::is_none);
         let mut buffer = [0u8; 128];
         let started = match (slot, app.command(libwoven::current_pid(), &mut buffer)) {
@@ -1690,7 +1860,12 @@ impl Desktop {
     fn workspace_area(&self, index: usize) -> Area {
         let span = WORKSPACES as i32 * (WORKSPACE_BOX + WORKSPACE_GAP) - WORKSPACE_GAP;
         let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
-        Area::new(x, self.taskbar_top() + 4, WORKSPACE_BOX, START_HEIGHT as i32)
+        Area::new(
+            x,
+            self.taskbar_top() + 4,
+            WORKSPACE_BOX,
+            START_HEIGHT as i32,
+        )
     }
 
     /// Show workspace `target`: save the current stack, restore the target's.
@@ -1698,8 +1873,8 @@ impl Desktop {
         if target >= WORKSPACES || target == self.workspace {
             return Area::new(0, 0, 0, 0);
         }
+        self.cancel_pointer_gesture();
         let _ = self.close_panels();
-        self.drag = None;
         self.saved[self.workspace] = (self.stack, self.stacked);
         (self.stack, self.stacked) = self.saved[target];
         self.workspace = target;
@@ -1711,7 +1886,9 @@ impl Desktop {
 
     /// Move the focused window to the next workspace and follow it.
     fn move_focused_to_next_workspace(&mut self) -> Area {
-        let Some(slot) = self.focused() else { return Area::new(0, 0, 0, 0) };
+        let Some(slot) = self.focused() else {
+            return Area::new(0, 0, 0, 0);
+        };
         let target = (self.workspace + 1) % WORKSPACES;
         // Off this workspace's stack, onto the top of the target's.
         self.stacked -= 1;
@@ -1764,9 +1941,13 @@ impl Desktop {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             canvas.shade(&color);
             return;
         };
@@ -1820,14 +2001,31 @@ impl Desktop {
     fn paint_desktop_icons(&self, canvas: &mut Canvas<'_>) {
         for (index, name) in DESKTOP_ICON_LABELS.iter().enumerate() {
             let area = self.desktop_icon_area(index);
-            let Some(app_index) = self.desktop_icon_app(index) else { continue };
-            let Some(app) = self.apps[app_index] else { continue };
+            let Some(app_index) = self.desktop_icon_app(index) else {
+                continue;
+            };
+            let Some(app) = self.apps[app_index] else {
+                continue;
+            };
             let icon_x = area.x + (area.width - DESKTOP_ICON_SIZE) / 2;
-            canvas.fill_rect(icon_x + 2, area.y + 3, DESKTOP_ICON_SIZE as usize, DESKTOP_ICON_SIZE as usize, rgb(0, 0, 0));
-            draw_app_icon(canvas, icon_x, area.y, app_icon(app.name()), DESKTOP_ICON_SIZE, false);
+            canvas.fill_rect(
+                icon_x + 2,
+                area.y + 3,
+                DESKTOP_ICON_SIZE as usize,
+                DESKTOP_ICON_SIZE as usize,
+                rgb(0, 0, 0),
+            );
+            draw_app_icon(
+                canvas,
+                icon_x,
+                area.y,
+                app_icon(app.name()),
+                DESKTOP_ICON_SIZE,
+                false,
+            );
             let width = font::text_width(name) as i32;
             let text_x = area.x + ((area.width - width) / 2).max(0);
-            canvas.draw_text(text_x, area.y + 40, name, TEXT);
+            canvas.draw_text(text_x, area.y + 40, name, theme_text());
         }
     }
 
@@ -1835,16 +2033,13 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        self.paint_desktop_icons(canvas);
         if self.three_d {
             self.render_taskbar_3d(canvas);
-            // Keep the desktop's depth and perspective while presenting the
-            // taskbar as a crisp foreground surface. Projecting a 24px bar
-            // compresses the bitmap font enough to make labels unreadable.
-            self.paint_taskbar_content(canvas);
-        } else {
-            self.paint_taskbar_content(canvas);
         }
+        // Taskbar preparation may restore its backdrop; shortcuts belong
+        // above the wallpaper and must not be erased by that preparation.
+        self.paint_desktop_icons(canvas);
+        self.paint_taskbar_content(canvas);
     }
 
     /// The taskbar's content -- its translucent fill, accent top border,
@@ -1859,11 +2054,35 @@ impl Desktop {
         let top = self.taskbar_top();
         let width = self.width as usize;
         let height = self.height;
-        canvas.shade(|x, y| wallpaper(x, y, height));
-        canvas.blend_rect(0, top, width, TASKBAR_HEIGHT as usize, TASKBAR, TASKBAR_OPACITY);
-        canvas.fill_rect(0, top, width, 1, ACCENT);
+        // This painter also receives desktop tiles above the taskbar. Shade
+        // only the bar's backdrop, preserving shortcuts and avoiding duplicate
+        // full-tile wallpaper work during every pointer/window repaint.
+        let left = canvas.x().max(0);
+        let right = (canvas.x() + canvas.width() as i32).min(self.width);
+        let first_row = canvas.y().max(top);
+        let last_row = (canvas.y() + canvas.height() as i32).min(height);
+        for y in first_row..last_row {
+            for x in left..right {
+                canvas.set(x, y, wallpaper(x, y, height));
+            }
+        }
+        canvas.blend_rect(
+            0,
+            top,
+            width,
+            TASKBAR_HEIGHT as usize,
+            theme_taskbar(),
+            TASKBAR_OPACITY,
+        );
+        canvas.fill_rect(0, top, width, 1, theme_accent());
 
-        canvas.fill_rect(START_X, top + 4, START_WIDTH, START_HEIGHT, START_FILL);
+        canvas.fill_rect(
+            START_X,
+            top + 4,
+            START_WIDTH,
+            START_HEIGHT,
+            theme_start_fill(),
+        );
         let icon_x = START_X + START_ICON_MARGIN;
         let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
         for (row, line) in START_ICON.iter().enumerate() {
@@ -1877,52 +2096,90 @@ impl Desktop {
             }
         }
         let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
-        canvas.draw_text(label_x, self.text_y(), START_LABEL, TEXT);
+        canvas.draw_text(label_x, self.text_y(), START_LABEL, theme_text());
 
         let focused = self.focused();
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.entry_area(index);
-            let fill = if Some(slot) == focused { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
-            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let fill = theme_entry(Some(slot) == focused);
+            canvas.fill_rect(
+                area.x,
+                area.y,
+                area.width as usize,
+                area.height as usize,
+                fill,
+            );
             let mut buffer = [0u8; 32];
-            let length = label(&window.title[..window.title_length], ENTRY_CHARS, &mut buffer);
+            let length = label(
+                &window.title[..window.title_length],
+                ENTRY_CHARS,
+                &mut buffer,
+            );
             let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(area.x + 4, self.text_y(), text, TEXT);
+            canvas.draw_text(area.x + 4, self.text_y(), text, theme_text());
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
-        canvas.draw_text(clock_x, self.text_y(), text, TEXT);
+        canvas.draw_text(clock_x, self.text_y(), text, theme_text());
 
         // The workspace switcher, left of the Quick Settings button.
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
-            let fill = if index == self.workspace { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
-            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            let fill = theme_entry(index == self.workspace);
+            canvas.fill_rect(
+                area.x,
+                area.y,
+                area.width as usize,
+                area.height as usize,
+                fill,
+            );
             let digit = [b'1' + index as u8];
-            canvas.draw_text(area.x + 3, self.text_y(), core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+            canvas.draw_text(
+                area.x + 3,
+                self.text_y(),
+                core::str::from_utf8(&digit).unwrap_or("?"),
+                theme_text(),
+            );
         }
 
         // The signed-in account's name, left of the workspace switcher.
         if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
             let name = core::str::from_utf8(account.name()).unwrap_or("?");
             let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
-            canvas.draw_text(x, self.text_y(), name, TEXT);
+            canvas.draw_text(x, self.text_y(), name, theme_text());
         }
 
         // The Quick Settings button.
         let button = self.qs_button();
-        let fill = if self.qs_open { ENTRY_ACTIVE } else { ENTRY_INACTIVE };
-        canvas.fill_rect(button.x, button.y, button.width as usize, button.height as usize, fill);
-        canvas.draw_text(button.x + 5, self.text_y(), "Q", TEXT);
+        let fill = theme_entry(self.qs_open);
+        canvas.fill_rect(
+            button.x,
+            button.y,
+            button.width as usize,
+            button.height as usize,
+            fill,
+        );
+        canvas.draw_text(button.x + 5, self.text_y(), "Q", theme_text());
 
         // The unread badge, just left of the clock: a count up to 9.
         if self.unread > 0 {
             let badge = self.badge_area();
-            canvas.fill_rect(badge.x, badge.y, badge.width as usize, badge.height as usize, ACCENT);
+            canvas.fill_rect(
+                badge.x,
+                badge.y,
+                badge.width as usize,
+                badge.height as usize,
+                theme_accent(),
+            );
             let digit = [b'0' + self.unread.min(9) as u8];
-            canvas.draw_text(badge.x + 3, badge.y + 2, core::str::from_utf8(&digit).unwrap_or("?"), TEXT);
+            canvas.draw_text(
+                badge.x + 3,
+                badge.y + 2,
+                core::str::from_utf8(&digit).unwrap_or("?"),
+                theme_text(),
+            );
         }
     }
 
@@ -1936,6 +2193,9 @@ impl Desktop {
     /// this is invoked for.
     fn render_taskbar_3d(&self, canvas: &mut Canvas<'_>) {
         let top = self.taskbar_top();
+        if canvas.y() + canvas.height() as i32 <= top || canvas.y() >= self.height {
+            return;
+        }
         let width = self.width;
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
@@ -1980,14 +2240,19 @@ impl Desktop {
         ) else {
             return self.paint_taskbar_content(canvas);
         };
-        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        let vertex =
+            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return self.paint_taskbar_content(canvas);
         };
         depth.clear(u16::MAX);
@@ -2021,7 +2286,12 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
-        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+        Area::new(
+            self.width - 4 - CENTER_WIDTH,
+            self.taskbar_top() - 2 - height,
+            CENTER_WIDTH,
+            height,
+        )
     }
 
     /// The toggles as they currently read.
@@ -2029,17 +2299,37 @@ impl Desktop {
         [
             "Power off",
             "Restart",
-            if self.scale == 2 { "Display scale: 2x" } else { "Display scale: 1x" },
-            if self.dnd { "Do not disturb: On" } else { "Do not disturb: Off" },
-            if self.tiled { "Tiling: On" } else { "Tiling: Off" },
+            if self.scale == 2 {
+                "Display scale: 2x"
+            } else {
+                "Display scale: 1x"
+            },
+            if self.dnd {
+                "Do not disturb: On"
+            } else {
+                "Do not disturb: Off"
+            },
+            if self.tiled {
+                "Tiling: On"
+            } else {
+                "Tiling: Off"
+            },
             "Lock screen",
             "Change PIN",
             match self.language {
                 libwoven::i18n::Language::English => "Language: English",
                 libwoven::i18n::Language::Chichewa => "Language: Chichewa",
             },
-            if self.three_d { "3D Desktop: On" } else { "3D Desktop: Off" },
-            if self.reduced_motion { "Reduced Motion: On" } else { "Reduced Motion: Off" },
+            if self.three_d {
+                "3D Desktop: On"
+            } else {
+                "3D Desktop: Off"
+            },
+            if self.reduced_motion {
+                "Reduced Motion: On"
+            } else {
+                "Reduced Motion: Off"
+            },
         ]
     }
 
@@ -2047,14 +2337,16 @@ impl Desktop {
     /// prompt, and a masked dot per digit typed, all centred.
     fn render_lock(&self, canvas: &mut Canvas<'_>) {
         let height = self.height;
-        self.render_floor_3d(canvas, |x, y| blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM));
+        self.render_floor_3d(canvas, |x, y| {
+            blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM)
+        });
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
         let catalog = lock_catalog(self.language);
         if self.mode == LockMode::SignIn {
             // The sign-in prompt, then the accounts, the chosen one marked.
             let text = catalog.lookup("sign_in", "Sign in");
-            canvas.draw_text(centred(text), middle - 60, text, TEXT);
+            canvas.draw_text(centred(text), middle - 60, text, theme_text());
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {
@@ -2062,23 +2354,30 @@ impl Desktop {
                 }
                 line[2..2 + account.name().len()].copy_from_slice(account.name());
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
-                canvas.draw_text(centred(text), middle - 46 + index as i32 * 10, text, TEXT);
+                canvas.draw_text(
+                    centred(text),
+                    middle - 46 + index as i32 * 10,
+                    text,
+                    theme_text(),
+                );
             }
         } else if self.mode == LockMode::ChangePin {
             let text = catalog.lookup("change_pin", "Change PIN");
-            canvas.draw_text(centred(text), middle - 34, text, TEXT);
+            canvas.draw_text(centred(text), middle - 34, text, theme_text());
         } else {
             let text = catalog.lookup("locked", "Locked");
-            canvas.draw_text(centred(text), middle - 34, text, TEXT);
+            canvas.draw_text(centred(text), middle - 34, text, theme_text());
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-            canvas.draw_text(centred(clock), middle - 20, clock, TEXT);
+            canvas.draw_text(centred(clock), middle - 20, clock, theme_text());
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
             match self.change_pin {
                 Some(ChangePinStep::Current) => catalog.lookup("current_pin", "Current PIN"),
                 Some(ChangePinStep::New) => catalog.lookup("new_pin", "New PIN"),
-                Some(ChangePinStep::Confirm) => catalog.lookup("confirm_new_pin", "Confirm new PIN"),
+                Some(ChangePinStep::Confirm) => {
+                    catalog.lookup("confirm_new_pin", "Confirm new PIN")
+                }
                 None => catalog.lookup("enter_pin", "Enter PIN"),
             }
         } else {
@@ -2088,11 +2387,11 @@ impl Desktop {
                 LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
-        canvas.draw_text(centred(prompt), middle - 4, prompt, TEXT);
+        canvas.draw_text(centred(prompt), middle - 4, prompt, theme_text());
         let dots = self.entry_length as i32;
         let left = (self.width - (dots * 10 - 4)) / 2;
         for index in 0..dots {
-            canvas.fill_rect(left + index * 10, middle + 12, 6, 6, TEXT);
+            canvas.fill_rect(left + index * 10, middle + 12, 6, 6, theme_text());
         }
     }
 
@@ -2104,6 +2403,7 @@ impl Desktop {
                 return self.screen();
             }
         }
+        self.cancel_pointer_gesture();
         self.locked = true;
         self.mode = LockMode::Lock;
         self.forget_entry();
@@ -2121,7 +2421,11 @@ impl Desktop {
         if self.session.is_none() {
             let mut text = [0u8; 32];
             let length = label(b"No account signed in", TOAST_CHARS, &mut text);
-            self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+            self.toast = Some(Toast {
+                text,
+                length,
+                until: libwoven::ticks() + TOAST_TICKS,
+            });
             return dirty.union(self.toast_area());
         }
         self.locked = true;
@@ -2154,7 +2458,9 @@ impl Desktop {
         if let Some(account) = account.and_then(|index| self.accounts[index]) {
             return account.verify(&self.entry[..self.entry_length]);
         }
-        let Some((stored, length)) = &self.pin else { return true };
+        let Some((stored, length)) = &self.pin else {
+            return true;
+        };
         // Constant time over the whole buffer: no early exit on a mismatch.
         let mut difference = u8::from(*length != self.entry_length);
         for (stored, typed) in stored.iter().zip(&self.entry) {
@@ -2199,35 +2505,39 @@ impl Desktop {
                     self.prompt = LockPrompt::LockedOut;
                 } else if match self.mode {
                     LockMode::SignIn | LockMode::Lock
-                        if self.accounts.iter().any(Option::is_some) => true,
+                        if self.accounts.iter().any(Option::is_some) =>
+                    {
+                        true
+                    }
                     _ => self.pin_matches(),
                 } {
                     let kernel_authenticated = match self.mode {
-                        LockMode::SignIn => {
-                            match self.accounts[self.chosen] {
-                                Some(account) => {
-                                    let digest = account.password_digest(&self.entry[..self.entry_length]);
-                                    match libwoven::identity::session_open_verified(
-                                        account.name(),
-                                        &digest,
-                                    ) {
-                                        Ok(session) => {
-                                            self.kernel_session = Some(session);
-                                            true
-                                        }
-                                        Err(_) => false,
+                        LockMode::SignIn => match self.accounts[self.chosen] {
+                            Some(account) => {
+                                let digest =
+                                    account.password_digest(&self.entry[..self.entry_length]);
+                                match libwoven::identity::session_open_verified(
+                                    account.name(),
+                                    &digest,
+                                ) {
+                                    Ok(session) => {
+                                        self.kernel_session = Some(session);
+                                        true
                                     }
+                                    Err(_) => false,
                                 }
-                                None => false,
                             }
-                        }
+                            None => false,
+                        },
                         LockMode::Lock => match (
                             self.kernel_session,
                             self.session.and_then(|index| self.accounts[index]),
                         ) {
                             (Some(session), Some(account)) => {
-                                let digest = account.password_digest(&self.entry[..self.entry_length]);
-                                libwoven::identity::session_unlock_verified(session, &digest).is_ok()
+                                let digest =
+                                    account.password_digest(&self.entry[..self.entry_length]);
+                                libwoven::identity::session_unlock_verified(session, &digest)
+                                    .is_ok()
                             }
                             // No account ever signed in: this is the legacy
                             // `--pin`-only mode, which has no kernel session
@@ -2250,7 +2560,10 @@ impl Desktop {
                     if self.mode == LockMode::SignIn {
                         self.session = Some(self.chosen);
                         let name = self.accounts[self.chosen];
-                        log(&[b"woven-shell: signed in: ", name.as_ref().map_or(&b"?"[..], |account| account.name())]);
+                        log(&[
+                            b"woven-shell: signed in: ",
+                            name.as_ref().map_or(&b"?"[..], |account| account.name()),
+                        ]);
                     } else {
                         log(&[b"woven-shell: unlocked"]);
                     }
@@ -2351,7 +2664,8 @@ impl Desktop {
             }
             Some(ChangePinStep::Confirm) => {
                 let matches = self.entry_length == self.change_pin_new_length
-                    && self.entry[..self.entry_length] == self.change_pin_new[..self.change_pin_new_length];
+                    && self.entry[..self.entry_length]
+                        == self.change_pin_new[..self.change_pin_new_length];
                 self.forget_entry();
                 if !matches {
                     // Does not match: back to entering the new PIN, keeping
@@ -2400,7 +2714,11 @@ impl Desktop {
                 };
                 let mut text = [0u8; 32];
                 let length = label(message, TOAST_CHARS, &mut text);
-                self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+                self.toast = Some(Toast {
+                    text,
+                    length,
+                    until: libwoven::ticks() + TOAST_TICKS,
+                });
                 log(&[
                     b"woven-shell: pin change ",
                     if succeeded { b"succeeded" } else { b"failed" },
@@ -2418,11 +2736,22 @@ impl Desktop {
     /// perspective projection samples.
     fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        outline(canvas, area, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
-        canvas.draw_text(x + 6, y + 5, QS_TITLE, TEXT);
+        outline(canvas, area, theme_accent());
+        canvas.fill_rect(
+            x + 1,
+            y + 1,
+            (area.width - 2) as usize,
+            PANEL_ROW as usize,
+            theme_start_fill(),
+        );
+        canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_text());
         for (row, text) in self.qs_rows().iter().enumerate() {
-            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+            canvas.draw_text(
+                x + 6,
+                y + 1 + (1 + row as i32) * PANEL_ROW + 4,
+                text,
+                theme_text(),
+            );
         }
     }
 
@@ -2448,14 +2777,18 @@ impl Desktop {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let texture_pixels = unsafe { &mut *QS_PANEL_TEXTURE.0.get() };
-        let Some(mut texture) =
-            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
-        else {
+        let Some(mut texture) = Canvas::new(
+            texture_pixels,
+            0,
+            0,
+            area.width as usize,
+            area.height as usize,
+        ) else {
             return self.paint_qs_content(canvas, area);
         };
         texture.shade(|x, y| {
             blend(
-                PANEL_FILL,
+                theme_panel(),
                 wallpaper(area.x + x, area.y + y, self.height),
                 PANEL_OPACITY,
             )
@@ -2496,14 +2829,19 @@ impl Desktop {
         ) else {
             return self.paint_qs_content(canvas, area);
         };
-        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        let vertex =
+            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return self.paint_qs_content(canvas, area);
         };
         depth.clear(u16::MAX);
@@ -2554,8 +2892,16 @@ impl Desktop {
     /// Power off, or restart. Returns only if the machine is still
     /// running; a toast says why.
     fn power(&mut self, restart: bool) -> Area {
-        log(if restart { &[b"woven-shell: restart"] } else { &[b"woven-shell: power off"] });
-        let result = if restart { libwoven::restart() } else { libwoven::power_off() };
+        log(if restart {
+            &[b"woven-shell: restart"]
+        } else {
+            &[b"woven-shell: power off"]
+        });
+        let result = if restart {
+            libwoven::restart()
+        } else {
+            libwoven::power_off()
+        };
         let reason: &[u8] = match result {
             Err(_) => b"Not allowed to turn the machine off",
             Ok(1) => b"This machine has no ACPI power-off",
@@ -2564,13 +2910,21 @@ impl Desktop {
         };
         let mut text = [0u8; 32];
         let length = label(reason, TOAST_CHARS, &mut text);
-        self.toast = Some(Toast { text, length, until: libwoven::ticks() + TOAST_TICKS });
+        self.toast = Some(Toast {
+            text,
+            length,
+            until: libwoven::ticks() + TOAST_TICKS,
+        });
         self.close_panels().union(self.toast_area())
     }
 
     fn toggle_tiling(&mut self) -> Area {
         self.tiled = !self.tiled;
-        log(if self.tiled { &[b"woven-shell: tiling on"] } else { &[b"woven-shell: tiling off"] });
+        log(if self.tiled {
+            &[b"woven-shell: tiling on"]
+        } else {
+            &[b"woven-shell: tiling off"]
+        });
         self.retile().union(self.qs_area())
     }
 
@@ -2584,17 +2938,33 @@ impl Desktop {
         };
         self.scale = info.scale;
         // The monitors scale together; the first stays the primary.
-        let (outputs, monitors) = libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
+        let (outputs, monitors) =
+            libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
         self.desktop_width = info.width as i32;
-        self.width = if monitors > 0 { (outputs[0].width as i32).clamp(1, self.desktop_width) } else { self.desktop_width };
+        self.width = if monitors > 0 {
+            (outputs[0].width as i32).clamp(1, self.desktop_width)
+        } else {
+            self.desktop_width
+        };
         self.height = info.height as i32;
         let top = self.taskbar_top();
         for window in self.windows.iter_mut().flatten() {
-            window.x = window.x.clamp(0, (self.desktop_width - window.width).max(0));
-            window.y = window.y.clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+            window.x = window
+                .x
+                .clamp(0, (self.desktop_width - window.width).max(0));
+            window.y = window
+                .y
+                .clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
         }
-        self.pointer = (self.pointer.0.min(self.desktop_width - 1), self.pointer.1.min(self.height - 1));
-        log(if target == 1 { &[b"woven-shell: display scale 1x"] } else { &[b"woven-shell: display scale 2x"] });
+        self.pointer = (
+            self.pointer.0.min(self.desktop_width - 1),
+            self.pointer.1.min(self.height - 1),
+        );
+        log(if target == 1 {
+            &[b"woven-shell: display scale 1x"]
+        } else {
+            &[b"woven-shell: display scale 2x"]
+        });
         let _ = self.retile();
         self.screen()
     }
@@ -2615,7 +2985,12 @@ impl Desktop {
         }
         let count = self.notes.iter().flatten().count();
         let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
-        Area::new(self.width - 4 - CENTER_WIDTH, self.taskbar_top() - 2 - height, CENTER_WIDTH, height)
+        Area::new(
+            self.width - 4 - CENTER_WIDTH,
+            self.taskbar_top() - 2 - height,
+            CENTER_WIDTH,
+            height,
+        )
     }
 
     /// The Notification Center's overlay: border, title row with Clear, and
@@ -2625,19 +3000,35 @@ impl Desktop {
     /// mode's perspective projection samples.
     fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        outline(canvas, area, ACCENT);
-        canvas.fill_rect(x + 1, y + 1, (area.width - 2) as usize, PANEL_ROW as usize, START_FILL);
-        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, TEXT);
+        outline(canvas, area, theme_accent());
+        canvas.fill_rect(
+            x + 1,
+            y + 1,
+            (area.width - 2) as usize,
+            PANEL_ROW as usize,
+            theme_start_fill(),
+        );
+        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_text());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
-        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, TEXT);
+        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, theme_text());
         let mut any = false;
         for (row, note) in self.notes.iter().flatten().enumerate() {
             any = true;
             let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
-            canvas.draw_text(x + 6, y + 1 + (1 + row as i32) * PANEL_ROW + 4, text, TEXT);
+            canvas.draw_text(
+                x + 6,
+                y + 1 + (1 + row as i32) * PANEL_ROW + 4,
+                text,
+                theme_text(),
+            );
         }
         if !any {
-            canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, "No notifications", TEXT);
+            canvas.draw_text(
+                x + 6,
+                y + 1 + PANEL_ROW + 4,
+                "No notifications",
+                theme_text(),
+            );
         }
     }
 
@@ -2659,14 +3050,18 @@ impl Desktop {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let texture_pixels = unsafe { &mut *CENTER_TEXTURE.0.get() };
-        let Some(mut texture) =
-            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
-        else {
+        let Some(mut texture) = Canvas::new(
+            texture_pixels,
+            0,
+            0,
+            area.width as usize,
+            area.height as usize,
+        ) else {
             return self.paint_center_content(canvas, area);
         };
         texture.shade(|x, y| {
             blend(
-                PANEL_FILL,
+                theme_panel(),
                 wallpaper(area.x + x, area.y + y, self.height),
                 PANEL_OPACITY,
             )
@@ -2697,14 +3092,19 @@ impl Desktop {
         ) else {
             return self.paint_center_content(canvas, area);
         };
-        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        let vertex =
+            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return self.paint_center_content(canvas, area);
         };
         depth.clear(u16::MAX);
@@ -2743,7 +3143,11 @@ impl Desktop {
     fn remember(&mut self, sender: process::Id, text: &[u8]) -> Area {
         // The sender's window title names it; a sender without a window is
         // "app".
-        let window = self.windows.iter().flatten().find(|window| window.owner == sender);
+        let window = self
+            .windows
+            .iter()
+            .flatten()
+            .find(|window| window.owner == sender);
         let source = window.map_or(&b"app"[..], |window| &window.title[..window.title_length]);
         let mut row = [0u8; 64];
         let mut length = 0;
@@ -2752,7 +3156,10 @@ impl Desktop {
             row[length..length + take].copy_from_slice(&part[..take]);
             length += take;
         }
-        let mut note = Note { text: [0; 32], length: 0 };
+        let mut note = Note {
+            text: [0; 32],
+            length: 0,
+        };
         note.length = label(&row[..length], CENTER_CHARS, &mut note.text);
         let before = self.center_area();
         self.notes.rotate_right(1);
@@ -2774,23 +3181,39 @@ impl Desktop {
 
     fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>, three_d: bool) {
         let area = window.title_area();
-        let fill = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
+        let fill = theme_title(focused);
         if three_d {
             Self::render_title_3d(area, fill, canvas);
         } else {
-            canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+            canvas.fill_rect(
+                area.x,
+                area.y,
+                area.width as usize,
+                area.height as usize,
+                fill,
+            );
         }
         let close = window.close_area();
         if !close.is_empty() {
-            canvas.fill_rect(close.x, close.y, close.width as usize, close.height as usize, CLOSE_FILL);
-            canvas.draw_text(close.x + 3, close.y + 2, "x", TEXT);
+            canvas.fill_rect(
+                close.x,
+                close.y,
+                close.width as usize,
+                close.height as usize,
+                CLOSE_FILL,
+            );
+            canvas.draw_text(close.x + 3, close.y + 2, "x", theme_text());
         }
         let mut buffer = [0u8; 32];
-        let reserved = if close.is_empty() { 8 } else { 8 + CLOSE_SIZE + 4 };
+        let reserved = if close.is_empty() {
+            8
+        } else {
+            8 + CLOSE_SIZE + 4
+        };
         let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-        canvas.draw_text(area.x + 4, area.y + 4, text, TEXT);
+        canvas.draw_text(area.x + 4, area.y + 4, text, theme_text());
     }
 
     /// A window's title-bar fill, perspective-projected as a card tilted
@@ -2804,7 +3227,13 @@ impl Desktop {
     /// own fill) rather than whatever this tile's shared scratch buffer
     /// held from an unrelated previous repaint.
     fn render_title_3d(area: Area, fill: u32, canvas: &mut Canvas<'_>) {
-        canvas.fill_rect(area.x, area.y, area.width as usize, area.height as usize, fill);
+        canvas.fill_rect(
+            area.x,
+            area.y,
+            area.width as usize,
+            area.height as usize,
+            fill,
+        );
         let half_width = (area.width / 2) << 16;
         let half_height = ((area.height - 1) << 16) / 2;
         const DISTANCE: i32 = 200 << 16;
@@ -2823,25 +3252,36 @@ impl Desktop {
         ) else {
             return;
         };
-        let color = libwoven::graphics::Color::rgb(
-            (fill >> 16) as u8,
-            (fill >> 8) as u8,
-            fill as u8,
-        );
+        let color =
+            libwoven::graphics::Color::rgb((fill >> 16) as u8, (fill >> 8) as u8, fill as u8);
         let vertex = |(x, y, depth): (i32, i32, u16)| Vertex3::new(x, y, depth, color);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return;
         };
         depth.clear(u16::MAX);
         let mut renderer = Renderer::new(canvas);
-        renderer.triangle_3d(&mut depth, vertex(top_left), vertex(top_right), vertex(bottom_left));
-        renderer.triangle_3d(&mut depth, vertex(top_right), vertex(bottom_right), vertex(bottom_left));
+        renderer.triangle_3d(
+            &mut depth,
+            vertex(top_left),
+            vertex(top_right),
+            vertex(bottom_left),
+        );
+        renderer.triangle_3d(
+            &mut depth,
+            vertex(top_right),
+            vertex(bottom_right),
+            vertex(bottom_left),
+        );
     }
 
     /// The toast's overlay: border and text over its blended background,
@@ -2850,9 +3290,9 @@ impl Desktop {
     /// offscreen texture, as the source the 3D mode's perspective
     /// projection samples.
     fn paint_toast_content(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
-        outline(canvas, area, ACCENT);
+        outline(canvas, area, theme_accent());
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
-        canvas.draw_text(area.x + 6, area.y + 8, text, TEXT);
+        canvas.draw_text(area.x + 6, area.y + 8, text, theme_text());
     }
 
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
@@ -2873,19 +3313,27 @@ impl Desktop {
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let texture_pixels = unsafe { &mut *TOAST_TEXTURE.0.get() };
-        let Some(mut texture) =
-            Canvas::new(texture_pixels, 0, 0, area.width as usize, area.height as usize)
-        else {
+        let Some(mut texture) = Canvas::new(
+            texture_pixels,
+            0,
+            0,
+            area.width as usize,
+            area.height as usize,
+        ) else {
             return self.paint_toast_content(toast, canvas, area);
         };
         texture.shade(|x, y| {
             blend(
-                TOAST_FILL,
+                theme_toast(),
                 wallpaper(area.x + x, area.y + y, self.height),
                 TOAST_OPACITY,
             )
         });
-        self.paint_toast_content(toast, &mut texture, Area::new(0, 0, area.width, area.height));
+        self.paint_toast_content(
+            toast,
+            &mut texture,
+            Area::new(0, 0, area.width, area.height),
+        );
         // As in `render_qs_3d`: paint the (3D-projected) desktop background
         // before the depth buffer below is (re-)cleared, since
         // `render_desktop_background` clears and uses that same shared
@@ -2911,14 +3359,19 @@ impl Desktop {
         ) else {
             return self.paint_toast_content(toast, canvas, area);
         };
-        let vertex = |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        let vertex =
+            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
 
         // SAFETY: single-threaded; this is the only live reference, and it
         // does not outlive this call.
         let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) =
-            DepthBuffer::new(depth_values, canvas.x(), canvas.y(), canvas.width(), canvas.height())
-        else {
+        let Some(mut depth) = DepthBuffer::new(
+            depth_values,
+            canvas.x(),
+            canvas.y(),
+            canvas.width(),
+            canvas.height(),
+        ) else {
             return self.paint_toast_content(toast, canvas, area);
         };
         depth.clear(u16::MAX);
@@ -2946,7 +3399,7 @@ impl Desktop {
             for (column, cell) in line.iter().enumerate() {
                 let color = match cell {
                     b'B' => rgb(0, 0, 0),
-                    b'W' => TEXT,
+                    b'W' => theme_text(),
                     _ => continue,
                 };
                 canvas.set(left + column as i32, top + row as i32, color);
@@ -2955,16 +3408,46 @@ impl Desktop {
     }
 
     /// Recompose `area` completely, bottom to top.
-    fn repaint(&self, painter: &mut Painter<'_>, area: Area) {
+    fn repaint(&mut self, painter: &mut Painter<'_>, mut area: Area) {
+        // A client can release its surface between check_clients and a blit.
+        // Recover before presenting the frame, using the same teardown as the
+        // liveness path. Each retry removes one window, so work is bounded.
+        for _ in 0..=MAX_WINDOWS {
+            let Some(slot) = self.repaint_once(painter, area) else {
+                return;
+            };
+            let Some(window) = self.windows[slot] else {
+                fail(8);
+            };
+            if libwoven::compositor_blit_damage(window.token, window.x, window.y).is_ok() {
+                // The surface is still valid: retain the unexpected failure
+                // diagnostic rather than classifying any blit error as exit.
+                log(&[
+                    b"woven-shell: shared surface compose failed: ",
+                    &window.title[..window.title_length],
+                ]);
+                fail(8);
+            }
+            log(&[b"woven-shell: released surface removed before present"]);
+            self.close(slot);
+            // Closing can change focus, tiling and the taskbar outside area.
+            // Rebuild the complete frame after this rare lifetime race.
+            area = self.screen();
+        }
+        fail(8);
+    }
+
+    /// Return a client that vanished while composing this frame.
+    fn repaint_once(&self, painter: &mut Painter<'_>, area: Area) -> Option<usize> {
         let area = area.intersect(self.screen());
         if area.is_empty() {
-            return;
+            return None;
         }
         // Locked, nothing but the lock screen is drawn: no window, no
         // notification, no pointer.
         if self.locked {
             painter.draw(area, |canvas| self.render_lock(canvas));
-            return;
+            return None;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
 
@@ -2984,8 +3467,14 @@ impl Desktop {
         // Windows may sit on any monitor; only the taskbar band is excluded.
         let above_taskbar = Area::new(0, 0, self.desktop_width, self.taskbar_top());
         for &slot in &self.stack[..self.stacked] {
-            let Some(window) = &self.windows[slot] else { continue };
-            let bands = if Some(slot) == focused { FOCUSED_SHADOW } else { UNFOCUSED_SHADOW };
+            let Some(window) = &self.windows[slot] else {
+                continue;
+            };
+            let bands = if Some(slot) == focused {
+                FOCUSED_SHADOW
+            } else {
+                UNFOCUSED_SHADOW
+            };
             let frame = window.frame();
             // Everything about a fading window, its shadow included, is
             // composed at its current opacity.
@@ -2994,7 +3483,12 @@ impl Desktop {
                 continue;
             }
             for (offset, opacity) in bands {
-                let band = Area::new(frame.x + offset, frame.y + offset, frame.width, frame.height);
+                let band = Area::new(
+                    frame.x + offset,
+                    frame.y + offset,
+                    frame.width,
+                    frame.height,
+                );
                 let part = band.intersect(area).intersect(above_taskbar);
                 let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
                 if !part.is_empty() && opacity != 0 {
@@ -3005,9 +3499,13 @@ impl Desktop {
             if !title.is_empty() {
                 let active = Some(slot) == focused;
                 if alpha == u8::MAX {
-                    painter.draw(title, |canvas| Self::render_title(window, active, canvas, self.three_d));
+                    painter.draw(title, |canvas| {
+                        Self::render_title(window, active, canvas, self.three_d)
+                    });
                 } else {
-                    painter.draw_blended(title, alpha, |canvas| Self::render_title(window, active, canvas, self.three_d));
+                    painter.draw_blended(title, alpha, |canvas| {
+                        Self::render_title(window, active, canvas, self.three_d)
+                    });
                 }
             }
             let body = window.body().intersect(area);
@@ -3016,10 +3514,18 @@ impl Desktop {
                 let result = if alpha == u8::MAX {
                     libwoven::compositor_blit_region_shared(window.token, region, body.x, body.y)
                 } else {
-                    libwoven::compositor_blend_region_shared(window.token, region, body.x, body.y, alpha)
+                    libwoven::compositor_blend_region_shared(
+                        window.token,
+                        region,
+                        body.x,
+                        body.y,
+                        alpha,
+                    )
                 };
-                if result.is_err() {
-                    log(&[b"woven-shell: shared surface compose failed: ", &window.title[..window.title_length]]);
+                // A resize deliberately permits a bounded gap between the
+                // old surface's release and the replacement WRSZ message.
+                if result.is_err() && libwoven::ticks() >= window.resizing_until {
+                    return Some(slot);
                 }
             }
         }
@@ -3027,26 +3533,26 @@ impl Desktop {
         if let Some(toast) = &self.toast {
             let part = self.toast_area().intersect(area);
             if !part.is_empty() {
-                painter.blend(part, TOAST_FILL, TOAST_OPACITY);
+                painter.blend(part, theme_toast(), TOAST_OPACITY);
                 painter.overlay(part, |canvas| self.render_toast(toast, canvas));
             }
         }
 
         let panel = self.panel_area().intersect(area);
         if !panel.is_empty() {
-            painter.blend(panel, PANEL_FILL, PANEL_OPACITY);
+            painter.blend(panel, theme_panel(), PANEL_OPACITY);
             painter.overlay(panel, |canvas| self.render_panel(canvas));
         }
 
         let qs = self.qs_area().intersect(area);
         if !qs.is_empty() {
-            painter.blend(qs, PANEL_FILL, PANEL_OPACITY);
+            painter.blend(qs, theme_panel(), PANEL_OPACITY);
             painter.overlay(qs, |canvas| self.render_qs(canvas));
         }
 
         let center = self.center_area().intersect(area);
         if !center.is_empty() {
-            painter.blend(center, PANEL_FILL, PANEL_OPACITY);
+            painter.blend(center, theme_panel(), PANEL_OPACITY);
             painter.overlay(center, |canvas| self.render_center(canvas));
         }
 
@@ -3054,6 +3560,7 @@ impl Desktop {
         if !cursor.is_empty() {
             painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
+        None
     }
 
     fn raise(&mut self, slot: usize) {
@@ -3068,10 +3575,17 @@ impl Desktop {
         if self.focused() == Some(slot) {
             return Area::new(0, 0, 0, 0);
         }
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
+        let previous = self
+            .focused()
+            .and_then(|old| self.windows[old])
+            .map(|w| w.footprint());
         self.raise(slot);
-        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
-        current.union(previous.unwrap_or(Area::new(0, 0, 0, 0))).union(self.taskbar())
+        let current = self.windows[slot]
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        current
+            .union(previous.unwrap_or(Area::new(0, 0, 0, 0)))
+            .union(self.taskbar())
     }
 
     /// Open a window for `owner`. Returns the areas to repaint.
@@ -3103,7 +3617,11 @@ impl Desktop {
         // Reduced motion: appear at full opacity immediately rather than
         // animate in, matching libwoven::accessibility::Settings's own
         // "duration 0" convention for this preference.
-        let mut fade = Spring::new(if self.reduced_motion { i32::from(u8::MAX) } else { 0 });
+        let mut fade = Spring::new(if self.reduced_motion {
+            i32::from(u8::MAX)
+        } else {
+            0
+        });
         fade.set_target(i32::from(u8::MAX));
         let window = Window {
             owner,
@@ -3119,7 +3637,10 @@ impl Desktop {
             resizing_until: 0,
         };
         self.windows[slot] = Some(window);
-        let previous = self.focused().and_then(|old| self.windows[old]).map(|w| w.footprint());
+        let previous = self
+            .focused()
+            .and_then(|old| self.windows[old])
+            .map(|w| w.footprint());
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window opened: ", &title[..title_length]]);
@@ -3201,7 +3722,12 @@ impl Desktop {
             log(&[b"woven-shell: WRSZ rejected: token or geometry"]);
             return empty;
         }
-        let Some(window) = self.windows.iter_mut().flatten().find(|window| window.owner == owner) else {
+        let Some(window) = self
+            .windows
+            .iter_mut()
+            .flatten()
+            .find(|window| window.owner == owner)
+        else {
             log(&[b"woven-shell: WRSZ rejected: owner window missing"]);
             return empty;
         };
@@ -3210,14 +3736,17 @@ impl Desktop {
         window.width = width;
         window.height = height;
         window.resizing_until = 0;
-        log(&[b"woven-shell: window resized: ", &window.title[..window.title_length]]);
+        log(&[
+            b"woven-shell: window resized: ",
+            &window.title[..window.title_length],
+        ]);
         before.union(window.footprint())
     }
 
     /// Remove window `slot`. Returns the area to repaint.
-    fn close(&mut self, slot: usize) -> Area {
+    fn close(&mut self, slot: usize) -> Dirty {
         let Some(window) = self.windows[slot].take() else {
-            return Area::new(0, 0, 0, 0);
+            return Dirty::new();
         };
         if window.workspace == self.workspace {
             if let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) {
@@ -3234,14 +3763,24 @@ impl Desktop {
         if self.drag.is_some_and(|(dragged, _, _)| dragged == slot) {
             self.drag = None;
         }
-        log(&[b"woven-shell: window closed: ", &window.title[..window.title_length]]);
+        // A reused window slot must never inherit a dead client's capture.
+        if self.pointer_capture == Some(slot) {
+            self.pointer_capture = None;
+        }
+        log(&[
+            b"woven-shell: window closed: ",
+            &window.title[..window.title_length],
+        ]);
         // The newly focused window's title and shadow change too.
-        let next = self.focused().and_then(|top| self.windows[top]).map(|w| w.footprint());
-        window
-            .footprint()
-            .union(next.unwrap_or(Area::new(0, 0, 0, 0)))
-            .union(self.taskbar())
-            .union(self.retile())
+        let next = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint());
+        let mut dirty = Dirty::of(window.footprint());
+        dirty.add(next.unwrap_or(Area::new(0, 0, 0, 0)));
+        dirty.add(self.taskbar());
+        dirty.add(self.retile());
+        dirty
     }
 
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Dirty {
@@ -3286,41 +3825,42 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
-        // Locked, keys go to the PIN prompt and nowhere else; the pointer
-        // still moves, unseen, so it is where it was left once unlocked.
+        // Motion changes state immediately, but painting is deferred until the
+        // bounded input batch completes. Absolute devices use the same hit tests
+        // and pointer capture as the relative PS/2 path.
+        match event {
+            InputEvent::PointerMove { dx, dy } => {
+                return self.move_pointer_to(
+                    self.pointer.0 + i32::from(dx),
+                    self.pointer.1 + i32::from(dy),
+                );
+            }
+            InputEvent::PointerAbsolute { x, y } => {
+                return self.move_pointer_to(
+                    absolute_pointer_axis(x, self.desktop_width),
+                    absolute_pointer_axis(y, self.height),
+                );
+            }
+            _ => {}
+        }
         if self.locked {
             return match event {
                 InputEvent::Key(key) => self.lock_key(key),
-                InputEvent::PointerMove { dx, dy } => {
-                    self.pointer = (
-                        (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
-                        (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
-                    );
-                    empty
-                }
                 _ => empty,
             };
         }
         match event {
-            InputEvent::PointerMove { dx, dy } => {
-                let before = self.cursor_area();
-                self.pointer = (
-                    (self.pointer.0 + i32::from(dx)).clamp(0, self.desktop_width - 1),
-                    (self.pointer.1 + i32::from(dy)).clamp(0, self.height - 1),
-                );
-                self.pointer_visible = true;
-                let moved = self.drag_to_pointer();
-                if self.drag.is_none() {
-                    self.forward_pointer_move();
-                }
-                before.union(self.cursor_area()).union(moved)
-            }
-            InputEvent::PointerButton { button: 0, pressed: false } => {
+            InputEvent::PointerButton {
+                button: 0,
+                pressed: false,
+            } => {
                 if let Some(slot) = self.pointer_capture.take() {
                     self.forward_pointer_button(slot, false);
                 }
                 // Dropped on the left or right edge: snap to that half.
-                let Some((slot, _, _)) = self.drag.take() else { return empty };
+                let Some((slot, _, _)) = self.drag.take() else {
+                    return empty;
+                };
                 let (x, _) = self.pointer;
                 // The desktop's outer edges: the left snaps on the primary,
                 // the right on the last monitor (monitors are the same size).
@@ -3334,9 +3874,14 @@ impl Desktop {
                 }
                 empty
             }
-            InputEvent::PointerButton { button: 0, pressed: true } => {
+            InputEvent::PointerButton {
+                button: 0,
+                pressed: true,
+            } => {
                 let (x, y) = self.pointer;
-                if let Some(index) = (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y)) {
+                if let Some(index) =
+                    (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
+                {
                     return self.switch_workspace(index);
                 }
                 if self.start_area().contains(x, y) {
@@ -3357,7 +3902,11 @@ impl Desktop {
                         2 => self.toggle_scale(),
                         3 => {
                             self.dnd = !self.dnd;
-                            log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                            log(if self.dnd {
+                                &[b"woven-shell: do not disturb on"]
+                            } else {
+                                &[b"woven-shell: do not disturb off"]
+                            });
                             panel
                         }
                         4 => self.toggle_tiling(),
@@ -3365,29 +3914,43 @@ impl Desktop {
                         6 => self.start_change_pin(),
                         7 => {
                             self.language = match self.language {
-                                libwoven::i18n::Language::English => libwoven::i18n::Language::Chichewa,
-                                libwoven::i18n::Language::Chichewa => libwoven::i18n::Language::English,
+                                libwoven::i18n::Language::English => {
+                                    libwoven::i18n::Language::Chichewa
+                                }
+                                libwoven::i18n::Language::Chichewa => {
+                                    libwoven::i18n::Language::English
+                                }
                             };
                             log(&[b"woven-shell: language toggled"]);
                             panel
                         }
                         8 => {
                             self.three_d = !self.three_d;
-                            log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
+                            log(if self.three_d {
+                                &[b"woven-shell: 3D desktop on"]
+                            } else {
+                                &[b"woven-shell: 3D desktop off"]
+                            });
                             // Every open window's title bar also renders
                             // differently in 3D mode, not just this panel.
                             panel.union(self.screen())
                         }
                         9 => {
                             self.reduced_motion = !self.reduced_motion;
-                            log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                            log(if self.reduced_motion {
+                                &[b"woven-shell: reduced motion on"]
+                            } else {
+                                &[b"woven-shell: reduced motion off"]
+                            });
                             panel
                         }
                         _ => empty,
                     };
                 }
                 // The clock opens and closes the Notification Center.
-                if self.clock_area().contains(x, y) || (self.unread > 0 && self.badge_area().contains(x, y)) {
+                if self.clock_area().contains(x, y)
+                    || (self.unread > 0 && self.badge_area().contains(x, y))
+                {
                     return self.toggle_center();
                 }
                 if self.center_open {
@@ -3439,19 +4002,33 @@ impl Desktop {
                 // Otherwise the topmost window under the pointer: its close
                 // control asks the owner to close; anywhere else focuses it,
                 // and its title bar also starts a drag.
-            let mut pointer_x = [0u8; 20];
-            let mut pointer_y = [0u8; 20];
-            let pointer_x = libwoven::format_u64(self.pointer.0.max(0) as u64, &mut pointer_x);
-            let pointer_y = libwoven::format_u64(self.pointer.1.max(0) as u64, &mut pointer_y);
-            log(&[b"woven-shell: pointer press x=", pointer_x, b" y=", pointer_y]);
-                let hit = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
-                    self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
-                });
+                let mut pointer_x = [0u8; 20];
+                let mut pointer_y = [0u8; 20];
+                let pointer_x = libwoven::format_u64(self.pointer.0.max(0) as u64, &mut pointer_x);
+                let pointer_y = libwoven::format_u64(self.pointer.1.max(0) as u64, &mut pointer_y);
+                log(&[
+                    b"woven-shell: pointer press x=",
+                    pointer_x,
+                    b" y=",
+                    pointer_y,
+                ]);
+                let hit = self.stack[..self.stacked]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&slot| {
+                        self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
+                    });
                 let Some(slot) = hit else { return empty };
-                let Some(window) = self.windows[slot] else { return empty };
+                let Some(window) = self.windows[slot] else {
+                    return empty;
+                };
                 if window.close_area().contains(x, y) {
                     let _ = libwoven::message_send(window.owner, b"WCLS");
-                    log(&[b"woven-shell: close requested: ", &window.title[..window.title_length]]);
+                    log(&[
+                        b"woven-shell: close requested: ",
+                        &window.title[..window.title_length],
+                    ]);
                     return empty;
                 }
                 if window.title_area().contains(x, y) {
@@ -3464,18 +4041,33 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            // Tab is shell-owned outside the sign-in/launcher paths. Cycle
+            // the bounded workspace stack without requiring a pointer.
+            InputEvent::Key(Key::Tab) => {
+                self.cancel_pointer_gesture();
+                let panels = self.close_panels();
+                let focused = self.stack[..self.stacked]
+                    .first()
+                    .copied()
+                    .map_or(empty, |slot| self.focus(slot));
+                panels.union(focused)
+            }
             InputEvent::Key(Key::F2) => self.toggle_tiling(),
             InputEvent::Key(Key::F3) => self.switch_workspace((self.workspace + 1) % WORKSPACES),
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Enter) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
+                    let _ =
+                        libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
                 }
                 empty
             }
             InputEvent::Key(Key::Backspace) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE]);
+                    let _ = libwoven::message_send(
+                        window.owner,
+                        &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE],
+                    );
                 }
                 empty
             }
@@ -3490,16 +4082,57 @@ impl Desktop {
         }
     }
 
-    /// Forward a pointer move to the topmost client under the pointer. Shell
-    /// chrome, title bars and window drags remain shell-owned.
+    /// Update pointer state without painting a bounding box across its path.
+    /// The event loop damages the old/new cursor rectangles separately.
+    fn move_pointer_to(&mut self, x: i32, y: i32) -> Area {
+        self.pointer = (
+            x.clamp(0, self.desktop_width - 1),
+            y.clamp(0, self.height - 1),
+        );
+        if self.locked {
+            return Area::new(0, 0, 0, 0);
+        }
+        self.pointer_visible = true;
+        let moved = self.drag_to_pointer();
+        if self.drag.is_none() {
+            self.forward_pointer_move();
+        }
+        moved
+    }
+
+    /// End the current gesture before hiding its workspace or locking.
+    /// Deliver exactly one release while the owner is still visible; a later
+    /// physical release must not reach a hidden client or a reused slot.
+    fn cancel_pointer_gesture(&mut self) {
+        if let Some(slot) = self.pointer_capture.take() {
+            self.forward_pointer_button(slot, false);
+        }
+        self.drag = None;
+    }
+
+    /// Captured motion stays with its owner even outside the window. Without
+    /// capture, the topmost frame (including chrome) blocks windows below.
     fn forward_pointer_move(&self) {
         let (x, y) = self.pointer;
-        let Some(slot) = self.stack[..self.stacked].iter().rev().copied().find(|&slot| {
-            self.windows[slot].is_some_and(|window| window.body().contains(x, y))
-        }) else {
+        let captured = self.pointer_capture.filter(|&slot| {
+            self.windows[slot].is_some_and(|window| window.workspace == self.workspace)
+        });
+        let slot = if let Some(slot) = captured {
+            Some(slot)
+        } else if self.panel_area().contains(x, y)
+            || self.qs_area().contains(x, y)
+            || self.center_area().contains(x, y)
+        {
+            None
+        } else {
+            self.stack[..self.stacked].iter().rev().copied()
+                .find(|&slot| self.windows[slot].is_some_and(|window| window.frame().contains(x, y)))
+                .filter(|&slot| self.windows[slot].is_some_and(|window| window.body().contains(x, y)))
+        };
+        let Some(slot) = slot else { return };
+        let Some(window) = self.windows[slot] else {
             return;
         };
-        let Some(window) = self.windows[slot] else { return };
         let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
         let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
         let mut message = [0u8; 8];
@@ -3513,7 +4146,9 @@ impl Desktop {
     /// pointer capture. Coordinates are clamped to the shared surface.
     fn forward_pointer_button(&self, slot: usize, pressed: bool) {
         let (x, y) = self.pointer;
-        let Some(window) = self.windows[slot] else { return };
+        let Some(window) = self.windows[slot] else {
+            return;
+        };
         let local_x = (x - window.x).clamp(0, window.width.saturating_sub(1)) as u16;
         let local_y = (y - window.y).clamp(0, window.height.saturating_sub(1)) as u16;
         let mut message = [0u8; 10];
@@ -3529,22 +4164,33 @@ impl Desktop {
     /// and above the taskbar. Returns the area to repaint.
     fn drag_to_pointer(&mut self) -> Area {
         let empty = Area::new(0, 0, 0, 0);
-        let Some((slot, grab_x, grab_y)) = self.drag else { return empty };
-        let Some(window) = self.windows[slot].as_mut() else { return empty };
+        let Some((slot, grab_x, grab_y)) = self.drag else {
+            return empty;
+        };
+        let Some(window) = self.windows[slot].as_mut() else {
+            return empty;
+        };
         let before = window.footprint();
         let top = self.height - TASKBAR_HEIGHT;
         window.x = (self.pointer.0 - grab_x).clamp(0, (self.desktop_width - window.width).max(0));
-        window.y = (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        window.y =
+            (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
         let after = window.footprint();
-        if after == before { empty } else { before.union(after) }
+        if after == before {
+            empty
+        } else {
+            before.union(after)
+        }
     }
 
     /// Composite client damage, and drop windows and icons whose surface is
     /// gone. Returns the area to repaint.
-    fn check_clients(&mut self) -> Area {
-        let mut dirty = Area::new(0, 0, 0, 0);
+    fn check_clients(&mut self) -> Dirty {
+        let mut dirty = Dirty::new();
         for slot in 0..MAX_WINDOWS {
-            let Some(window) = self.windows[slot] else { continue };
+            let Some(window) = self.windows[slot] else {
+                continue;
+            };
             // A damage blit may draw over windows stacked above; repainting
             // the region afterwards, before presenting, puts them back.
             match libwoven::compositor_blit_damage(window.token, window.x, window.y) {
@@ -3560,31 +4206,34 @@ impl Desktop {
                     // pixels into the compositor, but a full body repaint
                     // restores stacking order and guarantees the next
                     // present cannot retain a stale tile behind overlays.
-                    dirty = dirty.union(changed).union(window.body());
+                    dirty.add(changed.union(window.body()));
                 }
                 Ok(None) => {}
                 // While a resize is outstanding the owner may have released
                 // the old surface before its new one arrives.
                 Err(_) if libwoven::ticks() < window.resizing_until => {}
                 Err(_) => {
-                    // A released client surface can leave stale pixels in a
-                    // partially damaged scanout. Recompose the full screen
-                    // after removing the window so its wallpaper/taskbar
-                    // and all remaining layers are presented atomically.
-                    dirty = dirty.union(self.close(slot)).union(self.screen());
+                    // Recompose the released footprint, newly focused window,
+                    // taskbar and tiling changes as separate regions. Painting
+                    // an enclosing full-screen box delays close feedback.
+                    for &area in self.close(slot).areas() {
+                        dirty.add(area);
+                    }
                 }
             }
         }
         for index in 0..MAX_TRAY {
-            let Some(icon) = self.tray[index] else { continue };
+            let Some(icon) = self.tray[index] else {
+                continue;
+            };
             let place = self.tray_area(index);
             match libwoven::compositor_blit_damage(icon.token, place.x, place.y) {
-                Ok(Some(_)) => dirty = dirty.union(place),
+                Ok(Some(_)) => dirty.add(place),
                 Ok(None) => {}
                 Err(_) => {
                     self.tray[index] = None;
                     log(&[b"woven-shell: tray icon removed"]);
-                    dirty = dirty.union(place);
+                    dirty.add(place);
                 }
             }
         }
@@ -3593,7 +4242,10 @@ impl Desktop {
 
     /// Whether any window is still fading.
     fn animating(&self) -> bool {
-        self.windows.iter().flatten().any(|window| !window.fade.is_settled())
+        self.windows
+            .iter()
+            .flatten()
+            .any(|window| !window.fade.is_settled())
     }
 
     /// Advance every animation by `frames`. Returns the area to repaint.
@@ -3617,9 +4269,17 @@ impl Desktop {
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
             // The lock screen's clock is in the middle of the screen.
-            dirty = dirty.union(if self.locked { self.screen() } else { self.clock_area() });
+            dirty = dirty.union(if self.locked {
+                self.screen()
+            } else {
+                self.clock_area()
+            });
         }
-        if self.toast.as_ref().is_some_and(|toast| libwoven::ticks() >= toast.until) {
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|toast| libwoven::ticks() >= toast.until)
+        {
             self.toast = None;
             dirty = dirty.union(self.toast_area());
         }
@@ -3630,7 +4290,9 @@ impl Desktop {
 /// Read up to [`MAX_ACCOUNTS`] accounts from an accounts file into
 /// `accounts`, which starts empty; malformed lines are skipped.
 fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>; MAX_ACCOUNTS]) {
-    let Ok(descriptor) = libwoven::open(path) else { return };
+    let Ok(descriptor) = libwoven::open(path) else {
+        return;
+    };
     let mut text = [0u8; 1024];
     let read = libwoven::read(descriptor, &mut text);
     let _ = libwoven::close(descriptor);
@@ -3647,6 +4309,28 @@ fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>
     }
 }
 
+fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
+    let Ok(descriptor) = libwoven::open(path) else {
+        return;
+    };
+    let mut bytes = [0u8; 512];
+    let read = libwoven::read(descriptor, &mut bytes);
+    let _ = libwoven::close(descriptor);
+    let Ok(length) = read else { return };
+    let data = &bytes[..length.min(bytes.len())];
+    let mut settings = libwoven::accessibility::Settings::new();
+    settings.apply_json(data);
+    if settings.high_contrast {
+        THEME_MODE.store(1, Ordering::Relaxed);
+    }
+    if settings.reduced_motion {
+        desktop.reduced_motion = true;
+    }
+}
+
+mod input;
+use input::{absolute_pointer_axis, EVENT_BATCH};
+
 fn main(args: Args) -> ! {
     // SAFETY: the only reference to the desktop's state, taken once.
     let desktop = unsafe { &mut *DESKTOP.0.get() };
@@ -3654,16 +4338,30 @@ fn main(args: Args) -> ! {
     while let Some(argument) = args.get(index) {
         match argument {
             b"--seconds" => desktop.seconds = true,
+            b"--reduced-motion" => desktop.reduced_motion = true,
             // The Stage 20.5 contract isolates the flat compositor's window
             // depth/shadow behavior. Production remains 3D by default; this
             // explicit switch keeps that acceptance independent of the later
             // 3D presentation stages.
             b"--no-3d" => desktop.three_d = false,
+            b"--high-contrast" => THEME_MODE.store(1, Ordering::Relaxed),
+            b"--settings" => {
+                index += 1;
+                if let Some(path) = args
+                    .get(index)
+                    .and_then(|path| core::str::from_utf8(path).ok())
+                {
+                    load_accessibility_settings(path, desktop);
+                } else {
+                    fail(1);
+                }
+            }
             b"--pin" => {
                 index += 1;
                 match args.get(index) {
                     Some(digits)
-                        if (1..=MAX_PIN).contains(&digits.len()) && digits.iter().all(u8::is_ascii_digit) =>
+                        if (1..=MAX_PIN).contains(&digits.len())
+                            && digits.iter().all(u8::is_ascii_digit) =>
                     {
                         let mut stored = [0u8; MAX_PIN];
                         stored[..digits.len()].copy_from_slice(digits);
@@ -3674,7 +4372,9 @@ fn main(args: Args) -> ! {
             }
             b"--accounts" => {
                 index += 1;
-                let path = args.get(index).and_then(|path| core::str::from_utf8(path).ok());
+                let path = args
+                    .get(index)
+                    .and_then(|path| core::str::from_utf8(path).ok());
                 desktop.accounts = [None; MAX_ACCOUNTS];
                 if let Some(path) = path {
                     load_accounts(path, &mut desktop.accounts);
@@ -3713,8 +4413,13 @@ fn main(args: Args) -> ! {
 
     let (width, height) = (info.width as i32, info.height as i32);
     // The first monitor is the primary; the desktop spans them all.
-    let (outputs, monitors) = libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
-    desktop.width = if monitors > 0 { (outputs[0].width as i32).clamp(1, width) } else { width };
+    let (outputs, monitors) =
+        libwoven::compositor_outputs().unwrap_or(([libwoven::Output::default(); 4], 0));
+    desktop.width = if monitors > 0 {
+        (outputs[0].width as i32).clamp(1, width)
+    } else {
+        width
+    };
     desktop.desktop_width = width;
     if monitors > 1 {
         let count = [b'0' + monitors as u8];
@@ -3727,6 +4432,9 @@ fn main(args: Args) -> ! {
     desktop.locked = desktop.accounts.iter().any(Option::is_some);
     desktop.pointer = (width / 2, height / 2);
     desktop.app_count = load_catalog(&mut desktop.apps);
+    let mut catalog_digits = [0u8; 20];
+    let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_digits);
+    log(&[b"woven-shell: catalog entries=", catalog_count]);
     desktop.repaint(&mut painter, desktop.screen());
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
@@ -3766,21 +4474,32 @@ fn main(args: Args) -> ! {
             }
             Err(_) => fail(8),
         }
-        while let Ok((length, sender)) = libwoven::message_receive(&mut message) {
+        // Bound each source so an application flooding its mailbox cannot
+        // indefinitely postpone keyboard input, pointer edges or presentation.
+        for _ in 0..EVENT_BATCH {
+            let Ok((length, sender)) = libwoven::message_receive(&mut message) else {
+                break;
+            };
             log(&[b"woven-shell: application message received"]);
             for &area in desktop.handle_message(sender, &message[..length]).areas() {
                 dirty.add(area);
             }
         }
-        while let Ok(Some(event)) = libwoven::input_poll_event() {
-            let area = desktop.handle_input(event);
-            if !area.is_empty() {
-                // Repainted per event, so pointer motion over several
-                // events never leaves a trail.
-                desktop.repaint(&mut painter, area);
+        for _ in 0..EVENT_BATCH {
+            let Ok(Some(event)) = libwoven::input_poll_event() else {
+                break;
+            };
+            let pointer_before = (desktop.pointer, desktop.pointer_visible);
+            let cursor_before = desktop.cursor_area();
+            dirty.add(desktop.handle_input(event));
+            if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
+                dirty.add(cursor_before);
+                dirty.add(desktop.cursor_area());
             }
         }
-        dirty.add(desktop.check_clients());
+        for &area in desktop.check_clients().areas() {
+            dirty.add(area);
+        }
         for &area in dirty.areas() {
             desktop.repaint(&mut painter, area);
         }

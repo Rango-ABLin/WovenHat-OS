@@ -90,8 +90,8 @@ fn draw_gui(
     expression: &[u8],
     result: Option<i64>,
     active: bool,
-    pointer: Option<(u16, u16)>,
-    pressed: bool,
+    _pointer: Option<(u16, u16)>,
+    _pressed: bool,
     evaluate_button: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
@@ -113,7 +113,9 @@ fn draw_gui(
     };
     Label::new(Frame::new(PANEL_X - 2, PANEL_Y, 180, 16), "WovenCalculator").draw(canvas, theme);
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
-    if let Ok(text) = core::str::from_utf8(expression) {
+    if expression.is_empty() {
+        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, "Type e.g. 12+3", ACCENT);
+    } else if let Ok(text) = core::str::from_utf8(expression) {
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, text, TEXT);
     }
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", ACCENT);
@@ -126,16 +128,7 @@ fn draw_gui(
     }
     evaluate_button.draw(canvas, theme);
     canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter evaluates", TEXT);
-    if let Some((x, y)) = pointer {
-        let color = if pressed { TEXT } else { ACCENT };
-        canvas.fill_rect(
-            i32::from(x).saturating_sub(1),
-            i32::from(y).saturating_sub(1),
-            3,
-            3,
-            color,
-        );
-    }
+    // The desktop owns the cursor; clients draw only control hover state.
 }
 
 fn render(
@@ -204,7 +197,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     let expression = [0u8; MAX_INPUT];
     if !render(
         &window,
-        &expression,
+        &expression[..0],
         None,
         false,
         None,
@@ -286,8 +279,12 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     u16::from_le_bytes([message[4], message[5]]),
                     u16::from_le_bytes([message[6], message[7]]),
                 ));
+                let before = (evaluate_button.hovered, evaluate_button.pressed);
                 if let Some((x, y)) = pointer {
                     evaluate_button.pointer(i32::from(x), i32::from(y), pointer_pressed);
+                }
+                if before == (evaluate_button.hovered, evaluate_button.pressed) {
+                    continue;
                 }
                 if !render(
                     &window,

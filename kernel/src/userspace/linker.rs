@@ -447,20 +447,25 @@ fn load_with_geometry_env(
             .ok()?;
         }
     }
-    if LIFECYCLE_TRAMPOLINE >= mmap_base
-        || pending.space.mappings[..pending.space.mapping_count]
-            .iter()
-            .any(|mapping| {
-                LIFECYCLE_TRAMPOLINE < mapping.start() + mapping.size() as u64
-                    && mapping.start() < LIFECYCLE_TRAMPOLINE + 4096
-            })
-        || pending.space.mapping_count == MAX_IMAGE_MAPPINGS
-    {
+    if pending.space.mapping_count == MAX_IMAGE_MAPPINGS {
         return None;
     }
-    let trampoline = UserMapping::new(LIFECYCLE_TRAMPOLINE, 4096, false, true)?;
-    paging::map_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, true, false).ok()?;
-    paging::zero_user_range_in(page_table, LIFECYCLE_TRAMPOLINE, 4096).ok()?;
+    let mut image_end = LIFECYCLE_TRAMPOLINE;
+    for mapping in &pending.space.mappings[..pending.space.mapping_count] {
+        image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+    }
+    let lifecycle_trampoline = if LIFECYCLE_TRAMPOLINE < image_end {
+        image_end.checked_add(4095).map(|address| address & !4095)?
+    } else {
+        LIFECYCLE_TRAMPOLINE
+    };
+    if lifecycle_trampoline < image_end || lifecycle_trampoline.checked_add(4096)? > mmap_base {
+        return None;
+    }
+    let lazy_trampoline_base = lifecycle_trampoline.checked_add(0x100)?;
+    let trampoline = UserMapping::new(lifecycle_trampoline, 4096, false, true)?;
+    paging::map_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, true, false).ok()?;
+    paging::zero_user_range_in(page_table, lifecycle_trampoline, 4096).ok()?;
     // The exit continuation preserves the status in callee-saved R12 while
     // destructors run, then re-enters the normal exit syscall path.
     let trampoline_code = [
@@ -469,10 +474,10 @@ fn load_with_geometry_env(
         0xcd, 0x80, // int 0x80
         0x0f, 0x0b, // ud2 if the syscall unexpectedly returns
     ];
-    paging::write_user_bytes(page_table, LIFECYCLE_TRAMPOLINE, &trampoline_code).ok()?;
+    paging::write_user_bytes(page_table, lifecycle_trampoline, &trampoline_code).ok()?;
     pending.space.mappings[pending.space.mapping_count] = trampoline;
     pending.space.mapping_count += 1;
-    pending.space.lifecycle_trampoline = LIFECYCLE_TRAMPOLINE;
+    pending.space.lifecycle_trampoline = lifecycle_trampoline;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
     for (image_index, linked) in images.iter().enumerate() {
@@ -491,7 +496,7 @@ fn load_with_geometry_env(
         .copied()
         .enumerate()
     {
-        let trampoline = LAZY_TRAMPOLINE_BASE
+        let trampoline = lazy_trampoline_base
             .checked_add((index as u64).checked_mul(LAZY_TRAMPOLINE_STRIDE)?)?;
         let mut code = [0u8; 24];
         code[0..2].copy_from_slice(&[0x49, 0xbb]); // mov r11, slot
@@ -501,7 +506,7 @@ fn load_with_geometry_env(
         code[17..19].copy_from_slice(&[0xff, 0xe0]); // jmp rax
         paging::write_user_bytes(page_table, trampoline, &code).ok()?;
     }
-    paging::protect_user_range_in_inactive(page_table, LIFECYCLE_TRAMPOLINE, 4096, false, true)
+    paging::protect_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, false, true)
         .ok()?;
     for linked in &images {
         for segment in linked.image.segments() {

@@ -4,6 +4,201 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## POSIX musl static-libc bootstrap - 2026-10-28
+
+Added the repeatable bounded bootstrap builder for pinned musl 1.2.6. It
+generates the required type header, compiles upstream `read.c`, `write.c`, and
+`syscall_ret.c`, and links them with the WovenHat cancellation bridge and a
+single-thread errno cell. The resulting static C ELF executed through the
+production loader on QEMU at 1/2/4 CPUs and proved denied-write `-1`/EIO
+behavior. TLS, C startup, allocator, cancellation, and broader POSIX bodies
+remain open; this is neither full static libc nor a profile-conformance claim.
+
+The next static-libc increment added a minimal assembly/C CRT adapter for the
+already accepted WovenHat argc/argv stack. It calls `main` and returns through
+upstream musl `_Exit`; the linked ELF passed QEMU at 1/2/4 CPUs. Full musl
+startup lifecycle, TLS, auxiliary vectors, constructors and allocator remain
+open.
+
+## S03 process-lifecycle ABI surface - 2026-10-28
+
+Added safe `libwoven` wrappers for the existing bounded kernel process-group
+and signal authorities, including explicit process/group target encoding,
+signal range checks, disposition decoding, and zero-value `setpgid`
+conventions. The focused 193-test `libwoven` suite and warning-denying
+`libwoven` Clippy pass. Kernel/QEMU lifecycle evidence is still required;
+S03 remains implementing.
+
+The dedicated `s03-process-lifecycle-test` then passed on 1/2/4 CPUs with exit
+33. Freestanding Ring-3 probes covered fork/wait/reap, process-group signal
+targeting, safe-point termination, and exit status 143. PTYs/termios, job
+control, caught handlers, and full signal semantics remain outside this slice.
+
+The caught-handler increment also passed on 1/2/4 CPUs: a Ring-3 SIGUSR1
+handler was installed, invoked through the real syscall return path, and
+returned status 42. Failed frame delivery now restores the pending signal
+instead of dropping it.
+
+The terminal-control increment passed in the same 1/2/4-CPU S03 gate with a
+Ring-3 `TCGETS`/`TCSETS` round trip. Foreground process-group ioctl constants
+and validation are now part of the bounded terminal ABI; PTY multiplexing and
+full job-control semantics remain open. Foreground assignment is authorized
+against the caller's group or TaskControl capability, and background console
+reads are rejected; the 1/2/4-CPU gate remains green.
+The input path also consumes the configured `VINTR` byte and targets SIGINT at
+the foreground group.
+PS/2 and USB-HID decoder self-tests cover Ctrl-C to `VINTR`; QEMU keyboard
+injection remains an explicit qualification gap.
+The lifecycle probe also covers default SIGQUIT process-group termination with
+status 131; stop/continue semantics remain open.
+The bounded stop/continue increment now passes SIGSTOP/SIGCONT scheduling and
+reap coverage on 1/2/4 CPUs; full session/job-control semantics remain open.
+The fork probe now exercises the reserved wait-any selector (`waitpid(-1)`) and
+the same exact-child transactional reap path.
+The PTY increment passes the same matrix with fixed-capacity master/slave
+allocation, canonical buffering, echo separation, and stream teardown covered
+by the in-kernel S03 probe. Session identity is inherited across process
+creation, `getsid`/`setsid` are exercised by a Ring-3 probe, and cross-session
+process-group assignment is rejected. Exact-child reaping now checks the
+second-wait `NoSuchChild` result and preserves the pre-test zombie count; the
+existing wait-any selector remains covered by its dedicated probe. The
+dedicated headless QMP gate now enumerates xHCI, injects Ctrl-C through the USB
+HID keyboard, and proves foreground-group SIGINT termination (status 130);
+accepted evidence is under `target/s03-keyboard-injection/`. The bounded
+job-control implementation also covers default stop/continue dispositions,
+`TOSTOP` SIGTTOU enforcement, stopped orphaned-group SIGHUP/SIGCONT
+notification, child reparenting, and PTY hangup EOF/write rejection. Full
+POSIX terminal coverage beyond this bounded ABI remains open.
+
+## S04 scheduler, quotas, classes, and SMP topology - 2026-10-28
+
+S04 now has a bounded scheduler policy contract. Live tasks record timer-tick
+runtime and dispatch count, fixed classes rank work above quantum priority, and
+pre-dispatch policy configuration can enforce a per-task runtime quota within a
+bounded period. Once exhausted, the task is throttled into a timed sleep and
+returns to Ready at the next period; zero quota preserves legacy unlimited
+behavior. The scheduler retains hard affinity, Ready-only migration,
+NUMA-domain preference, and hotplug authority.
+
+`scripts/test-s04-scheduler-accounting.py` passes on 1/2/4 CPUs with QEMU exit
+33. The 2/4-CPU command lines create two explicit 2-GiB NUMA nodes and the
+guest verifies the published two-domain topology. The guest also configures
+Realtime and Background workers with 2/8-tick budgets, observes bounded runtime
+and class identity, then verifies both workers stop cleanly after quota-period
+recovery. Evidence is retained under
+`audit-artifacts/s04-scheduler-accounting-{1,2,4}cpu-*`.
+
+S04 is accepted for this bounded software/QEMU scope. Physical CPU hotplug,
+native NUMA latency/placement, dynamic cgroup-like classes, and unbounded quota
+policy remain outside the stage.
+
+## S02 freestanding C ABI build boundary - 2026-10-28
+
+Added the reproducible source/linker boundary in
+`scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
+Source-shape and Rust-fixture inventory checks passed. LLVM 23.1.4 built the
+ELF through its paired `ld.lld`; the exact output was embedded by the
+independently guarded `s02-c-abi-test` and run through the production loader.
+The Ring-3 fixture returned native exit status 42 with full process/IPC/frame
+teardown, and QEMU exit 33 passed on 1/2/4 CPUs. Evidence:
+`audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This closes the documented
+no-libc C ABI scope of S02; hosted-C and broader runtime work remain explicitly
+outside that stage.
+
+## Stage 32 integrated WovenDev software boundary - 2026-10-28
+
+The one integrated Stage 32 software gate passed 1/2/4-CPU QEMU self-tests.
+It composes diagnostics, crash dumps, tracing, profiling, RSP framing, COM2,
+packet assembly, session lifecycle, trap classification, generation ownership,
+frame snapshots, task binding, register writes, UART polling, and developer
+artifacts. The breakpoint ISR handoff is live and nonblocking; physical GDB
+qualification remains outside this boundary. Scheduler safe-point resume
+adaptation is covered by validated `UserForkFrame` mutation, including TF
+step/continue handling and kernel-stack ownership checks.
+
+## Stage 32.16 GDB transport pump - 2026-10-28
+
+The bounded RSP byte pump passed 1/2/4-CPU QEMU self-tests. Acknowledgement
+handling, packet assembly, checksum verification, malformed rejection, and
+oversize reset are covered. Target and host warning-denying Clippy and Python
+syntax validation passed. Live UART polling and session dispatch remain
+outside this acceptance.
+
+## Stage 32.15 GDB generation-checked task binding - 2026-10-28
+
+The stopped-context binding passed 1/2/4-CPU QEMU self-tests. It covers
+current-token capture, context access while attached, rejection of foreign
+tokens, and invalidation after detach. Target and host warning-denying Clippy
+and Python syntax validation passed. Scheduler lookup, exception wiring, and
+register mutation remain outside this acceptance.
+
+## Stage 32.14 GDB trap-frame snapshot - 2026-10-28
+
+The owned trap-frame conversion passed 1/2/4-CPU QEMU self-tests. Fixed-order
+general-register, control-register, segment, error-code, and vector copying
+is covered without retained frame references. Target and host warning-denying
+Clippy and Python syntax validation passed. Live IDT capture and task
+ownership remain outside this acceptance.
+
+## Stage 32.13 GDB generation-bound owner - 2026-10-28
+
+The single-owner debugger authority passed 1/2/4-CPU QEMU self-tests.
+Nonzero attachment validation, duplicate attach refusal, exact-token detach,
+and stale-token rejection after generation reuse are covered. Target and host
+warning-denying Clippy and Python syntax validation passed. Live task binding,
+transport ownership, and execution control remain outside this acceptance.
+
+## Stage 32.12 GDB trap-stop boundary - 2026-10-28
+
+The bounded architectural stop classifier passed 1/2/4-CPU QEMU self-tests.
+Breakpoint, single-step, fault, external, and unknown-vector signal mapping,
+error-code retention, and publication into the active session are covered.
+Target and host warning-denying Clippy and Python syntax validation passed.
+Live IDT/exception wiring, frame capture, task ownership, and execution
+control remain outside this acceptance.
+
+## Stage 32.11 GDB session state machine - 2026-10-28
+
+The bounded session lifecycle passed 1/2/4-CPU QEMU self-tests. Stop replies,
+running-state command refusal, continue/step action translation, and kill
+deactivation are covered. Target and host warning-denying Clippy, host tests,
+and Python syntax validation passed. Trap ownership, task binding, transport
+integration, and execution control remain outside this acceptance.
+
+## Stage 32.10 GDB register context and command dispatch - 2026-10-28
+
+The pure GDB command boundary passed 1/2/4-CPU QEMU self-tests. Register
+encoding, bounded memory reads, malformed/out-of-range refusal, feature
+negotiation, and continue/step/kill action classification are covered. Target
+and host warning-denying Clippy plus host tests passed. Live trap/session
+integration remains outside this acceptance.
+
+## Stage 32.9 second-UART debug serial - 2026-10-27
+
+The bounded COM2 16550 transport passed its loopback and second-QEMU-serial
+marker gate at 1/2/4 CPUs with exit 33. Target and host warning-denying Clippy
+and host tests passed. The result is transport-boundary evidence only; live
+GDB command handling and trap/debug lifecycle remain outside this increment.
+
+## Stage 20.8 resize-surface diagnostic cleanup - 2026-10-27
+
+The WovenShell repaint path previously logged expected shared-surface blit
+failures while a client was between the old and replacement surfaces during
+`WSIZ`/`WRSZ`. The path now uses the existing bounded resize grace deadline;
+post-deadline failures remain observable. Stage 20.8 passed at 1/2/4 CPUs,
+with target and host warning-denying Clippy plus host tests passing.
+
+## Stage 20 reported-gate revalidation - 2026-10-27
+
+The seven gates reported red by the desktop UX sweep were rerun against
+current commit `744b5839`: Stage 20.2, 20.3, 20.4, 20.6, 20.8, 20.9, and
+20.13. Every gate passed at 1, 2, and 4 CPUs with QEMU exit 33. The affected
+Stage 20 image-backed feature gates, production kernel lint, and host
+`--all-targets` Clippy passed. No assertion, timeout, or source behavior was
+weakened; the earlier 2-CPU 20.6 result was an intermittent failure and passed
+on a clean rerun. Evidence remains in the corresponding `target/woven-shell-*`
+CPU directories.
+
 ## Source: AUDIT-STAGE10.1-KERNEL-EVENT-ASYNC-IO.md
 
 # WovenHat OS Stage 10.1 â€” Kernel Event + Async I/O Foundation
@@ -16168,3 +16363,99 @@ Full inherited preservation remains required. This correction is **not accepted*
 from focused passes. Keep all
 failed evidence, run warning-denying host/kernel/affected-feature checks and
 the unchanged Stage 10.7/10.8â€“11.5 preservation gates before accepting it.
+
+## Stage 32 production build repair (2026-10-27; focused regression pass)
+
+The desktop build exposed private instrumentation APIs and unconditional
+optional state/test helpers as dead code under warnings-denied production
+compilation. Exported the intended Rust APIs and gated optional state and
+self-tests without changing record formats, syscall ABI, locks, allocations,
+or object lifetime behavior. No warning suppressions or feature prerequisites
+were added. Warning-denying default, tracing, profiler, and Stage 32.1-32.4
+kernel Clippy plus host all-target Clippy and host all-target tests pass.
+Stage 32.1, 32.2, 32.3 and 32.4 QEMU gates each pass on 1/2/4 CPUs (exit 33).
+Prior evidence was copied under target/stage32-production-fix/prior-evidence-*
+before rerunning the established harnesses. This focused repair is not full
+Stage 32 or full historical Windows-chain acceptance.
+
+## Desktop experience focused repair (2026-10-27; runtime validated, graphics acceptance incomplete)
+
+User-reported lag/input problems were investigated against the real desktop.
+The baseline 2-CPU qualification failed its terminal-close framebuffer check.
+Fixes bound shell event-source work, batch painting, keep cursor/teardown
+regions separate, route absolute HID pointers, and constrain taskbar backdrop
+painting (which previously erased desktop shortcuts). Calculator no longer
+renders its zero-filled startup input storage and uploads hover changes only
+when its button state changes; the desktop owns the cursor.
+
+The emulated demo chooses flat composition/reduced motion without changing
+other boot profiles or removing 3D. The interactive launcher adds a USB tablet
+and preserves unique logs. Host tests include normalized pointer endpoint/
+scale/malformed-range regression coverage. No test thresholds, assertions,
+credential iterations, capabilities or ownership checks were weakened.
+Final matrix results and remaining limitations are recorded in stage-status.
+
+Final runtime qualification passes on WHPX 1/2/4 CPUs. Stage 20.1/5/7/10/11/
+12/15/17/18 pass on TCG 1/2/4 CPUs. Stage 20.2/3/4/6/8/9/13 pixel gates fail
+on all three CPU counts; 20.2 and 20.6 are reproduced with the pre-change
+shell at the same assertions on 1 CPU. Other failed gates remain open.
+No complete stage acceptance is claimed. Full paths/results are in stage-status.
+The already-enabled Windows hypervisor was probed, then the live desktop was
+verified with PS/2 typing and USB absolute-pointer evaluation of 12-3=9.
+No host security/firmware settings were changed. The launcher makes a private
+read-only boot-image snapshot so subsequent builds cannot change a new VM's
+boot disk. Kernel/app/host lints deny warnings; host and helper tests pass.
+
+
+## Desktop software graphics acceptance closed - 2026-10-27
+
+ACCEPTED AND CLOSED for the reported software/QEMU desktop repair at source
+`cea33d1a2f6ef1ddb5cdb71a8f99d393952c0df7`. This supersedes the open desktop pixel failures in the historical records;
+those historical failed artifacts remain preserved. All 87 required matrix
+cases pass on 1/2/4 CPUs, including TCG/WHPX keyboard/mouse/performance,
+software 3D, GPU recovery, two monitors and session behavior. The strict
+clean-source GFX-07 checker passes 9/9 with its fatal detector unchanged.
+Build, warning-denying lints, Rust tests and all 205 Python tests pass.
+
+See [the acceptance record](graphics/desktop-acceptance-2026-10-27.md) for exact
+source/evidence provenance, stronger completed-frame pixel assertions,
+close-time repaint recovery, and validation limits. This closes software
+desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
+graphics mandate or the full historical Windows acceptance chain.
+## S05 deterministic memory-pressure boundary (2026-10-28)
+
+The physical-frame boundary now publishes a deterministic pressure level after
+each successful allocation or release and records every failed allocation as an
+explicit OOM decision. The policy is fixed and bounded: Normal above 20%
+remaining frames, Moderate at 6-20%, Critical at 1-5%, and Exhausted at zero.
+Atomic state carries the latest counts and transition/failure counters without
+holding the allocator lock during observation. The feature-guarded QEMU probe
+also exercises the policy thresholds and transition publication.
+
+Verification: target warning-denying Clippy for `s05-memory-pressure-test`,
+host all-targets warning-denying Clippy, 193 `libwoven` tests, and executable
+QEMU at 1/2/4 CPUs all pass. Evidence is retained under
+`target/s05-memory-pressure-{1,2,4}cpu-debug/`. This is bounded software
+pressure/OOM evidence; reclaim ordering, writeback retry, OOM victim policy,
+and physical low-memory qualification remain unclaimed.
+
+The follow-up now closes the bounded policy gaps. File-frame reclamation walks
+the oldest unpinned cache entry first and repeats until no eligible entry
+remains. Dirty buffer-cache writeback has exactly three attempts per eviction
+or flush; retries are counted, and a final error leaves the data dirty and
+resident. OOM victim selection uses a fixed candidate array, excludes the
+currently executing task, prefers lower scheduler classes, then larger mapped
+footprints, and finally the lowest stable task ID. The selected process ID is
+published with the pressure snapshot without terminating while allocator or
+scheduler metadata is held.
+
+The S05 feature gate and the dedicated 256 MiB low-memory runner pass at 1/2/4
+CPUs with exit 33. Evidence: `target/s05-low-memory-{1,2,4}cpu-debug/`.
+Target/host warning-denying Clippy and 193 `libwoven` tests pass. This is
+software/QEMU qualification of the physical-frame path; native hardware below
+the supported 4 GiB production floor remains outside the evidence.
+The read-only host inventory
+`audit-artifacts/physical-host-20261028-112453-065/host.json` was refreshed
+after the QEMU matrix. It reports 8.21 GiB installed RAM and
+`PhysicalTestPerformed=false`; it changes no firmware, boot configuration,
+disk, or device state and cannot substitute for an authorized native test.

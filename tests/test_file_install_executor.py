@@ -60,7 +60,12 @@ class FileInstallExecutorTests(unittest.TestCase):
 
     def test_symlink_and_protected_identity_are_refused(self):
         link = self.root / "link.img"
-        link.symlink_to(self.image)
+        try:
+            link.symlink_to(self.image)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("symlink creation requires SeCreateSymbolicLinkPrivilege or Developer Mode")
+            raise
         with self.assertRaisesRegex(MODULE.ExecutionError, "regular"):
             MODULE.execute(link, self.plan)
         protected = json.loads(self.plan.read_text(encoding="utf-8"))

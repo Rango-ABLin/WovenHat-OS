@@ -22,6 +22,7 @@ pub enum Error {
     Full,
     Invalid,
     Closed,
+    Interrupted,
 }
 
 struct Pipe {
@@ -203,6 +204,9 @@ pub fn write(id: PipeId, buf: &[u8]) -> Result<usize, Error> {
             break;
         }
         if block {
+            if task::current_has_caught_signal() && !task::current_caught_signal_restarts() {
+                return if total > 0 { Ok(total) } else { Err(Error::Interrupted) };
+            }
             let still_block = {
                 let table = TABLE.lock();
                 table
@@ -215,6 +219,9 @@ pub fn write(id: PipeId, buf: &[u8]) -> Result<usize, Error> {
             // A peer may signal between the condition check and this call.
             // The scheduler latch consumes that signal instead of sleeping.
             task::wait_for_event();
+            if task::current_has_caught_signal() && !task::current_caught_signal_restarts() {
+                return if total > 0 { Ok(total) } else { Err(Error::Interrupted) };
+            }
             continue;
         }
         if written == 0 {
@@ -259,6 +266,9 @@ pub fn read(id: PipeId, buf: &mut [u8]) -> Result<usize, Error> {
             return Ok(0);
         }
         if block {
+            if task::current_has_caught_signal() && !task::current_caught_signal_restarts() {
+                return Err(Error::Interrupted);
+            }
             let still_block = {
                 let table = TABLE.lock();
                 table.get(id).is_ok_and(|p| p.len == 0 && p.writers > 0)
@@ -267,6 +277,9 @@ pub fn read(id: PipeId, buf: &mut [u8]) -> Result<usize, Error> {
                 continue;
             }
             task::wait_for_event();
+            if task::current_has_caught_signal() && !task::current_caught_signal_restarts() {
+                return Err(Error::Interrupted);
+            }
             continue;
         }
         return Ok(0);

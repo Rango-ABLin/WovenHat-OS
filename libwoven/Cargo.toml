@@ -27,6 +27,7 @@ unicode-bidi = { version = "0.3.18", default-features = false, features = ["hard
 zune-core = { version = "0.5.3", default-features = false }
 zune-jpeg = { version = "0.5.16-rc3", default-features = false }
 zune-png = { version = "0.5.2", default-features = false }
+zenwebp = { version = "=0.3.2", default-features = false }
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 oxideav-webp = { version = "0.3.1", default-features = false }

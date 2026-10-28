@@ -8,6 +8,9 @@
  * independent Rust fixture.
  */
 
+#include "wovenhat/syscall.h"
+#include "syscall_arch.h"
+
 typedef unsigned long long wh_u64;
 
 static wh_u64 wh_exit_status(void) {
@@ -16,13 +19,7 @@ static wh_u64 wh_exit_status(void) {
 
 __attribute__((noreturn)) void _start(void) {
     wh_u64 status = wh_exit_status();
-    __asm__ volatile (
-        "mov %0, %%rdi\n\t"
-        "mov $3, %%eax\n\t"
-        "int $0x80\n\t"
-        "ud2\n\t"
-        :
-        : "r"(status)
-        : "rax", "rdi", "memory");
+    (void)__syscall1(WH_LINUX_EXIT, (long)status);
+    __asm__ volatile ("ud2" ::: "memory");
     __builtin_unreachable();
 }

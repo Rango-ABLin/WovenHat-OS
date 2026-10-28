@@ -40,6 +40,49 @@ static USER_HEAP: heap_allocator::RuntimeHeap<heap_allocator::NativeVm> =
 pub mod process {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Id(pub u64);
+
+    /// A bounded process or process-group signal target.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalTarget {
+        Process(Id),
+        CurrentGroup,
+        Group(u64),
+    }
+
+    /// The dispositions supported by the bounded process-lifecycle ABI.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum SignalDisposition {
+        Default,
+        Ignore,
+        Handler(u64),
+    }
+}
+pub mod terminal {
+    pub const TCGETS: u64 = 0x5401;
+    pub const TCSETS: u64 = 0x5402;
+    pub const TIOCGPGRP: u64 = 0x540f;
+    pub const TIOCSPGRP: u64 = 0x5410;
+    pub const TIOCGPTN: u64 = 0x8004_5430;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Termios {
+        pub input_flags: u32,
+        pub output_flags: u32,
+        pub control_flags: u32,
+        pub local_flags: u32,
+        pub control_chars: [u8; 8],
+    }
+
+    impl Termios {
+        pub const DEFAULT: Self = Self {
+            input_flags: 0x0000_0500,
+            output_flags: 0x0000_0001,
+            control_flags: 0x0000_00b0,
+            local_flags: 0x0000_000b,
+            control_chars: [3, 28, 127, 21, 4, 0, 0, 0],
+        };
+    }
 }
 pub mod abi;
 pub mod accessibility;
@@ -49,6 +92,7 @@ pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
 pub mod browser;
+pub mod javascript;
 pub mod codecs;
 pub mod i18n;
 pub mod icons;
@@ -11941,12 +11985,19 @@ pub mod syscall {
     pub const CHDIR: u64 = 20;
     pub const GETCWD: u64 = 21;
     pub const GETPPID: u64 = 25;
+    pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
     pub const UNLINK: u64 = 28;
     pub const SLEEP: u64 = 29;
     pub const RENAME: u64 = 30;
     pub const GETTICKS: u64 = 31;
     pub const SYNC: u64 = 32;
+    pub const IOCTL: u64 = 33;
+    pub const SIGACTION: u64 = 34;
+    pub const GETPGRP: u64 = 35;
+    pub const SETPGID: u64 = 36;
+    pub const GETSID: u64 = 244;
+    pub const SETSID: u64 = 245;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
     pub const ENV_COUNT: u64 = 53;
@@ -12142,6 +12193,64 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn getppid() -> u64 {
         unsafe { invoke(GETPPID, 0, 0, 0) }
+    }
+
+    /// Send a signal to a process or process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn kill(target: u64, signal: u64) -> u64 {
+        unsafe { invoke(KILL, target, signal, 0) }
+    }
+
+    /// Read or replace the current process's signal disposition.
+    ///
+    /// # Safety
+    /// `handler`, when greater than one, must be a candidate userspace code
+    /// address. The kernel validates that it belongs to the current image.
+    pub unsafe fn sigaction(signal: u64, handler: u64) -> u64 {
+        unsafe { invoke(SIGACTION, signal, handler, 0) }
+    }
+
+    /// Return the current process group.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getpgrp() -> u64 {
+        unsafe { invoke(GETPGRP, 0, 0, 0) }
+    }
+
+    /// Set a process group using the kernel's zero-value conventions.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setpgid(pid: u64, group: u64) -> u64 {
+        unsafe { invoke(SETPGID, pid, group, 0) }
+    }
+
+    /// Return the session containing `pid`; zero selects the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn getsid(pid: u64) -> u64 {
+        unsafe { invoke(GETSID, pid, 0, 0) }
+    }
+
+    /// Create a new session and process group for the caller.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn setsid() -> u64 {
+        unsafe { invoke(SETSID, 0, 0, 0) }
+    }
+
+    /// Apply a bounded terminal control request.
+    ///
+    /// # Safety
+    /// `argument` must point to the readable or writable object required by
+    /// the request, and the call must originate from WovenHat userspace.
+    pub unsafe fn ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+        unsafe { invoke(IOCTL, fd, request, argument) }
     }
 
     /// # Safety
@@ -14242,6 +14351,25 @@ pub fn write(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// The kernel intentionally validates each individual user pointer and caps
+/// one syscall transfer. This helper makes that implementation detail
+/// invisible to callers while retaining progress and overflow checks.
+pub fn write_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write bytes to an opened filesystem descriptor. The kernel enforces the
 /// descriptor's owner and `FileWrite` capability before mutating storage.
 pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
@@ -14250,14 +14378,29 @@ pub fn write_file(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     check(result).map(|count| count as usize)
 }
 
+/// Write an arbitrarily sized file payload through chunked file-write calls.
+pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = (offset + CHUNK).min(bytes.len());
+        let written = write_file(descriptor, &bytes[offset..end])?;
+        if written == 0 || written > end - offset {
+            return Err(Error::Failed);
+        }
+        offset += written;
+    }
+    Ok(offset)
+}
+
 /// Write a string to standard output.
 pub fn print(text: &str) -> Result<usize, Error> {
-    write(syscall::STDOUT, text.as_bytes())
+    write_all(syscall::STDOUT, text.as_bytes())
 }
 
 /// Write a string to standard error.
 pub fn eprint(text: &str) -> Result<usize, Error> {
-    write(syscall::STDERR, text.as_bytes())
+    write_all(syscall::STDERR, text.as_bytes())
 }
 
 /// Read into a buffer, returning the count filled.
@@ -14265,6 +14408,29 @@ pub fn read(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
     // SAFETY: a slice is writable for its own length.
     let result = unsafe { syscall::read(descriptor, buffer.as_mut_ptr(), buffer.len()) };
     check(result).map(|count| count as usize)
+}
+
+/// Fill an arbitrarily sized buffer through the bounded syscall ABI.
+///
+/// A short read is returned as normal end-of-stream behavior. Every syscall
+/// still receives a separately validated slice, so this does not weaken the
+/// kernel's pointer or per-call memory checks.
+pub fn read_all(descriptor: u64, buffer: &mut [u8]) -> Result<usize, Error> {
+    const CHUNK: usize = 1024;
+    let mut offset = 0usize;
+    while offset < buffer.len() {
+        let end = (offset + CHUNK).min(buffer.len());
+        let requested = end - offset;
+        let read = read(descriptor, &mut buffer[offset..end])?;
+        if read == 0 || read > requested {
+            break;
+        }
+        offset += read;
+        if read < requested {
+            break;
+        }
+    }
+    Ok(offset)
 }
 
 /// This process's identifier.
@@ -14513,6 +14679,137 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
 pub fn wait(pid: process::Id) -> Result<u64, Error> {
     // SAFETY: waitpid takes no pointers.
     check(unsafe { syscall::waitpid(pid.0) })
+}
+
+/// Wait for any child process, reaping one exited child when available.
+/// Returns `Error::WouldBlock` while owned children remain live.
+pub fn wait_any_child() -> Result<u64, Error> {
+    // SAFETY: the reserved all-children selector takes no pointers.
+    check(unsafe { syscall::waitpid(u64::MAX) })
+}
+
+/// Send a bounded signal to a process or process group.
+pub fn kill(target: process::SignalTarget, signal: u8) -> Result<(), Error> {
+    if signal > 31 {
+        return Err(Error::Failed);
+    }
+    let encoded_target = match target {
+        process::SignalTarget::Process(id) => id.0,
+        process::SignalTarget::CurrentGroup => 0,
+        process::SignalTarget::Group(0) => return Err(Error::Failed),
+        process::SignalTarget::Group(group) => 0u64.wrapping_sub(group),
+    };
+    check(unsafe { syscall::kill(encoded_target, u64::from(signal)) }).map(|_| ())
+}
+
+/// Read or replace the current process's bounded signal disposition.
+pub fn signal_action(
+    signal: u8,
+    disposition: process::SignalDisposition,
+) -> Result<process::SignalDisposition, Error> {
+    let handler = match disposition {
+        process::SignalDisposition::Default => 0,
+        process::SignalDisposition::Ignore => 1,
+        process::SignalDisposition::Handler(address) if address > 1 => address,
+        process::SignalDisposition::Handler(_) => return Err(Error::Failed),
+    };
+    if signal == 0 || signal > 31 || signal == 9 {
+        return Err(Error::Failed);
+    }
+    let previous = check(unsafe { syscall::sigaction(u64::from(signal), handler) })?;
+    Ok(match previous {
+        0 => process::SignalDisposition::Default,
+        1 => process::SignalDisposition::Ignore,
+        address => process::SignalDisposition::Handler(address),
+    })
+}
+
+/// Return the current process group identifier.
+pub fn process_group() -> Result<u64, Error> {
+    check(unsafe { syscall::getpgrp() })
+}
+
+/// Set a process's bounded process group. `None` selects the caller, and
+/// `None` for `group` applies the kernel's default group convention.
+pub fn set_process_group(process_id: Option<process::Id>, group: Option<u64>) -> Result<(), Error> {
+    if group == Some(0) {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::setpgid(process_id.map_or(0, |id| id.0), group.unwrap_or(0)) })
+        .map(|_| ())
+}
+
+/// Return the caller's session identifier.
+pub fn session() -> Result<u64, Error> {
+    check(unsafe { syscall::getsid(0) })
+}
+
+/// Start a new terminal session and process group for the caller.
+pub fn create_session() -> Result<process::Id, Error> {
+    check(unsafe { syscall::setsid() }).map(process::Id)
+}
+
+/// Read the bounded terminal settings for standard input.
+pub fn terminal_attributes() -> Result<terminal::Termios, Error> {
+    let mut value = terminal::Termios::DEFAULT;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCGETS,
+            (&mut value as *mut terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| value)
+}
+
+/// Replace the bounded terminal settings for standard input.
+pub fn set_terminal_attributes(value: &terminal::Termios) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TCSETS,
+            (value as *const terminal::Termios).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+/// Read the foreground process group associated with standard input.
+pub fn foreground_process_group() -> Result<u64, Error> {
+    let mut group = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCGPGRP,
+            (&mut group as *mut u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| group)
+}
+
+/// Assign standard input to an existing process group.
+pub fn set_foreground_process_group(group: u64) -> Result<(), Error> {
+    check(unsafe {
+        syscall::ioctl(
+            syscall::STDIN,
+            terminal::TIOCSPGRP,
+            (&group as *const u64).cast::<u8>() as u64,
+        )
+    })
+    .map(|_| ())
+}
+
+/// Return the bounded PTY number for a master or slave descriptor.
+pub fn pty_number(descriptor: u64) -> Result<u64, Error> {
+    let mut number = 0u64;
+    check(unsafe {
+        syscall::ioctl(
+            descriptor,
+            terminal::TIOCGPTN,
+            (&mut number as *mut u64) as u64,
+        )
+    })?;
+    Ok(number)
 }
 
 /// Terminate this process. Never returns.

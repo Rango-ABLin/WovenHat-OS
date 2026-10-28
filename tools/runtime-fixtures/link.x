@@ -1,18 +1,13 @@
 ENTRY(_start)
-
-PHDRS
-{
-    text PT_LOAD FLAGS(5);
-    data PT_LOAD FLAGS(6);
+PHDRS {
+  text PT_LOAD FLAGS(5);
+  rodata PT_LOAD FLAGS(4);
+  data PT_LOAD FLAGS(6);
 }
-
-SECTIONS
-{
-    . = 0x400000000000;
-    .text : ALIGN(4096) { *(.text.start) *(.text .text.*) } :text
-    .rodata : ALIGN(4096) { *(.rodata .rodata.*) } :text
-    . = ALIGN(4096);
-    .data : ALIGN(4096) { *(.data .data.*) } :data
-    .bss : ALIGN(4096) { *(.bss .bss.*) *(COMMON) } :data
-    /DISCARD/ : { *(.eh_frame .eh_frame_hdr .comment .note .note.*) }
+SECTIONS {
+  . = 0x400000000000;
+  .text : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.text.start) *(.text .text.*) } :text
+  .rodata : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.rodata .rodata.*) } :rodata
+  .data : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.data .data.*) } :data
+  .bss : ALIGN(CONSTANT(MAXPAGESIZE)) { *(.bss .bss.*) *(COMMON) } :data
 }

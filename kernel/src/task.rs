@@ -64,6 +64,8 @@ static CURRENT_PROCESS_IDS: [AtomicU64; crate::smp::MAX_CPUS] =
 static PREEMPTION_REQUESTED: [AtomicBool; crate::smp::MAX_CPUS] =
     [const { AtomicBool::new(false) }; crate::smp::MAX_CPUS];
 static PREEMPTION_SWITCHES: AtomicU64 = AtomicU64::new(0);
+static CPU_RUNTIME_TICKS: [AtomicU64; crate::smp::MAX_CPUS] =
+    [const { AtomicU64::new(0) }; crate::smp::MAX_CPUS];
 static REBALANCE_PASSES: AtomicU64 = AtomicU64::new(0);
 static REBALANCE_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
 static USERSPACE_REBALANCE_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
@@ -208,6 +210,7 @@ impl Credentials {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
     Ready,
+    Stopped,
     Exited,
 }
 
@@ -237,6 +240,36 @@ impl TaskPriority {
     }
 }
 
+/// Scheduler class is the policy tier; priority remains the round-robin
+/// quantum within a class. Classes are deliberately fixed and allocation-free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TaskClass {
+    Background,
+    Service,
+    Interactive,
+    Realtime,
+}
+
+impl TaskClass {
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Background => 0,
+            Self::Service => 1,
+            Self::Interactive => 2,
+            Self::Realtime => 3,
+        }
+    }
+
+    const fn for_priority(priority: TaskPriority) -> Self {
+        match priority {
+            TaskPriority::LOW => Self::Background,
+            TaskPriority::NORMAL => Self::Service,
+            TaskPriority::HIGH => Self::Interactive,
+            _ => Self::Background,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TaskState {
     Empty,
@@ -248,6 +281,7 @@ enum TaskState {
     Switching,
     Blocked,
     Sleeping,
+    Stopped,
     Dead,
 }
 
@@ -260,6 +294,7 @@ impl TaskState {
             Self::Switching => "switching",
             Self::Blocked => "blocked",
             Self::Sleeping => "sleeping",
+            Self::Stopped => "stopped",
             Self::Dead => "dead",
         }
     }
@@ -321,6 +356,7 @@ struct TaskControlBlock {
     name: &'static str,
     state: TaskState,
     priority: TaskPriority,
+    class: TaskClass,
     context: Context,
     capabilities: CapabilitySet,
     /// Optional WovenGuard provenance for each currently delegated capability.
@@ -335,6 +371,12 @@ struct TaskControlBlock {
     fs_base: u64,
     address_space: Option<paging::AddressSpace>,
     remaining_ticks: u8,
+    runtime_ticks: u64,
+    dispatches: u64,
+    quota_ticks: u64,
+    quota_period: u64,
+    quota_used: u64,
+    quota_epoch: u64,
     cpu: usize,
     migratable: bool,
     /// True once the scheduler has selected this task for execution at least once.
@@ -352,6 +394,8 @@ struct TaskControlBlock {
     /// Switching tasks acknowledge this only at a scheduler-owned safe point;
     /// tasks that are not physically executing may be retired immediately.
     termination_signal: u8,
+    /// A SIGSTOP request awaiting scheduler hand-off for a running task.
+    stop_requested: bool,
     /// Exit status latched until a thread has completed its scheduler hand-off.
     thread_exit_code: i32,
     /// Latched scheduler event used by Stage 8.3 wait/wake handshakes.
@@ -378,6 +422,7 @@ impl TaskControlBlock {
             name: "",
             state: TaskState::Empty,
             priority: TaskPriority::NORMAL,
+            class: TaskClass::Realtime,
             context: Context { stack_pointer: 0 },
             capabilities: CapabilitySet::empty(),
             capability_lineages: [None; Capability::COUNT],
@@ -389,11 +434,18 @@ impl TaskControlBlock {
             fs_base: 0,
             address_space: None,
             remaining_ticks: 0,
+            runtime_ticks: 0,
+            dispatches: 0,
+            quota_ticks: 0,
+            quota_period: 0,
+            quota_used: 0,
+            quota_epoch: 0,
             cpu: 0,
             migratable: false,
             ever_dispatched: false,
             affinity_mask: 1,
             termination_signal: 0,
+            stop_requested: false,
             thread_exit_code: 0,
             event_pending: false,
             event_deadline: None,
@@ -415,6 +467,7 @@ impl TaskControlBlock {
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = priority;
+        self.class = TaskClass::for_priority(priority);
         self.entry = Some(entry);
         self.wake_tick = 0;
         self.capabilities = CapabilitySet::empty();
@@ -423,10 +476,17 @@ impl TaskControlBlock {
         self.fs_base = 0;
         self.address_space = paging::kernel_address_space();
         self.remaining_ticks = priority.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.migratable = false;
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -442,6 +502,9 @@ impl TaskControlBlock {
         // consumed by `ret`. Fresh tasks start with IF clear; task_bootstrap
         // completes the scheduler hand-off before deliberately enabling IRQs.
         // The reserved eight bytes preserve the SysV entry alignment.
+        // SAFETY: `cursor` walks down this task's own stack (TASK_STACKS[slot],
+        // exclusively owned during construction), staying within the mapped
+        // stack bounds, so each pushed word lands in valid, owned memory.
         unsafe {
             push_stack_value(&mut cursor, (task_bootstrap as fn() -> !) as usize as u64);
             push_stack_value(&mut cursor, 0x2);
@@ -468,12 +531,19 @@ impl TaskControlBlock {
         self.name = name;
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
+        self.class = TaskClass::Service;
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = Some(context);
         self.fs_base = context.fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.capabilities = CapabilitySet::userspace();
         self.capability_lineages = [None; Capability::COUNT];
         self.security_domain = wovenguard::SecurityDomain::User;
@@ -482,6 +552,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -494,6 +565,9 @@ impl TaskControlBlock {
         // it then installs the saved user context with iretq. The synthetic
         // scheduler frame starts with IF clear until task_bootstrap finalizes
         // the hand-off.
+        // SAFETY: `cursor` walks down this task's own stack (exclusively owned
+        // during construction) within its mapped bounds, so each pushed word
+        // lands in valid, owned memory.
         unsafe {
             push_stack_value(&mut cursor, (task_bootstrap as fn() -> !) as usize as u64);
             push_stack_value(&mut cursor, 0x2);
@@ -520,12 +594,19 @@ impl TaskControlBlock {
         self.name = "fork-child";
         self.state = TaskState::Ready;
         self.priority = TaskPriority::NORMAL;
+        self.class = TaskClass::Service;
         self.entry = None;
         self.wake_tick = 0;
         self.user_context = None;
         self.fs_base = fs_base;
         self.address_space = Some(address_space);
         self.remaining_ticks = TaskPriority::NORMAL.quantum();
+        self.runtime_ticks = 0;
+        self.dispatches = 0;
+        self.quota_ticks = 0;
+        self.quota_period = 0;
+        self.quota_used = 0;
+        self.quota_epoch = 0;
         self.capabilities = security.capabilities;
         self.capability_lineages = security.capability_lineages;
         self.security_domain = security.security_domain;
@@ -534,6 +615,7 @@ impl TaskControlBlock {
         self.ever_dispatched = false;
         self.affinity_mask = 1;
         self.termination_signal = 0;
+        self.stop_requested = false;
         self.thread_exit_code = 0;
         self.event_pending = false;
         self.event_deadline = None;
@@ -541,10 +623,15 @@ impl TaskControlBlock {
         let stack_start = TASK_STACKS[slot].0.get().cast::<u8>() as usize;
         let stack_top = (stack_start + TASK_STACK_SIZE) & !0xf;
         let frame_start = stack_top - core::mem::size_of::<crate::syscall::UserForkFrame>();
+        // SAFETY: `frame_start` is a `UserForkFrame`-sized, aligned region at the
+        // top of this child's own stack (exclusively owned during construction),
+        // so writing the child-return frame there is in bounds.
         unsafe {
             (frame_start as *mut crate::syscall::UserForkFrame).write(frame.child_return());
         }
         let mut cursor = frame_start;
+        // SAFETY: `cursor` walks down this child's own stack within its mapped
+        // bounds, so each pushed word lands in valid, owned memory.
         unsafe {
             // A fresh fork child must complete the scheduler hand-off before
             // returning to ring 3. Jumping directly to syscall_resume would
@@ -669,6 +756,8 @@ pub enum FdKind {
     },
     PipeRead(crate::pipe::PipeId),
     PipeWrite(crate::pipe::PipeId),
+    PtyMaster(crate::pty::PtyId),
+    PtySlave(crate::pty::PtyId),
 }
 
 #[derive(Clone, Copy)]
@@ -689,7 +778,9 @@ pub struct Process {
     cwd_len: usize,
     pending_signal: u64,
     process_group: u64,
+    session_id: u64,
     signal_actions: [u64; 32],
+    signal_restart: [bool; 32],
     environment: ProcessEnvironment,
 }
 
@@ -752,7 +843,7 @@ pub fn cancel_user_thread(raw_id: u64, exit_code: i32) -> Result<(), ThreadJoinE
         scheduler.tasks[slot].termination_signal = u8::MAX;
         reschedule_cpu = scheduler.tasks[slot].cpu;
         match scheduler.tasks[slot].state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 scheduler.tasks[slot].state = TaskState::Dead;
                 scheduler.tasks[slot].name = "thread-canceled";
                 scheduler.tasks[slot].termination_signal = 0;
@@ -801,6 +892,8 @@ pub enum FileError {
     BadDescriptor,
     AlreadyExists,
     NotEmpty,
+    BrokenPipe,
+    Interrupted,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -839,6 +932,24 @@ pub struct CpuRunLoad {
     pub running: usize,
 }
 
+/// Stable scheduler accounting copied while holding the scheduler lock.
+/// Runtime is counted in timer ticks and dispatches count Ready-to-Running
+/// selections; neither value is a reservation or a billing guarantee.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TaskAccounting {
+    pub priority: u8,
+    pub class: TaskClass,
+    pub cpu: usize,
+    pub affinity_mask: usize,
+    pub runtime_ticks: u64,
+    pub dispatches: u64,
+    pub quota_ticks: u64,
+    pub quota_period: u64,
+    pub quota_used: u64,
+    pub throttled: bool,
+}
+
 impl CpuRunLoad {
     pub const fn runnable(self) -> usize {
         self.ready + self.running
@@ -863,6 +974,7 @@ pub enum SpawnError {
     Full,
     OfflineCpu,
     InvalidAffinity,
+    InvalidQuota,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1000,7 +1112,7 @@ impl Scheduler {
         self.reap_dead();
         self.validate_affinity_invariants();
 
-        let best_priority = self
+        let best_policy = self
             .tasks
             .iter()
             .filter(|task| {
@@ -1008,16 +1120,17 @@ impl Scheduler {
                     && task.cpu == crate::smp::cpu_index()
                     && (task.affinity_mask & cpu_bit(crate::smp::cpu_index())) != 0
             })
-            .map(|task| task.priority)
+            .map(|task| (task.class.rank(), task.priority))
             .max()?;
-        let priority_index = best_priority.index();
+        let priority_index = best_policy.1.index();
         let start = self.last_selected[crate::smp::cpu_index()][priority_index];
         let next_slot = (1..=MAX_TASKS)
             .map(|offset| (start + offset) % MAX_TASKS)
             .find(|slot| {
                 let task = &self.tasks[*slot];
                 task.state == TaskState::Ready
-                    && task.priority == best_priority
+                    && task.class.rank() == best_policy.0
+                    && task.priority == best_policy.1
                     && task.cpu == crate::smp::cpu_index()
                     && (task.affinity_mask & cpu_bit(crate::smp::cpu_index())) != 0
             })?;
@@ -1059,6 +1172,7 @@ impl Scheduler {
         // therefore never mistake a task that has already been dispatched for
         // a fresh pre-dispatch Ring-3 placement candidate.
         self.tasks[next_slot].ever_dispatched = true;
+        self.tasks[next_slot].dispatches = self.tasks[next_slot].dispatches.saturating_add(1);
         self.tasks[next_slot].state = TaskState::Running;
         self.tasks[next_slot].remaining_ticks = self.tasks[next_slot].priority.quantum();
         self.current_slot[crate::smp::cpu_index()] = next_slot;
@@ -1137,6 +1251,9 @@ impl Scheduler {
             // recycled like the process leader, even if it used to be a
             // scheduler-backed thread.
             self.tasks[outgoing].thread_id = None;
+        } else if self.tasks[outgoing].stop_requested {
+            self.tasks[outgoing].stop_requested = false;
+            self.tasks[outgoing].state = TaskState::Stopped;
         } else {
             self.tasks[outgoing].state = TaskState::Ready;
         }
@@ -1156,7 +1273,7 @@ impl Scheduler {
         self.tasks[slot].termination_signal = signal;
 
         match self.tasks[slot].state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 self.tasks[slot].state = TaskState::Dead;
                 self.tasks[slot].name = "terminated";
                 self.tasks[slot].termination_signal = 0;
@@ -1174,6 +1291,41 @@ impl Scheduler {
             TaskState::Empty | TaskState::Dead => unreachable!(),
         }
         Some(cpu)
+    }
+
+    fn stop_process(&mut self, process_id: ProcessId) -> usize {
+        let mut reschedule_mask = 0;
+        for task in &mut self.tasks {
+            if task.process_id != process_id {
+                continue;
+            }
+            match task.state {
+                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
+                    task.state = TaskState::Stopped;
+                }
+                TaskState::Running | TaskState::Switching => {
+                    task.stop_requested = true;
+                    reschedule_mask |= cpu_bit(task.cpu);
+                }
+                TaskState::Empty | TaskState::Dead => {}
+            }
+        }
+        reschedule_mask
+    }
+
+    fn continue_process(&mut self, process_id: ProcessId) -> usize {
+        let mut reschedule_mask = 0;
+        for task in &mut self.tasks {
+            if task.process_id != process_id {
+                continue;
+            }
+            task.stop_requested = false;
+            if task.state == TaskState::Stopped {
+                task.state = TaskState::Ready;
+                reschedule_mask |= cpu_bit(task.cpu);
+            }
+        }
+        reschedule_mask
     }
 
     fn reap_dead(&mut self) {
@@ -1369,6 +1521,11 @@ impl Scheduler {
     }
 }
 
+/// # Safety
+/// Must be called at a scheduler decision point with interrupts disabled and
+/// the scheduler lock released. `context_switch` must describe the chosen
+/// incoming task: a valid privilege stack, FS base, address space and a saved
+/// `next_rsp` built by task construction or a prior switch.
 unsafe fn switch_stacks(context_switch: ContextSwitch) {
     gdt::set_privilege_stack(context_switch.next_privilege_stack);
     // FS is task state, just like the address space.  The scheduler lock is
@@ -1377,6 +1534,9 @@ unsafe fn switch_stacks(context_switch: ContextSwitch) {
         context_switch.next_fs_base,
     ));
     paging::switch_to(context_switch.next_address_space);
+    // SAFETY: `previous_rsp`/`next_rsp` are the outgoing and incoming task
+    // kernel stacks; the asm routine saves callee-saved state to the former and
+    // restores it from the latter, both valid per this fn's contract.
     unsafe {
         wovenhat_context_switch(context_switch.previous_rsp, context_switch.next_rsp);
     }
@@ -1416,13 +1576,17 @@ fn create_process(
     cwd[0] = b'/';
     let mut cwd_len = 1usize;
     let mut inherited_group = None;
+    let mut inherited_session = None;
     let mut inherited_environment = ProcessEnvironment::defaults();
+    let fallback_group = current_process_group();
+    let fallback_session = current_session_id();
     {
         let processes = process_table_lock();
         if let Some(parent_proc) = processes.iter().flatten().find(|p| p.id == parent) {
             cwd = parent_proc.cwd;
             cwd_len = parent_proc.cwd_len;
             inherited_group = Some(parent_proc.process_group);
+            inherited_session = Some(parent_proc.session_id);
             inherited_environment = parent_proc.environment;
         }
     }
@@ -1441,8 +1605,10 @@ fn create_process(
         cwd,
         cwd_len,
         pending_signal: 0,
-        process_group: inherited_group.unwrap_or(id.as_u64()),
+        process_group: inherited_group.unwrap_or(fallback_group),
+        session_id: inherited_session.unwrap_or(fallback_session),
         signal_actions: [0; 32],
+        signal_restart: [false; 32],
         environment: inherited_environment,
     }
 }
@@ -1478,6 +1644,20 @@ fn clone_file_table(
                 })?;
                 child_files[index] = Some(FdKind::PipeWrite(*id));
             }
+            Some(FdKind::PtyMaster(id)) => {
+                crate::pty::clone_master(*id).map_err(|_| {
+                    release_file_table(&mut child_files);
+                    ProcessError::Full
+                })?;
+                child_files[index] = Some(FdKind::PtyMaster(*id));
+            }
+            Some(FdKind::PtySlave(id)) => {
+                crate::pty::clone_slave(*id).map_err(|_| {
+                    release_file_table(&mut child_files);
+                    ProcessError::Full
+                })?;
+                child_files[index] = Some(FdKind::PtySlave(*id));
+            }
             None => {}
         }
     }
@@ -1491,6 +1671,8 @@ fn release_fd(fd: FdKind) {
         }
         FdKind::PipeRead(id) => crate::pipe::close_reader(id),
         FdKind::PipeWrite(id) => crate::pipe::close_writer(id),
+        FdKind::PtyMaster(id) => crate::pty::close_master(id),
+        FdKind::PtySlave(id) => crate::pty::close_slave(id),
     }
 }
 
@@ -1508,6 +1690,12 @@ fn clone_fd(fd: FdKind) -> Result<FdKind, FileError> {
             crate::pipe::clone_writer(id).map_err(|_| FileError::TooManyFiles)?;
             Ok(FdKind::PipeWrite(id))
         }
+        FdKind::PtyMaster(id) => Ok(FdKind::PtyMaster(
+            crate::pty::clone_master(id).map_err(|_| FileError::TooManyFiles)?,
+        )),
+        FdKind::PtySlave(id) => Ok(FdKind::PtySlave(
+            crate::pty::clone_slave(id).map_err(|_| FileError::TooManyFiles)?,
+        )),
     }
 }
 
@@ -1660,6 +1848,9 @@ pub fn begin_user_destructor_exit(
     if frame.is_null() {
         return false;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current kernel
+    // stack (checked non-null above); this task's syscall is the only code
+    // touching it, so a unique `&mut` is sound.
     let frame = unsafe { &mut *(frame as *mut crate::syscall::UserForkFrame) };
     let Some(retry_rip) = frame.rip.checked_sub(2) else {
         return false;
@@ -1743,6 +1934,8 @@ pub fn resolve_lazy_binding(frame: *const crate::syscall::UserForkFrame) -> u64 
     if frame.is_null() {
         return u64::MAX;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current kernel
+    // stack (checked non-null above), valid for reading the saved R11.
     let slot = unsafe { (*frame).r11 };
     let Some((address_space, target)) = ({
         let processes = process_table_lock();
@@ -2053,6 +2246,9 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
         scheduler.prepare_switch()
     };
     if let Some(context_switch) = context_switch {
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
     }
     loop {
@@ -2069,6 +2265,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage10-4-test",
     feature = "stage10-9-test",
     feature = "stage18-2-test",
+    feature = "stage08-graphics-test",
     feature = "stage19-2-test",
     feature = "stage19-4-test",
     feature = "stage19-5-test",
@@ -2077,6 +2274,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test",
     feature = "stage19-13-test",
     feature = "stage19-14-test",
@@ -2095,6 +2293,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage20-12-test",
     feature = "stage13-15-test",
     feature = "stage20-13-test",
+    feature = "stage20-19-test",
     feature = "stage20-14b-test",
     feature = "stage20-15-test",
     feature = "stage20-16-test",
@@ -2442,6 +2641,192 @@ pub fn process_exited(id: ProcessId) -> bool {
     exited && !process_has_live_tasks(id.as_u64())
 }
 
+/// S03 bounded process-lifecycle acceptance: the real Ring-3 stub exercises
+/// fork/child ownership/wait/reap, then a second live process is moved into a
+/// dedicated group and terminated through the process-group signal path.
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn s03_process_lifecycle_self_test() -> bool {
+    if !crate::pty::self_test() {
+        return false;
+    }
+    let zombie_baseline = zombie_count();
+    let Some(program) = userspace::create_s03_fork_wait_process() else {
+        return false;
+    };
+    let Ok((child, _)) = spawn_user_process("s03-fork-wait", program) else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    let first_status = wait_process(child.as_u64());
+    if first_status != Ok(0) {
+        return false;
+    }
+    // The exact-child reap must remove the zombie and a second wait must not
+    // observe a phantom child.
+    let second_wait = wait_process(child.as_u64());
+    let reap_clean = second_wait == Err(WaitError::NoSuchChild)
+        && zombie_count() == zombie_baseline;
+    crate::serial::write_line(format_args!("[S03.WAIT] exact-reap-clean={}", reap_clean));
+    if !reap_clean {
+        return false;
+    }
+
+    let Some(group_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((group_child, _)) = spawn_user_process("s03-process-group", group_program) else {
+        return false;
+    };
+    let group_set = set_process_group(group_child.as_u64(), group_child.as_u64());
+    if group_set.is_err() {
+        return false;
+    }
+    let group_kill = kill_process(0u64.wrapping_sub(group_child.as_u64()), 15);
+    if group_kill.is_err() {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(group_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    let status = wait_process(group_child.as_u64());
+    if status != Ok(143) {
+        return false;
+    }
+
+    let Some(quit_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((quit_child, _)) = spawn_user_process("s03-default-quit", quit_program) else {
+        return false;
+    };
+    if set_process_group(quit_child.as_u64(), quit_child.as_u64()).is_err()
+        || kill_process(0u64.wrapping_sub(quit_child.as_u64()), 3).is_err()
+    {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(quit_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(quit_child.as_u64()) != Ok(131) {
+        return false;
+    }
+
+    let Some(stop_program) = userspace::create_s03_group_process() else {
+        return false;
+    };
+    let Ok((stop_child, _)) = spawn_user_process("s03-stop-continue", stop_program) else {
+        return false;
+    };
+    if set_process_group(stop_child.as_u64(), stop_child.as_u64()).is_err()
+        || kill_process(0u64.wrapping_sub(stop_child.as_u64()), 19).is_err()
+    {
+        return false;
+    }
+    if wait_process(stop_child.as_u64()) != Err(WaitError::StillRunning) {
+        return false;
+    }
+    if kill_process(0u64.wrapping_sub(stop_child.as_u64()), 18).is_err()
+        || kill_process(0u64.wrapping_sub(stop_child.as_u64()), 15).is_err()
+    {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(stop_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(stop_child.as_u64()) != Ok(143) {
+        return false;
+    }
+
+    #[cfg(feature = "s03-keyboard-injection-test")]
+    {
+        let Some(keyboard_program) = userspace::create_s03_vintr_process() else {
+            return false;
+        };
+        let Ok((keyboard_child, _)) = spawn_user_process("s03-keyboard", keyboard_program)
+        else {
+            return false;
+        };
+        if set_process_group(keyboard_child.as_u64(), keyboard_child.as_u64()).is_err() {
+            return false;
+        }
+        crate::terminal::set_foreground_group(keyboard_child.as_u64());
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] waiting for QEMU Ctrl-C injection"
+        ));
+        let deadline = timer::ticks().wrapping_add(3000);
+        while !process_exited(keyboard_child) {
+            if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+                return false;
+            }
+            yield_now();
+        }
+        let keyboard_status = wait_process(keyboard_child.as_u64());
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] status={}",
+            keyboard_status.unwrap_or(-999)
+        ));
+        crate::terminal::release_foreground(keyboard_child.as_u64());
+        if keyboard_status != Ok(130) {
+            return false;
+        }
+        crate::serial::write_line(format_args!(
+            "[S03.KEYBOARD] USB HID Ctrl-C delivered SIGINT to foreground group: PASSED"
+        ));
+    }
+
+    let Some(session_program) = userspace::create_s03_session_process() else {
+        return false;
+    };
+    let Ok((session_child, _)) = spawn_user_process("s03-session", session_program) else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(session_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    let session_status = wait_process(session_child.as_u64());
+    if session_status != Ok(42) {
+        return false;
+    }
+
+    let Some(handler_program) = userspace::create_s03_handler_process() else {
+        return false;
+    };
+    let Ok((handler_child, _)) = spawn_user_process("s03-signal-handler", handler_program)
+    else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(handler_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    wait_process(handler_child.as_u64()) == Ok(42)
+}
+
 /// Whether the process named by the raw id `id` is in the table and has not
 /// exited. For a caller that only has the id as `u64` (e.g. across a module
 /// boundary that erases [`ProcessId`], such as [`crate::session::start`]'s
@@ -2471,6 +2856,7 @@ pub fn task_live(id: TaskId) -> bool {
     feature = "stage19-8-test",
     feature = "stage19-9-test",
     feature = "stage19-11-test",
+    feature = "stage09-compositor-test",
     feature = "stage19-12-test"
 ))]
 pub fn process_task_blocked(id: ProcessId) -> bool {
@@ -2709,6 +3095,9 @@ fn block_current_and_wake_pager_from_exception(
         // The saved context includes the CPU exception frame. Resuming this
         // task returns here, consumes its pager completion, returns from the
         // page-fault handler, and hardware retries the original user RIP.
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
     }
 }
@@ -2756,6 +3145,9 @@ fn pager_wait_for_request() -> PagerWork {
 
         let context_switch = switch
             .expect("blocked pager has no runnable replacement; per-CPU idle fallback is missing");
+        // SAFETY: reached at a scheduler decision point with interrupts
+        // disabled and the scheduler lock released; `context_switch` names the
+        // chosen incoming task (see `switch_stacks`).
         unsafe { switch_stacks(context_switch) };
 
         if interrupts_were_enabled {
@@ -2867,6 +3259,44 @@ pub fn evict_one_mapped_file_page() -> bool {
         }
     }
     false
+}
+
+/// Select a deterministic OOM victim without terminating it while scheduler
+/// metadata is locked. Background tasks are preferred, then the task with the
+/// largest mapped-process footprint; task id breaks ties. The caller owns the
+/// subsequent signal/teardown operation.
+pub fn select_oom_victim() -> Option<u64> {
+    let current = current_task_id();
+    let scheduler = SCHEDULER.lock();
+    let mut candidates = [crate::memory_pressure::Candidate::EMPTY; MAX_TASKS];
+    let mut count = 0;
+    for task in scheduler.tasks.iter().filter(|task| {
+        !matches!(task.state, TaskState::Empty | TaskState::Dead)
+            && task.process_id.as_u64() != 0
+            && Some(task.id) != Some(current)
+    }) {
+        let mapped_pages = {
+            let mapped_pages = PROCESS_TABLE
+                .lock()
+                .iter()
+                .flatten()
+                .find(|process| process.id == task.process_id)
+                .map(|process| process.memory_mappings.iter().flatten().map(|m| m.size / 4096).sum::<usize>())
+                .unwrap_or(0);
+            mapped_pages
+        };
+        if count == candidates.len() {
+            break;
+        }
+        candidates[count] = crate::memory_pressure::Candidate {
+            process_id: task.process_id.as_u64(),
+            task_id: task.id.as_u64(),
+            class_rank: task.class.rank(),
+            mapped_pages,
+        };
+        count += 1;
+    }
+    crate::memory_pressure::choose_victim(&candidates[..count]).map(|candidate| candidate.process_id)
 }
 
 /// Attempt to resolve a user write fault via copy-on-write.
@@ -3147,7 +3577,9 @@ pub fn fork_current(frame: crate::syscall::UserForkFrame) -> Result<ProcessId, P
         cwd_len: parent.cwd_len,
         pending_signal: 0,
         process_group: parent.process_group,
+        session_id: parent.session_id,
         signal_actions: parent.signal_actions,
+        signal_restart: parent.signal_restart,
         environment: parent.environment,
     });
     Ok(child_id)
@@ -3264,7 +3696,10 @@ pub fn exit_current_process(exit_code: i32) -> ! {
                 continue;
             }
             match sibling_state {
-                TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+                TaskState::Ready
+                | TaskState::Blocked
+                | TaskState::Sleeping
+                | TaskState::Stopped => {
                     if let Some(thread_id) = sibling_thread {
                         if retired_thread_count < retired_threads.len() {
                             retired_threads[retired_thread_count] = Some(thread_id);
@@ -3329,6 +3764,8 @@ pub fn exit_current_process(exit_code: i32) -> ! {
         release_task_runtime_resources(sibling);
     }
     release_file_table(&mut detached_files);
+    notify_orphaned_groups(exiting_pid);
+    reparent_children(exiting_pid);
     if let Some(thread_id) = exiting_thread {
         let _ = crate::thread::terminate(thread_id, exit_code);
         let _ = crate::thread::take_waiter(thread_id);
@@ -3354,6 +3791,9 @@ pub fn exit_current_process(exit_code: i32) -> ! {
     if let Some(context_switch) = context_switch_result {
         if let Some(context_switch) = context_switch {
             paging::switch_to(context_switch.next_address_space);
+            // SAFETY: reached at a scheduler decision point with interrupts
+            // disabled and the scheduler lock released; `context_switch` names the
+            // chosen incoming task (see `switch_stacks`).
             unsafe { switch_stacks(context_switch) };
         }
     } else {
@@ -3368,23 +3808,87 @@ pub fn exit_current_process(exit_code: i32) -> ! {
 }
 
 fn process_has_live_tasks(process_id: u64) -> bool {
-    SCHEDULER.lock().process_has_live_tasks(process_id)
+    let scheduler = SCHEDULER.lock();
+    scheduler.vm_handoffs.retains(process_id) || scheduler.tasks.iter().any(|task| {
+        task.process_id.as_u64() == process_id
+            && matches!(
+                task.state,
+                TaskState::Ready
+                    | TaskState::Running
+                    | TaskState::Switching
+                    | TaskState::Blocked
+                    | TaskState::Sleeping
+                    | TaskState::Stopped
+            )
+    })
 }
 
-impl Scheduler {
-    fn process_has_live_tasks(&self, process_id: u64) -> bool {
-        self.vm_handoffs.retains(process_id)
-            || self.tasks.iter().any(|task| {
-                task.process_id.as_u64() == process_id
-                    && matches!(
-                        task.state,
-                        TaskState::Ready
-                            | TaskState::Running
-                            | TaskState::Switching
-                            | TaskState::Blocked
-                            | TaskState::Sleeping
-                    )
-            })
+/// Apply the POSIX orphaned-group transition to stopped descendants of an
+/// exiting parent. The scan is bounded by the process table and the signals
+/// are published only after the table lock is released.
+fn notify_orphaned_groups(exiting_pid: u64) {
+    let mut candidates = [0u64; MAX_PROCESSES];
+    let mut candidate_count = 0usize;
+    let mut notify = [0u64; MAX_PROCESSES];
+    let mut notify_count = 0usize;
+    {
+        let processes = process_table_lock();
+        for process in processes.iter().flatten() {
+            if process.parent.as_u64() != exiting_pid
+                || process.state == ProcessState::Exited
+                || process.process_group == 0
+            {
+                continue;
+            }
+            if !candidates[..candidate_count].contains(&process.process_group) {
+                candidates[candidate_count] = process.process_group;
+                candidate_count += 1;
+            }
+        }
+        for &group in &candidates[..candidate_count] {
+            let Some(session) = processes
+                .iter()
+                .flatten()
+                .find(|process| {
+                    process.process_group == group && process.state != ProcessState::Exited
+                })
+                .map(|process| process.session_id)
+            else {
+                continue;
+            };
+            let orphaned = !processes.iter().flatten().any(|member| {
+                member.process_group == group
+                    && member.session_id == session
+                    && member.state != ProcessState::Exited
+                    && processes.iter().flatten().any(|parent| {
+                        parent.id == member.parent
+                            && parent.state != ProcessState::Exited
+                            && parent.session_id == session
+                            && parent.process_group != group
+                    })
+            });
+            let stopped = processes.iter().flatten().any(|process| {
+                process.process_group == group && process.state == ProcessState::Stopped
+            });
+            if orphaned && stopped {
+                notify[notify_count] = group;
+                notify_count += 1;
+            }
+        }
+    }
+    for &group in &notify[..notify_count] {
+        let _ = signal_processes(0u64.wrapping_sub(group), 1, SignalSender::Kernel);
+        let _ = signal_processes(0u64.wrapping_sub(group), 18, SignalSender::Kernel);
+    }
+}
+
+fn reparent_children(exiting_pid: u64) {
+    let mut processes = process_table_lock();
+    for process in processes.iter_mut().flatten() {
+        if process.parent.as_u64() == exiting_pid && process.state != ProcessState::Exited {
+            // PID 0 is the bounded kernel/init surrogate for this slice.
+            process.parent = ProcessId(0);
+        }
     }
 }
 
@@ -3464,6 +3968,34 @@ pub fn wait_process(child_id: u64) -> Result<i32, WaitError> {
     Ok(exit_code)
 }
 
+pub fn wait_any_process() -> Result<i32, WaitError> {
+    let parent = ProcessId(current_process_id());
+    let (exited_child, has_child) = {
+        let processes = process_table_lock();
+        let mut exited = None;
+        let mut child = false;
+        for process in processes.iter().flatten() {
+            if process.parent != parent {
+                continue;
+            }
+            child = true;
+            if process.state == ProcessState::Exited {
+                exited = Some(process.id.as_u64());
+                break;
+            }
+        }
+        (exited, child)
+    };
+    if let Some(child) = exited_child {
+        return wait_process(child);
+    }
+    if has_child {
+        Err(WaitError::StillRunning)
+    } else {
+        Err(WaitError::NoSuchChild)
+    }
+}
+
 pub fn zombie_count() -> usize {
     process_table_lock()
         .iter()
@@ -3494,6 +4026,7 @@ pub fn process_info(index: usize) -> Option<ProcessInfo> {
     let process = processes.iter().flatten().nth(index)?;
     let state = match process.state {
         ProcessState::Ready => 1,
+        ProcessState::Stopped => 2,
         ProcessState::Exited => 4,
     };
     Some(ProcessInfo {
@@ -3787,15 +4320,61 @@ pub fn anonymous_mapping_count() -> usize {
         .map(|process| process.memory_mappings.iter().flatten().count())
         .sum()
 }
+
+fn install_current_fd(fd: FdKind) -> Result<u64, FileError> {
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    let process = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .ok_or(FileError::NoProcess)?;
+    let descriptor = (3..MAX_FILE_DESCRIPTORS)
+        .find(|descriptor| process.files[*descriptor].is_none())
+        .ok_or(FileError::TooManyFiles)?;
+    process.files[descriptor] = Some(fd);
+    Ok(descriptor as u64)
+}
+
 pub fn open_current(path: &str) -> Result<u64, FileError> {
-    if !current_has(Capability::FileRead) {
+    open_current_with_access(path, 1, true)
+}
+
+fn open_current_with_access(path: &str, access: u64, legacy_create: bool) -> Result<u64, FileError> {
+    if path == "/dev/ptmx" {
+        if !current_has(Capability::Console) {
+            return Err(FileError::PermissionDenied);
+        }
+        let id = crate::pty::create().map_err(|_| FileError::TooManyFiles)?;
+        return install_current_fd(FdKind::PtyMaster(id)).inspect_err(|_| {
+            crate::pty::close_master(id);
+        });
+    }
+    if let Some(index) = path.strip_prefix("/dev/pts/").and_then(|value| value.parse().ok()) {
+        if !current_has(Capability::Console) {
+            return Err(FileError::PermissionDenied);
+        }
+        let id = crate::pty::open_slave(index).map_err(|_| FileError::NotFound)?;
+        return install_current_fd(FdKind::PtySlave(id)).inspect_err(|_| {
+            crate::pty::close_slave(id);
+        });
+    }
+    let read = access & 1 != 0;
+    let write = access & 2 != 0;
+    let create = access & 4 != 0;
+    if access & !7 != 0 || !read && !write || create && !write
+        || (read && !current_has(Capability::FileRead))
+        || (write && !current_has(Capability::FileWrite))
+    {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
     if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
-    if !authorize_current_file_path(&path, false) {
+    if (read && !authorize_current_file_path(&path, false))
+        || (write && !authorize_current_file_path(&path, true))
+    {
         return Err(FileError::PermissionDenied);
     }
     if touches_mnt(&path) {
@@ -3811,8 +4390,11 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
     let file = match vfs::open(&path) {
         Ok(id) => id,
         Err(_) => {
-            // POSIX-ish O_CREAT for missing files when writer-capable.
-            if !current_has(Capability::FileWrite) || !authorize_current_file_path(&path, true) {
+            // Legacy Open retains its established implicit-create behavior.
+            if !(legacy_create || create)
+                || !current_has(Capability::FileWrite)
+                || !authorize_current_file_path(&path, true)
+            {
                 return Err(FileError::NotFound);
             }
             if path.starts_with("/wfs/") {
@@ -3844,6 +4426,11 @@ pub fn open_current(path: &str) -> Result<u64, FileError> {
     });
     Ok(descriptor as u64)
 }
+
+/// Checked access-mode entry for the versioned OpenAccess syscall.
+pub fn open_current_access(path: &str, access: u64) -> Result<u64, FileError> {
+    open_current_with_access(path, access, false)
+}
 pub fn descriptor_is_open(descriptor: u64) -> bool {
     let Ok(descriptor) = usize::try_from(descriptor) else {
         return false;
@@ -3855,6 +4442,20 @@ pub fn descriptor_is_open(descriptor: u64) -> bool {
         .find(|process| process.id.as_u64() == process_id)
         .and_then(|process| process.files.get(descriptor))
         .is_some_and(Option::is_some)
+}
+
+pub fn pty_number_current(descriptor: u64) -> Option<u64> {
+    let descriptor = usize::try_from(descriptor).ok()?;
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .and_then(|process| process.files.get(descriptor).copied().flatten())
+        .and_then(|fd| match fd {
+            FdKind::PtyMaster(id) | FdKind::PtySlave(id) => Some(id.index as u64),
+            _ => None,
+        })
 }
 
 /// Pin the exact open-file description behind a userspace descriptor for an
@@ -3943,8 +4544,13 @@ pub fn read_current(descriptor: u64, buffer: &mut [u8]) -> Result<usize, FileErr
             }
             vfs::read(id, buffer).map_err(|_| FileError::BadDescriptor)
         }
-        FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PipeRead(id) => crate::pipe::read(id, buffer).map_err(|error| match error {
+            crate::pipe::Error::Interrupted => FileError::Interrupted,
+            crate::pipe::Error::Full | crate::pipe::Error::Invalid | crate::pipe::Error::Closed => FileError::BadDescriptor,
+        }),
         FdKind::PipeWrite(_) => Err(FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => crate::pty::read_master(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtySlave(id) => crate::pty::read_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
     }
 }
 
@@ -4004,10 +4610,14 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
             }
             written
         }
-        FdKind::PipeWrite(id) => {
-            crate::pipe::write(id, buffer).map_err(|_| FileError::BadDescriptor)
-        }
+        FdKind::PipeWrite(id) => crate::pipe::write(id, buffer).map_err(|error| match error {
+            crate::pipe::Error::Closed => FileError::BrokenPipe,
+            crate::pipe::Error::Interrupted => FileError::Interrupted,
+            crate::pipe::Error::Full | crate::pipe::Error::Invalid => FileError::BadDescriptor,
+        }),
         FdKind::PipeRead(_) => Err(FileError::BadDescriptor),
+        FdKind::PtyMaster(id) => crate::pty::write_master(id, buffer).map_err(|_| FileError::BadDescriptor),
+        FdKind::PtySlave(id) => crate::pty::write_slave(id, buffer).map_err(|_| FileError::BadDescriptor),
     }
 }
 
@@ -4404,6 +5014,9 @@ pub fn prepare_user_context_with_tls(
 
 fn enter_user_context(context: UserTaskContext) -> ! {
     x86_64::registers::model_specific::FsBase::write(x86_64::VirtAddr::new(context.fs_base));
+    // SAFETY: `context` was built by `prepare_user_context` with a validated
+    // user entry, stack top and ring-3 segment selectors; the asm routine
+    // performs the `iretq` into ring 3 and never returns.
     unsafe {
         wovenhat_enter_user_mode(
             context.entry,
@@ -4423,6 +5036,32 @@ pub fn spawn_with_priority(
     entry: fn() -> !,
     priority: TaskPriority,
 ) -> Result<TaskId, SpawnError> {
+    spawn_with_policy(
+        name,
+        entry,
+        priority,
+        TaskClass::for_priority(priority),
+        0,
+        0,
+    )
+}
+
+/// Spawn a kernel task with a fixed scheduler class and optional runtime
+/// quota. Quota policy is installed while the new task is still Ready, so it
+/// cannot execute outside the policy transaction.
+pub fn spawn_with_policy(
+    name: &'static str,
+    entry: fn() -> !,
+    priority: TaskPriority,
+    class: TaskClass,
+    quota_ticks: u64,
+    period_ticks: u64,
+) -> Result<TaskId, SpawnError> {
+    if quota_ticks != 0
+        && (period_ticks < 2 || quota_ticks > period_ticks || period_ticks > 1_000_000)
+    {
+        return Err(SpawnError::InvalidQuota);
+    }
     let mut scheduler = SCHEDULER.lock();
     assert!(scheduler.task_count != 0, "scheduler not initialized");
 
@@ -4434,6 +5073,10 @@ pub fn spawn_with_priority(
 
     let id = TaskId(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed));
     scheduler.tasks[slot].initialize(slot, id, name, entry, priority);
+    scheduler.tasks[slot].class = class;
+    scheduler.tasks[slot].quota_ticks = quota_ticks;
+    scheduler.tasks[slot].quota_period = if quota_ticks == 0 { 0 } else { period_ticks };
+    scheduler.tasks[slot].quota_epoch = timer::ticks();
     scheduler.task_count += 1;
     Ok(id)
 }
@@ -4561,6 +5204,22 @@ pub fn tick() {
     let task = &mut scheduler.tasks[slot];
     if task.state != TaskState::Running {
         return;
+    }
+    task.runtime_ticks = task.runtime_ticks.saturating_add(1);
+    CPU_RUNTIME_TICKS[crate::smp::cpu_index()].fetch_add(1, Ordering::Relaxed);
+    let now = timer::ticks();
+    if task.quota_ticks != 0 {
+        if now.wrapping_sub(task.quota_epoch) >= task.quota_period {
+            task.quota_epoch = now;
+            task.quota_used = 0;
+        }
+        task.quota_used = task.quota_used.saturating_add(1);
+        if task.quota_used >= task.quota_ticks {
+            task.state = TaskState::Sleeping;
+            task.wake_tick = task.quota_epoch.saturating_add(task.quota_period);
+            PREEMPTION_REQUESTED[crate::smp::cpu_index()].store(true, Ordering::Release);
+            return;
+        }
     }
     if task.remaining_ticks > 1 {
         task.remaining_ticks -= 1;
@@ -5789,7 +6448,7 @@ fn complete_process_termination(
             continue;
         }
         match task.state {
-            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping => {
+            TaskState::Ready | TaskState::Blocked | TaskState::Sleeping | TaskState::Stopped => {
                 task.state = TaskState::Dead;
                 task.termination_signal = 0;
                 task.thread_id = None;
@@ -5898,8 +6557,46 @@ impl SignalSender {
     }
 }
 
+fn default_terminates(signal: u64) -> bool {
+    matches!(
+        signal,
+        1 | 2 | 3 | 4 | 6 | 8 | 9 | 11 | 12 | 13 | 14 | 15
+    )
+}
+
 pub fn kill_process(pid: u64, sig: u64) -> Result<(), FileError> {
     signal_processes(pid, sig, SignalSender::Kernel)
+}
+
+/// Queue a standard signal for the calling process through the existing
+/// disposition and scheduler-owned termination path. Callers hold no locks.
+pub fn raise_current_signal(sig: u64) -> Result<(), FileError> {
+    signal_processes(current_process_id(), sig, SignalSender::Kernel)
+}
+
+/// Whether a caught signal is pending for this task's process. It is not
+/// consumed here; syscall return retains ownership of handler delivery.
+pub fn current_has_caught_signal() -> bool {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| {
+            let sig = process.pending_signal;
+            sig > 0 && sig <= 31 && process.signal_actions[sig as usize] > 1
+        })
+}
+
+/// Whether the pending caught signal requests the supported restart policy.
+pub fn current_caught_signal_restarts() -> bool {
+    let process_id = current_process_id();
+    process_table_lock().iter().flatten().find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| {
+            let sig = process.pending_signal;
+            sig > 0 && sig <= 31 && process.signal_actions[sig as usize] > 1
+                && process.signal_restart[sig as usize]
+        })
 }
 
 /// `kill` from Ring 3. Each selected process is checked separately, as POSIX
@@ -5939,6 +6636,9 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
     let mut matched = false;
     let mut refused = false;
     let mut termination_requests = alloc::vec::Vec::new();
+    let mut caught_wakeups = alloc::vec::Vec::new();
+    let mut stop_requests = alloc::vec::Vec::new();
+    let mut continue_requests = alloc::vec::Vec::new();
     for process in processes.iter_mut().flatten() {
         let selected = if let Some(group) = target_group {
             process.process_group == group
@@ -5957,14 +6657,37 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
             continue;
         }
         let action = process.signal_actions[sig as usize];
-        if action == 1 {
+        if action == 1 && sig != 19 {
             continue;
         } // SIG_IGN
-        if action > 1 && sig != 9 {
-            process.pending_signal = sig;
+        if matches!(sig, 19..=22) {
+            if process.state != ProcessState::Exited {
+                // Catchable stop signals are delivered to the user's handler;
+                // only the default disposition performs job-control stop.
+                if action > 1 && sig != 19 {
+                    process.pending_signal = sig;
+                    continue;
+                }
+                process.pending_signal = sig;
+                process.state = ProcessState::Stopped;
+                stop_requests.push(process.id);
+            }
             continue;
         }
-        if sig == 9 || sig == 15 || sig == 2 {
+        if sig == 18 {
+            if process.state == ProcessState::Stopped {
+                process.state = ProcessState::Ready;
+                process.pending_signal = 0;
+                continue_requests.push(process.id);
+            }
+            continue;
+        }
+        if action > 1 && sig != 9 {
+            process.pending_signal = sig;
+            caught_wakeups.push(process.task_id);
+            continue;
+        }
+        if default_terminates(sig) {
             // Do not publish ProcessState::Exited or release resources here.
             // This process may still be physically executing on a CPU. The
             // scheduler owns the transition and acknowledges it at a safe
@@ -5979,8 +6702,21 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
     }
     drop(processes);
 
+    for task_id in caught_wakeups {
+        let _ = signal_event(task_id);
+    }
+
+    let mut reschedule_mask = 0usize;
+    if !stop_requests.is_empty() || !continue_requests.is_empty() {
+        let mut scheduler = SCHEDULER.lock();
+        for process_id in stop_requests {
+            reschedule_mask |= scheduler.stop_process(process_id);
+        }
+        for process_id in continue_requests {
+            reschedule_mask |= scheduler.continue_process(process_id);
+        }
+    }
     if !termination_requests.is_empty() {
-        let mut reschedule_mask = 0usize;
         {
             let mut scheduler = SCHEDULER.lock();
             for (task_id, signal) in termination_requests {
@@ -6007,7 +6743,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
 
 /// Set/query a minimal sigaction disposition. `handler` uses 0=SIG_DFL, 1=SIG_IGN,
 /// otherwise it is a userspace handler address. Returns the previous disposition.
-pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
+pub fn sigaction_current(sig: u64, handler: u64, restart: bool) -> Result<u64, FileError> {
     if sig == 0 || sig > 31 || sig == 9 {
         return Err(FileError::PermissionDenied);
     }
@@ -6031,7 +6767,20 @@ pub fn sigaction_current(sig: u64, handler: u64) -> Result<u64, FileError> {
     let slot = &mut process.signal_actions[sig as usize];
     let old = *slot;
     *slot = handler;
+    process.signal_restart[sig as usize] = restart && handler > 1;
     Ok(old)
+}
+
+pub fn current_signal_ignored(sig: u64) -> bool {
+    if sig > 31 {
+        return false;
+    }
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .is_some_and(|process| process.signal_actions[sig as usize] == 1)
 }
 
 pub fn current_process_group() -> u64 {
@@ -6047,11 +6796,92 @@ pub fn current_process_group() -> u64 {
     group.unwrap_or_else(current_process_id)
 }
 
+pub fn current_session_id() -> u64 {
+    let process_id = current_process_id();
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .map(|process| process.session_id)
+        .unwrap_or(process_id)
+}
+
+pub fn session_of(pid: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == pid)
+        .map(|process| process.session_id)
+}
+
+pub fn process_group_session(group: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.process_group == group && process.state != ProcessState::Exited)
+        .map(|process| process.session_id)
+}
+
+pub fn create_session_current() -> Result<u64, FileError> {
+    let current = current_process_id();
+    let mut processes = process_table_lock();
+    let process = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current)
+        .ok_or(FileError::NoProcess)?;
+    if process.process_group == current {
+        return Err(FileError::PermissionDenied);
+    }
+    process.session_id = current;
+    process.process_group = current;
+    drop(processes);
+    crate::terminal::release_foreground(current);
+    Ok(current)
+}
+
+pub fn process_group_of(pid: u64) -> Option<u64> {
+    process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == pid)
+        .map(|process| process.process_group)
+}
+
+pub fn process_group_exists(group: u64) -> bool {
+    group != 0
+        && process_table_lock()
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == group && process.state != ProcessState::Exited)
+}
+
+pub fn can_control_foreground_group(group: u64) -> bool {
+    group != 0
+        && process_group_session(group) == Some(current_session_id())
+        && (current_has(crate::capability::Capability::TaskControl)
+            || current_process_group() == group)
+}
+
 pub fn set_process_group(pid: u64, pgid: u64) -> Result<(), FileError> {
     let caller = current_process_id();
     let target = if pid == 0 { caller } else { pid };
     let group = if pgid == 0 { target } else { pgid };
     let mut processes = process_table_lock();
+    let caller_session = processes
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == caller)
+        .map(|process| process.session_id);
+    if let Some(caller_session) = caller_session {
+        if processes
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == group && process.session_id != caller_session)
+        {
+            return Err(FileError::PermissionDenied);
+        }
+    }
     let process = processes
         .iter_mut()
         .flatten()
@@ -6082,6 +6912,25 @@ pub fn take_pending_signal_current() -> Option<(u64, u64)> {
     }
     process.pending_signal = 0;
     Some((sig, handler))
+}
+
+/// Put a caught signal back if delivery could not safely modify the current
+/// user frame. A newer pending signal wins; never overwrite it during recovery.
+pub fn restore_pending_signal_current(signal: u64) {
+    if signal == 0 || signal > 31 {
+        return;
+    }
+    let process_id = current_process_id();
+    let mut processes = process_table_lock();
+    if let Some(process) = processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+    {
+        if process.pending_signal == 0 {
+            process.pending_signal = signal;
+        }
+    }
 }
 
 pub fn seek_current(descriptor: u64, offset: u64) -> Result<u64, FileError> {
@@ -6674,6 +7523,35 @@ pub fn cpu_run_loads() -> [CpuRunLoad; crate::smp::MAX_CPUS] {
     SCHEDULER.lock().run_loads()
 }
 
+/// Return accounting for a live task without exposing its mutable scheduler
+/// state. A task that has already been retired is intentionally absent.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn task_accounting(id: TaskId) -> Option<TaskAccounting> {
+    let scheduler = SCHEDULER.lock();
+    scheduler
+        .tasks
+        .iter()
+        .find(|task| task.id == id && task.state != TaskState::Empty)
+        .map(|task| TaskAccounting {
+            priority: task.priority.as_u8(),
+            class: task.class,
+            cpu: task.cpu,
+            affinity_mask: task.affinity_mask,
+            runtime_ticks: task.runtime_ticks,
+            dispatches: task.dispatches,
+            quota_ticks: task.quota_ticks,
+            quota_period: task.quota_period,
+            quota_used: task.quota_used,
+            throttled: task.state == TaskState::Sleeping && task.quota_ticks != 0,
+        })
+}
+
+/// Snapshot timer-tick runtime accumulated by each logical CPU.
+#[cfg(feature = "s04-scheduler-accounting-test")]
+pub fn cpu_runtime_ticks() -> [u64; crate::smp::MAX_CPUS] {
+    core::array::from_fn(|cpu| CPU_RUNTIME_TICKS[cpu].load(Ordering::Relaxed))
+}
+
 /// Perform one bounded automatic load-balancing transfer. Only explicitly
 /// migratable Ready tasks are candidates. Legacy CPU0-owned userspace and
 /// pinned I/O/service workloads remain excluded by policy. The destination
@@ -6779,6 +7657,9 @@ pub unsafe fn spawn_parallel(name: &'static str, entry: fn() -> !) -> Result<Tas
             .min_by_key(|cpu| loads[*cpu].runnable())
             .unwrap_or(0)
     };
+    // SAFETY: `entry` obeys the restricted AP service contract required by
+    // `spawn_migratable_on` (forwarded by this fn's own `# Safety` contract),
+    // and `cpu` is a schedulable CPU chosen just above.
     unsafe { spawn_migratable_on(cpu, name, entry) }
 }
 

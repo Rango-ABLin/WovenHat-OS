@@ -1,6 +1,7 @@
 use libwoven::layout::Frame;
+use libwoven::media::ThumbnailCache;
 use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::{rgb, Canvas, GraphicsSurface};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -21,6 +22,12 @@ const PANEL_HEIGHT: usize = 196;
 const MAX_ENTRIES: usize = 128;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
+const WALLPAPER_WIDTH: usize = 160;
+const WALLPAPER_HEIGHT: usize = 90;
+const WALLPAPER_CACHE_KEY: u64 = 0x574f5645_4e484154;
+// Leave one sentinel byte because load_vfs_asset reserves the full buffer
+// length to distinguish an exact-size asset from a truncated read.
+const WALLPAPER_BYTES: usize = 54 + ((WALLPAPER_WIDTH * 3 + 3) & !3) * WALLPAPER_HEIGHT + 1;
 
 struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
@@ -30,6 +37,22 @@ unsafe impl Sync for PixelBuffer {}
 static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
     [0; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT],
 ));
+
+struct WallpaperBytes(core::cell::UnsafeCell<[u8; WALLPAPER_BYTES]>);
+unsafe impl Sync for WallpaperBytes {}
+static WALLPAPER_DATA: WallpaperBytes =
+    WallpaperBytes(core::cell::UnsafeCell::new([0; WALLPAPER_BYTES]));
+
+struct WallpaperPixels(core::cell::UnsafeCell<[u32; WALLPAPER_WIDTH * WALLPAPER_HEIGHT]>);
+unsafe impl Sync for WallpaperPixels {}
+static WALLPAPER_PIXELS: WallpaperPixels = WallpaperPixels(core::cell::UnsafeCell::new(
+    [0; WALLPAPER_WIDTH * WALLPAPER_HEIGHT],
+));
+
+struct WallpaperThumbnailCache(core::cell::UnsafeCell<ThumbnailCache<1>>);
+unsafe impl Sync for WallpaperThumbnailCache {}
+static WALLPAPER_THUMBNAILS: WallpaperThumbnailCache =
+    WallpaperThumbnailCache(core::cell::UnsafeCell::new(ThumbnailCache::new()));
 
 fn fail(code: u64) -> ! {
     let _ = libwoven::print("WovenImages: failure\n");
@@ -56,12 +79,97 @@ fn image_count() -> usize {
     count
 }
 
+fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
+    let cache: &'static mut ThumbnailCache<1> = unsafe { &mut *WALLPAPER_THUMBNAILS.0.get() };
+    if cache.get(WALLPAPER_CACHE_KEY).is_some() {
+        let thumbnail = cache.get(WALLPAPER_CACHE_KEY)?;
+        return Some((
+            &thumbnail.pixels,
+            usize::from(thumbnail.width),
+            usize::from(thumbnail.height),
+        ));
+    }
+    let bytes = unsafe { &mut *WALLPAPER_DATA.0.get() };
+    let pixels = unsafe { &mut *WALLPAPER_PIXELS.0.get() };
+    let (length, metadata) =
+        match libwoven::media::load_vfs_asset("/share/wallpapers/wovenhat-gradient.bmp", bytes) {
+            Ok(asset) => asset,
+            Err(libwoven::media::VfsAssetError::Open) => {
+                let _ = libwoven::print("WovenImages: wallpaper open denied\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::Read) => {
+                let _ = libwoven::print("WovenImages: wallpaper read failed\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::TooLarge) => {
+                let _ = libwoven::print("WovenImages: wallpaper too large\n");
+                return None;
+            }
+            Err(libwoven::media::VfsAssetError::InvalidImage(_)) => {
+                let _ = libwoven::print("WovenImages: wallpaper header invalid\n");
+                return None;
+            }
+        };
+    if metadata.width as usize != WALLPAPER_WIDTH || metadata.height as usize != WALLPAPER_HEIGHT {
+        return None;
+    }
+    libwoven::media::decode_bmp_rgba(&bytes[..length], pixels).ok()?;
+    let mut thumbnail = [0u32; libwoven::media::THUMBNAIL_PIXELS];
+    for y in 0..libwoven::media::THUMBNAIL_SIDE {
+        let source_y = y * WALLPAPER_HEIGHT / libwoven::media::THUMBNAIL_SIDE;
+        for x in 0..libwoven::media::THUMBNAIL_SIDE {
+            let source_x = x * WALLPAPER_WIDTH / libwoven::media::THUMBNAIL_SIDE;
+            thumbnail[y * libwoven::media::THUMBNAIL_SIDE + x] =
+                pixels[source_y * WALLPAPER_WIDTH + source_x];
+        }
+    }
+    if !cache.insert(
+        WALLPAPER_CACHE_KEY,
+        libwoven::media::THUMBNAIL_SIDE,
+        libwoven::media::THUMBNAIL_SIDE,
+        &thumbnail,
+    ) {
+        return None;
+    }
+    let thumbnail = cache.get(WALLPAPER_CACHE_KEY)?;
+    Some((
+        &thumbnail.pixels,
+        usize::from(thumbnail.width),
+        usize::from(thumbnail.height),
+    ))
+}
+
+fn draw_thumbnail(canvas: &mut Canvas<'_>, image: Option<(&[u32], usize, usize)>) {
+    let Some((pixels, width, height)) = image else {
+        canvas.draw_text(182, 72, "Wallpaper unavailable", TEXT);
+        return;
+    };
+    let x0 = 182i32;
+    let y0 = 70i32;
+    let target_width = 140usize;
+    let target_height = 78usize;
+    canvas.fill_rect(x0 - 2, y0 - 2, target_width + 4, target_height + 4, ACCENT);
+    for y in 0..target_height {
+        let source_y = y * height / target_height;
+        for x in 0..target_width {
+            let source_x = x * width / target_width;
+            canvas.set(
+                x0 + x as i32,
+                y0 + y as i32,
+                pixels[source_y * width + source_x],
+            );
+        }
+    }
+}
+
 fn draw_images(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
     refresh: &Button<'_>,
+    wallpaper: Option<(&[u32], usize, usize)>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
@@ -91,6 +199,8 @@ fn draw_images(
     );
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", TEXT);
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 88, "Image files", ACCENT);
+    canvas.draw_text(182, 54, "Licensed wallpaper", ACCENT);
+    draw_thumbnail(canvas, wallpaper);
     let mut digits = [0u8; 20];
     canvas.draw_text(PANEL_X + 10, PANEL_Y + 106, "Entries ", TEXT);
     let count_text = libwoven::format_u64(image_count() as u64, &mut digits);
@@ -134,7 +244,15 @@ fn render(
     ) else {
         return false;
     };
-    draw_images(&mut canvas, pointer, pressed, refresh_count, refresh);
+    let wallpaper = load_wallpaper();
+    draw_images(
+        &mut canvas,
+        pointer,
+        pressed,
+        refresh_count,
+        refresh,
+        wallpaper,
+    );
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -163,6 +281,17 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         ),
         "Refresh",
     );
+    match load_wallpaper() {
+        Some((_, width, height)) => {
+            let _ = libwoven::print("WovenImages: wallpaper decoded 160x90\n");
+            if width != WALLPAPER_WIDTH || height != WALLPAPER_HEIGHT {
+                fail(9)
+            }
+        }
+        None => {
+            let _ = libwoven::print("WovenImages: wallpaper unavailable\n");
+        }
+    }
     if !render(&window, None, false, 0, &refresh) {
         fail(3)
     }
