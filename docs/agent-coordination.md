@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - dynamic-section admission metadata (2026-10-28)
+
+Extended the ELF admission plan with checked PT_DYNAMIC metadata for RELA
+location/size/entry width and symbol/string table locations. Unsupported RELA
+entry widths and malformed dynamic ranges fail closed. This is metadata for
+the kernel relocation stage, not relocation execution.
+
 ## Codex - complete ELF image admission in runtime manager (2026-10-28)
 
 Extended the runtime manager to accept validated ELF images with or without

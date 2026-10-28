@@ -1,5 +1,12 @@
 # Stage status
 
+## Dynamic-section admission metadata - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The ELF image plan now retains validated dynamic-section metadata needed for
+RELA relocation and dynamic symbol lookup, including table locations, sizes,
+and entry width. Parser tests and warning-denying libwoven Clippy pass.
+Relocation application and process mutation remain kernel loader work.
+
 ## Complete ELF image admission boundary - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 Runtime modules now admit validated ELF images with optional PT_TLS, returning

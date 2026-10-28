@@ -22,6 +22,16 @@ pub struct ImagePlan {
     pub segment_count: usize,
     pub has_dynamic: bool,
     pub tls: Option<Segment>,
+    pub dynamic: Option<DynamicPlan>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DynamicPlan {
+    pub rela: Option<(u64, u64)>,
+    pub rela_entry_size: u64,
+    pub symtab: Option<u64>,
+    pub strtab: Option<u64>,
+    pub strtab_size: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +64,7 @@ impl ImagePlan {
             segment_count: 0,
             has_dynamic: false,
             tls: None,
+            dynamic: None,
         };
         for index in 0..phnum {
             let header = phoff.checked_add(index.checked_mul(phentsize).ok_or(Error::Overflow)?).ok_or(Error::Overflow)?;
@@ -77,7 +88,10 @@ impl ImagePlan {
                     plan.segments[plan.segment_count] = Some(segment);
                     plan.segment_count += 1;
                 }
-                2 => plan.has_dynamic = true,
+                2 => {
+                    plan.has_dynamic = true;
+                    plan.dynamic = Some(parse_dynamic(image, offset, file_size)?);
+                }
                 7 => plan.tls = Some(segment),
                 _ => {}
             }
@@ -92,6 +106,31 @@ impl ImagePlan {
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, Error> { bytes.get(offset..offset + 2).and_then(|b| b.try_into().ok()).map(u16::from_le_bytes).ok_or(Error::Bounds) }
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, Error> { bytes.get(offset..offset + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes).ok_or(Error::Bounds) }
 fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, Error> { bytes.get(offset..offset + 8).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes).ok_or(Error::Bounds) }
+
+fn parse_dynamic(image: &[u8], offset: u64, size: u64) -> Result<DynamicPlan, Error> {
+    let start = usize::try_from(offset).map_err(|_| Error::Overflow)?;
+    let end = usize::try_from(offset.checked_add(size).ok_or(Error::Overflow)?).map_err(|_| Error::Overflow)?;
+    if end > image.len() || !size.is_multiple_of(16) { return Err(Error::Bounds); }
+    let mut plan = DynamicPlan { rela: None, rela_entry_size: 24, symtab: None, strtab: None, strtab_size: 0 };
+    let mut cursor = start;
+    while cursor < end {
+        let tag = read_u64(image, cursor)?;
+        let value = read_u64(image, cursor + 8)?;
+        cursor += 16;
+        match tag {
+            0 => break,
+            5 => plan.strtab = Some(value),
+            6 => plan.symtab = Some(value),
+            10 => plan.strtab_size = value,
+            7 => plan.rela = Some((value, 0)),
+            8 => if let Some((address, _)) = plan.rela { plan.rela = Some((address, value)); },
+            9 => plan.rela_entry_size = value,
+            _ => {}
+        }
+    }
+    if plan.rela_entry_size != 24 { return Err(Error::Unsupported); }
+    Ok(plan)
+}
 
 #[cfg(test)]
 mod tests {
