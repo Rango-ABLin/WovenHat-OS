@@ -51,7 +51,7 @@ static void *sync_thread(void *argument)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
 	char byte = 'x';
 	char motd[24];
@@ -62,15 +62,19 @@ int main(int argc, char **argv)
 	int pipe_fd[2];
 	int child_status;
 	pid_t child;
+	if (envp != argv + argc + 1)
+		return 80;
 	/* The loader supplies a bounded aux-vector after the empty envp. */
 	unsigned long *aux = (unsigned long *)(argv + argc + 2);
-	int saw_pagesz = 0, saw_uid = 0, saw_gid = 0;
+	int saw_pagesz = 0, saw_uid = 0, saw_gid = 0, saw_random = 0;
 	for (; aux[0] != 0; aux += 2) {
 		if (aux[0] == 6 && aux[1] == 4096) saw_pagesz = 1;
 		if (aux[0] == 11 && aux[1] == 1000) saw_uid = 1;
 		if (aux[0] == 12 && aux[1] == 1000) saw_gid = 1;
+		if (aux[0] == 25 && aux[1] != 0 && ((unsigned char *)aux[1])[0] != 0)
+			saw_random = 1;
 	}
-	if (!saw_pagesz || !saw_uid || !saw_gid)
+	if (!saw_pagesz || !saw_uid || !saw_gid || !saw_random)
 		return 95;
 
 	if (getpid() < 0)

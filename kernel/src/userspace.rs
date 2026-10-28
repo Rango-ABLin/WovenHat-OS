@@ -4659,6 +4659,14 @@ pub fn setup_argv_stack(
     if strings_start < stack.base {
         return None;
     }
+    let random_start = strings_start.checked_sub(16)?;
+    if random_start < stack.base {
+        return None;
+    }
+    let random_a = crate::entropy::random_u64().to_le_bytes();
+    let random_b = crate::entropy::random_u64().to_le_bytes();
+    paging::write_user_bytes(address_space, random_start, &random_a).ok()?;
+    paging::write_user_bytes(address_space, random_start + 8, &random_b).ok()?;
 
     let mut cursor = strings_start;
     let mut argv_ptrs = [0u64; MAX_ARGV];
@@ -4681,7 +4689,11 @@ pub fn setup_argv_stack(
     const AT_PAGESZ: u64 = 6;
     const AT_UID: u64 = 11;
     const AT_GID: u64 = 12;
-    let auxv = [AT_PAGESZ, 4096, AT_UID, 1000, AT_GID, 1000, AT_NULL, 0];
+    const AT_RANDOM: u64 = 25;
+    let auxv = [
+        AT_PAGESZ, 4096, AT_UID, 1000, AT_GID, 1000,
+        AT_RANDOM, random_start, AT_NULL, 0,
+    ];
     let pointer_words = 1 + args.len() + 1 + 1 + auxv.len();
     let pointer_bytes = pointer_words * 8;
     let mut rsp = strings_start.checked_sub(pointer_bytes as u64)?;
