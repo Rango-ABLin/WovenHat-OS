@@ -361,8 +361,24 @@ mod tests {
         // Each case starts with a fresh host-only table; assertions still fail.
         let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
         *TABLE.lock() = Table::new();
+        *ROBUST.lock() = [RobustRecord { address: 0, owner: None, generation: 1, state: RobustState::Free }; MAX_ROBUST_RECORDS];
         test();
         *TABLE.lock() = Table::new();
+        *ROBUST.lock() = [RobustRecord { address: 0, owner: None, generation: 1, state: RobustState::Free }; MAX_ROBUST_RECORDS];
+    }
+
+    #[test]
+    fn robust_owner_death_requires_consistency() {
+        isolated(|| {
+            let owner = create(9).unwrap();
+            assert!(register_robust_mutex(owner, 0x1000));
+            assert_eq!(robust_lock(owner, 0x1000), 0);
+            mark_robust_owner_dead(owner);
+            let successor = create(9).unwrap();
+            assert_eq!(robust_lock(successor, 0x1000), 1);
+            assert!(robust_consistent(successor, 0x1000));
+            assert!(robust_unlock(successor, 0x1000));
+        });
     }
 
     fn exhaust(retire: fn(ThreadId)) {
