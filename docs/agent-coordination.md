@@ -7,6 +7,17 @@ dynamic-module namespace, DTV/general-dynamic TLS, constructor/destructor and
 unload quiescence, detached/cancellation cleanup, kernel-clock timed waits,
 allocator qualification, and ordered acceptance gates. This is a design
 baseline only; it does not claim those unresolved capabilities are complete.
+## Codex - libc start-main and entropy auxv increment (2026-10-28)
+
+The static CRT now exports a musl-compatible `__libc_start_main` entry,
+passes `envp` to `main`, invokes optional init/fini hooks, and terminates via
+the existing `_Exit` path. The loader publishes `AT_RANDOM` backed by two
+kernel entropy words in addition to the bounded page-size and uid/gid entries;
+the fixture validates the envp contract and non-zero random bytes. LLVM build
+and the production loader gate pass on the available 1-CPU rerun; the prior
+1/2/4-CPU bounded startup gate remains valid. Dynamic TLS modules, kernel-clock
+timed waits, robust owner-death recovery, and the remaining POSIX syscall
+families still require kernel/loader work.
 
 ## Codex - bounded musl startup auxv and detached-thread increment (2026-10-28)
 

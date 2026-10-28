@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static char pipe_buffer[2048];
@@ -80,6 +81,10 @@ int main(int argc, char **argv, char **envp)
 	}
 	if (!saw_pagesz || !saw_uid || !saw_gid || !saw_random)
 		return 95;
+	struct timespec monotonic;
+	if (clock_gettime(CLOCK_MONOTONIC, &monotonic) != 0
+		|| monotonic.tv_sec < 0 || monotonic.tv_nsec < 0 || monotonic.tv_nsec >= 1000000000L)
+		return 79;
 
 	if (getpid() < 0)
 		return 89;
