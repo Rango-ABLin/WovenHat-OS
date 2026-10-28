@@ -54,6 +54,14 @@ The PTY increment adds generation-checked `/dev/ptmx` and `/dev/pts/N` handles,
 bounded canonical buffering, echo, EOF/VINTR handling, and master/slave stream
 teardown. The S03 probe passes on 1/2/4 CPUs.
 
+The follow-on session increment adds inherited process sessions, `getsid` and
+`setsid`, same-session process-group authority, and a Ring-3 session probe;
+the S03 matrix remains green on 1/2/4 CPUs. The wait audit now verifies
+second-wait rejection after exact reap and preservation of the baseline zombie
+count. A headless QMP Ctrl-C experiment remains preserved as failed evidence;
+decoder self-tests pass, but runtime keyboard injection is not claimed until
+the emulator/device path is made reliable.
+
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
 Per user direction, the remaining Stage 32 work was consolidated into one
