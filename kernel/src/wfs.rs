@@ -33,7 +33,8 @@ pub const MAX_TXN_BLOCKS: usize = 32;
     feature = "stage15-1-test",
     feature = "stage15-2-test",
     feature = "stage21-6-test",
-    feature = "stage24-3-test"
+    feature = "stage24-3-test",
+    feature = "stage12-2-xattr-test"
 ))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
@@ -49,6 +50,22 @@ pub const MAX_DIR_ENTRIES: usize = DIRECT_BLOCKS * DIR_ENTRIES_PER_BLOCK;
 
 pub const KIND_FILE: u16 = 1;
 pub const KIND_DIR: u16 = 2;
+
+/// Extended-attribute name/value bound. Names reuse the directory-entry
+/// bound; values are capped so one bounded 512-byte block always holds the
+/// header, checksum, and at least one maximally-sized entry.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+pub const MAX_XATTR_NAME: usize = MAX_NAME;
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+pub const MAX_XATTR_VALUE: usize = 256;
+/// `entry_count` (2) + packed entries region (502) + checksum (8) = 512.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+const XATTR_BLOCK_HEADER: usize = 2;
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+const XATTR_BLOCK_CHECKSUM_AT: usize = SECTOR_SIZE - 8;
+/// `[name_len: u8][value_len: u16]` precedes each entry's bytes.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+const XATTR_ENTRY_HEADER: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -91,6 +108,106 @@ fn read_u64(bytes: &[u8], at: usize) -> u64 {
     let mut raw = [0u8; 8];
     raw.copy_from_slice(&bytes[at..at + 8]);
     u64::from_le_bytes(raw)
+}
+
+// --------------------------------------------------------- extended-attr block
+//
+// One 512-byte block, allocated from the same bitmap as any other data
+// block: `entry_count: u16` at offset 0, packed `[name_len: u8][value_len:
+// u16][name bytes][value bytes]` entries from offset 2, and an FNV-1a
+// checksum over bytes `0..XATTR_BLOCK_CHECKSUM_AT` in the last 8 bytes —
+// the same "checksum over everything before it" shape as the inode and
+// superblock.
+
+/// Decode one packed entry at `at`, returning its name, value, and the
+/// offset of the following entry. Fails closed on any length that would
+/// read past the checksum rather than guessing at corrupt data.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+fn xattr_entry_at(sector: &[u8], at: usize) -> Option<(&[u8], &[u8], usize)> {
+    if at + XATTR_ENTRY_HEADER > XATTR_BLOCK_CHECKSUM_AT {
+        return None;
+    }
+    let name_len = sector[at] as usize;
+    let value_len = read_u16(sector, at + 1) as usize;
+    let name_at = at + XATTR_ENTRY_HEADER;
+    let value_at = name_at + name_len;
+    let next = value_at + value_len;
+    if next > XATTR_BLOCK_CHECKSUM_AT {
+        return None;
+    }
+    Some((&sector[name_at..value_at], &sector[value_at..next], next))
+}
+
+#[cfg(any(test, feature = "stage12-2-xattr-test"))]
+fn xattr_verify(sector: &[u8]) -> Result<(), Error> {
+    if read_u64(sector, XATTR_BLOCK_CHECKSUM_AT) != fnv1a(&sector[..XATTR_BLOCK_CHECKSUM_AT]) {
+        return Err(Error::Corrupt);
+    }
+    Ok(())
+}
+
+/// Append one entry to `out` at `*at`, advancing it. Bounded by the packed
+/// entries region; a full block fails closed with `Error::NoSpace`.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+fn xattr_append(
+    out: &mut [u8; SECTOR_SIZE],
+    at: &mut usize,
+    name: &[u8],
+    value: &[u8],
+) -> Result<(), Error> {
+    let needed = XATTR_ENTRY_HEADER + name.len() + value.len();
+    let Some(end) = at.checked_add(needed) else {
+        return Err(Error::NoSpace);
+    };
+    if end > XATTR_BLOCK_CHECKSUM_AT {
+        return Err(Error::NoSpace);
+    }
+    out[*at] = name.len() as u8;
+    out[*at + 1..*at + 3].copy_from_slice(&(value.len() as u16).to_le_bytes());
+    let name_at = *at + XATTR_ENTRY_HEADER;
+    out[name_at..name_at + name.len()].copy_from_slice(name);
+    let value_at = name_at + name.len();
+    out[value_at..value_at + value.len()].copy_from_slice(value);
+    *at = value_at + value.len();
+    Ok(())
+}
+
+/// Rebuild a verified xattr sector's packed entries, replacing (or, when
+/// `new_value` is `None`, removing) `name` and leaving every other entry
+/// untouched and in its original order. Returns the rebuilt sector and
+/// whether `name` was found among the existing entries.
+#[cfg(any(test, feature = "stage12-2-xattr-test", feature = "stage32-20-test"))]
+fn xattr_rebuild(
+    sector: &[u8; SECTOR_SIZE],
+    name: &[u8],
+    new_value: Option<&[u8]>,
+) -> Result<([u8; SECTOR_SIZE], bool), Error> {
+    let mut out = [0u8; SECTOR_SIZE];
+    let mut at = XATTR_BLOCK_HEADER;
+    let mut count = 0u16;
+    let mut replaced = false;
+
+    let existing_count = read_u16(sector, 0) as usize;
+    let mut read_at = XATTR_BLOCK_HEADER;
+    for _ in 0..existing_count {
+        let (entry_name, value, next) =
+            xattr_entry_at(sector, read_at).ok_or(Error::Corrupt)?;
+        if entry_name == name {
+            replaced = true;
+        } else {
+            xattr_append(&mut out, &mut at, entry_name, value)?;
+            count += 1;
+        }
+        read_at = next;
+    }
+    if let Some(value) = new_value {
+        xattr_append(&mut out, &mut at, name, value)?;
+        count += 1;
+    }
+    out[0..2].copy_from_slice(&count.to_le_bytes());
+    let checksum = fnv1a(&out[..XATTR_BLOCK_CHECKSUM_AT]);
+    out[XATTR_BLOCK_CHECKSUM_AT..].copy_from_slice(&checksum.to_le_bytes());
+    Ok((out, replaced))
 }
 
 // --------------------------------------------------------------- superblock
@@ -164,6 +281,11 @@ pub struct Inode {
     pub data_checksum: u64,
     pub direct: [u64; DIRECT_BLOCKS],
     pub kind: u16,
+    /// Extended-attribute block, 0 = none. Lives in what was previously
+    /// always-zero spare space (bytes 106..114); every inode written before
+    /// this field existed already decodes as 0 here, so no format-version
+    /// change is needed.
+    pub xattr_block: u64,
 }
 
 const INODE_CHECKSUM_AT: usize = 120;
@@ -179,6 +301,7 @@ impl Inode {
             data_checksum: 0,
             direct: [0; DIRECT_BLOCKS],
             kind: 0,
+            xattr_block: 0,
         }
     }
 
@@ -199,6 +322,7 @@ impl Inode {
             raw[at..at + 8].copy_from_slice(&block.to_le_bytes());
         }
         raw[104..106].copy_from_slice(&self.kind.to_le_bytes());
+        raw[106..114].copy_from_slice(&self.xattr_block.to_le_bytes());
         let checksum = fnv1a(&raw[..INODE_CHECKSUM_AT]);
         raw[INODE_CHECKSUM_AT..INODE_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
@@ -226,6 +350,7 @@ impl Inode {
             data_checksum: read_u64(raw, 32),
             direct,
             kind: read_u16(raw, 104),
+            xattr_block: read_u64(raw, 106),
         })
     }
 }
@@ -260,7 +385,8 @@ impl DirEntry {
         test,
         feature = "stage15-1-test",
         feature = "stage15-2-test",
-        feature = "stage21-6-test"
+        feature = "stage21-6-test",
+        feature = "stage12-2-xattr-test"
     ))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
@@ -392,7 +518,8 @@ pub struct Volume<D: BlockDevice> {
     feature = "stage15-1-test",
     feature = "stage15-2-test",
     feature = "stage21-6-test",
-    feature = "stage24-3-test"
+    feature = "stage24-3-test",
+    feature = "stage12-2-xattr-test"
 ))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
@@ -491,7 +618,8 @@ impl<D: BlockDevice> Volume<D> {
         feature = "stage15-1-test",
         feature = "stage15-2-test",
         feature = "stage21-6-test",
-        feature = "stage24-3-test"
+        feature = "stage24-3-test",
+        feature = "stage12-2-xattr-test"
     ))]
     pub fn format(mut device: D, inode_count: u32) -> Result<Self, Error> {
         let total = device.sector_count();
@@ -635,7 +763,8 @@ impl<D: BlockDevice> Volume<D> {
         test,
         feature = "stage15-1-test",
         feature = "stage15-2-test",
-        feature = "stage24-3-test"
+        feature = "stage24-3-test",
+        feature = "stage12-2-xattr-test"
     ))]
     pub fn into_device(self) -> D {
         self.device
@@ -1226,6 +1355,9 @@ impl<D: BlockDevice> Volume<D> {
                 node.direct[slot] = 0;
             }
         }
+        if node.xattr_block != 0 {
+            self.stage_bitmap(&mut txn, node.xattr_block, false)?;
+        }
         self.stage_inode(&mut txn, entry.inode, &Inode::empty())?;
         self.stage_dir_entry(&mut txn, &dir, position, &DirEntry::empty())?;
         dir.modified = now;
@@ -1236,6 +1368,135 @@ impl<D: BlockDevice> Volume<D> {
     pub fn unlink_path(&mut self, path: &str, now: u64) -> Result<(), Error> {
         let (parent, name) = self.parent_and_name(path)?;
         self.unlink(parent, &name, now)
+    }
+
+    // ------------------------------------------------------ extended attrs
+
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    fn valid_xattr_name(name: &str) -> Result<(), Error> {
+        if name.is_empty() || name.len() > MAX_XATTR_NAME || name.as_bytes().contains(&0) {
+            return Err(Error::InvalidName);
+        }
+        Ok(())
+    }
+
+    /// Read one extended attribute's value into `out`, returning its length.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn get_xattr(&mut self, inode: u64, name: &str, out: &mut [u8]) -> Result<usize, Error> {
+        Self::valid_xattr_name(name)?;
+        let node = self.inode(inode)?;
+        if !node.is_used() || node.xattr_block == 0 {
+            return Err(Error::NotFound);
+        }
+        let sector = self.read_block(node.xattr_block)?;
+        xattr_verify(&sector)?;
+        let name_bytes = name.as_bytes();
+        let count = read_u16(&sector, 0) as usize;
+        let mut at = XATTR_BLOCK_HEADER;
+        for _ in 0..count {
+            let (entry_name, value, next) = xattr_entry_at(&sector, at).ok_or(Error::Corrupt)?;
+            if entry_name == name_bytes {
+                if out.len() < value.len() {
+                    return Err(Error::TooLarge);
+                }
+                out[..value.len()].copy_from_slice(value);
+                return Ok(value.len());
+            }
+            at = next;
+        }
+        Err(Error::NotFound)
+    }
+
+    /// List extended attribute names, NUL-separated, into `out`. Returns the
+    /// total byte count written (0 if the inode has no attributes).
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn list_xattr(&mut self, inode: u64, out: &mut [u8]) -> Result<usize, Error> {
+        let node = self.inode(inode)?;
+        if !node.is_used() {
+            return Err(Error::NotFound);
+        }
+        if node.xattr_block == 0 {
+            return Ok(0);
+        }
+        let sector = self.read_block(node.xattr_block)?;
+        xattr_verify(&sector)?;
+        let count = read_u16(&sector, 0) as usize;
+        let mut at = XATTR_BLOCK_HEADER;
+        let mut written = 0usize;
+        for _ in 0..count {
+            let (entry_name, _value, next) = xattr_entry_at(&sector, at).ok_or(Error::Corrupt)?;
+            let needed = entry_name.len() + 1;
+            if out.len() < written + needed {
+                return Err(Error::TooLarge);
+            }
+            out[written..written + entry_name.len()].copy_from_slice(entry_name);
+            out[written + entry_name.len()] = 0;
+            written += needed;
+            at = next;
+        }
+        Ok(written)
+    }
+
+    /// Set (create or overwrite) one extended attribute, as one transaction:
+    /// the rebuilt xattr block and the inode's pointer to it land together or
+    /// not at all, exactly like `mkdir`'s directory block + inode pointer.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn set_xattr(&mut self, inode: u64, name: &str, value: &[u8], now: u64) -> Result<(), Error> {
+        Self::valid_xattr_name(name)?;
+        if value.len() > MAX_XATTR_VALUE {
+            return Err(Error::TooLarge);
+        }
+        let mut txn = Transaction::new();
+        let mut node = self.inode_staged(&txn, inode)?;
+        if !node.is_used() {
+            return Err(Error::NotFound);
+        }
+        let existing = if node.xattr_block != 0 {
+            let sector = self.read_block_staged(&txn, node.xattr_block)?;
+            xattr_verify(&sector)?;
+            sector
+        } else {
+            [0u8; SECTOR_SIZE]
+        };
+        let (updated, _replaced) = xattr_rebuild(&existing, name.as_bytes(), Some(value))?;
+        let block = if node.xattr_block != 0 {
+            node.xattr_block
+        } else {
+            self.allocate_block(&mut txn)?
+        };
+        txn.stage(block, &updated)?;
+        node.xattr_block = block;
+        node.modified = now;
+        self.stage_inode(&mut txn, inode, &node)?;
+        self.commit(&txn)
+    }
+
+    /// Remove one extended attribute, as one transaction. Frees the xattr
+    /// block (mirroring `write_file`'s block-free path) when it was the last
+    /// attribute, so a deleted attribute never leaks an allocated block.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn remove_xattr(&mut self, inode: u64, name: &str, now: u64) -> Result<(), Error> {
+        Self::valid_xattr_name(name)?;
+        let mut txn = Transaction::new();
+        let mut node = self.inode_staged(&txn, inode)?;
+        if !node.is_used() || node.xattr_block == 0 {
+            return Err(Error::NotFound);
+        }
+        let existing = self.read_block_staged(&txn, node.xattr_block)?;
+        xattr_verify(&existing)?;
+        let (updated, replaced) = xattr_rebuild(&existing, name.as_bytes(), None)?;
+        if !replaced {
+            return Err(Error::NotFound);
+        }
+        if read_u16(&updated, 0) == 0 {
+            self.stage_bitmap(&mut txn, node.xattr_block, false)?;
+            node.xattr_block = 0;
+        } else {
+            txn.stage(node.xattr_block, &updated)?;
+        }
+        node.modified = now;
+        self.stage_inode(&mut txn, inode, &node)?;
+        self.commit(&txn)
     }
 
     /// Rename a file or empty directory by moving its directory entry in one
@@ -1310,7 +1571,12 @@ impl<D: BlockDevice> Volume<D> {
     /// Verify internal consistency: every block referenced by a live inode is
     /// marked allocated, every directory entry names a live inode, and no two
     /// inodes claim the same block.
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage12-2-xattr-test"
+    ))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
@@ -1340,6 +1606,24 @@ impl<D: BlockDevice> Volume<D> {
                     seen[seen_len] = block;
                     seen_len += 1;
                 }
+            }
+            #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+            if node.xattr_block != 0 {
+                let block = node.xattr_block;
+                if block < sb.data_start || block >= sb.total_blocks {
+                    return Err(Error::Corrupt);
+                }
+                if !self.bitmap_get(&txn, block)? {
+                    return Err(Error::Corrupt);
+                }
+                if seen[..seen_len].contains(&block) {
+                    return Err(Error::Corrupt);
+                }
+                if seen_len < seen.len() {
+                    seen[seen_len] = block;
+                    seen_len += 1;
+                }
+                xattr_verify(&self.read_block_staged(&txn, block)?)?;
             }
         }
 
@@ -1427,14 +1711,14 @@ impl DirectoryView {
 /// stack frame, so the image lives on the heap. `budget` lets the self-test
 /// stop accepting writes at an exact point and so reproduce a power loss inside
 /// a transaction.
-#[cfg(feature = "stage15-1-test")]
+#[cfg(any(feature = "stage15-1-test", feature = "stage12-2-xattr-test"))]
 pub struct TestDisk {
     sectors: alloc::vec::Vec<[u8; SECTOR_SIZE]>,
     budget: Option<usize>,
     accepted: usize,
 }
 
-#[cfg(feature = "stage15-1-test")]
+#[cfg(any(feature = "stage15-1-test", feature = "stage12-2-xattr-test"))]
 impl TestDisk {
     pub fn new(sectors: usize) -> Self {
         Self {
@@ -1457,7 +1741,7 @@ impl TestDisk {
     }
 }
 
-#[cfg(feature = "stage15-1-test")]
+#[cfg(any(feature = "stage15-1-test", feature = "stage12-2-xattr-test"))]
 impl BlockDevice for TestDisk {
     fn sector_count(&self) -> u64 {
         self.sectors.len() as u64
@@ -1722,6 +2006,255 @@ pub fn stage15_1_self_test() -> bool {
         return false;
     };
     survivor.check().is_ok()
+}
+
+/// Stage 12.2 acceptance: extended-attribute lifecycle and crash recovery,
+/// enumerating every write at which a `set_xattr`/`remove_xattr` transaction
+/// can lose power.
+#[cfg(feature = "stage12-2-xattr-test")]
+pub fn xattr_self_test() -> bool {
+    const SECTORS: usize = 192;
+    const INODES: u32 = 32;
+
+    let Ok(volume) = Volume::format(TestDisk::new(SECTORS), INODES) else {
+        return false;
+    };
+    let base = volume.into_device();
+    let Ok(mut mounted) = Volume::mount(base.fork(None)) else {
+        return false;
+    };
+    let Ok(file) = mounted.create(1, "report.bin", 0o644, 10) else {
+        return false;
+    };
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 1: file created"));
+
+    // No attribute yet: NotFound, empty list, nothing to remove.
+    let mut buf = [0u8; MAX_XATTR_VALUE];
+    if mounted.get_xattr(file, "user.note", &mut buf) != Err(Error::NotFound)
+        || mounted.list_xattr(file, &mut buf) != Ok(0)
+        || mounted.remove_xattr(file, "user.note", 11) != Err(Error::NotFound)
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 2: empty-state checks"));
+
+    // Set, get back, overwrite with a different length, get the new value.
+    if mounted.set_xattr(file, "user.note", b"draft", 12).is_err() {
+        return false;
+    }
+    if mounted.get_xattr(file, "user.note", &mut buf) != Ok(5) || &buf[..5] != b"draft" {
+        return false;
+    }
+    if mounted.set_xattr(file, "user.note", b"final version", 13).is_err() {
+        return false;
+    }
+    if mounted.get_xattr(file, "user.note", &mut buf) != Ok(13) || &buf[..13] != b"final version"
+    {
+        return false;
+    }
+    if mounted.check().is_err() {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 3: set/overwrite round trip"
+    ));
+
+    // A second attribute coexists; list returns both names, NUL-separated.
+    if mounted.set_xattr(file, "user.tag", b"x", 14).is_err() {
+        return false;
+    }
+    let Ok(listed) = mounted.list_xattr(file, &mut buf) else {
+        return false;
+    };
+    let names = &buf[..listed];
+    if !names.windows(10).any(|w| w == b"user.note\0")
+        || !names.windows(9).any(|w| w == b"user.tag\0")
+    {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 4: list_xattr"));
+
+    // Bounds: an oversized value and an oversized output buffer both fail
+    // closed without touching on-disk state.
+    let oversized = [0u8; MAX_XATTR_VALUE + 1];
+    if mounted.set_xattr(file, "user.big", &oversized, 15) != Err(Error::TooLarge) {
+        return false;
+    }
+    // "user.note" currently holds "final version" (13 bytes); "user.tag"'s
+    // 1-byte value would fit a 2-byte buffer and so wouldn't exercise this.
+    let mut tiny = [0u8; 2];
+    if mounted.get_xattr(file, "user.note", &mut tiny) != Err(Error::TooLarge) {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 5: bounds checks"));
+
+    // Removing one of two attributes must not free the block -- the other
+    // attribute still lives there.
+    if mounted.remove_xattr(file, "user.tag", 16).is_err() {
+        return false;
+    }
+    let Ok(node) = mounted.inode(file) else {
+        return false;
+    };
+    if node.xattr_block == 0 {
+        return false;
+    }
+    // Removing the last remaining attribute frees its block: the bitmap bit
+    // used by the (now sole) xattr block must clear, not merely the inode's
+    // pointer.
+    if mounted.remove_xattr(file, "user.note", 17).is_err()
+        || mounted.get_xattr(file, "user.note", &mut buf) != Err(Error::NotFound)
+        || mounted.check().is_err()
+    {
+        return false;
+    }
+    let Ok(node) = mounted.inode(file) else {
+        return false;
+    };
+    if node.xattr_block != 0 {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 6: remove_xattr frees block"));
+
+    // Removing the file's directory entry must also free a still-attached
+    // xattr block, not leak it.
+    if mounted.set_xattr(file, "user.note", b"leftover", 18).is_err() {
+        return false;
+    }
+    if mounted.unlink(1, "report.bin", 19).is_err() || mounted.check().is_err() {
+        return false;
+    }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 7: unlink frees xattr block"));
+
+    // Contents must survive an unmount/remount cycle.
+    let Ok(persisted) = mounted.create(1, "persisted.bin", 0o644, 20) else {
+        return false;
+    };
+    if mounted.set_xattr(persisted, "user.note", b"kept", 21).is_err() {
+        return false;
+    }
+    let populated = mounted.into_device();
+    let Ok(mut remounted) = Volume::mount(populated.fork(None)) else {
+        return false;
+    };
+    if remounted.get_xattr(persisted, "user.note", &mut buf) != Ok(4) || &buf[..4] != b"kept" {
+        return false;
+    }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 8: survives remount"
+    ));
+
+    // Crash recovery for set_xattr: the file (with no existing attribute) is
+    // created and durably committed first, so only `set_xattr`'s own writes
+    // are budgeted. Count them, then replay once per write boundary, cutting
+    // power at that exact write.
+    let base = remounted.into_device();
+    let with_file = {
+        let Ok(mut setup) = Volume::mount(base.fork(None)) else {
+            return false;
+        };
+        if setup.create(1, "atomic-set.bin", 0o644, 30).is_err() {
+            return false;
+        }
+        setup.into_device()
+    };
+    let set_writes = {
+        let Ok(mut probe) = Volume::mount(with_file.fork(None)) else {
+            return false;
+        };
+        let Ok(target) = probe.lookup(1, "atomic-set.bin") else {
+            return false;
+        };
+        if probe
+            .set_xattr(target.inode, "user.note", b"value", 31)
+            .is_err()
+        {
+            return false;
+        }
+        probe.into_device().accepted()
+    };
+    if set_writes < 2 {
+        return false;
+    }
+    for cut in 0..=set_writes {
+        let Ok(mut crashing) = Volume::mount(with_file.fork(Some(cut))) else {
+            return false;
+        };
+        let Ok(target) = crashing.lookup(1, "atomic-set.bin") else {
+            return false;
+        };
+        let _ = crashing.set_xattr(target.inode, "user.note", b"value", 31);
+        let image = crashing.into_device();
+
+        let Ok(mut recovered) = Volume::mount(image.fork(None)) else {
+            return false;
+        };
+        if recovered.check().is_err() {
+            return false;
+        }
+        match recovered.get_xattr(target.inode, "user.note", &mut buf) {
+            Ok(5) if &buf[..5] == b"value" => {}
+            Err(Error::NotFound) => {}
+            _ => return false,
+        }
+    }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 9: set_xattr crash enumeration"
+    ));
+
+    // Crash recovery for remove_xattr: the block-free side effect must be
+    // all-or-nothing too -- a crash must never leave the bitmap bit clear
+    // while the inode still points at the block, or vice versa.
+    let remove_base = {
+        let Ok(mut setup) = Volume::mount(base.fork(None)) else {
+            return false;
+        };
+        let Ok(target) = setup.create(1, "atomic-remove.bin", 0o644, 40) else {
+            return false;
+        };
+        if setup.set_xattr(target, "user.note", b"value", 41).is_err() {
+            return false;
+        }
+        setup.into_device()
+    };
+    let remove_writes = {
+        let Ok(mut probe) = Volume::mount(remove_base.fork(None)) else {
+            return false;
+        };
+        let Ok(target) = probe.lookup(1, "atomic-remove.bin") else {
+            return false;
+        };
+        if probe.remove_xattr(target.inode, "user.note", 42).is_err() {
+            return false;
+        }
+        probe.into_device().accepted()
+    };
+    if remove_writes < 2 {
+        return false;
+    }
+    for cut in 0..=remove_writes {
+        let Ok(mut crashing) = Volume::mount(remove_base.fork(Some(cut))) else {
+            return false;
+        };
+        let Ok(target) = crashing.lookup(1, "atomic-remove.bin") else {
+            return false;
+        };
+        let _ = crashing.remove_xattr(target.inode, "user.note", 42);
+        let image = crashing.into_device();
+
+        let Ok(mut recovered) = Volume::mount(image.fork(None)) else {
+            return false;
+        };
+        if recovered.check().is_err() {
+            return false;
+        }
+        match recovered.get_xattr(target.inode, "user.note", &mut buf) {
+            Ok(5) if &buf[..5] == b"value" => {}
+            Err(Error::NotFound) => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 // ------------------------------------------------------- real device mount

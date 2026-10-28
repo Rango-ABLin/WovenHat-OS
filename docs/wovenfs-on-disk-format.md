@@ -62,10 +62,18 @@ cannot destroy the filesystem: the other slot remains intact and older.
 | 32 | 8 | `data_checksum` |
 | 40 | 64 | `direct[8]` block pointers |
 | 104 | 2 | `kind` (1 = file, 2 = directory) |
+| 106 | 8 | `xattr_block` (0 = none) |
+| 114 | 6 | spare, always zero |
 | 120 | 8 | `checksum` over bytes 0..120 |
 
 Eight direct blocks give a 4 KiB maximum file size. Bounded by construction, in
 keeping with the rest of the kernel; indirect blocks are a later extension.
+
+`xattr_block` was added in place of what was previously always-zero spare
+space (bytes 106..120 were zeroed and never read). Every inode written before
+this field existed already decodes as `xattr_block = 0`, so no format-version
+change was needed and no reader/writer skew is possible — there is exactly
+one copy of this code.
 
 ### Directory entry (64 bytes, 8 per block)
 
@@ -77,6 +85,32 @@ keeping with the rest of the kernel; indirect blocks are a later extension.
 | 16 | 48 | `name` |
 
 Eight direct blocks per directory inode give 64 entries per directory.
+
+### Extended-attribute block (512 bytes, one per inode)
+
+Allocated from the same block bitmap as any other data block — there is no
+separate on-disk region for it, and `xattr_block` in the owning inode is the
+only reference.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 2 | `entry_count` |
+| 2 | 502 | packed entries, back-to-back, no padding |
+| 504 | 8 | `checksum` over bytes 0..504 |
+
+Each packed entry is `[name_len: u8][value_len: u16][name bytes][value
+bytes]`. Names are bounded by `MAX_XATTR_NAME` (48, the same bound as a
+directory-entry name) and values by `MAX_XATTR_VALUE` (256); the number of
+attributes an inode can hold is implicitly bounded by the 502-byte entries
+region rather than a separate count limit.
+
+`set_xattr`/`remove_xattr` always rebuild the whole entries region (decode,
+drop or replace the named entry, re-encode) rather than splicing a
+variable-length region in place — simple and bounded, at the cost of
+rewriting the whole block on every mutation, which is one sector regardless.
+Removing the last attribute frees the block back to the bitmap in the same
+transaction, exactly like `write_file` freeing a direct block it no longer
+needs; `unlink` frees a still-attached xattr block the same way.
 
 ## Journal
 
