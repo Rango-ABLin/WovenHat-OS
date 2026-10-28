@@ -95,3 +95,8 @@ After the exact MOTD read, the fixture performs a one-byte read on the same
 descriptor and requires zero bytes at EOF before close. This proves sequential
 offset advancement and EOF for the bounded read-only path at 1/2/4 CPUs; seek,
 partial transfer and concurrent-descriptor semantics remain separate gates.
+
+## Bootstrap increment: partial transfers
+
+The MOTD fixture reads 7 bytes followed by 17 bytes, validates the joined
+content, then checks EOF. This proves sequential partial reads at 1/2/4 CPUs.

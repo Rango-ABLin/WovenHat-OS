@@ -7246,3 +7246,6 @@ more byte from the same descriptor and requires EOF (0) before close. QEMU
 passed at 1/2/4 CPUs. This proves bounded sequential offset/EOF behavior only;
 seek, partial transfer and concurrent descriptor behavior remain open.
 
+POSIX port increment 11: split MOTD reads of 7 then 17 bytes validate partial
+transfer and offset advance before EOF. QEMU passed at 1/2/4 CPUs.
+

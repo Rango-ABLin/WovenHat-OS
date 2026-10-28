@@ -21,7 +21,7 @@ int main(int argc, char **argv)
 	fd = open("/etc/motd", O_RDONLY);
 	if (fd < 3)
 		return 96;
-	if (read(fd, motd, sizeof motd) != (int)sizeof motd
+	if (read(fd, motd, 7) != 7 || read(fd, motd + 7, 17) != 17
 		|| motd[0] != 'W' || motd[8] != 't' || motd[21] != 'S'
 		|| motd[23] != '\n')
 		return 98;
