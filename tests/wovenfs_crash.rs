@@ -3153,6 +3153,42 @@ fn check_refuses_a_free_inode_with_nonzero_fields() {
 /// image with a resealed structural checksum passes `Inode::decode()` while
 /// hiding the non-zero timestamp from every earlier check.
 #[test]
+fn check_refuses_root_directory_inode_with_nonzero_created_timestamp() {
+    let base = formatted();
+    let root_inode = {
+        let volume = Volume::mount(base.clone()).expect("mount");
+        volume.super_block().root_inode
+    };
+    assert_eq!(root_inode, 1, "sanity: root inode is always 1 on a fresh volume");
+
+    // `format()` builds the root inode via `Inode::empty()`, which zeroes
+    // every field including `created`.  Only `stage_create` ever writes a
+    // non-zero `created`, and only for newly allocated KIND_FILE inodes — never
+    // for the pre-existing root directory inode.  A non-zero `root.created` is
+    // therefore corruption the runtime cannot produce; `check()` must reject it.
+    for created in [1u64, u64::MAX] {
+        let corrupt = base.fork(None);
+        reseal_inode_created(&corrupt, root_inode, created);
+
+        let before = corrupt.sectors();
+        let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a root directory inode with created = {created}"
+        );
+        assert!(
+            corrupt.sectors() == before,
+            "check() must not modify the image (created = {created})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+#[test]
 fn check_refuses_a_free_inode_with_nonzero_timestamps() {
     let base = formatted();
     // Inode 2 is the first free slot after the root (inode 1).

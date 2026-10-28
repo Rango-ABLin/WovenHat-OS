@@ -1,5 +1,66 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse root directory inode with nonzero created timestamp
+
+Branch: `auto/wovenhat-development` (base `bf2f2810`). Working tree had uncommitted
+changes from a prior session; this session validated and committed them.
+
+### Defect / gap
+
+The prior session's timestamp guard for free inodes covers `created` and `modified`
+on inode slots where `mode == 0`. But the root directory inode (inode 1, `mode != 0`)
+has a separate block of explicit guards in `check()`.
+
+`format()` builds the root inode via `Inode::empty()`, which zeroes every field
+including `created`. The only code that writes a non-zero `created` is `stage_create`
+(line `node.created = now`), and it operates exclusively on freshly allocated
+`KIND_FILE` inodes — never on the pre-existing root directory inode. No runtime path
+ever touches `root.created` after `format()`.
+
+A crafted image can reseal the structural inode checksum after patching `root.created`
+to a non-zero value. `Inode::decode()` accepts the image (checksum valid). Without an
+explicit guard, `check()` returned `Ok(())` on such an image — wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — after the existing `root.data_checksum != 0`
+guard, added:
+
+```rust
+if root.created != 0 {
+    return Err(Error::Corrupt);
+}
+```
+
+With a comment explaining why no runtime path can produce a non-zero `root.created`.
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_root_directory_inode_with_nonzero_created_timestamp`:
+1. Formats a fresh volume; reads `super_block().root_inode` (always 1).
+2. For each of two values — `1u64` and `u64::MAX` — forks the image, patches
+   `root.created` via `reseal_inode_created`, and asserts `check()` returns
+   `Err(Corrupt)` and does not modify the image.
+3. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **62 passed / 0 failed** (was 61; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `root.created` is now guarded; `root.modified` has no explicit guard in this block
+  (it can legitimately be non-zero after any `stage_create` or `stage_unlink`), but
+  that is correct behavior — `modified` is set by the runtime and `check()` does not
+  validate its value.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse free inode with nonzero timestamps
 
 Branch: `auto/wovenhat-development` (base `c67b85c5`). Working tree was clean.

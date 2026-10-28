@@ -1503,6 +1503,19 @@ impl<D: BlockDevice> Volume<D> {
         if root.data_checksum != 0 {
             return Err(Error::Corrupt);
         }
+        // `format()` creates the root directory inode via `Inode::empty()`, which
+        // zeroes every field, including `created`.  The only code that assigns a
+        // non-zero `created` value to an inode is `stage_create` (line
+        // `node.created = now`), and it operates exclusively on freshly allocated
+        // KIND_FILE inodes — never on the pre-existing root directory inode.  No
+        // runtime path (including `stage_create` and `stage_unlink`, which each
+        // set `dir.modified = now`) ever touches the root inode's `created` field.
+        // A non-zero `root.created` is therefore corruption that the runtime cannot
+        // have produced.  Without an explicit guard, a crafted image with a
+        // resealed inode checksum passes `mount()` and all earlier guards silently.
+        if root.created != 0 {
+            return Err(Error::Corrupt);
+        }
         // `format()` always sets the root directory's `size` to `SECTOR_SIZE` (one
         // directory data block).  `stage_create` and `stage_unlink` update only the
         // directory inode's `modified` field, not `size`.  No other runtime path
