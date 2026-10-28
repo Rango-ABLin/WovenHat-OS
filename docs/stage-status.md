@@ -12298,3 +12298,12 @@ accepted. Host and target warning-denying Clippy pass; QEMU passes at 1/2/4
 CPUs with exit 33. Evidence is under
 `audit-artifacts/stage13.10-{1,2,4}cpu-*`.
 
+## Stage 13.10K BLE profiles/services — 2026-10-28 — ACCEPTED
+
+The exact current Stage 13.10 runtime chain accepts the bounded Device
+Information, Battery, and WovenHat OS services, including permission checks,
+subscription-bound notifications, range validation, and transactional
+characteristic capacity handling. QEMU passes at 1/2/4 CPUs with exit 33.
+Evidence: `audit-artifacts/stage13.10-{1,2,4}cpu-*`. Next: Stage 13.10L
+Bluetooth lifecycle and teardown hardening.
+
