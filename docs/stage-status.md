@@ -12252,3 +12252,15 @@ At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
 RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
 read-only image snapshot. This focused repair is not full Stage 20/32 or full
 historical Windows acceptance; the seven failed graphics gates need follow-up.
+## Stage 32.18 GDB owner/binding attachment QEMU gate - 2026-10-28 - ACCEPTED
+
+The owner/binding boot self-test now exercises same-task token reuse,
+cross-task exclusion, generation-safe cleanup, and reacquisition. The live
+trap path still requires a scheduler-owned current task; the boot self-test
+uses a deterministic nonzero identity because it runs before task scheduling
+is active. Host/all-target Clippy and target Clippy with `stage32-18-test`
+pass. QEMU passes with the required marker at 1, 2, and 4 CPUs (exit 33).
+Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
+`target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
+`target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
+

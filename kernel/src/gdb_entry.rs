@@ -198,6 +198,20 @@ static GDB_OWNER: IrqMutex<(Owner, Option<(AttachmentToken, u64)>)> =
 #[cfg(feature = "gdb-entry")]
 fn gdb_owner_acquire() -> Option<AttachmentToken> {
     let task_id = crate::task::current_task_id_if_running()?.as_u64();
+    gdb_owner_acquire_for(task_id)
+}
+
+/// Acquire the debugger floor for a validated task identity.
+///
+/// The live trap path obtains the identity from the scheduler.  The stage
+/// boot self-test runs before a task is marked running, so it uses this same
+/// state transition with a deterministic synthetic identity instead of
+/// weakening the ownership check or depending on scheduler timing.
+#[cfg(feature = "gdb-entry")]
+fn gdb_owner_acquire_for(task_id: u64) -> Option<AttachmentToken> {
+    if task_id == 0 {
+        return None;
+    }
     let mut guard = GDB_OWNER.lock();
     let (owner, stored) = &mut *guard;
     if let Some((token, stored_task)) = *stored {
@@ -421,14 +435,15 @@ pub fn self_test() -> bool {
 /// 3. Releasing clears the floor so this task can acquire fresh again.
 #[cfg(any(test, feature = "stage32-18-test"))]
 pub fn owner_binding_self_test() -> bool {
-    let Some(task_id) = crate::task::current_task_id_if_running().map(|id| id.as_u64()) else {
-        return false;
-    };
+    let task_id = crate::task::current_task_id_if_running()
+        .map(|id| id.as_u64())
+        .filter(|&id| id != 0)
+        .unwrap_or(1);
 
-    let Some(token_a) = gdb_owner_acquire() else {
+    let Some(token_a) = gdb_owner_acquire_for(task_id) else {
         return false;
     };
-    let Some(token_b) = gdb_owner_acquire() else {
+    let Some(token_b) = gdb_owner_acquire_for(task_id) else {
         return false;
     };
     if token_a != token_b {
@@ -445,7 +460,7 @@ pub fn owner_binding_self_test() -> bool {
         };
         *stored = Some((foreign_token, foreign_task));
     }
-    if gdb_owner_acquire().is_some() {
+    if gdb_owner_acquire_for(task_id).is_some() {
         // Must not have been granted another task's floor. Clean up the
         // manually-installed foreign attachment before failing, so a failed
         // run of this self-test cannot wedge a later one.
@@ -467,7 +482,7 @@ pub fn owner_binding_self_test() -> bool {
         }
     }
 
-    let Some(token_c) = gdb_owner_acquire() else {
+    let Some(token_c) = gdb_owner_acquire_for(task_id) else {
         return false;
     };
     gdb_owner_release(token_c);

@@ -7898,3 +7898,13 @@ the C fixture verifies its handler and EINTR result. Target Clippy and QEMU
 passed at 1/2/4 CPUs. No SA_RESTART policy is implemented; partial transfers
 remain successful rather than being converted to EINTR.
 
+## Codex - Stage 32.18 GDB owner/binding attachment (2026-10-28)
+
+Stage 32.18 is accepted. The boot self-test covers same-task token reuse,
+foreign-task exclusion, cleanup, and reacquisition. A boot-time zero/current
+identity was normalized to a deterministic nonzero test identity; production
+trap acquisition remains scheduler-bound. Host/all-target and target
+`stage32-18-test` Clippy pass. QEMU passes at 1/2/4 CPUs with exit 33.
+Evidence is retained under the three `target/stage32-18-gdb-owner-binding-*`
+directories. Commit: pending.
+
