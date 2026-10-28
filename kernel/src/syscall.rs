@@ -3130,9 +3130,6 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             } else if arg1 == 1 {
                 crate::thread::register_robust_mutex(thread, arg0)
             } else { false };
-            if ok && arg1 == 1 {
-                let _ = crate::thread::robust_lock(thread, arg0);
-            }
             u64::from(ok)
         }
         value if value == Number::ThreadRobustLock as u64 => {
