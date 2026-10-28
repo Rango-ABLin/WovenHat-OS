@@ -7986,3 +7986,10 @@ distribution bound to handle, key size, and peer identity. Duplicate, stale,
 malformed, and mismatched material is rejected. Evidence is retained under
 `audit-artifacts/stage13.11-{1,2,4}cpu-*`.
 
+## Codex - full Stage 13 acceptance sweep (2026-10-28)
+
+Completed and accepted the current-tip Stage 13.1–13.11 matrix. All 33
+runtime runs (11 stages × 3 CPU counts) passed with exit 33 and their
+explicit markers; host and target warning-denying Clippy passed. Evidence is
+retained under the timestamped `audit-artifacts/stage13.*cpu-*` directories.
+

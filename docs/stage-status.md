@@ -12334,3 +12334,12 @@ size, and peer identity; malformed, stale, duplicate, and mismatched inputs
 fail closed. QEMU passes at 1/2/4 CPUs with exit 33. Evidence:
 `audit-artifacts/stage13.11-{1,2,4}cpu-*`.
 
+## Stage 13 full acceptance sweep — 2026-10-28 — ACCEPTED
+
+The complete current-tip Stage 13.1–13.11 runtime sweep passed at 1, 2, and
+4 CPUs; every run exited 33 and satisfied its explicit marker contract.
+Host and target warning-denying Clippy also pass. Evidence is preserved in
+the timestamped `audit-artifacts/stage13.*cpu-*` directories, including the
+current sweep at source tip. This is deterministic QEMU/software acceptance;
+physical hardware, radio interoperability, and certification remain separate.
+
