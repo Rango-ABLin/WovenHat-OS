@@ -292,8 +292,46 @@ impl Pending {
         scope: &SymbolScope<'_>,
         tls_plan: Option<&TlsPlan>,
     ) -> Option<()> {
+        validate_relocation_plan(images)?;
         relocate_linked_images(images, scope, self.space.paging(), &mut self.space, tls_plan)
     }
+}
+
+/// Validate relocation metadata before the first staged write. This keeps a
+/// post-start transaction fail-closed without partially applying an image's
+/// relocation stream; `Pending` still owns rollback for mapping failures.
+fn validate_relocation_plan(images: &[LinkImage<'_>]) -> Option<()> {
+    for linked in images {
+        let Some(dynamic) = linked.image.dynamic() else { continue };
+        for (offset, size, entry_size) in [
+            (dynamic.rela_file_offset, dynamic.rela_size, dynamic.rela_entry_size),
+            (dynamic.plt_rela_file_offset, dynamic.plt_rela_size, elf::RELA_ENTRY_SIZE),
+            (dynamic.rel_file_offset, dynamic.rel_size, dynamic.rel_entry_size),
+            (dynamic.plt_rel_file_offset, dynamic.plt_rel_size, dynamic.plt_rel_entry_size),
+        ] {
+            if size == 0 { continue; }
+            if entry_size == 0 || size % entry_size != 0 { return None; }
+            let end = offset.checked_add(size)?;
+            let bytes = linked.bytes.get(offset..end)?;
+            for entry in bytes.chunks_exact(entry_size) {
+                let info = u64::from_le_bytes(entry.get(8..16)?.try_into().ok()?);
+                let relocation = info as u32;
+                if !matches!(
+                    relocation,
+                    elf::R_X86_64_RELATIVE
+                        | elf::R_X86_64_64
+                        | elf::R_X86_64_GLOB_DAT
+                        | elf::R_X86_64_JUMP_SLOT
+                        | elf::R_X86_64_DTPMOD64
+                        | elf::R_X86_64_DTPOFF64
+                        | elf::R_X86_64_TPOFF64
+                        | elf::R_X86_64_GOTTPOFF
+                        | elf::R_X86_64_TPOFF32
+                ) { return None; }
+            }
+        }
+    }
+    Some(())
 }
 
 /// Map and populate verified image segments into an unpublished address space.
