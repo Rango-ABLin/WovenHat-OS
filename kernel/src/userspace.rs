@@ -161,6 +161,31 @@ global_asm!(
     "wovenhat_s03_handler_end:",
 );
 
+#[cfg(feature = "s03-process-lifecycle-test")]
+global_asm!(
+    ".global wovenhat_s03_vintr_start",
+    ".global wovenhat_s03_vintr_end",
+    "wovenhat_s03_vintr_start:",
+    "1:",
+    "mov eax, 0",
+    "xor edi, edi",
+    "mov rsi, 0x4000001fffe0",
+    "mov edx, 1",
+    "int 0x80",
+    "cmp rax, -1",
+    "je 2f",
+    "test rax, rax",
+    "jz 1b",
+    "cmp byte ptr [rsi], 3",
+    "je 2f",
+    "jmp 1b",
+    "2:",
+    "mov edi, 1",
+    "mov eax, 3",
+    "int 0x80",
+    "wovenhat_s03_vintr_end:",
+);
+
 global_asm!(
     ".global wovenhat_user_program_start",
     ".global wovenhat_user_program_end",
@@ -5208,6 +5233,21 @@ pub fn create_s03_handler_process() -> Option<UserProgram> {
     let stub = unsafe {
         let start = &wovenhat_s03_handler_start as *const u8;
         let end = &wovenhat_s03_handler_end as *const u8;
+        core::slice::from_raw_parts(start, end.offset_from(start) as usize)
+    };
+    load_elf(&build_stub_elf(stub)?)
+}
+
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn create_s03_vintr_process() -> Option<UserProgram> {
+    unsafe extern "C" {
+        static wovenhat_s03_vintr_start: u8;
+        static wovenhat_s03_vintr_end: u8;
+    }
+    // SAFETY: linker-delimited immutable bytes in the kernel image.
+    let stub = unsafe {
+        let start = &wovenhat_s03_vintr_start as *const u8;
+        let end = &wovenhat_s03_vintr_end as *const u8;
         core::slice::from_raw_parts(start, end.offset_from(start) as usize)
     };
     load_elf(&build_stub_elf(stub)?)

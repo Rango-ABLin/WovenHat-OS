@@ -2274,6 +2274,7 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
 /// produce nothing; usages WovenInput has no key for are ignored.
 pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6] {
     let shift = report[0] & 0x22 != 0;
+    let control = report[0] & 0x11 != 0;
     let mut keys = [None; 6];
     let mut current = [0u8; 6];
     current.copy_from_slice(&report[2..8]);
@@ -2283,7 +2284,7 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
     }
     for (slot, usage) in keys.iter_mut().zip(current) {
         if usage > 3 && !held.contains(&usage) {
-            *slot = usage_key(usage, shift);
+            *slot = usage_key(usage, shift, control);
         }
     }
     *held = current;
@@ -2292,7 +2293,7 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
 
 /// A HID keyboard usage (page 7) as a WovenInput key.
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-fn usage_key(usage: u8, shift: bool) -> Option<Key> {
+fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
     const DIGITS: &[u8; 10] = b"1234567890";
     const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";
     // Usages 0x2d-0x38: - = [ ] \ (non-US #) ; ' ` , . /
@@ -2301,7 +2302,9 @@ fn usage_key(usage: u8, shift: bool) -> Option<Key> {
     let character = match usage {
         0x04..=0x1d => {
             let letter = b'a' + (usage - 0x04);
-            if shift {
+            if control {
+                letter - b'a' + 1
+            } else if shift {
                 letter.to_ascii_uppercase()
             } else {
                 letter
