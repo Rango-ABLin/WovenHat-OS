@@ -1316,6 +1316,17 @@ impl<D: BlockDevice> Volume<D> {
             if !node.is_used() {
                 continue;
             }
+            // Only KIND_FILE (1) and KIND_DIR (2) are defined.  `stage_create`
+            // allocates only KIND_FILE inodes; `format()` writes exactly one
+            // KIND_DIR inode (the root).  Any other value is corruption that no
+            // runtime path can produce.  All downstream guards are gated on
+            // `node.kind == KIND_FILE` or `node.kind == KIND_DIR`, so an unknown
+            // kind slips through every check — the KIND_FILE guards are skipped,
+            // the orphan-inode scan at the end skips non-KIND_FILE inodes, and
+            // the bitmap→inode check sees no named blocks to verify.
+            if !matches!(node.kind, KIND_FILE | KIND_DIR) {
+                return Err(Error::Corrupt);
+            }
             // `mkdir` is not implemented: this is a flat, single-directory
             // filesystem.  The only valid KIND_DIR inode is the root
             // (sb.root_inode).  A live inode with kind == KIND_DIR and a number

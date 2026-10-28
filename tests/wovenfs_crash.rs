@@ -2905,3 +2905,52 @@ fn check_refuses_a_directory_entry_with_nonzero_reserved_padding() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a live inode whose `kind` is not `KIND_FILE` (1) or
+/// `KIND_DIR` (2).
+///
+/// Only two kind values are defined. `stage_create` allocates only `KIND_FILE`
+/// inodes; `format()` writes one `KIND_DIR` inode (the root). Any other value
+/// is corruption no runtime path can produce. The per-inode guards in `check()`
+/// are all gated on `kind == KIND_FILE` or `kind == KIND_DIR`, so an unknown
+/// kind passes every existing check silently: the `KIND_FILE` guards are
+/// skipped, the orphan-inode scan at the end skips non-`KIND_FILE` inodes, the
+/// non-root `KIND_DIR` guard does not fire, and no directory entry names the
+/// phantom inode, so the bitmap scan passes too.
+#[test]
+fn check_refuses_a_live_inode_with_unknown_kind() {
+    let base = formatted();
+
+    // Unknown kind values to exercise; none equal KIND_FILE (1) or KIND_DIR (2).
+    let unknown_kinds: &[(u16, &str)] = &[
+        (0, "kind 0"),
+        (3, "kind 3"),
+        (0xFF, "kind 255"),
+        (0xFFFF, "kind 65535"),
+    ];
+
+    for &(kind, label) in unknown_kinds {
+        // Inject a live inode with the unknown kind into inode slot 2 (the first
+        // free slot after the root at inode 1).  Give it a non-zero mode so
+        // is_used() returns true, then set the unknown kind.
+        let image = base.fork(None);
+        reseal_inode_mode(&image, 2, 0o100_644);
+        reseal_inode_kind(&image, 2, kind);
+
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a live inode with {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
