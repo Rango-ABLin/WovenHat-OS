@@ -20,6 +20,12 @@ def find_clang(explicit: str | None) -> str | None:
     return shutil.which("clang") or shutil.which("clang.exe")
 
 
+def find_lld(clang: str) -> str | None:
+    """Find the ELF linker paired with the selected clang installation."""
+    candidate = Path(clang).resolve().parent / ("ld.lld.exe" if os.name == "nt" else "ld.lld")
+    return str(candidate) if candidate.is_file() else shutil.which("ld.lld")
+
+
 def elf_header(path: Path) -> dict[str, int]:
     data = path.read_bytes()
     if len(data) < 64 or data[:4] != b"\x7fELF":
@@ -61,6 +67,14 @@ def main() -> int:
         (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
         return 2
+    lld = find_lld(clang)
+    report["linker_driver"] = lld
+    if lld is None:
+        report["status"] = "NOT_AVAILABLE"
+        report["reason"] = "No ELF lld paired with the selected clang was found"
+        (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2))
+        return 2
     version = subprocess.run([clang, "--version"], cwd=root, capture_output=True,
                              text=True, check=False)
     (output / "compiler.txt").write_text(version.stdout + version.stderr, encoding="utf-8")
@@ -68,7 +82,7 @@ def main() -> int:
     elf_file = output / "c-abi.elf"
     compile_command = [clang, "--target=x86_64-unknown-none", "-ffreestanding",
                        "-fno-stack-protector", "-fno-builtin", "-nostdlib",
-                       "-nostartfiles", "-nodefaultlibs", "-c", str(source),
+                       "-nodefaultlibs", "-c", str(source),
                        "-o", str(object_file)]
     compiled = subprocess.run(compile_command, cwd=root, capture_output=True,
                               text=True, check=False)
@@ -78,10 +92,10 @@ def main() -> int:
         report["reason"] = "clang rejected the freestanding fixture"
         (output / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         return 1
-    link_command = [clang, "--target=x86_64-unknown-none", "-fuse-ld=lld",
-                    "-nostdlib", "-nostartfiles", "-nodefaultlibs", str(object_file),
-                    "-Wl,-e,_start", f"-Wl,-T,{linker}", "-Wl,-z,norelro",
-                    "-o", str(elf_file)]
+    # Invoke ELF lld directly. On Windows, clang's generic driver otherwise
+    # delegates to a GNU `gcc` linker driver even with `-fuse-ld=lld`.
+    link_command = [lld, "--entry=_start", f"--script={linker}", "-z", "norelro",
+                    "--oformat=elf64-x86-64", "-o", str(elf_file), str(object_file)]
     linked = subprocess.run(link_command, cwd=root, capture_output=True,
                             text=True, check=False)
     (output / "link.log").write_text(linked.stdout + linked.stderr, encoding="utf-8")

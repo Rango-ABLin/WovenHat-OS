@@ -8,11 +8,13 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 Added the reproducible source/linker boundary in
 `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
-Source-shape and Rust-fixture inventory checks passed. The local build
-returned `NOT_AVAILABLE` (exit 2) because no target-qualified clang was
-available; no C ELF, loader execution, or QEMU qualification is claimed.
-S02 remains `IMPLEMENTING` pending a target-capable compiler and execution
-evidence.
+Source-shape and Rust-fixture inventory checks passed. LLVM 23.1.4 built the
+ELF through its paired `ld.lld`; the exact output was embedded by the
+independently guarded `s02-c-abi-test` and run through the production loader.
+The Ring-3 fixture returned native exit status 42 with full process/IPC/frame
+teardown, and QEMU exit 33 passed on 1/2/4 CPUs. Evidence:
+`audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This is only the no-libc C ABI
+subgate; S02's broader runtime scope remains open.
 
 ## Stage 32 integrated WovenDev software boundary - 2026-10-28
 

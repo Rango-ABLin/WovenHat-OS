@@ -7123,3 +7123,20 @@ QEMU execution evidence was produced. S02 remains implementing; do not treat
 this slice as accepted until a target-capable compiler builds the ELF and the
 real WovenHat loader/QEMU gate passes. No Rust/kernel files were changed.
 
+S02 actual C ELF build: located LLVM 23.1.4 at `C:\Program Files\LLVM\bin`
+outside `PATH`. The Windows clang driver incorrectly delegated a freestanding
+ELF link to unavailable GNU `gcc`; the builder now locates and invokes its
+paired `ld.lld.exe` directly. `target/s02-c-abi-actual/c-abi.elf` was produced
+with ELF64 x86-64 executable type and entry `0x400000000000` (SHA-256
+`e6d5e2f5e4fd2e2322fcdd513c98b86fb6daed5e2d1a53ba5955648ff84f9451`). This
+is a successful build only; loader/QEMU execution and S02 acceptance remain
+unrun.
+
+S02 execution completed: added the independently guarded `s02-c-abi-test`.
+It embeds the exact C ELF, parses and loads it through the production loader,
+spawns it as a normal user process, expects native exit status 42, and checks
+frame/process/IPC teardown. The real QEMU gate passed with exit 33 on 1/2/4
+CPUs; evidence is `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`. This closes
+only the narrow freestanding C ABI subgate; it does not claim hosted-C,
+libc/pthread/TLS/destructor/shared-library or broad S02 closure.
+

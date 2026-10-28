@@ -1,15 +1,18 @@
 # Stage status
 
-## S02 freestanding C ABI build boundary - 2026-10-28 - IMPLEMENTING
+## S02 freestanding C ABI boundary - 2026-10-28 - PARTIAL
 
 Added `scripts/build-c-abi-fixture.py` and `tools/runtime-fixtures/link.x`.
-The builder records the source/linker/compiler provenance, produces a static
-ELF64 validation record when a target-qualified clang/lld is available, and
-returns `NOT_AVAILABLE` rather than passing when the compiler is absent. On
-this host the build returned exit 2 because no target-qualified clang was
-installed. Source-shape and Rust-fixture inventory checks pass, but C ELF
-build, WovenHat loader execution, and QEMU exit-status evidence remain open;
-S02 is not accepted.
+The builder records source/linker/compiler provenance and produces a static
+ELF64 validation record. LLVM 23.1.4 built the no-libc fixture through its
+paired `ld.lld`; `s02-c-abi-test` embeds that exact ELF, uses the production
+loader, runs it as an ordinary Ring-3 process, verifies native exit status 42,
+and verifies process/IPC/frame teardown. QEMU passed with exit 33 on 1, 2 and
+4 CPUs. Evidence: `audit-artifacts/s02-c-abi-rerun-{1,2,4}cpu-*`.
+
+This is a bounded freestanding C ABI subgate, not S02 closure: libc, pthread,
+locale, math, destructors, TLS, async VFS/network and shared-library
+compatibility remain open.
 
 ## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
 

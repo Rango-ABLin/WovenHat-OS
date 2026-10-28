@@ -8,8 +8,12 @@ fixture. `scripts/build-c-abi-fixture.py` compiles it for
 checks the resulting ELF header and user-region entry point. The fixture does
 not claim libc, pthread, locale, math, destructor, TLS, allocator, or shared
 library compatibility. Build success is separate from loader/QEMU execution
-acceptance. The current Windows host has no target-qualified clang, so the
-builder records `NOT_AVAILABLE` and S02 remains open.
+acceptance. On Windows, the builder invokes the selected LLVM installation's
+paired `ld.lld` directly because clang's generic driver otherwise delegates
+to an unavailable GNU linker driver. The `s02-c-abi-test` QEMU feature embeds
+the exact built ELF, loads it via the production loader, expects native exit
+status 42, and checks frame/process/IPC teardown. It passed on 1/2/4 CPUs;
+hosted-C and broader runtime compatibility remain outside this boundary.
 
 ## Integrated WovenDev software boundary (2026-10-28)
 

@@ -3795,6 +3795,59 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "[S11.STATUS] libwoven signed exit status/ownership/teardown: PASSED"
         ));
     }
+    #[cfg(feature = "s02-c-abi-test")]
+    {
+        let frames = memory::stats().allocated_frames;
+        let processes = task::process_count();
+        let endpoints = ipc::endpoint_count();
+        let bytes = include_bytes!(env!("WOVENHAT_S02_C_ABI_ELF"));
+        let Ok(parsed) = elf::parse(bytes) else {
+            serial::write_line(format_args!("[S02.C] ELF parse: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let Some(program) = userspace::load_elf_with_argv(bytes, &["s02-c-abi"]) else {
+            serial::write_line(format_args!("[S02.C] ELF load: FAILED"));
+            qemu_test_exit_failure();
+        };
+        if program.image.entry != parsed.entry {
+            serial::write_line(format_args!("[S02.C] fixed entry: FAILED"));
+            qemu_test_exit_failure();
+        }
+        let Ok((pid, _)) = task::spawn_user_process("s02-c-abi", program) else {
+            serial::write_line(format_args!("[S02.C] process spawn: FAILED"));
+            qemu_test_exit_failure();
+        };
+        let status = loop {
+            match task::wait_process(pid.as_u64()) {
+                Ok(status) => break status,
+                Err(task::WaitError::StillRunning) => task::yield_now(),
+                Err(task::WaitError::NoSuchChild) => {
+                    serial::write_line(format_args!("[S02.C] process wait: FAILED"));
+                    qemu_test_exit_failure();
+                }
+            }
+        };
+        if status != 42
+            || memory::stats().allocated_frames != frames
+            || task::process_count() != processes
+            || ipc::endpoint_count() != endpoints
+            || thread::reap_owner(pid.as_u64()) != 0
+        {
+            serial::write_line(format_args!(
+                "[S02.C] exit={} frames={}/{} processes={}/{} endpoints={}/{}: FAILED",
+                status,
+                memory::stats().allocated_frames,
+                frames,
+                task::process_count(),
+                processes,
+                ipc::endpoint_count(),
+                endpoints
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S02.C] freestanding ELF load, exit, teardown: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage11-2-test")]
     {
         if !thread::structural_self_test() {
