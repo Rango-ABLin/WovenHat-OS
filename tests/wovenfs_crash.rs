@@ -1327,6 +1327,38 @@ fn reseal_inode_size(image: &CrashDisk, inode: u64, size: u64) {
     raw[120..128].copy_from_slice(&checksum.to_le_bytes());
 }
 
+/// Set an on-disk inode's `created` field, re-sealing the inode checksum.
+fn reseal_inode_created(image: &CrashDisk, inode: u64, created: u64) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[16..24].copy_from_slice(&created.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
+/// Set an on-disk inode's `modified` field, re-sealing the inode checksum.
+fn reseal_inode_modified(image: &CrashDisk, inode: u64, modified: u64) {
+    let inode_start = {
+        let volume = Volume::mount(image.clone()).expect("mount");
+        volume.super_block().inode_start
+    };
+    let index = inode - 1;
+    let lba = (inode_start + index / 4) as usize;
+    let offset = (index % 4) as usize * 128;
+    let mut sectors = image.image.borrow_mut();
+    let raw = &mut sectors[lba][offset..offset + 128];
+    raw[24..32].copy_from_slice(&modified.to_le_bytes());
+    let checksum = test_fnv1a(&raw[..120]);
+    raw[120..128].copy_from_slice(&checksum.to_le_bytes());
+}
+
 /// Set an on-disk inode's `links` field, re-sealing the inode checksum.
 fn reseal_inode_links(image: &CrashDisk, inode: u64, links: u32) {
     let inode_start = {
@@ -3106,6 +3138,56 @@ fn check_refuses_a_free_inode_with_nonzero_fields() {
         assert!(
             image.sectors() == before,
             "check() must not modify the image (direct[0])"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
+/// `check()` must return `Err(Corrupt)` when a free inode (mode == 0) has a
+/// non-zero `created` or `modified` timestamp.  `Inode::empty()` zeroes both
+/// fields, and `stage_unlink` writes `Inode::empty()` to free a slot, so no
+/// runtime path can leave either field non-zero in a free inode.  A crafted
+/// image with a resealed structural checksum passes `Inode::decode()` while
+/// hiding the non-zero timestamp from every earlier check.
+#[test]
+fn check_refuses_a_free_inode_with_nonzero_timestamps() {
+    let base = formatted();
+    // Inode 2 is the first free slot after the root (inode 1).
+
+    // Non-zero created.
+    {
+        let image = base.fork(None);
+        reseal_inode_created(&image, 2, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with created = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (created)"
+        );
+    }
+
+    // Non-zero modified.
+    {
+        let image = base.fork(None);
+        reseal_inode_modified(&image, 2, 1);
+        let before = image.sectors();
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a free inode with modified = 1"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image (modified)"
         );
     }
 

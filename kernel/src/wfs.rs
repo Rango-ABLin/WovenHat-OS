@@ -1318,13 +1318,16 @@ impl<D: BlockDevice> Volume<D> {
                 // inode slots directly (no encode call), and `stage_unlink`
                 // writes `Inode::empty()` to free an occupied slot.  No
                 // runtime path can therefore leave non-zero `links`, `size`,
-                // `data_checksum`, `kind`, or any `direct` entry in a free
-                // inode (mode == 0).  A crafted image with a resealed
-                // structural checksum passes `Inode::decode()` while hiding
-                // these values from every per-field check above, so without
-                // an explicit guard here the corruption goes unnoticed.
+                // `created`, `modified`, `data_checksum`, `kind`, or any
+                // `direct` entry in a free inode (mode == 0).  A crafted
+                // image with a resealed structural checksum passes
+                // `Inode::decode()` while hiding these values from every
+                // per-field check above, so without an explicit guard here
+                // the corruption goes unnoticed.
                 if node.links != 0
                     || node.size != 0
+                    || node.created != 0
+                    || node.modified != 0
                     || node.data_checksum != 0
                     || node.kind != 0
                     || node.direct.iter().any(|&b| b != 0)

@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-10-28 — WovenFS check(): refuse free inode with nonzero timestamps
+
+Branch: `auto/wovenhat-development` (base `c67b85c5`). Working tree was clean.
+
+### Defect / gap
+
+The previous session added a guard in `check()` that refuses a free inode
+(mode == 0) with non-zero `links`, `size`, `data_checksum`, `kind`, or any
+`direct[]` entry.  That session explicitly noted as open:
+
+> "The guard covers `links`, `size`, `data_checksum`, `kind`, and `direct[]`;
+> `created` and `modified` timestamps are not checked."
+
+`Inode::empty()` zeroes all fields including `created` and `modified`.
+`format()` zeroes inode slots directly (no encode call), and `stage_unlink`
+writes `Inode::empty()` to free an occupied slot.  No runtime path can
+therefore leave a non-zero `created` or `modified` in a free inode slot.
+
+A crafted image can reseal the structural checksum after patching either
+timestamp while leaving `mode == 0`.  `Inode::decode()` accepts the image
+(checksum valid), returns the inode with the non-zero field, and the prior
+guard did not check `created` or `modified`, so `check()` returned `Ok(())` —
+wrong.
+
+### Change
+
+**`kernel/src/wfs.rs`** `check()` — extended the free-inode guard to also
+check `node.created != 0` and `node.modified != 0`:
+
+```rust
+if node.links != 0
+    || node.size != 0
+    || node.created != 0
+    || node.modified != 0
+    || node.data_checksum != 0
+    || node.kind != 0
+    || node.direct.iter().any(|&b| b != 0)
+{
+    return Err(Error::Corrupt);
+}
+```
+
+Updated the comment above the guard to name `created` and `modified` among
+the fields that no runtime path can leave non-zero.
+
+**`tests/wovenfs_crash.rs`** — added two helpers and one test:
+
+- `reseal_inode_created(image, inode, created)`: patches raw inode bytes
+  16..24 (the `created` field) and re-seals the structural checksum.
+- `reseal_inode_modified(image, inode, modified)`: patches raw inode bytes
+  24..32 (the `modified` field) and re-seals.
+- `check_refuses_a_free_inode_with_nonzero_timestamps`:
+  1. Formats a fresh volume (inode 2 is the first free slot).
+  2. For each of two cases — `created = 1` and `modified = 1` — forks the
+     image, patches the field via the new helper, and asserts `check()`
+     returns `Err(Corrupt)` and does not modify the image.
+  3. Control: the unpatched volume passes `check()`.
+
+### Results (run on this host, 2026-10-28)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **61 passed / 0 failed** (was 60; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The free-inode guard now covers all inode fields: `links`, `size`,
+  `created`, `modified`, `data_checksum`, `kind`, and `direct[]`.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse free inode with nonzero fields
 
 Branch: `auto/wovenhat-development` (base `69f69984`). Working tree was clean.
