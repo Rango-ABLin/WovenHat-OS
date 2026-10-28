@@ -97,35 +97,38 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 	(void)attr;
 	if (!mutex) return EINVAL;
 	mutex->__u.__vi[0] = 0;
-	return 0;
+	return wh_syscall2(WH_SYS_THREAD_ROBUST_REGISTER, (long)(uintptr_t)mutex, 1) == 1 ? 0 : EAGAIN;
 }
 int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
 	if (!mutex || mutex->__u.__vi[0]) return EBUSY;
-	return 0;
+	return wh_syscall2(WH_SYS_THREAD_ROBUST_REGISTER, (long)(uintptr_t)mutex, 0) == 1 ? 0 : EINVAL;
 }
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
 	if (!mutex) return EINVAL;
-	return __sync_bool_compare_and_swap(&mutex->__u.__vi[0], 0, 1) ? 0 : EBUSY;
+	if (!__sync_bool_compare_and_swap(&mutex->__u.__vi[0], 0, 1)) return EBUSY;
+	long state = wh_syscall1(WH_SYS_THREAD_ROBUST_LOCK, (long)(uintptr_t)mutex);
+	return state == 1 ? EOWNERDEAD : state == 2 ? ENOTRECOVERABLE : state < 0 ? EBUSY : 0;
 }
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
 	if (!mutex) return EINVAL;
 	while (!__sync_bool_compare_and_swap(&mutex->__u.__vi[0], 0, 1))
-		sched_yield();
-	return 0;
+		(void)wh_syscall1(WH_SYS_THREAD_ROBUST_WAIT, (long)(uintptr_t)mutex);
+	long state = wh_syscall1(WH_SYS_THREAD_ROBUST_LOCK, (long)(uintptr_t)mutex);
+	return state == 1 ? EOWNERDEAD : state == 2 ? ENOTRECOVERABLE : state < 0 ? EBUSY : 0;
 }
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
 	if (!mutex || !mutex->__u.__vi[0]) return EINVAL;
 	__sync_lock_release(&mutex->__u.__vi[0]);
-	return 0;
+	return wh_syscall1(WH_SYS_THREAD_ROBUST_UNLOCK, (long)(uintptr_t)mutex) == 1 ? 0 : EPERM;
 }
 int pthread_mutex_consistent(pthread_mutex_t *mutex)
 {
-	(void)mutex;
-	return ENOTSUP;
+	if (!mutex) return EINVAL;
+	return wh_syscall1(WH_SYS_THREAD_ROBUST_CONSISTENT, (long)(uintptr_t)mutex) == 1 ? 0 : EINVAL;
 }
 
 /* Condition waits use a sequence counter.  The caller's mutex is released

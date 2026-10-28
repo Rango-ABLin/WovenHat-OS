@@ -2482,6 +2482,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     let Some(thread_id) = current_thread_id() else {
         exit_current_process(exit_code);
     };
+    crate::thread::mark_robust_owner_dead(thread_id);
     x86_64::instructions::interrupts::disable();
     let context_switch = {
         let mut scheduler = SCHEDULER.lock();

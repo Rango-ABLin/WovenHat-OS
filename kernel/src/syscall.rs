@@ -373,6 +373,13 @@ pub enum Number {
     /// user initializer pointer, packed initializer/memory lengths -> length or ERROR
     DynamicTlsValidate = 148,
     DynamicTlsMapAll = 149,
+    /// current thread, validated mutex address, operation (1 add, 0 remove)
+    ThreadRobustRegister = 150,
+    ThreadRobustLock = 151,
+    ThreadRobustUnlock = 152,
+    ThreadRobustConsistent = 153,
+    ThreadRobustWait = 154,
+    ThreadRobustWake = 155,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3121,26 +3128,6 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ThreadCancel as u64 => {
             crate::task::cancel_user_thread(arg0, arg1 as i32).map_or(SYSCALL_ERROR, |_| 0)
         }
-        value if value == Number::ThreadSleep as u64 => {
-            crate::task::sleep_current(arg0);
-            0
-        }
-        value if value == Number::ThreadConditionWait as u64 => {
-            crate::task::wait_on_condition(arg0, arg1);
-            0
-        }
-        value if value == Number::ThreadConditionSignal as u64 => {
-            u64::from(crate::task::signal_condition(arg0))
-        }
-        value if value == Number::DynamicTlsAddr as u64 => {
-            crate::task::dynamic_tls_address(arg0, arg1)
-        }
-        value if value == Number::DynamicTlsModuleStart as u64 => {
-            crate::task::dynamic_tls_module_range(arg0).map_or(SYSCALL_ERROR, |(start, _)| start)
-        }
-        value if value == Number::DynamicTlsModuleSize as u64 => crate::task::dynamic_tls_module_range(arg0)
-            .and_then(|(_, size)| u64::try_from(size).ok())
-            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::DynamicModuleRetain as u64 => {
             u64::from(crate::task::retain_dynamic_module(arg0, arg1))
         }
@@ -3169,6 +3156,54 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             let mut initializer = [0u8; 4096];
             if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len]).is_err() || !crate::task::map_dynamic_tls_all(arg0, &initializer[..initializer_len], memory_size) { SYSCALL_ERROR } else { 0 }
         }
+        value if value == Number::ThreadRobustRegister as u64 => {
+            let Some(thread) = crate::task::current_thread_id() else { return SYSCALL_ERROR; };
+            let mut probe = [0_u8; 4];
+            if crate::paging::copy_from_current_user(arg0, &mut probe).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let ok = if arg1 == 0 {
+                crate::thread::unregister_robust_mutex(thread, arg0)
+            } else if arg1 == 1 {
+                crate::thread::register_robust_mutex(thread, arg0)
+            } else { false };
+            u64::from(ok)
+        }
+        value if value == Number::ThreadRobustLock as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| crate::thread::robust_lock(id, arg0))
+        }
+        value if value == Number::ThreadRobustUnlock as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_unlock(id, arg0)))
+        }
+        value if value == Number::ThreadRobustConsistent as u64 => {
+            crate::task::current_thread_id().map_or(SYSCALL_ERROR, |id| u64::from(crate::thread::robust_consistent(id, arg0)))
+        }
+        value if value == Number::ThreadRobustWait as u64 => {
+            crate::thread::wait_robust_waiter(arg0, crate::task::current_task_id().as_u64()); 0
+        }
+        value if value == Number::ThreadRobustWake as u64 => {
+            crate::thread::signal_robust_waiter(arg0); 0
+        }
+        value if value == Number::ThreadSleep as u64 => {
+            crate::task::sleep_current(arg0);
+            0
+        }
+        value if value == Number::ThreadConditionWait as u64 => {
+            crate::task::wait_on_condition(arg0, arg1);
+            0
+        }
+        value if value == Number::ThreadConditionSignal as u64 => {
+            u64::from(crate::task::signal_condition(arg0))
+        }
+        value if value == Number::DynamicTlsAddr as u64 => {
+            crate::task::dynamic_tls_address(arg0, arg1)
+        }
+        value if value == Number::DynamicTlsModuleStart as u64 => {
+            crate::task::dynamic_tls_module_range(arg0).map_or(SYSCALL_ERROR, |(start, _)| start)
+        }
+        value if value == Number::DynamicTlsModuleSize as u64 => crate::task::dynamic_tls_module_range(arg0)
+            .and_then(|(_, size)| u64::try_from(size).ok())
+            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {
