@@ -1,18 +1,86 @@
 # Agent coordination (Claude Code and Codex)
 
-## Claude Code — Stage 32.13 IDT trap-frame capture and GDB entry point (2026-10-28)
+## Claude Code — Stage 32.17 IDT trap-frame capture and GDB entry point (2026-10-28)
 
 Added `kernel/src/gdb_entry.rs`: assembly trampoline (`wovenhat_debug_entry`),
 `DebugFrame` struct, `to_register_context()`, and bounded `wovenhat_debug_dispatch`
 with a 65536-poll COM2 stub loop. IDT vectors 1 and 3 wired via `set_handler_addr`
 in `interrupts::init` under `#[cfg(feature = "gdb-entry")]`; existing
-`breakpoint_handler` path preserved for lower features. Feature chain:
+`breakpoint_handler` path (and Codex's `gdb_live::record` hook) preserved for
+non-`gdb-entry` features. Feature chain:
 `gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]`,
-`stage32-13-test = ["qemu-test", "gdb-entry"]`. Target and host `-D warnings`
+`stage32-17-test = ["qemu-test", "gdb-entry"]`. Target and host `-D warnings`
 Clippy, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence under
-`target/stage32-13-gdb-entry-{1,2,4}cpu/`. Stage 32.13 accepted; stopped-task
-ownership, per-register write commands (`P`/`X`), breakpoint table management,
-and multi-client lifecycle remain open.
+`target/stage32-17-gdb-entry-{1,2,4}cpu/`. Stage 32.17 accepted. (Originally
+committed as Stage 32.13; renumbered to 32.17 after Codex concurrently accepted
+32.13–32.16 and the integrated gate.)
+
+## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
+
+Per user direction, the remaining Stage 32 work was consolidated into one
+change set rather than further 32.x increments. `kernel/src/wovendev.rs` now
+connects owner, copied frame, RSP transport pump, session dispatch, bounded
+register writes, and optional COM2 polling. SDK/API guidance, an application
+example path, and a reusable application template were added. Target and host
+warning-denying Clippy, Python validation, and the integrated QEMU 1/2/4-CPU
+gate pass with exit 33. This is a repository-level software boundary; live
+IDT safe-point wiring, scheduler-owned continue/step mutation, and physical
+GDB qualification are deliberately not claimed.
+
+## Codex - Stage 32 live breakpoint handoff continuation (2026-10-28)
+
+Wired the breakpoint IDT handler to `gdb_live::record`, a packed atomic
+vector/error latch. The handler returns immediately and never takes a lock,
+sleeps, or switches tasks; a later safe point consumes through `take()`. The
+integrated Stage 32 target/host lints and QEMU 1/2/4-CPU gate pass again.
+Scheduler-owned saved-context mutation for continue/step and physical GDB
+qualification remain open.
+
+The saved-context adapter is now implemented in `gdb_scheduler.rs`. It accepts
+only a scheduler-owned `UserForkFrame`, validates current kernel-stack
+ownership and user return state, maps registers, and controls TF at a safe
+point. It is not callable from the IRQ handler; physical qualification remains
+open.
+
+## Codex - Stage 32.16 GDB transport pump (2026-10-28)
+
+Added `kernel/src/gdb_transport.rs`, a fixed-size COM2/RSP byte assembler with
+acknowledgement handling and checksum-verified packet handoff. Oversized or
+malformed input resets the local pump; no global transport/session state is
+introduced. Target and host warning-denying Clippy, Python syntax, and QEMU
+1/2/4-CPU gates pass with exit 33. Evidence is under
+`target/stage32-16-gdb-transport-{1,2,4}cpu/`. Stage32.16 is accepted; live
+UART polling and session dispatch remain next.
+
+## Codex - Stage 32.15 GDB generation-checked task binding (2026-10-28)
+
+Added `kernel/src/gdb_binding.rs`, binding a copied trap-frame context to the
+current generation-bound owner. Reads are revalidated against the owner, so
+detach invalidates the context and stale/foreign tokens are rejected. Target
+and host warning-denying Clippy, Python syntax, and QEMU 1/2/4-CPU gates pass
+with exit 33. Evidence is under
+`target/stage32-15-gdb-binding-{1,2,4}cpu/`. Stage32.15 is accepted; live
+scheduler lookup and exception/register integration remain next.
+
+## Codex - Stage 32.14 GDB trap-frame snapshot (2026-10-28)
+
+Added `kernel/src/gdb_frame.rs`, an owned conversion from captured
+architectural values to the fixed 24-slot GDB register context. It retains no
+interrupt-frame or stack reference and carries error code/vector values by
+copy. Target and host warning-denying Clippy, Python syntax, and QEMU 1/2/4-
+CPU gates pass with exit 33. Evidence is under
+`target/stage32-14-gdb-frame-{1,2,4}cpu/`. Stage32.14 is accepted; live IDT
+capture and task binding remain prerequisites for the next slice.
+
+## Codex - Stage 32.13 GDB generation-bound owner (2026-10-28)
+
+Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority
+with checked generation tokens. It rejects zero/duplicate attachments,
+requires the exact current token for detach, and blocks stale events after
+teardown and generation reuse. Target and host warning-denying Clippy, Python
+syntax, and QEMU 1/2/4-CPU gates pass with exit 33. Evidence is under
+`target/stage32-13-gdb-owner-{1,2,4}cpu/`. Stage32.13 is accepted; live task
+and transport integration remain prerequisites for the next slice.
 
 ## Codex - Stage 32.12 GDB trap-stop boundary (2026-10-28)
 

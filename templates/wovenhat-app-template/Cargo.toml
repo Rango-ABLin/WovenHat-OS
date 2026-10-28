@@ -1,0 +1,15 @@
+[package]
+name = "wovenhat-app-template"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+libwoven = { path = "../../libwoven" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

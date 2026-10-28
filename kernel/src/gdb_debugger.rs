@@ -8,6 +8,7 @@
 pub const REGISTER_COUNT: usize = 24;
 /// Maximum bytes returned by one bounded `m` memory command.
 pub const MAX_MEMORY_READ: usize = 256;
+pub const REGISTER_HEX_BYTES: usize = REGISTER_COUNT * 16;
 
 /// Register order used by the bounded remote context.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,32 @@ pub enum Action {
     Step,
     Kill,
     Empty,
+}
+
+/// Apply a complete fixed-size GDB `G` register write to caller-owned state.
+pub fn write_registers(
+    command: &[u8],
+    context: &mut RegisterContext,
+    reply: &mut [u8],
+) -> Option<usize> {
+    let data = command.strip_prefix(b"G")?;
+    if data.len() != REGISTER_HEX_BYTES || reply.len() < 2 {
+        return None;
+    }
+    let mut values = [0u64; REGISTER_COUNT];
+    for (index, value) in values.iter_mut().enumerate() {
+        let start = index * 16;
+        let mut bytes = [0u8; 8];
+        for (byte_index, byte) in bytes.iter_mut().enumerate() {
+            let high = from_hex(data[start + byte_index * 2])?;
+            let low = from_hex(data[start + byte_index * 2 + 1])?;
+            *byte = (high << 4) | low;
+        }
+        *value = u64::from_le_bytes(bytes);
+    }
+    context.values = values;
+    reply[..2].copy_from_slice(b"OK");
+    Some(2)
 }
 
 /// Dispatch one decoded RSP command into caller-owned reply storage.

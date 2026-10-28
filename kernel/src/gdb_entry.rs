@@ -188,7 +188,7 @@ unsafe extern "C" fn wovenhat_debug_dispatch(frame: *mut DebugFrame) {
 
     HANDLER_FIRED.store(true, Ordering::Release);
 
-    let ctx = frame.to_register_context();
+    let mut ctx = frame.to_register_context();
 
     let mut session = crate::gdb_session::Session::STOPPED;
     // Determine the vector from the instruction pointer context.
@@ -220,7 +220,7 @@ unsafe extern "C" fn wovenhat_debug_dispatch(frame: *mut DebugFrame) {
 
         let memory_base = frame.rip & !0xfff_u64;
         let action =
-            session.handle(&pkt, &ctx, memory_base, &[], &mut reply_buf);
+            session.handle(&pkt, &mut ctx, memory_base, &[], &mut reply_buf);
 
         use crate::gdb_session::SessionAction;
         match action {
@@ -269,7 +269,7 @@ pub fn debug_entry_address() -> u64 {
 ///
 /// The handler times out immediately when no GDB client is connected and
 /// returns to the instruction after `int3`, so the self-test does not hang.
-#[cfg(any(test, feature = "stage32-13-test"))]
+#[cfg(any(test, feature = "stage32-17-test"))]
 pub fn self_test() -> bool {
     // ── Pure mapping test ─────────────────────────────────────────────────────
     let frame = DebugFrame {

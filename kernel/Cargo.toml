@@ -170,11 +170,30 @@ stage32-11-test = ["qemu-test", "gdb-session"]
 gdb-trap = ["gdb-session"]
 # Stage 32 WovenDev trap-stop classification QEMU gate.
 stage32-12-test = ["qemu-test", "gdb-trap"]
+# Enable generation-bound single-owner authority for the debugger.
+gdb-owner = []
+stage32-13-test = ["qemu-test", "gdb-owner"]
+# Enable the owned trap-frame to GDB-context snapshot boundary.
+gdb-frame = ["gdb-debugger"]
+stage32-14-test = ["qemu-test", "gdb-frame"]
+# Enable generation-checked stopped-context binding.
+gdb-binding = ["gdb-frame", "gdb-owner"]
+stage32-15-test = ["qemu-test", "gdb-binding"]
+# Enable bounded byte-to-RSP-packet transport assembly.
+gdb-transport = ["gdb-stub"]
+stage32-16-test = ["qemu-test", "gdb-transport"]
+# Integrated WovenDev debugger path; the acceptance feature enables its boot self-test.
+wovendev = ["gdb-binding", "gdb-transport", "debug-serial"]
+stage32-integrated-test = ["qemu-test", "wovendev-live", "gdb-scheduler"]
+# Enable the interrupt-safe, nonblocking trap handoff.
+wovendev-live = ["wovendev"]
+# Enable scheduler safe-point debugger resume adapters.
+gdb-scheduler = ["wovendev"]
 # Enable live IDT trap entry: assembly trampoline, DebugFrame capture, and
 # bounded GDB stub loop over the debug-serial transport.
 gdb-entry = ["gdb-trap", "gdb-debugger", "debug-serial", "gdb-stub"]
 # Stage 32 WovenDev IDT trap-frame capture and GDB entry point QEMU gate.
-stage32-13-test = ["qemu-test", "gdb-entry"]
+stage32-17-test = ["qemu-test", "gdb-entry"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.

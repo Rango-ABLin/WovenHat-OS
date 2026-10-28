@@ -24,11 +24,11 @@ def main() -> int:
         parser.error("Set --qemu and --firmware to existing files.")
 
     image = subprocess.check_output(
-        ["cargo", "run", "--quiet", "--features", "stage32-13-test", "--", "--print-image"],
+        ["cargo", "run", "--quiet", "--features", "stage32-17-test", "--", "--print-image"],
         cwd=root,
         text=True,
     ).strip()
-    out = root / "target" / f"stage32-13-gdb-entry-{args.cpus}cpu"
+    out = root / "target" / f"stage32-17-gdb-entry-{args.cpus}cpu"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
     qemu_log = out / "qemu.log"
@@ -62,14 +62,14 @@ def main() -> int:
         log,
         [
             f"[SMP] online={args.cpus} expected={args.cpus}",
-            "[S32.13] GDB trap entry: PASSED",
+            "[S32.17] GDB trap entry: PASSED",
         ],
     )
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(log[-12000:], file=sys.stderr)
         return 1
-    print(f"Stage 32.13 GDB trap entry: PASS ({args.cpus} CPU, exit 33)")
+    print(f"Stage 32.17 GDB trap entry: PASS ({args.cpus} CPU, exit 33)")
     print(f"Evidence: {out}")
     return 0
 

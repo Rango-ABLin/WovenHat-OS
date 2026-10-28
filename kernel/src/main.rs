@@ -122,6 +122,15 @@ pub mod gdb_debugger;
 pub mod gdb_session;
 pub mod gdb_trap;
 pub mod gdb_entry;
+pub mod gdb_owner;
+pub mod gdb_frame;
+pub mod gdb_binding;
+pub mod gdb_transport;
+#[cfg(feature = "wovendev-live")]
+pub mod gdb_live;
+pub mod gdb_scheduler;
+#[cfg(feature = "wovendev")]
+pub mod wovendev;
 pub mod log_filter;
 pub mod log_ring;
 pub mod profiler;
@@ -5251,11 +5260,64 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "stage32-13-test")]
     {
-        if !gdb_entry::self_test() {
-            serial::write_line(format_args!("[S32.13] GDB trap entry: FAILED"));
+        if !gdb_owner::self_test() {
+            serial::write_line(format_args!("[S32.13] GDB owner: FAILED"));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S32.13] GDB trap entry: PASSED"));
+        serial::write_line(format_args!("[S32.13] GDB owner: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-14-test")]
+    {
+        if !gdb_frame::self_test() {
+            serial::write_line(format_args!("[S32.14] GDB frame snapshot: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.14] GDB frame snapshot: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-15-test")]
+    {
+        if !gdb_binding::self_test() {
+            serial::write_line(format_args!("[S32.15] GDB task binding: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.15] GDB task binding: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-16-test")]
+    {
+        if !gdb_transport::self_test() {
+            serial::write_line(format_args!("[S32.16] GDB transport pump: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.16] GDB transport pump: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-integrated-test")]
+    {
+        if !wovendev::WovenDev::self_test() {
+            serial::write_line(format_args!("[S32] WovenDev integrated path: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !gdb_live::self_test() {
+            serial::write_line(format_args!("[S32] live trap handoff: FAILED"));
+            qemu_test_exit_failure();
+        }
+        if !gdb_scheduler::self_test() {
+            serial::write_line(format_args!("[S32] scheduler adapter: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32] WovenDev integrated path: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage32-17-test")]
+    {
+        if !gdb_entry::self_test() {
+            serial::write_line(format_args!("[S32.17] GDB trap entry: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.17] GDB trap entry: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage15-1-test")]

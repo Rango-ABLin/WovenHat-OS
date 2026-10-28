@@ -1,6 +1,77 @@
 # Stage status
 
-## Stage 32.13 IDT trap-frame capture and GDB entry point — 2026-10-28 — ACCEPTED
+## Stage 32 integrated WovenDev software gate - 2026-10-28 - ACCEPTED BOUNDARY
+
+The integrated Stage 32 change set connects the bounded diagnostics/logging,
+crash-dump, tracing, profiler, RSP, COM2, packet pump, session, trap-stop,
+generation-owner, trap-frame, task-binding, register-write, UART-poll, SDK
+documentation, API documentation, example path, and application-template
+surfaces through `kernel/src/wovendev.rs`. The single integrated gate is
+`stage32-integrated-test` and passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-integrated-{1,2,4}cpu/`.
+
+The breakpoint IDT path now also has an interrupt-safe live handoff under the
+integrated feature: it records one packed vector/error event atomically and
+returns without locks, sleeping, or switching tasks. The event is consumed
+later through `gdb_live::take()`. Continue/step mutation is now covered by
+`gdb_scheduler.rs`, which validates user return state, maps the fixed GDB
+context into the owned `UserForkFrame`, controls x86 TF, and checks current
+kernel-stack ownership before its raw-pointer entry. Physical GDB
+qualification remains separate.
+
+## Stage 32.16 GDB transport pump QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_transport.rs`, a bounded byte pump for COM2/RSP input.
+It recognizes acknowledgements, assembles one bounded frame, validates the
+checksum through `gdb_stub`, exposes a packet only through an explicit take
+operation, and resets on malformed or oversized input. It does not poll UART
+or own debugger/session state.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-16-gdb-transport-{1,2,4}cpu/`. Target and host
+warning-denying Clippy plus Python syntax validation pass. Live UART loop,
+session dispatch, and task execution control remain open.
+
+## Stage 32.15 GDB generation-checked task binding QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_binding.rs`, which binds an owned trap-frame snapshot to
+the current generation-bound debugger owner. Context reads are refused after
+detach or when a token belongs to another owner, preventing stale attachment
+events from exposing or replacing a stopped context.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-15-gdb-binding-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live scheduler/task lookup,
+exception-handler wiring, and register mutation remain open.
+
+## Stage 32.14 GDB trap-frame snapshot QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_frame.rs`, which copies an owned architectural snapshot
+into the fixed 24-slot Stage 32.10 register context. General registers, RIP,
+RFLAGS, segment selectors, error code, and vector are copied by value; no
+interrupt-frame or stack reference escapes. The module remains a pure
+conversion boundary and does not install an exception handler or resume a
+task.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-14-gdb-frame-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live IDT capture and task binding
+remain open.
+
+## Stage 32.13 GDB generation-bound owner QEMU gate - 2026-10-28 - ACCEPTED
+
+Added `kernel/src/gdb_owner.rs`, a caller-owned single-attachment authority
+with checked generation increments. It rejects zero or duplicate task
+identities, requires the current token for detach, and prevents stale tokens
+from matching after teardown and reattachment. No global task lookup, trap
+handling, or execution control is introduced.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-13-gdb-owner-{1,2,4}cpu/`. Target and host warning-denying
+Clippy plus Python syntax validation pass. Live task binding, transport
+ownership, and debugger execution remain open.
+
+## Stage 32.17 IDT trap-frame capture and GDB entry point — 2026-10-28 — ACCEPTED
 
 Added `kernel/src/gdb_entry.rs`: a `global_asm!` trampoline (`wovenhat_debug_entry`)
 that saves all 15 GPRs on the kernel stack, calls `wovenhat_debug_dispatch`, and
@@ -16,7 +87,7 @@ path is preserved for all lower-stage gates. Feature chain:
 Self-test: pure register-mapping check plus a live INT3 via `HANDLER_FIRED`.
 
 Passes on 1/2/4 CPUs with exit 33. Evidence:
-`target/stage32-13-gdb-entry-{1,2,4}cpu/`. Target (stage32-13-test and
+`target/stage32-17-gdb-entry-{1,2,4}cpu/`. Target (stage32-17-test and
 stage32-12-test) and host warning-denying Clippy pass. No intermediate live
 GDB client needed; the stub loop timeout path is sufficient for gate acceptance.
 

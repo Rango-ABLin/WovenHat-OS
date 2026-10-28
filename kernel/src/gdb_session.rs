@@ -55,7 +55,7 @@ impl Session {
     pub fn handle(
         &mut self,
         packet: &gdb_stub::Packet,
-        context: &RegisterContext,
+        context: &mut RegisterContext,
         memory_base: u64,
         memory: &[u8],
         frame: &mut [u8],
@@ -77,6 +77,12 @@ impl Session {
             return SessionAction::Ignore;
         }
         let mut payload = [0u8; 512];
+        if command.starts_with(b"G") {
+            return match gdb_debugger::write_registers(command, context, &mut payload) {
+                Some(written) => encode_reply(&payload[..written], frame),
+                None => encode_reply(b"E01", frame),
+            };
+        }
         let Some((action, written)) =
             gdb_debugger::dispatch(command, context, memory_base, memory, &mut payload)
         else {
@@ -118,13 +124,13 @@ fn hex(value: u8) -> u8 {
 
 #[cfg(any(test, feature = "stage32-11-test"))]
 pub fn self_test() -> bool {
-    let context = RegisterContext::ZERO;
+    let mut context = RegisterContext::ZERO;
     let mut session = Session::STOPPED;
     let mut frame = [0u8; 520];
     let Some(packet) = gdb_stub::decode(b"$?#3f") else {
         return false;
     };
-    let SessionAction::Reply(written) = session.handle(&packet, &context, 0, b"", &mut frame)
+    let SessionAction::Reply(written) = session.handle(&packet, &mut context, 0, b"", &mut frame)
     else {
         return false;
     };
@@ -138,7 +144,7 @@ pub fn self_test() -> bool {
     let Some(c) = c else {
         return false;
     };
-    if session.handle(&c, &context, 0, b"", &mut frame) != SessionAction::Continue
+    if session.handle(&c, &mut context, 0, b"", &mut frame) != SessionAction::Continue
         || session.is_stopped()
     {
         return false;
@@ -151,7 +157,7 @@ pub fn self_test() -> bool {
     let Some(s) = s else {
         return false;
     };
-    if session.handle(&s, &context, 0, b"", &mut frame) != SessionAction::Step {
+    if session.handle(&s, &mut context, 0, b"", &mut frame) != SessionAction::Step {
         return false;
     }
     session.stop(5);
@@ -159,7 +165,8 @@ pub fn self_test() -> bool {
     let Some(k) = k else {
         return false;
     };
-    session.handle(&k, &context, 0, b"", &mut frame) == SessionAction::Kill && !session.is_active()
+    session.handle(&k, &mut context, 0, b"", &mut frame) == SessionAction::Kill
+        && !session.is_active()
 }
 
 #[cfg(test)]

@@ -261,6 +261,8 @@ pub fn breakpoint_reached() -> bool {
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
     BREAKPOINT_REACHED.store(true, Ordering::SeqCst);
+    #[cfg(feature = "wovendev-live")]
+    crate::gdb_live::record(3, None);
 }
 
 fn dump_exception_context(label: &str, stack_frame: &InterruptStackFrame, error_code: Option<u64>) {

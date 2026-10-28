@@ -1,5 +1,52 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Integrated WovenDev software boundary (2026-10-28)
+
+`kernel/src/wovendev.rs` composes the Stage 32 primitives in one caller-owned
+coordinator: generation-bound attachment, copied trap context, RSP byte pump,
+session dispatch, bounded register writes, and optional bounded COM2 polling.
+The coordinator keeps the packet/frame/context lifetimes explicit. The
+`gdb_live` handoff publishes one packed vector/error event atomically from the
+breakpoint ISR and consumes it outside the IRQ path. It does not take locks,
+sleep, switch tasks, or claim physical GDB qualification. `gdb_scheduler.rs`
+is the safe-point adapter for the owned `UserForkFrame`: it validates user
+RIP/RSP and selectors, maps the fixed GDB register order, and controls x86 TF
+for step/continue. Its raw-pointer entry is explicitly unsafe and checks
+kernel-stack ownership; it is not callable from the IRQ handler.
+
+## WovenDev bounded transport pump (2026-10-28)
+
+`kernel/src/gdb_transport.rs` keeps COM2 byte assembly separate from UART
+polling and debugger lifecycle. It has a fixed frame bound, handles `+`/`-`
+acknowledgements, validates complete packets through `gdb_stub`, and exposes
+verified packets only once. Malformed and oversized input resets the local
+pump; no packet, UART, task, or session state is retained globally.
+
+## WovenDev generation-checked task binding (2026-10-28)
+
+`kernel/src/gdb_binding.rs` combines the current owner token with a copied
+GDB register context. Every read checks the owner generation again, so detach
+immediately invalidates the binding and a reused attachment cannot consume an
+old context. It does not perform scheduler lookup or register mutation; those
+authorities remain for live exception integration.
+
+## WovenDev trap-frame snapshot boundary (2026-10-28)
+
+`kernel/src/gdb_frame.rs` copies a caller-owned architectural snapshot into
+the fixed GDB register order. It stores all values by value, including the
+error code and vector, so a future exception handler can hand off a stable
+context without retaining an interrupt-frame or stack reference. IDT capture,
+task binding, and resume authority remain outside this module.
+
+## WovenDev generation-bound owner (2026-10-28)
+
+`kernel/src/gdb_owner.rs` provides a local single-attachment authority. Each
+nonzero opaque task identity receives a checked monotonically increasing
+generation; only the exact current token can match or detach. This prevents
+late asynchronous events from a prior debugger attachment from being applied
+to a reused task/session. The owner remains caller-owned until live task and
+transport integration defines its lock, cancellation, and teardown context.
+
 ## WovenDev trap-stop classification boundary (2026-10-28)
 
 `kernel/src/gdb_trap.rs` converts a captured vector and optional error code
