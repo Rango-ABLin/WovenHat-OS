@@ -24,14 +24,17 @@ def main() -> int:
     parser.add_argument("--firmware", type=Path, required=True)
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--timeout", type=float, default=45)
+    parser.add_argument("--feature", default="stage32-19-test")
+    parser.add_argument("--name", default=None)
+    parser.add_argument("--command", default="c", choices=("c", "D"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
     image = subprocess.check_output(
-        ["cargo", "run", "--quiet", "--features", "stage32-19-test", "--", "--print-image"],
+        ["cargo", "run", "--quiet", "--features", args.feature, "--", "--print-image"],
         cwd=root, text=True,
     ).strip()
-    out = root / "target" / f"stage32-19-live-gdb-{args.cpus}cpu"
+    out = root / "target" / f"{args.name or 'stage32-19-live-gdb'}-{args.cpus}cpu"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
     qemu_log = out / "qemu.log"
@@ -84,7 +87,15 @@ def main() -> int:
         if b"S05" not in received:
             raise RuntimeError(f"missing GDB stop reply: {received!r}")
         client.sendall(b"+")
-        client.sendall(packet(b"c"))
+        client.sendall(packet(args.command.encode()))
+        if args.command == "D":
+            while b"OK" not in received and time.monotonic() < deadline:
+                try:
+                    received.extend(client.recv(256))
+                except socket.timeout:
+                    continue
+            if b"OK" not in received:
+                raise RuntimeError(f"missing detach acknowledgement: {received!r}")
         remaining = max(0.1, deadline - time.monotonic())
         stdout, stderr = process.communicate(timeout=remaining)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
@@ -101,7 +112,7 @@ def main() -> int:
     log = serial.read_text(encoding="utf-8", errors="replace")
     errors = validation_errors(process.returncode, log, [
         f"[SMP] online={args.cpus} expected={args.cpus}",
-        "[S32.19] live GDB COM2 client qualification: PASSED",
+        f"[S32.20] live GDB detach: PASSED" if args.command == "D" else "[S32.19] live GDB COM2 client qualification: PASSED",
     ])
     if errors:
         print("\n".join(errors), file=sys.stderr)

@@ -5610,6 +5610,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage32-20-test")]
+    {
+        if task::spawn("gdb-detach-test", gdb_entry::live_detach_task_entry).is_err() {
+            serial::write_line(format_args!("[S32.20] live GDB detach: FAILED"));
+            qemu_test_exit_failure();
+        }
+        let mut waited = 0u32;
+        while !gdb_entry::live_detach_task_done() && waited < 2_000_000 {
+            task::yield_now();
+            waited += 1;
+        }
+        if !gdb_entry::live_detach_task_done() {
+            serial::write_line(format_args!("[S32.20] live GDB detach: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[S32.20] live GDB detach: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
@@ -5626,6 +5644,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S12.2] WovenFS: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "stage12-2-xattr-test")]
+    {
+        if !wfs::xattr_self_test() {
+            serial::write_line(format_args!(
+                "[S12.2 XATTR] WovenFS extended attributes: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S12.2 XATTR] WovenFS extended attributes: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage12-3-test")]

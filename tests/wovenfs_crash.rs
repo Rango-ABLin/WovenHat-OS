@@ -693,3 +693,163 @@ fn content_corruption_is_detected_on_read() {
         "a flipped data byte must fail the content checksum"
     );
 }
+
+#[test]
+fn xattr_lifecycle_and_block_reuse() {
+    let base = formatted();
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let inode = volume.create(1, "f.bin", 0o644, 1).expect("create");
+
+    let mut out = vec![0u8; 512];
+    assert_eq!(
+        volume.get_xattr(inode, "user.note", &mut out),
+        Err(Error::NotFound)
+    );
+    assert_eq!(volume.list_xattr(inode, &mut out), Ok(0));
+
+    volume
+        .set_xattr(inode, "user.note", b"draft", 2)
+        .expect("set");
+    assert_eq!(volume.get_xattr(inode, "user.note", &mut out), Ok(5));
+    assert_eq!(&out[..5], b"draft");
+
+    volume
+        .set_xattr(inode, "user.note", b"a much longer replacement value", 3)
+        .expect("overwrite with a different length");
+    assert_eq!(volume.get_xattr(inode, "user.note", &mut out), Ok(32));
+    assert_eq!(&out[..32], b"a much longer replacement value");
+
+    let oversized = vec![0u8; 257];
+    assert_eq!(
+        volume.set_xattr(inode, "user.big", &oversized, 4),
+        Err(Error::TooLarge)
+    );
+
+    let block = volume.inode(inode).expect("inode").xattr_block;
+    assert_ne!(block, 0);
+    volume
+        .remove_xattr(inode, "user.note", 5)
+        .expect("remove last attribute");
+    assert_eq!(
+        volume.inode(inode).expect("inode").xattr_block,
+        0,
+        "removing the last attribute must free its block"
+    );
+    assert_eq!(
+        volume.get_xattr(inode, "user.note", &mut out),
+        Err(Error::NotFound)
+    );
+    volume.check().expect("consistent");
+
+    // The freed block must be genuinely reusable, not merely unreferenced.
+    let inode_b = volume.create(1, "g.bin", 0o644, 6).expect("create second");
+    volume
+        .set_xattr(inode_b, "user.note", b"reused", 7)
+        .expect("set on second file");
+    assert_eq!(
+        volume.inode(inode_b).expect("inode").xattr_block,
+        block,
+        "the freed xattr block should be the next one allocated"
+    );
+    volume.check().expect("consistent");
+}
+
+#[test]
+fn unlink_frees_an_attached_xattr_block() {
+    let base = formatted();
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    let inode = volume.create(1, "f.bin", 0o644, 1).expect("create");
+    volume
+        .set_xattr(inode, "user.note", b"value", 2)
+        .expect("set");
+    let block = volume.inode(inode).expect("inode").xattr_block;
+    assert_ne!(block, 0);
+
+    volume.unlink(1, "f.bin", 3).expect("unlink");
+    volume.check().expect("consistent");
+
+    let inode_b = volume.create(1, "g.bin", 0o644, 4).expect("create second");
+    volume
+        .set_xattr(inode_b, "user.note", b"reused", 5)
+        .expect("set on second file");
+    assert_eq!(
+        volume.inode(inode_b).expect("inode").xattr_block,
+        block,
+        "unlink must have freed the attached xattr block, not merely the inode"
+    );
+}
+
+#[test]
+fn set_xattr_is_atomic_across_every_crash_point() {
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.create(1, "f.bin", 0o644, 1).expect("create")
+    };
+
+    let writes = write_count(&base, |volume| {
+        volume
+            .set_xattr(inode, "user.note", b"value", 2)
+            .expect("set");
+    });
+    assert!(writes > 1, "expected a multi-sector operation, got {writes}");
+
+    for cut in 0..=writes {
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount before the operation");
+        let _ = volume.set_xattr(inode, "user.note", b"value", 2);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("crash at {cut}"));
+
+        let mut out = vec![0u8; 512];
+        match recovered.get_xattr(inode, "user.note", &mut out) {
+            Ok(5) => assert_eq!(&out[..5], b"value"),
+            Err(Error::NotFound) => {}
+            Err(error) => panic!("crash at {cut}: unexpected get_xattr error: {error:?}"),
+        }
+    }
+}
+
+#[test]
+fn remove_xattr_is_atomic_across_every_crash_point() {
+    let base = formatted();
+    let inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let inode = volume.create(1, "f.bin", 0o644, 1).expect("create");
+        volume
+            .set_xattr(inode, "user.note", b"value", 2)
+            .expect("set");
+        inode
+    };
+
+    let writes = write_count(&base, |volume| {
+        volume.remove_xattr(inode, "user.note", 3).expect("remove");
+    });
+    assert!(writes > 1, "expected a multi-sector operation, got {writes}");
+
+    for cut in 0..=writes {
+        let crashing = base.fork(Some(cut));
+        let mut volume = Volume::mount(crashing.clone()).expect("mount before the operation");
+        let _ = volume.remove_xattr(inode, "user.note", 3);
+        drop(volume);
+
+        let settled = crashing.fork(None);
+        let mut recovered = mount_consistent(&settled, &format!("crash at {cut}"));
+
+        // Either the attribute and its block are both still fully present,
+        // or both are fully gone -- never a freed block with a dangling
+        // inode pointer, or a cleared pointer with the bitmap bit still set.
+        let node = recovered.inode(inode).expect("inode");
+        let mut out = vec![0u8; 512];
+        match recovered.get_xattr(inode, "user.note", &mut out) {
+            Ok(5) => {
+                assert_eq!(&out[..5], b"value");
+                assert_ne!(node.xattr_block, 0);
+            }
+            Err(Error::NotFound) => assert_eq!(node.xattr_block, 0),
+            Err(error) => panic!("crash at {cut}: unexpected get_xattr error: {error:?}"),
+        }
+    }
+}

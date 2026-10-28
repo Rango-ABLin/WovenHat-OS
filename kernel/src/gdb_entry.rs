@@ -171,6 +171,8 @@ const FRAME_BUF: usize = 520;
 static HANDLER_FIRED: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "stage32-19-test")]
 static LIVE_TASK_DONE: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "stage32-20-test")]
+static LIVE_DETACH_DONE: AtomicBool = AtomicBool::new(false);
 
 // ── Single-attachment authority (Stage 32.18) ──────────────────────────────
 
@@ -529,6 +531,19 @@ pub fn live_task_entry() -> ! {
 #[cfg(feature = "stage32-19-test")]
 pub fn live_task_done() -> bool {
     LIVE_TASK_DONE.load(Ordering::SeqCst)
+}
+
+#[cfg(feature = "stage32-20-test")]
+pub fn live_detach_task_entry() -> ! {
+    HANDLER_FIRED.store(false, Ordering::SeqCst);
+    unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+    LIVE_DETACH_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
+    loop { crate::task::yield_now(); }
+}
+
+#[cfg(feature = "stage32-20-test")]
+pub fn live_detach_task_done() -> bool {
+    LIVE_DETACH_DONE.load(Ordering::SeqCst)
 }
 
 // ── Host unit tests ───────────────────────────────────────────────────────────

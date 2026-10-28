@@ -18,6 +18,7 @@ physical-probe = []
 physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
 s05-memory-pressure-test = ["qemu-test"]
+stage12-2-xattr-test = ["qemu-test"]
 stage07-webp-test = ["qemu-test"]
 stage6-hotplug-test = ["qemu-test"]
 network-test = ["qemu-test"]
@@ -213,6 +214,7 @@ stage32-17-test = ["qemu-test", "gdb-entry"]
 stage32-18-test = ["qemu-test", "gdb-entry"]
 # Stage 32 live COM2 RSP client qualification.
 stage32-19-test = ["qemu-test", "gdb-entry"]
+stage32-20-test = ["qemu-test", "gdb-entry"]
 # QEMU-only acceptance for the production service supervisor. This is kept
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
