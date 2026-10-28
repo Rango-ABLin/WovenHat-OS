@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## POSIX static-libc bootstrap (2026-10-28)
+
+The POSIX port uses pinned upstream musl 1.2.6 and keeps WovenHat adaptation
+outside the vendor tree. `ports/musl/include/syscall_arch.h` translates only
+the currently checked Linux-shaped read, write, close, and exit calls to the
+three-argument WovenHat syscall gate. `ports/musl/src/syscall_cp.c` is the
+temporary cancellation-point transport boundary; it contains no cancellation
+claim. The reproducible bootstrap builder compiles genuine upstream `read.c`
+and `write.c` into an archive but intentionally does not link or execute it:
+errno/TLS, startup, allocator, threading and the remaining syscall surface
+must be implemented and qualified in later increments.
+
 ## S03 process-lifecycle ABI surface (2026-10-28)
 
 The existing `kernel/src/task.rs` process authority owns parent/child

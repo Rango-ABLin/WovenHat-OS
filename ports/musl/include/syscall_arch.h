@@ -14,12 +14,12 @@
 #define WH_LINUX_EXIT       60
 #define WH_LINUX_EXIT_GROUP 231
 
-static __inline long wh_musl_syscall0(long number)
+static __inline long __syscall0(long number)
 {
 	return wh_syscall0(number);
 }
 
-static __inline long wh_musl_syscall1(long number, long arg0)
+static __inline long __syscall1(long number, long arg0)
 {
 	switch (number) {
 	case WH_LINUX_CLOSE:
@@ -32,7 +32,15 @@ static __inline long wh_musl_syscall1(long number, long arg0)
 	}
 }
 
-static __inline long wh_musl_syscall3(long number, long arg0, long arg1, long arg2)
+static __inline long __syscall2(long number, long arg0, long arg1)
+{
+	(void)number;
+	(void)arg0;
+	(void)arg1;
+	return -WH_ENOSYS;
+}
+
+static __inline long __syscall3(long number, long arg0, long arg1, long arg2)
 {
 	switch (number) {
 	case WH_LINUX_READ:
@@ -44,13 +52,22 @@ static __inline long wh_musl_syscall3(long number, long arg0, long arg1, long ar
 	}
 }
 
-/* musl's internal syscall macros call these names. */
-#define __syscall0(n) wh_musl_syscall0(n)
-#define __syscall1(n,a) wh_musl_syscall1(n,a)
-#define __syscall2(n,a,b) (-WH_ENOSYS)
-#define __syscall3(n,a,b,c) wh_musl_syscall3(n,a,b,c)
-#define __syscall4(n,a,b,c,d) (-WH_ENOSYS)
-#define __syscall5(n,a,b,c,d,e) (-WH_ENOSYS)
-#define __syscall6(n,a,b,c,d,e,f) (-WH_ENOSYS)
+static __inline long __syscall4(long n, long a, long b, long c, long d)
+{
+	(void)n; (void)a; (void)b; (void)c; (void)d;
+	return -WH_ENOSYS;
+}
+
+static __inline long __syscall5(long n, long a, long b, long c, long d, long e)
+{
+	(void)n; (void)a; (void)b; (void)c; (void)d; (void)e;
+	return -WH_ENOSYS;
+}
+
+static __inline long __syscall6(long n, long a, long b, long c, long d, long e, long f)
+{
+	(void)n; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
+	return -WH_ENOSYS;
+}
 
 #endif

@@ -7168,3 +7168,12 @@ target warning-denying Clippy and QEMU 1-CPU execution passed with exit 33
 (`audit-artifacts/musl-transport-1cpu-639287669541568774`). This is transport
 bring-up only, not static musl linking or POSIX conformance.
 
+POSIX port increment 2: `scripts/build-musl-wovenhat-bootstrap.py` now
+generates musl's type header and compiles the pinned upstream `read.c` and
+`write.c` with the WovenHat syscall adapter, archiving them with the explicit
+non-cancelling `__syscall_cp` bridge. The archive is `BUILT_NOT_LINKED`;
+`__syscall_ret`, errno/TLS, startup, allocator, and pthread cancellation are
+not present and remain next work. Bootstrap build/contract validation and the
+preserved S02 QEMU regression passed at 1/2/4 CPUs. No POSIX profile or static
+libc execution claim is made.
+

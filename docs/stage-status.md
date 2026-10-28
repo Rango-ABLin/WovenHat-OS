@@ -14,6 +14,20 @@ This closes S02's documented freestanding C ABI scope. libc, pthread, locale,
 math, destructors, TLS, async VFS/network and shared-library compatibility are
 explicitly outside S02 and remain separately unclaimed.
 
+## POSIX musl static-libc bootstrap - 2026-10-28 - IMPLEMENTING
+
+The repeatable `scripts/build-musl-wovenhat-bootstrap.py` build generated
+musl's type header and compiled pinned upstream musl 1.2.6 `read.c` and
+`write.c` with the WovenHat adapter, then archived them with the bounded
+cancellation-point bridge. The build is intentionally `BUILT_NOT_LINKED`:
+the required `__syscall_ret`/errno/TLS, C startup, allocator, cancellation,
+and broader syscall bodies do not exist yet. Python validation, the bootstrap
+build, S02 target warning-denying Clippy, and the preserved S02 QEMU regression
+gate passed at 1/2/4 CPUs. Evidence: `target/musl-wovenhat-bootstrap-check2/`
+and `target/musl-bootstrap-s02-1cpu-debug/`,
+`target/musl-bootstrap-s02-rerun-{2,4}cpu-debug/`. This is not a POSIX profile
+acceptance or static-libc execution gate.
+
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 
 The existing bounded kernel process lifecycle now has matching safe `libwoven`
