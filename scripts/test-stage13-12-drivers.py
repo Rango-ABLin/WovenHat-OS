@@ -40,6 +40,18 @@ SHELL_MARKER = '[BOOT] shell-first runtime ready'
 LINE = re.compile(r'^\[DRIVERS\] (\w+)(?: at ([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.\d))?: (\w+)', re.M)
 
 
+def firmware_drive_args(firmware, firmware_vars, out):
+    """Use a private writable VARS image; never modify the supplied template."""
+    drives = ['-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}']
+    if firmware_vars is not None:
+        if not firmware_vars.is_file():
+            raise FileNotFoundError(f'OVMF VARS template does not exist: {firmware_vars}')
+        vars_copy = out / 'OVMF_VARS.fd'
+        shutil.copyfile(firmware_vars, vars_copy)
+        drives.extend(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'])
+    return drives
+
+
 def outcomes(log):
     """The first bring-up's outcome per driver (the gate runs it twice)."""
     seen = {}
