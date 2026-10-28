@@ -207,7 +207,19 @@ pub fn init() {
     let idt = IDT.call_once(|| {
         let mut idt = InterruptDescriptorTable::new();
 
+        #[cfg(not(feature = "gdb-entry"))]
         idt.breakpoint.set_handler_fn(breakpoint_handler);
+        // SAFETY: wovenhat_debug_entry saves all GPRs, calls
+        // wovenhat_debug_dispatch, and returns via iretq.  Neither vector 1
+        // nor 3 pushes an error code, so the frame layout is identical for
+        // both and the trampoline can handle either.
+        #[cfg(feature = "gdb-entry")]
+        unsafe {
+            idt.breakpoint
+                .set_handler_addr(VirtAddr::new(crate::gdb_entry::debug_entry_address()));
+            idt.debug
+                .set_handler_addr(VirtAddr::new(crate::gdb_entry::debug_entry_address()));
+        }
         idt.non_maskable_interrupt.set_handler_fn(tlb_nmi_handler);
         idt[crate::smp::TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
         idt[crate::smp::RESCHEDULE_VECTOR].set_handler_fn(reschedule_ipi_handler);
@@ -249,6 +261,8 @@ pub fn breakpoint_reached() -> bool {
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
     BREAKPOINT_REACHED.store(true, Ordering::SeqCst);
+    #[cfg(feature = "wovendev-live")]
+    crate::gdb_live::record(3, None);
 }
 
 fn dump_exception_context(label: &str, stack_frame: &InterruptStackFrame, error_code: Option<u64>) {

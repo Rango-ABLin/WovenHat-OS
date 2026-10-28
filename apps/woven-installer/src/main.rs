@@ -3,8 +3,10 @@
 
 use core::panic::PanicInfo;
 
-use libwoven::{rgb, Args, Canvas, GraphicsSurface};
 use libwoven::installer_ipc::{self, Operation, Request, Response};
+use libwoven::layout::Frame;
+use libwoven::ui::{Button, Label, Theme};
+use libwoven::{Args, Canvas, GraphicsSurface, rgb};
 use wovenhat_installer::{Screen, State};
 
 mod service;
@@ -35,8 +37,9 @@ struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_GUI_WIDTH * MAX_GUI_HEIGHT]>
 // mutable reference while it renders into the process-owned buffer.
 unsafe impl Sync for PixelBuffer {}
 
-static CANVAS_PIXELS: PixelBuffer =
-    PixelBuffer(core::cell::UnsafeCell::new([0; MAX_GUI_WIDTH * MAX_GUI_HEIGHT]));
+static CANVAS_PIXELS: PixelBuffer = PixelBuffer(core::cell::UnsafeCell::new(
+    [0; MAX_GUI_WIDTH * MAX_GUI_HEIGHT],
+));
 
 #[derive(Clone, Copy)]
 enum InventoryStatus {
@@ -94,7 +97,9 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
     } else {
         InstallStatus::NotRequested
     };
-    if !render_gui(&window, state, inventory, install, None, false) || window.share_with(shell).is_err() {
+    if !render_gui(&window, state, inventory, install, None, false)
+        || window.share_with(shell).is_err()
+    {
         libwoven::exit(4)
     }
     const TITLE: &[u8] = b"WovenInstaller";
@@ -125,10 +130,13 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
             break;
         }
         if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
-            let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_GUI_WIDTH as u32);
-            let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_GUI_HEIGHT as u32);
+            let width =
+                u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_GUI_WIDTH as u32);
+            let height =
+                u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_GUI_HEIGHT as u32);
             if let Ok(resized) = GraphicsSurface::create(width, height) {
-                if resized.share_with(shell).is_ok() && send_resize(&resized, shell)
+                if resized.share_with(shell).is_ok()
+                    && send_resize(&resized, shell)
                     && render_gui(&resized, state, inventory, install, pointer, pressed)
                 {
                     let previous = core::mem::replace(&mut window, resized);
@@ -181,9 +189,22 @@ fn render_gui(
         return false;
     };
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(24, 20, canvas.width().saturating_sub(48), canvas.height().saturating_sub(40), PANEL);
+    canvas.fill_rect(
+        24,
+        20,
+        canvas.width().saturating_sub(48),
+        canvas.height().saturating_sub(40),
+        PANEL,
+    );
     canvas.fill_rect(24, 20, canvas.width().saturating_sub(48), 42, PANEL_DARK);
-    canvas.draw_text(42, 34, "WovenInstaller", TEXT);
+    let theme = Theme {
+        surface: PANEL,
+        accent: ACCENT,
+        text: TEXT,
+        disabled: BUTTON,
+        focus: ACCENT,
+    };
+    Label::new(Frame::new(42, 34, 180, 16), "WovenInstaller").draw(&mut canvas, theme);
     let (title, detail) = screen_text(state.screen);
     canvas.draw_text(42, 82, title, ACCENT);
     canvas.draw_text(42, 103, detail, MUTED);
@@ -209,16 +230,25 @@ fn render_gui(
         };
         canvas.draw_text(42, 218, status, MUTED);
     }
-    canvas.fill_rect(
-        BUTTON_X,
-        BUTTON_Y,
-        BUTTON_WIDTH,
-        BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
+    let mut close = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Close",
     );
-    canvas.draw_text(BUTTON_X + 26, BUTTON_Y + 9, "Close", TEXT);
+    close.pressed = pressed;
+    close.draw(&mut canvas, theme);
     if let Some((x, y)) = pointer {
-        canvas.fill_rect(i32::from(x).saturating_sub(1), i32::from(y).saturating_sub(1), 3, 3, ACCENT);
+        canvas.fill_rect(
+            i32::from(x).saturating_sub(1),
+            i32::from(y).saturating_sub(1),
+            3,
+            3,
+            ACCENT,
+        );
     }
     window.write_canvas(&canvas).is_ok()
 }
@@ -227,7 +257,11 @@ fn request_inventory() -> InventoryStatus {
     let Ok(service) = libwoven::ipc_service_discover(installer_ipc::SERVICE_NAME) else {
         return InventoryStatus::Unavailable;
     };
-    let request = Request { operation: Operation::Inventory, request_id: 1, plan: b"" };
+    let request = Request {
+        operation: Operation::Inventory,
+        request_id: 1,
+        plan: b"",
+    };
     let mut bytes = [0u8; installer_ipc::MAX_MESSAGE_BYTES];
     let Ok(length) = request.encode(&mut bytes) else {
         return InventoryStatus::Unavailable;
@@ -257,7 +291,11 @@ fn request_install(plan: &[u8]) -> InstallStatus {
     let Ok(service) = libwoven::ipc_service_discover(installer_ipc::SERVICE_NAME) else {
         return InstallStatus::Failed(installer_ipc::STATUS_TARGET_UNAVAILABLE);
     };
-    let request = Request { operation: Operation::Install, request_id: 2, plan };
+    let request = Request {
+        operation: Operation::Install,
+        request_id: 2,
+        plan,
+    };
     let mut bytes = [0u8; installer_ipc::MAX_MESSAGE_BYTES];
     let Ok(length) = request.encode(&mut bytes) else {
         return InstallStatus::Failed(installer_ipc::STATUS_BAD_REQUEST);
@@ -298,8 +336,14 @@ fn screen_text(screen: Screen) -> (&'static str, &'static str) {
         Screen::Welcome => ("Welcome", "Review the validated installation plan."),
         Screen::TargetSelection => ("Target selection", "The selected target is shown below."),
         Screen::PartitionReview => ("Partition review", "Review the proposed partition layout."),
-        Screen::Settings => ("Settings", "Review user, timezone, keyboard, and network settings."),
-        Screen::Progress => ("Progress", "Installation progress is reported by the executor."),
+        Screen::Settings => (
+            "Settings",
+            "Review user, timezone, keyboard, and network settings.",
+        ),
+        Screen::Progress => (
+            "Progress",
+            "Installation progress is reported by the executor.",
+        ),
         Screen::Cancelling => ("Cancelling", "The operation is being cancelled."),
         Screen::Cancelled => ("Cancelled", "No further action was taken."),
         Screen::Success => ("Success", "The validated operation completed."),
@@ -309,8 +353,10 @@ fn screen_text(screen: Screen) -> (&'static str, &'static str) {
 
 fn in_close_button(pointer: Option<(u16, u16)>) -> bool {
     let Some((x, y)) = pointer else { return false };
-    i32::from(x) >= BUTTON_X && i32::from(x) < BUTTON_X + BUTTON_WIDTH as i32
-        && i32::from(y) >= BUTTON_Y && i32::from(y) < BUTTON_Y + BUTTON_HEIGHT as i32
+    i32::from(x) >= BUTTON_X
+        && i32::from(x) < BUTTON_X + BUTTON_WIDTH as i32
+        && i32::from(y) >= BUTTON_Y
+        && i32::from(y) < BUTTON_Y + BUTTON_HEIGHT as i32
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -323,11 +369,17 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {
-    if text.is_empty() { return None; }
+    if text.is_empty() {
+        return None;
+    }
     let mut value = 0u64;
     for digit in text {
-        if !digit.is_ascii_digit() { return None; }
-        value = value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))?;
+        if !digit.is_ascii_digit() {
+            return None;
+        }
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
     }
     Some(value)
 }

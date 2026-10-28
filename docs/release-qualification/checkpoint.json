@@ -1,0 +1,63 @@
+{
+  "schema": "WOVENHAT-RELEASE-QUALIFICATION-CHECKPOINT-V1",
+  "updated_utc": "2026-10-24T18:35:00Z",
+  "milestone": "S02",
+  "milestone_title": "Bounded portable runtime compatibility",
+  "status": "IMPLEMENTING",
+  "release_decision": "NO-GO",
+  "baseline_commit": "3eee80b8",
+  "accepted_commit": "f9091b6a",
+  "branch": "master",
+  "working_tree_clean_before_documentation": true,
+  "tests": {
+    "focused_python": "previously recorded passing suites",
+    "release_validation": {
+      "checks": 158,
+      "failures": 0,
+      "classification": "QEMU/host software evidence"
+    },
+    "desktop_qualification": "strict QEMU desktop journey PASS on 1/2/4 CPUs with 5G configured and at least 4 GiB usable",
+    "repeated_shell_boots": "2 sequential boots PASS on 1/2/4 CPUs",
+    "guest_reset": "Stage 13.20 reboot PASS on 1/2/4 CPUs",
+    "rust_all_targets": "PASS",
+    "python_host_suite": "204 tests PASS",
+    "clippy": "kernel target and host all-targets PASS with warnings denied",
+    "stage28_disposable": "PASS",
+    "installed_disk_qemu": "PASS on 1/2/4 CPUs",
+    "installer_storage_focused": "45 tests PASS",
+    "stage27_5_recovery": "PASS on 1/2/4 CPUs",
+    "driver_restart": "PASS on 1/2/4 CPUs",
+    "graphics_scanout": "Stage 20.14b PASS on 1/2/4 CPUs",
+    "usb_input": "Stage 13.13 PASS on 1/2/4 CPUs",
+    "usable_memory": "isolated repeated shell reruns report meets_minimum=true on 1/2/4",
+    "network_link_loss": "PASS on 1/2/4 CPUs",
+    "wifi_bluetooth_contracts": "Stage 13.10 PASS on 1/2/4 CPUs",
+    "single_output_graphics": "Stage 20.14S PASS on 1/2/4 CPUs",
+    "gfx02_renderer": "PASS on 1/2/4 CPUs",
+    "release_chain": "158/158 PASS on current head",
+    "s01_native_abi": "PASS: independent libwoven fixture, current/unsupported/malformed cases on 1/2/4 CPUs",
+    "s02_contract_checker": "PASS: source contract validated; target-qualified ELF C compiler NOT_AVAILABLE; execution NOT_RUN",
+    "application_service_matrix": "PASS on 1/2/4 CPUs",
+    "virtual_trust_status": "NOT_QUALIFIED: missing OVMF VARS, swtpm, OpenSSL, key, certificate",
+    "physical_status": "PHYSICAL_NOT_TESTED",
+    "final_release_decision": "NO-GO",
+    "virtual_trust": "NOT_QUALIFIED"
+  },
+  "blockers": [
+    "M10/M14 trust provisioning, production signing, release provenance, and independent review",
+    "M13 native hardware and physical power-loss qualification",
+    "OVMF VARS and swtpm prerequisites",
+    "development signing key and certificate",
+    "supported installer transaction evidence",
+    "physical/native hardware qualification",
+    "independent security review"
+  ],
+  "next_action": "Provide a target-qualified ELF C compiler, build c-abi.c, then run the independent loader/QEMU 1/2/4 acceptance before extending the runtime contract; preserve the separate M10-M15 NO-GO release boundary",
+  "safety": {
+    "host_reboot_requested": false,
+    "raw_device_opened": false,
+    "physical_media_written": false,
+    "host_firmware_changed": false,
+    "host_tpm_changed": false
+  }
+}

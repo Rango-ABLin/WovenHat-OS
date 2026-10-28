@@ -131,8 +131,12 @@ pub fn decode(raw: Raw, status_b: u8) -> Option<DateTime> {
     valid.then_some(time)
 }
 
+/// # Safety
+/// Performs CMOS port I/O; call with the `PORTS` lock held so register
+/// accesses are not interleaved with another reader.
 unsafe fn wait_until_settled() -> bool {
     for _ in 0..POLL_ITERATIONS {
+        // SAFETY: CMOS register-A read, sound under this fn's PORTS-held contract.
         if unsafe { register(REGISTER_A) } & UPDATE_IN_PROGRESS == 0 {
             return true;
         }
@@ -141,7 +145,11 @@ unsafe fn wait_until_settled() -> bool {
     false
 }
 
+/// # Safety
+/// Performs CMOS port I/O; call with the `PORTS` lock held (see [`register`]).
 unsafe fn raw() -> Raw {
+    // SAFETY: each read is a CMOS register access, sound under this fn's
+    // PORTS-held contract.
     unsafe {
         [
             register(REGISTER_SECONDS),
@@ -156,8 +164,13 @@ unsafe fn raw() -> Raw {
 
 /// Select `index` and read it. Bit 7 of the index port stays clear, leaving
 /// NMI enabled.
+/// # Safety
+/// Performs CMOS index/data port I/O; call with the `PORTS` lock held so the
+/// select-then-read pair is not interleaved with another access.
 unsafe fn register(index: u8) -> u8 {
     let value: u8;
+    // SAFETY: writes `index` to the fixed CMOS INDEX_PORT then reads the
+    // selected byte from the fixed CMOS DATA_PORT; both are valid I/O ports.
     unsafe {
         asm!("out dx, al", in("dx") INDEX_PORT, in("al") index, options(nomem, nostack, preserves_flags));
         asm!("in al, dx", out("al") value, in("dx") DATA_PORT, options(nomem, nostack, preserves_flags));

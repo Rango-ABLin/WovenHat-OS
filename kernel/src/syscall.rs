@@ -116,6 +116,9 @@ pub enum Number {
     Read = 0,
     Write = 1,
     Open = 2,
+    /// path ptr, path length, access bits (1=read, 2=write, 4=create) -> descriptor.
+    /// Kept distinct from legacy Open so its ABI cannot change silently.
+    OpenAccess = 254,
     Exit = 3,
     Getpid = 4,
     Waitpid = 5,
@@ -163,6 +166,10 @@ pub enum Number {
     Getpgrp = 35,
     /// pid, pgid (0 follows POSIX current/default conventions)
     Setpgid = 36,
+    /// -> current session identifier
+    Getsid = 244,
+    /// -> new session/process-group identifier, or ERROR
+    Setsid = 245,
     /// kind: 1=UDP, 2=TCP -> process-owned network descriptor
     Socket = 37,
     /// socket, local port
@@ -410,6 +417,8 @@ pub enum Number {
     InstallerInventory = 241,
     /// plan pointer, plan length -> 100 on a completed kernel transaction
     InstallerInstall = 242,
+    /// request and response pointers to bounded native ABI descriptors
+    AbiNegotiate = 243,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -439,7 +448,11 @@ pub enum Number {
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
     IdentityOpen = 219,
     /// session -> 0; owner-bound lock
-    #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+    #[cfg(any(
+        feature = "stage20-12-test",
+        feature = "stage24-5-test",
+        feature = "system-apps"
+    ))]
     IdentityLock = 220,
     /// session, password buffer `[length][password]`, length -> 0
     #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
@@ -566,6 +579,9 @@ pub fn service_pending() {
 }
 
 const SYSCALL_ERROR: u64 = u64::MAX;
+/// Distinguishes a broken pipe from generic denied/invalid syscall failures.
+const SYSCALL_BROKEN_PIPE: u64 = u64::MAX - 2;
+const SYSCALL_INTERRUPTED: u64 = u64::MAX - 3;
 
 fn sys_mmap(length: u64, flags: u64) -> u64 {
     if flags & !1 != 0 {
@@ -590,9 +606,6 @@ fn sys_munmap(address: u64, length: u64) -> u64 {
     }
 }
 fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
-    if !matches!(descriptor, 1 | 2) {
-        return SYSCALL_ERROR;
-    }
     let Ok(length) = usize::try_from(length) else {
         return SYSCALL_ERROR;
     };
@@ -604,11 +617,17 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         return SYSCALL_ERROR;
     }
 
-    // If stdout/stderr has been explicitly redirected with dup2(), honor the
-    // process file table. Otherwise these descriptors remain the console.
+    // Open descriptors (including files and pipes) take the owned descriptor
+    // path. Unopened stdout/stderr remain the capability-gated console.
     if crate::task::descriptor_is_open(descriptor) {
-        let Ok(count) = crate::task::write_current(descriptor, &buffer[..length]) else {
-            return SYSCALL_ERROR;
+        let count = match crate::task::write_current(descriptor, &buffer[..length]) {
+            Ok(count) => count,
+            Err(crate::task::FileError::BrokenPipe) => {
+                let _ = crate::task::raise_current_signal(13);
+                return SYSCALL_BROKEN_PIPE;
+            }
+            Err(crate::task::FileError::Interrupted) => return SYSCALL_INTERRUPTED,
+            Err(_) => return SYSCALL_ERROR,
         };
         IO_COMPLETIONS.fetch_or(IO_WRITE, Ordering::Release);
         if descriptor == 2 {
@@ -617,8 +636,23 @@ fn sys_write(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         return count as u64;
     }
 
+    if !matches!(descriptor, 1 | 2) {
+        return SYSCALL_ERROR;
+    }
+
     if !crate::task::current_has(crate::capability::Capability::Console) {
         return SYSCALL_ERROR;
+    }
+    let termios = crate::terminal::termios();
+    if termios.local_flags & crate::terminal::TOSTOP != 0 {
+        if let Some(group) = crate::terminal::foreground_pid() {
+            if crate::task::current_process_group() != group
+                && !crate::task::current_signal_ignored(22)
+            {
+                let _ = crate::task::kill_process(0u64.wrapping_sub(crate::task::current_process_group()), 22);
+                return SYSCALL_ERROR;
+            }
+        }
     }
     crate::serial::write_bytes(&buffer[..length]);
     crate::terminal::write_bytes(&buffer[..length]);
@@ -648,6 +682,22 @@ fn sys_open(user_path: u64, length: u64) -> u64 {
             IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release);
             descriptor
         }
+        Err(crate::task::FileError::BrokenPipe) => {
+            let _ = crate::task::raise_current_signal(13);
+            SYSCALL_BROKEN_PIPE
+        }
+        Err(_) => SYSCALL_ERROR,
+    }
+}
+
+fn sys_open_access(user_path: u64, length: u64, access: u64) -> u64 {
+    let Ok(length) = usize::try_from(length) else { return SYSCALL_ERROR; };
+    if length == 0 || length > MAX_PATH_SIZE || access & !7 != 0 || access & 3 == 0 || (access & 4 != 0 && access & 2 == 0) { return SYSCALL_ERROR; }
+    let mut path = [0_u8; MAX_PATH_SIZE];
+    if crate::paging::copy_from_current_user(user_path, &mut path[..length]).is_err() { return SYSCALL_ERROR; }
+    let Ok(path) = core::str::from_utf8(&path[..length]) else { return SYSCALL_ERROR; };
+    match crate::task::open_current_access(path, access) {
+        Ok(descriptor) => { IO_COMPLETIONS.fetch_or(IO_OPEN, Ordering::Release); descriptor }
         Err(_) => SYSCALL_ERROR,
     }
 }
@@ -751,6 +801,39 @@ fn sys_installer_install(user_plan: u64, length: u64) -> u64 {
         Ok(progress) => u64::from(progress),
         Err(_) => SYSCALL_ERROR,
     }
+}
+
+fn sys_abi_negotiate(user_request: u64, user_response: u64, response_capacity: u64) -> u64 {
+    const BYTES: usize = libwoven::abi::DESCRIPTOR_BYTES;
+    let Ok(capacity) = usize::try_from(response_capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity < BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut request = [0_u8; BYTES];
+    if crate::paging::copy_from_current_user(user_request, &mut request).is_err() {
+        return SYSCALL_ERROR;
+    }
+    if request[6..8] != [0, 0] {
+        return SYSCALL_ERROR;
+    }
+    let requested = libwoven::abi::Contract::new(
+        u16::from_le_bytes([request[0], request[1]]),
+        u16::from_le_bytes([request[2], request[3]]),
+        u16::from_le_bytes([request[4], request[5]]),
+    );
+    let Ok(negotiated) = libwoven::abi::negotiate(requested) else {
+        return SYSCALL_ERROR;
+    };
+    let mut response = [0_u8; BYTES];
+    response[0..2].copy_from_slice(&negotiated.major.to_le_bytes());
+    response[2..4].copy_from_slice(&negotiated.minor.to_le_bytes());
+    response[4..6].copy_from_slice(&negotiated.descriptor.to_le_bytes());
+    if crate::paging::copy_to_current_user(user_response, &response).is_err() {
+        return SYSCALL_ERROR;
+    }
+    BYTES as u64
 }
 
 #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
@@ -953,6 +1036,11 @@ fn sys_read(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         if !crate::task::current_has(crate::capability::Capability::Console) {
             return SYSCALL_ERROR;
         }
+        if let Some(group) = crate::terminal::foreground_pid() {
+            if crate::task::current_process_group() != group {
+                return SYSCALL_ERROR;
+            }
+        }
         let count = crate::keyboard::read_bytes(&mut buffer[..length]);
         if crate::paging::copy_to_current_user(user_buffer, &buffer[..count]).is_err() {
             return SYSCALL_ERROR;
@@ -960,8 +1048,10 @@ fn sys_read(descriptor: u64, user_buffer: u64, length: u64) -> u64 {
         IO_COMPLETIONS.fetch_or(IO_STDIN, Ordering::Release);
         return count as u64;
     }
-    let Ok(count) = crate::task::read_current(descriptor, &mut buffer[..length]) else {
-        return SYSCALL_ERROR;
+    let count = match crate::task::read_current(descriptor, &mut buffer[..length]) {
+        Ok(count) => count,
+        Err(crate::task::FileError::Interrupted) => return SYSCALL_INTERRUPTED,
+        Err(_) => return SYSCALL_ERROR,
     };
     if crate::paging::copy_to_current_user(user_buffer, &buffer[..count]).is_err() {
         return SYSCALL_ERROR;
@@ -1271,8 +1361,68 @@ fn sys_sync() -> u64 {
         .unwrap_or(SYSCALL_ERROR)
 }
 
-fn sys_ioctl(_fd: u64, _req: u64, _arg: u64) -> u64 {
-    0 // no-op placeholder for future TTY control
+fn sys_ioctl(fd: u64, request: u64, argument: u64) -> u64 {
+    if request == crate::terminal::TIOCGPTN {
+        let Some(number) = crate::task::pty_number_current(fd) else {
+            return SYSCALL_ERROR;
+        };
+        return crate::paging::copy_to_current_user(argument, &number.to_le_bytes())
+            .map_or(SYSCALL_ERROR, |_| 0);
+    }
+    if fd != 0 {
+        return SYSCALL_ERROR;
+    }
+    match request {
+        crate::terminal::TCGETS => {
+            let value = crate::terminal::termios();
+            // SAFETY: `value` is a live, initialized `repr(C)` value and the
+            // slice is bounded to exactly its object representation.
+            let bytes = unsafe {
+                core::slice::from_raw_parts(
+                    (&value as *const crate::terminal::Termios).cast::<u8>(),
+                    core::mem::size_of::<crate::terminal::Termios>(),
+                )
+            };
+            crate::paging::copy_to_current_user(argument, bytes).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        crate::terminal::TCSETS => {
+            let mut value = crate::terminal::Termios::DEFAULT;
+            // SAFETY: `value` is a live, writable `repr(C)` value and the
+            // slice is bounded to exactly its object representation.
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    (&mut value as *mut crate::terminal::Termios).cast::<u8>(),
+                    core::mem::size_of::<crate::terminal::Termios>(),
+                )
+            };
+            if crate::paging::copy_from_current_user(argument, bytes).is_err()
+                || !crate::terminal::set_termios(value)
+            {
+                SYSCALL_ERROR
+            } else {
+                0
+            }
+        }
+        crate::terminal::TIOCGPGRP => {
+            let group = crate::terminal::foreground_pid().unwrap_or(0).to_le_bytes();
+            crate::paging::copy_to_current_user(argument, &group).map_or(SYSCALL_ERROR, |_| 0)
+        }
+        crate::terminal::TIOCSPGRP => {
+            let mut bytes = [0u8; 8];
+            if crate::paging::copy_from_current_user(argument, &mut bytes).is_err() {
+                return SYSCALL_ERROR;
+            }
+            let group = u64::from_le_bytes(bytes);
+            if !crate::task::process_group_exists(group)
+                || !crate::task::can_control_foreground_group(group)
+            {
+                return SYSCALL_ERROR;
+            }
+            crate::terminal::set_foreground_group(group);
+            0
+        }
+        _ => SYSCALL_ERROR,
+    }
 }
 
 fn sys_sleep(ticks: u64) -> u64 {
@@ -1309,6 +1459,9 @@ fn sys_fork(frame: *const UserForkFrame) -> u64 {
         crate::audit::record(actor, crate::audit::Action::ProcessFork, 0, false);
         return SYSCALL_ERROR;
     }
+    // SAFETY: the syscall entry stub passes `frame` pointing at the caller's
+    // saved register frame on the current kernel stack; it is valid and aligned
+    // for the whole syscall, and `as_ref` yields `None` only if it is null.
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         crate::audit::record(actor, crate::audit::Action::ProcessFork, 0, false);
         return SYSCALL_ERROR;
@@ -1331,7 +1484,11 @@ fn sys_fork(frame: *const UserForkFrame) -> u64 {
     }
 }
 fn sys_sigaction(sig: u64, handler: u64) -> u64 {
-    crate::task::sigaction_current(sig, handler).unwrap_or(SYSCALL_ERROR)
+    // Bit 62 is outside the bounded userspace image range and leaves the
+    // existing bit-63 invalid-handler probes distinguishable.
+    const RESTART: u64 = 1 << 62;
+    crate::task::sigaction_current(sig, handler & !RESTART, handler & RESTART != 0)
+        .unwrap_or(SYSCALL_ERROR)
 }
 
 fn sys_setpgid(pid: u64, pgid: u64) -> u64 {
@@ -1348,18 +1505,25 @@ fn prepare_signal_delivery(frame: *const UserForkFrame) {
         return;
     };
     if frame.is_null() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
     // `sigaction` admits only executable user addresses; never return to a
     // non-user RIP, which would fault on `iretq` in ring 0.
     if crate::user_address::check_user_range(handler, 1).is_err() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
+    // SAFETY: `frame` is the caller's saved register frame on the current
+    // kernel stack (checked non-null above); this task's syscall is the only
+    // code touching that frame, so a unique `&mut` is sound.
     let frame = unsafe { &mut *(frame as *mut UserForkFrame) };
     let Some(new_rsp) = frame.rsp.checked_sub(8) else {
+        crate::task::restore_pending_signal_current(sig);
         return;
     };
     if crate::paging::copy_to_current_user(new_rsp, &frame.rip.to_le_bytes()).is_err() {
+        crate::task::restore_pending_signal_current(sig);
         return;
     }
     frame.rsp = new_rsp;
@@ -1724,6 +1888,9 @@ fn sys_process_info(index: u64, user_out: u64) -> u64 {
     let Some(info) = crate::task::process_info(index) else {
         return SYSCALL_ERROR;
     };
+    // SAFETY: `info` is a live local of `size_of::<ProcessInfo>()` bytes, so the
+    // slice covers exactly its bytes and is valid for reading; it is consumed by
+    // the copy below before `info` is dropped.
     let bytes = unsafe {
         core::slice::from_raw_parts(
             (&info as *const crate::task::ProcessInfo).cast::<u8>(),
@@ -1826,6 +1993,9 @@ fn sys_net_info(user_buffer: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let info = crate::network::net_info();
+    // SAFETY: `info` is a live local of `size_of::<NetInfo>()` bytes, so the
+    // slice covers exactly its bytes and is valid for reading; it is consumed by
+    // the copy below before `info` is dropped.
     let bytes = unsafe {
         core::slice::from_raw_parts(
             (&info as *const crate::network::NetInfo).cast::<u8>(),
@@ -2683,6 +2853,9 @@ fn sys_secret_store(user_secret: u64, length: u64) -> u64 {
     let actor = crate::task::current_task_id().as_u64();
     let result = crate::secret_vault::store(actor, &secret[..length]);
     for byte in &mut secret {
+        // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+        // stack buffer; the volatile write scrubs the secret and cannot be
+        // elided by the optimizer.
         unsafe { core::ptr::write_volatile(byte, 0) };
     }
     match result {
@@ -2715,23 +2888,35 @@ fn sys_secret_read(raw_handle: u64, user_output: u64, capacity: u64) -> u64 {
     );
     let Ok(length) = result else {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     };
     if length > capacity {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     }
     if crate::paging::copy_to_current_user(user_output, &secret[..length]).is_err() {
         for byte in &mut secret {
+            // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+            // stack buffer; the volatile write scrubs the secret and cannot be
+            // elided by the optimizer.
             unsafe { core::ptr::write_volatile(byte, 0) };
         }
         return SYSCALL_ERROR;
     }
     for byte in &mut secret {
+        // SAFETY: `byte` is a valid, aligned `&mut u8` into the live `secret`
+        // stack buffer; the volatile write scrubs the secret and cannot be
+        // elided by the optimizer.
         unsafe { core::ptr::write_volatile(byte, 0) };
     }
     length as u64
@@ -2769,6 +2954,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::FileWrite as u64 => sys_file_write(arg0, arg1, arg2),
         value if value == Number::Write as u64 => sys_write(arg0, arg1, arg2),
         value if value == Number::Open as u64 => sys_open(arg0, arg1),
+        value if value == Number::OpenAccess as u64 => sys_open_access(arg0, arg1, arg2),
         value if value == Number::Close as u64 => sys_close(arg0),
         value if value == Number::Exec as u64 => sys_exec(arg0, arg1),
         value if value == Number::ExecCommand as u64 => sys_exec_command(arg0, arg1),
@@ -2827,10 +3013,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::InstallerInventory as u64 => sys_installer_inventory(),
         value if value == Number::InstallerInstall as u64 => sys_installer_install(arg0, arg1),
+        value if value == Number::AbiNegotiate as u64 => sys_abi_negotiate(arg0, arg1, arg2),
         #[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
-        value if value == Number::RecoveryQuery as u64 => {
-            sys_recovery_query(arg0, arg1, arg2)
-        }
+        value if value == Number::RecoveryQuery as u64 => sys_recovery_query(arg0, arg1, arg2),
         #[cfg(any(
             feature = "stage23-1-test",
             feature = "stage23-2-test",
@@ -2902,7 +3087,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
-        value if value == Number::Waitpid as u64 => match crate::task::wait_process(arg0) {
+        value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {
+            crate::task::wait_any_process()
+        } else {
+            crate::task::wait_process(arg0)
+        } {
             Ok(exit_code) => crate::exit_status::encode(exit_code),
             Err(crate::task::WaitError::StillRunning) => u64::MAX - 1,
             Err(crate::task::WaitError::NoSuchChild) => u64::MAX,
@@ -2927,6 +3116,14 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::Sigaction as u64 => sys_sigaction(arg0, arg1),
         value if value == Number::Getpgrp as u64 => crate::task::current_process_group(),
         value if value == Number::Setpgid as u64 => sys_setpgid(arg0, arg1),
+        value if value == Number::Getsid as u64 => crate::task::session_of(if arg0 == 0 {
+            crate::task::current_process_id()
+        } else {
+            arg0
+        })
+        .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::Setsid as u64 => crate::task::create_session_current()
+            .unwrap_or(SYSCALL_ERROR),
         value if value == Number::Socket as u64 => sys_socket(arg0),
         value if value == Number::Bind as u64 => sys_net_bind(arg0, arg1),
         value if value == Number::Connect as u64 => sys_net_connect(arg0, arg1),
@@ -3083,7 +3280,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::AccountsChangePin as u64 => sys_accounts_change_pin(arg0, arg1),
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityOpen as u64 => sys_identity_open(arg0, arg1),
-        #[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+        #[cfg(any(
+            feature = "stage20-12-test",
+            feature = "stage24-5-test",
+            feature = "system-apps"
+        ))]
         value if value == Number::IdentityLock as u64 => sys_identity_lock(arg0),
         #[cfg(any(feature = "stage24-5-test", feature = "system-apps"))]
         value if value == Number::IdentityUnlock as u64 => {
@@ -3679,7 +3880,11 @@ fn sys_identity_open(user_buffer: u64, length: u64) -> u64 {
     result.map(|session| session.0).unwrap_or(SYSCALL_ERROR)
 }
 
-#[cfg(any(feature = "stage20-12-test", feature = "stage24-5-test", feature = "system-apps"))]
+#[cfg(any(
+    feature = "stage20-12-test",
+    feature = "stage24-5-test",
+    feature = "system-apps"
+))]
 fn sys_identity_lock(session: u64) -> u64 {
     let result = crate::identity_runtime::lock(
         crate::task::current_process_id(),

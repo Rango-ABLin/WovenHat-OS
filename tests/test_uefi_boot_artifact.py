@@ -99,7 +99,12 @@ class UefiBootArtifactTests(unittest.TestCase):
         source = self.root / "artifact.bin"
         source.write_bytes(b"artifact")
         link = self.root / "link.bin"
-        link.symlink_to(source)
+        try:
+            link.symlink_to(source)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("symlink creation requires SeCreateSymbolicLinkPrivilege or Developer Mode")
+            raise
         with self.assertRaisesRegex(artifact.ArtifactError, "symlink"):
             artifact.prepare(self.image, self.plan, artifact=link, harness_created=True)
         with self.assertRaisesRegex(artifact.ArtifactError, "exactly one"):

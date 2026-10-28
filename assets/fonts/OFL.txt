@@ -1,0 +1,9 @@
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+
+This directory contains Noto Sans, distributed under the SIL Open Font
+License, Version 1.1. The complete license text is available at:
+https://scripts.sil.org/OFL
+
+The font is bundled with WovenHat OS under the terms of that license. The
+font file is not sold separately. Source metadata is recorded in:
+https://github.com/google/fonts/tree/main/ofl/notosans

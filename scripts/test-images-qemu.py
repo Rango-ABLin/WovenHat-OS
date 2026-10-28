@@ -42,7 +42,7 @@ def main() -> int:
     env.setdefault('CARGO_BUILD_BUILD_DIR', str(root / '.cargo-build'))
     env.setdefault('CARGO_TARGET_DIR', str(root / 'target'))
     boot = subprocess.run(
-        ['cargo', 'run', '--quiet', '--features', 'stage16-1-test', '--', '--print-image'],
+        ['cargo', 'run', '--quiet', '--features', 'stage07-webp-test', '--', '--print-image'],
         cwd=root, env=env, capture_output=True, text=True,
     )
     if boot.returncode:
@@ -71,7 +71,14 @@ def main() -> int:
         print(f'QEMU timeout; evidence: {out}')
         return 1
     text = serial.read_text(errors='replace') if serial.exists() else ''
-    if code != 33 or '[S16.1] out-of-kernel application: PASSED' not in text:
+    required_markers = (
+        '[S07] freestanding WebP decode: PASSED',
+        '[WEBP] freestanding decode: PASSED 2x2',
+        '[BMP] stream decode: PASSED 2x1',
+        '[GIF] interlaced stream decode: PASSED 1x1',
+        '[GIF] animation playback: PASSED 2 frames',
+    )
+    if code != 33 or any(marker not in text for marker in required_markers):
         print(f'WovenImages failed (exit {code}); evidence: {out}')
         return 1
     print(f'WovenImages: PASS ({args.cpus} CPU, exit 33). Evidence: {out}')

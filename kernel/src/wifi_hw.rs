@@ -2189,6 +2189,9 @@ impl OwnedDmaBuffer {
         let allocation_len = page_count
             .checked_mul(DMA_PAGE_SIZE)
             .ok_or(DmaMemoryError::AddressOverflow)?;
+        // SAFETY: `virtual_address` is the direct-map address of the just-reserved
+        // `page_count` frames owned by this allocation; `allocation_len` is
+        // exactly their size, so zeroing that span is in bounds.
         unsafe { core::ptr::write_bytes(virtual_address as *mut u8, 0, allocation_len) };
         Ok(Self {
             first_frame,
@@ -2229,6 +2232,8 @@ impl OwnedDmaBuffer {
         {
             return Err(DmaMemoryError::AddressOverflow);
         }
+        // SAFETY: `offset` is 4-aligned and `offset + 4 <= self.length` (checked
+        // above), so the u32 lies within this DMA allocation.
         unsafe { ((self.virtual_address + offset as u64) as *mut u32).write_volatile(value) };
         Ok(())
     }
@@ -2240,6 +2245,8 @@ impl OwnedDmaBuffer {
         {
             return Err(DmaMemoryError::AddressOverflow);
         }
+        // SAFETY: `offset` is 4-aligned and `offset + 4 <= self.length` (checked
+        // above), so the u32 lies within this DMA allocation.
         Ok(unsafe { ((self.virtual_address + offset as u64) as *const u32).read_volatile() })
     }
     pub fn write_bytes(&mut self, offset: usize, bytes: &[u8]) -> Result<(), DmaMemoryError> {
@@ -2249,6 +2256,9 @@ impl OwnedDmaBuffer {
         if end > usize::from(self.length) {
             return Err(DmaMemoryError::AddressOverflow);
         }
+        // SAFETY: `offset + bytes.len() <= self.length` (checked above), so the
+        // destination range lies within this DMA allocation; `bytes` is a
+        // disjoint caller slice.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
@@ -2262,6 +2272,8 @@ impl OwnedDmaBuffer {
         if offset >= usize::from(self.length) {
             return Err(DmaMemoryError::AddressOverflow);
         }
+        // SAFETY: `offset < self.length` (checked above), so the byte lies
+        // within this DMA allocation.
         Ok(unsafe { ((self.virtual_address as *const u8).add(offset)).read_volatile() })
     }
 
@@ -2272,6 +2284,9 @@ impl OwnedDmaBuffer {
         if end > usize::from(self.length) {
             return Err(DmaMemoryError::AddressOverflow);
         }
+        // SAFETY: `offset + out.len() <= self.length` (checked above), so the
+        // source range lies within this DMA allocation; `out` is a disjoint
+        // caller slice.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 (self.virtual_address as *const u8).add(offset),
