@@ -2203,6 +2203,18 @@ pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+pub fn dynamic_tls_module_range(module: u64) -> Option<(u64, usize)> {
+    let thread = current_thread_id()?;
+    let tls_base = crate::thread::tls(thread)?;
+    let processes = process_table_lock();
+    processes
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())
+        .and_then(|process| process.address_space)
+        .and_then(|space| space.dynamic_tls_module_range(module, tls_base))
+}
+
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its
 /// generation-tagged handle is reused.
 pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {

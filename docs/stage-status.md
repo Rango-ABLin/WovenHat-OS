@@ -1,5 +1,15 @@
 # Stage status
 
+## Per-module TLS mapping publication - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Each startup-loaded PT_TLS image now retains its TP-relative offset and mapped
+size in the process address space. New checked kernel queries expose the
+per-thread module start and size, while the existing address resolver validates
+module-relative accesses against that individual range. Target kernel build,
+warning-denying Clippy, and dynamic-TLS tests pass. Runtime mapping for
+post-start `dlopen` modules and unload/reclamation is still outside this
+bounded loader slice.
+
 ## Loader-backed dynamic TLS address ABI - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel now retains PT_TLS module TP-relative offsets for each loaded image,

@@ -4841,6 +4841,7 @@ struct InitialTls {
     template: Option<(u64, usize)>,
     template_size: usize,
     module_tpoff: [i64; crate::elf::MAX_SCOPE_IMAGES],
+    module_size: [usize; crate::elf::MAX_SCOPE_IMAGES],
     module_valid: [bool; crate::elf::MAX_SCOPE_IMAGES],
 }
 
@@ -4870,6 +4871,18 @@ impl InitialTls {
         (address >= self.start
             && address.checked_add(1)? <= self.start + self.layout.mapping_size as u64)
             .then_some(address)
+    }
+
+    fn module_range(self, module: u64, tls_base: u64) -> Option<(u64, usize)> {
+        let index = usize::try_from(module.checked_sub(1)?).ok()?;
+        if !self.module_valid.get(index).copied().unwrap_or(false) {
+            return None;
+        }
+        let start = tls_base.checked_add_signed(self.module_tpoff[index])?;
+        let size = self.module_size[index];
+        (size != 0 && start >= self.start
+            && start.checked_add(size as u64)? <= self.start + self.layout.mapping_size as u64)
+            .then_some((start, size))
     }
 }
 
@@ -4921,6 +4934,10 @@ impl AddressSpace {
 
     pub fn dynamic_tls_address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {
         self.tls?.address(module, offset, tls_base)
+    }
+
+    pub fn dynamic_tls_module_range(self, module: u64, tls_base: u64) -> Option<(u64, usize)> {
+        self.tls?.module_range(module, tls_base)
     }
 
     /// Returns whether `address` falls in a logically writable mapping

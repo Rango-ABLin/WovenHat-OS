@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - per-module TLS mapping publication (2026-10-28)
+
+Extended the loader's retained PT_TLS metadata with each module's mapped
+start/size, added checked kernel queries for module start and size, and exposed
+the same ABI through `libwoven`. The existing address resolver and range checks
+now operate against individually identified loaded-module mappings. This
+covers startup-loaded shared-library TLS; post-start dynamic image mapping and
+unload remain separate loader lifecycle work.
+
 ## Codex - loader-backed dynamic TLS address ABI (2026-10-28)
 
 Added checked per-process PT_TLS module metadata to the kernel's existing

@@ -545,6 +545,13 @@ pub(super) fn load_with_geometry(
             module_tpoff: core::array::from_fn(|index| {
                 tls_tpoff(&images, index, &plan).unwrap_or(0)
             }),
+            module_size: core::array::from_fn(|index| {
+                images
+                    .get(index)
+                    .and_then(|image| image.image.tls())
+                    .map(|tls| tls.memory_size)
+                    .unwrap_or(0)
+            }),
             module_valid: core::array::from_fn(|index| {
                 images
                     .get(index)

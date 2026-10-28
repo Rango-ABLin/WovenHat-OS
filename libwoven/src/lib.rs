@@ -12351,6 +12351,22 @@ pub mod syscall {
         unsafe { invoke(THREAD_GET_TLS, 0, 0, 0) }
     }
 
+    /// Resolve the mapped start of a loaded PT_TLS module for this thread.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_tls_module_start(module: u64) -> u64 {
+        unsafe { invoke(142, module, 0, 0) }
+    }
+
+    /// Resolve the mapped size of a loaded PT_TLS module.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dynamic_tls_module_size(module: u64) -> u64 {
+        unsafe { invoke(143, module, 0, 0) }
+    }
+
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
     ///
