@@ -12,6 +12,7 @@
 /* Current WovenHat syscall numbers; keep synchronized with kernel::syscall. */
 #define WH_SYS_READ  0
 #define WH_SYS_WRITE 1
+#define WH_SYS_OPEN  2
 #define WH_SYS_EXIT  3
 #define WH_SYS_CLOSE 6
 

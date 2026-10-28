@@ -7222,3 +7222,8 @@ the exact byte count and all prior errno checks. QEMU passed at 1/2/4 CPUs.
 The fallback is not a closable file-table entry; no standard-stream close
 policy was changed.
 
+POSIX port increment 7: added the restricted `O_RDONLY` WovenHat open adapter
+and QEMU fixture assertion that `O_WRONLY` fails locally with ENOSYS. Build,
+target Clippy and QEMU 1/2/4 CPUs pass. This prevents flag loss but is not a
+successful-open/create or broader POSIX open claim.
+

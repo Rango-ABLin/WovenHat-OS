@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 int main(int argc, char **argv)
 {
@@ -13,5 +14,7 @@ int main(int argc, char **argv)
 		return 91;
 	if (close(-1) != -1 || errno != 5)
 		return 93;
+	if (open("/not-a-wovenhat-open-fixture", O_WRONLY) != -1 || errno != 38)
+		return 95;
 	return 42;
 }

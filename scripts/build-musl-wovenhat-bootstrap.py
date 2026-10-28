@@ -22,6 +22,7 @@ SOURCES = (
     "ports/musl/src/crt_start.c",
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
+    "ports/musl/src/open.c",
     "vendor/musl/src/exit/_Exit.c",
     "vendor/musl/src/internal/syscall_ret.c",
     "vendor/musl/src/unistd/read.c",

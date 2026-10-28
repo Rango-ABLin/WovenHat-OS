@@ -64,3 +64,12 @@ The static fixture proves upstream musl `write(1, ...)` returns its full byte
 count through WovenHat's existing capability-gated console path on 1/2/4 CPUs.
 It does not create a file-table entry for stdout or relax the kernel policy
 that descriptors below 3 cannot be closed.
+
+## Bootstrap increment: restricted open policy
+
+`ports/musl/src/open.c` exposes only a bounded `O_RDONLY` translation to the
+current WovenHat path-plus-length syscall. Null, empty and overlong paths, and
+every flag other than `O_RDONLY`, fail locally with `ENOSYS`; flags and mode
+are never discarded. The executable fixture verifies `O_WRONLY` rejection at
+1/2/4 CPUs. A stable readable VFS fixture and a kernel flags/mode ABI are
+required before successful open/create semantics can be certified.
