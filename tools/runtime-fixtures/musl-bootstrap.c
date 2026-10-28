@@ -2,6 +2,8 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
+#include <pthread.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -17,6 +19,15 @@ static void note_sigpipe(int sig)
 static void resume_after_signal(int sig)
 {
 	(void)sig;
+}
+
+static void *thread_probe(void *argument)
+{
+	char *value = malloc(8);
+	if (!value || !argument) return (void *)1;
+	value[0] = 'T';
+	free(value);
+	return (void *)42;
 }
 
 int main(int argc, char **argv)
@@ -37,6 +48,12 @@ int main(int argc, char **argv)
 		return 90;
 	if (getuid() != 0 || getgid() != 0)
 		return 88;
+	pthread_t thread;
+	void *thread_result;
+	if (pthread_create(&thread, 0, thread_probe, &byte) != 0
+		|| pthread_join(thread, &thread_result) != 0
+		|| thread_result != (void *)42)
+		return 86;
 	if (!getcwd(cwd, sizeof cwd) || cwd[0] != '/')
 		return 87;
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
