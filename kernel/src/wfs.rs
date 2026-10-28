@@ -33,7 +33,8 @@ pub const MAX_TXN_BLOCKS: usize = 32;
     feature = "stage15-1-test",
     feature = "stage15-2-test",
     feature = "stage21-6-test",
-    feature = "stage24-3-test"
+    feature = "stage24-3-test",
+    feature = "stage12-2-xattr-test"
 ))]
 pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 
@@ -384,7 +385,8 @@ impl DirEntry {
         test,
         feature = "stage15-1-test",
         feature = "stage15-2-test",
-        feature = "stage21-6-test"
+        feature = "stage21-6-test",
+        feature = "stage12-2-xattr-test"
     ))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
@@ -516,7 +518,8 @@ pub struct Volume<D: BlockDevice> {
     feature = "stage15-1-test",
     feature = "stage15-2-test",
     feature = "stage21-6-test",
-    feature = "stage24-3-test"
+    feature = "stage24-3-test",
+    feature = "stage12-2-xattr-test"
 ))]
 fn plan(total_blocks: u64, inode_count: u32) -> Result<SuperBlock, Error> {
     let journal_start = 2;
@@ -1568,7 +1571,12 @@ impl<D: BlockDevice> Volume<D> {
     /// Verify internal consistency: every block referenced by a live inode is
     /// marked allocated, every directory entry names a live inode, and no two
     /// inodes claim the same block.
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
+    #[cfg(any(
+        test,
+        feature = "stage15-1-test",
+        feature = "stage15-2-test",
+        feature = "stage12-2-xattr-test"
+    ))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
@@ -2018,6 +2026,7 @@ pub fn xattr_self_test() -> bool {
     let Ok(file) = mounted.create(1, "report.bin", 0o644, 10) else {
         return false;
     };
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 1: file created"));
 
     // No attribute yet: NotFound, empty list, nothing to remove.
     let mut buf = [0u8; MAX_XATTR_VALUE];
@@ -2027,6 +2036,7 @@ pub fn xattr_self_test() -> bool {
     {
         return false;
     }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 2: empty-state checks"));
 
     // Set, get back, overwrite with a different length, get the new value.
     if mounted.set_xattr(file, "user.note", b"draft", 12).is_err() {
@@ -2045,6 +2055,9 @@ pub fn xattr_self_test() -> bool {
     if mounted.check().is_err() {
         return false;
     }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 3: set/overwrite round trip"
+    ));
 
     // A second attribute coexists; list returns both names, NUL-separated.
     if mounted.set_xattr(file, "user.tag", b"x", 14).is_err() {
@@ -2059,6 +2072,7 @@ pub fn xattr_self_test() -> bool {
     {
         return false;
     }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 4: list_xattr"));
 
     // Bounds: an oversized value and an oversized output buffer both fail
     // closed without touching on-disk state.
@@ -2066,10 +2080,13 @@ pub fn xattr_self_test() -> bool {
     if mounted.set_xattr(file, "user.big", &oversized, 15) != Err(Error::TooLarge) {
         return false;
     }
+    // "user.note" currently holds "final version" (13 bytes); "user.tag"'s
+    // 1-byte value would fit a 2-byte buffer and so wouldn't exercise this.
     let mut tiny = [0u8; 2];
-    if mounted.get_xattr(file, "user.tag", &mut tiny) != Err(Error::TooLarge) {
+    if mounted.get_xattr(file, "user.note", &mut tiny) != Err(Error::TooLarge) {
         return false;
     }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 5: bounds checks"));
 
     // Removing the last attribute frees its block: the bitmap bit used by
     // the (now sole) xattr block must clear, not merely the inode's pointer.
@@ -2088,6 +2105,7 @@ pub fn xattr_self_test() -> bool {
     {
         return false;
     }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 6: remove_xattr frees block"));
 
     // Removing the file's directory entry must also free a still-attached
     // xattr block, not leak it.
@@ -2097,6 +2115,7 @@ pub fn xattr_self_test() -> bool {
     if mounted.unlink(1, "report.bin", 19).is_err() || mounted.check().is_err() {
         return false;
     }
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 7: unlink frees xattr block"));
 
     // Contents must survive an unmount/remount cycle.
     let Ok(persisted) = mounted.create(1, "persisted.bin", 0o644, 20) else {
@@ -2112,6 +2131,9 @@ pub fn xattr_self_test() -> bool {
     if remounted.get_xattr(persisted, "user.note", &mut buf) != Ok(4) || &buf[..4] != b"kept" {
         return false;
     }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 8: survives remount"
+    ));
 
     // Crash recovery for set_xattr: the file (with no existing attribute) is
     // created and durably committed first, so only `set_xattr`'s own writes
@@ -2167,6 +2189,9 @@ pub fn xattr_self_test() -> bool {
             _ => return false,
         }
     }
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 9: set_xattr crash enumeration"
+    ));
 
     // Crash recovery for remove_xattr: the block-free side effect must be
     // all-or-nothing too -- a crash must never leave the bitmap bit clear
