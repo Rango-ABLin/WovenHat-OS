@@ -672,8 +672,20 @@ impl<D: BlockDevice> Volume<D> {
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
-            if target >= sb.total_blocks {
-                return Ok(());
+            // Never replay user-controlled journal targets into reserved
+            // superblock or journal sectors, even after checksum verification.
+            let journal_end = sb
+                .journal_start
+                .checked_add(u64::from(sb.journal_blocks))
+                .ok_or(Error::Corrupt)?;
+            if target >= sb.total_blocks
+                || target < 2
+                || (target >= sb.journal_start && target < journal_end)
+                || (0..index).any(|earlier| {
+                    read_u64(&descriptor, 24 + earlier * 8) == target
+                })
+            {
+                return Err(Error::Corrupt);
             }
             let mut data = [0u8; SECTOR_SIZE];
             self.device
@@ -712,6 +724,23 @@ impl<D: BlockDevice> Volume<D> {
         }
         let sb = self.super_block;
         let count = txn.len;
+        // Validate the full transaction before writing even the descriptor.
+        // A rejected request must not leave a commit-shaped partial journal.
+        let journal_end = sb
+            .journal_start
+            .checked_add(u64::from(sb.journal_blocks))
+            .ok_or(Error::Corrupt)?;
+        for (index, block) in txn.blocks[..count].iter().enumerate() {
+            if block.target < 2
+                || block.target >= sb.total_blocks
+                || (block.target >= sb.journal_start && block.target < journal_end)
+                || txn.blocks[..index]
+                    .iter()
+                    .any(|previous| previous.target == block.target)
+            {
+                return Err(Error::Corrupt);
+            }
+        }
         let transaction_id = sb.sequence.wrapping_add(1).max(1);
 
         let mut descriptor = [0u8; SECTOR_SIZE];
