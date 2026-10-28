@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - per-thread dynamic TLS ownership (2026-10-28)
+
+Extended thread resources with independently reclaimable dynamic TLS mapping
+slots. Thread join teardown now unmaps and releases those mappings before the
+generation-tagged thread handle is reusable, while startup TLS remains a
+separate aggregate mapping.
+
 ## Codex - dynamic module retain/release ABI (2026-10-28)
 
 Added generation-checked retain and release operations on the current process's

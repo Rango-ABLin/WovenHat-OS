@@ -2169,7 +2169,11 @@ pub fn create_user_thread(
     scheduler.task_count += 1;
     drop(processes);
     drop(scheduler);
-    if !crate::thread::attach_resources(thread_id, crate::thread::Resources { stack, tls }) {
+    if !crate::thread::attach_resources(thread_id, crate::thread::Resources {
+        stack,
+        tls,
+        dynamic_tls: [None; userspace::MAX_DYNAMIC_MODULES],
+    }) {
         return Err(ThreadError::Full);
     }
     if parent_cpu != crate::smp::cpu_index() {
@@ -2252,7 +2256,7 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
         Err(crate::thread::JoinError::Running) => return Err(ThreadJoinError::Running),
     }
     let resources = crate::thread::resources(owner, id).ok_or(ThreadJoinError::Invalid)?;
-    let (address_space, stack_slot, tls_slot) = {
+    let (address_space, stack_slot, tls_slot, dynamic_slots) = {
         let processes = process_table_lock();
         let process = processes
             .iter()
@@ -2273,12 +2277,25 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
                 .iter()
                 .position(|mapping| mapping.is_some_and(|mapping| mapping.address == tls.address))
         });
-        (address_space, stack_slot, tls_slot)
+        let mut dynamic_slots = [None; userspace::MAX_DYNAMIC_MODULES];
+        for (index, dynamic) in resources.dynamic_tls.iter().enumerate() {
+            dynamic_slots[index] = dynamic.and_then(|mapping| {
+                process.memory_mappings.iter().position(|slot| {
+                    slot.is_some_and(|slot| slot.address == mapping.address)
+                })
+            });
+        }
+        (address_space, stack_slot, tls_slot, dynamic_slots)
     };
     if !userspace::unmap_anonymous(address_space, resources.stack)
         || resources
             .tls
             .is_some_and(|tls| !userspace::unmap_anonymous(address_space, tls))
+        || resources
+            .dynamic_tls
+            .into_iter()
+            .flatten()
+            .any(|mapping| !userspace::unmap_anonymous(address_space, mapping))
     {
         return Err(ThreadJoinError::MappingFailed);
     }
@@ -2297,6 +2314,10 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
     process.memory_mappings[stack_slot] = None;
     process.memory_mapping_scopes[stack_slot] = None;
     if let Some(slot) = tls_slot {
+        process.memory_mappings[slot] = None;
+        process.memory_mapping_scopes[slot] = None;
+    }
+    for slot in dynamic_slots.into_iter().flatten() {
         process.memory_mappings[slot] = None;
         process.memory_mapping_scopes[slot] = None;
     }

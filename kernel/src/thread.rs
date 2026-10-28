@@ -24,6 +24,7 @@ impl ThreadId {
 pub struct Resources {
     pub stack: AnonymousMapping,
     pub tls: Option<AnonymousMapping>,
+    pub dynamic_tls: [Option<AnonymousMapping>; crate::userspace::MAX_DYNAMIC_MODULES],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

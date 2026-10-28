@@ -1,5 +1,12 @@
 # Stage status
 
+## Per-thread dynamic TLS ownership - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+Thread resources now own bounded dynamic TLS mapping slots independently from
+startup TLS. Join teardown identifies, unmaps, and clears those slots before
+thread-handle reuse. Kernel target build and warning-denying Clippy pass. Live
+module allocation and DTV publication across all existing threads remain next.
+
 ## Dynamic module retain/release ABI - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The kernel now exposes generation-checked dynamic-module retain/release
