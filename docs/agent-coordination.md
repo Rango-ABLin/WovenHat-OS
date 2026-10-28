@@ -1,5 +1,15 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - S05 bounded-scope closure (2026-10-28)
+
+S05 is closed for its bounded software/QEMU and physical-storage scope. The
+S05 memory-pressure, reclaim, writeback, OOM, and 256 MiB QEMU gates passed at
+1/2/4 CPUs. The authorized USB storage qualification also passed at 1/2/4
+CPUs, including write, remount, VFS publication/invalidation, rejection, and
+durability checks. True physical low-memory qualification and controlled
+power-loss/torn-sector testing remain explicitly deferred release prerequisites;
+no production-readiness claim is made for those items.
+
 ## Codex - S05 reclaim, writeback, OOM selection, and low-memory qualification (2026-10-28)
 
 Completed the remaining bounded S05 implementation: unpinned file-frame
