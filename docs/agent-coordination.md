@@ -25,9 +25,8 @@ matrix; S02 is now accepted by the remote LLVM/QEMU qualification.
 
 The dedicated `s03-process-lifecycle-test` subsequently passed on 1/2/4 CPUs
 with exit 33. It uses freestanding Ring-3 fork/wait and live process-group
-probes, preserving the failed generic-fixture evidence and limiting the claim
-to the accepted bounded slice. PTY/termios, job control, caught handlers, and
-full signal semantics remain for later S03 work.
+probes and limiting the claim to the accepted bounded slice. PTY/termios, job
+control, caught handlers, and full signal semantics remain for later S03 work.
 
 ## Codex - integrated Stage 32 WovenDev software boundary (2026-10-28)
 
