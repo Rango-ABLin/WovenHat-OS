@@ -4,6 +4,7 @@
 int main(int argc, char **argv)
 {
 	char byte = 'x';
+	char motd[24];
 	int fd;
 
 	if (argc != 1 || argv[0][0] != 's' || argv[0][1] != '0')
@@ -20,6 +21,10 @@ int main(int argc, char **argv)
 	fd = open("/etc/motd", O_RDONLY);
 	if (fd < 3)
 		return 96;
+	if (read(fd, motd, sizeof motd) != (int)sizeof motd
+		|| motd[0] != 'W' || motd[8] != 't' || motd[21] != 'S'
+		|| motd[23] != '\n')
+		return 98;
 	if (close(fd) != 0)
 		return 97;
 	return 42;

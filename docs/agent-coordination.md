@@ -7236,3 +7236,8 @@ the restricted O_RDONLY adapter, requires fd >= 3, then closes it through
 upstream musl close.c. QEMU passed at 1/2/4 CPUs. Only the read-only open/close
 lifecycle is claimed; create/write/offset/dup semantics remain open.
 
+POSIX port increment 9: the executable bootstrap reads all 24 bytes of
+`/etc/motd` through upstream musl read.c, validates stable fixture bytes, and
+closes the descriptor. QEMU passed at 1/2/4 CPUs. Offset, partial-read and
+writable-descriptor semantics remain open.
+

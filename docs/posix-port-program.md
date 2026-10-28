@@ -81,3 +81,10 @@ non-standard descriptor, and closes it through upstream musl `close.c`.
 The entire lifecycle passed at 1/2/4 CPUs. This certifies only the existing
 read-only path-plus-length kernel contract; create, write modes, offsets and
 descriptor duplication remain separate work.
+
+## Bootstrap increment: read-only descriptor read
+
+The same `/etc/motd` lifecycle now reads all 24 boot-provided bytes through
+upstream musl `read.c` and validates stable content before close. The full
+open/read/close path passed at 1/2/4 CPUs. File offsets, partial reads,
+nonblocking behavior and writable descriptors remain unimplemented.
