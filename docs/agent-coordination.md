@@ -1,5 +1,12 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - bounded lifecycle staging helper (2026-10-28)
+
+Extracted constructor/destructor collection into `collect_lifecycle`, with one
+capacity check before any callback list is returned. Initialization order and
+reverse finalization order are unchanged, and the helper is suitable for
+staging callbacks in a future live-module transaction.
+
 ## Codex - reusable PT_TLS mapping transaction (2026-10-28)
 
 Extracted template reservation, PT_TLS image copying, per-module metadata, and

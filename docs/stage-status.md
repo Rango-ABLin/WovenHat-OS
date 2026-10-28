@@ -1,5 +1,12 @@
 # Stage status
 
+## Bounded lifecycle staging - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
+
+The kernel linker now stages constructor and destructor callbacks through a
+bounded helper with capacity validation and preserved ordering. Target build
+and warning-denying Clippy pass. Live-module constructor execution and
+destructor registration remain pending.
+
 ## Reusable PT_TLS mapping transaction - 2026-10-28 - IMPLEMENTED BOUNDED SLICE
 
 The startup loader now uses a single `Pending`-owned helper for PT_TLS template

@@ -443,6 +443,23 @@ fn map_initial_tls(
     initialize_tls(page_table, start, initial)
 }
 
+fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
+    let capacity = elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS;
+    let mut init = Vec::new();
+    let mut fini = Vec::new();
+    for image in images {
+        let lifecycle = image.image.lifecycle();
+        if init.len() + lifecycle.init_count > capacity { return None; }
+        init.extend_from_slice(&lifecycle.init[..lifecycle.init_count]);
+    }
+    for image in images.iter().rev() {
+        let lifecycle = image.image.lifecycle();
+        if fini.len() + lifecycle.fini_count > capacity { return None; }
+        fini.extend_from_slice(&lifecycle.fini[..lifecycle.fini_count]);
+    }
+    Some((init, fini))
+}
+
 pub(super) fn load(bytes: &[u8], args: &[&str]) -> Option<UserProgram> {
     load_with_candidate_bias(bytes, args, aslr_image_delta())
 }
@@ -472,26 +489,7 @@ pub(super) fn load_with_geometry(
 ) -> Option<UserProgram> {
     let images = prepare(bytes, candidate_bias)?;
     let main = images.first()?;
-    let mut init_functions = Vec::new();
-    let mut fini_functions = Vec::new();
-    for image in &images {
-        let lifecycle = image.image.lifecycle();
-        for function in lifecycle.init[..lifecycle.init_count].iter().copied() {
-            if init_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
-                return None;
-            }
-            init_functions.push(function);
-        }
-    }
-    for image in images.iter().rev() {
-        let lifecycle = image.image.lifecycle();
-        for function in lifecycle.fini[..lifecycle.fini_count].iter().copied() {
-            if fini_functions.len() == elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS {
-                return None;
-            }
-            fini_functions.push(function);
-        }
-    }
+    let (init_functions, fini_functions) = collect_lifecycle(&images)?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
         scope
