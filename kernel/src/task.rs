@@ -2489,6 +2489,50 @@ pub fn process_exited(id: ProcessId) -> bool {
         .is_some_and(|process| process.state == ProcessState::Exited)
 }
 
+/// S03 bounded process-lifecycle acceptance: the real Ring-3 stub exercises
+/// fork/child ownership/wait/reap, then a second live process is moved into a
+/// dedicated group and terminated through the process-group signal path.
+#[cfg(feature = "s03-process-lifecycle-test")]
+pub fn s03_process_lifecycle_self_test() -> bool {
+    let Some(program) = userspace::create_stub_process() else {
+        return false;
+    };
+    let Ok((child, _)) = spawn_user_process("s03-fork-wait", program) else {
+        return false;
+    };
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    if wait_process(child.as_u64()) != Ok(0) {
+        return false;
+    }
+
+    let Some(group_program) = userspace::create_stub_process() else {
+        return false;
+    };
+    let Ok((group_child, _)) = spawn_user_process("s03-process-group", group_program) else {
+        return false;
+    };
+    if set_process_group(group_child.as_u64(), group_child.as_u64()).is_err() {
+        return false;
+    }
+    if kill_process(0u64.wrapping_sub(group_child.as_u64()), 15).is_err() {
+        return false;
+    }
+    let deadline = timer::ticks().wrapping_add(3000);
+    while !process_exited(group_child) {
+        if timer::ticks().wrapping_sub(deadline) < u64::MAX / 2 {
+            return false;
+        }
+        yield_now();
+    }
+    wait_process(group_child.as_u64()) == Ok(143)
+}
+
 /// Whether the process named by the raw id `id` is in the table and has not
 /// exited. For a caller that only has the id as `u64` (e.g. across a module
 /// boundary that erases [`ProcessId`], such as [`crate::session::start`]'s

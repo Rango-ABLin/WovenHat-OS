@@ -5179,6 +5179,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "s03-process-lifecycle-test")]
+    {
+        if !task::s03_process_lifecycle_self_test() {
+            serial::write_line(format_args!("[S03.PROCESS-LIFECYCLE] FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S03.PROCESS-LIFECYCLE] fork/wait/reap and process-group signal teardown: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage32-1-test")]
     {
         if !diagnostics::self_test() {
