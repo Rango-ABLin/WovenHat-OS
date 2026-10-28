@@ -6504,7 +6504,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         if action == 1 && sig != 19 {
             continue;
         } // SIG_IGN
-        if matches!(sig, 19 | 20 | 21 | 22) {
+        if matches!(sig, 19..=22) {
             if process.state != ProcessState::Exited {
                 process.pending_signal = sig;
                 process.state = ProcessState::Stopped;

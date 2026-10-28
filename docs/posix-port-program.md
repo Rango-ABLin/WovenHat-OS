@@ -132,3 +132,15 @@ proves the user-visible EOF transition after the final writer closes, alongside
 the prior generic unopened stdout/stderr fallback regression, at 1/2/4 CPUs.
 It does not certify a scheduler-blocked read/write, bounded-buffer saturation,
 or broken-pipe signal/error behavior.
+
+## Bootstrap increment: scheduler-aware pipe capacity and SIGPIPE
+
+The bootstrap now uses the established fork, yield, and plain-exit-status wait
+ABIs to exercise a real parent/child pipe. Two 1024-byte writes fill the
+2048-byte pipe; a third byte is released only after the reader consumes
+capacity. A second child closes its reader, the parent closes its copies, and
+the resulting write is verified to take the default SIGPIPE termination path
+(exit status 141). The C ELF QEMU gate passed at 1/2/4 CPUs, and the unopened
+stdout/stderr console fallback remains covered by the same fixture. This is a
+narrow bootstrap contract: caught/ignored SIGPIPE, POSIX wait-status encoding,
+signal interruption/restart, and general signal API conformance remain open.

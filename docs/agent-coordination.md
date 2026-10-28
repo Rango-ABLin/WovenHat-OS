@@ -7291,3 +7291,9 @@ verifies that the remaining reader observes EOF. QEMU passed at 1/2/4 CPUs.
 Scheduler-blocked read/write, buffer-capacity and SIGPIPE semantics remain
 separate work.
 
+POSIX port increment 18: a forked C fixture fills the 2048-byte pipe with two
+bounded writes, proves the third byte is released after a reader consumes
+capacity, and verifies default SIGPIPE termination (exit 141) after all
+readers close. Target Clippy and QEMU passed at 1/2/4 CPUs. Caught/ignored
+SIGPIPE, POSIX wait-status encoding and restart semantics remain open.
+
