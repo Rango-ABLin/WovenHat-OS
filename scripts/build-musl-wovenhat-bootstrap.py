@@ -19,12 +19,15 @@ import sys
 
 MUSL_VERSION = "1.2.6"
 SOURCES = (
+    "ports/musl/src/crt_start.c",
     "ports/musl/src/syscall_cp.c",
     "ports/musl/src/errno_location.c",
+    "vendor/musl/src/exit/_Exit.c",
     "vendor/musl/src/internal/syscall_ret.c",
     "vendor/musl/src/unistd/read.c",
     "vendor/musl/src/unistd/write.c",
 )
+ASSEMBLY_SOURCES = ("ports/musl/src/crt_start.S",)
 FIXTURE = "tools/runtime-fixtures/musl-bootstrap.c"
 
 
@@ -65,6 +68,11 @@ def run(command: list[str], log: Path, root: Path) -> None:
         raise RuntimeError(f"command failed ({result.returncode}): {command[0]}")
 
 
+def object_stem(source: str) -> str:
+    """Avoid collisions such as the paired crt_start.c/crt_start.S files."""
+    return source.replace("/", "-").replace(".", "-")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clang")
@@ -83,7 +91,7 @@ def main() -> int:
     report: dict[str, object] = {
         "contract": "WOVENHAT-MUSL-BOOTSTRAP-V1",
         "musl_version": MUSL_VERSION,
-        "sources": {source: sha256(root / source) for source in SOURCES},
+        "sources": {source: sha256(root / source) for source in SOURCES + ASSEMBLY_SOURCES},
         "fixture": {"path": FIXTURE, "sha256": sha256(root / FIXTURE)},
         "qualification": "NOT_QUALIFIED",
         "scope": "upstream musl read/write objects plus WovenHat cancellation bridge",
@@ -123,9 +131,16 @@ def main() -> int:
               "-I", str(root / "vendor/musl/src/internal"), "-I", str(root / "vendor/musl/include")]
     objects: list[Path] = []
     for source in SOURCES:
-        object_file = output / (Path(source).stem + ".o")
+        stem = object_stem(source)
+        object_file = output / (stem + ".o")
         run(common + ["-c", str(root / source), "-o", str(object_file)],
-            output / (Path(source).stem + ".compile.log"), root)
+            output / (stem + ".compile.log"), root)
+        objects.append(object_file)
+    for source in ASSEMBLY_SOURCES:
+        stem = object_stem(source)
+        object_file = output / (stem + ".o")
+        run(common + ["-c", str(root / source), "-o", str(object_file)],
+            output / (stem + ".compile.log"), root)
         objects.append(object_file)
     archive = output / "libmusl-wovenhat-bootstrap.a"
     run([ar, "rcs", str(archive), *map(str, objects)], output / "archive.log", root)

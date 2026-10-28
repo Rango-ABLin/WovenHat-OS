@@ -29,6 +29,14 @@ CPUs. Evidence: `target/musl-wovenhat-static-check2/` and
 cancellation, and the broader syscall surface are open. This is not a POSIX
 profile acceptance.
 
+The same bootstrap now has an executable minimal CRT: `_start` consumes the
+existing loader argv stack, invokes `main(argc, argv)`, and exits through musl
+`_Exit`. The fixture checks its expected `argc`/`argv` prefix and the prior
+denied-write errno behavior. QEMU passed at 1/2/4 CPUs in
+`target/musl-crt-bootstrap-1cpu-debug/` and
+`target/musl-crt-bootstrap-rerun-{2,4}cpu-debug/`. It is not a full musl
+start-main or TLS acceptance.
+
 ## S03 process-lifecycle ABI surface - 2026-10-28 - IMPLEMENTING
 
 The existing bounded kernel process lifecycle now has matching safe `libwoven`

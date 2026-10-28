@@ -14,6 +14,12 @@ production loader on QEMU at 1/2/4 CPUs and proved denied-write `-1`/EIO
 behavior. TLS, C startup, allocator, cancellation, and broader POSIX bodies
 remain open; this is neither full static libc nor a profile-conformance claim.
 
+The next static-libc increment added a minimal assembly/C CRT adapter for the
+already accepted WovenHat argc/argv stack. It calls `main` and returns through
+upstream musl `_Exit`; the linked ELF passed QEMU at 1/2/4 CPUs. Full musl
+startup lifecycle, TLS, auxiliary vectors, constructors and allocator remain
+open.
+
 ## S03 process-lifecycle ABI surface - 2026-10-28
 
 Added safe `libwoven` wrappers for the existing bounded kernel process-group
