@@ -5586,6 +5586,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "stage32-19-test")]
+    {
+        if !gdb_entry::self_test() {
+            serial::write_line(format_args!(
+                "[S32.19] live GDB COM2 client qualification: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S32.19] live GDB COM2 client qualification: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage15-1-test")]
     {
         if !wfs::stage15_1_self_test() {
