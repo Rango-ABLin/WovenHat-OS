@@ -87,6 +87,9 @@ jobs:
           sha256sum "$ovmf_code" "$ovmf_vars"
           python3 -m unittest discover -s tests -p 'test_stage13_12_firmware.py'
           python3 scripts/test-release.py --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
+      - name: Stage 11 userspace allocator publication regression
+        run: python3 -m unittest discover -s tests -p test_userspace_allocator_protocol.py
+
       - name: Stage 1–19 closure baseline and source-integrity preflight
         shell: bash
         run: |
