@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses a directory entry naming a free inode
+
+Branch: `auto/wovenhat-development` (base `bdfdcbcf`). Working tree was clean.
+
+### Defect / gap
+
+`check()`'s directory-entry loop (wfs.rs line 1565) contains:
+
+```rust
+if !node.is_used() || node.kind != KIND_FILE || entry.kind != KIND_FILE {
+    return Err(Error::Corrupt);
+}
+```
+
+This is a combined guard with three branches:
+1. `!node.is_used()` — directory entry names a free (unused) inode slot
+2. `node.kind != KIND_FILE` — directory entry names a directory inode
+3. `entry.kind != KIND_FILE` — the entry's own kind field is wrong
+
+The two prior tests cover branches 2 and 3:
+- `check_refuses_a_directory_entry_naming_a_directory_inode` — patches entry to inode 1 (root, KIND_DIR)
+- `check_refuses_a_directory_entry_with_wrong_kind` — patches entry.kind to KIND_DIR while inode is KIND_FILE
+
+No standalone `check_refuses_*` test exercised branch 1: a directory entry whose inode field points to a slot
+with `mode == 0` (free). The behavior was verified indirectly inside
+`lookup_refuses_a_stale_entry_naming_a_free_inode` (which calls check() and asserts Corrupt), but that test
+exists to document lookup's behavior, not check()'s guard specifically.
+
+A partially applied `stage_unlink` (inode zeroed, directory entry not yet cleared) or a crafted image can
+produce this state. The entry is permanently unreachable because every lookup path refuses free inodes; the
+entry and its former data blocks cannot be freed through the normal path.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `check_refuses_a_directory_entry_naming_a_free_inode`:
+
+- Calls `two_file_root()` to get a volume with `a.txt` and `b.txt`.
+- Finds the first free inode dynamically via `(2..=INODES).find(|n| !volume.inode(*n).is_used())`.
+- Patches a.txt's directory entry inode field (bytes 0..8) to `free_inode.to_le_bytes()`.
+  `free_inode` is in `1..=inode_count` so the range check at line 1558 passes; the
+  `!node.is_used()` guard at line 1565 then fires.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Verifies b.txt (unpatched) remains readable.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already existed; only the missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **71 passed / 0 failed** (was 70; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires on the first directory entry whose inode is free; the specific entry index is not reported.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses two file inodes naming the same block
 
 Branch: `auto/wovenhat-development` (base `8694bccd`). Working tree was clean.
