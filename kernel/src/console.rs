@@ -79,6 +79,14 @@ impl Console {
 
     /// Paint a branded boot frame. The spinner is deliberately composed from
     /// integer primitives so the loader works before the compositor exists.
+    ///
+    /// `frame` is a monotonically increasing tick count (not a per-call
+    /// counter): the caller derives it from `timer::ticks()`, not from how
+    /// many times this has been called. Boot stages take wildly different
+    /// amounts of wall-clock time, so advancing the spinner once per call
+    /// made it visibly freeze during a long stage and then jump during a
+    /// run of short ones. Ticking it from elapsed time keeps the motion
+    /// smooth regardless of how the boot stages are spaced.
     #[cfg(feature = "system-apps")]
     pub fn show_splash_frame(&mut self, frame: usize) {
         let quiet = self.quiet;
@@ -87,32 +95,58 @@ impl Console {
 
         let centre_x = self.info.width / 2;
         let centre_y = self.info.height / 2;
-        let ring = [
-            (0isize, -34isize),
+
+        // 24 points instead of 12 (precomputed: no libm in this no_std
+        // kernel, so the ring is a lookup table, not trig at boot time).
+        // The same ring reads as a smooth sweep rather than a coarse
+        // dodecagon of blocks.
+        const RING: [(isize, isize); 24] = [
+            (0, -34),
+            (9, -33),
             (17, -29),
+            (24, -24),
             (29, -17),
+            (33, -9),
             (34, 0),
+            (33, 9),
             (29, 17),
+            (24, 24),
             (17, 29),
+            (9, 33),
             (0, 34),
+            (-9, 33),
             (-17, 29),
+            (-24, 24),
             (-29, 17),
+            (-33, 9),
             (-34, 0),
+            (-33, -9),
             (-29, -17),
+            (-24, -24),
             (-17, -29),
+            (-9, -33),
         ];
-        for (index, (dx, dy)) in ring.iter().copied().enumerate() {
-            let distance = (index + frame) % ring.len();
+        const SEGMENTS: usize = RING.len();
+        for (index, (dx, dy)) in RING.iter().copied().enumerate() {
+            // Trailing fade: the lit head is bright gold, fading through
+            // teal into the background colour over the rest of the ring,
+            // so it reads as a comet sweeping around rather than flashing
+            // dots.
+            let distance = (index + SEGMENTS - frame % SEGMENTS) % SEGMENTS;
             let (red, green, blue) = match distance {
-                0 => (255, 205, 96),
-                1 | 2 => (105, 232, 225),
-                3 | 4 => (55, 164, 178),
-                _ => (25, 74, 103),
+                0 => (255, 210, 110),
+                1 => (205, 232, 160),
+                2 => (140, 230, 215),
+                3 => (95, 206, 212),
+                4 => (70, 182, 198),
+                5 => (55, 150, 175),
+                6..=8 => (38, 110, 140),
+                _ => (18, 56, 84),
             };
             let x = centre_x.saturating_add_signed(dx).saturating_sub(3);
             let y = centre_y.saturating_add_signed(dy).saturating_sub(3);
             terminal::with_framebuffer(|buffer, info| {
-                fill_color(buffer, info, x, y, 7, 7, red, green, blue);
+                fill_color(buffer, info, x, y, 6, 6, red, green, blue);
             });
         }
 

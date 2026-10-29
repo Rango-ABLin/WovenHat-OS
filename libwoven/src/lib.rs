@@ -10818,6 +10818,61 @@ pub mod graphics {
             }
         }
 
+        /// Fill a rounded rectangle with a top-to-bottom colour gradient:
+        /// the same corner mask as `rounded_rect`, with the fill colour
+        /// interpolated by row instead of constant, so chrome like the
+        /// Start button can carry the same top-lit look as the window
+        /// title bars without a separate flat-vs-gradient special case.
+        pub fn rounded_rect_gradient(&mut self, rect: Rect, radius: usize, top: Color, bottom: Color) {
+            if rect.is_empty() {
+                return;
+            }
+            let radius = radius.min(rect.width.min(rect.height) / 2);
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
+                return;
+            };
+            let right = rect_end(rect.x, rect.width);
+            let bottom_edge = rect_end(rect.y, rect.height);
+            let radius = i32::try_from(radius).unwrap_or(i32::MAX);
+            let r = radius as i64;
+            let r2 = r * r;
+            let last = i128::try_from(rect.height.saturating_sub(1).max(1)).unwrap_or(i128::MAX);
+            for canvas_row in row..row + rows {
+                let y = self.canvas.y + canvas_row as i32;
+                let offset = (i128::from(y) - i128::from(rect.y)).clamp(0, last);
+                let t = (offset * 255 / last) as u8;
+                let color = Color::rgb(
+                    lerp(top.red, bottom.red, t),
+                    lerp(top.green, bottom.green, t),
+                    lerp(top.blue, bottom.blue, t),
+                );
+                let corner_y = if y < rect.y.saturating_add(radius) {
+                    rect.y.saturating_add(radius)
+                } else if y > bottom_edge.saturating_sub(radius) {
+                    bottom_edge.saturating_sub(radius)
+                } else {
+                    y
+                };
+                for canvas_column in column..column + columns {
+                    let x = self.canvas.x + canvas_column as i32;
+                    let corner_x = if x < rect.x.saturating_add(radius) {
+                        rect.x.saturating_add(radius)
+                    } else if x > right.saturating_sub(radius) {
+                        right.saturating_sub(radius)
+                    } else {
+                        x
+                    };
+                    let dx = i64::from(x) - i64::from(corner_x);
+                    let dy = i64::from(y) - i64::from(corner_y);
+                    if dx * dx + dy * dy <= r2 {
+                        self.canvas.set(x, y, color.packed());
+                    }
+                }
+            }
+        }
+
         /// Fill a rectangle with a clipped top-to-bottom colour gradient.
         pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
             let Some((column, row, columns, rows)) =

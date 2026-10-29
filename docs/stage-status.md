@@ -12286,3 +12286,82 @@ Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
 `target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
 `target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
 
+## Stage 12.2 WovenFS extended attributes — 2026-10-28 — ACCEPTED
+
+Completed the bounded real-WovenFS xattr implementation: one checksummed
+attribute block per inode, validated names and values, get/list/set/remove,
+transactional inode/bitmap updates, unlink cleanup, remount persistence, and
+crash-recovery enumeration. Target and host warning-denying Clippy pass.
+QEMU passes at 1/2/4 CPUs. Evidence: `target/stage12-2-xattr-{1,2,4}cpu-*`.
+
+## Stage 12.5 storage manager integration — 2026-10-28 — ACCEPTED
+
+Integrated the storage manager with the existing MBR/GPT partition
+detectors. `inspect_device` now returns bounded disk/partition/filesystem
+metadata, and `discover_and_mount` publishes a manager mount record only
+after successful FAT32 discovery. The self-test covers removable metadata,
+partition bounds and mount teardown. Host/target warning-denying Clippy and
+QEMU pass at 1/2/4 CPUs. Evidence: `target/stage12-5-storage-manager-*`.
+
+## Stage 12.4 WovenFS snapshots and copy-on-write — 2026-10-28 — ACCEPTED
+
+Replaced the metadata-only snapshot stub with a bounded fixed-page COW image.
+Snapshots retain page roots, writes clone shared pages, restore swaps the live
+roots, and removal releases references back to the bounded pool. Host/target
+warning-denying Clippy and QEMU pass at 1/2/4 CPUs. Evidence:
+`target/stage12-4-snapshot-{1,2,4}cpu-*`.
+
+## Stage 13.10T outbound BLE notification key-size gate — 2026-10-28 — ACCEPTED
+
+The outbound notification authorization contract is now qualified in the full
+Stage 13.10 runtime chain. Weak authenticated sessions are rejected before
+notification encoding, while sessions meeting the 16-byte key-size policy are
+accepted. Host and target warning-denying Clippy pass; QEMU passes at 1/2/4
+CPUs with exit 33. Evidence is under
+`audit-artifacts/stage13.10-{1,2,4}cpu-*`.
+
+## Stage 13.10K BLE profiles/services — 2026-10-28 — ACCEPTED
+
+The exact current Stage 13.10 runtime chain accepts the bounded Device
+Information, Battery, and WovenHat OS services, including permission checks,
+subscription-bound notifications, range validation, and transactional
+characteristic capacity handling. QEMU passes at 1/2/4 CPUs with exit 33.
+Evidence: `audit-artifacts/stage13.10-{1,2,4}cpu-*`. Next: Stage 13.10L
+Bluetooth lifecycle and teardown hardening.
+
+## Stage 13.10L Bluetooth lifecycle hardening — 2026-10-28 — ACCEPTED
+
+Accepted the existing bounded `BluetoothLeLifecycle` integration. Disconnect
+events revoke all subscriptions for the handle; controller reset clears links
+and subscriptions; stale/unknown handles fail closed; and the lifecycle
+generation advances only on successful invalidation. The full Stage 13.10
+runtime gate passes at 1/2/4 CPUs with exit 33. Physical controller recovery
+and radio qualification remain outside this deterministic gate.
+
+## Stage 13.11A BLE SMP pairing/fixed-channel foundation — 2026-10-28 — ACCEPTED
+
+The chained Stage 13.11 runtime gate accepts bounded Pairing Request/Response
+validation, negotiated key-size and distribution flags, fixed L2CAP CID
+`0x0006`, handle-bound pairing state, and fail-closed malformed/stale traffic.
+Host/target warning-denying Clippy and QEMU pass at 1/2/4 CPUs with exit 33.
+Evidence: `audit-artifacts/stage13.11-{1,2,4}cpu-*`. Later SMP key
+distribution, cryptographic confirmation, encryption, identity and lifecycle
+increments remain separate.
+
+## Stage 13.11B BLE SMP LTK/key distribution — 2026-10-28 — ACCEPTED
+
+The chained Stage 13.11 gate accepts bounded Encryption Information and Master
+Identification distribution. Material is bound to the pairing handle, key
+size, and peer identity; malformed, stale, duplicate, and mismatched inputs
+fail closed. QEMU passes at 1/2/4 CPUs with exit 33. Evidence:
+`audit-artifacts/stage13.11-{1,2,4}cpu-*`.
+
+## Stage 13 full acceptance sweep — 2026-10-28 — ACCEPTED
+
+The complete current-tip Stage 13.1–13.11 runtime sweep passed at 1, 2, and
+4 CPUs; every run exited 33 and satisfied its explicit marker contract.
+Host and target warning-denying Clippy also pass. Evidence is preserved in
+the timestamped `audit-artifacts/stage13.*cpu-*` directories, including the
+current sweep at source tip. This is deterministic QEMU/software acceptance;
+physical hardware, radio interoperability, and certification remain separate.
+

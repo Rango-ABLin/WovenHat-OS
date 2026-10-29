@@ -1,5 +1,46 @@
 //! Mount/partition inventory boundary over GPT and legacy partition parsers.
 use crate::irq_lock::IrqMutex as Mutex;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FilesystemKind {
+    Fat32,
+    Unknown,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct DiskInfo {
+    pub sectors: u64,
+    pub start_lba: u64,
+    pub partition_sectors: u64,
+    pub filesystem: FilesystemKind,
+    pub removable: bool,
+}
+
+/// Discover the first supported filesystem partition without retaining a
+/// device borrow. MBR FAT32 is preferred, then the existing GPT FAT finder.
+pub fn inspect_device(device: &mut impl crate::block::BlockDevice, removable: bool) -> Option<DiskInfo> {
+    let partition = crate::partition::find_fat32(device)
+        .ok()
+        .flatten()
+        .or_else(|| crate::gpt::find_fat_partition(device).ok().flatten())?;
+    Some(DiskInfo {
+        sectors: device.sector_count(),
+        start_lba: partition.start_lba,
+        partition_sectors: partition.sectors,
+        filesystem: FilesystemKind::Fat32,
+        removable,
+    })
+}
+
+/// Discover and publish a mount record as one bounded manager operation.
+pub fn discover_and_mount(
+    device: &mut impl crate::block::BlockDevice,
+    removable: bool,
+) -> Option<(u64, DiskInfo)> {
+    let info = inspect_device(device, removable)?;
+    let id = mount(info.start_lba, info.partition_sectors, removable)?;
+    Some((id, info))
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Mount {
     pub id: u64,
@@ -189,5 +230,26 @@ pub fn structural_self_test() -> bool {
     let Some(id) = mount(2048, 10000, true) else {
         return false;
     };
-    unmount(id)
+    if !unmount(id) {
+        return false;
+    }
+    let mut disk = crate::block::RamDisk::<8>::new();
+    let mut mbr = [0u8; crate::block::SECTOR_SIZE];
+    mbr[510] = 0x55;
+    mbr[511] = 0xaa;
+    mbr[446 + 4] = 0x0c;
+    mbr[446 + 8..446 + 12].copy_from_slice(&2u32.to_le_bytes());
+    mbr[446 + 12..446 + 16].copy_from_slice(&4u32.to_le_bytes());
+    if crate::block::BlockDevice::write_sector(&mut disk, 0, &mbr).is_err() {
+        return false;
+    }
+    let Some((id, info)) = discover_and_mount(&mut disk, true) else {
+        return false;
+    };
+    info.sectors == 8
+        && info.start_lba == 2
+        && info.partition_sectors == 4
+        && info.filesystem == FilesystemKind::Fat32
+        && info.removable
+        && unmount(id)
 }

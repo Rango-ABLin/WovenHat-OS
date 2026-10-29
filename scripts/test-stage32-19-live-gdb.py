@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=45)
     parser.add_argument("--feature", default="stage32-19-test")
     parser.add_argument("--name", default=None)
-    parser.add_argument("--command", default="c", choices=("c", "D"))
+    parser.add_argument("--command", default="c", choices=("c", "D", "k", "g"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -71,23 +71,46 @@ def main() -> int:
         # Do not transmit before the guest has initialized COM2 and reached
         # the scheduler-owned qualification hook; early UART bytes are not
         # buffered by the kernel's bounded polling path.
+        ready_marker = (
+            f"[S32.{20 if args.command == 'D' else 22 if args.command == 'g' else 21}] live GDB {'detach' if args.command == 'D' else 'registers' if args.command == 'g' else 'kill'}: READY"
+            if args.command in ("D", "k", "g")
+            else "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED"
+        )
         while time.monotonic() < deadline:
-            if "[S10.3] userspace async completion ABI + cancellation/teardown: PASSED" in serial.read_text(encoding="utf-8", errors="replace"):
+            if ready_marker in serial.read_text(encoding="utf-8", errors="replace"):
                 break
             time.sleep(0.02)
         # The INT3 self-test polls COM2. Ask for the stop reason, verify the
         # reply, then continue so the kernel can publish its acceptance marker.
-        client.sendall(packet(b"?"))
         received = bytearray()
+        next_query = 0.0
         while b"S05" not in received and time.monotonic() < deadline:
+            if time.monotonic() >= next_query:
+                client.sendall(packet(b"?"))
+                # Keep at most one outstanding query in the bounded guest
+                # poll loop; flooding it can starve the subsequent D packet.
+                next_query = time.monotonic() + 1.0
             try:
                 received.extend(client.recv(256))
             except socket.timeout:
                 continue
         if b"S05" not in received:
             raise RuntimeError(f"missing GDB stop reply: {received!r}")
-        client.sendall(b"+")
+        # The bounded kernel entry consumes complete `$...#cc` frames directly;
+        # it does not feed standalone host ACK bytes into that frame buffer.
+        # Sending `+` here would prefix the next packet and make it invalid.
+        if args.command != "D":
+            client.sendall(b"+")
         client.sendall(packet(args.command.encode()))
+        if args.command == "g":
+            while (b"#" not in received or len(received) < 160) and time.monotonic() < deadline:
+                try:
+                    received.extend(client.recv(256))
+                except socket.timeout:
+                    continue
+            if len(received) < 160:
+                raise RuntimeError(f"missing register reply: {received!r}")
+            client.sendall(packet(b"k"))
         if args.command == "D":
             while b"OK" not in received and time.monotonic() < deadline:
                 try:
@@ -103,7 +126,8 @@ def main() -> int:
             process.kill()
         stdout, stderr = process.communicate()
         qemu_log.write_text((stdout or b"").decode(errors="replace") + (stderr or b"").decode(errors="replace"), encoding="utf-8")
-        print(f"Stage 32.19 live GDB qualification failed: {error}; evidence: {out}", file=sys.stderr)
+        detail = f"; received={bytes(received)!r}" if "received" in locals() else ""
+        print(f"Stage 32.19 live GDB qualification failed: {error}{detail}; evidence: {out}", file=sys.stderr)
         return 1
     finally:
         if client is not None:
@@ -112,7 +136,8 @@ def main() -> int:
     log = serial.read_text(encoding="utf-8", errors="replace")
     errors = validation_errors(process.returncode, log, [
         f"[SMP] online={args.cpus} expected={args.cpus}",
-        f"[S32.20] live GDB detach: PASSED" if args.command == "D" else "[S32.19] live GDB COM2 client qualification: PASSED",
+        (f"[S32.{20 if args.command == 'D' else 22 if args.command == 'g' else 21}] live GDB {'detach' if args.command == 'D' else 'registers' if args.command == 'g' else 'kill'}: PASSED"
+         if args.command in ("D", "k", "g") else "[S32.19] live GDB COM2 client qualification: PASSED"),
     ])
     if errors:
         print("\n".join(errors), file=sys.stderr)

@@ -1,5 +1,69 @@
 # Agent coordination (Claude Code and Codex)
 
+## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
+
+User reported the GUI "looks like 1998 graphics." Root cause:
+`libwoven::graphics::Renderer` already has anti-aliased rounded rects, alpha
+blending and gradients (accepted at the library level), but
+`apps/woven-shell/src/main.rs` never called them for everyday chrome -- only
+for the opt-in 3D panel effect (deliberately made non-default by an earlier
+M01 regression fix, `docs/stage-status.md:1799-1806`). Converted the
+self-contained chrome elements to use `Renderer`: the Start button and window
+close button now use `rounded_rect` (new `CHROME_RADIUS`/
+`CHROME_RADIUS_SMALL` constants), and the window title bar plus the Quick
+Settings/Notification Center panel headers now use `vertical_gradient`
+(square corners kept there deliberately -- they sit flush against an
+adjacent region and independent rounding would show a seam). Two small local
+helpers (`rect_of`/`color_of`) convert between the shell's `Area`/packed-`u32`
+types and `libwoven::graphics`'s `Rect`/`Color`; no changes to
+`kernel/src/display.rs`, `compositor.rs`, the font/text path, or the 3D opt-in
+path.
+
+Verified visually, not just by a clean build: ran
+`scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture) --
+the Start button renders as a rounded pill and the Files window title bar
+shows a visible gradient with a rounded close button, both with text still
+correctly positioned; the desktop qualification gate itself passed (1 CPU).
+Target Clippy on `apps/woven-shell` (its own workspace, `--target
+x86_64-unknown-none`) is clean.
+
+Deliberately left for a follow-on, not this pass: the toast notification's
+background fill goes through a `painter.blend(...)` call I haven't fully
+traced (risk of disturbing alpha-layering order without understanding it
+first); and font/text rendering (`kernel/src/font.rs`, a 5x7 bitmap glyph
+table) is untouched -- it's a separate, larger change touching text layout
+throughout the shell, not a chrome-fill swap.
+
+## Claude Code - Stage 12.2 extended attributes accepted (2026-10-28)
+
+Added real extended-attribute support to `kernel/src/wfs.rs` (the native FS,
+not the unrelated RAM-only `wovenfs.rs` side table): a new `xattr_block`
+inode field (fits in previously-always-zero spare space, no format-version
+bump), a 512-byte packed name/value block allocated from the existing bitmap
+allocator, and `set_xattr`/`get_xattr`/`list_xattr`/`remove_xattr` following
+the exact `mkdir`-style one-transaction template. `unlink` now also frees an
+attached xattr block (previously would have leaked it). `Volume::check()`
+validates xattr blocks the same way it validates direct blocks.
+
+Gated under `stage12-2-xattr-test` (kept distinct from the existing
+`stage12-2-test`, which exercises the unrelated `wovenfs.rs`). Host tests
+(`tests/wovenfs_crash.rs`, including exhaustive crash-point enumeration for
+both `set_xattr` and `remove_xattr`, plus block-reuse and unlink-frees-block
+tests), target+host warning-denying Clippy, and QEMU 1/2/4 CPUs all pass.
+`docs/wovenfs-on-disk-format.md` updated with the new inode field and the
+extended-attribute block layout.
+
+This is a Rust-API-level increment only -- no syscall/VFS exposure to
+userspace yet (deliberately separate follow-on work). Next queued: 12.5
+(`storage_manager.rs` mount-manager integration, currently zero real
+callers), then 12.4 (snapshots, currently a disconnected stub).
+
+Unrelated finding while running the full host suite: `thread::tests::
+abort_permanently_retires_exhausted_generations` (`tests/thread_registry.rs`)
+is currently failing on master, apparently from the in-progress dynamic
+TLS/mutex-ownership work -- not touched by this change, flagging for
+whoever owns that area.
+
 ## Claude Code - Stage 12 product decision resolved; starting 12.2 xattrs (2026-10-28)
 
 The user resolved the open product decision noted in `docs/stage-status.md`
@@ -7924,6 +7988,74 @@ trap acquisition remains scheduler-bound. Host/all-target and target
 `stage32-18-test` Clippy pass. QEMU passes at 1/2/4 CPUs with exit 33.
 Evidence is retained under the three `target/stage32-18-gdb-owner-binding-*`
 directories. Commit: pending.
+
+## Codex - Stage 12.2 WovenFS xattrs (2026-10-28)
+
+Finished Claude's xattr slice on the real `kernel/src/wfs.rs`. The bounded
+checksummed attribute block, transactional lifecycle, unlink/free behavior,
+remount persistence, and crash-recovery checks pass. Target and host
+warning-denying Clippy pass; QEMU passes at 1/2/4 CPUs. Evidence is under
+`target/stage12-2-xattr-{1,2,4}cpu-*`.
+
+## Codex - Stage 12.5 storage manager integration (2026-10-28)
+
+Completed the next filesystem increment after xattrs. The storage manager
+now consumes the existing MBR/GPT FAT32 discovery boundary, exposes bounded
+disk/partition/filesystem metadata, and publishes mount records through one
+discover-and-mount operation. Host/target Clippy and QEMU 1/2/4 CPU gates
+pass. Evidence is under `target/stage12-5-storage-manager-*`.
+
+## Codex - Stage 12.4 WovenFS snapshots/COW (2026-10-28)
+
+Completed the bounded snapshot implementation after Stage 12.5. The snapshot
+catalog now has a fixed-page copy-on-write image: shared pages clone on write,
+restore swaps roots, and snapshot removal reclaims references. Target/host
+Clippy and QEMU 1/2/4 CPU acceptance pass. Evidence is under
+`target/stage12-4-snapshot-{1,2,4}cpu-*`.
+
+## Codex - Stage 13.10T outbound BLE notification key-size gate (2026-10-28)
+
+Closed the pending Stage 13.10T acceptance. The full runtime chain, including
+weak/strong outbound notification authorization, passes at 1/2/4 CPUs; host
+and target warning-denying Clippy also pass. Evidence is retained under
+`audit-artifacts/stage13.10-{1,2,4}cpu-*`.
+
+## Codex - Stage 13.10K BLE profiles/services closure (2026-10-28)
+
+The exact current Stage 13.10 runtime chain passed at 1/2/4 CPUs with exit
+33, closing the bounded Device Information, Battery, and WovenHat OS service
+surface. Evidence is under `audit-artifacts/stage13.10-{1,2,4}cpu-*`.
+Next permitted work is Stage 13.10L lifecycle hardening.
+
+## Codex - Stage 13.10L Bluetooth lifecycle hardening (2026-10-28)
+
+Closed the lifecycle boundary already wired through `BluetoothLeLifecycle`:
+disconnect revokes per-link subscriptions, reset clears all live state, stale
+handles fail closed, and successful invalidation advances the generation. The
+full Stage 13.10 1/2/4-CPU runtime gate passes. Physical controller recovery
+and radio qualification remain separate.
+
+## Codex - Stage 13.11A BLE SMP pairing foundation (2026-10-28)
+
+Closed the Stage 13.11A boundary using its designed `stage13-10-test` feature
+chain. Pairing parameter validation, fixed-channel enforcement, key-size and
+distribution policy, handle binding, and fail-closed stale/malformed traffic
+pass host/target Clippy and QEMU 1/2/4 CPUs. Later 13.11 increments remain
+open.
+
+## Codex - Stage 13.11B BLE SMP LTK distribution (2026-10-28)
+
+Stage 13.11B passes the chained 1/2/4-CPU runtime gate with LTK and key
+distribution bound to handle, key size, and peer identity. Duplicate, stale,
+malformed, and mismatched material is rejected. Evidence is retained under
+`audit-artifacts/stage13.11-{1,2,4}cpu-*`.
+
+## Codex - full Stage 13 acceptance sweep (2026-10-28)
+
+Completed and accepted the current-tip Stage 13.1–13.11 matrix. All 33
+runtime runs (11 stages × 3 CPU counts) passed with exit 33 and their
+explicit markers; host and target warning-denying Clippy passed. Evidence is
+retained under the timestamped `audit-artifacts/stage13.*cpu-*` directories.
 
 
 ## Codex - modern desktop implementation sequence (2026-10-29)
