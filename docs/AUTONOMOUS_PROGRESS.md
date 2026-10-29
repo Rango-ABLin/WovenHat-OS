@@ -1,5 +1,55 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS: test that read_file refuses a buffer smaller than the file
+
+Branch: `auto/wovenhat-development` (base `2f75d975`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (line 1222 of `kernel/src/wfs.rs`) returns `Err(Error::TooLarge)` when
+`out.len() < size`.  The only existing test for `Error::TooLarge` in the suite
+(`a_file_larger_than_the_direct_block_limit_is_refused`) checks `write_file`
+refusing data larger than `MAX_FILE_SIZE`, not the `read_file` buffer-size check.
+No test exercised the path where the caller supplies a buffer that is smaller than
+the file's stored content, leaving this guard untested.
+
+This gap matters because:
+- if the guard were accidentally removed or the comparison inverted, every caller
+  that supplies an undersized buffer would silently receive a short read (up to
+  `out.len()` bytes) instead of an error, corrupting the caller's view of the file;
+- the read-side `TooLarge` error is the only mechanism that prevents a caller from
+  requesting a file into a stack buffer that cannot hold it.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `read_file_refuses_a_buffer_smaller_than_the_file`:
+
+- Calls `formatted()` and creates `hello.txt` with 5 bytes of content.
+- Asserts `read_file` with a 4-byte buffer returns `Err(Error::TooLarge)`.
+- Asserts `read_file` with a 0-byte buffer returns `Err(Error::TooLarge)` (edge case:
+  any positive file size exceeds a zero-length buffer).
+- Control: a 5-byte (exact-size) buffer returns `Ok(5)` with the correct content.
+- Control: a `MAX_FILE_SIZE`-byte buffer returns `Ok(5)` with the correct first 5 bytes.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **78 passed / 0 failed** (was 77; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test uses a five-byte file.  Files spanning multiple blocks (> `SECTOR_SIZE`
+  bytes) are not tested here, but those are handled by the same guard.
+- No repair or retry path — `read_file` returns the error unconditionally.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses an orphaned file inode
 
 Branch: `auto/wovenhat-development` (base `0e803738`). Working tree was clean.

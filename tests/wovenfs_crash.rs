@@ -4086,3 +4086,59 @@ fn check_refuses_an_orphaned_file_inode() {
         "a.txt must be readable on the clean image"
     );
 }
+
+/// `read_file` returns `Error::TooLarge` when the caller's buffer is smaller
+/// than the file's stored size.
+///
+/// `read_file` checks `out.len() < size` before copying any data and returns
+/// `Err(Error::TooLarge)` when the buffer cannot hold all content.  No existing
+/// test exercised that path: the write-side `TooLarge` test only covers
+/// `write_file` refusing data larger than `MAX_FILE_SIZE`.  This test also
+/// verifies that an exact-sized buffer and a larger buffer both succeed and
+/// return the correct content.
+#[test]
+fn read_file_refuses_a_buffer_smaller_than_the_file() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create")
+    };
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // A buffer smaller than the five-byte file must be refused.
+    let mut too_small = [0u8; 4];
+    assert_eq!(
+        volume.read_file(file_inode, &mut too_small),
+        Err(Error::TooLarge),
+        "read_file must return TooLarge when the buffer is 4 bytes but the file is 5"
+    );
+
+    // A zero-length buffer is also smaller than any non-empty file.
+    let mut empty_buf: [u8; 0] = [];
+    assert_eq!(
+        volume.read_file(file_inode, &mut empty_buf),
+        Err(Error::TooLarge),
+        "read_file must return TooLarge for a zero-length buffer"
+    );
+
+    // An exact-sized buffer succeeds and returns the correct content.
+    let mut exact = [0u8; 5];
+    assert_eq!(
+        volume.read_file(file_inode, &mut exact),
+        Ok(5),
+        "read_file must succeed with an exact-sized buffer"
+    );
+    assert_eq!(&exact, b"hello", "exact-buffer content must match");
+
+    // A larger buffer also succeeds; only the first five bytes are written.
+    let mut big = [0xffu8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(file_inode, &mut big),
+        Ok(5),
+        "read_file must succeed with a buffer larger than the file"
+    );
+    assert_eq!(&big[..5], b"hello", "large-buffer content prefix must match");
+}
