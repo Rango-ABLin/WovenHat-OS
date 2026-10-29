@@ -4679,3 +4679,21 @@ Selection is recorded, while existing scheduler-owned signal/teardown remains
 the only termination path. The 256 MiB QEMU profile qualifies physical-frame
 pressure under emulation; native hardware below the 4 GiB production floor is
 not implied.
+
+## Modern desktop input contract (2026-10-29, acceptance open)
+
+WovenUI Button now separates hover/motion (`pointer_move`) from primary-button
+edges (`pointer`) and exposes `cancel_pointer`. Files, Calculator, Editor,
+Images, Monitor, Settings, Store, Terminal and Update route their authenticated
+shell messages through that contract. Settings retains its actual Button
+between repaints; Files and Settings support Enter/Space/R refresh and visible
+keyboard focus. Owner-authenticated `WCAP` version 1 opts an open window into
+cancellation; the flag is reset with slot reuse and preserved on resize. Shell
+`WCAN` precedes the existing synthetic `WPBT` release on workspace/lock
+cancellation only for opted-in windows, preserving strict legacy clients. All eleven production pointer clients clear and
+repaint pending state; Security/Installer require a prior press for release
+actions. WCAN enqueue failure suppresses the synthetic release to avoid an
+aborted action, but saturated-mailbox retry is not yet qualified. This is
+single-threaded bounded userspace state; there are no new syscalls, kernel
+objects, locks, unsafe blocks or capabilities. See
+`docs/graphics/modern-desktop-implementation-2026-10-29.md` for scope and gates.

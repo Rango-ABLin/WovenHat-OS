@@ -142,6 +142,7 @@ fn draw_settings(
     pressed: bool,
     refresh_count: u32,
     mode: ThemeMode,
+    refresh: &Button<'_>,
 ) {
     let shared = mode.shared();
     let panel = shared.surface;
@@ -239,16 +240,6 @@ fn draw_settings(
         &mut refresh_digits,
         shared,
     );
-    let mut refresh = Button::new(
-        Frame::new(
-            BUTTON_X,
-            BUTTON_Y,
-            BUTTON_WIDTH as i32,
-            BUTTON_HEIGHT as i32,
-        ),
-        "Refresh",
-    );
-    refresh.pressed = pressed;
     refresh.draw(canvas, shared);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
@@ -267,6 +258,7 @@ fn render(
     pressed: bool,
     refresh_count: u32,
     mode: ThemeMode,
+    refresh: &Button<'_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -278,7 +270,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_settings(&mut canvas, pointer, pressed, refresh_count, mode);
+    draw_settings(&mut canvas, pointer, pressed, refresh_count, mode, refresh);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -298,7 +290,16 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
         fail(7)
     };
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
-    if !render(&window, None, false, 0, mode) {
+    let mut refresh = Button::new(
+        Frame::new(
+            BUTTON_X,
+            BUTTON_Y,
+            BUTTON_WIDTH as i32,
+            BUTTON_HEIGHT as i32,
+        ),
+        "Refresh",
+    );
+    if !render(&window, None, false, 0, mode, &refresh) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -311,7 +312,9 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
     open[12..14].copy_from_slice(&(WIDTH as u16).to_le_bytes());
     open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
-    if libwoven::message_send(shell, &open).is_err() {
+    if libwoven::message_send(shell, &open).is_err()
+        || libwoven::message_send(shell, b"WCAP\x01").is_err()
+    {
         fail(5)
     }
     let _ = libwoven::print("WovenSettings: window opened\n");
@@ -330,6 +333,14 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
             if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
             }
+            if message.get(..length) == Some(&b"WCAN"[..]) {
+                refresh.cancel_pointer();
+                pointer_pressed = false;
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                    fail(8)
+                }
+                continue;
+            }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
                 let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
                     .min(MAX_SURFACE_WIDTH as u32);
@@ -337,7 +348,7 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, mode) {
+                        if render(&resized, pointer, pointer_pressed, refresh_count, mode, &refresh) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenSettings: window resized\n");
@@ -348,12 +359,26 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                         drop(resized);
                     }
                 }
+            } else if (message.get(..length) == Some(&b"WKEY\x01"[..])
+                || message.get(..length) == Some(&b"r"[..])
+                || message.get(..length) == Some(&b" "[..]))
+                && refresh.activate()
+            {
+                refresh.focused = true;
+                refresh_count = refresh_count.saturating_add(1);
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                    fail(8)
+                }
+                let _ = libwoven::print("WovenSettings: keyboard refreshed\n");
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
                 pointer = Some((
                     u16::from_le_bytes([message[4], message[5]]),
                     u16::from_le_bytes([message[6], message[7]]),
                 ));
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
+                if let Some((x, y)) = pointer {
+                    refresh.pointer_move(i32::from(x), i32::from(y));
+                }
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
@@ -362,16 +387,11 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
-                if !pointer_pressed
-                    && i32::from(local_x) >= BUTTON_X
-                    && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
-                    && i32::from(local_y) >= BUTTON_Y
-                    && i32::from(local_y) < BUTTON_Y + BUTTON_HEIGHT as i32
-                {
+                if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSettings: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode) {
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");

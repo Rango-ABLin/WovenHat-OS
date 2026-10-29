@@ -29,6 +29,10 @@
 //! - `WPMV`, x (u16), y (u16): report a pointer move in client coordinates.
 //! - `WPBT`, button (u8), pressed (u8), x (u16), y (u16): report a bounded
 //!   client button edge in client coordinates.
+//! - `WCAP`, version (u8 = 1): opt the sender's open window into cancellation.
+//! - `WCAN`: cancel an opted-in client's pointer actions before a synthetic
+//!   `WPBT` release when locking or leaving a workspace. Legacy clients get
+//!   only the established release message.
 //!
 //! A surface is accepted only if the sender owns it: the token names its
 //! owner, and the kernel enforces that name on every operation. A window or
@@ -946,6 +950,8 @@ impl Dirty {
 #[derive(Clone, Copy)]
 struct Window {
     owner: process::Id,
+    /// Opt-in avoids sending unknown tags to strict legacy clients.
+    cancellation_protocol: bool,
     token: u64,
     /// Top-left of the client area; the title bar sits above it.
     x: i32,
@@ -3635,6 +3641,7 @@ impl Desktop {
             fade,
             workspace: self.workspace,
             resizing_until: 0,
+            cancellation_protocol: false,
         };
         self.windows[slot] = Some(window);
         let previous = self
@@ -3786,6 +3793,14 @@ impl Desktop {
     fn handle_message(&mut self, sender: process::Id, message: &[u8]) -> Dirty {
         let empty = Dirty::new();
         match message.get(..4) {
+            Some(b"WCAP") if message == b"WCAP\x01" => {
+                if let Some(window) = self.windows.iter_mut().flatten()
+                    .find(|window| window.owner == sender)
+                {
+                    window.cancellation_protocol = true;
+                }
+                empty
+            }
             Some(b"WOPN") => self.open(sender, message),
             Some(b"WRSZ") => Dirty::of(self.resized(sender, message)),
             Some(b"TRAY") if message.len() == 12 => {
@@ -4105,7 +4120,15 @@ impl Desktop {
     /// physical release must not reach a hidden client or a reused slot.
     fn cancel_pointer_gesture(&mut self) {
         if let Some(slot) = self.pointer_capture.take() {
-            self.forward_pointer_button(slot, false);
+            if let Some(window) = self.windows[slot] {
+                // Both messages use the same FIFO. If cancellation cannot be
+                // queued, do not turn an aborted gesture into a client action.
+                if !window.cancellation_protocol
+                    || libwoven::message_send(window.owner, b"WCAN").is_ok()
+                {
+                    self.forward_pointer_button(slot, false);
+                }
+            }
         }
         self.drag = None;
     }

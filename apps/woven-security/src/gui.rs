@@ -526,7 +526,9 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     open[12..14].copy_from_slice(&(WIDTH as u16).to_le_bytes());
     open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
-    if libwoven::message_send(shell, &open).is_err() {
+    if libwoven::message_send(shell, &open).is_err()
+        || libwoven::message_send(shell, b"WCAP\x01").is_err()
+    {
         fail(5)
     }
     let _ = libwoven::print("WovenSecurity: window opened\n");
@@ -545,6 +547,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 admin.close();
                 break;
+            }
+            if message.get(..length) == Some(&b"WCAN"[..]) {
+                pointer_pressed = false;
+                if !render(&window, pointer, pointer_pressed, refresh_count, &admin) {
+                    fail(8)
+                }
+                continue;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
                 let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
@@ -567,11 +576,12 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 if !render(&window, pointer, pointer_pressed, refresh_count, &admin) { fail(8) }
                 let _ = libwoven::print("WovenSecurity: pointer updated\n");
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
+                let was_pressed = pointer_pressed;
                 pointer_pressed = message[5] != 0;
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
-                if !pointer_pressed
+                if was_pressed && !pointer_pressed
                     && i32::from(local_x) >= BUTTON_X
                     && i32::from(local_x) < BUTTON_X + BUTTON_WIDTH as i32
                     && i32::from(local_y) >= BUTTON_Y

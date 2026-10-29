@@ -217,7 +217,9 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     open[12..14].copy_from_slice(&(WIDTH as u16).to_le_bytes());
     open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
-    if libwoven::message_send(shell, &open).is_err() {
+    if libwoven::message_send(shell, &open).is_err()
+        || libwoven::message_send(shell, b"WCAP\x01").is_err()
+    {
         fail(7);
     }
     let _ = libwoven::print("WovenCalculator: window opened\n");
@@ -242,6 +244,14 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             }
             if message.get(..message_length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
+            }
+            if message.get(..message_length) == Some(&b"WCAN"[..]) {
+                evaluate_button.cancel_pointer();
+                pointer_pressed = false;
+                if !render(&window, &expression[..length], result, true, pointer, pointer_pressed, &evaluate_button) {
+                    fail(10)
+                }
+                continue;
             }
             if message.get(..4) == Some(&b"WSIZ"[..]) && message_length == 8 {
                 let width = u32::from(u16::from_le_bytes([message[4], message[5]]))
@@ -281,7 +291,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 ));
                 let before = (evaluate_button.hovered, evaluate_button.pressed);
                 if let Some((x, y)) = pointer {
-                    evaluate_button.pointer(i32::from(x), i32::from(y), pointer_pressed);
+                    evaluate_button.pointer_move(i32::from(x), i32::from(y));
                 }
                 if before == (evaluate_button.hovered, evaluate_button.pressed) {
                     continue;

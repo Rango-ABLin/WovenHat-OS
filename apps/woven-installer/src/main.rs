@@ -109,7 +109,9 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
     open[12..14].copy_from_slice(&(GUI_WIDTH as u16).to_le_bytes());
     open[14..16].copy_from_slice(&(GUI_HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
-    if libwoven::message_send(shell, &open).is_err() {
+    if libwoven::message_send(shell, &open).is_err()
+        || libwoven::message_send(shell, b"WCAP\x01").is_err()
+    {
         libwoven::exit(5)
     }
 
@@ -128,6 +130,11 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
         }
         if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
             break;
+        }
+        if message.get(..length) == Some(&b"WCAN"[..]) {
+            pressed = false;
+            let _ = render_gui(&window, state, inventory, install, pointer, pressed);
+            continue;
         }
         if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
             let width =
@@ -154,12 +161,13 @@ fn run_gui(shell_arg: Option<&[u8]>, snapshot: Option<&[u8]>) -> ! {
             continue;
         }
         if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
+            let was_pressed = pressed;
             pressed = message[5] != 0;
             pointer = Some((
                 u16::from_le_bytes([message[6], message[7]]),
                 u16::from_le_bytes([message[8], message[9]]),
             ));
-            if !pressed && in_close_button(pointer) {
+            if was_pressed && !pressed && in_close_button(pointer) {
                 let _ = libwoven::message_send(shell, b"WCLS");
                 break;
             }

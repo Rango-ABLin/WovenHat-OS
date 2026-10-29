@@ -1,5 +1,27 @@
 # Stage status
 
+## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
+
+The full appearance/features proposal is authorized. Work resumes at the open
+window/input/accessibility prerequisite; later personalization, shared visual
+polish and workflow stages have not been promoted. Shared Button motion/edge
+routing, persistent Settings button state, Files/Settings keyboard refresh,
+and negotiated, authenticated WCAN-before-release handling are implemented. All eleven
+production pointer clients repaint cancellation; saturated-mailbox retry is
+still unqualified. The QEMU desktop journey now exercises real cancellation,
+Files/Settings keyboard activation, screenshots and close behavior.
+
+The prescribed Windows baseline initially failed because the Stage9.5 runner
+and its reachable prerequisites were deleted by an earlier cleanup. Twenty
+runners are restored from b5a2e571^ with original gates intact. Stage7.6
+Clippy now checks host all-targets and the freestanding kernel target to avoid
+a host std/no_std handler conflict.
+Final-source host tests, host/kernel Clippy, kernel build, all twelve affected
+app release builds/lints and Stage20.19 input isolation pass at 1/2/4 CPUs.
+Production desktop journeys, full Windows and inherited matrices remain open. Evidence and limits are in
+`docs/graphics/modern-desktop-implementation-2026-10-29.md`. No accepted-stage
+commit or complete modernization claim is made.
+
 ## S05 low-memory matrix requalification - 2026-10-28 - PASSED BOUNDED GATE
 
 The dedicated memory-pressure feature and 256 MiB QEMU low-memory gate passed

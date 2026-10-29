@@ -212,7 +212,9 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
     open[12..14].copy_from_slice(&(WIDTH as u16).to_le_bytes());
     open[14..16].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
     open[16..].copy_from_slice(TITLE);
-    if libwoven::message_send(shell, &open).is_err() {
+    if libwoven::message_send(shell, &open).is_err()
+        || libwoven::message_send(shell, b"WCAP\x01").is_err()
+    {
         fail(6);
     }
     let _ = libwoven::print("WovenFiles: window opened\n");
@@ -233,6 +235,15 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
             if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
                 break;
             }
+            if message.get(..length) == Some(&b"WCAN"[..]) {
+                refresh_button.cancel_pointer();
+                pointer_pressed = false;
+                let _ = libwoven::print("WovenFiles: pointer cancelled\n");
+                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                    fail(8)
+                }
+                continue;
+            }
             if message.get(..4) == Some(&b"WSIZ"[..]) && length == 8 {
                 let width = u32::from(u16::from_le_bytes([message[4], message[5]])).min(MAX_SURFACE_WIDTH as u32);
                 let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
@@ -249,11 +260,22 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                         drop(resized);
                     }
                 }
+            } else if (message.get(..length) == Some(&b"WKEY\x01"[..])
+                || message.get(..length) == Some(&b"r"[..])
+                || message.get(..length) == Some(&b" "[..]))
+                && refresh_button.activate()
+            {
+                refresh_button.focused = true;
+                refresh_count = refresh_count.saturating_add(1);
+                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                    fail(8)
+                }
+                let _ = libwoven::print("WovenFiles: keyboard refreshed\n");
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
                 let local_x = u16::from_le_bytes([message[4], message[5]]);
                 let local_y = u16::from_le_bytes([message[6], message[7]]);
                 pointer = Some((local_x, local_y));
-                refresh_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
+                refresh_button.pointer_move(i32::from(local_x), i32::from(local_y));
                 if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
                     fail(8)
                 }

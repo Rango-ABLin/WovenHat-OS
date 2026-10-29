@@ -7925,3 +7925,23 @@ trap acquisition remains scheduler-bound. Host/all-target and target
 Evidence is retained under the three `target/stage32-18-gdb-owner-binding-*`
 directories. Commit: pending.
 
+
+## Codex - modern desktop implementation sequence (2026-10-29)
+
+User authorizes all proposed appearance and everyday-workflow improvements.
+Resuming the earliest open desktop prerequisite: window/input/accessibility
+reliability. The prior 90-case chain was interrupted by concurrent source
+changes, so it is not accepted. Owning shared WovenUI input fixes and desktop
+qualification; no filesystem, GDB or dynamic-TLS changes planned. Persistent
+settings and later modernization remain gated on this prerequisite. Preserve
+all previous evidence and run only one acceptance chain at a time.
+
+Independent input review found synthetic-release activation and new QMP
+cascade-coordinate errors. WCAN-before-release plus client state clearing and
+immediate repaint now address normal-mailbox cancellation; saturated-mailbox
+retry remains open. Files/Settings Enter acceptance is added to the real-QEMU
+journey. Restored the 20 reachable Stage7.6-9.5 PowerShell runners byte-for-byte
+from b5a2e571^ after the prescribed full Windows gate failed on a missing
+runner. Root owns serial validation under
+`audit-artifacts/modern-desktop-20261029-083456/`; do not start another chain.
+Earlier static app results preceding the repaint fix need final-source reruns.

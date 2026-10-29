@@ -510,6 +510,49 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             if changed_pixels(before_pointer, after_pointer) < 20:
                 raise GateFailure("mouse click did not change the client framebuffer")
 
+            # An aborted press must not become a click when the workspace
+            # hides its owner. Keep the physical pointer inside Refresh.
+            refreshes = read_serial(serial).count("WovenFiles: pointer refreshed")
+            cancel_started = time.monotonic()
+            qmp.command("input-send-event", {"events": [
+                {"type": "btn", "data": {"down": True, "button": "left"}},
+            ]})
+            time.sleep(0.3)
+            qmp.key("f3", 90)
+            wait_marker(serial, "WovenFiles: pointer cancelled",
+                        cancel_started + args.input_timeout, process,
+                        "files_pointer_cancel_ms", timings, cancel_started)
+            for _ in range(3):
+                qmp.key("f3", 90)
+                time.sleep(0.2)
+            wait_marker(serial, "woven-shell: workspace 1",
+                        cancel_started + args.input_timeout, process,
+                        "files_workspace_return_ms", timings, cancel_started)
+            qmp.command("input-send-event", {"events": [
+                {"type": "btn", "data": {"down": False, "button": "left"}},
+            ]})
+            time.sleep(1.0)
+            if read_serial(serial).count("WovenFiles: pointer refreshed") != refreshes:
+                raise GateFailure("workspace cancellation activated the Refresh button")
+
+            keyboard_refresh_started = time.monotonic()
+            qmp.key("ret", 90)
+            wait_marker(serial, "WovenFiles: keyboard refreshed",
+                        keyboard_refresh_started + args.input_timeout, process,
+                        "files_keyboard_refresh_ms", timings, keyboard_refresh_started)
+            # The same-client FIFO has now consumed cancellation and release.
+            if read_serial(serial).count("WovenFiles: pointer refreshed") != refreshes:
+                raise GateFailure("delayed workspace cancellation activated Refresh")
+            time.sleep(1.0)
+            keyboard_frame = output / "files-keyboard-refresh.ppm"
+            _, _, after_keyboard = capture_frame(
+                qmp, keyboard_frame, time.monotonic() + args.frame_timeout,
+                timings, "keyboard_refresh"
+            )
+            screenshots.append(keyboard_frame.name)
+            if changed_pixels(after_pointer, after_keyboard) < 20:
+                raise GateFailure("keyboard refresh did not change the client framebuffer")
+
             close_files_started = time.monotonic()
             # The Files window opens at (40,40), with a 320px client and a
             # ten-pixel close box at the right of its 14px title bar.  The
@@ -519,6 +562,44 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             qmp.click()
             wait_marker(serial, "woven-shell: window closed: Files", close_files_started + args.input_timeout,
                         process, "files_window_close_ms", timings, close_files_started)
+
+            settings_started = time.monotonic()
+            for key in ("f1", "s", "e", "t", "t", "i", "n", "g", "s", "ret"):
+                qmp.key(key, 90)
+                time.sleep(0.12)
+            wait_marker(serial, "woven-shell: window opened: Settings",
+                        settings_started + args.input_timeout, process,
+                        "settings_window_open_ms", timings, settings_started)
+            time.sleep(1.0)
+            settings_before = output / "settings-window-open.ppm"
+            _, _, before_settings_key = capture_frame(
+                qmp, settings_before, time.monotonic() + args.frame_timeout,
+                timings, "settings_window"
+            )
+            screenshots.append(settings_before.name)
+            settings_key_started = time.monotonic()
+            qmp.key("ret", 90)
+            wait_marker(serial, "WovenSettings: keyboard refreshed",
+                        settings_key_started + args.input_timeout, process,
+                        "settings_keyboard_refresh_ms", timings, settings_key_started)
+            time.sleep(1.0)
+            settings_after = output / "settings-keyboard-refresh.ppm"
+            _, _, after_settings_key = capture_frame(
+                qmp, settings_after, time.monotonic() + args.frame_timeout,
+                timings, "settings_keyboard_refresh"
+            )
+            screenshots.append(settings_after.name)
+            if changed_pixels(before_settings_key, after_settings_key) < 20:
+                raise GateFailure("Settings keyboard refresh did not change the client framebuffer")
+            # The shell cascades each newly opened window by (24,24), even
+            # after the earlier window closes. Settings opens at (64,64).
+            qmp.relative_mouse(69, 29)
+            qmp.click()
+            settings_close_started = time.monotonic()
+            wait_marker(serial, "woven-shell: window closed: Settings",
+                        settings_close_started + args.input_timeout, process,
+                        "settings_window_close_ms", timings, settings_close_started)
+            qmp.relative_mouse(-69, -29)
 
             terminal_started = time.monotonic()
             for key in ("f1", "t", "e", "r", "m", "i", "n", "a", "l", "ret"):
@@ -565,12 +646,12 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
 
             close_terminal_started = time.monotonic()
             # Files is the first cascade window at (40,40); CASCADE_STEP is
-            # 24, so the terminal is the second at (64,64), width 360.
+            # 24; after Settings, Terminal is the third at (88,88), width 360.
             # Window::close_area() is inset by two pixels from the right edge
             # and starts two pixels into the 14-pixel title bar, so its
-            # center is (417,57). The focus click leaves the pointer at
+            # center is (441,81). The focus click leaves the pointer at
             # (100,100).
-            qmp.relative_mouse(317, -43)
+            qmp.relative_mouse(341, -19)
             qmp.click()
             # Keep the click qualification tolerant of one-pixel rounding in
             # the PS/2 logical-coordinate conversion while still requiring
@@ -668,6 +749,10 @@ def main(argv: list[str] | None = None) -> int:
             "sign_in_input_ms": args.max_input_ms,
             "keyboard_input_ms": args.max_input_ms,
             "mouse_click_input_ms": args.max_input_ms,
+            "files_pointer_cancel_ms": args.max_input_ms,
+            "files_workspace_return_ms": args.max_input_ms,
+            "files_keyboard_refresh_ms": args.max_input_ms,
+            "settings_keyboard_refresh_ms": args.max_input_ms,
         }
         timing_failures = timing_within(evidence["timings_ms"], limits)
         frame_failures = [

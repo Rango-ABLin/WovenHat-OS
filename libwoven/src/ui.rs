@@ -132,8 +132,23 @@ impl<'a> Button<'a> {
             && y < self.frame.y.saturating_add(self.frame.height.max(0))
     }
 
-    /// Route a pointer event. Returns `true` exactly once for an accepted
-    /// release inside the button.
+    /// Update hover without starting or completing a gesture. Route motion
+    /// here even while a button is held; only button edges belong in `pointer`.
+    pub fn pointer_move(&mut self, x: i32, y: i32) {
+        self.hovered = self.enabled && self.contains(x, y);
+        if !self.enabled {
+            self.pressed = false;
+        }
+    }
+
+    /// Discard a gesture on focus loss, cancellation or surface replacement.
+    pub fn cancel_pointer(&mut self) {
+        self.hovered = false;
+        self.pressed = false;
+    }
+
+    /// Route a pointer button edge. Returns `true` exactly once for a
+    /// release inside that follows a press inside the button.
     pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
         if !self.enabled {
             self.hovered = false;
@@ -1389,6 +1404,42 @@ mod tests {
         assert!(button.activate());
         button.enabled = false;
         assert!(!button.activate());
+    }
+
+    #[test]
+    fn button_motion_does_not_activate_or_steal_a_gesture() {
+        let mut button = Button::new(Frame::new(10, 20, 40, 16), "OK");
+        // A press elsewhere cannot arm a button when dragged over it.
+        assert!(!button.pointer(0, 0, true));
+        button.pointer_move(12, 22);
+        assert!(button.hovered);
+        assert!(!button.pressed);
+        assert!(!button.pointer(12, 22, false));
+        // Motion while released cannot consume the eventual click.
+        assert!(!button.pointer(12, 22, true));
+        button.pointer_move(13, 23);
+        assert!(button.pressed);
+        button.pointer_move(80, 80);
+        assert!(!button.hovered);
+        assert!(button.pressed);
+        button.pointer_move(12, 22);
+        assert!(button.pointer(12, 22, false));
+        assert!(!button.pointer(12, 22, false));
+    }
+
+    #[test]
+    fn button_cancel_and_disable_discard_pending_activation() {
+        let mut button = Button::new(Frame::new(0, 0, 40, 16), "OK");
+        assert!(!button.pointer(2, 2, true));
+        button.cancel_pointer();
+        assert!(!button.hovered);
+        assert!(!button.pointer(2, 2, false));
+        assert!(!button.pointer(2, 2, true));
+        button.enabled = false;
+        button.pointer_move(2, 2);
+        button.enabled = true;
+        assert!(!button.pointer(2, 2, false));
+        assert!(button.activate());
     }
 
     #[test]
