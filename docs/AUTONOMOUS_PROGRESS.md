@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming a bitmap-free block
+
+Branch: `auto/wovenhat-development` (base `b2215da7`). Working tree was clean.
+
+### Defect / gap
+
+`check()`'s per-inode block loop (wfs.rs lines 1439–1450) runs for every live
+inode — both `KIND_FILE` and `KIND_DIR`.  For each non-zero `direct[slot]` it
+calls `self.bitmap_get(&txn, block)?` and returns `Err(Corrupt)` if the bit is
+clear.  The existing test
+`check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free` covers this
+guard only for `KIND_FILE` inodes.  No test exercised the same guard when the
+root directory inode (inode 1, `KIND_DIR`) names a block whose bitmap bit is
+clear.
+
+A crafted image where `root.direct[0]` addresses a valid data block but the
+bitmap marks that block free is impossible to produce through any runtime path —
+the allocator always sets the bitmap bit before returning a block, and no
+runtime operation clears a bitmap bit without zeroing the inode pointer.  The
+consequence if `check()` were to miss it: the block would appear unallocated to
+the allocator; a subsequent `stage_allocate_block` call could hand it out again,
+silently overwriting all directory entries.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_root_directory_inode_naming_a_block_the_bitmap_marks_free`:
+
+- Calls `formatted()` to get a fresh, empty volume.
+- Reads `dir_block = root.direct[0]` (the root directory's data block).
+- Forks the image and calls `clear_bitmap_block(&corrupt, dir_block)` to mark
+  `dir_block` free in the bitmap without touching the inode's `direct[0]` or
+  any content.  The block address remains in range and the inode structural
+  checksum is intact, so `mount()` and `checked_inode()` accept the image.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+The bitmap guard fires when `check()`'s per-inode loop processes inode 1 (root,
+`KIND_DIR`): `bitmap_get(dir_block)` returns `false` → `Err(Corrupt)`.
+
+No production code changed — the guard already existed; only the missing
+cross-kind test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **74 passed / 0 failed** (was 73; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires when processing inode 1 (root) in the per-inode loop;
+  subsequent file inodes are not reached.
+- Only `direct[0]` of the root inode is exercised; the guard runs for all
+  non-zero `direct[slot]` entries, but only `direct[0]` is ever non-zero for
+  the root directory.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses a file inode naming the root directory's data block
 
 Branch: `auto/wovenhat-development` (base `9ee3ac05`). Working tree was clean.

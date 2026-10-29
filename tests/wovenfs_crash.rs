@@ -3748,6 +3748,56 @@ fn check_refuses_root_directory_inode_naming_a_block_outside_the_data_region() {
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
 
+/// `check()` must refuse the root directory inode when its data block is
+/// in `direct[0]` but the bitmap marks that block free.
+///
+/// The per-inode block loop at `wfs.rs` runs for every live inode — both
+/// `KIND_FILE` and `KIND_DIR`.  For each non-zero `direct[slot]` it checks
+/// `!self.bitmap_get(&txn, block)?` and returns `Err(Corrupt)` if the bit is
+/// clear.  `check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free`
+/// covers this guard for `KIND_FILE` inodes only.  No prior test exercised it
+/// for the root directory inode: a crafted image where `root.direct[0]` points
+/// to a valid data block that happens to be marked free in the bitmap.
+///
+/// Such a state is impossible to produce through any runtime path — the
+/// allocator always sets the bitmap bit before returning a block, and no runtime
+/// path ever clears the bit without zeroing the inode slot — but a crafted
+/// image or a bitmap write failure could produce it.  Without this guard the
+/// root directory's data block would appear unallocated to the allocator; any
+/// subsequent allocation could hand out the same block, silently overwriting
+/// all directory entries.
+#[test]
+fn check_refuses_root_directory_inode_naming_a_block_the_bitmap_marks_free() {
+    let base = formatted();
+
+    // Read the root directory's data block from direct[0].
+    let dir_block = read_inode_direct0(&base, 1);
+
+    // Fork the image and clear the bitmap bit for dir_block without touching the
+    // inode's direct[0] or any content.  The block address is still in range and
+    // the inode checksum is intact, so mount() and checked_inode() both accept
+    // the image.  The bitmap guard `!bitmap_get(dir_block)` fires when the
+    // per-inode loop processes inode 1 (the root directory).
+    let corrupt = base.fork(None);
+    clear_bitmap_block(&corrupt, dir_block);
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse root directory inode naming a bitmap-free block"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
+
 /// `check()` must refuse a volume where a file inode names the same data block
 /// as the root directory inode.
 ///
