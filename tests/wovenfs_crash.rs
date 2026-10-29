@@ -1,4 +1,4 @@
-//! Exhaustive crash-recovery proof for WovenFS.
+﻿//! Exhaustive crash-recovery proof for WovenFS.
 //!
 //! These tests do not assert that recovery works in general; they enumerate
 //! every point at which an operation can lose power and check the result at
@@ -3511,6 +3511,62 @@ fn check_refuses_a_file_inode_naming_a_block_outside_the_data_region() {
     }
 
     // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
+
+/// `check()` must refuse a file inode whose `direct` array contains the same
+/// non-zero block address in two slots (intra-inode aliasing).
+///
+/// `stage_write` allocates one distinct block per sector of content via
+/// `stage_allocate_block`, which always returns a fresh, previously-free
+/// block; it never places the same address in two different `direct` slots.
+/// An inode with `direct[i] == direct[j]` (both non-zero, i != j) is
+/// therefore corruption the runtime cannot produce.  `read_file` would read
+/// the same on-disk sector for both logical halves; `write_file` would
+/// overwrite it twice, discarding the second half's content silently.
+///
+/// `check()` calls `self.inode(number)?`, which calls `checked_inode`.  That
+/// function contains the intra-inode duplicate guard:
+///
+///   for (slot, block) in node.direct.iter().enumerate() {
+///       if *block != 0 && node.direct[slot + 1..].contains(block) {
+///           return Err(Error::Corrupt);
+///       }
+///   }
+///
+/// `an_inode_naming_one_block_twice_is_refused` proves the same corruption is
+/// refused by runtime operations (inode read, file read, write, unlink).
+/// This test proves that `check()` also rejects it.
+#[test]
+fn check_refuses_a_file_inode_naming_the_same_block_twice() {
+    let (base, inode) = two_block_file();
+    let first = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(inode)
+        .expect("inode")
+        .direct[0];
+
+    // Redirect direct[1] to the same block address as direct[0].  The inode
+    // structural checksum is resealed by redirect_inode_block; data_checksum
+    // is left at the original value, but checked_inode fires at the
+    // intra-inode duplicate guard before the data-checksum guard is reached.
+    let image = base.fork(None);
+    redirect_inode_block(&image, inode, 1, first);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode whose direct[0] == direct[1]"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched two-block file passes check().
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
