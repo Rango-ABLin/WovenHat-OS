@@ -40,6 +40,14 @@ class DesktopQualificationTests(unittest.TestCase):
         right = b"\x00\x00\x00\xff\x00\xff"
         self.assertEqual(MODULE.changed_pixels(left, right), 1)
 
+    def test_refresh_oracle_rejects_stale_blank_and_incomplete_frames(self):
+        one = (4, 12, 4, 4, 4, 4, 14)
+        ink, paper = b"\x64\xdc\xb4", b"\x2d\x41\x5a"
+        blank = paper * (10 * 14)
+        self.assertFalse(MODULE.bitmap_matches(10, 14, blank, 0, 0, one, ink, paper))
+        self.assertFalse(MODULE.bitmap_matches(10, 14, blank[:-1], 0, 0, one, ink, paper))
+        self.assertFalse(MODULE.bitmap_matches(10, 14, blank, 1, 0, one, ink, paper))
+
     def test_missing_qemu_and_firmware_are_unsupported(self):
         blockers = MODULE.preflight(Path("Z:/missing-qemu.exe"), Path("Z:/missing-ovmf.fd"))
         self.assertEqual(len(blockers), 2)

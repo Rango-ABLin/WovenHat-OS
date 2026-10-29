@@ -28,7 +28,7 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -283,6 +283,23 @@ def capture_frame(qmp: Qmp, path: Path, deadline: float, timings: dict[str, floa
     raise GateFailure(f"timed out capturing valid framebuffer {label!r}")
 
 
+def bitmap_matches(width: int, height: int, pixels: bytes, x: int, y: int,
+                   rows: tuple[int, ...], ink: bytes, paper: bytes) -> bool:
+    """Independent 5-column, 2x bitmap oracle for the refresh count."""
+    if len(pixels) != width * height * 3 or x < 0 or y < 0:
+        return False
+    if x + 10 > width or y + len(rows) * 2 > height:
+        return False
+    for row, mask in enumerate(rows):
+        for sy in range(2):
+            for col in range(5):
+                offset = ((y + row * 2 + sy) * width + x + col * 2) * 3
+                color = ink if mask & (1 << (4 - col)) else paper
+                if pixels[offset:offset + 6] != color * 2:
+                    return False
+    return True
+
+
 def capture_until_changed(
     qmp: Qmp,
     path: Path,
@@ -291,6 +308,7 @@ def capture_until_changed(
     timings: dict[str, float],
     label: str,
     minimum_changed: int,
+    expected: Callable[[int, int, bytes], bool] | None = None,
 ) -> tuple[int, int, bytes]:
     """Retain real QMP scanouts until a repaint is visible or fail closed."""
     started = time.monotonic()
@@ -304,7 +322,9 @@ def capture_until_changed(
         except (OSError, ValueError):
             time.sleep(0.1)
             continue
-        if len(reference) == len(pixels) and changed_pixels(reference, pixels) >= minimum_changed:
+        if (len(reference) == len(pixels)
+                and changed_pixels(reference, pixels) >= minimum_changed
+                and (expected is None or expected(width, height, pixels))):
             shutil.copyfile(attempt_path, path)
             timings[f"frame_{label}_ms"] = (time.monotonic() - started) * 1000.0
             return width, height, pixels
@@ -545,9 +565,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 raise GateFailure("delayed workspace cancellation activated Refresh")
             time.sleep(1.0)
             keyboard_frame = output / "files-keyboard-refresh.ppm"
-            _, _, after_keyboard = capture_frame(
-                qmp, keyboard_frame, time.monotonic() + args.frame_timeout,
-                timings, "keyboard_refresh"
+            _, _, after_keyboard = capture_until_changed(
+                qmp, keyboard_frame, after_pointer,
+                time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
+                lambda w, h, pixels: w == 1280 and h == 800 and bitmap_matches(
+                    w, h, pixels, 236, 492, (14, 17, 1, 2, 4, 8, 31),
+                    bytes((100, 220, 180)), bytes((35, 43, 66))
+                )
             )
             screenshots.append(keyboard_frame.name)
             if changed_pixels(after_pointer, after_keyboard) < 20:
@@ -587,28 +611,18 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # A generic delta can be an unfinished opening repaint. Require
             # the complete gold focus strip on the actual Refresh control.
             # Logical window (64,64), button (250,190), width 90, scale 2.
-            focus_started = time.monotonic()
-            focus_deadline = focus_started + args.frame_timeout
-            attempt = 0
-            while time.monotonic() < focus_deadline:
-                candidate = settings_after.with_name(f"settings-focus.attempt-{attempt}.ppm")
-                attempt += 1
-                width, height, after_settings_key = capture_frame(
-                    qmp, candidate, focus_deadline, timings, "settings_focus_sample"
-                )
-                if width == 1280 and height == 800 and all(
-                    after_settings_key[(y * width + 628) * 3:(y * width + 808) * 3]
+            _, _, after_settings_key = capture_until_changed(
+                qmp, settings_after, before_settings_key,
+                time.monotonic() + args.frame_timeout, timings, "settings_keyboard_refresh", 20,
+                lambda w, h, pixels: w == 1280 and h == 800 and all(
+                    pixels[(y * w + 628) * 3:(y * w + 808) * 3]
                     == bytes((255, 205, 96)) * 180
                     for y in range(508, 510)
-                ):
-                    shutil.copyfile(candidate, settings_after)
-                    timings["frame_settings_keyboard_refresh_ms"] = (
-                        time.monotonic() - focus_started
-                    ) * 1000.0
-                    break
-                time.sleep(0.1)
-            else:
-                raise GateFailure("Settings keyboard focus strip was not presented")
+                ) and bitmap_matches(
+                    w, h, pixels, 292, 520, (4, 12, 4, 4, 4, 4, 14),
+                    bytes((100, 220, 180)), bytes((45, 65, 90))
+                )
+            )
             screenshots.append(settings_after.name)
             if changed_pixels(before_settings_key, after_settings_key) < 20:
                 raise GateFailure("Settings keyboard refresh did not change the client framebuffer")
@@ -687,8 +701,9 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                         process, "terminal_window_close_ms", timings, close_terminal_started)
             time.sleep(1.0)
             closed_frame = output / "desktop-after-window-close.ppm"
-            _, _, closed_pixels = capture_frame(
-                qmp, closed_frame, time.monotonic() + args.frame_timeout, timings, "window_close"
+            _, _, closed_pixels = capture_until_changed(
+                qmp, closed_frame, terminal_after,
+                time.monotonic() + args.frame_timeout, timings, "window_close", 1000
             )
             screenshots.append(closed_frame.name)
             if changed_pixels(terminal_after, closed_pixels) < 1000:
