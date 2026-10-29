@@ -17815,8 +17815,6 @@ fn stage18_2_self_test() -> bool {
 /// measures from tick 0 (the timer's own start), which is what "time to the
 /// first stage" should mean anyway.
 static BOOT_STAGE_CLOCK: AtomicU64 = AtomicU64::new(0);
-#[cfg(feature = "system-apps")]
-static BOOT_SPLASH_FRAME: AtomicU64 = AtomicU64::new(0);
 
 /// Print `label` on screen exactly as the unprofiled call did, and log how
 /// many ticks elapsed since the previous call (or boot start, for the
@@ -17824,8 +17822,13 @@ static BOOT_SPLASH_FRAME: AtomicU64 = AtomicU64::new(0);
 fn boot_stage(console: &mut Console, label: &str) {
     let now = timer::ticks();
     let previous = BOOT_STAGE_CLOCK.swap(now, Ordering::AcqRel);
+    // Drive the spinner from elapsed wall-clock ticks, not from how many
+    // times this function has run: boot stages vary wildly in length, so a
+    // per-call counter froze the spinner through a slow stage and then
+    // jumped it through a run of fast ones. Ticks/4 keeps the 24-point ring
+    // sweeping roughly once per second at the 100 Hz boot timer.
     #[cfg(feature = "system-apps")]
-    console.show_splash_frame(BOOT_SPLASH_FRAME.fetch_add(1, Ordering::AcqRel) as usize);
+    console.show_splash_frame((now / 4) as usize);
     console.println(label);
     serial::write_line(format_args!(
         "[BOOT PROFILE] {} (+{} ticks)",

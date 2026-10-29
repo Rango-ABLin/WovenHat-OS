@@ -152,13 +152,15 @@ libwoven::entry!(main);
 /// Wallpaper gradient, top to bottom.
 const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
 const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
-/// The weave: `WEAVE_PITCH`-sized blocks alternately tinted light and dark,
-/// basket-weave style, with a thin highlight seam at each block boundary.
+/// The weave: faint diagonal bands over the gradient, `WEAVE_PITCH` pixels
+/// wide. Axis-aligned squares with a highlight seam at each boundary read
+/// as a literal checkerboard at screen scale rather than a fabric texture,
+/// so this runs along the diagonal instead, with no seam line, a wider
+/// pitch and lower contrast.
 const WEAVE: u32 = rgb(255, 255, 255);
-const WEAVE_OPACITY: u8 = 10;
 const WEAVE_SHADE: u32 = rgb(0, 0, 0);
-const WEAVE_TINT_OPACITY: u8 = 12;
-const WEAVE_PITCH: i32 = 96;
+const WEAVE_TINT_OPACITY: u8 = 6;
+const WEAVE_PITCH: i32 = 220;
 
 const TASKBAR_HEIGHT: i32 = 24;
 const TASKBAR: u32 = rgb(10, 18, 30);
@@ -210,8 +212,10 @@ const TRAY_GAP: i32 = 4;
 const MAX_TRAY: usize = 4;
 
 const TITLE_HEIGHT: i32 = 14;
-const TITLE_ACTIVE: u32 = rgb(70, 120, 210);
-const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
+// Teal-tinted, matching ACCENT/START_FILL, instead of an unrelated
+// saturated blue that clashed with the rest of the desktop's palette.
+const TITLE_ACTIVE: u32 = rgb(24, 98, 128);
+const TITLE_INACTIVE: u32 = rgb(38, 44, 56);
 const MAX_TITLE: usize = 24;
 /// Shadow bands, outermost first, as (offset, opacity) of black over what
 /// lies beneath. The focused window's shadow is deeper: its elevation.
@@ -426,8 +430,11 @@ fn draw_app_icon(
     selected: bool,
 ) {
     let (fill, ink) = icon_colors(icon);
-    canvas.fill_rect(x + 1, y + 2, size as usize, size as usize, rgb(0, 0, 0));
-    canvas.fill_rect(x, y, size as usize, size as usize, fill);
+    // A rounded tile with a soft offset shadow, Fluent-style, instead of a
+    // hard-edged square with a flat black square behind it.
+    let radius = (size / 4).max(1) as usize;
+    fill_rounded(canvas, Area::new(x + 1, y + 2, size, size), radius, rgb(0, 0, 0));
+    fill_rounded(canvas, Area::new(x, y, size, size), radius, fill);
     canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
     if selected {
         outline(
@@ -696,14 +703,9 @@ fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     } else {
         blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t)
     };
-    let over = (x / WEAVE_PITCH + y / WEAVE_PITCH) % 2 == 0;
-    let tint = if over { WEAVE } else { WEAVE_SHADE };
-    let woven = blend(tint, base, WEAVE_TINT_OPACITY);
-    if x % WEAVE_PITCH == 0 || y % WEAVE_PITCH == 0 {
-        blend(WEAVE, woven, WEAVE_OPACITY)
-    } else {
-        woven
-    }
+    let band = ((x + y) / WEAVE_PITCH) % 2 == 0;
+    let tint = if band { WEAVE } else { WEAVE_SHADE };
+    blend(tint, base, WEAVE_TINT_OPACITY)
 }
 
 /// Clock text for `time`: `HH:MM`, or `HH:MM:SS` with `seconds`, and dashes
@@ -1653,10 +1655,19 @@ impl Desktop {
     fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        outline(canvas, area, theme_accent());
-        canvas.fill_rect(x + 1, y + 1, inner, PANEL_ROW as usize, theme_start_fill());
+        // Rounded, near-opaque card, matching the lock screen, Quick
+        // Settings and Notification Center chrome, instead of a hard-edged
+        // square outline with a flat header block.
+        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
         draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
-        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_text());
+        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_accent());
+        canvas.fill_rect(
+            x + CHROME_RADIUS as i32,
+            y + PANEL_ROW,
+            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
+            1,
+            theme_accent(),
+        );
 
         let mut search = [0u8; MAX_QUERY + 3];
         search[..2].copy_from_slice(b"> ");
@@ -1675,7 +1686,12 @@ impl Desktop {
             };
             let row_y = y + 1 + (2 + row as i32) * PANEL_ROW;
             if row == self.selected {
-                canvas.fill_rect(x + 1, row_y, inner, PANEL_ROW as usize, theme_entry(true));
+                fill_rounded(
+                    canvas,
+                    Area::new(x + 2, row_y, inner as i32 - 2, PANEL_ROW),
+                    CHROME_RADIUS_SMALL,
+                    theme_entry(true),
+                );
             }
             draw_app_icon(
                 canvas,
@@ -2078,13 +2094,6 @@ impl Desktop {
                 continue;
             };
             let icon_x = area.x + (area.width - DESKTOP_ICON_SIZE) / 2;
-            canvas.fill_rect(
-                icon_x + 2,
-                area.y + 3,
-                DESKTOP_ICON_SIZE as usize,
-                DESKTOP_ICON_SIZE as usize,
-                rgb(0, 0, 0),
-            );
             draw_app_icon(
                 canvas,
                 icon_x,
@@ -2148,12 +2157,16 @@ impl Desktop {
 
         // The taskbar band itself stays flat and full-width (rounding a
         // screen-edge-spanning bar would look wrong); only the self-contained
-        // Start button gets the rounded chrome treatment.
-        fill_rounded(
-            canvas,
-            Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32),
+        // Start button gets the rounded chrome treatment. A subtle top-lit
+        // gradient, matching the window title bars, reads less flat than a
+        // single fill colour.
+        let start_area = Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32);
+        let start_fill = theme_start_fill();
+        Renderer::new(canvas).rounded_rect_gradient(
+            rect_of(start_area),
             CHROME_RADIUS,
-            theme_start_fill(),
+            color_of(lighten(start_fill, 24)),
+            color_of(start_fill),
         );
         let icon_x = START_X + START_ICON_MARGIN;
         let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
@@ -2174,13 +2187,7 @@ impl Desktop {
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.entry_area(index);
             let fill = theme_entry(Some(slot) == focused);
-            canvas.fill_rect(
-                area.x,
-                area.y,
-                area.width as usize,
-                area.height as usize,
-                fill,
-            );
+            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let mut buffer = [0u8; 32];
             let length = label(
                 &window.title[..window.title_length],
@@ -2819,15 +2826,21 @@ impl Desktop {
     /// perspective projection samples.
     fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        outline(canvas, area, theme_accent());
-        let fill = theme_start_fill();
-        fill_gradient(
-            canvas,
-            Area::new(x + 1, y + 1, area.width - 2, PANEL_ROW),
-            lighten(fill, 40),
-            fill,
+        // A rounded, near-opaque card instead of a hard-edged square outline
+        // with a flat header block, Windows-11-style like the lock screen's
+        // card. `render()`'s keyed overlay leaves the handful of corner
+        // pixels outside the rounding untouched, so the square backdrop tint
+        // `blend()` already laid down under this shows through there as a
+        // soft drop shadow rather than a visible seam.
+        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
+        canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_accent());
+        canvas.fill_rect(
+            x + CHROME_RADIUS as i32,
+            y + PANEL_ROW,
+            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
+            1,
+            theme_accent(),
         );
-        canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_text());
         for (row, text) in self.qs_rows().iter().enumerate() {
             canvas.draw_text(
                 x + 6,
@@ -3083,17 +3096,20 @@ impl Desktop {
     /// mode's perspective projection samples.
     fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        outline(canvas, area, theme_accent());
-        let fill = theme_start_fill();
-        fill_gradient(
-            canvas,
-            Area::new(x + 1, y + 1, area.width - 2, PANEL_ROW),
-            lighten(fill, 40),
-            fill,
-        );
-        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_text());
+        // Same rounded, near-opaque card treatment as the Quick Settings
+        // panel and the lock screen, instead of a hard-edged square outline
+        // with a flat header block.
+        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
+        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_accent());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
         canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, theme_text());
+        canvas.fill_rect(
+            x + CHROME_RADIUS as i32,
+            y + PANEL_ROW,
+            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
+            1,
+            theme_accent(),
+        );
         let mut any = false;
         for (row, note) in self.notes.iter().flatten().enumerate() {
             any = true;
@@ -3365,7 +3381,9 @@ impl Desktop {
     /// offscreen texture, as the source the 3D mode's perspective
     /// projection samples.
     fn paint_toast_content(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
-        outline(canvas, area, theme_accent());
+        // Rounded, near-opaque card, matching the rest of the floating
+        // chrome, instead of a hard-edged square outline.
+        fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, theme_text());
     }
