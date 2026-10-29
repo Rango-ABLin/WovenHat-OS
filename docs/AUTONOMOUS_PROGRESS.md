@@ -1,5 +1,72 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming a block outside the data region
+
+Branch: `auto/wovenhat-development` (base `57237888`). Working tree was clean.
+
+### Defect / gap
+
+`check()`'s per-inode loop (wfs.rs lines 1439–1449) contains a block-range guard:
+
+```rust
+for slot in 0..DIRECT_BLOCKS {
+    let block = node.direct[slot];
+    if block == 0 { continue; }
+    if block < sb.data_start || block >= sb.total_blocks {
+        return Err(Error::Corrupt);
+    }
+    if !self.bitmap_get(&txn, block)? {
+        return Err(Error::Corrupt);
+    }
+}
+```
+
+This loop runs for **every live inode** — both `KIND_FILE` and `KIND_DIR`. The root
+directory is inode 1, `kind == KIND_DIR`, and its data block is in `direct[0]`. If a
+crafted image sets `root.direct[0]` to a value in the inode table (below `data_start`)
+or past `total_blocks`, the same range guard fires.
+
+`check_refuses_a_file_inode_naming_a_block_outside_the_data_region` (line 3479) covers
+this guard for `KIND_FILE` inodes only. No test exercised the same guard for the root
+directory inode specifically. A crafted image where `root.direct[0]` points into the
+inode table would allow `dir_entries` to interpret raw inode bytes as directory entries,
+silently hiding corruption the real directory block would have exposed.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_root_directory_inode_naming_a_block_outside_the_data_region`:
+
+- Calls `formatted()` to get a fresh, empty volume.
+- Reads the superblock to obtain `inode_start` (below `data_start`) and `total_blocks`
+  (at or past the end).
+- For each of those two out-of-range targets:
+  - Calls `redirect_inode_block(&image, 1, 0, target)` to patch `root.direct[0]` and
+    reseal the inode's structural checksum, so `mount()` and `checked_inode()` accept
+    the image.
+  - Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+  - Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already existed; only the missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **72 passed / 0 failed** (was 71; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Tests two representative out-of-range targets (below `data_start` and at `total_blocks`);
+  values in between the metadata sections are not individually tested.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses a directory entry naming a free inode
 
 Branch: `auto/wovenhat-development` (base `bdfdcbcf`). Working tree was clean.

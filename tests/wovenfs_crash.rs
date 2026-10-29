@@ -3697,3 +3697,53 @@ fn check_refuses_a_directory_entry_naming_a_free_inode() {
     let mut clean = Volume::mount(base.clone()).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse the root directory inode when its data block pointer
+/// names a block outside the valid data region.
+///
+/// The block-range guard in `check()`'s per-inode loop runs for every live
+/// inode — both `KIND_FILE` and `KIND_DIR`.  `format()` always places the root
+/// directory's data block inside the data region; any pointer below `data_start`
+/// or at or beyond `total_blocks` is corruption no runtime path can produce.  A
+/// crafted image where `root.direct[0]` points into the inode table would allow
+/// `dir_entries` to interpret raw inode bytes as directory entries, silently
+/// hiding corruption the real directory block would have exposed.
+///
+/// `check_refuses_a_file_inode_naming_a_block_outside_the_data_region` covers
+/// the same guard for `KIND_FILE` inodes; this test covers the `KIND_DIR` path
+/// that the earlier test leaves untested.
+#[test]
+fn check_refuses_root_directory_inode_naming_a_block_outside_the_data_region() {
+    let base = formatted();
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+
+    let targets: &[(&str, u64)] = &[
+        ("inode table (below data_start)", sb.inode_start),
+        ("past the end (>= total_blocks)", sb.total_blocks),
+    ];
+
+    for &(label, target) in targets {
+        // Redirect root.direct[0] (slot 0 of inode 1) to an out-of-range block
+        // and reseal the inode structural checksum so mount() and checked_inode()
+        // accept the image.  The range guard in check()'s per-inode loop fires
+        // before the root-specific section is reached.
+        let image = base.fork(None);
+        redirect_inode_block(&image, 1, 0, target);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse root directory inode with block pointer {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image ({label})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
