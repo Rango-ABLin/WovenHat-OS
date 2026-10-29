@@ -1,5 +1,56 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS: test that read_file refuses a freed inode
+
+Branch: `auto/wovenhat-development` (base `5e90dc7d`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (lines 1214–1216 of `kernel/src/wfs.rs`) returns `Err(Error::NotFound)` when
+the inode's `mode` is 0, i.e. when the inode is free.  No existing test exercised this
+path: every prior `read_file` test operated on a live FILE inode or a live DIR inode.
+A caller that retains an inode number across an `unlink` could attempt to read through
+the freed slot; this guard prevents that.
+
+This gap matters because:
+- without the guard a freed inode's stale fields (size, data_checksum, block pointers)
+  could be read as if they described a live file, returning arbitrary bytes or
+  triggering a false checksum match on whatever content was last written;
+- verifying the guard is in place closes the same category of stale-handle hazard
+  the `lookup` stale-entry tests cover, but on the direct inode-number path.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `read_file_refuses_a_freed_inode`:
+
+- Calls `formatted()` and creates `gone.txt` (5 bytes, `"five!"`), recording its inode.
+- Unlinks `gone.txt`, freeing its inode.
+- Asserts `lookup(1, "gone.txt")` returns `Err(Error::NotFound)` (confirming the unlink).
+- Asserts `read_file(file_inode, &mut out)` returns `Err(Error::NotFound)` (freed inode).
+- Control: creates a new file `new.txt` after the unlink; verifies it mounts and reads
+  back correctly, confirming the volume is intact after the freed-inode read attempt.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **79 passed / 0 failed** (was 78; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test unlinking frees the inode; it does not craft a partial-write image where
+  the directory entry is gone but the inode is not yet zeroed.  That scenario is covered
+  by the crash-atomicity tests.
+- No multi-block files tested on this path; the `!is_used()` check fires before any
+  block pointer is read, so file size is irrelevant.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS: test that read_file refuses a buffer smaller than the file
 
 Branch: `auto/wovenhat-development` (base `2f75d975`). Working tree was clean.

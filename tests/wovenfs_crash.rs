@@ -4142,3 +4142,53 @@ fn read_file_refuses_a_buffer_smaller_than_the_file() {
     );
     assert_eq!(&big[..5], b"hello", "large-buffer content prefix must match");
 }
+
+#[test]
+fn read_file_refuses_a_freed_inode() {
+    let base = formatted();
+
+    // Create a file and record its inode number.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "gone.txt", 0o644, b"five!", 1)
+            .expect("create")
+    };
+
+    // Unlink the file so its inode becomes free (mode == 0).
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.unlink(1, "gone.txt", 2).expect("unlink");
+    }
+
+    // After unlink the name no longer resolves.
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.lookup(1, "gone.txt"),
+        Err(Error::NotFound),
+        "unlinked file must not be found by name"
+    );
+
+    // Calling read_file with the now-freed inode number must return NotFound,
+    // not silently succeed or corrupt the output buffer.
+    let mut out = [0u8; 8];
+    assert_eq!(
+        volume.read_file(file_inode, &mut out),
+        Err(Error::NotFound),
+        "read_file must return NotFound for a freed inode"
+    );
+
+    // Control: a file created after the unlink reuses the slot but a fresh
+    // volume mounts cleanly, confirming the freed path does not corrupt state.
+    let mut volume2 = Volume::mount(base.clone()).expect("remount after unlink");
+    let new_inode = volume2
+        .create_file(1, "new.txt", 0o644, b"fresh", 3)
+        .expect("create after unlink");
+    let mut buf = [0u8; 8];
+    assert_eq!(
+        volume2.read_file(new_inode, &mut buf),
+        Ok(5),
+        "a freshly created file must be readable"
+    );
+    assert_eq!(&buf[..5], b"fresh", "new file content must be correct");
+}
