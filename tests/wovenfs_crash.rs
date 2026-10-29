@@ -3277,3 +3277,43 @@ fn check_refuses_superblock_with_root_inode_other_than_1() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a live `KIND_FILE` inode whose `links` field is not 1.
+///
+/// `stage_create` always initialises `node.links = 1`.  Hard links are not
+/// implemented: no runtime path increments or decrements a file's link count.
+/// Any value other than 1 is corruption the runtime cannot have produced.
+/// `unlink` already refuses a file whose `links` is not 1 rather than
+/// proceeding, so a crafted wrong count permanently orphans the file: neither
+/// the inode slot nor its data blocks can be freed.  Without an explicit guard
+/// in `check()`, a resealed inode with a wrong link count passes `mount()` and
+/// `inode()` and silently returns to the caller with the corrupt value.
+#[test]
+fn check_refuses_a_file_inode_with_links_other_than_1() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.create(1, "test.txt", 0o600, 1).expect("create file")
+    };
+
+    for links in [0u32, 2, u32::MAX] {
+        let corrupt = base.fork(None);
+        reseal_inode_links(&corrupt, file_inode, links);
+
+        let before = corrupt.sectors();
+        let mut volume = Volume::mount(corrupt.clone()).expect("mount corrupt");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "links = {links}: check() must refuse a KIND_FILE inode with links != 1"
+        );
+        assert!(
+            corrupt.sectors() == before,
+            "check() must not modify the image (links = {links})"
+        );
+    }
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}

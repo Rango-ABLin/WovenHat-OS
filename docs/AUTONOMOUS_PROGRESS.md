@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses KIND_FILE inode with links other than 1
+
+Branch: `auto/wovenhat-development` (base `35d38d8f`). Working tree was clean.
+
+### Defect / gap
+
+`check()` has had the guard `if node.kind == KIND_FILE && node.links != 1 { return
+Err(Error::Corrupt); }` (added 2026-10-16) but no `check_refuses_*` test exercised it.
+The guard was added as part of the batch of runtime enforcement changes but its
+correctness was not independently verified by the check-specific test pattern.
+
+`stage_create` always sets `node.links = 1` when creating a new file inode.  Hard
+links are not implemented: no runtime path (`stage_write`, `stage_unlink`,
+`stage_create`) ever increments or decrements a file's link count.  Any value other
+than 1 is therefore corruption the runtime cannot have produced.  `unlink` already
+refuses a file whose `links` is not 1, so a crafted image with `links = 0`, `2`, or
+`u32::MAX` permanently orphans both the inode slot and its data blocks.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `check_refuses_a_file_inode_with_links_other_than_1`:
+
+- Formats a fresh volume and creates a file via `volume.create`.
+- For each of `0u32`, `2`, `u32::MAX`:
+  a. Forks the image, patches `links` via the existing `reseal_inode_links` helper
+     (which re-seals the inode's structural checksum so `mount()` and `inode()` accept it).
+  b. Mounts the patched image (must succeed).
+  c. Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+  d. Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No changes to production code — the guard already exists; only the test was missing.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **64 passed / 0 failed** (was 63; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires on the first file inode with `links != 1`; it cannot pinpoint which inode.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-28 — WovenFS check(): refuse superblock with root_inode other than 1
 
 Branch: `auto/wovenhat-development` (base `15338299`). Working tree was clean.
