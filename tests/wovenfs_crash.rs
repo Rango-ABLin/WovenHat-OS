@@ -4235,3 +4235,30 @@ fn lookup_refuses_a_file_inode_as_directory() {
         "lookup on the root directory must find the file"
     );
 }
+
+#[test]
+fn read_dir_refuses_a_file_inode_as_directory() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // Passing a file inode as the directory argument must be refused.
+    assert!(
+        matches!(volume.read_dir(file_inode), Err(Error::NotADirectory)),
+        "read_dir on a file inode must return NotADirectory"
+    );
+
+    // Control: read_dir on the root directory (KIND_DIR) succeeds and shows
+    // the one file we created.
+    assert_eq!(
+        volume.read_dir(1).expect("root directory readable").count(),
+        1,
+        "root directory must contain exactly the one created file"
+    );
+}

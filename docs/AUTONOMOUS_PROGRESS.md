@@ -1,5 +1,55 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS: test that read_dir refuses a file inode as directory
+
+Branch: `auto/wovenhat-development` (base `be17958e`). Working tree was clean.
+
+### Defect / gap
+
+`read_dir` (line 992 of `kernel/src/wfs.rs`) checks `dir.kind != KIND_DIR` and
+returns `Err(Error::NotADirectory)` when the caller passes a file inode as the
+directory argument.  No existing test exercised this path: every prior `read_dir`
+call in the suite used inode 1 (the root directory).
+
+This gap matters because:
+- without the guard, `dir_entries` would walk the file's data blocks interpreting
+  each 64-byte chunk as a `DirEntry`, potentially returning garbage entries or
+  silently matching a name embedded in binary file content;
+- the symmetry test `lookup_refuses_a_file_inode_as_directory` already confirms
+  the `lookup` path is guarded; `read_dir` has the identical guard and should be
+  equally tested.
+
+`DirectoryView` does not implement `Debug` or `PartialEq`, so `assert_eq!` on the
+`Result<DirectoryView, Error>` cannot be used.  The test uses `matches!` for the
+error case, which does not require those traits.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `read_dir_refuses_a_file_inode_as_directory`:
+
+- Calls `formatted()` and creates `hello.txt` (5 bytes, `"hello"`), recording its inode.
+- Asserts `matches!(volume.read_dir(file_inode), Err(Error::NotADirectory))`.
+- Control: `read_dir(1)` on the root directory succeeds and `count() == 1`,
+  confirming the volume is intact.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **81 passed / 0 failed** (was 80; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- `unlink(file_inode, ...)` has the same `NotADirectory` guard (line 1252 of `wfs.rs`)
+  and is not yet covered by a dedicated test.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS: test that lookup refuses a file inode as directory
 
 Branch: `auto/wovenhat-development` (base `c6fe15c9`). Working tree was clean.
