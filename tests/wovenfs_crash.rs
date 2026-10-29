@@ -3918,3 +3918,99 @@ fn check_refuses_root_directory_inode_naming_the_same_block_twice() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse any inode whose structural checksum does not match its
+/// content bytes.
+///
+/// Every inode write path calls `Inode::encode`, which computes a FNV-1a
+/// checksum over the first 120 content bytes and stores the result at offset
+/// 120 within the 128-byte inode slot.  `Inode::decode` rejects any
+/// non-all-zero slot whose stored checksum disagrees with the computed one.
+/// `checked_inode` — called for every `self.inode()` access inside `check()`
+/// — propagates that rejection as `Err(Corrupt)`.
+///
+/// This guard detects single-bit rot in any of the 120 content bytes or in
+/// the checksum bytes themselves, a partially-written inode (only some bytes
+/// reached stable storage), and crafted images whose fields were patched
+/// without updating the checksum.  All other `check()` tests reseal the
+/// structural checksum after patching any inode field, so none of them
+/// exercise this decode path.
+///
+/// This test corrupts the structural checksum of (a) a live KIND_FILE inode
+/// and (b) the root KIND_DIR inode by XOR-ing the first checksum byte with
+/// 0xFF, leaving every content byte intact.  The checksum mismatch is the
+/// only inconsistency; every other structural guard would pass for both cases.
+///
+/// `check()` processes inodes in order from 1 to `inode_count`.  The file
+/// inode (2) exercises the case where the bad checksum is encountered after
+/// the root inode has already been validated; the root inode (1) exercises
+/// the case where `check()` fails on the very first `self.inode()` call.
+#[test]
+fn check_refuses_an_inode_with_a_bad_structural_checksum() {
+    // Build a base image containing one file (inode 2, KIND_FILE).
+    let base = formatted();
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+    }
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.lookup(1, "a.txt").expect("lookup a.txt").inode
+    };
+
+    // --- file inode: corrupt the structural checksum at byte offset 120 ---
+    let corrupt_file = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt_file.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        // Four inodes per sector; each slot is 128 bytes.
+        let index = file_inode - 1;
+        let lba = (inode_start + index / 4) as usize;
+        let offset = (index % 4) as usize * 128;
+        corrupt_file.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+    let before_file = corrupt_file.sectors();
+
+    let mut vol_file = Volume::mount(corrupt_file.clone()).expect("mount corrupt_file");
+    assert_eq!(
+        vol_file.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode with a bad structural checksum"
+    );
+    assert!(
+        corrupt_file.sectors() == before_file,
+        "check() must not modify the image (file inode case)"
+    );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base.clone()).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+
+    // --- root directory inode (inode 1): corrupt its structural checksum ---
+    let corrupt_root = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt_root.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        // Inode 1 → index 0 → offset 0 in the first inode sector.
+        let lba = inode_start as usize;
+        corrupt_root.image.borrow_mut()[lba][120] ^= 0xFF;
+    }
+    let before_root = corrupt_root.sectors();
+
+    let mut vol_root = Volume::mount(corrupt_root.clone()).expect("mount corrupt_root");
+    assert_eq!(
+        vol_root.check(),
+        Err(Error::Corrupt),
+        "check() must refuse the root directory inode with a bad structural checksum"
+    );
+    assert!(
+        corrupt_root.sectors() == before_root,
+        "check() must not modify the image (root inode case)"
+    );
+}

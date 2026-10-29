@@ -1,5 +1,75 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses an inode with a bad structural checksum
+
+Branch: `auto/wovenhat-development` (base `9447f51a`). Working tree was clean.
+
+### Defect / gap
+
+Every inode write path calls `Inode::encode`, which computes a FNV-1a checksum
+over the first 120 bytes of the 128-byte inode slot and stores the result at
+offset 120.  `Inode::decode` rejects any non-all-zero slot whose stored
+checksum disagrees with the computed one; `checked_inode` — called for every
+`self.inode()` access inside `check()` — propagates that rejection as
+`Err(Corrupt)`.
+
+All existing `check()` tests patch one or more inode fields and then call a
+`reseal_inode_*` helper to recompute and write the correct structural checksum
+before asserting the refusal.  None of them left the checksum wrong.  The
+`Inode::decode(raw).ok_or(Error::Corrupt)?` path in `checked_inode` was
+therefore exercised on every test run only incidentally (through valid inodes)
+and not as the tested failure mode.
+
+This gap matters because the structural checksum is the first defence against:
+- single-bit rot in any of the 120 content bytes or the checksum bytes
+  themselves;
+- a partially-written inode (only some bytes reached stable storage);
+- a crafted image whose fields were patched without updating the checksum.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_an_inode_with_a_bad_structural_checksum`:
+
+- Calls `formatted()` to get a fresh volume, then creates `a.txt` so inode 2
+  (`KIND_FILE`) is live.
+- **File inode case**: forks the image, XOR-s the first checksum byte
+  (`sectors[lba][offset + 120] ^= 0xFF`) of inode 2, asserts `check()` returns
+  `Err(Error::Corrupt)`, and asserts the image is not modified.
+- **Root inode case**: forks the same base image, XOR-s the first checksum
+  byte of inode 1 (root directory, `KIND_DIR`) in the same way, and asserts
+  the same two properties.
+- Control (shared): the unpatched base volume passes `check()`.
+
+The file-inode case exercises the path where `check()` fails partway through
+the per-inode loop (after the root inode 1 has already been validated).  The
+root-inode case exercises the path where `check()` fails on the very first
+`self.inode(1)` call.
+
+No production code changed — `Inode::decode` and `checked_inode` already
+contained the guard; only the missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **76 passed / 0 failed** (was 75; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Both sub-cases corrupt only byte offset 120 (the first checksum byte).  A
+  flip at any of the other 7 checksum bytes, or at any of the 120 content
+  bytes, would trigger the same guard.
+- `Inode::decode` treats an all-zero slot as a free inode without verifying
+  the checksum; that case (format's zeroed inode table) is by design and is
+  not a gap.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming the same block twice
 
 Branch: `auto/wovenhat-development` (base `482b97c4`). Working tree was clean.
