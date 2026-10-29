@@ -1,5 +1,73 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming the same block twice
+
+Branch: `auto/wovenhat-development` (base `7c81cef0`). Working tree was clean.
+
+### Defect / gap
+
+`checked_inode` (called by `self.inode(number)?` in `check()`'s main loop)
+contains the intra-inode duplicate-block guard:
+
+```rust
+for (slot, block) in node.direct.iter().enumerate() {
+    if *block != 0 && node.direct[slot + 1..].contains(block) {
+        return Err(Error::Corrupt);
+    }
+}
+```
+
+A file inode with `direct[i] == direct[j]` (both non-zero, i ≠ j) is
+corruption `stage_write` cannot produce: `stage_allocate_block` always
+returns a fresh, unique block. Allowing it to pass `check()` silently would
+mean `read_file` reads the same on-disk sector for both logical halves of the
+file, and `write_file` would overwrite the shared block twice, discarding
+content.
+
+The existing test `an_inode_naming_one_block_twice_is_refused` (line 658)
+proves that the runtime operations (`inode`, `read_file`, `write_file`,
+`unlink`) refuse such an inode. However, that test makes no call to
+`check()`, so the check()-vs-runtime gap was open for this specific
+corruption.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_file_inode_naming_the_same_block_twice`:
+
+- Calls `two_block_file()` to get a volume with a 600-byte file (`p.bin`,
+  two blocks: `direct[0]` and `direct[1]`).
+- Reads the file inode to recover `direct[0]`.
+- Forks the image and calls `redirect_inode_block(&image, inode, 1, direct0)`
+  to set `direct[1] = direct[0]`.  The inode's structural checksum is
+  resealed; `data_checksum` is left at the original value, which is
+  irrelevant because `checked_inode` fires before the data-checksum guard.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched two-block volume passes `check()`.
+
+No production code changed — the guard already exists in `checked_inode`;
+only the missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **69 passed / 0 failed** (was 68; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires via `checked_inode` inside `self.inode(number)?`; the
+  data-checksum and per-slot bitmap checks are never reached for this case.
+- After the redirect, the original `direct[1]` block is orphaned (allocated
+  in the bitmap but named by no inode); `check()` would detect that too via
+  the bitmap→inode scan, but `checked_inode` fires first.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming a block outside the data region
 
 Branch: `auto/wovenhat-development` (base `17ccf3e3`). Working tree was clean.
