@@ -1,5 +1,54 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS: test that unlink refuses a file inode as directory
+
+Branch: `auto/wovenhat-development` (base `6f5551ce`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (line 1249 of `kernel/src/wfs.rs`) checks `dir.kind != KIND_DIR` at
+line 1252 and returns `Err(Error::NotADirectory)` when the caller passes a file
+inode as the directory argument. No existing test exercised this path; all prior
+`unlink` callers used inode 1 (the root directory).
+
+This gap matters because without the guard `dir_entries` would walk the file's
+data blocks interpreting each 64-byte chunk as a `DirEntry`, and the subsequent
+free of whichever inode was found there would corrupt unrelated metadata.
+
+The prior progress entries for `lookup_refuses_a_file_inode_as_directory` and
+`read_dir_refuses_a_file_inode_as_directory` both noted this as the remaining
+uncovered sibling guard on the `unlink` path.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `unlink_refuses_a_file_inode_as_directory`:
+
+- Calls `formatted()` and creates `hello.txt` (5 bytes, `"hello"`), recording its inode.
+- Asserts `unlink(file_inode, "hello.txt", 2)` returns `Err(Error::NotADirectory)`.
+- Control: `lookup(1, "hello.txt")` confirms the file still exists, and
+  `unlink(1, "hello.txt", 2)` through the correct directory inode succeeds.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **82 passed / 0 failed** (was 81; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+Commit: `d5a2dee1`
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The `NotADirectory` guards on the internal helpers `dir_entries` and
+  `load_dir_block` are not directly tested (they are reachable only through
+  `lookup`, `read_dir` and `unlink`, all now covered).
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS: test that read_dir refuses a file inode as directory
 
 Branch: `auto/wovenhat-development` (base `be17958e`). Working tree was clean.
