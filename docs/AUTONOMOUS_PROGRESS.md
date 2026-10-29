@@ -1,5 +1,74 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses root inode with kind not KIND_DIR
+
+Branch: `auto/wovenhat-development` (base `ea5d1360`). Working tree was clean.
+
+### Defect / gap
+
+`check()` contains the guard:
+```rust
+if root.kind != KIND_DIR {
+    return Err(Error::Corrupt);
+}
+```
+in the root-section checks (after the main inode loop and bitmap→inode scan).
+No existing `check_refuses_*` test exercised this guard independently.
+
+`format()` always sets the root inode's kind to `KIND_DIR`.  No runtime path
+(`stage_create`, `stage_unlink`, `stage_write`) ever modifies a directory
+inode's kind field.  Any value other than `KIND_DIR` is therefore corruption
+the runtime cannot have produced.
+
+Without this guard, a crafted image whose root inode has `kind = KIND_FILE` but
+`mode = 0o040_755` passes the earlier mode check and silently misdirects
+`dir_entries` to read the directory data block as raw file content.
+
+The test is non-trivial because several earlier guards must also pass before
+the kind guard fires:
+- Main-loop KIND_FILE path requires `links = 1` and a matching `data_checksum`
+  (computed as `fnv1a` of the directory data block content).
+- Block consistency, block range, bitmap, and cross-inode aliasing checks pass
+  because `direct[0]` is the (allocated, in-range, uniquely-named) root dir block.
+- The root-section mode check passes because `mode` is left at `0o040_755`.
+- The root-section kind check then fires: `KIND_FILE != KIND_DIR → Err(Corrupt)`.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_root_directory_inode_with_kind_not_dir`:
+
+- Calls `formatted()` to get an empty volume.
+- Reads the root inode's `direct[0]` block and its raw sector bytes.
+- Forks the image and applies three re-sealing patches:
+  1. `reseal_inode_kind(&image, 1, KIND_FILE)` — changes kind to 1.
+  2. `reseal_inode_links(&image, 1, 1u32)` — changes links to 1 (KIND_FILE invariant).
+  3. `reseal_inode_data_checksum(&image, 1, &dir_bytes)` — sets data_checksum to
+     the FNV-1a of the directory sector (passes the content-checksum check).
+- Mounts the patched image (succeeds; mount does not read inodes).
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already exists; only the test was missing.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **67 passed / 0 failed** (was 66; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires only after the main inode loop completes; a crafted root inode
+  also triggers detection through the main loop's KIND_FILE content checks.
+- No repair path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming a bitmap-free block
 
 Branch: `auto/wovenhat-development` (base `bb5366a5`). Working tree was clean.

@@ -3407,3 +3407,54 @@ fn check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+#[test]
+fn check_refuses_root_directory_inode_with_kind_not_dir() {
+    // `format()` sets the root inode's kind to KIND_DIR (2) and no runtime path
+    // ever changes a directory inode's kind field.  Any other value is
+    // corruption.  The root-section guard `root.kind != KIND_DIR` catches it.
+    //
+    // To exercise this guard independently, the crafted inode must pass every
+    // earlier check:
+    //
+    //   Main-loop KIND_FILE path:
+    //     links = 1  (KIND_FILE requires links == 1)
+    //     block consistency: needed = 1, direct[0] != 0, direct[1..] == 0
+    //     data_checksum = fnv1a(directory data block) — content check passes
+    //     block range: direct[0] is the root directory block
+    //     bitmap: that block is allocated
+    //     no cross-inode aliasing (only inode 1 names it)
+    //   Bitmap→inode orphan scan: directory block named by inode 1
+    //   Root-section mode check: mode left at 0o040_755 → passes
+    //   Root-section kind check: KIND_FILE != KIND_DIR → Err(Corrupt)  ← fires
+    use wfs::KIND_FILE;
+
+    let base = formatted();
+    let dir_block = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(1)
+        .expect("root inode")
+        .direct[0];
+    let dir_bytes = base.sectors()[dir_block as usize];
+
+    let image = base.fork(None);
+    reseal_inode_kind(&image, 1, KIND_FILE);
+    reseal_inode_links(&image, 1, 1u32);
+    reseal_inode_data_checksum(&image, 1, &dir_bytes);
+
+    let before = image.sectors();
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a root inode whose kind is not KIND_DIR"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}
