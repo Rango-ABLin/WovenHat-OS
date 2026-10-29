@@ -3458,3 +3458,59 @@ fn check_refuses_root_directory_inode_with_kind_not_dir() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` calls `self.inode(number)?` in its main loop, which internally
+/// calls `checked_inode`.  That function refuses any direct-block pointer that
+/// is outside the data region `[data_start, total_blocks)`:
+///
+///   let in_data = |block| *block == 0 || (data_start..total_blocks).contains(block);
+///   if !node.direct.iter().all(in_data) { return Err(Corrupt); }
+///
+/// A file that points into a metadata sector (below `data_start`) or past the
+/// volume end (`>= total_blocks`) is corruption `stage_write` cannot produce:
+/// `stage_allocate_block` allocates only from `[data_start, total_blocks)`.
+/// Redirecting I/O through such a pointer would silently read or overwrite
+/// journal, bitmap, or inode-table sectors.
+///
+/// `inode_block_pointers_outside_the_data_region_are_refused` proves that
+/// runtime operations (`read_file`, `write_file`, `unlink`) refuse these
+/// inodes.  This test proves that `check()` does so as well.
+#[test]
+fn check_refuses_a_file_inode_naming_a_block_outside_the_data_region() {
+    let (base, _, _) = two_file_root();
+    let a_inode = Volume::mount(base.clone())
+        .expect("mount")
+        .lookup(1, "a.txt")
+        .expect("a.txt")
+        .inode;
+    let sb = *Volume::mount(base.clone()).expect("mount").super_block();
+
+    // Two representative out-of-range targets: one in the metadata region
+    // (below data_start) and one past the volume end (>= total_blocks).
+    // Both fail checked_inode's range predicate before any I/O on the
+    // (potentially invalid) address is attempted.
+    let targets: &[(&str, u64)] = &[
+        ("inode table (below data_start)", sb.inode_start),
+        ("past the end (>= total_blocks)", sb.total_blocks),
+    ];
+    for &(label, target) in targets {
+        let image = base.fork(None);
+        redirect_inode_block(&image, a_inode, 0, target);
+        let before = image.sectors();
+
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert_eq!(
+            volume.check(),
+            Err(Error::Corrupt),
+            "check() must refuse a file inode with a block pointer {label}"
+        );
+        assert!(
+            image.sectors() == before,
+            "check() must not modify the image for {label}"
+        );
+    }
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

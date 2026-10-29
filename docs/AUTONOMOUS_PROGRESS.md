@@ -1,5 +1,67 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming a block outside the data region
+
+Branch: `auto/wovenhat-development` (base `17ccf3e3`). Working tree was clean.
+
+### Defect / gap
+
+`check()` uses `self.inode(number)?` in its main loop, which calls `checked_inode`.
+`checked_inode` contains the range guard:
+
+```rust
+let in_data = |block: &u64| *block == 0 || (sb.data_start..sb.total_blocks).contains(block);
+if !node.direct.iter().all(in_data) {
+    return Err(Error::Corrupt);
+}
+```
+
+A file inode whose `direct[0]` points below `data_start` (into a metadata sector) or
+at/beyond `total_blocks` (past the volume end) is corruption `stage_write` cannot
+produce — `stage_allocate_block` allocates only from `[data_start, total_blocks)`.
+Redirecting I/O through such a pointer would silently read or overwrite journal,
+bitmap, or inode-table sectors.
+
+The existing test `inode_block_pointers_outside_the_data_region_are_refused` (line 554)
+proves that runtime operations (`read_file`, `write_file`, `unlink`) refuse these inodes.
+However, no `check_refuses_*` test called `check()` on a volume with such an inode.
+The gap was that `check()`'s own refusal was untested.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_file_inode_naming_a_block_outside_the_data_region`:
+
+- Calls `two_file_root()` to get a volume with `a.txt`.
+- Iterates over two representative out-of-range targets:
+  1. `sb.inode_start` (a metadata block below `data_start`)
+  2. `sb.total_blocks` (past the volume end)
+- For each target, forks the image, calls `redirect_inode_block` to point
+  `a.txt`'s `direct[0]` at the target (resealing the inode checksum), then
+  asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts the image is not modified by `check()`.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already exists in `checked_inode`; only the
+test was missing.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **68 passed / 0 failed** (was 67; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The range guard inside `check()`'s per-inode loop (line 1444 of `wfs.rs`) is
+  rendered redundant by `checked_inode`, which fires first via `self.inode(number)?`.
+  That existing dead-code guard was not removed; only the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses root inode with kind not KIND_DIR
 
 Branch: `auto/wovenhat-development` (base `ea5d1360`). Working tree was clean.
