@@ -3747,3 +3747,64 @@ fn check_refuses_root_directory_inode_naming_a_block_outside_the_data_region() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a volume where a file inode names the same data block
+/// as the root directory inode.
+///
+/// `refuse_shared_blocks` is called for every live inode in the per-inode loop,
+/// including the root directory inode (inode 1, KIND_DIR).  When processing the
+/// root, it scans all other live inodes and returns `Err(Corrupt)` if any of
+/// them names a block the root already names.  `stage_allocate_block` always
+/// returns a fresh block never used by any live inode, so a file inode whose
+/// `direct[0]` equals `root.direct[0]` is corruption no runtime path can produce.
+///
+/// `check_refuses_two_file_inodes_naming_the_same_block` covers the same
+/// `refuse_shared_blocks` guard when both inodes are `KIND_FILE`.  This test
+/// covers the cross-kind path where one inode is the root directory (`KIND_DIR`).
+/// Because the root (inode 1) is the first inode processed in the loop,
+/// `refuse_shared_blocks` fires during its turn — before the file inode is
+/// reached — so neither the data-checksum guard nor any `KIND_FILE`-specific
+/// check for the file inode can interfere.
+#[test]
+fn check_refuses_a_file_inode_naming_the_root_directory_data_block() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt")
+    };
+
+    // dir_block  = root.direct[0]: the root directory's data block.
+    // file_block = file_inode.direct[0]: a.txt's single data block.
+    let dir_block = read_inode_direct0(&base, 1);
+    let file_block = read_inode_direct0(&base, file_inode);
+    assert_ne!(dir_block, file_block, "fresh allocations must be distinct");
+
+    // Redirect file_inode.direct[0] to dir_block and reseal the inode structural
+    // checksum so mount() and checked_inode() accept the image.
+    let image = base.fork(None);
+    redirect_inode_block(&image, file_inode, 0, dir_block);
+    // file_block is now named by no live inode.  Clear its bitmap bit so the
+    // orphan-block scan does not fire before refuse_shared_blocks.
+    clear_bitmap_block(&image, file_block);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    // check() processes inode 1 (root, KIND_DIR) first.  refuse_shared_blocks
+    // scans all other live inodes and finds file_inode also naming dir_block ->
+    // Err(Corrupt).  The file inode's data-checksum guard is never reached.
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode naming the root directory's data block"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}

@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses a file inode naming the root directory's data block
+
+Branch: `auto/wovenhat-development` (base `9ee3ac05`). Working tree was clean.
+
+### Defect / gap
+
+`refuse_shared_blocks` is called at the end of the per-inode loop in `check()`
+for **every** live inode, including inode 1 (the root directory, `KIND_DIR`).
+When processing the root, it scans all other live inodes and returns
+`Err(Corrupt)` if any of them names a block the root already names.
+
+`check_refuses_two_file_inodes_naming_the_same_block` covers this guard for
+two `KIND_FILE` inodes.  No test exercised the cross-kind path — a `KIND_FILE`
+inode whose `direct[0]` equals `root.direct[0]`.
+
+`stage_allocate_block` always returns a fresh block never used by any live
+inode, so a file inode naming the root directory's data block is corruption no
+runtime path can produce.  The consequence: any write to the file would
+overwrite the directory block, silently destroying all directory entries.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_file_inode_naming_the_root_directory_data_block`:
+
+- Formats a fresh volume and creates `a.txt` (one-block file, inode 2).
+- Reads `dir_block = root.direct[0]` and `file_block = file_inode.direct[0]`;
+  asserts they are distinct (fresh-allocation invariant).
+- Forks the image and calls `redirect_inode_block(&image, file_inode, 0, dir_block)`
+  to set `file.direct[0] := dir_block` and reseal the inode structural checksum
+  (so `mount()` and `checked_inode()` accept the image).
+- Calls `clear_bitmap_block(&image, file_block)` to mark `file_block` free so
+  the orphan-block scan does not fire before `refuse_shared_blocks`.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+The root inode (inode 1) is the first processed in the loop.  When
+`refuse_shared_blocks(txn, 1, root.direct)` runs, it finds `file_inode` also
+naming `dir_block` and returns `Err(Corrupt)` — before the loop ever reaches
+`file_inode` and its `data_checksum` guard.
+
+No production code changed — `refuse_shared_blocks` already existed in
+`check()`; only the missing cross-kind test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **73 passed / 0 failed** (was 72; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires when processing root (inode 1); the file inode's own checks
+  (data-checksum, block range) are never reached for this scenario.
+- Only `direct[0]` of the file inode is redirected; the same guard would fire
+  for any slot, because `refuse_shared_blocks` iterates all non-zero slots.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming a block outside the data region
 
 Branch: `auto/wovenhat-development` (base `57237888`). Working tree was clean.
