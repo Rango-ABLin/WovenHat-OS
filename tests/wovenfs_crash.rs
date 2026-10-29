@@ -3570,3 +3570,67 @@ fn check_refuses_a_file_inode_naming_the_same_block_twice() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+#[test]
+fn check_refuses_two_file_inodes_naming_the_same_block() {
+    // `refuse_shared_blocks` is called by `check()` for each live inode and
+    // scans every other live inode for any overlapping block.  `stage_write`
+    // always allocates fresh blocks, so two distinct inodes naming one block
+    // is cross-inode aliasing that no runtime write path can produce.
+    //
+    // Construction:
+    //  - Create a.txt and b.txt with identical content ([7u8; SECTOR_SIZE])
+    //    so both have the same data_checksum.
+    //  - Read block_a = a.txt.direct[0] and block_b = b.txt.direct[0].
+    //  - Redirect b.txt.direct[0] := block_a (same block as a.txt).
+    //    redirect_inode_block re-seals b.txt's inode structural checksum.
+    //    b.txt.data_checksum already matches block_a's content (identical
+    //    file content), so the data-checksum check passes.
+    //  - Clear the bitmap bit for block_b so the bitmap-orphan scan does not
+    //    fire first (block_b is no longer named by any inode after the
+    //    redirect; without clearing its bitmap bit, check() would report it
+    //    as an orphaned block before reaching refuse_shared_blocks).
+    //  - Now a.txt and b.txt both name block_a, which is the cross-inode
+    //    aliasing that refuse_shared_blocks catches.
+    let base = formatted();
+    let (a_inode, b_inode) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume
+            .create_file(1, "a.txt", 0o644, &[7u8; SECTOR_SIZE], 1)
+            .expect("create a.txt");
+        let b = volume
+            .create_file(1, "b.txt", 0o644, &[7u8; SECTOR_SIZE], 2)
+            .expect("create b.txt");
+        (a, b)
+    };
+    let (block_a, block_b) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a_node = volume.inode(a_inode).expect("a inode");
+        let b_node = volume.inode(b_inode).expect("b inode");
+        (a_node.direct[0], b_node.direct[0])
+    };
+    assert_ne!(block_a, block_b, "fresh allocation must give distinct blocks");
+
+    let image = base.fork(None);
+    // Point b.txt at a.txt's block; re-seals b.txt's inode checksum.
+    redirect_inode_block(&image, b_inode, 0, block_a);
+    // Clear block_b from the bitmap so check()'s orphan-block scan passes;
+    // the first error path is then refuse_shared_blocks for a.txt (or b.txt).
+    clear_bitmap_block(&image, block_b);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse two inodes naming the same block"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

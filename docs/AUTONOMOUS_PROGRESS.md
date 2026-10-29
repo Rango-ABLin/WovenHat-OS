@@ -1,5 +1,75 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses two file inodes naming the same block
+
+Branch: `auto/wovenhat-development` (base `8694bccd`). Working tree was clean.
+
+### Defect / gap
+
+`check()` calls `self.refuse_shared_blocks(&txn, number, &node.direct)?;` at the
+end of the per-inode loop.  `refuse_shared_blocks` scans every other live inode
+for any block that appears in both inode's `direct` arrays — the cross-inode
+aliasing guard.  `stage_write` always calls `stage_allocate_block`, which returns
+a fresh block never used by any live inode, so two distinct inodes naming the same
+data block is corruption the runtime cannot produce.
+
+The consequence: if a crafted image has two file inodes sharing one block, any
+write or free through either inode destroys the other inode's data or permanently
+orphans its block — the same catastrophic aliasing the write path's guard prevents.
+
+The existing test `check_refuses_a_file_inode_naming_the_same_block_twice` covers
+only the **intra-inode** duplicate case (both slots in the same inode pointing at the
+same block), which is caught by `checked_inode` before `refuse_shared_blocks` runs.
+No `check_refuses_*` test exercised the **cross-inode** case — the case where two
+*different* inodes name one block, which is the path `refuse_shared_blocks` exists
+to catch.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_two_file_inodes_naming_the_same_block`:
+
+- Formats a volume and creates `a.txt` and `b.txt` both with `[7u8; SECTOR_SIZE]`
+  content (one full sector each).  Identical content gives both inodes the same
+  `data_checksum`, which is key for making the data-checksum guard pass on both
+  inodes after the block redirect.
+- Reads `block_a = a.txt.direct[0]` and `block_b = b.txt.direct[0]`; asserts
+  they are distinct (fresh allocation invariant).
+- Forks the image and calls `redirect_inode_block(&image, b_inode, 0, block_a)` —
+  sets `b.txt.direct[0] := block_a` and re-seals `b.txt`'s inode structural
+  checksum.  `b.txt.data_checksum` is already correct (same content, same hash as
+  `a.txt`), so the data-checksum guard passes for `b.txt`.
+- Calls `clear_bitmap_block(&image, block_b)` — marks `block_b` free in the
+  bitmap.  After the redirect, `block_b` is no longer named by any live inode;
+  without clearing its bitmap bit, `check()`'s orphan-block scan would fire first
+  rather than `refuse_shared_blocks`.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched two-file volume passes `check()`.
+
+No production code changed — `refuse_shared_blocks` already existed in `check()`;
+only the missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **70 passed / 0 failed** (was 69; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires when processing the first of the two aliasing inodes in inode-number
+  order; the second is never reached.
+- The test uses identical-content files to avoid needing to update `data_checksum`;
+  the `refuse_shared_blocks` path is reached regardless of file content as long as
+  both earlier guards (data checksum, block range, bitmap) pass.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming the same block twice
 
 Branch: `auto/wovenhat-development` (base `7c81cef0`). Working tree was clean.
