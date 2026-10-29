@@ -9179,14 +9179,10 @@ fn stage20_14b_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -10227,14 +10223,10 @@ fn stage20_13_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -10476,14 +10468,10 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -10959,14 +10947,10 @@ fn stage20_11_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -11389,9 +11373,8 @@ fn stage20_10_self_test() -> bool {
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const QUIET: u32 = rgb(90, 170, 170);
     const UNSET: u32 = 0x0100_0000;
-    const WEAVE_PITCH: i32 = 96;
-    const WEAVE_OPACITY: u8 = 10;
-    const WEAVE_TINT_OPACITY: u8 = 12;
+    const WEAVE_PITCH: i32 = 220;
+    const WEAVE_TINT_OPACITY: u8 = 6;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -11417,14 +11400,9 @@ fn stage20_10_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / WEAVE_PITCH + y / WEAVE_PITCH) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, WEAVE_TINT_OPACITY);
-        if x % WEAVE_PITCH == 0 || y % WEAVE_PITCH == 0 {
-            blend_pixel(WHITE, woven, WEAVE_OPACITY)
-        } else {
-            woven
-        }
+        let band = ((x + y) / WEAVE_PITCH) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, WEAVE_TINT_OPACITY)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -12053,14 +12031,10 @@ fn stage20_17_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = crate::display::blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            crate::display::blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        crate::display::blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -12400,9 +12374,8 @@ fn stage20_18_self_test() -> bool {
         let span = (height - 1).max(1);
         let gradient = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58),
             (y.clamp(0, span) * 255 / span) as u8);
-        let tint = if (x / 96 + y / 96) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
-        let woven = blend_pixel(tint, gradient, 12);
-        if x % 96 == 0 || y % 96 == 0 { blend_pixel(rgb(255, 255, 255), woven, 10) } else { woven }
+        let tint = if ((x + y) / 220) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
+        blend_pixel(tint, gradient, 6)
     };
     let (toast_x, toast_y) = (width - 188, 8);
     let mut toast = Surface::new(180, 22);
@@ -12500,14 +12473,10 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -12766,14 +12735,10 @@ fn stage20_8_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13422,14 +13387,10 @@ fn stage20_6_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13710,14 +13671,10 @@ fn stage20_5_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -14168,14 +14125,10 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14451,14 +14404,10 @@ fn stage20_3_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14792,14 +14741,10 @@ fn stage20_2_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -15601,14 +15546,10 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for the shell's diagonal weave (no seam).
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -15844,8 +15785,8 @@ fn stage20_1_self_test() -> bool {
     }
 
     let top = height - TASKBAR_HEIGHT;
-    // Wallpaper: corner, centre, both weave lines, and the last row above
-    // the taskbar, each a block wide enough to straddle a grid line.
+    // Wallpaper: corner, centre, diagonal bands, and the last row above
+    // the taskbar. These samples catch stale texture or blend formulas.
     let wall = region(0, 0, 40, 40, |x, y| expected_wallpaper(x, y, width, height))
         && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
             expected_wallpaper(x, y, width, height)
