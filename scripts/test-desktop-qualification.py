@@ -584,10 +584,31 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                         "settings_keyboard_refresh_ms", timings, settings_key_started)
             time.sleep(1.0)
             settings_after = output / "settings-keyboard-refresh.ppm"
-            _, _, after_settings_key = capture_frame(
-                qmp, settings_after, time.monotonic() + args.frame_timeout,
-                timings, "settings_keyboard_refresh"
-            )
+            # A generic delta can be an unfinished opening repaint. Require
+            # the complete gold focus strip on the actual Refresh control.
+            # Logical window (64,64), button (250,190), width 90, scale 2.
+            focus_started = time.monotonic()
+            focus_deadline = focus_started + args.frame_timeout
+            attempt = 0
+            while time.monotonic() < focus_deadline:
+                candidate = settings_after.with_name(f"settings-focus.attempt-{attempt}.ppm")
+                attempt += 1
+                width, height, after_settings_key = capture_frame(
+                    qmp, candidate, focus_deadline, timings, "settings_focus_sample"
+                )
+                if width == 1280 and height == 800 and all(
+                    after_settings_key[(y * width + 628) * 3:(y * width + 808) * 3]
+                    == bytes((255, 205, 96)) * 180
+                    for y in range(508, 510)
+                ):
+                    shutil.copyfile(candidate, settings_after)
+                    timings["frame_settings_keyboard_refresh_ms"] = (
+                        time.monotonic() - focus_started
+                    ) * 1000.0
+                    break
+                time.sleep(0.1)
+            else:
+                raise GateFailure("Settings keyboard focus strip was not presented")
             screenshots.append(settings_after.name)
             if changed_pixels(before_settings_key, after_settings_key) < 20:
                 raise GateFailure("Settings keyboard refresh did not change the client framebuffer")
