@@ -3356,3 +3356,54 @@ fn check_refuses_a_directory_entry_with_inode_number_out_of_range() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
 }
+
+/// `check()` must refuse a live file inode whose data block the bitmap marks
+/// as free.
+///
+/// `stage_write` marks every allocated block as used in the bitmap before
+/// writing the inode back.  `stage_unlink` clears bitmap bits only after
+/// zeroing and writing the inode.  No runtime path therefore leaves a live
+/// inode naming a block the bitmap considers free.  A crafted image where the
+/// bitmap bit for a live file's block is cleared is an impossible state: the
+/// allocator could hand out the same block to a future file, creating a silent
+/// cross-inode alias.
+///
+/// This covers the inode→bitmap direction.  The bitmap→inode direction
+/// (a block allocated in the bitmap but named by no live inode) is covered by
+/// `check_refuses_a_bitmap_allocated_block_named_by_no_inode`.
+#[test]
+fn check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free() {
+    let (base, _, _) = two_file_root();
+    let (a_inode, a_block) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume.lookup(1, "a.txt").expect("a.txt").inode;
+        let block = volume.inode(a).expect("inode a").direct[0];
+        (a, block)
+    };
+    let _ = a_inode;
+
+    // Clear the bitmap bit for a.txt's data block without touching the inode or
+    // its content.  The data checksum and range checks both pass (the block
+    // content is unchanged and the block address is within [data_start,
+    // total_blocks)), so the per-inode bitmap check at `!bitmap_get(block)` is
+    // the first path to fire.  The subsequent bitmap→inode orphan scan never
+    // reaches it, because the block is no longer marked allocated.
+    let image = base.fork(None);
+    clear_bitmap_block(&image, a_block);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode whose data block the bitmap marks free"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

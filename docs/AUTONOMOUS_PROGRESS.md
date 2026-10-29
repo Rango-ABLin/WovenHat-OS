@@ -1,5 +1,67 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses file inode naming a bitmap-free block
+
+Branch: `auto/wovenhat-development` (base `bb5366a5`). Working tree was clean.
+
+### Defect / gap
+
+`check()` contains the guard:
+```rust
+if !self.bitmap_get(&txn, block)? {
+    return Err(Error::Corrupt);
+}
+```
+inside the per-inode block loop (after the block-range check, after the data-checksum
+verification).  This is the inode→bitmap direction: a live inode names a block the
+bitmap considers free.  The existing test
+`check_refuses_a_bitmap_allocated_block_named_by_no_inode` covers only the
+bitmap→inode direction (a block the bitmap marks allocated but no live inode names).
+No test independently exercised the inode→bitmap guard.
+
+`stage_write` marks every block it allocates as used in the bitmap before writing the
+inode back.  `stage_unlink` clears bitmap bits only after zeroing the inode.  No
+runtime path therefore leaves a live inode naming a block the bitmap considers free.
+Any such state is corruption the runtime cannot have produced: the allocator might
+hand out the same block to a future file, creating a silent cross-inode alias that
+every earlier check misses.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free`:
+
+- Calls `two_file_root()` to get a volume with `a.txt` and `b.txt`.
+- Reads `a.txt`'s inode to recover its `direct[0]` block address.
+- Forks the image and calls `clear_bitmap_block` on that block.
+  The block content and the inode (including `data_checksum`) are
+  untouched, so the data-checksum and block-range checks both pass.
+  The per-inode `!bitmap_get(block)` check is the first path to fire.
+  The bitmap→inode orphan scan never reaches the block, because it is
+  no longer marked allocated.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already exists; only the test was missing.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **66 passed / 0 failed** (was 65; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires on the first live inode whose block the bitmap considers free; the
+  specific inode and slot are not reported.
+- No repair path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses directory entry with inode number out of range
 
 Branch: `auto/wovenhat-development` (base `b43faa96`). Working tree was clean.
