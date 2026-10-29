@@ -4262,3 +4262,38 @@ fn read_dir_refuses_a_file_inode_as_directory() {
         "root directory must contain exactly the one created file"
     );
 }
+
+/// `unlink` checks `dir.kind != KIND_DIR` (wfs.rs:1252) before doing any work.
+/// Without the guard, `dir_entries` would walk the file's data blocks as if they
+/// were directory entries, and the subsequent free of whichever inode was found
+/// there would corrupt unrelated metadata.
+#[test]
+fn unlink_refuses_a_file_inode_as_directory() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // Passing a file inode as the directory argument must be refused.
+    assert_eq!(
+        volume.unlink(file_inode, "hello.txt", 2),
+        Err(Error::NotADirectory),
+        "unlink on a file inode must return NotADirectory"
+    );
+
+    // Control: the file still exists in the root directory and unlink through
+    // the correct directory inode succeeds.
+    assert_eq!(
+        volume.lookup(1, "hello.txt").map(|entry| entry.inode),
+        Ok(file_inode),
+        "file must still be present after a refused unlink"
+    );
+    volume
+        .unlink(1, "hello.txt", 2)
+        .expect("unlink via the correct directory inode must succeed");
+}
