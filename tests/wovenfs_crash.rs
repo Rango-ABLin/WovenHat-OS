@@ -3317,3 +3317,42 @@ fn check_refuses_a_file_inode_with_links_other_than_1() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse a directory entry whose `inode` field names an inode
+/// number beyond the end of the inode table (`> sb.inode_count`).
+///
+/// `stage_create` allocates inodes from the range `2..=inode_count` and
+/// writes the allocated number into the new directory entry.  No runtime path
+/// ever writes a value larger than `inode_count` into a live directory entry.
+/// A crafted entry with an out-of-range inode number is permanently
+/// unlookupable: calling `self.inode(entry.inode)` would attempt to read a
+/// sector beyond the inode table region.  `check()` validates `entry.inode`
+/// before calling `self.inode`, so the corruption is caught without an
+/// out-of-bounds read or a false `Ok(())`.
+#[test]
+fn check_refuses_a_directory_entry_with_inode_number_out_of_range() {
+    let (base, block, index) = two_file_root();
+
+    // Patch a.txt's directory entry inode field (bytes 0–7) to INODES + 1
+    // (= 33), which is one past the end of the inode table (inode_count = 32).
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+    // Snapshot after patching: check() must not write anything.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a directory entry with inode = INODES + 1"
+    );
+    // The image must be unchanged by check().
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+}

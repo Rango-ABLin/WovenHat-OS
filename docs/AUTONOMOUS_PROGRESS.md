@@ -1,5 +1,61 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses directory entry with inode number out of range
+
+Branch: `auto/wovenhat-development` (base `b43faa96`). Working tree was clean.
+
+### Defect / gap
+
+`check()` contains the guard:
+```rust
+if entry.inode > u64::from(sb.inode_count) {
+    return Err(Error::Corrupt);
+}
+```
+at the start of the directory-entry loop (before `self.inode(entry.inode)` is called), but no
+`check_refuses_*` test exercised it.  Without the guard, `self.inode(entry.inode)` would attempt
+to read a sector beyond the end of the inode table region, which returns `Err(Error::Corrupt)`
+from the device, but the guard-level intent — that the stored entry is structurally impossible —
+was not independently verified.
+
+`stage_create` allocates inodes only from `2..=inode_count`; no runtime path writes a value larger
+than `inode_count` into a live directory entry.  Any `entry.inode > inode_count` is therefore
+corruption that the runtime cannot have produced.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_a_directory_entry_with_inode_number_out_of_range`:
+
+- Calls `two_file_root()` to get a volume with files `a.txt` and `b.txt` and their directory
+  block/index.
+- Patches `a.txt`'s directory entry inode field (bytes 0–7) to `INODES + 1` (= 33), which is one
+  past the end of the inode table (`inode_count = 32`).  Directory blocks carry no checksum, so
+  no re-sealing is needed.
+- Mounts the patched image (must succeed; mount() does not read directory entries).
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already exists; only the test was missing.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **65 passed / 0 failed** (was 64; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires on the first directory entry with `inode > inode_count`; the specific entry
+  index is not reported.
+- No repair path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses KIND_FILE inode with links other than 1
 
 Branch: `auto/wovenhat-development` (base `35d38d8f`). Working tree was clean.
