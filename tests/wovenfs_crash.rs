@@ -4192,3 +4192,46 @@ fn read_file_refuses_a_freed_inode() {
     );
     assert_eq!(&buf[..5], b"fresh", "new file content must be correct");
 }
+
+/// `lookup` must return `NotADirectory` when `dir_inode` names a file rather
+/// than a directory.
+///
+/// `lookup` reads the inode and then checks `dir.kind != KIND_DIR` before
+/// walking any directory blocks.  On a WovenFS volume the only valid directory
+/// inode is the root (inode 1, `KIND_DIR`); every other live inode is
+/// `KIND_FILE`.  A caller that accidentally passes a file inode as the directory
+/// argument — or that receives a corrupt inode number — must get a clean
+/// `NotADirectory` error rather than having `dir_entries` read the file's data
+/// blocks as if they contained directory entries, which would produce garbage
+/// lookups or spurious `NotFound` results.
+///
+/// Without the guard, `dir_entries` walks the file's data sectors and
+/// interprets each 64-byte chunk as a `DirEntry`.  For a five-byte file the
+/// first entry's `inode` field comes from the first eight bytes of file content
+/// — an unpredictable value that might spuriously match or corrupt state.
+#[test]
+fn lookup_refuses_a_file_inode_as_directory() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // Passing a file inode as the directory argument must be refused.
+    assert_eq!(
+        volume.lookup(file_inode, "hello.txt"),
+        Err(Error::NotADirectory),
+        "lookup on a file inode must return NotADirectory"
+    );
+
+    // Control: lookup on the root directory (KIND_DIR) succeeds.
+    assert_eq!(
+        volume.lookup(1, "hello.txt").map(|entry| entry.inode),
+        Ok(file_inode),
+        "lookup on the root directory must find the file"
+    );
+}
