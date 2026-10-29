@@ -1,5 +1,70 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming the same block twice
+
+Branch: `auto/wovenhat-development` (base `482b97c4`). Working tree was clean.
+
+### Defect / gap
+
+`checked_inode` (called via `self.inode(number)` in `check()`'s main inode loop)
+detects intra-inode duplicate block pointers for every inode regardless of kind:
+for each non-zero `direct[slot]` it checks `direct[slot + 1..].contains(block)`
+and returns `Err(Corrupt)` if so.
+
+`check_refuses_a_file_inode_naming_the_same_block_twice` covers this guard only
+for `KIND_FILE` inodes.  No test exercised the same guard when the root directory
+inode (inode 1, `KIND_DIR`) has `direct[0] == direct[1]`.
+
+Such a state is impossible to produce through any runtime path — `format()`
+hardcodes `direct[0] = root_block` and zeroes every other slot via
+`Inode::empty()`, and no write path ever modifies a directory inode's `direct`
+array.  The consequence if the guard were absent: any write of the directory
+block would stage it twice with different bytes in the same transaction, and
+freeing it (if the root were torn down) would leave the allocator with a
+dangling pointer to a block already given to another owner.
+
+The error fires from `checked_inode` in `check()`'s main loop, before the
+root-specific `direct[slot] != 0 for slot > 0` guard is reached.  The two
+guards therefore address different corruptions: the root-specific guard catches
+an *extra* block (different from `direct[0]`) in a later slot; this test catches
+the same block appearing in two slots.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`check_refuses_root_directory_inode_naming_the_same_block_twice`:
+
+- Calls `formatted()` to get a fresh, empty volume.
+- Reads `dir_block = root.direct[0]` (the root directory's data block).
+- Forks the image and calls `reseal_inode_direct(&image, 1, 1, dir_block)` to set
+  `root.direct[1] = dir_block` (same as `direct[0]`) and reseal the inode
+  structural checksum so `mount()` accepts the image.
+- Asserts `volume.check()` returns `Err(Error::Corrupt)`.
+- Asserts `check()` did not modify the image.
+- Control: the unpatched volume passes `check()`.
+
+No production code changed — the guard already existed in `checked_inode`;
+only the missing cross-kind test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **75 passed / 0 failed** (was 74; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires from `checked_inode` during main-loop processing of inode 1;
+  the root-specific section is never reached.
+- Only `direct[1] = direct[0]` is tested; the same guard would fire for any slot
+  in `direct[2..7]` set to `dir_block`, but the cross-kind principle is proven.
+- No repair (fsck) path — `check()` detects but cannot fix corruption.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses root directory inode naming a bitmap-free block
 
 Branch: `auto/wovenhat-development` (base `b2215da7`). Working tree was clean.

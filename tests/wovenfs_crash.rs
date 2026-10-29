@@ -3858,3 +3858,63 @@ fn check_refuses_a_file_inode_naming_the_root_directory_data_block() {
     let mut clean = Volume::mount(base).expect("mount clean");
     assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
 }
+
+/// `check()` must refuse the root directory inode when `direct[0] == direct[1]`
+/// (intra-inode duplicate block pointer).
+///
+/// `checked_inode` (called via `self.inode(number)` in `check()`'s main inode
+/// loop) detects intra-inode duplicate block pointers for every inode, regardless
+/// of kind.  For each non-zero `direct[slot]` it checks whether that block also
+/// appears in `direct[slot + 1..]`, returning `Err(Corrupt)` if so.
+///
+/// `check_refuses_a_file_inode_naming_the_same_block_twice` covers this guard
+/// for `KIND_FILE` inodes: a file with two direct pointers to the same block.
+/// No prior test exercised the same guard for the root directory inode
+/// (`KIND_DIR`): a crafted image where `root.direct[0] == root.direct[1]`.
+///
+/// Such a state is impossible to produce through any runtime path — `format()`
+/// hardcodes `direct[0] = root_block` and zeroes every other slot via
+/// `Inode::empty()`, and no write path ever modifies a directory inode's
+/// `direct` array.  The consequence if `checked_inode`'s guard were missing:
+/// any flush of the directory data block would stage that block twice with
+/// different bytes, and freeing it (if the root were ever torn down) would
+/// leave the allocator with a dangling pointer to a block already given to
+/// another owner.
+///
+/// The error fires in `check()`'s main loop when processing inode 1 (root):
+/// `checked_inode` sees `direct[1] == direct[0]` and returns `Err(Corrupt)`.
+/// This happens before `check()` reaches the root-specific guard
+/// (`direct[slot] != 0 for slot > 0`), so the two guards address different
+/// corruptions even though both fire for a root with a non-zero `direct[1]`:
+/// the root-specific guard catches a *different* extra block; this test catches
+/// the same block appearing twice.
+#[test]
+fn check_refuses_root_directory_inode_naming_the_same_block_twice() {
+    let base = formatted();
+
+    // Read the root directory's data block from direct[0].
+    let dir_block = read_inode_direct0(&base, 1);
+
+    // Fork and set root.direct[1] = dir_block (same as direct[0]).  Reseal
+    // the inode structural checksum so mount() accepts the image.  The
+    // intra-duplicate guard in checked_inode fires when check() calls
+    // self.inode(1): direct[0] appears in direct[1..] -> Err(Corrupt).
+    let image = base.fork(None);
+    reseal_inode_direct(&image, 1, 1, dir_block);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse root directory inode with direct[0] == direct[1]"
+    );
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched volume passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean volume must pass check()");
+}
