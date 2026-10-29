@@ -1,5 +1,64 @@
 # Autonomous progress log
 
+## 2026-10-29 — WovenFS check(): test that check() refuses an orphaned file inode
+
+Branch: `auto/wovenhat-development` (base `0e803738`). Working tree was clean.
+
+### Defect / gap
+
+`check()` contains a final orphan-inode scan (lines 1696-1704 of `kernel/src/wfs.rs`):
+for every live `KIND_FILE` inode it verifies that at least one live directory entry
+names it.  A file inode with no directory entry pointing to it represents a permanent
+space leak — `unlink` works by name, so neither the inode slot nor its data blocks
+can ever be freed through the normal path.
+
+No prior test exercised this guard directly.  Every existing test either patches
+fields that trigger an earlier guard (out-of-range inode, free inode, unknown kind,
+etc.) or leaves the directory entries intact.
+
+This gap matters because:
+- a crashed write that clears a directory entry while leaving the inode live (e.g.,
+  a power failure between the two sector writes of an `unlink` transaction) could
+  in principle produce an orphan on a filesystem whose journal failed to replay;
+- a crafted image can plant an orphan without triggering any structural guard.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `check_refuses_an_orphaned_file_inode`:
+
+- Calls `formatted()` to get a fresh volume, then creates `a.txt` (5 bytes) so
+  inode 2 (`KIND_FILE`) is live.
+- Records the file inode number, the directory data block address, and the entry
+  index of `a.txt` within the directory block.
+- Forks the image and overwrites the entire 64-byte entry slot with zeros via
+  `patch_dir_entry(&image, dir_block, entry_index, 0, &[0u8; 64])`.  All-zero
+  is a valid free slot: it passes the reserved-padding guard and the free-entry-
+  nonzero-fields guard, so no earlier `check()` guard fires.
+- Asserts `check()` returns `Err(Error::Corrupt)` and that the image is not
+  modified.
+- Control: the unpatched base volume passes `check()` and the file is readable.
+
+No production code changed — the orphan-inode scan already existed; only the
+missing test was added.
+
+### Results (run on this host, 2026-10-29)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **77 passed / 0 failed** (was 76; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test corrupts only one entry on a single-file volume.  A volume with
+  multiple files where one file's entry is cleared while the other remains
+  is a natural follow-up.
+- No repair (fsck) path — `check()` detects but cannot fix the orphan.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS check(): test that check() refuses an inode with a bad structural checksum
 
 Branch: `auto/wovenhat-development` (base `9447f51a`). Working tree was clean.

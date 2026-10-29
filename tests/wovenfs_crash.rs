@@ -4014,3 +4014,75 @@ fn check_refuses_an_inode_with_a_bad_structural_checksum() {
         "check() must not modify the image (root inode case)"
     );
 }
+
+/// `check()` must refuse a live `KIND_FILE` inode that no directory entry names.
+///
+/// The orphan-inode scan at the end of `check()` iterates every inode; for
+/// every live `KIND_FILE` inode it requires at least one live directory entry
+/// whose `inode` field equals the inode number.  An orphan — live (mode != 0),
+/// kind == `KIND_FILE`, but unreachable by name — represents a permanent space
+/// leak: `unlink` works by name, so neither the inode slot nor its data blocks
+/// can ever be freed through the normal path.
+///
+/// The scenario is impossible to produce through any runtime path (`create` and
+/// `unlink` always keep the directory entries consistent), but a crashed write
+/// that clears a directory entry while leaving the inode live, or a crafted
+/// image, can produce it.
+///
+/// Zeroing the entire 64-byte entry slot is the minimal surgical change: it
+/// produces a valid free slot (all bytes zero) that passes every earlier guard
+/// (reserved-padding, free-entry-nonzero-fields), so only the orphan-inode
+/// scan at the end of `check()` fires.
+#[test]
+fn check_refuses_an_orphaned_file_inode() {
+    // Build a base image with one live file (inode 2, KIND_FILE).
+    let base = formatted();
+    let (file_inode, dir_block, entry_index) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+        let file_inode = volume.lookup(1, "a.txt").expect("lookup a.txt").inode;
+        let dir_block = volume.inode(1).expect("root inode").direct[0];
+        let entry_index = volume
+            .read_dir(1)
+            .expect("read_dir")
+            .entries
+            .iter()
+            .position(|entry| entry.matches("a.txt"))
+            .expect("entry for a.txt");
+        (file_inode, dir_block, entry_index)
+    };
+
+    // Overwrite the entire 64-byte directory entry slot with zeros.  The
+    // inode itself (inode `file_inode`) stays live and unchanged.  Because
+    // the slot is now all-zeros it is a valid free entry and passes every
+    // earlier guard.  The orphan-inode scan then finds that no live entry
+    // names `file_inode` and returns Err(Corrupt).
+    let image = base.fork(None);
+    patch_dir_entry(&image, dir_block, entry_index, 0, &[0u8; 64]);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+    assert_eq!(
+        volume.check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live file inode that no directory entry names"
+    );
+    // check() must not modify the image.
+    assert!(
+        image.sectors() == before,
+        "check() must not modify the image"
+    );
+
+    // Control: the unpatched image passes check().
+    let mut clean = Volume::mount(base).expect("mount clean");
+    assert_eq!(clean.check(), Ok(()), "clean image must pass check()");
+    // Verify the file is readable on the clean image.
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        clean.read_file(file_inode, &mut buf),
+        Ok(5),
+        "a.txt must be readable on the clean image"
+    );
+}
