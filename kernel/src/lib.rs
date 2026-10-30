@@ -51,3 +51,5 @@ pub mod io_ports;
 pub mod async_ipc;
 
 pub mod process_monitor;
+
+pub mod elf_loader;
