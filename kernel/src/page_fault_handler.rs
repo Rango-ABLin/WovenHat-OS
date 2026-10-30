@@ -1,11 +1,15 @@
-// Page fault exception handler integration for kernel stack guard pages in WovenHat-OS
+// Page fault exception handler integration with TaskRegistry for WovenHat-OS
 use x86_64::registers::control::Cr2;
 use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode};
 use x86_64::VirtAddr;
+use crate::task_registry::TaskRegistry;
+use spin::Mutex;
+
+pub static GLOBAL_TASK_REGISTRY: Mutex<TaskRegistry> = Mutex::new(TaskRegistry::new());
 
 pub fn check_kernel_guard_page_fault(faulting_address: VirtAddr) -> bool {
-    let _ = faulting_address;
-    false 
+    let registry = GLOBAL_TASK_REGISTRY.lock();
+    registry.is_guard_page(faulting_address)
 }
 
 pub extern "C" fn page_fault_handler_wrapper(
