@@ -1,5 +1,62 @@
 # Autonomous progress log
 
+## 2026-10-30 — WovenFS: test that read_file refuses a multi-block file with a zero interior block pointer
+
+Branch: `auto/wovenhat-development` (base `1cad0c5d`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (wfs.rs lines 1230–1233) returns `Err(Error::Corrupt)` whenever it
+finds `direct[slot] == 0` while `copied < size`.  The existing test
+`read_file_refuses_a_file_with_a_zero_block_pointer` covers only the
+**single-block** case (slot 0 zeroed, `size = 5`).  For a two-block file
+(`size > SECTOR_SIZE`), the guard must also fire on the **second iteration**
+(slot 1), after the first block has been read successfully.  No test exercised
+this path.
+
+`stage_write` always allocates a fresh, non-zero block address for every slot
+required by `size`.  An inode with `size > SECTOR_SIZE` and `direct[1] == 0`
+is therefore corruption no runtime path can produce.  Without the guard the
+second read_block call would attempt to read block 0 — the volume's first
+sector, holding the superblock checkpoint — as file content.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_file_refuses_a_multi_block_file_with_a_zero_interior_block_pointer`:
+
+- Calls `two_block_file()` to get a 600-byte, two-block file (inode with
+  `direct[0]` and `direct[1]` non-zero, `size = 600`).
+- Control: the unpatched file reads back `Ok(600)` with `[7u8; 600]` content.
+- Forks the image and calls `reseal_inode_direct(&image, inode, 1, 0)` to set
+  `direct[1] = 0` while keeping `size = 600` (structural checksum resealed so
+  `mount()` accepts the image).
+- Snapshots the image before the refused read.
+- Asserts `read_file(inode, &mut buf)` returns `Err(Error::Corrupt)` — slot 0
+  is read (copied = 512), then slot 1 fires the `block == 0` guard.
+- Asserts the image was not modified by the refused read.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-30)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **86 passed / 0 failed** (was 85; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test zeros `direct[1]` in a two-block file.  A file with more blocks
+  (e.g., `direct[2]` zeroed in a three-block file) would fire the same guard on
+  the third iteration; the principle is proven by the two-block case.
+- No production code changed — the guard already existed in `read_file`; only
+  the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-30 — WovenFS: test that write_file refuses a freed inode
 
 Branch: `auto/wovenhat-development` (base `8b84a580`). Working tree was clean.

@@ -4492,3 +4492,56 @@ fn write_file_refuses_a_freed_inode() {
     );
     assert_eq!(&buf[..7], b"updated", "content must match the write");
 }
+
+/// `read_file` (wfs.rs lines 1230–1233) returns `Err(Error::Corrupt)` whenever
+/// it encounters a `direct[slot] == 0` while `copied < size`.  The existing
+/// `read_file_refuses_a_file_with_a_zero_block_pointer` test covers only the
+/// single-block case (slot 0).  For a two-block file (size > SECTOR_SIZE) the
+/// guard must also fire on the *second* iteration (slot 1), after the first
+/// block has been read successfully.
+///
+/// `two_block_file()` creates a 600-byte file: `direct[0]` holds the first 512
+/// bytes and `direct[1]` holds the remaining 88 bytes.  Zeroing `direct[1]`
+/// while keeping `size = 600` ensures `copied = 512 < size = 600` when slot 1
+/// is reached, so the guard fires there and not on slot 0.
+#[test]
+fn read_file_refuses_a_multi_block_file_with_a_zero_interior_block_pointer() {
+    let (base, inode) = two_block_file();
+
+    // Control: the unpatched two-block file reads back correctly.
+    let mut out = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        Volume::mount(base.clone())
+            .expect("mount")
+            .read_file(inode, &mut out),
+        Ok(600),
+        "control: unpatched two-block file must read back 600 bytes"
+    );
+    assert_eq!(
+        &out[..600],
+        &[7u8; 600][..],
+        "control: content must match [7; 600]"
+    );
+
+    // Fork and zero direct[1] while keeping size = 600 (the structural
+    // checksum is resealed so mount() and checked_inode() accept the image).
+    let image = base.fork(None);
+    reseal_inode_direct(&image, inode, 1, 0);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+    let mut buf = [0u8; MAX_FILE_SIZE];
+
+    // The first block is read (copied = 512), then direct[1] == 0 fires.
+    assert_eq!(
+        volume.read_file(inode, &mut buf),
+        Err(Error::Corrupt),
+        "read_file must return Corrupt when direct[1] is zero but size > SECTOR_SIZE"
+    );
+
+    // The refused read must not have modified the image.
+    assert!(
+        image.sectors() == before,
+        "a refused read_file must not modify the image"
+    );
+}
