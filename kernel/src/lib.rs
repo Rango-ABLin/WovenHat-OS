@@ -37,3 +37,5 @@ pub mod apic_timer;
 pub mod heap;
 
 pub mod dynamic_tasks;
+
+pub mod dynamic_caps;
