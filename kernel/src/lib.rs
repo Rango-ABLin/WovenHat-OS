@@ -39,3 +39,5 @@ pub mod heap;
 pub mod dynamic_tasks;
 
 pub mod dynamic_caps;
+
+pub mod vfs;
