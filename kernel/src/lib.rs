@@ -1,3 +1,7 @@
+﻿#![no_std]
+#![no_main]
+#![feature(abi_x86_interrupt)]
+
 
 // WovenHat-OS Kernel Hardening & Security Subsystems
 pub mod ipc_ring;
@@ -71,3 +75,6 @@ pub mod revocation;
 pub mod scheduler_hook;
 
 pub mod privilege;
+
+
+pub mod syscall_gateway;
