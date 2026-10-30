@@ -67,3 +67,5 @@ pub mod faults;
 pub mod cap_transfer;
 
 pub mod revocation;
+
+pub mod scheduler_hook;
