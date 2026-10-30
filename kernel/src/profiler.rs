@@ -1,7 +1,7 @@
 // CPU Utilization and Context Switch Latency Profiler for WovenHat-OS
 extern crate alloc;
 use core::sync::atomic::{AtomicU64, Ordering};
-use x86_64::instructions::tsc::read_tsc;
+use core::arch::x86_64::_rdtsc;
 
 pub struct KernelProfiler {
     pub total_context_switches: AtomicU64,
@@ -21,7 +21,7 @@ impl KernelProfiler {
     }
 
     pub fn record_context_switch(&self, start_tsc: u64) {
-        let end_tsc = read_tsc();
+        let end_tsc = unsafe { _rdtsc() };
         let latency = end_tsc.saturating_sub(start_tsc);
         self.total_context_switches.fetch_add(1, Ordering::Relaxed);
         self.cumulative_switch_latency_cycles.fetch_add(latency, Ordering::Relaxed);
