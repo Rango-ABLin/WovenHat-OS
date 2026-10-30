@@ -29,3 +29,5 @@ pub mod cap_delegation;
 pub mod task_vm;
 
 pub mod context_switch;
+
+pub mod timer_sched;
