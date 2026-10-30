@@ -57,3 +57,5 @@ pub mod elf_loader;
 pub mod profiler;
 
 pub mod module_loader;
+
+pub mod telemetry;
