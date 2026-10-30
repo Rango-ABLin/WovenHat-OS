@@ -1,7 +1,11 @@
-// Lock-free atomic IPC ring buffer with integrated Capability Context checks for WovenHat-OS
+// Lock-free atomic IPC ring buffer with Capability checks & BoundedAuditRing logging for WovenHat-OS
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::cell::UnsafeCell;
 use crate::capabilities::{TaskCapabilityContext, CapabilityType};
+use crate::audit::{BoundedAuditRing, AuditAction};
+use spin::Mutex;
+
+pub static GLOBAL_AUDIT_RING: Mutex<BoundedAuditRing> = Mutex::new(BoundedAuditRing::new());
 
 pub const RING_CAPACITY: usize = 64;
 
@@ -44,10 +48,17 @@ impl AtomicIpcRingBuffer {
         }
     }
 
-    pub fn send(&self, msg: IpcMessage, cap_ctx: &TaskCapabilityContext) -> Result<(), IpcError> {
-        if !cap_ctx.has_capability(CapabilityType::Ipc) {
+    pub fn send(&self, msg: IpcMessage, cap_ctx: &TaskCapabilityContext, tick: u64) -> Result<(), IpcError> {
+        let has_cap = cap_ctx.has_capability(CapabilityType::Ipc);
+        
+        let mut audit = GLOBAL_AUDIT_RING.lock();
+        if !has_cap {
+            audit.log_event(cap_ctx.pid, AuditAction::CapabilityCheckDenied, CapabilityType::Ipc, false, tick);
             return Err(IpcError::PermissionDenied);
         }
+        audit.log_event(cap_ctx.pid, AuditAction::CapabilityCheckAllowed, CapabilityType::Ipc, true, tick);
+        audit.log_event(cap_ctx.pid, AuditAction::IpcSend, CapabilityType::Ipc, true, tick);
+        drop(audit);
 
         let mask = RING_CAPACITY - 1;
         let mut current_tail = self.tail.load(Ordering::Relaxed);
@@ -79,10 +90,17 @@ impl AtomicIpcRingBuffer {
         }
     }
 
-    pub fn receive(&self, cap_ctx: &TaskCapabilityContext) -> Result<IpcMessage, IpcError> {
-        if !cap_ctx.has_capability(CapabilityType::Ipc) {
+    pub fn receive(&self, cap_ctx: &TaskCapabilityContext, tick: u64) -> Result<IpcMessage, IpcError> {
+        let has_cap = cap_ctx.has_capability(CapabilityType::Ipc);
+
+        let mut audit = GLOBAL_AUDIT_RING.lock();
+        if !has_cap {
+            audit.log_event(cap_ctx.pid, AuditAction::CapabilityCheckDenied, CapabilityType::Ipc, false, tick);
             return Err(IpcError::PermissionDenied);
         }
+        audit.log_event(cap_ctx.pid, AuditAction::CapabilityCheckAllowed, CapabilityType::Ipc, true, tick);
+        audit.log_event(cap_ctx.pid, AuditAction::IpcReceive, CapabilityType::Ipc, true, tick);
+        drop(audit);
 
         let mask = RING_CAPACITY - 1;
         let mut current_head = self.head.load(Ordering::Relaxed);
