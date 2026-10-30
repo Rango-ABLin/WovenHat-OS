@@ -7,3 +7,5 @@ pub mod aslr;
 pub mod process_loader;
 
 pub mod stack_mapper;
+
+pub mod page_fault_handler;
