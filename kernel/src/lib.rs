@@ -43,3 +43,5 @@ pub mod dynamic_caps;
 pub mod vfs;
 
 pub mod net_socket;
+
+pub mod shared_memory;
