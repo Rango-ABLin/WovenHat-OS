@@ -1,6 +1,7 @@
-// Lock-free atomic IPC ring buffer with capability gating for WovenHat-OS
+// Lock-free atomic IPC ring buffer with integrated Capability Context checks for WovenHat-OS
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::cell::UnsafeCell;
+use crate::capabilities::{TaskCapabilityContext, CapabilityType};
 
 pub const RING_CAPACITY: usize = 64;
 
@@ -43,8 +44,8 @@ impl AtomicIpcRingBuffer {
         }
     }
 
-    pub fn send(&self, msg: IpcMessage, has_ipc_capability: bool) -> Result<(), IpcError> {
-        if !has_ipc_capability {
+    pub fn send(&self, msg: IpcMessage, cap_ctx: &TaskCapabilityContext) -> Result<(), IpcError> {
+        if !cap_ctx.has_capability(CapabilityType::Ipc) {
             return Err(IpcError::PermissionDenied);
         }
 
@@ -78,8 +79,8 @@ impl AtomicIpcRingBuffer {
         }
     }
 
-    pub fn receive(&self, has_ipc_capability: bool) -> Result<IpcMessage, IpcError> {
-        if !has_ipc_capability {
+    pub fn receive(&self, cap_ctx: &TaskCapabilityContext) -> Result<IpcMessage, IpcError> {
+        if !cap_ctx.has_capability(CapabilityType::Ipc) {
             return Err(IpcError::PermissionDenied);
         }
 
