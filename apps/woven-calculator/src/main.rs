@@ -97,43 +97,81 @@ fn draw_gui(
     _pressed: bool,
     evaluate_button: &Button<'_>,
 ) {
+    // Window chrome
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
+
+    // Raised panel
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
+
+    // Title bar band
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, TITLE_H as usize, PANEL_RAISED);
     canvas.fill_rect(
-        PANEL_X + 184,
-        PANEL_Y + 8,
-        18,
-        8,
-        if active { ACCENT } else { PANEL },
+        PANEL_X,
+        PANEL_Y + TITLE_H,
+        PANEL_WIDTH,
+        1,
+        rgb(50, 60, 86),
     );
+
     let theme = Theme {
-        surface: PANEL,
+        surface: BUTTON,
         accent: ACCENT,
         text: TEXT,
-        disabled: BUTTON,
+        disabled: rgb(76, 84, 100),
         focus: ACCENT,
     };
-    Label::new(Frame::new(PANEL_X - 2, PANEL_Y, 180, 16), "WovenCalculator").draw(canvas, theme);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", TEXT);
+
+    // Title + active status pill
+    Label::new(
+        Frame::new(PANEL_X + PAD, PANEL_Y + 2, 140, 14),
+        "Calculator",
+    )
+    .draw(canvas, theme);
+
+    let pill_w = 10usize;
+    let pill_x = PANEL_X + PANEL_WIDTH as i32 - PAD - pill_w as i32;
+    canvas.fill_rect(
+        pill_x,
+        PANEL_Y + 5,
+        pill_w,
+        8,
+        if active { ACCENT } else { rgb(60, 70, 96) },
+    );
+
+    // Display card (expression + result)
+    let disp_x = PANEL_X + PAD;
+    let disp_y = PANEL_Y + TITLE_H + PAD;
+    let disp_w = (PANEL_WIDTH as i32 - PAD * 2) as usize;
+    let disp_h = 56usize;
+    canvas.fill_rect(disp_x, disp_y, disp_w, disp_h, DISPLAY);
+    stroke_rect(canvas, disp_x, disp_y, disp_w, disp_h, rgb(50, 60, 86));
+
+    canvas.draw_text(disp_x + 6, disp_y + 4, "Expression", MUTED);
     if expression.is_empty() {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, "Type e.g. 12+3", ACCENT);
+        canvas.draw_text(disp_x + 6, disp_y + 16, "12+3  (type to enter)", MUTED);
     } else if let Ok(text) = core::str::from_utf8(expression) {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, text, TEXT);
+        canvas.draw_text(disp_x + 6, disp_y + 16, text, TEXT);
     }
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", ACCENT);
+
+    canvas.draw_text(disp_x + 6, disp_y + 34, "Result", MUTED);
     if let Some(value) = result {
         let mut digits = [0u8; 24];
         let result_text = format_signed(value, &mut digits);
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, result_text, ACCENT);
+        canvas.draw_text(disp_x + 6, disp_y + 44, result_text, ACCENT);
     } else {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", ACCENT);
+        canvas.draw_text(disp_x + 6, disp_y + 44, "—", MUTED);
     }
-    evaluate_button.draw(canvas, theme);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter evaluates", TEXT);
-    // The desktop owns the cursor; clients draw only control hover state.
-}
 
+    // Footer hint + primary action
+    canvas.draw_text(
+        PANEL_X + PAD,
+        BUTTON_Y + 4,
+        "Enter evaluates",
+        MUTED,
+    );
+    evaluate_button.draw(canvas, theme);
+}
 fn render(
     window: &GraphicsSurface,
     expression: &[u8],
