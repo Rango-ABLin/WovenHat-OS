@@ -25,3 +25,5 @@ pub mod file_io;
 pub mod scheduler;
 
 pub mod cap_delegation;
+
+pub mod task_vm;
