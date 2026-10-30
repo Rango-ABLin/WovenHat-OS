@@ -15,3 +15,5 @@ pub mod task_registry;
 pub mod capabilities;
 
 pub mod audit;
+
+pub mod syscall;
