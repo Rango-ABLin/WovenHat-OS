@@ -61,3 +61,5 @@ pub mod module_loader;
 pub mod telemetry;
 
 pub mod user_space;
+
+pub mod faults;
