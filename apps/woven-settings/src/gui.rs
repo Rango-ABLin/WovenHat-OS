@@ -1,5 +1,5 @@
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
+use libwoven::ui::{Button, DesignTokens, Label, Theme};
 use libwoven::{rgb, Canvas, GraphicsSurface};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,14 +31,20 @@ const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
+
+// Layout from shared DesignTokens (Stage 11 foothold).
+// space_3 == 12, space_2 == 8 — keep accepted geometry, stop hard-coding magic numbers.
+const TOKENS: DesignTokens = DesignTokens::DEFAULT;
+const PANEL_INSET: i32 = TOKENS.space_3; // 12
+const CONTENT_PAD: i32 = TOKENS.space_2 + 2; // 10 (preserves previous label offset)
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 190;
 const BUTTON_WIDTH: usize = 90;
 const BUTTON_HEIGHT: usize = 24;
-const PANEL_X: i32 = 12;
-const PANEL_Y: i32 = 12;
-const PANEL_WIDTH: usize = 336;
-const PANEL_HEIGHT: usize = 216;
+const PANEL_X: i32 = PANEL_INSET;
+const PANEL_Y: i32 = PANEL_INSET;
+const PANEL_WIDTH: usize = (WIDTH as i32 - PANEL_INSET * 2) as usize; // 336
+const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 216;
 // Keep the static render target below the current Ring-3 image/stack window.
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -153,11 +159,11 @@ fn draw_settings(
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, accent);
     let title_theme = shared;
     Label::new(
-        Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
+        Frame::new(PANEL_X + CONTENT_PAD, PANEL_Y + TOKENS.space_2, 180, 16),
         "WovenSettings",
     )
     .draw(canvas, title_theme);
-    Label::new(Frame::new(PANEL_X + 10, PANEL_Y + 32, 120, 16), "Identity").draw(
+    Label::new(Frame::new(PANEL_X + CONTENT_PAD, PANEL_Y + 32, 120, 16), "Identity").draw(
         canvas,
         Theme {
             text: accent,
@@ -185,7 +191,7 @@ fn draw_settings(
         &mut digits,
         shared,
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
+    canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 80, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
         draw_clock(
             canvas,
@@ -196,9 +202,9 @@ fn draw_settings(
             shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
+        canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 96, "unavailable", text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", accent);
+    canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 136, "Display", accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -228,7 +234,7 @@ fn draw_settings(
             shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
+        canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 152, "unavailable", text);
     }
     let mut refresh_digits = [0u8; 20];
     draw_number(
