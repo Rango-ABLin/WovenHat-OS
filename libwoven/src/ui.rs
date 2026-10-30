@@ -187,20 +187,21 @@ impl<'a> Button<'a> {
             fill,
         );
         if self.focused {
+            // 2px focus bars: clearer keyboard/control state (Stage 11).
             canvas.fill_rect(
                 self.frame.x,
                 self.frame.y,
                 self.frame.width.max(0) as usize,
-                1,
+                2,
                 theme.focus,
             );
             canvas.fill_rect(
                 self.frame.x,
                 self.frame
                     .y
-                    .saturating_add(self.frame.height.saturating_sub(1)),
+                    .saturating_add(self.frame.height.saturating_sub(2)),
                 self.frame.width.max(0) as usize,
-                1,
+                2,
                 theme.focus,
             );
         }

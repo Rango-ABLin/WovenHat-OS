@@ -4,7 +4,7 @@
 use core::panic::PanicInfo;
 
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
+use libwoven::ui::{Button, DesignTokens, Label, Theme};
 use libwoven::{Args, Canvas, GraphicsSurface, rgb};
 use wovenhat_calculator::evaluate;
 
@@ -17,15 +17,18 @@ const PANEL: u32 = rgb(35, 43, 66);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 const BUTTON: u32 = rgb(45, 65, 90);
+
+// Layout from shared DesignTokens (Stage 11).
+const TOKENS: DesignTokens = DesignTokens::DEFAULT;
+const PANEL_INSET: i32 = TOKENS.space_3; // 12
 const BUTTON_X: i32 = 150;
 const BUTTON_Y: i32 = 110;
 const BUTTON_WIDTH: usize = 60;
 const BUTTON_HEIGHT: usize = 18;
-
-const PANEL_X: i32 = 12;
-const PANEL_Y: i32 = 12;
-const PANEL_WIDTH: usize = 216;
-const PANEL_HEIGHT: usize = 126;
+const PANEL_X: i32 = PANEL_INSET;
+const PANEL_Y: i32 = PANEL_INSET;
+const PANEL_WIDTH: usize = (WIDTH as i32 - PANEL_INSET * 2) as usize; // 216
+const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 126
 const MAX_INPUT: usize = 24;
 // Keep the static render target below the userspace image/stack window while
 // still covering the common tiled-client geometry. Larger WSIZ requests are
