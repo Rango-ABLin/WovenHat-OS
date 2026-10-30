@@ -355,6 +355,7 @@ stage1-5-test = ["qemu-test"]
 stage7-test = ["qemu-test"]
 
 [dependencies]
+linked_list_allocator = "0.10.5"
 libwoven = { path = "../libwoven", default-features = false }
 bootloader_api = "0.11.17"
 x86_64 = "0.15.5"
@@ -384,3 +385,4 @@ rsa = { version = "0.9.9", default-features = false, features = ["sha2"] }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
 [lints.rust]
 warnings = "deny"
+

@@ -33,3 +33,5 @@ pub mod context_switch;
 pub mod timer_sched;
 
 pub mod apic_timer;
+
+pub mod heap;
