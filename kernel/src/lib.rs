@@ -49,3 +49,5 @@ pub mod shared_memory;
 pub mod io_ports;
 
 pub mod async_ipc;
+
+pub mod process_monitor;
