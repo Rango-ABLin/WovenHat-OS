@@ -1,5 +1,75 @@
 # Autonomous progress log
 
+## 2026-10-30 — WovenFS: test that read_file refuses a file with a mismatched data checksum
+
+Branch: `auto/wovenhat-development` (base `7e46007e`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (lines 1242–1244 of `kernel/src/wfs.rs`) verifies the FNV-1a
+checksum of the assembled file content against the stored `data_checksum`
+before returning bytes to the caller:
+
+```rust
+if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
+    return Err(Error::Corrupt);
+}
+```
+
+`check()` contains its own independent checksum verification at lines
+1421–1437, computing the hash directly from data blocks via `read_block`.
+The existing test `check_refuses_a_file_with_a_mismatched_data_checksum`
+only exercises the `check()` path and does not call `read_file` on a
+corrupted image.  No prior test exercised the `read_file` checksum guard
+as a standalone property.
+
+`stage_write` stores `data_checksum = fnv1a(data)` atomically with the
+data blocks in a single journal transaction, so a committed write always
+leaves them consistent.  A mismatch can only arise from on-disk bit-rot,
+a missed fsync, or a crafted image.  Without the guard `read_file` would
+silently return bytes that do not match what was written.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_file_refuses_a_file_with_a_mismatched_data_checksum`:
+
+- Calls `formatted()` and creates `hello.txt` with `b"hello world"` (11 bytes,
+  one block), recording its inode.
+- Control: the unpatched file reads back `Ok(11)` with the correct content.
+- Reads `direct[0]` to get the data block address, forks the image, and calls
+  `image.flip_byte(block as usize, 0)` to corrupt the first byte of the data
+  block without modifying the inode or its `data_checksum`.
+- Snapshots the image before the refused read.
+- Asserts `read_file(file_inode, &mut buf)` returns `Err(Error::Corrupt)` —
+  the content is copied into `buf`, then the checksum comparison fires.
+- Asserts the image was not modified by the refused read.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-30)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **87 passed / 0 failed** (was 86; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test corrupts one byte in a single-block file.  A multi-block file where
+  only the second block is corrupted would reach the checksum guard on the same
+  path (the full content is assembled before comparison); the single-block case
+  is sufficient to prove the guard fires.
+- The `read_file` checksum guard fires after all bytes are copied into the
+  caller's buffer; the buffer contains wrong data at the point of failure, but
+  the caller receives `Err(Corrupt)` and must discard it.
+- No production code changed — the guard already existed in `read_file`; only
+  the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-30 — WovenFS: test that read_file refuses a multi-block file with a zero interior block pointer
 
 Branch: `auto/wovenhat-development` (base `1cad0c5d`). Working tree was clean.

@@ -4545,3 +4545,78 @@ fn read_file_refuses_a_multi_block_file_with_a_zero_interior_block_pointer() {
         "a refused read_file must not modify the image"
     );
 }
+
+/// `read_file` (lines 1242-1244 of `wfs.rs`) verifies the content of the data
+/// blocks against the inode's `data_checksum` before returning bytes to the
+/// caller:
+///
+/// ```rust
+/// if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
+///     return Err(Error::Corrupt);
+/// }
+/// ```
+///
+/// `check()` performs the same verification through its own direct block-read
+/// loop (lines 1421-1437), so the two verification paths are independent.
+/// `check_refuses_a_file_with_a_mismatched_data_checksum` only exercises the
+/// `check()` path.  No prior test called `read_file` on a file whose data block
+/// content was corrupted after writing, leaving the `read_file` checksum guard
+/// untested as a standalone property.
+///
+/// `stage_write` stores `data_checksum = fnv1a(data)` atomically with the data
+/// blocks in a single journal transaction, so a committed write always leaves
+/// them consistent.  A mismatch can only arise from on-disk bit-rot, a missed
+/// fsync, or a crafted image.  Without this guard `read_file` would silently
+/// return bytes that do not match what was written.
+#[test]
+fn read_file_refuses_a_file_with_a_mismatched_data_checksum() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let inode = volume.create(1, "hello.txt", 0o100_644, 3).expect("create");
+        volume
+            .write_file(inode, b"hello world", 4)
+            .expect("write_file");
+        inode
+    };
+
+    // Control: the unpatched file reads back correctly.
+    let mut out = [0u8; MAX_FILE_SIZE];
+    let n = Volume::mount(base.clone())
+        .expect("mount control")
+        .read_file(file_inode, &mut out)
+        .expect("control read_file");
+    assert_eq!(n, 11, "control: file must read back 11 bytes");
+    assert_eq!(
+        &out[..11],
+        b"hello world",
+        "control: content must match"
+    );
+
+    // Fork and flip one byte in the data block without touching the inode.
+    // The stored data_checksum no longer matches the on-disk content.
+    let block = Volume::mount(base.clone())
+        .expect("mount")
+        .inode(file_inode)
+        .expect("inode")
+        .direct[0];
+    let image = base.fork(None);
+    image.flip_byte(block as usize, 0);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+    let mut buf = [0u8; MAX_FILE_SIZE];
+
+    // The content is copied into buf, then the checksum comparison fires.
+    assert_eq!(
+        volume.read_file(file_inode, &mut buf),
+        Err(Error::Corrupt),
+        "read_file must return Corrupt when content does not match data_checksum"
+    );
+
+    // The refused read must not have modified the image.
+    assert!(
+        image.sectors() == before,
+        "a refused read_file must not modify the image"
+    );
+}
