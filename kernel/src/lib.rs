@@ -63,3 +63,5 @@ pub mod telemetry;
 pub mod user_space;
 
 pub mod faults;
+
+pub mod cap_transfer;
