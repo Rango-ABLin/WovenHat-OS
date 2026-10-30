@@ -42,22 +42,25 @@ impl ThemeMode {
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 240;
-const BACKGROUND: u32 = rgb(14, 18, 30);
+const BACKGROUND: u32 = rgb(12, 14, 22);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
+const PANEL_RAISED: u32 = rgb(38, 46, 68);
+const CARD: u32 = rgb(18, 24, 38);
+const MUTED_DARK: u32 = rgb(140, 152, 176);
 
-// Layout from shared DesignTokens (Stage 11 foothold).
-// space_3 == 12, space_2 == 8 — keep accepted geometry, stop hard-coding magic numbers.
+// Layout from shared DesignTokens (Stage 11).
 const TOKENS: DesignTokens = DesignTokens::DEFAULT;
 const PANEL_INSET: i32 = TOKENS.space_3; // 12
-const CONTENT_PAD: i32 = TOKENS.space_2 + 2; // 10 (preserves previous label offset)
-const BUTTON_X: i32 = 250;
-const BUTTON_Y: i32 = 190;
-const BUTTON_WIDTH: usize = 90;
-const BUTTON_HEIGHT: usize = 24;
+const PAD: i32 = TOKENS.space_2; // 8
+const TITLE_H: i32 = 20;
 const PANEL_X: i32 = PANEL_INSET;
 const PANEL_Y: i32 = PANEL_INSET;
 const PANEL_WIDTH: usize = (WIDTH as i32 - PANEL_INSET * 2) as usize; // 336
-const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 216;
+const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 216
+const BUTTON_WIDTH: usize = 90;
+const BUTTON_HEIGHT: usize = 24;
+const BUTTON_X: i32 = PANEL_X + PANEL_WIDTH as i32 - PAD - BUTTON_WIDTH as i32;
+const BUTTON_Y: i32 = PANEL_Y + PANEL_HEIGHT as i32 - PAD - BUTTON_HEIGHT as i32;
 // Keep the static render target below the current Ring-3 image/stack window.
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -164,31 +167,65 @@ fn draw_settings(
     refresh: &Button<'_>,
 ) {
     let shared = mode.shared();
-    let panel = shared.surface;
     let accent = shared.accent;
     let text = shared.text;
+    let muted = match mode {
+        ThemeMode::Light => rgb(90, 100, 120),
+        ThemeMode::HighContrast => rgb(220, 220, 220),
+        ThemeMode::Dark => MUTED_DARK,
+    };
+    let panel = shared.surface;
+    let card = match mode {
+        ThemeMode::Light => rgb(255, 255, 255),
+        ThemeMode::HighContrast => rgb(0, 0, 0),
+        ThemeMode::Dark => CARD,
+    };
+    let raised = match mode {
+        ThemeMode::Light => rgb(230, 234, 242),
+        ThemeMode::HighContrast => rgb(20, 20, 20),
+        ThemeMode::Dark => PANEL_RAISED,
+    };
+    let divider = match mode {
+        ThemeMode::Light => rgb(200, 208, 220),
+        ThemeMode::HighContrast => accent,
+        ThemeMode::Dark => rgb(50, 60, 86),
+    };
+
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), mode.background());
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, panel);
     stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, accent);
-    let title_theme = shared;
+
+    // Title bar
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, TITLE_H as usize, raised);
+    canvas.fill_rect(PANEL_X, PANEL_Y + TITLE_H, PANEL_WIDTH, 1, divider);
+
+    let title_theme = Theme {
+        surface: raised,
+        accent,
+        text,
+        disabled: shared.disabled,
+        focus: shared.focus,
+    };
     Label::new(
-        Frame::new(PANEL_X + CONTENT_PAD, PANEL_Y + TOKENS.space_2, 180, 16),
-        "WovenSettings",
+        Frame::new(PANEL_X + PAD, PANEL_Y + 3, 180, 14),
+        "Settings",
     )
     .draw(canvas, title_theme);
-    Label::new(Frame::new(PANEL_X + CONTENT_PAD, PANEL_Y + 32, 120, 16), "Identity").draw(
-        canvas,
-        Theme {
-            text: accent,
-            ..title_theme
-        },
-    );
+
     let mut digits = [0u8; 20];
+    let card_x = PANEL_X + PAD;
+    let card_w = (PANEL_WIDTH as i32 - PAD * 2) as usize;
+
+    // Identity card
+    let id_y = PANEL_Y + TITLE_H + PAD;
+    canvas.fill_rect(card_x, id_y, card_w, 36, card);
+    stroke_rect(canvas, card_x, id_y, card_w, 36, divider);
+    canvas.draw_text(card_x + 6, id_y + 4, "Identity", accent);
     // SAFETY: argument-free identity queries.
     draw_number(
         canvas,
-        PANEL_X + 10,
-        PANEL_Y + 48,
+        card_x + 6,
+        id_y + 18,
         "UID ",
         unsafe { libwoven::syscall::getuid() },
         &mut digits,
@@ -197,32 +234,35 @@ fn draw_settings(
     // SAFETY: argument-free identity queries.
     draw_number(
         canvas,
-        PANEL_X + 150,
-        PANEL_Y + 48,
+        card_x + 140,
+        id_y + 18,
         "GID ",
         unsafe { libwoven::syscall::getgid() },
         &mut digits,
         shared,
     );
-    canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 80, "Clock (UTC)", accent);
+
+    // Clock card
+    let clock_y = id_y + 36 + 6;
+    canvas.fill_rect(card_x, clock_y, card_w, 48, card);
+    stroke_rect(canvas, card_x, clock_y, card_w, 48, divider);
+    canvas.draw_text(card_x + 6, clock_y + 4, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
-        draw_clock(
-            canvas,
-            PANEL_X + 10,
-            PANEL_Y + 96,
-            time,
-            &mut digits,
-            shared,
-        );
+        draw_clock(canvas, card_x + 6, clock_y + 18, time, &mut digits, shared);
     } else {
-        canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 96, "unavailable", text);
+        canvas.draw_text(card_x + 6, clock_y + 20, "unavailable", muted);
     }
-    canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 136, "Display", accent);
+
+    // Display card
+    let disp_y = clock_y + 48 + 6;
+    canvas.fill_rect(card_x, disp_y, card_w, 36, card);
+    stroke_rect(canvas, card_x, disp_y, card_w, 36, divider);
+    canvas.draw_text(card_x + 6, disp_y + 4, "Display", accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
-            PANEL_X + 10,
-            PANEL_Y + 152,
+            card_x + 6,
+            disp_y + 18,
             "W ",
             u64::from(info.width),
             &mut digits,
@@ -230,8 +270,8 @@ fn draw_settings(
         );
         draw_number(
             canvas,
-            PANEL_X + 110,
-            PANEL_Y + 152,
+            card_x + 100,
+            disp_y + 18,
             "H ",
             u64::from(info.height),
             &mut digits,
@@ -239,27 +279,37 @@ fn draw_settings(
         );
         draw_number(
             canvas,
-            PANEL_X + 210,
-            PANEL_Y + 152,
+            card_x + 200,
+            disp_y + 18,
             "Scale ",
             u64::from(info.scale),
             &mut digits,
             shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 152, "unavailable", text);
+        canvas.draw_text(card_x + 6, disp_y + 18, "unavailable", muted);
     }
+
+    // Footer
     let mut refresh_digits = [0u8; 20];
-    draw_number(
-        canvas,
-        PANEL_X + 10,
-        PANEL_Y + 184,
-        "Refreshes ",
-        u64::from(refresh_count),
-        &mut refresh_digits,
-        shared,
-    );
-    refresh.draw(canvas, shared);
+    canvas.draw_text(PANEL_X + PAD, BUTTON_Y + 6, "Refreshes", muted);
+    let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
+    if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
+        canvas.draw_text(PANEL_X + PAD + 64, BUTTON_Y + 6, refresh_text, accent);
+    }
+
+    let button_theme = Theme {
+        surface: match mode {
+            ThemeMode::Dark => rgb(45, 65, 90),
+            _ => shared.surface,
+        },
+        accent,
+        text,
+        disabled: shared.disabled,
+        focus: shared.focus,
+    };
+    refresh.draw(canvas, button_theme);
+
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
@@ -270,7 +320,6 @@ fn draw_settings(
         );
     }
 }
-
 fn render(
     window: &GraphicsSurface,
     pointer: Option<(u16, u16)>,
