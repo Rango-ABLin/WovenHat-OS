@@ -10873,6 +10873,66 @@ pub mod graphics {
             }
         }
 
+        /// Fill a top-to-bottom gradient rectangle whose top-left and
+        /// top-right corners are rounded and whose bottom corners stay
+        /// square -- a window title bar sitting flush on its square body,
+        /// the shape every modern desktop compositor (Windows, macOS,
+        /// GNOME) uses for a floating window, instead of either a fully
+        /// square title bar or one whose independently-rounded bottom
+        /// corners would show a seam against the square body beneath it.
+        pub fn rounded_rect_top_gradient(
+            &mut self,
+            rect: Rect,
+            radius: usize,
+            top: Color,
+            bottom: Color,
+        ) {
+            if rect.is_empty() {
+                return;
+            }
+            let radius = radius.min(rect.width.min(rect.height) / 2);
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
+                return;
+            };
+            let right = rect_end(rect.x, rect.width);
+            let radius = i32::try_from(radius).unwrap_or(i32::MAX);
+            let r = radius as i64;
+            let r2 = r * r;
+            let last = i128::try_from(rect.height.saturating_sub(1).max(1)).unwrap_or(i128::MAX);
+            let corner_y = rect.y.saturating_add(radius);
+            for canvas_row in row..row + rows {
+                let y = self.canvas.y + canvas_row as i32;
+                let offset = (i128::from(y) - i128::from(rect.y)).clamp(0, last);
+                let t = (offset * 255 / last) as u8;
+                let color = Color::rgb(
+                    lerp(top.red, bottom.red, t),
+                    lerp(top.green, bottom.green, t),
+                    lerp(top.blue, bottom.blue, t),
+                );
+                let in_top_band = y < corner_y;
+                for canvas_column in column..column + columns {
+                    let x = self.canvas.x + canvas_column as i32;
+                    if in_top_band {
+                        let corner_x = if x < rect.x.saturating_add(radius) {
+                            rect.x.saturating_add(radius)
+                        } else if x > right.saturating_sub(radius) {
+                            right.saturating_sub(radius)
+                        } else {
+                            x
+                        };
+                        let dx = i64::from(x) - i64::from(corner_x);
+                        let dy = i64::from(y) - i64::from(corner_y);
+                        if dx * dx + dy * dy > r2 {
+                            continue;
+                        }
+                    }
+                    self.canvas.set(x, y, color.packed());
+                }
+            }
+        }
+
         /// Fill a rectangle with a clipped top-to-bottom colour gradient.
         pub fn vertical_gradient(&mut self, rect: Rect, top: Color, bottom: Color) {
             let Some((column, row, columns, rows)) =
@@ -13613,6 +13673,15 @@ impl<'a> Canvas<'a> {
 
     /// Draw `text` with the kernel's font, top-left at `(x, y)`. Newlines
     /// start a new line at `x`.
+    ///
+    /// The font itself is a hard 1-bit-per-pixel 5x7 grid -- replacing it
+    /// with a true anti-aliased or proportional font is a much larger
+    /// project (a rasterizer, a new glyph set, and a pass over every pixel
+    /// offset in every caller that currently assumes this exact cell size).
+    /// Short of that, every glyph pixel adjacent to a lit one gets a
+    /// partial-coverage fringe, softening the diagonal stair-step edges
+    /// that otherwise read as a blocky, dated bitmap font, without
+    /// changing the glyph's cell size or any caller's layout math.
     pub fn draw_text(&mut self, x: i32, y: i32, text: &str, color: u32) {
         let (mut cursor_x, mut cursor_y) = (x, y);
         for character in text.chars() {
@@ -13621,14 +13690,34 @@ impl<'a> Canvas<'a> {
                 cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
                 continue;
             }
-            for (row, bits) in font::glyph(character).iter().enumerate() {
+            let glyph = font::glyph(character);
+            let bit_at = |row: i32, column: i32| -> bool {
+                if row < 0 || column < 0 || column >= font::WIDTH as i32 {
+                    return false;
+                }
+                let Some(bits) = usize::try_from(row).ok().and_then(|row| glyph.get(row)) else {
+                    return false;
+                };
+                bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0
+            };
+            for row in 0..glyph.len() as i32 {
                 for column in 0..font::WIDTH as i32 {
-                    if bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0 {
-                        self.set(
-                            cursor_x.saturating_add(column),
-                            cursor_y.saturating_add(row as i32),
-                            color,
-                        );
+                    let (px, py) = (cursor_x.saturating_add(column), cursor_y.saturating_add(row));
+                    if bit_at(row, column) {
+                        self.set(px, py, color);
+                        continue;
+                    }
+                    let mut neighbours = 0u32;
+                    for dr in -1..=1 {
+                        for dc in -1..=1 {
+                            if (dr, dc) != (0, 0) && bit_at(row + dr, column + dc) {
+                                neighbours += 1;
+                            }
+                        }
+                    }
+                    if neighbours > 0 {
+                        let opacity = (neighbours * 32).min(140) as u8;
+                        self.blend_pixel(px, py, color, opacity);
                     }
                 }
             }
