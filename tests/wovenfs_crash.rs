@@ -4412,3 +4412,83 @@ fn write_file_refuses_a_directory_inode() {
     );
     assert_eq!(&out[..5], b"world", "control: content must match");
 }
+
+/// `write_file` must return `NotFound` when the inode number names a freed
+/// (unlinked) inode rather than a live file inode.
+///
+/// `write_file` reads the staged inode and then checks `!node.is_used()`,
+/// returning `Err(Error::NotFound)` before touching any block.  After
+/// `unlink` the inode's `mode` field is zeroed, so `is_used()` returns
+/// `false`.  Without this guard, `write_file` could overwrite the block
+/// slots of a freed inode — either the stale block addresses written to by
+/// a previous occupant or the zero sentinel — silently corrupting unrelated
+/// data or creating dangling block references.
+///
+/// The symmetric path `read_file_refuses_a_freed_inode` already proves the
+/// freed-inode guard on the read side; this test proves the identical guard
+/// on the write side.
+#[test]
+fn write_file_refuses_a_freed_inode() {
+    let base = formatted();
+
+    // Create a file and record its inode number.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "gone.txt", 0o644, b"five!", 1)
+            .expect("create")
+    };
+
+    // Unlink the file so its inode becomes free (mode == 0).
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.unlink(1, "gone.txt", 2).expect("unlink");
+    }
+
+    // After unlink the name no longer resolves.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        assert_eq!(
+            volume.lookup(1, "gone.txt"),
+            Err(Error::NotFound),
+            "unlinked file must not be found by name"
+        );
+    }
+
+    // Snapshot the image before the refused write.
+    let before = base.sectors();
+
+    // Calling write_file with the now-freed inode number must return NotFound,
+    // not silently succeed or corrupt block state.
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.write_file(file_inode, b"new data", 3),
+        Err(Error::NotFound),
+        "write_file must return NotFound for a freed inode"
+    );
+
+    // The refused write must not have modified the image.
+    assert!(
+        base.sectors() == before,
+        "a refused write_file on a freed inode must not modify the image"
+    );
+
+    // Control: a new file created after the unlink is writable and readable,
+    // confirming the freed path did not corrupt volume state.
+    let mut volume2 = Volume::mount(base.clone()).expect("remount after unlink");
+    let new_inode = volume2
+        .create_file(1, "new.txt", 0o644, b"fresh", 3)
+        .expect("create after unlink");
+    assert_eq!(
+        volume2.write_file(new_inode, b"updated", 4),
+        Ok(()),
+        "write_file must succeed for a freshly created file"
+    );
+    let mut buf = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume2.read_file(new_inode, &mut buf),
+        Ok(7),
+        "updated file must read back 7 bytes"
+    );
+    assert_eq!(&buf[..7], b"updated", "content must match the write");
+}

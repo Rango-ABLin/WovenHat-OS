@@ -1,5 +1,60 @@
 # Autonomous progress log
 
+## 2026-10-30 — WovenFS: test that write_file refuses a freed inode
+
+Branch: `auto/wovenhat-development` (base `8b84a580`). Working tree was clean.
+
+### Defect / gap
+
+`write_file` (lines 1164–1165 of `kernel/src/wfs.rs`) checks `!node.is_used()`
+and returns `Err(Error::NotFound)` when the caller passes a freed inode number.
+After `unlink`, an inode's `mode` field is zeroed so `is_used()` returns `false`.
+
+Without this guard, `write_file` could overwrite the block slots of a freed
+inode — either stale block addresses from a previous occupant or the zero
+sentinel — silently corrupting unrelated data or creating dangling block
+references.
+
+The symmetric path `read_file_refuses_a_freed_inode` already proves the
+freed-inode guard on the read side, but no test exercised the identical guard on
+the write side.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `write_file_refuses_a_freed_inode`:
+
+- Calls `formatted()` and creates `gone.txt` (5 bytes), recording its inode.
+- Unlinks `gone.txt` so its inode becomes free (mode == 0).
+- Confirms `lookup(1, "gone.txt")` returns `Err(NotFound)`.
+- Snapshots the image before the refused write.
+- Asserts `write_file(file_inode, b"new data", 3)` returns `Err(Error::NotFound)`.
+- Asserts the image was not modified by the refused write.
+- Control: creates `new.txt`, writes `"updated"` into it, and reads back the
+  correct 7 bytes, confirming the volume is intact after the refused write.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-30)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **85 passed / 0 failed** (was 84; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Only the freed-inode case for `write_file` is added here.  `write_file` on an
+  inode outside the valid range (`Err(NotFound)` from `inode_staged`) is covered
+  by the existing `inode_staged` bounds check; no dedicated test was identified
+  as missing there.
+- `read_file_refuses_a_file_with_a_zero_block_pointer` covers a single-block
+  file; a multi-block file with a zero interior pointer is the next plausible gap
+  on the read path.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-30 — WovenFS: test that write_file refuses a directory inode
 
 Branch: `auto/wovenhat-development` (base `bec781fb`). Working tree was clean.
