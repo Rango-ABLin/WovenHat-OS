@@ -10,7 +10,7 @@ pub const APIC_REG_TIMER_DIVIDE: usize = 0x03E0;
 pub const APIC_TIMER_VECTOR: u8 = 0x20;
 
 pub fn register_apic_idt(idt: &mut InterruptDescriptorTable) {
-    idt[APIC_TIMER_VECTOR].set_handler_fn(timer_interrupt_handler);
+    idt[usize::from(APIC_TIMER_VECTOR)].set_handler_fn(timer_interrupt_handler);
 }
 
 pub unsafe fn init_apic_timer() {
