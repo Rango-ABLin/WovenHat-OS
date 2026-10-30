@@ -4224,14 +4224,50 @@ impl Desktop {
     /// End the current gesture before hiding its workspace or locking.
     /// Deliver exactly one release while the owner is still visible; a later
     /// physical release must not reach a hidden client or a reused slot.
+    /// End the current gesture before hiding its workspace or locking.
+    /// Deliver cancellation (and a synthetic release when safe) while the owner
+    /// is still visible. A later physical release must not reach a hidden client
+    /// or a reused slot.
+    ///
+    /// For clients that opted in with WCAP\x01 we try a small fixed number of
+    /// times to queue WCAN. If the mailbox stays full we still refuse to send a
+    /// synthetic release, so a stuck press cannot become an activation.
     fn cancel_pointer_gesture(&mut self) {
         if let Some(slot) = self.pointer_capture.take() {
             if let Some(window) = self.windows[slot] {
-                // Both messages use the same FIFO. If cancellation cannot be
-                // queued, do not turn an aborted gesture into a client action.
-                if !window.cancellation_protocol
-                    || libwoven::message_send(window.owner, b"WCAN").is_ok()
-                {
+                let can_send_release = if !window.cancellation_protocol {
+                    // Legacy clients never see WCAN; the synthetic release is
+                    // the only signal they receive.
+                    true
+                } else {
+                    // Opted-in clients: try a few times to deliver WCAN.
+                    // Bound is deliberately tiny so we never stall the shell.
+                    const WCAN_ATTEMPTS: u8 = 3;
+                    let mut delivered = false;
+                    for _ in 0..WCAN_ATTEMPTS {
+                        if libwoven::message_send(window.owner, b"WCAN").is_ok() {
+                            delivered = true;
+                            break;
+                        }
+                        // Very short cooperative spin. We stay in userspace and
+                        // do not sleep under any lock. Three attempts is enough
+                        // to ride out a transient full mailbox without turning
+                        // cancellation into a long delay.
+                        for _ in 0..64 {
+                            core::hint::spin_loop();
+                        }
+                    }
+                    if !delivered {
+                        // Keep the existing fail-closed contract: do not send a
+                        // synthetic release that the client never prepared for.
+                        // The client may stay pressed until the next real input;
+                        // that is still safer than accidental activation.
+                        log(&[b"woven-shell: WCAN saturated, skipping synthetic release"]);
+                    }
+                    delivered
+                };
+
+                if can_send_release {
                     self.forward_pointer_button(slot, false);
                 }
             }
