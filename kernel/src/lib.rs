@@ -55,3 +55,5 @@ pub mod process_monitor;
 pub mod elf_loader;
 
 pub mod profiler;
+
+pub mod module_loader;
