@@ -4359,3 +4359,56 @@ fn read_file_refuses_a_file_with_a_zero_block_pointer() {
         "a refused read_file must not modify the image"
     );
 }
+
+/// `write_file` (wfs.rs line 1167) checks `node.kind != KIND_FILE` and returns
+/// `Err(Error::NotADirectory)` when the caller passes a directory inode.  Without
+/// this guard, writing file data into a directory inode would overwrite its data
+/// blocks with arbitrary bytes, silently destroying every entry in the directory.
+///
+/// `read_file_refuses_a_directory_inode` covers the symmetric `read_file` path;
+/// no test covered the `write_file` path until now.
+#[test]
+fn write_file_refuses_a_directory_inode() {
+    let base = formatted();
+
+    // Create a file so the volume is non-trivially populated and the root
+    // directory inode (inode 1, KIND_DIR) has a non-trivial entry table.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    // Snapshot the image before any refused write.
+    let before = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // write_file on the root directory inode must be refused.
+    assert_eq!(
+        volume.write_file(1, b"overwrite", 2),
+        Err(Error::NotADirectory),
+        "write_file must refuse a directory inode"
+    );
+
+    // The refused write must not have modified the image.
+    assert!(
+        base.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+
+    // Control: the file inode still writes and reads back correctly.
+    assert_eq!(
+        volume.write_file(file_inode, b"world", 3),
+        Ok(()),
+        "control: write_file must succeed for a file inode"
+    );
+    let mut out = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(file_inode, &mut out),
+        Ok(5),
+        "control: updated file must read back 5 bytes"
+    );
+    assert_eq!(&out[..5], b"world", "control: content must match");
+}

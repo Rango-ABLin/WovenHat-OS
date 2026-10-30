@@ -1,5 +1,53 @@
 # Autonomous progress log
 
+## 2026-10-30 — WovenFS: test that write_file refuses a directory inode
+
+Branch: `auto/wovenhat-development` (base `bec781fb`). Working tree was clean.
+
+### Defect / gap
+
+`write_file` (lines 1167–1168 of `kernel/src/wfs.rs`) checks `node.kind != KIND_FILE`
+and returns `Err(Error::NotADirectory)` when the caller passes a directory inode.
+Without this guard, writing file data into a directory inode would overwrite its data
+blocks with arbitrary bytes, silently destroying every directory entry.
+
+`read_file_refuses_a_directory_inode` covers the symmetric `read_file` path (inode 1,
+`KIND_DIR`, must return `Err(NotADirectory)`), but no test exercised the same guard on
+the `write_file` path.  The pattern is clear: every guard that protects `read_file`
+should also be verified on `write_file` and vice versa.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `write_file_refuses_a_directory_inode`:
+
+- Calls `formatted()` and creates `hello.txt` (5 bytes) so inode 1 (root directory,
+  `KIND_DIR`) has a non-trivial entry table.
+- Snapshots the image before the refused write.
+- Asserts `write_file(1, b"overwrite", 2)` returns `Err(Error::NotADirectory)`.
+- Asserts the refused write did not modify the image.
+- Control: `write_file(file_inode, b"world", 3)` succeeds and the file reads back
+  with the updated content, confirming the volume is intact.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-30)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **84 passed / 0 failed** (was 83; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Only the directory-inode case is tested here.  `write_file` on a freed inode
+  (`!node.is_used()` → `Err(NotFound)`) is the next uncovered symmetric guard.
+- No production code changed — the guard already existed in `write_file`; only the
+  missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-30 — WovenFS: test that read_file refuses a file with a zero block pointer
 
 Branch: `auto/wovenhat-development` (base `4804dd3b`). Working tree was clean.
