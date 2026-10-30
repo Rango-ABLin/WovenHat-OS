@@ -1443,6 +1443,50 @@ mod tests {
     }
 
     #[test]
+    fn button_cancel_discards_press_before_any_later_release() {
+        let mut button = Button::new(Frame::new(0, 0, 40, 16), "OK");
+
+        // Arm a press.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pressed);
+
+        // Shell-style cancellation (WCAN arrived).
+        button.cancel_pointer();
+        assert!(!button.pressed);
+        assert!(!button.hovered);
+
+        // A synthetic or real release that arrives after WCAN must not click.
+        assert!(!button.pointer(2, 2, false));
+        assert!(!button.pressed);
+
+        // A brand-new gesture still works.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pointer(2, 2, false));
+    }
+
+    #[test]
+    fn button_cancel_discards_press_before_any_later_release() {
+        let mut button = Button::new(Frame::new(0, 0, 40, 16), "OK");
+
+        // Arm a press.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pressed);
+
+        // Shell-style cancellation (WCAN arrived).
+        button.cancel_pointer();
+        assert!(!button.pressed);
+        assert!(!button.hovered);
+
+        // A synthetic or real release that arrives after WCAN must not click.
+        assert!(!button.pointer(2, 2, false));
+        assert!(!button.pressed);
+
+        // A brand-new gesture still works.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pointer(2, 2, false));
+    }
+
+    #[test]
     fn text_field_is_utf8_bounded_and_backspaces_codepoints() {
         let mut field = TextField::<5>::new(Frame::new(0, 0, 40, 16));
         assert!(field.pointer(1, 1, true));
