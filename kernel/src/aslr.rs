@@ -2,6 +2,11 @@
 #![no_std]
 
 extern crate alloc;
+
+use core::result::Result::{self, Ok, Err};
+use core::option::Option::{self, Some, None};
+use core::mem::drop;
+
 use x86_64::VirtAddr;
 use x86_64::instructions::registers::read_tsc;
 use crate::audit::{BoundedAuditRing, AuditAction};
