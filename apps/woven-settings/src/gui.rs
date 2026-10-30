@@ -18,6 +18,19 @@ impl ThemeMode {
         }
     }
 
+    /// Map the UI mode onto the shared accessibility policy used by DesignTokens.
+    fn accessibility(self) -> libwoven::accessibility::Settings {
+        let mut settings = libwoven::accessibility::Settings::new();
+        if self == Self::HighContrast {
+            settings.high_contrast = true;
+        }
+        settings
+    }
+
+    fn tokens(self) -> DesignTokens {
+        DesignTokens::for_accessibility(self.accessibility())
+    }
+
     fn background(self) -> u32 {
         match self {
             Self::Dark => BACKGROUND,
