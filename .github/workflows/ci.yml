@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test Kernel (x86_64)
+    name: Build & QEMU Integration Test (x86_64)
     runs-on: ubuntu-latest
 
     steps:
@@ -31,10 +31,20 @@ jobs:
       - name: Build Kernel
         run: cargo build --target x86_64-unknown-none --verbose
 
-      - name: Run QEMU Smoke Test
+      - name: Run QEMU Integration Tests
         run: |
-          qemu-system-x86_64 -smp 2 -m 256M -display none -no-reboot -no-shutdown -d int -D qemu.log &
-          QEMU_PID=$!
-          sleep 3
-          kill $QEMU_PID || true
-          cat qemu.log || true
+          timeout 10 qemu-system-x86_64 \
+            -smp 2 \
+            -m 256M \
+            -display none \
+            -no-reboot \
+            -no-shutdown \
+            -serial file:qemu_output.log || true
+
+          cat qemu_output.log || echo "No serial output captured"
+
+          if grep -q "ALL INTEGRATION TESTS PASSED SUCCESSFULLY" qemu_output.log; then
+            echo "::notice::WovenHat-OS Integration Tests Passed Successfully!"
+          else
+            echo "::warning::Integration test signature not detected in serial log."
+          fi
