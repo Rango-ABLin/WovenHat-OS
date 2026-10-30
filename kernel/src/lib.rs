@@ -65,3 +65,5 @@ pub mod user_space;
 pub mod faults;
 
 pub mod cap_transfer;
+
+pub mod revocation;
