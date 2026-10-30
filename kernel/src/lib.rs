@@ -17,3 +17,5 @@ pub mod capabilities;
 pub mod audit;
 
 pub mod syscall;
+
+pub mod syscall_idt;
