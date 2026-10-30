@@ -41,3 +41,5 @@ pub mod dynamic_tasks;
 pub mod dynamic_caps;
 
 pub mod vfs;
+
+pub mod net_socket;
