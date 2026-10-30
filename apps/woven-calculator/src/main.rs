@@ -12,23 +12,27 @@ libwoven::entry!(main);
 
 const WIDTH: u32 = 240;
 const HEIGHT: u32 = 150;
-const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
+const BACKGROUND: u32 = rgb(12, 14, 22);
+const PANEL: u32 = rgb(28, 34, 52);
+const PANEL_RAISED: u32 = rgb(38, 46, 68);
+const DISPLAY: u32 = rgb(18, 24, 38);
 const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
+const MUTED: u32 = rgb(140, 152, 176);
 const BUTTON: u32 = rgb(45, 65, 90);
 
-// Layout from shared DesignTokens (Stage 11).
 const TOKENS: DesignTokens = DesignTokens::DEFAULT;
 const PANEL_INSET: i32 = TOKENS.space_3; // 12
-const BUTTON_X: i32 = 150;
-const BUTTON_Y: i32 = 110;
-const BUTTON_WIDTH: usize = 60;
-const BUTTON_HEIGHT: usize = 18;
+const PAD: i32 = TOKENS.space_2; // 8
 const PANEL_X: i32 = PANEL_INSET;
 const PANEL_Y: i32 = PANEL_INSET;
 const PANEL_WIDTH: usize = (WIDTH as i32 - PANEL_INSET * 2) as usize; // 216
 const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 126
+const TITLE_H: i32 = 18;
+const BUTTON_WIDTH: usize = 72;
+const BUTTON_HEIGHT: usize = 20;
+const BUTTON_X: i32 = PANEL_X + PANEL_WIDTH as i32 - PAD - BUTTON_WIDTH as i32;
+const BUTTON_Y: i32 = PANEL_Y + PANEL_HEIGHT as i32 - PAD - BUTTON_HEIGHT as i32;
 const MAX_INPUT: usize = 24;
 // Keep the static render target below the userspace image/stack window while
 // still covering the common tiled-client geometry. Larger WSIZ requests are
