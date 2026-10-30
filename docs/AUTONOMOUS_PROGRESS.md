@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-10-30 — WovenFS: test that read_file refuses a file with a zero block pointer
+
+Branch: `auto/wovenhat-development` (base `4804dd3b`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (lines 1228–1233 of `kernel/src/wfs.rs`) iterates `direct[0..DIRECT_BLOCKS]`
+and returns `Err(Error::Corrupt)` when it finds `block == 0` while `copied < size`:
+
+```rust
+let block = node.direct[slot];
+if block == 0 {
+    return Err(Error::Corrupt);
+}
+```
+
+`stage_write` always allocates a fresh, non-zero block address for every slot required
+by the file size.  An inode with `size > 0` and `direct[0] == 0` is therefore
+corruption no runtime path can produce.  Without the guard, `read_file` would attempt
+to read block 0 — the volume's first sector, which holds the superblock checkpoint —
+as file content, silently returning wrong bytes or bypassing the data-checksum
+verification.
+
+`checked_inode` (called by `self.inode(inode)?`) permits `direct[slot] == 0` as the
+sentinel for an unused slot, so the zero pointer passes the structural check and the
+`block == 0` guard in `read_file` is the only defence against this corruption on the
+read path.  No existing test exercised this guard: the four prior `read_file` tests
+(`read_file_refuses_a_directory_inode`, `read_file_refuses_a_freed_inode`,
+`read_file_refuses_a_buffer_smaller_than_the_file`, `read_file_succeeds_for_an_empty_file`)
+each cover a different path and none crafts a live file inode with a zeroed block pointer.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `read_file_refuses_a_file_with_a_zero_block_pointer`:
+
+- Calls `formatted()` and creates `hello.txt` (5 bytes, one block), recording its inode.
+- Control: the unpatched file reads back `Ok(5)` with the correct content.
+- Forks the image and calls `reseal_inode_direct(&image, file_inode, 0, 0)` to set
+  `direct[0] = 0` while keeping `size = 5`, resealing the inode structural checksum.
+- Mounts the patched image (succeeds; `checked_inode` allows zero block pointers).
+- Asserts `read_file(file_inode, &mut buf)` returns `Err(Error::Corrupt)`.
+- Asserts the image was not modified by the refused read.
+
+No production code changed.
+
+### Results (run on this host, 2026-10-30)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **83 passed / 0 failed** (was 82; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test crafts a single-block file with `direct[0] = 0`.  A multi-block file where
+  `direct[1] = 0` but `direct[0]` is valid would also fire the same guard on the second
+  iteration, but the single-block case is sufficient to prove the guard is reached.
+- No production code changed — the guard already existed in `read_file`; only the
+  missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-29 — WovenFS: test that unlink refuses a file inode as directory
 
 Branch: `auto/wovenhat-development` (base `6f5551ce`). Working tree was clean.

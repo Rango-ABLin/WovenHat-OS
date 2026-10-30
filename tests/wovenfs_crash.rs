@@ -4297,3 +4297,65 @@ fn unlink_refuses_a_file_inode_as_directory() {
         .unlink(1, "hello.txt", 2)
         .expect("unlink via the correct directory inode must succeed");
 }
+
+/// `read_file` returns `Err(Error::Corrupt)` when the loop finds
+/// `direct[slot] == 0` while `copied < size` (wfs.rs line 1232).
+///
+/// `stage_write` always allocates a fresh block for every slot required by the
+/// file size.  An inode with `size > 0` and `direct[0] == 0` is therefore
+/// corruption no runtime path can produce: the allocator hands out non-zero
+/// block addresses, and `write_file` always stores the returned address before
+/// committing.
+///
+/// Without the guard, `read_file` would attempt to read block 0 — the volume's
+/// first sector (which holds the superblock checkpoint) — as file content,
+/// silently returning wrong bytes or bypassing the data checksum.
+///
+/// `checked_inode` permits `direct[slot] == 0` as the sentinel for an unused
+/// slot, so the zero pointer passes the structural check and the zero-block
+/// guard in `read_file` is the only defence against this corruption on the
+/// read path.
+#[test]
+fn read_file_refuses_a_file_with_a_zero_block_pointer() {
+    let base = formatted();
+
+    // Create hello.txt (5 bytes, one block) and record its inode.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    // Control: the unpatched file reads back correctly.
+    let mut out = [0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        Volume::mount(base.clone())
+            .expect("mount")
+            .read_file(file_inode, &mut out),
+        Ok(5),
+        "control: unpatched file must read back 5 bytes"
+    );
+    assert_eq!(&out[..5], b"hello", "control: content must match");
+
+    // Fork and zero out direct[0] while keeping size=5.
+    let image = base.fork(None);
+    reseal_inode_direct(&image, file_inode, 0, 0);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+    let mut buf = [0u8; MAX_FILE_SIZE];
+
+    // read_file must refuse: size > 0 but the first block pointer is zero.
+    assert_eq!(
+        volume.read_file(file_inode, &mut buf),
+        Err(Error::Corrupt),
+        "read_file must return Corrupt when direct[0] is zero but size is non-zero"
+    );
+
+    // The refused read must not have modified the image.
+    assert!(
+        image.sectors() == before,
+        "a refused read_file must not modify the image"
+    );
+}
