@@ -23,3 +23,5 @@ pub mod syscall_idt;
 pub mod file_io;
 
 pub mod scheduler;
+
+pub mod cap_delegation;
