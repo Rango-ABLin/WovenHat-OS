@@ -9519,19 +9519,34 @@ fn stage20_15_self_test() -> bool {
         return false;
     }
 
-    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
-    // and Language were appended after Lock screen, so only the row-count
-    // term needs updating).
+    // Quick Settings, then its first row: Power off. The panel has ten
+    // rows and uses a rounded, perspective-projected card in production.
     let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
+    let panel_left = width - 4 - 164;
+    let panel_top = top - 2 - (11 * 14 + 2);
+    let power_row = (panel_left + 28, panel_top + 1 + 14 + 7);
+    // The old oracle expected a yellow pixel at the panel's leftmost
+    // bottom edge. That border no longer exists in the rounded/3D design.
+    // Instead, prove two interior framebuffer pixels actually change when
+    // the panel opens; the following Power off action still verifies that
+    // the opened panel is interactive, not merely a repaint.
+    let panel_probes = [
+        (panel_left + 60, panel_top + 130),
+        (panel_left + 110, panel_top + 130),
+    ];
+    let panel_before = panel_probes.map(|(x, y)| compositor::pixel(x, y).ok());
     let (px, py) = (width / 2, height / 2);
     let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
     if !step(
         "Quick Settings opens",
         opened
             && until(1000, || {
-                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(255, 255, 0))
+                panel_probes.iter().enumerate().all(|(index, &(x, y))| {
+                    let after = compositor::pixel(x, y).ok();
+                    panel_before[index].is_some()
+                        && after.is_some()
+                        && after != panel_before[index]
+                })
             }),
     ) {
         return false;
