@@ -68,14 +68,15 @@ impl ProcessScheduler {
         }
 
         let start_index = self.current_index;
+        let mut found_index = None;
+        
         loop {
             self.current_index = (self.current_index + 1) % MAX_PROCESSES;
             
-            if let Some(ref mut pcb) = self.processes[self.current_index] {
+            if let Some(pcb) = &self.processes[self.current_index] {
                 if pcb.state == ProcessState::Ready {
-                    pcb.state = ProcessState::Running;
-                    pcb.time_slices_allocated += 1;
-                    return Some(pcb);
+                    found_index = Some(self.current_index);
+                    break;
                 }
             }
 
@@ -83,6 +84,13 @@ impl ProcessScheduler {
                 break;
             }
         }
-        None
+        
+        found_index.and_then(|idx| {
+            self.processes[idx].as_mut().map(|pcb| {
+                pcb.state = ProcessState::Running;
+                pcb.time_slices_allocated += 1;
+                pcb
+            })
+        })
     }
 }
