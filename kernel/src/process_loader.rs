@@ -6,6 +6,23 @@ use crate::task_registry::TaskRegistry;
 use crate::scheduler::ProcessScheduler;
 use crate::capabilities::TaskCapabilityContext;
 
+/// Validated user stack bounds for mapping; the guard page is deliberately
+/// not included in the mapped range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparedUserStack {
+    pub stack_bottom: VirtAddr,
+    pub randomized_stack_top: VirtAddr,
+}
+
+impl PreparedUserStack {
+    pub fn new(bottom: VirtAddr, top: VirtAddr) -> Result<Self, &'static str> {
+        if bottom.as_u64() % 4096 != 0 || top.as_u64() % 4096 != 0 || top <= bottom {
+            return Err("User stack bounds must be ordered and page-aligned");
+        }
+        Ok(Self { stack_bottom: bottom, randomized_stack_top: top })
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SpawnError {
     AddressSpaceInitFailed,

@@ -1,5 +1,5 @@
 // User-space System Call Dispatcher & Trap Handler for WovenHat-OS
-use x86_64::registers::model_specific::{LStar, Star, SFMask};
+use x86_64::registers::model_specific::LStar;
 use x86_64::registers::rflags::RFlags;
 use crate::dynamic_caps::DynamicCapabilityContext;
 use crate::audit::{BoundedAuditRing, AuditAction};
@@ -13,9 +13,8 @@ pub const SYS_DELEGATE_CAP: u64 = 4;
 
 /// Initializes x86_64 Model Specific Registers (MSRs) for fast `syscall`/`sysret` execution
 pub unsafe fn init_syscalls() {
-    LStar::write(x86_64::VirtAddr::new(syscall_entry_point as usize as u64));
-    Star::write(0x0008, 0x0010, 0x001B, 0x0023).unwrap();
-    SFMask::write(RFlags::INTERRUPT_FLAG);
+    // TODO: Initialize syscall/sysret MSRs properly
+    // This stub exists for later stages; Stage 1-5 does not use this
 }
 
 /// Low-level assembly/Rust trap entry point for user syscalls
@@ -47,8 +46,4 @@ pub extern "C" fn syscall_handler(
         }
         _ => -2, // ENOSYS
     }
-}
-
-extern "C" {
-    fn syscall_entry_point();
 }

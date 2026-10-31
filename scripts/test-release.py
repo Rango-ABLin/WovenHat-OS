@@ -92,7 +92,7 @@ def main():
         if result.returncode:
             raise SystemExit(result.returncode)
 
-    run('lint-kernel', ['cargo', 'clippy', '-p', 'wovenhat-kernel', '--target', 'x86_64-unknown-none', '--', '-D', 'warnings'])
+    run('lint-kernel', ['cargo', 'clippy', '-p', 'wovenhat_kernel', '--target', 'x86_64-unknown-none', '--', '-D', 'warnings'])
     run('lint-host', ['cargo', 'clippy', '-p', 'wovenhat-os', '--', '-D', 'warnings'])
     # Cargo resolves dev dependencies in the configured build directory. Do
     # not guess an rlib location or select a stale hash from another build.
@@ -318,7 +318,7 @@ def main():
     run(
         'lint-kernel-system-apps',
         [
-            'cargo', 'clippy', '-p', 'wovenhat-kernel',
+            'cargo', 'clippy', '-p', 'wovenhat_kernel',
             '--target', 'x86_64-unknown-none', '--features', 'system-apps',
             '--', '-D', 'warnings',
         ],

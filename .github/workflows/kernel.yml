@@ -12,7 +12,7 @@ on:
 # and their uploaded evidence remain available; this prevents stale maturity
 # runs from starving the latest audited tree in the hosted runner queue.
 concurrency:
-  group: wovenhat-kernel-${{ github.workflow }}-${{ github.ref }}
+  group: wovenhat_kernel-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -84,8 +84,8 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage1-5-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage1-5-test -- -D warnings
+          cargo check -p wovenhat_kernel --target x86_64-unknown-none --features stage1-5-test
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage1-5-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 1-5 --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -102,8 +102,8 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features legacy-pic-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage6-hotplug-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features legacy-pic-test -- -D warnings
           for cpu in 2 4; do
             python3 scripts/test-stage6-hotplug.py --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -157,7 +157,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage13-3-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-3-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-3-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.3 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -175,7 +175,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-4-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-4-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-4-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.4 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -193,7 +193,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-5-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-5-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-5-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.5 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -211,7 +211,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-6-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-6-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-6-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.6 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -229,7 +229,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-7-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-7-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-7-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.7 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -247,7 +247,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-8-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-8-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-8-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.8 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -270,8 +270,8 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings
           for mode in devices nodisk absent production; do
             for cpu in 1 2 4; do
               python3 scripts/test-stage13-12-drivers.py --mode "$mode" --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
@@ -290,7 +290,7 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-13-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-13-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -307,7 +307,7 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-14-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-14-test -- -D warnings
           for mode in nvme ahci production; do
             for cpu in 1 2 4; do
               python3 scripts/test-stage13-14-storage.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -343,7 +343,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo test --test hid_reports
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-16-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-16-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage13-16-hid-reports.py --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -370,7 +370,7 @@ jobs:
           test -n "$ovmf_vars"
           cargo test --test usb_msc
           for feature in stage13-17-test stage13-18-test stage13-19-test; do
-            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
           done
           for cpu in 1 2 4; do
             for mode in nvme ahci production; do
@@ -401,7 +401,7 @@ jobs:
           test -n "$ovmf_code"
           python3 -m unittest discover -s tests -p 'test_*.py'
           cargo build --features stage13-9-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-9-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-9-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.9 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -419,7 +419,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.10 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -437,7 +437,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -455,7 +455,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -473,7 +473,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -491,7 +491,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -509,7 +509,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -527,7 +527,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -545,7 +545,7 @@ jobs:
           done
           test -n "$ovmf_code"
           cargo build --features stage13-10-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage13-10-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 13.11 --cpus "$cpu" --timeout 120 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -594,7 +594,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-1-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-1-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-1-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-1-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -618,7 +618,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-2-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-2-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-2-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-2-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -642,7 +642,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-3-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-3-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-3-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-3-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -666,7 +666,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-4-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-4-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-4-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-4-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -690,7 +690,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-5-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-5-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-5-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-5-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -714,7 +714,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-5b-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-5b-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-5b-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-5b-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -738,7 +738,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-5c-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-5c-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-5c-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-5c-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -762,7 +762,7 @@ jobs:
           test -n "$ovmf_code"
           test -n "$ovmf_vars"
           cargo build --features stage14-5d-test
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage14-5d-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage14-5d-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-network-qemu.py --feature stage14-5d-test --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code" --firmware-vars "$ovmf_vars"
           done
@@ -811,7 +811,7 @@ jobs:
           test -n "$ovmf_code"
           for stage in 10.8 10.9 11.1 11.2 11.3 11.4 11.5; do
             feature="stage${stage/./-}-test"
-            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do
               python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
             done
@@ -841,7 +841,7 @@ jobs:
             nl -ba kernel/src/storage_manager.rs | sed -n '19,44p'
             echo "::endgroup::"
             feature="stage${stage/./-}-test"
-            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do
               python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
             done
@@ -861,7 +861,7 @@ jobs:
           test -n "$ovmf_code"
           for stage in 13.1 13.2; do
             feature="stage${stage/./-}-test"
-            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do
               python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
             done
@@ -928,23 +928,23 @@ jobs:
           export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
           for stage in 17.1 18.1 19.1 19.3 19.10; do
             feature="stage${stage/./-}-test"
-            cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
+            cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features "$feature" -- -D warnings
             for cpu in 1 2 4; do
               python3 scripts/test-stage10-runtime.py --stage "$stage" --cpus "$cpu" --timeout 180 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage18-2-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-2-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-4-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-5-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-6-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-7-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-8-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-9-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-11-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-12-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-13-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage19-14-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage18-2-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-2-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-4-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-5-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-6-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-7-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-8-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-9-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-11-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-12-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-13-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage19-14-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-hello-gui-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -977,21 +977,21 @@ jobs:
           export WOVENHAT_SHELL_IMAGE="$PWD/apps/woven-shell/target/x86_64-unknown-none/release/wovenhat-woven-shell"
           (cd apps/hello-gui && cargo build --release)
           export WOVENHAT_HELLO_GUI_IMAGE="$PWD/apps/hello-gui/target/x86_64-unknown-none/release/wovenhat-hello-gui"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-2-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-3-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-4-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-5-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-6-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-7-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-8-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-9-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-10-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-11-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-12-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-13-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-1-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-2-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-3-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-4-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-5-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-6-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-7-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-8-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-9-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-10-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-11-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-12-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-13-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -1047,8 +1047,8 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-2-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features stage15-2-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage10-runtime.py --stage 15.1 --cpus "$cpu" --timeout 240 --qemu "$qemu" --firmware "$ovmf_code"
           done
@@ -1060,8 +1060,8 @@ jobs:
       - name: Default and physical-probe configuration lint
         shell: bash
         run: |
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features physical-probe -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features physical-probe -- -D warnings
           cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - name: Preserve wovenfs-lint evidence
@@ -1126,7 +1126,7 @@ jobs:
           CARGO_INCREMENTAL: "0"
         run: |
           set -euo pipefail
-          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features gfx02-test -- -D warnings
+          cargo clippy -p wovenhat_kernel --target x86_64-unknown-none --features gfx02-test -- -D warnings
           cargo test --test display_compositing
       - name: Preserve maturity host evidence
         if: always()

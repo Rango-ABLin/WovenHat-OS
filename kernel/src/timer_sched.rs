@@ -6,7 +6,7 @@ use spin::Mutex;
 
 pub static GLOBAL_SCHEDULER: Mutex<ProcessScheduler> = Mutex::new(ProcessScheduler::new());
 
-pub extern "C" fn timer_interrupt_handler(_stack_frame: &mut InterruptStackFrame) {
+pub extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let mut scheduler = GLOBAL_SCHEDULER.lock();
     
     if let Some(_next_pcb) = scheduler.schedule_next() {

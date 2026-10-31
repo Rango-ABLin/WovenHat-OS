@@ -26,7 +26,7 @@ def features():
 
 
 def clippy(args):
-    command = ['cargo', 'clippy', '-q', '-p', 'wovenhat-kernel', '--target', 'x86_64-unknown-none', *args,
+    command = ['cargo', 'clippy', '-q', '-p', 'wovenhat_kernel', '--target', 'x86_64-unknown-none', *args,
                '--', '-D', 'warnings']
     r = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     missing = re.findall(r'environment variable `(WOVENHAT_[A-Z_]+)` not defined', r.stderr)
