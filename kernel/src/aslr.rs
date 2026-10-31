@@ -8,7 +8,7 @@ use core::option::Option::{self, Some, None};
 use core::mem::drop;
 
 use x86_64::VirtAddr;
-use x86_64::instructions::registers::read_tsc;
+use core::arch::x86_64::_rdtsc;
 use crate::audit::{BoundedAuditRing, AuditAction};
 use crate::capabilities::CapabilityType;
 use spin::Mutex;
@@ -25,7 +25,7 @@ pub struct AslrManager {
 
 impl AslrManager {
     pub fn new() -> Self {
-        let tsc_val = unsafe { read_tsc() };
+        let tsc_val = unsafe { _rdtsc() };
         Self {
             entropy_seed: tsc_val ^ 0x9999_5555_AAAA_3333,
         }
