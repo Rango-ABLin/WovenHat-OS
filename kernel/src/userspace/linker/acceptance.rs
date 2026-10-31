@@ -448,7 +448,13 @@ pub(super) fn run() -> bool {
         drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY*3]);
         crate::heap::maintain_capacity();
         let frames = crate::memory::stats().allocated_frames;
-        let program = load(&main, &["shared-test"])?;
+        let Some(program) = load(&main, &["shared-test"]) else {
+            crate::serial::write_line(format_args!(
+                "[S11.5-D] valid graph reload after rejection fixtures failed; allocated_frames_before={frames}, allocated_frames_after={}",
+                crate::memory::stats().allocated_frames,
+            ));
+            return None;
+        };
         let mut address = [0; 8];
         paging::read_user_bytes_in(
             program.address_space.paging,
