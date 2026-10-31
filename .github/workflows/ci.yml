@@ -18,7 +18,7 @@ jobs:
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86
+          sudo apt-get install -y qemu-system-x86 ovmf
 
       - name: Set up Rust Toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -29,22 +29,7 @@ jobs:
         run: rustup target add x86_64-unknown-none
 
       - name: Build Kernel
-        run: cargo build --target x86_64-unknown-none --verbose
+        run: cargo build -p wovenhat-os --verbose
 
       - name: Run QEMU Integration Tests
-        run: |
-          timeout 10 qemu-system-x86_64 \
-            -smp 2 \
-            -m 256M \
-            -display none \
-            -no-reboot \
-            -no-shutdown \
-            -serial file:qemu_output.log || true
-
-          cat qemu_output.log || echo "No serial output captured"
-
-          if grep -q "ALL INTEGRATION TESTS PASSED SUCCESSFULLY" qemu_output.log; then
-            echo "::notice::WovenHat-OS Integration Tests Passed Successfully!"
-          else
-            echo "::warning::Integration test signature not detected in serial log."
-          fi
+        run: python3 scripts/test-shell-qemu.py --cpus 2 --memory 5G --firmware /usr/share/OVMF/OVMF_CODE_4M.fd
