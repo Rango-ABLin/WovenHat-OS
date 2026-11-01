@@ -863,13 +863,6 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
     Renderer::new(canvas).rounded_rect_blended(rect_of(area), radius, color_of(color), opacity);
 }
 
-/// A top-to-bottom gradient fill in `area`, replacing a flat `fill_rect` call
-/// for chrome that reads better with a subtle highlight (title bars, the
-/// taskbar, the Start button) rather than a single flat colour.
-fn fill_gradient(canvas: &mut Canvas<'_>, area: Area, top: u32, bottom: u32) {
-    Renderer::new(canvas).vertical_gradient(rect_of(area), color_of(top), color_of(bottom));
-}
-
 /// A filled circle of `diameter` centred at `(center_x, center_y)`. A circle
 /// is a square rounded rectangle whose radius is half its side, so this
 /// reuses `rounded_rect` rather than adding a second corner-distance
@@ -3284,17 +3277,37 @@ impl Desktop {
         before.union(self.center_area()).union(self.taskbar())
     }
 
-    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>, three_d: bool) {
+    fn render_title(
+        window: &Window,
+        focused: bool,
+        canvas: &mut Canvas<'_>,
+        three_d: bool,
+        height: i32,
+    ) {
         let area = window.title_area();
         let fill = theme_title(focused);
         if three_d {
             Self::render_title_3d(area, fill, canvas);
         } else {
-            // A subtle top-to-bottom highlight instead of one flat colour.
-            // Square corners here: the title bar sits directly against the
-            // window body below it, and rounding only the title independently
-            // would show a seam where the two meet.
-            fill_gradient(canvas, area, lighten(fill, 40), fill);
+            // Rounded top corners, square bottom: the standard modern
+            // window shape (Windows, macOS, GNOME all use it) -- the title
+            // bar's bottom edge sits flush against the square body below
+            // it, while its top corners read as a floating card rather
+            // than a flat slab. The rounded fill below leaves the handful
+            // of corner pixels outside the curve untouched, and `draw`
+            // presents this canvas opaquely from a reused scratch buffer
+            // (no transparent-key compositing here, unlike the floating
+            // panels), so those pixels must be given real content -- the
+            // desktop wallpaper, the common case for what is behind a
+            // window's top corners -- rather than left holding whatever an
+            // earlier, unrelated draw call put in the shared scratch tile.
+            canvas.shade(|x, y| wallpaper(x, y, height));
+            Renderer::new(canvas).rounded_rect_top_gradient(
+                rect_of(area),
+                CHROME_RADIUS_SMALL,
+                color_of(lighten(fill, 40)),
+                color_of(fill),
+            );
         }
         let close = window.close_area();
         if !close.is_empty() {
@@ -3599,11 +3612,11 @@ impl Desktop {
                 let active = Some(slot) == focused;
                 if alpha == u8::MAX {
                     painter.draw(title, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d)
+                        Self::render_title(window, active, canvas, self.three_d, self.height)
                     });
                 } else {
                     painter.draw_blended(title, alpha, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d)
+                        Self::render_title(window, active, canvas, self.three_d, self.height)
                     });
                 }
             }
@@ -4211,14 +4224,50 @@ impl Desktop {
     /// End the current gesture before hiding its workspace or locking.
     /// Deliver exactly one release while the owner is still visible; a later
     /// physical release must not reach a hidden client or a reused slot.
+    /// End the current gesture before hiding its workspace or locking.
+    /// Deliver cancellation (and a synthetic release when safe) while the owner
+    /// is still visible. A later physical release must not reach a hidden client
+    /// or a reused slot.
+    ///
+    /// For clients that opted in with WCAP\x01 we try a small fixed number of
+    /// times to queue WCAN. If the mailbox stays full we still refuse to send a
+    /// synthetic release, so a stuck press cannot become an activation.
     fn cancel_pointer_gesture(&mut self) {
         if let Some(slot) = self.pointer_capture.take() {
             if let Some(window) = self.windows[slot] {
-                // Both messages use the same FIFO. If cancellation cannot be
-                // queued, do not turn an aborted gesture into a client action.
-                if !window.cancellation_protocol
-                    || libwoven::message_send(window.owner, b"WCAN").is_ok()
-                {
+                let can_send_release = if !window.cancellation_protocol {
+                    // Legacy clients never see WCAN; the synthetic release is
+                    // the only signal they receive.
+                    true
+                } else {
+                    // Opted-in clients: try a few times to deliver WCAN.
+                    // Bound is deliberately tiny so we never stall the shell.
+                    const WCAN_ATTEMPTS: u8 = 3;
+                    let mut delivered = false;
+                    for _ in 0..WCAN_ATTEMPTS {
+                        if libwoven::message_send(window.owner, b"WCAN").is_ok() {
+                            delivered = true;
+                            break;
+                        }
+                        // Very short cooperative spin. We stay in userspace and
+                        // do not sleep under any lock. Three attempts is enough
+                        // to ride out a transient full mailbox without turning
+                        // cancellation into a long delay.
+                        for _ in 0..64 {
+                            core::hint::spin_loop();
+                        }
+                    }
+                    if !delivered {
+                        // Keep the existing fail-closed contract: do not send a
+                        // synthetic release that the client never prepared for.
+                        // The client may stay pressed until the next real input;
+                        // that is still safer than accidental activation.
+                        log(&[b"woven-shell: WCAN saturated, skipping synthetic release"]);
+                    }
+                    delivered
+                };
+
+                if can_send_release {
                     self.forward_pointer_button(slot, false);
                 }
             }

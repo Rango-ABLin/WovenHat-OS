@@ -1,7 +1,8 @@
 [package]
-name = "wovenhat-kernel"
+name = "wovenhat_kernel"
 version = "0.8.0"
 edition = "2021"
+autolib = false
 
 [[bin]]
 name = "wovenhat-kernel"

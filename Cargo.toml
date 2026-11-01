@@ -1,4 +1,4 @@
-[workspace]
+﻿[workspace]
 resolver = "3"
 members = ["kernel", "libwoven"]
 # Applications are excluded deliberately. They are freestanding Ring-3 ELF
@@ -245,7 +245,7 @@ edition = "2024"
 ovmf-prebuilt = "0.2.4"
 
 [build-dependencies]
-kernel = { package = "wovenhat-kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+kernel = { package = "wovenhat_kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
 ed25519-compact = { version = "2.6", default-features = false }
 sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
@@ -258,3 +258,4 @@ unicode-normalization = { version = "0.1.25", default-features = false }
 bootloader_api = "0.11.17"
 [lints.rust]
 warnings = "deny"
+
