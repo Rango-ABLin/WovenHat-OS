@@ -102,6 +102,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG] reading application");
     let application = fs::read(&input).expect("failed to read application ELF");
     if application.is_empty()
         || application.len() as u64 > libwoven::package::MAX_APPLICATION_BYTES
@@ -119,6 +120,7 @@ fn main() {
         process::exit(2);
     }
 
+    eprintln!("[WPKG] building manifest");
     let mut manifest = Vec::new();
     manifest.push(name.len() as u8);
     manifest.extend_from_slice(name.as_bytes());
@@ -143,6 +145,7 @@ fn main() {
     package.extend_from_slice(&application);
     package.extend_from_slice(&resource_bytes);
 
+    eprintln!("[WPKG] signing envelope");
     let seed = env::var("WOVENHAT_APP_SIGNING_SEED_HEX")
         .map(|value| parse_hex(&value))
         .unwrap_or(TEST_SEED);
@@ -154,17 +157,21 @@ fn main() {
             "application signing key mismatch"
         );
     }
+    eprintln!("[WPKG] computing digest");
     let mut signed = Sha256::new();
     signed.update(DOMAIN);
     signed.update(&package[..28]);
     signed.update(&package[HEADER_LEN..]);
     let digest: [u8; 32] = signed.finalize().into();
+    eprintln!("[WPKG] generating Ed25519 signature");
     let signature = key_pair.sk.sign(digest, None);
     package[28..HEADER_LEN].copy_from_slice(signature.as_ref());
+    eprintln!("[WPKG] validating envelope");
     assert!(
         parse(&package).is_ok(),
         "packager emitted an invalid WPKG envelope"
     );
+    eprintln!("[WPKG] writing artifact");
     fs::write(&output, &package).expect("failed to write WPKG package");
     println!(
         "signed {} -> {} ({} bytes)",
