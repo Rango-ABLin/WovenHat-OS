@@ -4,7 +4,7 @@
 use core::panic::PanicInfo;
 
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
+use libwoven::ui::{Button, DesignTokens, Label, Theme};
 use libwoven::{rgb, Args, Canvas, GraphicsSurface};
 
 libwoven::entry!(main);
@@ -20,15 +20,19 @@ const ACCENT: u32 = rgb(100, 220, 180);
 const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
 const BUTTON: u32 = rgb(45, 65, 90);
+
+// Layout from shared DesignTokens (Stage 11).
+const TOKENS: DesignTokens = DesignTokens::DEFAULT;
+const PANEL_INSET: i32 = TOKENS.space_3; // 12
+const CONTENT_PAD: i32 = TOKENS.space_2 - 2; // 6 (preserves previous text offset)
 const BUTTON_X: i32 = 220;
 const BUTTON_Y: i32 = 206;
 const BUTTON_WIDTH: usize = 80;
 const BUTTON_HEIGHT: usize = 20;
-
-const PANEL_X: i32 = 12;
-const PANEL_Y: i32 = 12;
-const PANEL_WIDTH: usize = 296;
-const PANEL_HEIGHT: usize = 216;
+const PANEL_X: i32 = PANEL_INSET;
+const PANEL_Y: i32 = PANEL_INSET;
+const PANEL_WIDTH: usize = (WIDTH as i32 - PANEL_INSET * 2) as usize; // 296
+const PANEL_HEIGHT: usize = (HEIGHT as i32 - PANEL_INSET * 2) as usize; // 216
 const LINE_HEIGHT: i32 = 10;
 const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
 const MAX_SURFACE_WIDTH: usize = 480;
@@ -79,7 +83,7 @@ fn draw_files(
         disabled: BUTTON,
         focus: ACCENT,
     };
-    Label::new(Frame::new(PANEL_X + 6, PANEL_Y + 4, 180, 16), "/mnt").draw(canvas, theme);
+    Label::new(Frame::new(PANEL_X + CONTENT_PAD, PANEL_Y + (TOKENS.space_1), 180, 16), "/mnt").draw(canvas, theme);
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
     for index in 0..MAX_ENTRIES {
@@ -97,8 +101,8 @@ fn draw_files(
                 let shown_length = text_length + usize::from(directory && text_length < line.len());
                 let text = core::str::from_utf8(&line[..shown_length]).unwrap_or("?");
                 canvas.draw_text(
-                    PANEL_X + 6,
-                    PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
+                    PANEL_X + CONTENT_PAD,
+                    PANEL_Y + CONTENT_PAD + (shown as i32 + 1) * LINE_HEIGHT,
                     text,
                     TEXT,
                 );
@@ -109,8 +113,8 @@ fn draw_files(
     }
     if shown == 0 {
         canvas.draw_text(
-            PANEL_X + 6,
-            PANEL_Y + 6 + LINE_HEIGHT,
+            PANEL_X + CONTENT_PAD,
+            PANEL_Y + CONTENT_PAD + LINE_HEIGHT,
             "(empty or unavailable)",
             TEXT,
         );
@@ -118,8 +122,8 @@ fn draw_files(
     let mut digits = [0u8; 20];
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut digits);
     if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", TEXT);
-        canvas.draw_text(PANEL_X + 66, PANEL_Y + 194, refresh_text, ACCENT);
+        canvas.draw_text(PANEL_X + CONTENT_PAD, PANEL_Y + 194, "Refreshes ", TEXT);
+        canvas.draw_text(PANEL_X + CONTENT_PAD6, PANEL_Y + 194, refresh_text, ACCENT);
     }
     refresh_button.draw(canvas, theme);
     if let Some((x, y)) = pointer {

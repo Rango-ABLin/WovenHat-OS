@@ -48,9 +48,10 @@ acknowledgement and its readiness race is not separately qualified.
 The shell and clients remain single-threaded userspace programs. No syscall,
 kernel object, unsafe block, lock, pointer lifetime or capability was added.
 Messages remain bounded and shell-sender authenticated. Window-slot removal
-continues to discard capture before reuse. Saturated-mailbox cancellation
-retry remains unqualified: a failed WCAN can leave client pressed state until
-subsequent input. This increment must not claim complete backpressure closure.
+continues to discard capture before reuse. Saturated-mailbox cancellation now retries a bounded number of times (3)
+before falling back to the previous fail-closed behaviour (skip the
+synthetic WPBT release). Client-side `cancel_pointer` is covered by host
+tests; a persistent full mailbox remains fail-closed by design.
 
 ## Acceptance work
 

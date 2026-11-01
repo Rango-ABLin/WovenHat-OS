@@ -187,20 +187,21 @@ impl<'a> Button<'a> {
             fill,
         );
         if self.focused {
+            // 2px focus bars: clearer keyboard/control state (Stage 11).
             canvas.fill_rect(
                 self.frame.x,
                 self.frame.y,
                 self.frame.width.max(0) as usize,
-                1,
+                2,
                 theme.focus,
             );
             canvas.fill_rect(
                 self.frame.x,
                 self.frame
                     .y
-                    .saturating_add(self.frame.height.saturating_sub(1)),
+                    .saturating_add(self.frame.height.saturating_sub(2)),
                 self.frame.width.max(0) as usize,
-                1,
+                2,
                 theme.focus,
             );
         }
@@ -1440,6 +1441,50 @@ mod tests {
         button.enabled = true;
         assert!(!button.pointer(2, 2, false));
         assert!(button.activate());
+    }
+
+    #[test]
+    fn button_cancel_discards_press_before_any_later_release() {
+        let mut button = Button::new(Frame::new(0, 0, 40, 16), "OK");
+
+        // Arm a press.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pressed);
+
+        // Shell-style cancellation (WCAN arrived).
+        button.cancel_pointer();
+        assert!(!button.pressed);
+        assert!(!button.hovered);
+
+        // A synthetic or real release that arrives after WCAN must not click.
+        assert!(!button.pointer(2, 2, false));
+        assert!(!button.pressed);
+
+        // A brand-new gesture still works.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pointer(2, 2, false));
+    }
+
+    #[test]
+    fn button_cancel_discards_press_before_any_later_release() {
+        let mut button = Button::new(Frame::new(0, 0, 40, 16), "OK");
+
+        // Arm a press.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pressed);
+
+        // Shell-style cancellation (WCAN arrived).
+        button.cancel_pointer();
+        assert!(!button.pressed);
+        assert!(!button.hovered);
+
+        // A synthetic or real release that arrives after WCAN must not click.
+        assert!(!button.pointer(2, 2, false));
+        assert!(!button.pressed);
+
+        // A brand-new gesture still works.
+        assert!(!button.pointer(2, 2, true));
+        assert!(button.pointer(2, 2, false));
     }
 
     #[test]
