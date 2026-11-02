@@ -149,6 +149,8 @@ mod serial;
 mod service_supervisor;
 mod session;
 mod shell;
+mod structured_logging;
+mod telemetry_hooks;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
