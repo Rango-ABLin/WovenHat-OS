@@ -5439,6 +5439,18 @@ Evidence is preserved under:
 `audit-artifacts/stage22.5-2cpu-1792521764182836500`, and
 `audit-artifacts/stage22.5-4cpu-1792521793861888600`.
 
+The 2026-11-02 core-foundation CI follow-up disabled `libwoven`'s
+WovenHat-specific default allocator in the host `wpkg-packager` dependency; on
+Linux that allocator otherwise issued the WovenHat `int 0x80` ABI and crashed
+the fixture-generation process. The QEMU gate now uses 512 MiB because the
+current kernel image's >208 MiB BSS plus its 44.7 MB boot payload cannot be
+loaded in the previous 256 MiB VM. The updated focused gate passed on 1/2/4
+CPUs (exit 33, `[S22.5] WovenPackage transactions: PASSED`); fresh evidence is
+under `audit-artifacts/stage22.5-1cpu-1793630185978710980`,
+`audit-artifacts/stage22.5-2cpu-1793630206999866114`, and
+`audit-artifacts/stage22.5-4cpu-1793630228824251418`. This is a gate
+configuration repair, not a new Stage 22.5 acceptance claim.
+
 The implementation remains deliberately bounded: source paths use the normal
 512-byte syscall limit, one source package is limited by the 64 KiB VFS node
 capacity, catalogs use the fixed WovenStore record ceiling, and payloads are

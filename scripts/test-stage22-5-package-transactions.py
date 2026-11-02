@@ -111,7 +111,7 @@ def main() -> int:
         "-machine",
         "pc",
         "-m",
-        "256M",
+        "512M",
         "-smp",
         str(args.cpus),
         "-display",

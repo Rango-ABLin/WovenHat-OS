@@ -8,6 +8,19 @@ single-pixel oracle landed in a rounded transparent corner. The acceptance now
 clicks the actual target center and checks the projected header accent. QEMU
 passes on 1/2/4 CPUs; no production desktop behavior changed.
 
+## Codex - core-foundation Actions repair (2026-11-02)
+
+Run 41455536209 failed in `test-stage22-5-package-transactions.py` while
+`tools/wpkg-packager` generated its host-side fixture. The crash reproduced
+locally before `main`: `libwoven`'s default `userspace-allocator` linked into
+the host tool and invoked the WovenHat `int 0x80` mmap ABI under Linux. Disabled
+that default feature for this host-only dependency. The next test step exposed
+that the Stage 22.5 QEMU boot cannot fit its >208 MiB kernel BSS and 44.7 MB
+boot payload in 256 MiB, so its test VM now uses 512 MiB. The focused gate,
+including fixture packaging, passes on 1/2/4 CPUs; package-tool tests, host
+Clippy, and Python syntax validation pass. Full core-foundation rerun remains
+needed. No overlapping agent work is recorded.
+
 ## Codex - runtime-storage-pcie Actions repair (2026-11-02)
 
 Fixed the Stage 11.5 lifecycle-trampoline placement that rejected shared-image
