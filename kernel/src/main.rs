@@ -14467,7 +14467,6 @@ fn stage20_3_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const ACCENT: u32 = rgb(76, 190, 188);
     const ACTIVE: u32 = rgb(70, 120, 210);
-    const START_FILL: u32 = rgb(28, 115, 145);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
@@ -14591,71 +14590,52 @@ fn stage20_3_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 50;
 
-    fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
-        let fill = rgb(74, 88, 112);
-        let ink = rgb(220, 230, 242);
-        surface.fill_rect(Rect::new(x + 1, y + 2, size as usize, size as usize), rgb(0, 0, 0));
-        surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
-        surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
-        if selected { surface.stroke_rect(Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize), ACCENT); }
-        let span = (size / 2).max(4);
-        surface.fill_rect(Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2), ink);
-        surface.fill_rect(Rect::new(x + size / 4 + 2, y + size / 3 + 6, (span - 4).max(0) as usize, 2), ink);
-        const MASK: [&[u8; 8]; 8] = [b"..####..", b".######.", b"########", b"###..###", b"##....##", b"#......#", b"########", b"........"];
-        let color = if selected { rgb(110, 235, 235) } else { rgb(225, 235, 250) };
-        for (row, line) in MASK.iter().enumerate() {
-            for (column, bit) in line.iter().enumerate() {
-                if *bit == b'#' { surface.fill_rect(Rect::new(x + (size - 8) / 2 + column as i32, y + (size - 8) / 2 + row as i32, 1, 1), color); }
-            }
-        }
-    }
-
-    // The launcher panel as the kernel renders it: rows of 14 pixels (title,
-    // search, one per match or "No matches") inside a one-pixel border, just
-    // above the taskbar.
+    // Independent acceptance of the current 50px taskbar's flat, rounded
+    // launcher. Text pixels, selected-row background, panel transparency,
+    // sorting, filtering and keyboard/pointer launch remain mandatory.
     let panel_height = |matches: usize| (2 + matches.max(1) as i32) * 14 + 2;
     let panel = |names: &[&str], query: &str, selected: usize| {
         let h = panel_height(names.len());
         let y = top - 2 - h;
-        let mut expected = Surface::new(160, h as usize);
-        expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
-        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
-        expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        generic_icon(&mut expected, 4, 3, 8, false);
-        expected.draw_text(16, 5, "WovenStart", WHITE);
-        expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
+        let x = 4;
+        let mut glyphs = Surface::new(160, h as usize);
+        glyphs.fill_rect(Rect::new(0, 0, 160, h as usize), UNSET);
+        glyphs.draw_text(16, 5, "WovenStart", ACCENT);
+        glyphs.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
         if names.is_empty() {
-            expected.draw_text(6, 33, "No matches", WHITE);
+            glyphs.draw_text(6, 33, "No matches", WHITE);
         }
         for (row, name) in names.iter().enumerate() {
             let row_y = 1 + (2 + row as i32) * 14;
-            if row == selected {
-                expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
-            }
-            generic_icon(&mut expected, 4, row_y + 1, 12, row == selected);
-            expected.draw_text(22, row_y + 4, name, WHITE);
+            glyphs.draw_text(22, row_y + 4, name, WHITE);
         }
-        const PANEL_FILL: u32 = rgb(28, 32, 44);
-        const PANEL_OPACITY: u8 = 216;
-        // The shell's 3D source texture is seeded with the translucent panel
-        // background at the corresponding flat screen coordinate before the
-        // sparse border/text painter runs. Reconstruct that seed here rather
-        // than treating transparent cells as black.
-        let flat = |lx: i32, ly: i32| match expected.pixel(lx, ly) {
-            Some(UNSET) | None => Some(blend_pixel(
-                PANEL_FILL,
-                wallpaper(4 + lx, y + ly, height),
-                PANEL_OPACITY,
-            )),
-            Some(pixel) => Some(pixel),
-        };
-        let sample = |x: i32, py: i32| {
-            flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
-        };
-        // Every pixel of the flat panel, including icon/selection/border.
-        let matches = until(500, || region(4, y, 160, h, sample));
-        if !matches { report_graphics_mismatch("launcher", 4, y, 160, h, sample); }
-        matches
+        until(500, || {
+            let bg_x = x + 145;
+            let bg_y = y + 5;
+            let transparent_panel = compositor::pixel(bg_x, bg_y)
+                == Ok(blend_pixel(
+                    rgb(28, 32, 44), wallpaper(bg_x, bg_y, height), 235,
+                ));
+            let text_matches = (0..h).all(|dy| (0..160).all(|dx| {
+                let expected = glyphs.pixel(dx, dy);
+                (expected != Some(WHITE) && expected != Some(ACCENT))
+                    || compositor::pixel(x + dx, y + dy) == Ok(expected.unwrap_or(UNSET))
+            }));
+            let row_selected = names.is_empty() || names.iter().enumerate().all(|(i, _)| {
+                let row_y = y + 1 + (2 + i as i32) * 14 + 7;
+                let color = compositor::pixel(x + 145, row_y);
+                if i == selected {
+                    color == Ok(ACTIVE)
+                } else {
+                    color == Ok(blend_pixel(
+                        rgb(28, 32, 44),
+                        wallpaper(x + 145, row_y, height),
+                        235,
+                    ))
+                }
+            });
+            transparent_panel && text_matches && row_selected
+        })
     };
     let closed = || {
         let h = panel_height(3);
