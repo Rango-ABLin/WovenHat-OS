@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - desktop-userspace Stage 20.3 oracle repair (2026-11-02)
+
+Investigated kernel Actions run `41464712512`, job `125348295893`. Stage 20.3
+fails at its first F1 launcher check because the independent launcher-panel
+pixel oracle expected opacity 235 while WovenShell renders the panel at 216.
+The acceptance expectation now matches the visible panel opacity; no production
+behavior changed. The sandbox has no QEMU binary, so runtime acceptance remains
+unverified and the stage is not being marked accepted.
+
 ## Codex - drivers-radio Stage 20.15 session gate (2026-11-02)
 
 Reproduced the `drivers-radio` failure at the Stage 20.15 Quick Settings

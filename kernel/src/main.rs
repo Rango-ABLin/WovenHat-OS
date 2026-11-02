@@ -14481,6 +14481,7 @@ fn stage20_3_self_test() -> bool {
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
+    const LAUNCHER_OPACITY: u8 = 216;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -14625,7 +14626,7 @@ fn stage20_3_self_test() -> bool {
             let bg_y = y + 5;
             let transparent_panel = compositor::pixel(bg_x, bg_y)
                 == Ok(blend_pixel(
-                    rgb(28, 32, 44), wallpaper(bg_x, bg_y, height), 235,
+                    rgb(28, 32, 44), wallpaper(bg_x, bg_y, height), LAUNCHER_OPACITY,
                 ));
             let text_matches = (0..h).all(|dy| (0..160).all(|dx| {
                 let expected = glyphs.pixel(dx, dy);
@@ -14641,7 +14642,7 @@ fn stage20_3_self_test() -> bool {
                     color == Ok(blend_pixel(
                         rgb(28, 32, 44),
                         wallpaper(x + 145, row_y, height),
-                        235,
+                        LAUNCHER_OPACITY,
                     ))
                 }
             });

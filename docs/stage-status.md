@@ -1,5 +1,14 @@
 # Stage status
 
+## Stage 20.3 desktop-userspace CI follow-up - 2026-11-02 - FIX INTEGRATED
+
+Kernel Actions run `41464712512`, job `125348295893`, failed on the first
+Stage 20.3 launcher assertion. The independent panel-color oracle expected
+opacity 235, but WovenShell's launcher panel uses opacity 216. Updated the
+oracle for the translucent panel and unselected rows; production behavior is
+unchanged. This sandbox has no QEMU binary, so the 1/2/4-CPU runtime gate is
+still unverified and this change does not claim Stage 20.3 acceptance.
+
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 
 The full appearance/features proposal is authorized. Work resumes at the open
