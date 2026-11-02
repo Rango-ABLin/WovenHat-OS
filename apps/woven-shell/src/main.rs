@@ -240,6 +240,7 @@ const CASCADE_STEP: i32 = 24;
 const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
 const TOAST_OPACITY: u8 = 216;
+const TOAST_CARD_OPACITY: u8 = 235;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
 
@@ -1337,6 +1338,42 @@ impl Painter<'_> {
                 x += width;
             }
             y += height;
+        }
+    }
+
+    /// Blend only the scanline spans inside a rounded rectangle. A keyed
+    /// overlay cannot alpha-blend against the already-composited background.
+    fn blend_rounded(&mut self, shape: Area, clip: Area, radius: usize, color: u32, opacity: u8) {
+        if shape.is_empty() || clip.is_empty() {
+            return;
+        }
+        let clipped = shape.intersect(clip);
+        if clipped.is_empty() {
+            return;
+        }
+        let radius = radius.min(shape.width.min(shape.height) as usize / 2) as i32;
+        let right = shape.x + shape.width - 1;
+        let bottom = shape.y + shape.height - 1;
+        let radius_squared = i64::from(radius) * i64::from(radius);
+        let center_top = shape.y + radius;
+        let center_bottom = bottom - radius;
+
+        for y in clipped.y..clipped.y + clipped.height {
+            let center_y = y.clamp(center_top, center_bottom);
+            let dy = i64::from(y - center_y);
+            let mut extent = 0i32;
+            while extent < radius {
+                let next = extent + 1;
+                if i64::from(next) * i64::from(next) + dy * dy > radius_squared {
+                    break;
+                }
+                extent = next;
+            }
+            let left = (shape.x + radius - extent).max(clipped.x);
+            let span_right = (right - radius + extent).min(clipped.x + clipped.width - 1);
+            if left <= span_right {
+                self.blend(Area::new(left, y, span_right - left + 1, 1), color, opacity);
+            }
         }
     }
 
@@ -3410,7 +3447,13 @@ impl Desktop {
     fn paint_toast_content(&self, toast: &Toast, canvas: &mut Canvas<'_>, area: Area) {
         // Rounded, near-opaque card, matching the rest of the floating
         // chrome, instead of a hard-edged square outline.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
+        fill_rounded_blended(
+            canvas,
+            area,
+            CHROME_RADIUS_SMALL,
+            theme_toast(),
+            TOAST_CARD_OPACITY,
+        );
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
         canvas.draw_text(area.x + 6, area.y + 8, text, theme_text());
     }
@@ -3651,10 +3694,25 @@ impl Desktop {
         }
 
         if let Some(toast) = &self.toast {
-            let part = self.toast_area().intersect(area);
+            let toast_area = self.toast_area();
+            let part = toast_area.intersect(area);
             if !part.is_empty() {
                 painter.blend(part, theme_toast(), TOAST_OPACITY);
-                painter.overlay(part, |canvas| self.render_toast(toast, canvas));
+                if self.three_d {
+                    painter.overlay(part, |canvas| self.render_toast(toast, canvas));
+                } else {
+                    painter.blend_rounded(
+                        toast_area,
+                        part,
+                        CHROME_RADIUS_SMALL,
+                        theme_toast(),
+                        TOAST_CARD_OPACITY,
+                    );
+                    let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
+                    painter.overlay(part, |canvas| {
+                        canvas.draw_text(toast_area.x + 6, toast_area.y + 8, text, theme_text())
+                    });
+                }
             }
         }
 

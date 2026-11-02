@@ -14803,6 +14803,8 @@ fn stage20_2_self_test() -> bool {
     const TASKBAR_HEIGHT: i32 = 50;
     const APP_SLOT: i32 = 40;
     const APP_GAP: i32 = 8;
+    const TOAST_BACKGROUND_OPACITY: u8 = 216;
+    const TOAST_CARD_OPACITY: u8 = 235;
     const UNSET: u32 = 0x0100_0000;
 
     fn step(name: &str, ok: bool) -> bool {
@@ -14986,25 +14988,28 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     // The toast is now anchored above the right edge of the 50px taskbar.
-    // Assert its accent border and actual message glyphs, not just a changed
-    // rectangle. The rendered interior uses translucent panel colour.
+    // Assert its translucent base and rounded-card layers, plus actual message
+    // glyphs, not just a changed rectangle.
     let mut toast_mask = Surface::new(180, 22);
     toast_mask.fill_rect(toast_mask.bounds(), UNSET);
     toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
     let toast = until(500, || {
-        // Rounded toast chrome uses a 235-alpha panel, not the old
-        // hard-edged accent border. Test its interior independently and
-        // every white message-glyph pixel without ignoring either.
+        // The panel's translucent rectangular base is beneath the
+        // near-opaque rounded card. Test the interior independently and every
+        // white message-glyph pixel without ignoring either.
+        let background = blend_pixel(
+            rgb(28, 32, 44),
+            wallpaper(toast_x + 160, toast_y + 11, height),
+            TOAST_BACKGROUND_OPACITY,
+        );
         compositor::pixel(toast_x + 160, toast_y + 11)
-            == Ok(blend_pixel(
-                rgb(28, 32, 44),
-                wallpaper(toast_x + 160, toast_y + 11, height),
-                235,
-            ))
-            && (0..22).all(|dy| (0..180).all(|dx| {
-                toast_mask.pixel(dx, dy) != Some(WHITE)
-                    || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
-            }))
+            == Ok(blend_pixel(rgb(28, 32, 44), background, TOAST_CARD_OPACITY))
+            && (0..22).all(|dy| {
+                (0..180).all(|dx| {
+                    toast_mask.pixel(dx, dy) != Some(WHITE)
+                        || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
+                })
+            })
     });
     if !step("notification toast above taskbar with readable text", toast) {
         return false;

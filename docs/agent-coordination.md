@@ -8093,3 +8093,14 @@ from b5a2e571^ after the prescribed full Windows gate failed on a missing
 runner. Root owns serial validation under
 `audit-artifacts/modern-desktop-20261029-083456/`; do not start another chain.
 Earlier static app results preceding the repaint fix need final-source reruns.
+
+## Codex - desktop-userspace toast oracle triage (2026-11-02)
+
+Investigating kernel Actions job `125311920358` on the desktop-userspace gate.
+The failure is isolated to the Stage 20.2 toast interior pixel assertion; shell
+startup, window, taskbar, and tray checks pass. Scope is limited to reconciling
+the independent kernel oracle with the shell's layered translucent toast. The
+flat toast now blends rounded spans against the live compositor instead of
+blending into the keyed overlay's magenta clear color. No QEMU acceptance chain
+has been started because this sandbox has no QEMU binary; preserve the existing
+serial-validation ownership and leave runtime acceptance to CI.

@@ -9828,6 +9828,19 @@ Negative controls, with evidence in
 - With taskbar entries ignoring clicks, it fails at "taskbar click raises
   window A".
 
+## Stage 20.2 desktop-userspace toast oracle — 2026-11-02 — FIX INTEGRATED / QEMU PENDING
+
+Actions run `41455547962`, job `125311920358`, failed only at the toast
+interior pixel assertion. The flat renderer blended the 235-opacity rounded
+card into the keyed overlay's magenta clear color, then copied those pixels
+over the compositor; this did not blend against the toast's 216-opacity base
+or the wallpaper. It now applies rounded scanline spans through the
+compositor's blended-region path and draws the text as a keyed opaque overlay.
+The independent oracle checks both compositing layers. WovenShell and hello-gui
+release builds, Stage 20.2 target Clippy and boot-image build, and host
+all-target Clippy pass locally. QEMU is unavailable in this sandbox, so the
+1/2/4-CPU runtime gate remains pending CI.
+
 Open:
 - **Discovery.** Applications learn the shell's process id from their
   arguments; there is no name service yet.
