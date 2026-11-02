@@ -204,10 +204,8 @@ const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
 
 /// Taskbar window entries, left to right after the start button.
 const ENTRY_WIDTH: i32 = desktop_layout::APP_SLOT;
-const ENTRY_GAP: i32 = desktop_layout::APP_GAP;
 const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
 const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
-/// Characters of a title that fit in an entry.
 
 /// Tray icons, right to left from the clock.
 const TRAY_ICON: i32 = 16;
@@ -242,7 +240,6 @@ const CASCADE_STEP: i32 = 24;
 
 const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
-const TOAST_MARGIN: i32 = 8;
 const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
@@ -1581,7 +1578,7 @@ impl Desktop {
 
     fn tray_area(&self, index: usize) -> Area {
         let x = self.width - CLOCK_WIDTH - (index as i32 + 1) * (TRAY_ICON + TRAY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+        Area::new(x, self.taskbar_top() + (TASKBAR_HEIGHT - TRAY_ICON) / 2, TRAY_ICON, TRAY_ICON)
     }
 
     fn toast_area(&self) -> Area {
@@ -1613,12 +1610,8 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        Area::new(
-            START_X,
-            self.taskbar_top() + 4,
-            START_WIDTH as i32,
-            START_HEIGHT as i32,
-        )
+        let rect = desktop_layout::start_button(self.height);
+        Area::new(rect.x, rect.y, rect.width, rect.height)
     }
 
     /// The launcher panel, sized to its rows, above the start button; empty
@@ -1958,7 +1951,7 @@ impl Desktop {
         let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
         Area::new(
             x,
-            self.taskbar_top() + 4,
+            self.taskbar_top() + (TASKBAR_HEIGHT - START_HEIGHT as i32) / 2,
             WORKSPACE_BOX,
             START_HEIGHT as i32,
         )
@@ -2346,7 +2339,7 @@ impl Desktop {
     /// The Quick Settings button, left of the tray's last icon slot.
     fn qs_button(&self) -> Area {
         let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+        Area::new(x, self.taskbar_top() + (TASKBAR_HEIGHT - TRAY_ICON) / 2, TRAY_ICON, TRAY_ICON)
     }
 
     /// Quick Settings: a title row and one row per toggle, above the
