@@ -1146,6 +1146,15 @@ return, keyboard delivery, Quick Settings access, and desktop power-off on
 1/2/4 CPUs. Target Clippy is green; evidence is preserved under
 `audit-artifacts/stage20.15-{1,2,4}cpu-*`.
 
+**Current-head requalification (2026-11-02).** The `drivers-radio` run exposed
+a stale session-test click target and a single-pixel oracle that landed in the
+rounded panel corner. The gate now clicks the center of the Quick Settings hit
+target and checks for its high-contrast accent in the projected header band.
+QEMU passes on 1/2/4 CPUs; target and host warning-denying Clippy pass. Evidence:
+`audit-artifacts/stage20.15-1cpu-1793629751713281078`,
+`audit-artifacts/stage20.15-2cpu-1793629786902467756`, and
+`audit-artifacts/stage20.15-4cpu-1793629802665473870`.
+
 ## Stage 13.20 power-off matrix - 2026-10-25
 
 The ACPI PM1/_S5 power-off gate passes on 1/2/4 CPUs. Evidence is preserved

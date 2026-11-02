@@ -9607,25 +9607,32 @@ fn stage20_15_self_test() -> bool {
         return false;
     }
 
-    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
-    // and Language were appended after Lock screen, so only the row-count
-    // term needs updating).
-    let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
+    // The pointer starts at the screen center. Move to the center of the
+    // 16-pixel Quick Settings hit target, centered in the 50-pixel taskbar.
+    let button = (width - 54 - 5 * 20 + 8, top + 25);
+    let panel_width = 164;
+    let panel_height = 11 * 14 + 2;
+    let panel_left = width - 4 - panel_width;
+    let panel_top = top - 2 - panel_height;
+    let power_row = (panel_left + 28, panel_top + 1 + 14 + 7);
     let (px, py) = (width / 2, height / 2);
-    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
+    let opened = move_by(button.0 - px, button.1 - py) && click();
+    // Projection moves the header into the panel's upper 40 pixels; check its
+    // accent there instead of sampling a rounded corner at one fixed pixel.
+    let panel_visible = until(1000, || {
+        (panel_top..panel_top + 40).any(|y| {
+            (panel_left..panel_left + panel_width)
+                .any(|x| compositor::pixel(x, y) == Ok(rgb(255, 255, 0)))
+        })
+    });
     if !step(
         "Quick Settings opens",
-        opened
-            && until(1000, || {
-                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(255, 255, 0))
-            }),
+        opened && panel_visible,
     ) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
-    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
+    let _ = move_by(power_row.0 - button.0, power_row.1 - button.1) && click();
     // The machine should now be off; still running after this is failure.
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1000 {

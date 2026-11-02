@@ -4597,6 +4597,11 @@ wallpaper and a tiled client, scale changes, and teardown. The gate uses the
 flat compatibility presentation so those checks remain independent of the
 separate 3D projection path.
 
+The Stage 20.15 session gate drives the shell's relative pointer from its
+centered startup position to the center of the Quick Settings hit target. Its
+visibility oracle checks for the high-contrast header accent within the
+projected panel band, rather than relying on a pixel at a rounded corner.
+
 ## Stage 32 production instrumentation compilation repair (2026-10-27)
 
 The kernel entry crate exports the diagnostics, tracing, and profiler Rust

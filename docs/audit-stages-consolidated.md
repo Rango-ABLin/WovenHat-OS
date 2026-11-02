@@ -10204,6 +10204,20 @@ Reruns after the fixes:
 DONE
 ```
 
+## Current-head Stage 20.15 regression repair (2026-11-02)
+
+The `drivers-radio` run failed at “Quick Settings opens.” The previous
+acceptance click landed above the current 16-pixel taskbar hit target, and the
+fixed-pixel check was at the rounded, transparent panel corner. The gate now
+clicks the hit-target center and searches for the high-contrast header accent
+in the projected panel band. No production desktop behavior changed.
+
+The repaired gate passes on 1/2/4 CPUs. Evidence:
+
+- `audit-artifacts/stage20.15-1cpu-1793629751713281078`
+- `audit-artifacts/stage20.15-2cpu-1793629786902467756`
+- `audit-artifacts/stage20.15-4cpu-1793629802665473870`
+
 **Negative controls**, each caught, on 1 CPU with the source restored byte
 for byte:
 - **F12 not intercepted.**

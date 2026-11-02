@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - drivers-radio Stage 20.15 session gate (2026-11-02)
+
+Reproduced the `drivers-radio` failure at the Stage 20.15 Quick Settings
+interaction. The old click missed the centered 16-pixel taskbar target, and its
+single-pixel oracle landed in a rounded transparent corner. The acceptance now
+clicks the actual target center and checks the projected header accent. QEMU
+passes on 1/2/4 CPUs; no production desktop behavior changed.
+
 ## Codex - runtime-storage-pcie Actions repair (2026-11-02)
 
 Fixed the Stage 11.5 lifecycle-trampoline placement that rejected shared-image
