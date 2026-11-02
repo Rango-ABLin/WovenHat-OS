@@ -456,13 +456,40 @@ pub(super) fn run() -> bool {
             &mut address,
         )
         .ok()?;
+        let trampoline = program.address_space.lifecycle_trampoline;
+        let trampoline_end = trampoline.checked_add(ASLR_PAGE);
+        let trampoline_mapping = program.address_space.mappings
+            [..program.address_space.mapping_count]
+            .iter()
+            .position(|mapping| {
+                mapping.start() == trampoline && mapping.size() as u64 == ASLR_PAGE
+            });
+        let trampoline_is_disjoint = trampoline_end.is_some_and(|end| {
+            trampoline >= USER_REGION_START
+                && end <= program.address_space.mmap_base
+                && trampoline_mapping.is_some_and(|trampoline_mapping| {
+                    program.address_space.mappings[..program.address_space.mapping_count]
+                        .iter()
+                        .enumerate()
+                        .all(|(index, mapping)| {
+                            index == trampoline_mapping
+                                || mapping
+                                    .start()
+                                    .checked_add(mapping.size() as u64)
+                                    .is_some_and(|mapping_end| {
+                                        end <= mapping.start() || mapping_end <= trampoline
+                                    })
+                        })
+                })
+        });
         if !step(
             "transitive graph and cross-image relocation",
             program.address_space.mapping_count == 7
                 && u64::from_le_bytes(address) == LIBRARY_START + 0x20
                 && program
                     .address_space
-                    .contains_executable(LIBRARY_START + 0x20),
+                    .contains_executable(LIBRARY_START + 0x20)
+                && trampoline_is_disjoint,
         ) {
             return None;
         }

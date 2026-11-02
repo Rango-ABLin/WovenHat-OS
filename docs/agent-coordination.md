@@ -1,5 +1,13 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - runtime-storage-pcie Actions repair (2026-11-02)
+
+Fixed the Stage 11.5 lifecycle-trampoline placement that rejected shared-image
+loads, and the Stage 12.5 strict-Clippy boolean comparison. The complete
+runtime/storage/PCIe matrix passes on 1/2/4 CPUs; evidence and implementation
+details are recorded in the stage-status, architecture, and consolidated audit
+documents. No overlapping work was recorded.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:
