@@ -21,8 +21,8 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Pure geometry tests
-        run: cargo test --manifest-path apps/woven-shell-layout/Cargo.toml
+        run: cargo +stable test --manifest-path apps/woven-shell-layout/Cargo.toml
       - name: Warnings-as-errors Clippy
-        run: cargo clippy --manifest-path apps/woven-shell-layout/Cargo.toml --all-targets -- -D warnings
+        run: cargo +stable clippy --manifest-path apps/woven-shell-layout/Cargo.toml --all-targets -- -D warnings
       - name: Formatting
-        run: cargo fmt --manifest-path apps/woven-shell-layout/Cargo.toml -- --check
+        run: cargo +stable fmt --manifest-path apps/woven-shell-layout/Cargo.toml -- --check
