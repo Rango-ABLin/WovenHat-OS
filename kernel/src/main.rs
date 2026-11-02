@@ -9273,14 +9273,8 @@ fn stage20_14b_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -9339,7 +9333,7 @@ fn stage20_14b_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
-    let top = height - 24;
+    let top = height - 50;
     serial::write_line(format_args!(
         "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
         width, height, scale, primary
@@ -9566,7 +9560,7 @@ fn stage20_15_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     // F1: the launcher's first row is the catalog's application.
     // The launcher panel: x 4, three rows of 14 plus its border, above the
     // taskbar; the first match's icon occupies the left margin and its text
@@ -10321,14 +10315,8 @@ fn stage20_13_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -10389,7 +10377,7 @@ fn stage20_13_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     // Switcher boxes, left of the Quick Settings button.
     let qs_x = width - (8 * crate::font::ADVANCE + 6) - 5 * (16 + 4);
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
@@ -10570,14 +10558,8 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -10856,7 +10838,7 @@ fn stage20_12_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let middle = height / 2;
     let dim = move |x: i32, y: i32| {
         blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
@@ -11053,14 +11035,8 @@ fn stage20_11_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -11302,7 +11278,7 @@ fn stage20_11_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -11760,7 +11736,7 @@ fn stage20_10_self_test() -> bool {
         beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
-        let top = height - 24;
+        let top = height - 50;
         let h = 11 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
@@ -11829,7 +11805,7 @@ fn stage20_10_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -11959,7 +11935,7 @@ fn stage20_10_self_test() -> bool {
         // layer (with the badge) before the toast layer, so the badge can be
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
-        && stays(100, || region(width - 188, 8, 180, 22, |x, y| {
+        && stays(100, || region(width - 188, height - 80, 180, 22, |x, y| {
             expected_wallpaper(x, y, width, height)
         }));
     let silenced = toast_clear;
@@ -12260,7 +12236,7 @@ fn stage20_17_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     const QS_ROWS: i32 = 10;
     const PANEL_ROW: i32 = 14;
     const CENTER_WIDTH: i32 = 164;
@@ -12420,7 +12396,7 @@ fn stage20_18_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
@@ -12494,11 +12470,10 @@ fn stage20_18_self_test() -> bool {
         let span = (height - 1).max(1);
         let gradient = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58),
             (y.clamp(0, span) * 255 / span) as u8);
-        let tint = if (x / 96 + y / 96) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
-        let woven = blend_pixel(tint, gradient, 12);
-        if x % 96 == 0 || y % 96 == 0 { blend_pixel(rgb(255, 255, 255), woven, 10) } else { woven }
+        let tint = if ((x + y) / 220) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
+        blend_pixel(tint, gradient, 6)
     };
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let mut toast = Surface::new(180, 22);
     for y in 0..22 {
         for x in 0..180 {
@@ -12594,14 +12569,8 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -12669,7 +12638,7 @@ fn stage20_9_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -12709,7 +12678,7 @@ fn stage20_9_self_test() -> bool {
     };
     if !step(
         "the toast shows the latest notification",
-        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
+        until(1500, || region(width - 188, height - 80, 180, 22, toast_expected)),
     ) {
         return false;
     }
@@ -12860,14 +12829,8 @@ fn stage20_8_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -12952,7 +12915,7 @@ fn stage20_8_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13516,14 +13479,8 @@ fn stage20_6_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13602,7 +13559,7 @@ fn stage20_6_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13622,7 +13579,7 @@ fn stage20_6_self_test() -> bool {
 
     // The toast A posts, over the wallpaper: background blended, border and
     // text exact.
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let toast_overlay = overlay((180, 22), |surface| {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
@@ -13804,14 +13761,8 @@ fn stage20_5_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -14035,7 +13986,7 @@ fn stage20_5_self_test() -> bool {
     /// window's shadow bands bottom to top, never on the taskbar.
     fn shadowed(x: i32, y: i32, height: i32, stack: &[(Frame, bool)]) -> u32 {
         let mut value = wallpaper(x, y, height);
-        if y >= height - 24 {
+        if y >= height - 50 {
             return value;
         }
         for &((fx, fy, fw, fh), focused) in stack {
@@ -14076,7 +14027,7 @@ fn stage20_5_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -14262,14 +14213,8 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14545,14 +14490,8 @@ fn stage20_3_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14644,7 +14583,7 @@ fn stage20_3_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
     fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
         let fill = rgb(74, 88, 112);
@@ -14790,7 +14729,7 @@ fn stage20_3_self_test() -> bool {
 
     // A failed spawn must display a real notification, with exact text.
     let toast = || {
-        let (x0, y0) = (width - 188, 8);
+        let (x0, y0) = (width - 188, height - 80);
         let mut expected = Surface::new(180, 22);
         expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
         expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
