@@ -174,7 +174,6 @@ const TASKBAR: u32 = rgb(10, 18, 30);
 const TASKBAR_OPACITY: u8 = 216;
 const ACCENT: u32 = rgb(76, 190, 188);
 const START_X: i32 = 8;
-const START_WIDTH: usize = desktop_layout::START_SIZE as usize;
 const START_HEIGHT: usize = desktop_layout::START_SIZE as usize;
 const START_FILL: u32 = rgb(28, 115, 145);
 /// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
