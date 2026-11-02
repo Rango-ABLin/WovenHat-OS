@@ -15679,7 +15679,7 @@ fn stage20_1_self_test() -> bool {
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const TASKBAR: u32 = rgb(10, 18, 30);
-    const TASKBAR_HEIGHT: i32 = 24;
+    const TASKBAR_HEIGHT: i32 = 50;
     /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
     const UNSET: u32 = 0x0100_0000;
 
@@ -15956,99 +15956,78 @@ fn stage20_1_self_test() -> bool {
     // The workspace switcher (Stage 20.13): four 12-pixel boxes, 2 apart,
     // ending 6 left of the Quick Settings button.
     let ws_x = qs_x - 6 - (4 * 14 - 2);
-    let label_x = 4 + 13;
-    let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let button_mask = text_mask(44, 16, label_x - 4, 5, "Woven");
-    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
-        let digit = [b'1' + index as u8];
-        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
-    });
-    // No windows are open in this stage, so the taskbar has no entries.
-    let no_entries: [TaskbarEntryMask3D; 0] = [];
-    // Under 3D projection, a query pixel anywhere in the taskbar can sample
-    // from anywhere in the texture, including the clock's own area -- so
-    // the structural checks below need a real clock mask, not `None`, to
-    // avoid a false mismatch there. The clock's own content is *not*
-    // re-verified pixel-exactly under projection, though: narrow text this
-    // close to the taskbar's right edge, under the degree of horizontal
-    // stretch this tilt applies, can have its projected texture sample
-    // land clear of the glyph's own small footprint -- not a one-pixel
-    // rounding tie, but the sample genuinely falling elsewhere in the
-    // texture. Independently re-deriving exactly where is possible but a
-    // bigger exercise than this stage warrants; instead the dedicated
-    // clock check below confirms the area's content is live (changes
-    // between two different reads of the real hardware clock) rather than
-    // asserting the exact rendered glyph positions.
-    let clock_mask_now = text_mask(clock_width as usize, 23, 0, 8, "00:00:00");
-    // Rows `top`..`top+3` are checked only at a handful of x well clear of
-    // the projected quad's upper two vertices (near x=0 and x=width), not
-    // across the full width: close to a vertex, a query pixel can be
-    // within a pixel of the triangles' shared edge -- close enough that
-    // independently-rounded fixed-point corners (this test's own vs. the
-    // renderer's) land the interpolated texture sample a pixel apart, same
-    // as a real GPU rasterizer's well-known "which triangle owns the
-    // shared edge" sensitivity. Every row from `top+4` on, and the
-    // narrower button/switcher/QS/clock checks below (all at `top+4` or
-    // deeper), are still checked exactly across their full width.
-    // Checked at a handful of specific points, the same style already
-    // established for the other 3D surfaces (e.g. Stage 20.17/20.18's
-    // corner checks), rather than an exhaustive scan: under projection, a
-    // query's texture sample can land some distance away (more, the
-    // closer the query is to the taskbar's receded top edge), so an
-    // exhaustive scan keeps reaching into the clock's own display, whose
-    // exact glyphs this test does not independently re-derive (see the
-    // note above `clock_mask_now`). Each point below is chosen well clear
-    // of both the top edge and the clock.
-    let safe_sample = |x: i32, y: i32| {
-        let expected = flat_taskbar_3d(
-            x,
-            y,
-            width,
-            top,
-            &button_mask,
-            &ws_digit_masks,
-            0,
-            &qs_mask,
-            false,
-            &no_entries,
-            Some(&clock_mask_now),
-            |x, y| wallpaper(x, y, height),
-        );
-        let actual = compositor::pixel(x, y);
-        actual == Ok(expected)
+    // Stage 20.1 runs the FLAT desktop path. Its previous pixel oracle
+    // described 24-pixel chrome with a text Start label and therefore could
+    // never verify the current 50-pixel, icon-only taskbar. Check the new
+    // contract independently: exact composited bar background, Q/number
+    // glyphs, and the complete WovenHat weave symbol.
+    //
+    // The shell has no FileRead capability in this stage, so no catalog
+    // entries or pinned-app icons can be resolved. Sample clear bar columns.
+    let backdrop = |x: i32, y: i32| {
+        if y == top {
+            rgb(76, 190, 188)
+        } else {
+            taskbar(x, y, height)
+        }
     };
-    let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
+    let bar = [80, 160, 240, 320, 380]
         .into_iter()
-        .all(|x| {
-            (top..top + TASKBAR_HEIGHT)
-                .step_by(3)
-                .all(|y| safe_sample(x, y))
-        });
+        .all(|x| (top..top + TASKBAR_HEIGHT).all(|y| {
+            compositor::pixel(x, y) == Ok(backdrop(x, y))
+        }));
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
-    let qs = [(qs_x + 4, top + 10), (qs_x + 11, top + 14)]
-        .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+
+    // Verify every foreground Q pixel, not just a region that happened to
+    // change. The independent mask uses the kernel font glyph renderer.
+    let qs_mask = text_mask(16, TASKBAR_HEIGHT as usize, 5, (TASKBAR_HEIGHT - 7) / 2, "Q");
+    let qs = (0..TASKBAR_HEIGHT).all(|dy| (0..16).all(|dx| {
+        qs_mask.pixel(dx, dy) != Some(WHITE)
+            || compositor::pixel(qs_x + dx, top + dy) == Ok(WHITE)
+    }));
     if !step("Quick Settings button and its label", qs) {
         return false;
     }
-    // Workspace boxes: the first current (active fill), digits 1-4.
-    let switcher = (0..4)
-        .flat_map(|index| {
-            [
-                (ws_x + index * 14 + 3, top + 10),
-                (ws_x + index * 14 + 8, top + 14),
-            ]
-        })
-        .all(|(x, y)| safe_sample(x, y));
+
+    let switcher = (0..4).all(|index| {
+        let digit = [b'1' + index as u8];
+        let mask = text_mask(
+            12,
+            TASKBAR_HEIGHT as usize,
+            3,
+            (TASKBAR_HEIGHT - 7) / 2,
+            core::str::from_utf8(&digit).unwrap_or("?"),
+        );
+        (0..TASKBAR_HEIGHT).all(|dy| (0..12).all(|dx| {
+            mask.pixel(dx, dy) != Some(WHITE)
+                || compositor::pixel(ws_x + index * 14 + dx, top + dy) == Ok(WHITE)
+        }))
+    });
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
-    // The start button, rendered here with the kernel's own font and icon.
-    let button = [(10, top + 10), (20, top + 14), (40, top + 10)]
-        .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+
+    // The WovenStart button has no text label. Test the visible 8x8 weave,
+    // including the overlapping strand colours, at its actual 36px centre.
+    let icon = [
+        b"AA..AA..", b"AA..AA..", b"..DD..DD", b"..DD..DD",
+        b"AA..AA..", b"AA..AA..", b"..DD..DD", b"..DD..DD",
+    ];
+    let icon_y = top + 7 + (36 - 8) / 2;
+    let button = icon.iter().enumerate().all(|(dy, row)| {
+        row.iter().enumerate().all(|(dx, pixel)| {
+            let expected = match pixel {
+                b'A' => Some(rgb(235, 225, 190)),
+                b'D' => Some(rgb(165, 125, 70)),
+                _ => None,
+            };
+            expected.is_none_or(|expected| {
+                compositor::pixel(11 + dx as i32, icon_y + dy as i32) == Ok(expected)
+            })
+        })
+    });
     if !step("start button and its label", button) {
         return false;
     }
