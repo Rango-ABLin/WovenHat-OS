@@ -637,12 +637,14 @@ unsafe impl Sync for ToastTexture {}
 
 static TOAST_TEXTURE: ToastTexture = ToastTexture(UnsafeCell::new([0; TOAST_PIXELS]));
 
-/// The taskbar's maximum pixel footprint, flat-rendered once per repaint
-/// into this offscreen texture, then sampled by the 3D desktop mode's
-/// perspective projection. `MAX_TASKBAR_WIDTH` mirrors the kernel
-/// compositor's own `MAX_WIDTH` bound (two 1280-pixel monitors side by
-/// side), since the taskbar spans the primary monitor's full width.
-const MAX_TASKBAR_WIDTH: usize = 2560;
+/// The 3D taskbar scratch is intentionally bounded to one 1280-pixel
+/// monitor. At 50px, allocating a 2560-pixel-wide texture would consume
+/// 512 KiB of static BSS and push the shell image into its userspace
+/// mmap/stack reservations. Canvas::new fails safely for wider monitors;
+/// render_taskbar_3d then paints the full-width 2D taskbar instead.
+/// This preserves primary-monitor 3D and multihead/wide-monitor usability
+/// without growing the kernel's fixed image mapping contract.
+const MAX_TASKBAR_WIDTH: usize = 1280;
 const TASKBAR_PIXELS: usize = MAX_TASKBAR_WIDTH * TASKBAR_HEIGHT as usize;
 
 struct TaskbarTexture(UnsafeCell<[u32; TASKBAR_PIXELS]>);
