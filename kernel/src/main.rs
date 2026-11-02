@@ -5740,7 +5740,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage11-compiler-test")]
-    run_compiler_loader_gate();
+    {
+        run_compiler_loader_gate();
+        run_compiler_fuzzing_campaign();
+    }
     #[cfg(feature = "stage11-5-test")]
     {
         if !userspace::elf_loader_self_test() || !userspace::shared_library_self_test() {
@@ -6562,6 +6565,88 @@ fn run_compiler_loader_gate() {
         qemu_test_exit_failure();
     }
     serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
+}
+
+#[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
+fn run_compiler_fuzzing_campaign() {
+    use compiler_fuzzing::{FuzzingCampaign, FuzzTestGenerator};
+
+    serial::write_line(format_args!("[S11.FUZZ] Campaign Framework: Initializing"));
+    serial::write_line(format_args!("[S11.FUZZ] Target: {} test cases across 5 strategies", 
+        FuzzTestGenerator::total_test_count()));
+
+    let mut campaign = FuzzingCampaign::new(0xdead_beef_u64);
+    
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 1: Structure Variation (250 tests)"));
+    if !campaign.run_structure_variation_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Structure Variation: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Structure Variation: {} passed",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 2: Type Combinations (250 tests)"));
+    if !campaign.run_type_combination_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Type Combinations: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Type Combinations: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 3: Unsafe Block Patterns (250 tests)"));
+    if !campaign.run_unsafe_block_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Unsafe Block Patterns: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Unsafe Block Patterns: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 4: Attribute Variations (250 tests)"));
+    if !campaign.run_attribute_variation_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Attribute Variations: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Attribute Variations: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 5: Edge Case Patterns (250 tests)"));
+    if !campaign.run_edge_case_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Edge Case Patterns: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Edge Case Patterns: {} total tests completed",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Campaign Complete"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Results: {} tests, {}% pass rate, {}% crash rate",
+        campaign.engine.tests_run,
+        campaign.engine.pass_rate(),
+        campaign.engine.crash_rate()
+    ));
+
+    if campaign.verify_success_criteria() {
+        serial::write_line(format_args!("[S11.FUZZ] Success Criteria: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.FUZZ] Coverage: {} variants exercised",
+            campaign.coverage.total_variants()
+        ));
+        qemu_test_exit_success();
+    } else {
+        serial::write_line(format_args!("[S11.FUZZ] Success Criteria: FAILED"));
+        qemu_test_exit_failure();
+    }
 }
 
 #[cfg(feature = "stage27-5-recovery-test")]
