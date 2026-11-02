@@ -15695,14 +15695,12 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for WovenShell's diagonal woven bands.
+        // Compare against the renderer's actual contract rather than the
+        // superseded 96px checkerboard/seam presentation.
+        let diagonal_band = ((x + y) / 220) % 2 == 0;
+        let tint = if diagonal_band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
