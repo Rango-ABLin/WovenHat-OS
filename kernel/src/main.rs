@@ -152,6 +152,7 @@ mod shell;
 mod structured_logging;
 mod telemetry_hooks;
 mod memory_safety_audit;
+mod bounded_capacity_analyzer;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
