@@ -27,6 +27,18 @@ Current source includes a launcher, basic taskbar and clock, notifications,
 window management and workspaces. Refer to `docs/graphics/current-state-audit.md`
 and the accepted desktop evidence before changing their contracts.
 
+### Verified dependency gap: global modifier shortcuts
+
+The present `kernel/src/woven_input.rs` public `Key` enum has character,
+Enter, Backspace, Tab and F1/F2/F3/F4/F12 variants but **no Super, Alt or
+arrow-key variants**. `kernel/src/keyboard.rs` tracks Shift/Control for
+ASCII decoding but does not publish Super/Alt press/release. Consequently
+the requested Super launcher, Alt+Tab and Super+arrow shortcuts **cannot
+be correctly implemented only within WovenShell**. A compatible, narrowly
+scoped input event/ABI addition (or an already-existing alternate event
+path, if validated) is a prerequisite. Do not claim the "no kernel
+changes" assumption has been established.
+
 ### Not yet implemented/verified by this branch
 
 - Super-key and Alt+Tab modifier routing, preview thumbnails, persistent pins,
