@@ -156,6 +156,7 @@ mod bounded_capacity_analyzer;
 mod deterministic_fault_injection;
 mod documentation_generator;
 mod qemu_perf_regression;
+mod compiler_fuzzing;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
