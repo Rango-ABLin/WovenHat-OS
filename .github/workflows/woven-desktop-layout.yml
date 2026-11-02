@@ -1,0 +1,28 @@
+name: Native Desktop Layout
+
+on:
+  pull_request:
+    paths:
+      - 'apps/woven-shell/src/desktop_layout.rs'
+      - 'apps/woven-shell-layout/**'
+      - '.github/workflows/woven-desktop-layout.yml'
+  push:
+    paths:
+      - 'apps/woven-shell/src/desktop_layout.rs'
+      - 'apps/woven-shell-layout/**'
+      - '.github/workflows/woven-desktop-layout.yml'
+
+jobs:
+  desktop-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Pure geometry tests
+        run: cargo test --manifest-path apps/woven-shell-layout/Cargo.toml
+      - name: Warnings-as-errors Clippy
+        run: cargo clippy --manifest-path apps/woven-shell-layout/Cargo.toml --all-targets -- -D warnings
+      - name: Formatting
+        run: cargo fmt --manifest-path apps/woven-shell-layout/Cargo.toml -- --check
