@@ -1,5 +1,14 @@
 # Agent coordination (Claude Code and Codex)
 
+## Codex - drivers-radio Actions failure repair (2026-11-02)
+
+Run `41464712512`, job `125348295789`, completed its driver and QEMU checks but
+failed one hardware-qualification unit test: the Linux runner interpreted
+`C:/outside/report.json` as a relative path. Evidence validation now rejects
+Windows drive/rooted paths and traversal components independent of host OS;
+the Windows-style traversal case has regression coverage. This is a validation
+repair only and does not change a stage acceptance result.
+
 ## Codex - desktop-userspace Stage 20.3 compositing repair (2026-11-02)
 
 Correction to the initial diagnosis in commit `7674121f`: the Stage 20.3 oracle

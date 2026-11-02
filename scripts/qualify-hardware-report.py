@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 
@@ -73,8 +73,17 @@ def validate(report: Any) -> list[str]:
         evidence = _text(item.get("evidence"))
         if not evidence:
             errors.append(f"{prefix}.evidence is required")
-        elif Path(evidence).is_absolute() or ".." in Path(evidence).parts:
-            errors.append(f"{prefix}.evidence must be a repository-relative path")
+        else:
+            evidence_path = Path(evidence)
+            windows_path = PureWindowsPath(evidence)
+            if (
+                evidence_path.is_absolute()
+                or windows_path.drive
+                or windows_path.root
+                or ".." in evidence_path.parts
+                or ".." in windows_path.parts
+            ):
+                errors.append(f"{prefix}.evidence must be a repository-relative path")
         if item.get("tier") == "tier1" and not (
             item.get("environment") == "native" and item.get("result") == "passed"
         ):

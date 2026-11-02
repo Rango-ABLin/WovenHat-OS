@@ -1,5 +1,14 @@
 # Stage status
 
+## drivers-radio Actions failure follow-up - 2026-11-02 - FIX INTEGRATED / CI RERUN OPEN
+
+Run `41464712512`, job `125348295789`, passed its driver and QEMU checks before
+one unrelated hardware-qualification report test failed: `pathlib.Path` on
+Linux accepted a Windows absolute evidence path. The validator now rejects
+absolute/rooted paths and traversal in both POSIX and Windows syntax, with
+focused regression coverage. This fixes the host validation defect; a fresh
+Actions run is still needed to verify the complete job.
+
 ## Stage 20.3 desktop-userspace CI follow-up - 2026-11-02 - FIX INTEGRATED / RUNTIME OPEN
 
 Kernel Actions run `41464712512`, job `125348295893`, failed at the F1 launcher

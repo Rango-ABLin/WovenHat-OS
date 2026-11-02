@@ -66,6 +66,14 @@ class HardwareQualificationTests(unittest.TestCase):
             MODULE.validate(report([item])),
         )
 
+    def test_windows_evidence_path_traversal_is_rejected(self):
+        item = observation("usb")
+        item["evidence"] = r"audit-artifacts\..\outside\report.json"
+        self.assertIn(
+            "observations[0].evidence must be a repository-relative path",
+            MODULE.validate(report([item])),
+        )
+
     def test_duplicate_observation_ids_are_rejected(self):
         first = observation("audio")
         second = observation("bluetooth")
