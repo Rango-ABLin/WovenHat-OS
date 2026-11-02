@@ -350,6 +350,8 @@ fn theme_entry(active: bool) -> u32 {
 /// remains the source of truth: these names are resolved against it at click
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
+/// Default pinned taskbar applications; resolved against the installed catalog.
+const TASKBAR_PINNED: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenSettings"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
 const DESKTOP_ICON_X: i32 = 24;
 const DESKTOP_ICON_Y: i32 = 52;
@@ -1563,8 +1565,8 @@ impl Desktop {
         )
     }
 
-    fn entry_area(&self, index: usize) -> Area {
-        let total = self.entries().count();
+    fn taskbar_slot(&self, index: usize) -> Area {
+        let total = TASKBAR_PINNED.len() + self.entries().count();
         let rect = desktop_layout::app_slot(
             self.width,
             self.height,
@@ -1573,6 +1575,17 @@ impl Desktop {
             CLOCK_WIDTH + (MAX_TRAY as i32 + 2) * (TRAY_ICON + TRAY_GAP) + 120,
         );
         Area::new(rect.x, rect.y, rect.width, rect.height)
+    }
+
+    fn entry_area(&self, index: usize) -> Area {
+        self.taskbar_slot(TASKBAR_PINNED.len() + index)
+    }
+
+    fn pinned_app(&self, index: usize) -> Option<usize> {
+        let name = TASKBAR_PINNED.get(index)?.as_bytes();
+        self.apps[..self.app_count]
+            .iter()
+            .position(|app| app.is_some_and(|app| app.name() == name))
     }
 
     fn tray_area(&self, index: usize) -> Area {
@@ -1840,7 +1853,11 @@ impl Desktop {
     /// Launch catalog entry `index` and close the launcher. A failure is
     /// reported in a toast. Returns the area to repaint.
     fn launch(&mut self, index: usize) -> Area {
-        let mut dirty = self.toggle_launcher();
+        let mut dirty = if self.launcher_open {
+            self.toggle_launcher()
+        } else {
+            Area::new(0, 0, 0, 0)
+        };
         let Some(app) = self.apps[index] else {
             return dirty;
         };
@@ -2180,6 +2197,13 @@ impl Desktop {
                     _ => continue,
                 };
                 canvas.set(icon_x + column as i32, icon_y + row as i32, color);
+            }
+        }
+
+        for (index, name) in TASKBAR_PINNED.iter().enumerate() {
+            if self.pinned_app(index).is_some() {
+                let area = self.taskbar_slot(index);
+                draw_app_icon(canvas, area.x + 4, area.y + 4, app_icon(name.as_bytes()), 32, false);
             }
         }
 
@@ -4080,6 +4104,15 @@ impl Desktop {
                         return self.launch(found[row as usize]);
                     }
                     return empty;
+                }
+                // Pinned icons launch installed apps. Never invent a missing
+                // catalog entry or open an unrelated launcher panel.
+                if let Some(index) = (0..TASKBAR_PINNED.len())
+                    .find(|&index| self.taskbar_slot(index).contains(x, y))
+                {
+                    if let Some(app) = self.pinned_app(index) {
+                        return self.launch(app);
+                    }
                 }
                 // A taskbar entry focuses its window.
                 let entry = self
