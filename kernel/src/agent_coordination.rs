@@ -198,7 +198,7 @@ impl CollisionDetector {
     }
 
     pub fn is_in_use(&self, filename: &str) -> bool {
-        self.active_files[..self.file_count].iter().any(|f| *f == filename)
+        self.active_files[..self.file_count].contains(&filename)
     }
 }
 

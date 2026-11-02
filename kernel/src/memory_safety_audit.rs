@@ -139,7 +139,7 @@ impl GenerationTracker {
     }
 
     pub fn retire_generation(&mut self) -> AuditResult {
-        if self.current_generation >= u32::MAX {
+        if self.current_generation == u32::MAX {
             AuditResult::Pass
         } else {
             AuditResult::Fail(AuditError::GenerationNotTracked)
@@ -195,8 +195,9 @@ impl LockOrderingAuditor {
     }
 
     pub fn verify_acquire(&mut self, rank: LockRank) -> AuditResult {
-        for held in self.held_locks[..self.lock_count].iter() {
-            if let Some(held_rank) = held {
+        for held_rank in self.held_locks[..self.lock_count].iter().flatten() {
+            if rank <= *held_rank {
+                    return AuditResult::Fail(AuditError::LockOrderingViolation);
                 if rank <= *held_rank {
                     return AuditResult::Fail(AuditError::LockOrderingViolation);
                 }

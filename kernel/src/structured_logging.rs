@@ -85,21 +85,21 @@ impl Logger {
 #[macro_export]
 macro_rules! log_error {
     ($module:expr, $msg:expr) => {
-        crate::serial::write_line(format_args!("[ERROR:{}] {}", $module, $msg));
+        $crate::serial::write_line(format_args!("[ERROR:{}] {}", $module, $msg));
     };
 }
 
 #[macro_export]
 macro_rules! log_warn {
     ($module:expr, $msg:expr) => {
-        crate::serial::write_line(format_args!("[WARN:{}] {}", $module, $msg));
+        $crate::serial::write_line(format_args!("[WARN:{}] {}", $module, $msg));
     };
 }
 
 #[macro_export]
 macro_rules! log_info {
     ($module:expr, $msg:expr) => {
-        crate::serial::write_line(format_args!("[INFO:{}] {}", $module, $msg));
+        $crate::serial::write_line(format_args!("[INFO:{}] {}", $module, $msg));
     };
 }
 
@@ -108,7 +108,7 @@ macro_rules! log_debug {
     ($module:expr, $msg:expr) => {
         #[cfg(any(test, debug_assertions))]
         {
-            crate::serial::write_line(format_args!("[DEBUG:{}] {}", $module, $msg));
+            $crate::serial::write_line(format_args!("[DEBUG:{}] {}", $module, $msg));
         }
     };
 }
@@ -118,7 +118,7 @@ macro_rules! log_trace {
     ($module:expr, $msg:expr) => {
         #[cfg(test)]
         {
-            crate::serial::write_line(format_args!("[TRACE:{}] {}", $module, $msg));
+            $crate::serial::write_line(format_args!("[TRACE:{}] {}", $module, $msg));
         }
     };
 }
