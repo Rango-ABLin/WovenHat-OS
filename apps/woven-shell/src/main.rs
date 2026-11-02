@@ -153,6 +153,9 @@ use libwoven::{
 
 libwoven::entry!(main);
 
+#[allow(dead_code)]
+mod desktop_layout;
+
 /// Wallpaper gradient, top to bottom.
 const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
 const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
@@ -166,15 +169,14 @@ const WEAVE_SHADE: u32 = rgb(0, 0, 0);
 const WEAVE_TINT_OPACITY: u8 = 6;
 const WEAVE_PITCH: i32 = 220;
 
-const TASKBAR_HEIGHT: i32 = 24;
+const TASKBAR_HEIGHT: i32 = desktop_layout::TASKBAR_HEIGHT;
 const TASKBAR: u32 = rgb(10, 18, 30);
 const TASKBAR_OPACITY: u8 = 216;
 const ACCENT: u32 = rgb(76, 190, 188);
-const START_X: i32 = 4;
-const START_WIDTH: usize = 44;
-const START_HEIGHT: usize = 16;
+const START_X: i32 = 8;
+const START_WIDTH: usize = desktop_layout::START_SIZE as usize;
+const START_HEIGHT: usize = desktop_layout::START_SIZE as usize;
 const START_FILL: u32 = rgb(28, 115, 145);
-const START_LABEL: &str = "Woven";
 /// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
 /// crossing over and under. `A` is the strand that is on top, `D` the one
 /// beneath it; `.` is transparent (the button fill shows through).
@@ -194,7 +196,6 @@ const START_ICON_D: u32 = rgb(165, 125, 70);
 /// Left margin from the button's edge to the icon, chosen so it clears the
 /// background-fill sample point Stage 20.1's self-test reads at `(6, top+6)`.
 const START_ICON_MARGIN: i32 = 3;
-const START_ICON_GAP: i32 = 2;
 const TEXT: u32 = rgb(255, 255, 255);
 /// Clock text is right-aligned this far from the right edge.
 const CLOCK_MARGIN: i32 = 6;
@@ -202,13 +203,11 @@ const CLOCK_MARGIN: i32 = 6;
 const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
 
 /// Taskbar window entries, left to right after the start button.
-const ENTRY_X: i32 = START_X + START_WIDTH as i32 + 8;
-const ENTRY_WIDTH: i32 = 80;
-const ENTRY_GAP: i32 = 4;
+const ENTRY_WIDTH: i32 = desktop_layout::APP_SLOT;
+const ENTRY_GAP: i32 = desktop_layout::APP_GAP;
 const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
 const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
 /// Characters of a title that fit in an entry.
-const ENTRY_CHARS: usize = ((ENTRY_WIDTH - 8) / font::ADVANCE) as usize;
 
 /// Tray icons, right to left from the clock.
 const TRAY_ICON: i32 = 16;
@@ -1556,7 +1555,7 @@ impl Desktop {
     /// Row for taskbar text: seven glyph rows centred in the bar below its
     /// one-pixel accent line.
     fn text_y(&self) -> i32 {
-        self.taskbar_top() + 9
+        self.taskbar_top() + (TASKBAR_HEIGHT - 7) / 2
     }
 
     fn clock_area(&self) -> Area {
@@ -1569,8 +1568,15 @@ impl Desktop {
     }
 
     fn entry_area(&self, index: usize) -> Area {
-        let x = ENTRY_X + index as i32 * (ENTRY_WIDTH + ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, ENTRY_WIDTH, START_HEIGHT as i32)
+        let total = self.entries().count();
+        let rect = desktop_layout::app_slot(
+            self.width,
+            self.height,
+            index,
+            total,
+            CLOCK_WIDTH + (MAX_TRAY as i32 + 2) * (TRAY_ICON + TRAY_GAP) + 120,
+        );
+        Area::new(rect.x, rect.y, rect.width, rect.height)
     }
 
     fn tray_area(&self, index: usize) -> Area {
@@ -1579,12 +1585,10 @@ impl Desktop {
     }
 
     fn toast_area(&self) -> Area {
-        Area::new(
-            self.width - TOAST_WIDTH - TOAST_MARGIN,
-            TOAST_MARGIN,
-            TOAST_WIDTH,
-            TOAST_HEIGHT,
-        )
+        let rect = desktop_layout::toast_rect(
+            self.width, self.height, TOAST_WIDTH, TOAST_HEIGHT,
+        );
+        Area::new(rect.x, rect.y, rect.width, rect.height)
     }
 
     fn cursor_area(&self) -> Area {
@@ -2166,7 +2170,7 @@ impl Desktop {
         // Start button gets the rounded chrome treatment. A subtle top-lit
         // gradient, matching the window title bars, reads less flat than a
         // single fill colour.
-        let start_area = Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32);
+        let start_area = self.start_area();
         let start_fill = theme_start_fill();
         Renderer::new(canvas).rounded_rect_gradient(
             rect_of(start_area),
@@ -2175,7 +2179,7 @@ impl Desktop {
             color_of(start_fill),
         );
         let icon_x = START_X + START_ICON_MARGIN;
-        let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
+        let icon_y = start_area.y + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
         for (row, line) in START_ICON.iter().enumerate() {
             for (column, cell) in line.iter().enumerate() {
                 let color = match cell {
@@ -2186,22 +2190,21 @@ impl Desktop {
                 canvas.set(icon_x + column as i32, icon_y + row as i32, color);
             }
         }
-        let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
-        canvas.draw_text(label_x, self.text_y(), START_LABEL, theme_text());
 
         let focused = self.focused();
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.entry_area(index);
-            let fill = theme_entry(Some(slot) == focused);
-            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
-            let mut buffer = [0u8; 32];
-            let length = label(
-                &window.title[..window.title_length],
-                ENTRY_CHARS,
-                &mut buffer,
+            draw_app_icon(
+                canvas, area.x + 4, area.y + 4,
+                app_icon(&window.title[..window.title_length]),
+                32, Some(slot) == focused,
             );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(area.x + 4, self.text_y(), text, theme_text());
+            if Some(slot) == focused {
+                canvas.fill_rect(
+                    area.x + 8, self.taskbar_top() + TASKBAR_HEIGHT - 3,
+                    (ENTRY_WIDTH - 16) as usize, 3, theme_accent(),
+                );
+            }
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
