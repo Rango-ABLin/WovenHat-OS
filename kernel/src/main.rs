@@ -12539,7 +12539,6 @@ fn stage20_9_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const TASKBAR: u32 = rgb(10, 18, 30);
     const ACCENT: u32 = rgb(76, 190, 188);
-    const START_FILL: u32 = rgb(28, 115, 145);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const TOAST_FILL: u32 = rgb(28, 32, 44);
     const NOTES: u32 = rgb(150, 120, 40);
@@ -12705,23 +12704,21 @@ fn stage20_9_self_test() -> bool {
         let lines = rows.len().max(1) as i32;
         let h = (1 + lines) * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
-        let image = overlay((164, h), &|surface| {
-            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
-            surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(
-                164 - 6 - crate::font::text_width("Clear") as i32,
-                5,
-                "Clear",
-                WHITE,
-            );
-            if rows.is_empty() {
-                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
-            }
-            for (index, row) in rows.iter().enumerate() {
-                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
-            }
-        });
-        (x0, y0, h, image)
+        let mut glyphs = Surface::new(164, h as usize);
+        glyphs.fill_rect(glyphs.bounds(), UNSET);
+        glyphs.draw_text(6, 5, "Notifications", ACCENT);
+        glyphs.draw_text(
+            164 - 6 - crate::font::text_width("Clear") as i32,
+            5, "Clear", WHITE,
+        );
+        glyphs.fill_rect(Rect::new(6, 14, 152, 1), ACCENT);
+        if rows.is_empty() {
+            glyphs.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
+        }
+        for (index, row) in rows.iter().enumerate() {
+            glyphs.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
+        }
+        (x0, y0, h, glyphs)
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
@@ -12730,12 +12727,19 @@ fn stage20_9_self_test() -> bool {
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
-    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        // Verify the entire panel: header, clear control, all rows and border.
-        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
-            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        })
+    let center_matches = |x0: i32, y0: i32, h: i32, glyphs: &Surface| {
+        // The 235-alpha rounded card has no square accent border and no
+        // opaque blue header. Require its real tint, separator, title,
+        // Clear control and each complete message glyph.
+        let x = x0 + 100;
+        let y = y0 + 10;
+        compositor::pixel(x, y) == Ok(blend_pixel(
+            PANEL_FILL, wallpaper(x, y, height), 235,
+        )) && (0..h).all(|dy| (0..164).all(|dx| {
+            let expected = glyphs.pixel(dx, dy);
+            (expected != Some(WHITE) && expected != Some(ACCENT))
+                || compositor::pixel(x0 + dx, y0 + dy) == Ok(expected.unwrap_or(UNSET))
+        }))
     };
     let clock_clicked = move_by(cx - px, cy - py) && click();
     let center_rendered = clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
