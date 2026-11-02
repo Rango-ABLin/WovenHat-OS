@@ -695,6 +695,28 @@ fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
     Some((init, fini))
 }
 
+fn lifecycle_trampoline_address(space: &AddressSpace, mmap_base: u64) -> Option<u64> {
+    let mut address = LIFECYCLE_TRAMPOLINE;
+    loop {
+        let end = address.checked_add(ASLR_PAGE)?;
+        if end > mmap_base {
+            return None;
+        }
+        let mut occupied = false;
+        for mapping in &space.mappings[..space.mapping_count] {
+            let mapping_end = mapping.start().checked_add(mapping.size() as u64)?;
+            if address < mapping_end && mapping.start() < end {
+                occupied = true;
+                break;
+            }
+        }
+        if !occupied {
+            return Some(address);
+        }
+        address = end;
+    }
+}
+
 fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
@@ -770,18 +792,7 @@ pub(super) fn load_with_geometry(
         }
     }
     map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
-    let mut image_end = LIFECYCLE_TRAMPOLINE;
-    for mapping in &pending.space.mappings[..pending.space.mapping_count] {
-        image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
-    }
-    let lifecycle_trampoline = if LIFECYCLE_TRAMPOLINE < image_end {
-        image_end.checked_add(4095).map(|address| address & !4095)?
-    } else {
-        LIFECYCLE_TRAMPOLINE
-    };
-    if lifecycle_trampoline < image_end || lifecycle_trampoline.checked_add(4096)? > mmap_base {
-        return None;
-    }
+    let lifecycle_trampoline = lifecycle_trampoline_address(&pending.space, mmap_base)?;
     let lazy_trampoline_base = lifecycle_trampoline.checked_add(0x100)?;
     let trampoline = UserMapping::new(lifecycle_trampoline, 4096, false, true)?;
     paging::map_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, true, false).ok()?;

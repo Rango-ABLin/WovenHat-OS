@@ -12365,3 +12365,21 @@ the timestamped `audit-artifacts/stage13.*cpu-*` directories, including the
 current sweep at source tip. This is deterministic QEMU/software acceptance;
 physical hardware, radio interoperability, and certification remain separate.
 
+## runtime-storage-pcie Actions regression repair — 2026-11-02
+
+The failing run `41449281175` passed through Stage 11.4, then exited 35 during
+Stage 11.5. Shared-library segments are mapped in a high-address window, but
+the loader selected the lifecycle trampoline after the highest image and
+rejected it for crossing `mmap_base`. It now searches for a free page in the
+reserved gap before the mmap arena; the graph-loader acceptance checks that the
+trampoline is mapped and disjoint from images. Stage 12.5 also had a redundant
+`bool != true` expression that failed its warning-denying Clippy gate; it is
+now expressed as a negation without changing behavior.
+
+Validation passed for the workflow's Stage 10.8–11.5, 12.1–12.5, and 13.1–13.2
+warning-denying Clippy and QEMU matrices on 1/2/4 CPUs. Host all-target Clippy
+passed. Stage 11.5 evidence:
+`audit-artifacts/stage11.5-1cpu-1793626110000921795`,
+`stage11.5-2cpu-1793626120670365708`, and
+`stage11.5-4cpu-1793626132209356746`. This is software/QEMU acceptance only;
+it does not claim physical PCIe qualification.

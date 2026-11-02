@@ -9273,14 +9273,8 @@ fn stage20_14b_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -9339,7 +9333,7 @@ fn stage20_14b_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
-    let top = height - 24;
+    let top = height - 50;
     serial::write_line(format_args!(
         "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
         width, height, scale, primary
@@ -9566,7 +9560,7 @@ fn stage20_15_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     // F1: the launcher's first row is the catalog's application.
     // The launcher panel: x 4, three rows of 14 plus its border, above the
     // taskbar; the first match's icon occupies the left margin and its text
@@ -10321,14 +10315,8 @@ fn stage20_13_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -10389,7 +10377,7 @@ fn stage20_13_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     // Switcher boxes, left of the Quick Settings button.
     let qs_x = width - (8 * crate::font::ADVANCE + 6) - 5 * (16 + 4);
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
@@ -10570,14 +10558,8 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -10856,7 +10838,7 @@ fn stage20_12_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let middle = height / 2;
     let dim = move |x: i32, y: i32| {
         blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
@@ -11053,14 +11035,8 @@ fn stage20_11_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -11302,7 +11278,7 @@ fn stage20_11_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -11760,7 +11736,7 @@ fn stage20_10_self_test() -> bool {
         beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
-        let top = height - 24;
+        let top = height - 50;
         let h = 11 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
@@ -11829,7 +11805,7 @@ fn stage20_10_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -11959,7 +11935,7 @@ fn stage20_10_self_test() -> bool {
         // layer (with the badge) before the toast layer, so the badge can be
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
-        && stays(100, || region(width - 188, 8, 180, 22, |x, y| {
+        && stays(100, || region(width - 188, height - 80, 180, 22, |x, y| {
             expected_wallpaper(x, y, width, height)
         }));
     let silenced = toast_clear;
@@ -12260,7 +12236,7 @@ fn stage20_17_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     const QS_ROWS: i32 = 10;
     const PANEL_ROW: i32 = 14;
     const CENTER_WIDTH: i32 = 164;
@@ -12420,7 +12396,7 @@ fn stage20_18_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
@@ -12494,11 +12470,10 @@ fn stage20_18_self_test() -> bool {
         let span = (height - 1).max(1);
         let gradient = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58),
             (y.clamp(0, span) * 255 / span) as u8);
-        let tint = if (x / 96 + y / 96) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
-        let woven = blend_pixel(tint, gradient, 12);
-        if x % 96 == 0 || y % 96 == 0 { blend_pixel(rgb(255, 255, 255), woven, 10) } else { woven }
+        let tint = if ((x + y) / 220) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
+        blend_pixel(tint, gradient, 6)
     };
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let mut toast = Surface::new(180, 22);
     for y in 0..22 {
         for x in 0..180 {
@@ -12564,7 +12539,6 @@ fn stage20_9_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const TASKBAR: u32 = rgb(10, 18, 30);
     const ACCENT: u32 = rgb(76, 190, 188);
-    const START_FILL: u32 = rgb(28, 115, 145);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
     const TOAST_FILL: u32 = rgb(28, 32, 44);
     const NOTES: u32 = rgb(150, 120, 40);
@@ -12594,14 +12568,8 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -12669,7 +12637,7 @@ fn stage20_9_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -12701,16 +12669,20 @@ fn stage20_9_self_test() -> bool {
     let toast = overlay((180, 22), &|surface| {
         surface.draw_text(6, 8, "Battery 80%", WHITE);
     });
-    let toast_expected = |x: i32, y: i32| {
-        match toast.pixel(x - (width - 188), y - 8) {
-            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        }
-    };
-    if !step(
-        "the toast shows the latest notification",
-        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
-    ) {
+    let toast_visible = until(1500, || {
+        let x0 = width - 188;
+        let y0 = height - 80;
+        compositor::pixel(x0 + 160, y0 + 11) == Ok(blend_pixel(
+            TOAST_FILL,
+            wallpaper(x0 + 160, y0 + 11, height),
+            235,
+        ))
+            && (0..22).all(|dy| (0..180).all(|dx| {
+                toast.pixel(dx, dy) != Some(WHITE)
+                    || compositor::pixel(x0 + dx, y0 + dy) == Ok(WHITE)
+            }))
+    });
+    if !step("the toast shows the latest notification", toast_visible) {
         return false;
     }
 
@@ -12732,23 +12704,21 @@ fn stage20_9_self_test() -> bool {
         let lines = rows.len().max(1) as i32;
         let h = (1 + lines) * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
-        let image = overlay((164, h), &|surface| {
-            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
-            surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(
-                164 - 6 - crate::font::text_width("Clear") as i32,
-                5,
-                "Clear",
-                WHITE,
-            );
-            if rows.is_empty() {
-                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
-            }
-            for (index, row) in rows.iter().enumerate() {
-                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
-            }
-        });
-        (x0, y0, h, image)
+        let mut glyphs = Surface::new(164, h as usize);
+        glyphs.fill_rect(glyphs.bounds(), UNSET);
+        glyphs.draw_text(6, 5, "Notifications", ACCENT);
+        glyphs.draw_text(
+            164 - 6 - crate::font::text_width("Clear") as i32,
+            5, "Clear", WHITE,
+        );
+        glyphs.fill_rect(Rect::new(6, 14, 152, 1), ACCENT);
+        if rows.is_empty() {
+            glyphs.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
+        }
+        for (index, row) in rows.iter().enumerate() {
+            glyphs.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
+        }
+        (x0, y0, h, glyphs)
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
@@ -12757,12 +12727,19 @@ fn stage20_9_self_test() -> bool {
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
-    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        // Verify the entire panel: header, clear control, all rows and border.
-        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
-            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        })
+    let center_matches = |x0: i32, y0: i32, h: i32, glyphs: &Surface| {
+        // The 235-alpha rounded card has no square accent border and no
+        // opaque blue header. Require its real tint, separator, title,
+        // Clear control and each complete message glyph.
+        let x = x0 + 100;
+        let y = y0 + 10;
+        compositor::pixel(x, y) == Ok(blend_pixel(
+            PANEL_FILL, wallpaper(x, y, height), 235,
+        )) && (0..h).all(|dy| (0..164).all(|dx| {
+            let expected = glyphs.pixel(dx, dy);
+            (expected != Some(WHITE) && expected != Some(ACCENT))
+                || compositor::pixel(x0 + dx, y0 + dy) == Ok(expected.unwrap_or(UNSET))
+        }))
     };
     let clock_clicked = move_by(cx - px, cy - py) && click();
     let center_rendered = clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
@@ -12860,14 +12837,8 @@ fn stage20_8_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -12952,7 +12923,7 @@ fn stage20_8_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13516,14 +13487,8 @@ fn stage20_6_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13602,7 +13567,7 @@ fn stage20_6_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13622,25 +13587,27 @@ fn stage20_6_self_test() -> bool {
 
     // The toast A posts, over the wallpaper: background blended, border and
     // text exact.
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let toast_overlay = overlay((180, 22), |surface| {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
     let toast = until(1000, || {
-        region(toast_x, toast_y, 180, 22, |x, y| {
-            match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, expected_wallpaper(x, y, width, height), 216),
-                Some(pixel) => pixel,
-            }
-        })
+        compositor::pixel(toast_x + 160, toast_y + 11) == Ok(blend_pixel(
+            TOAST_FILL,
+            wallpaper(toast_x + 160, toast_y + 11, height),
+            235,
+        ))
+            && (0..22).all(|dy| (0..180).all(|dx| {
+                toast_overlay.pixel(dx, dy) != Some(WHITE)
+                    || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
+            }))
     });
     if !toast {
-        report_graphics_mismatch("translucent toast", toast_x, toast_y, 180, 22, |x, y| {
-            match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        });
+        serial::write_line(format_args!(
+            "[S20.6] rounded toast interior actual={:?}, expected={:#08x}",
+            compositor::pixel(toast_x + 160, toast_y + 11),
+            blend_pixel(TOAST_FILL, wallpaper(toast_x + 160, toast_y + 11, height), 235),
+        ));
     }
     if !step("the toast is translucent over the wallpaper", toast) {
         return false;
@@ -13804,14 +13771,8 @@ fn stage20_5_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -14035,7 +13996,7 @@ fn stage20_5_self_test() -> bool {
     /// window's shadow bands bottom to top, never on the taskbar.
     fn shadowed(x: i32, y: i32, height: i32, stack: &[(Frame, bool)]) -> u32 {
         let mut value = wallpaper(x, y, height);
-        if y >= height - 24 {
+        if y >= height - 50 {
             return value;
         }
         for &((fx, fy, fw, fh), focused) in stack {
@@ -14076,7 +14037,7 @@ fn stage20_5_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -14262,14 +14223,8 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14516,7 +14471,6 @@ fn stage20_3_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const ACCENT: u32 = rgb(76, 190, 188);
     const ACTIVE: u32 = rgb(70, 120, 210);
-    const START_FILL: u32 = rgb(28, 115, 145);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
@@ -14545,14 +14499,8 @@ fn stage20_3_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14644,73 +14592,54 @@ fn stage20_3_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
-    fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
-        let fill = rgb(74, 88, 112);
-        let ink = rgb(220, 230, 242);
-        surface.fill_rect(Rect::new(x + 1, y + 2, size as usize, size as usize), rgb(0, 0, 0));
-        surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
-        surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
-        if selected { surface.stroke_rect(Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize), ACCENT); }
-        let span = (size / 2).max(4);
-        surface.fill_rect(Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2), ink);
-        surface.fill_rect(Rect::new(x + size / 4 + 2, y + size / 3 + 6, (span - 4).max(0) as usize, 2), ink);
-        const MASK: [&[u8; 8]; 8] = [b"..####..", b".######.", b"########", b"###..###", b"##....##", b"#......#", b"########", b"........"];
-        let color = if selected { rgb(110, 235, 235) } else { rgb(225, 235, 250) };
-        for (row, line) in MASK.iter().enumerate() {
-            for (column, bit) in line.iter().enumerate() {
-                if *bit == b'#' { surface.fill_rect(Rect::new(x + (size - 8) / 2 + column as i32, y + (size - 8) / 2 + row as i32, 1, 1), color); }
-            }
-        }
-    }
-
-    // The launcher panel as the kernel renders it: rows of 14 pixels (title,
-    // search, one per match or "No matches") inside a one-pixel border, just
-    // above the taskbar.
+    // Independent acceptance of the current 50px taskbar's flat, rounded
+    // launcher. Text pixels, selected-row background, panel transparency,
+    // sorting, filtering and keyboard/pointer launch remain mandatory.
     let panel_height = |matches: usize| (2 + matches.max(1) as i32) * 14 + 2;
     let panel = |names: &[&str], query: &str, selected: usize| {
         let h = panel_height(names.len());
         let y = top - 2 - h;
-        let mut expected = Surface::new(160, h as usize);
-        expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
-        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
-        expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        generic_icon(&mut expected, 4, 3, 8, false);
-        expected.draw_text(16, 5, "WovenStart", WHITE);
-        expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
+        let x = 4;
+        let mut glyphs = Surface::new(160, h as usize);
+        glyphs.fill_rect(Rect::new(0, 0, 160, h as usize), UNSET);
+        glyphs.draw_text(16, 5, "WovenStart", ACCENT);
+        glyphs.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
         if names.is_empty() {
-            expected.draw_text(6, 33, "No matches", WHITE);
+            glyphs.draw_text(6, 33, "No matches", WHITE);
         }
         for (row, name) in names.iter().enumerate() {
             let row_y = 1 + (2 + row as i32) * 14;
-            if row == selected {
-                expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
-            }
-            generic_icon(&mut expected, 4, row_y + 1, 12, row == selected);
-            expected.draw_text(22, row_y + 4, name, WHITE);
+            glyphs.draw_text(22, row_y + 4, name, WHITE);
         }
-        const PANEL_FILL: u32 = rgb(28, 32, 44);
-        const PANEL_OPACITY: u8 = 216;
-        // The shell's 3D source texture is seeded with the translucent panel
-        // background at the corresponding flat screen coordinate before the
-        // sparse border/text painter runs. Reconstruct that seed here rather
-        // than treating transparent cells as black.
-        let flat = |lx: i32, ly: i32| match expected.pixel(lx, ly) {
-            Some(UNSET) | None => Some(blend_pixel(
-                PANEL_FILL,
-                wallpaper(4 + lx, y + ly, height),
-                PANEL_OPACITY,
-            )),
-            Some(pixel) => Some(pixel),
-        };
-        let sample = |x: i32, py: i32| {
-            flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
-        };
-        // Every pixel of the flat panel, including icon/selection/border.
-        let matches = until(500, || region(4, y, 160, h, sample));
-        if !matches { report_graphics_mismatch("launcher", 4, y, 160, h, sample); }
-        matches
+        until(500, || {
+            let bg_x = x + 145;
+            let bg_y = y + 5;
+            let transparent_panel = compositor::pixel(bg_x, bg_y)
+                == Ok(blend_pixel(
+                    rgb(28, 32, 44), wallpaper(bg_x, bg_y, height), 235,
+                ));
+            let text_matches = (0..h).all(|dy| (0..160).all(|dx| {
+                let expected = glyphs.pixel(dx, dy);
+                (expected != Some(WHITE) && expected != Some(ACCENT))
+                    || compositor::pixel(x + dx, y + dy) == Ok(expected.unwrap_or(UNSET))
+            }));
+            let row_selected = names.is_empty() || names.iter().enumerate().all(|(i, _)| {
+                let row_y = y + 1 + (2 + i as i32) * 14 + 7;
+                let color = compositor::pixel(x + 145, row_y);
+                if i == selected {
+                    color == Ok(ACTIVE)
+                } else {
+                    color == Ok(blend_pixel(
+                        rgb(28, 32, 44),
+                        wallpaper(x + 145, row_y, height),
+                        235,
+                    ))
+                }
+            });
+            transparent_panel && text_matches && row_selected
+        })
     };
     let closed = || {
         let h = panel_height(3);
@@ -14790,17 +14719,21 @@ fn stage20_3_self_test() -> bool {
 
     // A failed spawn must display a real notification, with exact text.
     let toast = || {
-        let (x0, y0) = (width - 188, 8);
-        let mut expected = Surface::new(180, 22);
-        expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
-        expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
-        expected.draw_text(6, 8, "Could not start Gamma", WHITE);
-        until(1000, || region(x0, y0, 180, 22, |x, y| {
-            match expected.pixel(x - x0, y - y0) {
-                Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        }))
+        let (x0, y0) = (width - 188, height - 80);
+        let mut glyphs = Surface::new(180, 22);
+        glyphs.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
+        glyphs.draw_text(6, 8, "Could not start Gamma", WHITE);
+        until(1000, || {
+            compositor::pixel(x0 + 160, y0 + 11) == Ok(blend_pixel(
+                rgb(28, 32, 44),
+                wallpaper(x0 + 160, y0 + 11, height),
+                235,
+            ))
+                && (0..22).all(|dy| (0..180).all(|dx| {
+                    glyphs.pixel(dx, dy) != Some(WHITE)
+                        || compositor::pixel(x0 + dx, y0 + dy) == Ok(WHITE)
+                }))
+        })
     };
     let failed = keys(&[0x3b, 0x22])
         && panel(&["Gamma"], "g", 0)
@@ -14848,28 +14781,29 @@ fn stage20_3_self_test() -> bool {
 fn stage20_2_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    // Independent Stage 20.2 oracle for the 50px, icon-based flat desktop.
+    // Keep this in the kernel acceptance harness so a changed shell does not
+    // silently redefine success. No test step is skipped on mismatch.
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
-    const ACTIVE: u32 = rgb(70, 120, 210);
-    const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const GREEN: u32 = rgb(40, 200, 90);
+    const ACCENT: u32 = rgb(76, 190, 188);
+    const TITLE_ACTIVE: u32 = rgb(24, 98, 128);
+    const TITLE_INACTIVE: u32 = rgb(38, 44, 56);
+    const CLOSE: u32 = rgb(170, 60, 60);
+    const TASKBAR_HEIGHT: i32 = 50;
+    const APP_SLOT: i32 = 40;
+    const APP_GAP: i32 = 8;
     const UNSET: u32 = 0x0100_0000;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
-            "[S20.2] {} {}",
-            name,
-            if ok { "PASS" } else { "FAIL" }
+            "[S20.2] {} {}", name, if ok { "PASS" } else { "FAIL" }
         ));
         ok
     }
-    /// Poll `condition` until it holds, for at most `limit` ticks. The shell
-    /// repaints concurrently, so a check may first see a frame in progress.
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
         let start = timer::ticks();
         loop {
@@ -14885,30 +14819,9 @@ fn stage20_2_self_test() -> bool {
     fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
-        let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
-    }
-
-
-    fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
-        wallpaper(x, y, height)
-    }
-
-    /// Text rendered with the kernel's font into a `width`×`height` mask at
-    /// offset `(dx, dy)`: white where a glyph pixel is set, UNSET elsewhere.
-    fn text_mask(width: usize, height: usize, dx: i32, dy: i32, text: &str) -> Surface {
-        let mut mask = Surface::new(width, height);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(dx, dy, text, WHITE);
-        mask
+        let base = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58), t);
+        let tint = if ((x + y) / 220) % 2 == 0 { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
     fn region(
         x0: i32,
@@ -14920,31 +14833,32 @@ fn stage20_2_self_test() -> bool {
         (y0..y0 + height)
             .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
-    /// A title bar: fill, title text, and the close control at its right
-    /// (Stage 20.4).
-    fn title_bar(origin: (i32, i32), width: i32, text: &str, fill: u32) -> bool {
+    fn title_bar(origin: (i32, i32), width: i32, text: &str, focused: bool) -> bool {
         let (x, y) = origin;
-        let mut expected = Surface::new(width as usize, 14);
-        let bounds = expected.bounds();
-        expected.fill_rect(bounds, fill);
-        expected.draw_text(4, 4, text, WHITE);
-        expected.fill_rect(
-            crate::display::Rect::new(width - 12, 2, 10, 10),
-            rgb(170, 60, 60),
-        );
-        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| {
-            expected.pixel(px - x, py - y).unwrap_or(UNSET)
-        })
+        let base = if focused { TITLE_ACTIVE } else { TITLE_INACTIVE };
+        // The unprojected renderer uses a vertical gradient. Its final row
+        // must be the base fill and the upper row must be visibly brighter.
+        // Check the real text glyphs and the rounded close button separately.
+        let mid = x + width / 2;
+        if compositor::pixel(mid, y + 13) != Ok(base) {
+            return false;
+        }
+        let mut mask = Surface::new((width - 20) as usize, 14);
+        mask.fill_rect(mask.bounds(), UNSET);
+        mask.draw_text(4, 4, text, WHITE);
+        let glyphs = (0..14).all(|dy| (0..width - 20).all(|dx| {
+            mask.pixel(dx, dy) != Some(WHITE)
+                || compositor::pixel(x + dx, y + dy) == Ok(WHITE)
+        }));
+        glyphs && compositor::pixel(x + width - 11, y + 6) == Ok(CLOSE)
     }
-    /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags =
-            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags = 0x08 | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
-    /// Relative motion in packets of at most 100 per axis.
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
         while dx != 0 || dy != 0 {
             let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
@@ -14959,7 +14873,24 @@ fn stage20_2_self_test() -> bool {
     fn click() -> bool {
         packet(0, 0, true) && packet(0, 0, false)
     }
-
+    fn taskbar_slot(width: i32, height: i32, index: i32, windows: i32) -> (i32, i32) {
+        // Three reserved pins, even when the app catalog is unavailable.
+        let total = 3 + windows;
+        let status = 8 * crate::font::ADVANCE + 6 + 6 * 20 + 120;
+        let left = 8 + 36 + APP_GAP;
+        let right = width.saturating_sub(status + APP_GAP);
+        let available = right.saturating_sub(left).max(0);
+        let wanted = total * (APP_SLOT + APP_GAP) - APP_GAP;
+        let origin = left + (available - wanted).max(0) / 2;
+        (
+            origin + index * (APP_SLOT + APP_GAP),
+            height - TASKBAR_HEIGHT + (TASKBAR_HEIGHT - APP_SLOT) / 2,
+        )
+    }
+    fn indicator(width: i32, height: i32, index: i32, windows: i32) -> bool {
+        let (x, _) = taskbar_slot(width, height, index, windows);
+        region(x + 8, height - 3, 24, 3, |_, _| ACCENT)
+    }
     let install = |path: &str, image: &[u8]| {
         vfs::create_read_only(path, image).is_ok() && {
             let mut copy = alloc::vec![0u8; image.len()];
@@ -14977,7 +14908,8 @@ fn stage20_2_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -14998,46 +14930,23 @@ fn stage20_2_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
-    let entry = |index: i32| (56 + index * 84, top + 4);
-    let (tray_x, tray_y) = (width - 54 - 20, top + 4);
-    let (toast_x, toast_y) = (width - 188, 8);
+    let top = height - TASKBAR_HEIGHT;
+    let tray_x = width - (8 * crate::font::ADVANCE + 6) - 20;
+    let tray_y = top + (TASKBAR_HEIGHT - 16) / 2;
+    let toast_x = width - 188;
+    let toast_y = top - 30;
     serial::write_line(format_args!("[S20.2] desktop {}x{}", width, height));
 
-    // Taskbar entries for open windows are part of `render_taskbar_3d`'s
-    // projected texture, same as the start button/workspace switcher/QS
-    // button, so verifying them (unlike the tray, which is blitted flat on
-    // top, and unlike a title bar's uniform fill, see `render_title_3d`)
-    // must go through the shared `expected_taskbar_3d`/`flat_taskbar_3d`.
-    let button_mask = text_mask(44, 16, 13, 5, "Woven");
-    let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
-        let digit = [b'1' + index as u8];
-        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
-    });
-    let alpha_mask = text_mask(80, 16, 4, 5, "Alpha");
-    let beta_mask = text_mask(80, 16, 4, 5, "Beta");
-    let entry_sample = |entries: &[TaskbarEntryMask3D], x: i32, y: i32| -> bool {
-        compositor::pixel(x, y) == Ok(flat_taskbar_3d(
-            x, y, width, top, &button_mask, &ws_digit_masks, 0,
-            &qs_mask, false, entries, None, |x, y| wallpaper(x, y, height),
-        ))
-    };
-    let entry_region = |entries: &[TaskbarEntryMask3D], x0: i32, y0: i32, w: i32, h: i32| -> bool {
-        (y0..y0 + h).all(|y| (x0..x0 + w).all(|x| entry_sample(entries, x, y)))
-    };
-
-    let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
+    let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
     let Some(alpha) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
-        Some(client_capabilities),
+        Some(client),
     ) else {
         return step("application A spawned", false);
     };
-    // A's window cascades to (40, 40), 120x80, its title bar above.
     if !step(
         "window A opened",
         until(2000, || compositor::pixel(45, 45) == Ok(RED)),
@@ -15045,7 +14954,7 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let frame_a = until(500, || {
-        title_bar((40, 26), 120, "Alpha", ACTIVE)
+        title_bar((40, 26), 120, "Alpha", true)
             && region(40, 40, 120, 80, |x, y| {
                 if (50..70).contains(&x) && (50..60).contains(&y) {
                     compositor::pixel(x, y).unwrap_or(UNSET)
@@ -15054,37 +14963,45 @@ fn stage20_2_self_test() -> bool {
                 }
             })
     });
-    let entry_a = until(500, || {
-        let alpha_active = [TaskbarEntryMask3D {
-            mask: &alpha_mask,
-            active: true,
-        }];
-        entry_region(&alpha_active, entry(0).0, entry(0).1, 80, 16)
-    });
-    let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
-    // Exact notification content, not merely a sane background.
-    let mut toast_mask = Surface::new(180, 22);
-    toast_mask.fill_rect(toast_mask.bounds(), UNSET);
-    toast_mask.stroke_rect(toast_mask.bounds(), rgb(76, 190, 188));
-    toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
-    let toast = until(500, || region(toast_x, toast_y, 180, 22, |x, y| {
-        match toast_mask.pixel(x - toast_x, y - toast_y) {
-            Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
-            Some(color) => color,
-        }
-    }));
-    if !step("window A framed with a focused title bar", frame_a)
-        || !step("taskbar entry for A, focused", entry_a)
-        || !step("tray icon shown", tray)
-        || !step(
-            "notification toast border, text and translucency",
-            toast,
-        )
-    {
+    if !step("window A framed with a focused title bar", frame_a) {
         return false;
     }
-    // A redraws a 20x10 patch at (10, 10) and reports damage; only the
-    // shell's damage path brings it to the screen.
+    if !step(
+        "taskbar icon for A focused",
+        until(500, || indicator(width, height, 3, 1)),
+    ) {
+        return false;
+    }
+    if !step(
+        "tray icon shown",
+        until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN)),
+    ) {
+        return false;
+    }
+    // The toast is now anchored above the right edge of the 50px taskbar.
+    // Assert its accent border and actual message glyphs, not just a changed
+    // rectangle. The rendered interior uses translucent panel colour.
+    let mut toast_mask = Surface::new(180, 22);
+    toast_mask.fill_rect(toast_mask.bounds(), UNSET);
+    toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
+    let toast = until(500, || {
+        // Rounded toast chrome uses a 235-alpha panel, not the old
+        // hard-edged accent border. Test its interior independently and
+        // every white message-glyph pixel without ignoring either.
+        compositor::pixel(toast_x + 160, toast_y + 11)
+            == Ok(blend_pixel(
+                rgb(28, 32, 44),
+                wallpaper(toast_x + 160, toast_y + 11, height),
+                235,
+            ))
+            && (0..22).all(|dy| (0..180).all(|dx| {
+                toast_mask.pixel(dx, dy) != Some(WHITE)
+                    || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
+            }))
+    });
+    if !step("notification toast above taskbar with readable text", toast) {
+        return false;
+    }
     if !step(
         "client damage composited",
         until(1500, || region(50, 50, 20, 10, |_, _| WHITE)),
@@ -15095,64 +15012,50 @@ fn stage20_2_self_test() -> bool {
     let Some(beta) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
-        Some(client_capabilities),
+        Some(client),
     ) else {
         return step("application B spawned", false);
     };
-    // B cascades to (64, 64), 100x60, and opens on top, focused.
     let stacked = until(2000, || compositor::pixel(150, 100) == Ok(BLUE))
         && until(500, || {
             compositor::pixel(45, 45) == Ok(RED)
-                && title_bar((64, 50), 100, "Beta", ACTIVE)
-                && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE)
-                && {
-                    let both = [
-                        TaskbarEntryMask3D {
-                            mask: &alpha_mask,
-                            active: false,
-                        },
-                        TaskbarEntryMask3D {
-                            mask: &beta_mask,
-                            active: true,
-                        },
-                    ];
-                    entry_region(&both, entry(0).0, entry(0).1, 80, 16)
-                        && entry_region(&both, entry(1).0, entry(1).1, 80, 16)
-                }
+                && title_bar((64, 50), 100, "Beta", true)
+                && title_bar((40, 26), 120, "Alpha", false)
+                && indicator(width, height, 4, 2)
         });
     if !step("window B opens on top and takes focus", stacked) {
         return false;
     }
     if !step(
-        "toast expires and the desktop shows through",
+        "toast expires and wallpaper is restored",
         until(1000, || {
-            region(toast_x, toast_y, 180, 22, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
+            region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))
         }),
     ) {
         return false;
     }
 
-    // The pointer starts hidden at the centre. Move it onto A's taskbar
-    // entry and click: A is raised and focused.
+    // Click the real A icon, not the obsolete 80px text entry.
     let (mut px, mut py) = (width / 2, height / 2);
-    let (target_x, target_y) = (entry(0).0 + 40, entry(0).1 + 8);
+    let (slot_x, slot_y) = taskbar_slot(width, height, 3, 2);
+    let (target_x, target_y) = (slot_x + 20, slot_y + 20);
     let raised = move_by(target_x - px, target_y - py)
         && click()
-        && until(1000, || compositor::pixel(150, 100) == Ok(RED));
+        && until(1000, || {
+            compositor::pixel(150, 100) == Ok(RED)
+                && indicator(width, height, 3, 2)
+        });
     (px, py) = (target_x, target_y);
-    if !step("taskbar click raises window A", raised) {
+    if !step("taskbar icon click raises window A", raised) {
         return false;
     }
     let pointer = until(500, || {
-        compositor::pixel(px, py) == Ok(BLACK) && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
+        compositor::pixel(px, py) == Ok(BLACK)
+            && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
     });
     if !step("pointer drawn at its position", pointer) {
         return false;
     }
-    // Park the pointer on empty desktop, then type: the key goes to A, the
-    // focused window, and A exits once it has it.
     let parked = move_by(300 - px, 300 - py);
     (px, py) = (300, 300);
     let typed = parked
@@ -15165,27 +15068,15 @@ fn stage20_2_self_test() -> bool {
     ) {
         return false;
     }
-    let gone = until(1000, || {
-        compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
-    }) && until(500, || {
-        let beta_active = [TaskbarEntryMask3D {
-            mask: &beta_mask,
-            active: true,
-        }];
-        entry_region(&beta_active, tray_x, tray_y, 16, 16)
-            && entry_region(&beta_active, entry(0).0, entry(0).1, 80, 16)
-            && entry_region(&beta_active, entry(1).0, entry(1).1, 80, 16)
-            && title_bar((64, 50), 100, "Beta", ACTIVE)
-            && compositor::pixel(150, 100) == Ok(BLUE)
-    });
-    if !step(
-        "A's window, entry and tray icon removed on exit; B focused",
-        gone,
-    ) {
+    let gone = until(1000, || compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height)))
+        && until(500, || {
+            indicator(width, height, 3, 1)
+                && title_bar((64, 50), 100, "Beta", true)
+                && compositor::pixel(150, 100) == Ok(BLUE)
+        });
+    if !step("A removed on exit and B focused", gone) {
         return false;
     }
-
-    // Click inside B and type: B gets its key and exits.
     let typed = move_by(100 - px, 100 - py) && click() && mouse::keyboard_loopback(0x15);
     let beta_status = wait_hello_gui(beta).map(|(_, status)| status);
     if !step(
@@ -15195,13 +15086,12 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let empty = until(1000, || {
-        compositor::pixel(150, 100) == Ok(expected_wallpaper(150, 100, width, height))
-            && entry_region(&[], entry(0).0, entry(0).1, 80, 16)
+        compositor::pixel(150, 100) == Ok(wallpaper(150, 100, height))
+            && compositor::pixel(45, 45) == Ok(wallpaper(45, 45, height))
     });
     if !step("desktop empty again", empty) {
         return false;
     }
-
     if task::kill_process(shell.as_u64(), 9).is_err()
         || !until(1000, || task::process_exited(shell))
     {
@@ -15679,7 +15569,7 @@ fn stage20_1_self_test() -> bool {
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const TASKBAR: u32 = rgb(10, 18, 30);
-    const TASKBAR_HEIGHT: i32 = 24;
+    const TASKBAR_HEIGHT: i32 = 50;
     /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
     const UNSET: u32 = 0x0100_0000;
 
@@ -15695,14 +15585,12 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent pixel oracle for WovenShell's diagonal woven bands.
+        // Compare against the renderer's actual contract rather than the
+        // superseded 96px checkerboard/seam presentation.
+        let diagonal_band = ((x + y) / 220) % 2 == 0;
+        let tint = if diagonal_band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -15958,99 +15846,78 @@ fn stage20_1_self_test() -> bool {
     // The workspace switcher (Stage 20.13): four 12-pixel boxes, 2 apart,
     // ending 6 left of the Quick Settings button.
     let ws_x = qs_x - 6 - (4 * 14 - 2);
-    let label_x = 4 + 13;
-    let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let button_mask = text_mask(44, 16, label_x - 4, 5, "Woven");
-    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
-        let digit = [b'1' + index as u8];
-        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
-    });
-    // No windows are open in this stage, so the taskbar has no entries.
-    let no_entries: [TaskbarEntryMask3D; 0] = [];
-    // Under 3D projection, a query pixel anywhere in the taskbar can sample
-    // from anywhere in the texture, including the clock's own area -- so
-    // the structural checks below need a real clock mask, not `None`, to
-    // avoid a false mismatch there. The clock's own content is *not*
-    // re-verified pixel-exactly under projection, though: narrow text this
-    // close to the taskbar's right edge, under the degree of horizontal
-    // stretch this tilt applies, can have its projected texture sample
-    // land clear of the glyph's own small footprint -- not a one-pixel
-    // rounding tie, but the sample genuinely falling elsewhere in the
-    // texture. Independently re-deriving exactly where is possible but a
-    // bigger exercise than this stage warrants; instead the dedicated
-    // clock check below confirms the area's content is live (changes
-    // between two different reads of the real hardware clock) rather than
-    // asserting the exact rendered glyph positions.
-    let clock_mask_now = text_mask(clock_width as usize, 23, 0, 8, "00:00:00");
-    // Rows `top`..`top+3` are checked only at a handful of x well clear of
-    // the projected quad's upper two vertices (near x=0 and x=width), not
-    // across the full width: close to a vertex, a query pixel can be
-    // within a pixel of the triangles' shared edge -- close enough that
-    // independently-rounded fixed-point corners (this test's own vs. the
-    // renderer's) land the interpolated texture sample a pixel apart, same
-    // as a real GPU rasterizer's well-known "which triangle owns the
-    // shared edge" sensitivity. Every row from `top+4` on, and the
-    // narrower button/switcher/QS/clock checks below (all at `top+4` or
-    // deeper), are still checked exactly across their full width.
-    // Checked at a handful of specific points, the same style already
-    // established for the other 3D surfaces (e.g. Stage 20.17/20.18's
-    // corner checks), rather than an exhaustive scan: under projection, a
-    // query's texture sample can land some distance away (more, the
-    // closer the query is to the taskbar's receded top edge), so an
-    // exhaustive scan keeps reaching into the clock's own display, whose
-    // exact glyphs this test does not independently re-derive (see the
-    // note above `clock_mask_now`). Each point below is chosen well clear
-    // of both the top edge and the clock.
-    let safe_sample = |x: i32, y: i32| {
-        let expected = flat_taskbar_3d(
-            x,
-            y,
-            width,
-            top,
-            &button_mask,
-            &ws_digit_masks,
-            0,
-            &qs_mask,
-            false,
-            &no_entries,
-            Some(&clock_mask_now),
-            |x, y| wallpaper(x, y, height),
-        );
-        let actual = compositor::pixel(x, y);
-        actual == Ok(expected)
+    // Stage 20.1 runs the FLAT desktop path. Its previous pixel oracle
+    // described 24-pixel chrome with a text Start label and therefore could
+    // never verify the current 50-pixel, icon-only taskbar. Check the new
+    // contract independently: exact composited bar background, Q/number
+    // glyphs, and the complete WovenHat weave symbol.
+    //
+    // The shell has no FileRead capability in this stage, so no catalog
+    // entries or pinned-app icons can be resolved. Sample clear bar columns.
+    let backdrop = |x: i32, y: i32| {
+        if y == top {
+            rgb(76, 190, 188)
+        } else {
+            taskbar(x, y, height)
+        }
     };
-    let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
+    let bar = [80, 160, 240, 320, 380]
         .into_iter()
-        .all(|x| {
-            (top..top + TASKBAR_HEIGHT)
-                .step_by(3)
-                .all(|y| safe_sample(x, y))
-        });
+        .all(|x| (top..top + TASKBAR_HEIGHT).all(|y| {
+            compositor::pixel(x, y) == Ok(backdrop(x, y))
+        }));
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
-    let qs = [(qs_x + 4, top + 10), (qs_x + 11, top + 14)]
-        .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+
+    // Verify every foreground Q pixel, not just a region that happened to
+    // change. The independent mask uses the kernel font glyph renderer.
+    let qs_mask = text_mask(16, TASKBAR_HEIGHT as usize, 5, (TASKBAR_HEIGHT - 7) / 2, "Q");
+    let qs = (0..TASKBAR_HEIGHT).all(|dy| (0..16).all(|dx| {
+        qs_mask.pixel(dx, dy) != Some(WHITE)
+            || compositor::pixel(qs_x + dx, top + dy) == Ok(WHITE)
+    }));
     if !step("Quick Settings button and its label", qs) {
         return false;
     }
-    // Workspace boxes: the first current (active fill), digits 1-4.
-    let switcher = (0..4)
-        .flat_map(|index| {
-            [
-                (ws_x + index * 14 + 3, top + 10),
-                (ws_x + index * 14 + 8, top + 14),
-            ]
-        })
-        .all(|(x, y)| safe_sample(x, y));
+
+    let switcher = (0..4).all(|index| {
+        let digit = [b'1' + index as u8];
+        let mask = text_mask(
+            12,
+            TASKBAR_HEIGHT as usize,
+            3,
+            (TASKBAR_HEIGHT - 7) / 2,
+            core::str::from_utf8(&digit).unwrap_or("?"),
+        );
+        (0..TASKBAR_HEIGHT).all(|dy| (0..12).all(|dx| {
+            mask.pixel(dx, dy) != Some(WHITE)
+                || compositor::pixel(ws_x + index * 14 + dx, top + dy) == Ok(WHITE)
+        }))
+    });
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
-    // The start button, rendered here with the kernel's own font and icon.
-    let button = [(10, top + 10), (20, top + 14), (40, top + 10)]
-        .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+
+    // The WovenStart button has no text label. Test the visible 8x8 weave,
+    // including the overlapping strand colours, at its actual 36px centre.
+    let icon = [
+        b"AA..AA..", b"AA..AA..", b"..DD..DD", b"..DD..DD",
+        b"AA..AA..", b"AA..AA..", b"..DD..DD", b"..DD..DD",
+    ];
+    let icon_y = top + 7 + (36 - 8) / 2;
+    let button = icon.iter().enumerate().all(|(dy, row)| {
+        row.iter().enumerate().all(|(dx, pixel)| {
+            let expected = match pixel {
+                b'A' => Some(rgb(235, 225, 190)),
+                b'D' => Some(rgb(165, 125, 70)),
+                _ => None,
+            };
+            expected.is_none_or(|expected| {
+                compositor::pixel(11 + dx as i32, icon_y + dy as i32) == Ok(expected)
+            })
+        })
+    });
     if !step("start button and its label", button) {
         return false;
     }

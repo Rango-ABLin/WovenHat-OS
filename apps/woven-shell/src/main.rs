@@ -153,6 +153,9 @@ use libwoven::{
 
 libwoven::entry!(main);
 
+#[allow(dead_code)]
+mod desktop_layout;
+
 /// Wallpaper gradient, top to bottom.
 const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
 const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
@@ -166,15 +169,13 @@ const WEAVE_SHADE: u32 = rgb(0, 0, 0);
 const WEAVE_TINT_OPACITY: u8 = 6;
 const WEAVE_PITCH: i32 = 220;
 
-const TASKBAR_HEIGHT: i32 = 24;
+const TASKBAR_HEIGHT: i32 = desktop_layout::TASKBAR_HEIGHT;
 const TASKBAR: u32 = rgb(10, 18, 30);
 const TASKBAR_OPACITY: u8 = 216;
 const ACCENT: u32 = rgb(76, 190, 188);
-const START_X: i32 = 4;
-const START_WIDTH: usize = 44;
-const START_HEIGHT: usize = 16;
+const START_X: i32 = 8;
+const START_HEIGHT: usize = desktop_layout::START_SIZE as usize;
 const START_FILL: u32 = rgb(28, 115, 145);
-const START_LABEL: &str = "Woven";
 /// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
 /// crossing over and under. `A` is the strand that is on top, `D` the one
 /// beneath it; `.` is transparent (the button fill shows through).
@@ -194,7 +195,6 @@ const START_ICON_D: u32 = rgb(165, 125, 70);
 /// Left margin from the button's edge to the icon, chosen so it clears the
 /// background-fill sample point Stage 20.1's self-test reads at `(6, top+6)`.
 const START_ICON_MARGIN: i32 = 3;
-const START_ICON_GAP: i32 = 2;
 const TEXT: u32 = rgb(255, 255, 255);
 /// Clock text is right-aligned this far from the right edge.
 const CLOCK_MARGIN: i32 = 6;
@@ -202,13 +202,9 @@ const CLOCK_MARGIN: i32 = 6;
 const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
 
 /// Taskbar window entries, left to right after the start button.
-const ENTRY_X: i32 = START_X + START_WIDTH as i32 + 8;
-const ENTRY_WIDTH: i32 = 80;
-const ENTRY_GAP: i32 = 4;
+const ENTRY_WIDTH: i32 = desktop_layout::APP_SLOT;
 const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
 const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
-/// Characters of a title that fit in an entry.
-const ENTRY_CHARS: usize = ((ENTRY_WIDTH - 8) / font::ADVANCE) as usize;
 
 /// Tray icons, right to left from the clock.
 const TRAY_ICON: i32 = 16;
@@ -243,7 +239,6 @@ const CASCADE_STEP: i32 = 24;
 
 const TOAST_WIDTH: i32 = 180;
 const TOAST_HEIGHT: i32 = 22;
-const TOAST_MARGIN: i32 = 8;
 const TOAST_OPACITY: u8 = 216;
 const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
 const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
@@ -355,6 +350,8 @@ fn theme_entry(active: bool) -> u32 {
 /// remains the source of truth: these names are resolved against it at click
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
+/// Default pinned taskbar applications; resolved against the installed catalog.
+const TASKBAR_PINNED: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenSettings"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
 const DESKTOP_ICON_X: i32 = 24;
 const DESKTOP_ICON_Y: i32 = 52;
@@ -640,12 +637,14 @@ unsafe impl Sync for ToastTexture {}
 
 static TOAST_TEXTURE: ToastTexture = ToastTexture(UnsafeCell::new([0; TOAST_PIXELS]));
 
-/// The taskbar's maximum pixel footprint, flat-rendered once per repaint
-/// into this offscreen texture, then sampled by the 3D desktop mode's
-/// perspective projection. `MAX_TASKBAR_WIDTH` mirrors the kernel
-/// compositor's own `MAX_WIDTH` bound (two 1280-pixel monitors side by
-/// side), since the taskbar spans the primary monitor's full width.
-const MAX_TASKBAR_WIDTH: usize = 2560;
+/// The 3D taskbar scratch is intentionally bounded to one 1280-pixel
+/// monitor. At 50px, allocating a 2560-pixel-wide texture would consume
+/// 512 KiB of static BSS and push the shell image into its userspace
+/// mmap/stack reservations. Canvas::new fails safely for wider monitors;
+/// render_taskbar_3d then paints the full-width 2D taskbar instead.
+/// This preserves primary-monitor 3D and multihead/wide-monitor usability
+/// without growing the kernel's fixed image mapping contract.
+const MAX_TASKBAR_WIDTH: usize = 1280;
 const TASKBAR_PIXELS: usize = MAX_TASKBAR_WIDTH * TASKBAR_HEIGHT as usize;
 
 struct TaskbarTexture(UnsafeCell<[u32; TASKBAR_PIXELS]>);
@@ -1556,7 +1555,7 @@ impl Desktop {
     /// Row for taskbar text: seven glyph rows centred in the bar below its
     /// one-pixel accent line.
     fn text_y(&self) -> i32 {
-        self.taskbar_top() + 9
+        self.taskbar_top() + (TASKBAR_HEIGHT - 7) / 2
     }
 
     fn clock_area(&self) -> Area {
@@ -1568,23 +1567,39 @@ impl Desktop {
         )
     }
 
+    fn taskbar_slot(&self, index: usize) -> Area {
+        let total = TASKBAR_PINNED.len() + self.entries().count();
+        let rect = desktop_layout::app_slot(
+            self.width,
+            self.height,
+            index,
+            total,
+            CLOCK_WIDTH + (MAX_TRAY as i32 + 2) * (TRAY_ICON + TRAY_GAP) + 120,
+        );
+        Area::new(rect.x, rect.y, rect.width, rect.height)
+    }
+
     fn entry_area(&self, index: usize) -> Area {
-        let x = ENTRY_X + index as i32 * (ENTRY_WIDTH + ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, ENTRY_WIDTH, START_HEIGHT as i32)
+        self.taskbar_slot(TASKBAR_PINNED.len() + index)
+    }
+
+    fn pinned_app(&self, index: usize) -> Option<usize> {
+        let name = TASKBAR_PINNED.get(index)?.as_bytes();
+        self.apps[..self.app_count]
+            .iter()
+            .position(|app| app.is_some_and(|app| app.name() == name))
     }
 
     fn tray_area(&self, index: usize) -> Area {
         let x = self.width - CLOCK_WIDTH - (index as i32 + 1) * (TRAY_ICON + TRAY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+        Area::new(x, self.taskbar_top() + (TASKBAR_HEIGHT - TRAY_ICON) / 2, TRAY_ICON, TRAY_ICON)
     }
 
     fn toast_area(&self) -> Area {
-        Area::new(
-            self.width - TOAST_WIDTH - TOAST_MARGIN,
-            TOAST_MARGIN,
-            TOAST_WIDTH,
-            TOAST_HEIGHT,
-        )
+        let rect = desktop_layout::toast_rect(
+            self.width, self.height, TOAST_WIDTH, TOAST_HEIGHT,
+        );
+        Area::new(rect.x, rect.y, rect.width, rect.height)
     }
 
     fn cursor_area(&self) -> Area {
@@ -1609,12 +1624,8 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        Area::new(
-            START_X,
-            self.taskbar_top() + 4,
-            START_WIDTH as i32,
-            START_HEIGHT as i32,
-        )
+        let rect = desktop_layout::start_button(self.height);
+        Area::new(rect.x, rect.y, rect.width, rect.height)
     }
 
     /// The launcher panel, sized to its rows, above the start button; empty
@@ -1844,7 +1855,11 @@ impl Desktop {
     /// Launch catalog entry `index` and close the launcher. A failure is
     /// reported in a toast. Returns the area to repaint.
     fn launch(&mut self, index: usize) -> Area {
-        let mut dirty = self.toggle_launcher();
+        let mut dirty = if self.launcher_open {
+            self.toggle_launcher()
+        } else {
+            Area::new(0, 0, 0, 0)
+        };
         let Some(app) = self.apps[index] else {
             return dirty;
         };
@@ -1954,7 +1969,7 @@ impl Desktop {
         let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
         Area::new(
             x,
-            self.taskbar_top() + 4,
+            self.taskbar_top() + (TASKBAR_HEIGHT - START_HEIGHT as i32) / 2,
             WORKSPACE_BOX,
             START_HEIGHT as i32,
         )
@@ -2166,7 +2181,7 @@ impl Desktop {
         // Start button gets the rounded chrome treatment. A subtle top-lit
         // gradient, matching the window title bars, reads less flat than a
         // single fill colour.
-        let start_area = Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32);
+        let start_area = self.start_area();
         let start_fill = theme_start_fill();
         Renderer::new(canvas).rounded_rect_gradient(
             rect_of(start_area),
@@ -2175,7 +2190,7 @@ impl Desktop {
             color_of(start_fill),
         );
         let icon_x = START_X + START_ICON_MARGIN;
-        let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
+        let icon_y = start_area.y + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
         for (row, line) in START_ICON.iter().enumerate() {
             for (column, cell) in line.iter().enumerate() {
                 let color = match cell {
@@ -2186,22 +2201,28 @@ impl Desktop {
                 canvas.set(icon_x + column as i32, icon_y + row as i32, color);
             }
         }
-        let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
-        canvas.draw_text(label_x, self.text_y(), START_LABEL, theme_text());
+
+        for (index, name) in TASKBAR_PINNED.iter().enumerate() {
+            if self.pinned_app(index).is_some() {
+                let area = self.taskbar_slot(index);
+                draw_app_icon(canvas, area.x + 4, area.y + 4, app_icon(name.as_bytes()), 32, false);
+            }
+        }
 
         let focused = self.focused();
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.entry_area(index);
-            let fill = theme_entry(Some(slot) == focused);
-            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
-            let mut buffer = [0u8; 32];
-            let length = label(
-                &window.title[..window.title_length],
-                ENTRY_CHARS,
-                &mut buffer,
+            draw_app_icon(
+                canvas, area.x + 4, area.y + 4,
+                app_icon(&window.title[..window.title_length]),
+                32, Some(slot) == focused,
             );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(area.x + 4, self.text_y(), text, theme_text());
+            if Some(slot) == focused {
+                canvas.fill_rect(
+                    area.x + 8, self.taskbar_top() + TASKBAR_HEIGHT - 3,
+                    (ENTRY_WIDTH - 16) as usize, 3, theme_accent(),
+                );
+            }
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
@@ -2343,7 +2364,7 @@ impl Desktop {
     /// The Quick Settings button, left of the tray's last icon slot.
     fn qs_button(&self) -> Area {
         let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+        Area::new(x, self.taskbar_top() + (TASKBAR_HEIGHT - TRAY_ICON) / 2, TRAY_ICON, TRAY_ICON)
     }
 
     /// Quick Settings: a title row and one row per toggle, above the
@@ -4085,6 +4106,15 @@ impl Desktop {
                         return self.launch(found[row as usize]);
                     }
                     return empty;
+                }
+                // Pinned icons launch installed apps. Never invent a missing
+                // catalog entry or open an unrelated launcher panel.
+                if let Some(index) = (0..TASKBAR_PINNED.len())
+                    .find(|&index| self.taskbar_slot(index).contains(x, y))
+                {
+                    if let Some(app) = self.pinned_app(index) {
+                        return self.launch(app);
+                    }
                 }
                 // A taskbar entry focuses its window.
                 let entry = self

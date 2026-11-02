@@ -2978,9 +2978,12 @@ resolved by exact requested version; see
 validated. Constructors run before initial Ring-3 entry, while destructors
 run in reverse dependency order through a mapped RX trampoline; teardown uses
 a prebuilt stack return chain and transactional process-table/paging lock
-ordering. Writable PLT `JUMP_SLOT` entries use bounded loader-generated RX
-resolver stubs and a checked kernel first-call patch path; RELRO slots remain
-eager. See `docs/audit-stages-consolidated.md` and
+ordering. The trampoline is placed in the first free page at or above
+`LIFECYCLE_TRAMPOLINE` and below `mmap_base`, separate from the high-address
+shared-library windows and the mmap arena. Writable PLT `JUMP_SLOT` entries
+use bounded loader-generated RX resolver stubs and a checked kernel first-call
+patch path; RELRO slots remain eager. See
+`docs/audit-stages-consolidated.md` and
 `docs/audit-stages-consolidated.md`. The loader now constructs a
 combined immutable PT_TLS template for the main image and shared libraries,
 then gives each process a fresh mutable TLS/TCB copy and resolves shared TLS
