@@ -12,6 +12,9 @@ on:
       - 'apps/woven-shell-layout/**'
       - '.github/workflows/woven-desktop-layout.yml'
 
+permissions:
+  contents: read
+
 jobs:
   desktop-layout:
     runs-on: ubuntu-latest
