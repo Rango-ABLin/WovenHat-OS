@@ -17,9 +17,14 @@ been made by this branch.
 - 40-pixel running-application slots with 8-pixel horizontal spacing, centred
   within the remaining space subject to reserved Start and status regions.
 - Focused-window accent indicator and icon-based taskbar entries.
+- Installed-catalog-backed default pinned icons for Files, Terminal and Settings;
+  pin reordering/persistence remains outstanding.
+- Fixed launch behavior so starting apps from the desktop/taskbar does not
+  inadvertently open the launcher.
 - Bottom-right toast positioning above the taskbar.
 - Pure, allocation-free helpers for work-area, snap and taskbar geometry.
-- Host-oriented unit tests for geometry and small-display bounds.
+- A separate host-test crate and CI workflow for geometry and small-display
+  bounds (5 unit tests); full desktop-QEMU qualification is separate.
 
 ### Already available in existing WovenShell (not new claims)
 
