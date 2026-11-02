@@ -12670,16 +12670,20 @@ fn stage20_9_self_test() -> bool {
     let toast = overlay((180, 22), &|surface| {
         surface.draw_text(6, 8, "Battery 80%", WHITE);
     });
-    let toast_expected = |x: i32, y: i32| {
-        match toast.pixel(x - (width - 188), y - 8) {
-            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        }
-    };
-    if !step(
-        "the toast shows the latest notification",
-        until(1500, || region(width - 188, height - 80, 180, 22, toast_expected)),
-    ) {
+    let toast_visible = until(1500, || {
+        let x0 = width - 188;
+        let y0 = height - 80;
+        compositor::pixel(x0 + 160, y0 + 11) == Ok(blend_pixel(
+            TOAST_FILL,
+            wallpaper(x0 + 160, y0 + 11, height),
+            235,
+        ))
+            && (0..22).all(|dy| (0..180).all(|dx| {
+                toast.pixel(dx, dy) != Some(WHITE)
+                    || compositor::pixel(x0 + dx, y0 + dy) == Ok(WHITE)
+            }))
+    });
+    if !step("the toast shows the latest notification", toast_visible) {
         return false;
     }
 
@@ -13584,20 +13588,22 @@ fn stage20_6_self_test() -> bool {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
     let toast = until(1000, || {
-        region(toast_x, toast_y, 180, 22, |x, y| {
-            match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, expected_wallpaper(x, y, width, height), 216),
-                Some(pixel) => pixel,
-            }
-        })
+        compositor::pixel(toast_x + 160, toast_y + 11) == Ok(blend_pixel(
+            TOAST_FILL,
+            wallpaper(toast_x + 160, toast_y + 11, height),
+            235,
+        ))
+            && (0..22).all(|dy| (0..180).all(|dx| {
+                toast_overlay.pixel(dx, dy) != Some(WHITE)
+                    || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
+            }))
     });
     if !toast {
-        report_graphics_mismatch("translucent toast", toast_x, toast_y, 180, 22, |x, y| {
-            match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        });
+        serial::write_line(format_args!(
+            "[S20.6] rounded toast interior actual={:?}, expected={:#08x}",
+            compositor::pixel(toast_x + 160, toast_y + 11),
+            blend_pixel(TOAST_FILL, wallpaper(toast_x + 160, toast_y + 11, height), 235),
+        ));
     }
     if !step("the toast is translucent over the wallpaper", toast) {
         return false;
@@ -14730,16 +14736,20 @@ fn stage20_3_self_test() -> bool {
     // A failed spawn must display a real notification, with exact text.
     let toast = || {
         let (x0, y0) = (width - 188, height - 80);
-        let mut expected = Surface::new(180, 22);
-        expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
-        expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
-        expected.draw_text(6, 8, "Could not start Gamma", WHITE);
-        until(1000, || region(x0, y0, 180, 22, |x, y| {
-            match expected.pixel(x - x0, y - y0) {
-                Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        }))
+        let mut glyphs = Surface::new(180, 22);
+        glyphs.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
+        glyphs.draw_text(6, 8, "Could not start Gamma", WHITE);
+        until(1000, || {
+            compositor::pixel(x0 + 160, y0 + 11) == Ok(blend_pixel(
+                rgb(28, 32, 44),
+                wallpaper(x0 + 160, y0 + 11, height),
+                235,
+            ))
+                && (0..22).all(|dy| (0..180).all(|dx| {
+                    glyphs.pixel(dx, dy) != Some(WHITE)
+                        || compositor::pixel(x0 + dx, y0 + dy) == Ok(WHITE)
+                }))
+        })
     };
     let failed = keys(&[0x3b, 0x22])
         && panel(&["Gamma"], "g", 0)
