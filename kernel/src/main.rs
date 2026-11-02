@@ -15052,7 +15052,15 @@ fn stage20_2_self_test() -> bool {
     toast_mask.fill_rect(toast_mask.bounds(), UNSET);
     toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
     let toast = until(500, || {
-        region(toast_x, toast_y, 180, 1, |_, _| ACCENT)
+        // Rounded toast chrome uses a 235-alpha panel, not the old
+        // hard-edged accent border. Test its interior independently and
+        // every white message-glyph pixel without ignoring either.
+        compositor::pixel(toast_x + 160, toast_y + 11)
+            == Ok(blend_pixel(
+                rgb(28, 32, 44),
+                wallpaper(toast_x + 160, toast_y + 11, height),
+                235,
+            ))
             && (0..22).all(|dy| (0..180).all(|dx| {
                 toast_mask.pixel(dx, dy) != Some(WHITE)
                     || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(WHITE)
