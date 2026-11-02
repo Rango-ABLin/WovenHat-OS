@@ -338,13 +338,21 @@ impl CoordinationDashboard {
     }
 
     pub fn mark_task_in_progress(&mut self, task_id: u32) -> Result<(), ()> {
-        for task in self.tasks[..self.task_count].iter_mut() {
-            if task.task_id == task_id {
-                if self.can_start_task(task) {
+        // First check if task exists and dependencies are met
+        let task_ready = {
+            self.tasks[..self.task_count]
+                .iter()
+                .find(|t| t.task_id == task_id)
+                .map(|t| self.can_start_task(t))
+                .unwrap_or(false)
+        };
+
+        // Then update task status if ready
+        if task_ready {
+            for task in self.tasks[..self.task_count].iter_mut() {
+                if task.task_id == task_id {
                     task.status = TaskStatus::InProgress;
                     return Ok(());
-                } else {
-                    return Err(());
                 }
             }
         }
