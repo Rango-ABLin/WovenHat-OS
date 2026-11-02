@@ -298,3 +298,181 @@ mod tests {
         assert_eq!(balancer.average_load(), 0);
     }
 }
+
+pub struct CriticalFileLockRegistry;
+
+impl CriticalFileLockRegistry {
+    pub const CRITICAL_FILES: &'static [&'static str] = &[
+        "kernel/src/memory_safety_audit.rs",
+        "kernel/src/telemetry_hooks.rs",
+        "kernel/src/structured_logging.rs",
+        "kernel/src/bounded_capacity_analyzer.rs",
+        "kernel/src/deterministic_fault_injection.rs",
+        "kernel/src/compiler_fuzzing.rs",
+        "kernel/src/qemu_perf_regression.rs",
+        "kernel/src/agent_coordination.rs",
+        "docs/agent-coordination.md",
+        "docs/stage-status.md",
+        "Cargo.toml",
+        "kernel/Cargo.toml",
+    ];
+}
+
+impl CoordinationDashboard {
+    pub fn all_dependencies_complete(&self, task: &Task) -> bool {
+        for i in 0..task.dep_count {
+            let dep_id = task.dependencies[i];
+            if let Some(dep_task) = self.tasks[..self.task_count].iter().find(|t| t.task_id == dep_id) {
+                if dep_task.status != TaskStatus::Completed {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn can_start_task(&self, task: &Task) -> bool {
+        task.status == TaskStatus::Assigned && self.all_dependencies_complete(task)
+    }
+
+    pub fn mark_task_in_progress(&mut self, task_id: u32) -> Result<(), ()> {
+        for task in self.tasks[..self.task_count].iter_mut() {
+            if task.task_id == task_id {
+                if self.can_start_task(task) {
+                    task.status = TaskStatus::InProgress;
+                    return Ok(());
+                } else {
+                    return Err(());
+                }
+            }
+        }
+        Err(())
+    }
+
+    pub fn mark_task_completed(&mut self, task_id: u32) -> Result<(), ()> {
+        for task in self.tasks[..self.task_count].iter_mut() {
+            if task.task_id == task_id {
+                task.status = TaskStatus::Completed;
+                if let Ok(agent) = self.agents[..self.agent_count].iter_mut()
+                    .find(|a| a.agent_id == task.assigned_to)
+                    .ok_or(())
+                {
+                    agent.tasks_completed += 1;
+                }
+                return Ok(());
+            }
+        }
+        Err(())
+    }
+
+    pub fn find_next_ready_task(&self) -> Option<u32> {
+        self.tasks[..self.task_count]
+            .iter()
+            .filter(|t| self.can_start_task(t))
+            .min_by_key(|t| core::cmp::Reverse(t.priority))
+            .map(|t| t.task_id)
+    }
+
+    pub fn detect_deadlock(&self) -> bool {
+        let queued_count = self.tasks[..self.task_count]
+            .iter()
+            .filter(|t| t.status == TaskStatus::Queued || t.status == TaskStatus::Blocked)
+            .count();
+        
+        if queued_count == 0 {
+            return false;
+        }
+
+        let idle_count = self.count_idle_agents();
+        let working_count = self.count_working_agents();
+        
+        idle_count > 0 && !self.tasks[..self.task_count]
+            .iter()
+            .any(|t| self.can_start_task(t))
+    }
+}
+
+#[cfg(all(test, feature = "stage_11"))]
+mod agent_tests {
+    use super::*;
+
+    #[test]
+    fn test_dependency_resolution() {
+        let mut dash = CoordinationDashboard::new();
+        let mut task1 = Task::new(1, 5);
+        let mut task2 = Task::new(2, 5);
+        task2.add_dependency(1).ok();
+        
+        dash.add_task(task1).ok();
+        dash.add_task(task2).ok();
+        
+        assert!(!dash.all_dependencies_complete(&task2));
+        dash.mark_task_completed(1).ok();
+        assert!(dash.all_dependencies_complete(&task2));
+    }
+
+    #[test]
+    fn test_task_can_start() {
+        let mut dash = CoordinationDashboard::new();
+        dash.register_agent(1).ok();
+        let mut task = Task::new(1, 5);
+        dash.add_task(task).ok();
+        dash.assign_task(1, 1).ok();
+        assert!(dash.can_start_task(&dash.tasks[0]));
+    }
+
+    #[test]
+    fn test_collision_multiple_files() {
+        let mut detector = CollisionDetector::new();
+        assert!(detector.try_acquire("file1.rs").is_ok());
+        assert!(detector.try_acquire("file2.rs").is_ok());
+        assert!(detector.try_acquire("file3.rs").is_ok());
+        assert_eq!(detector.file_count, 3);
+        
+        assert!(detector.try_acquire("file1.rs").is_err());
+        assert!(detector.is_in_use("file2.rs"));
+        
+        detector.release("file1.rs");
+        assert!(detector.try_acquire("file1.rs").is_ok());
+    }
+
+    #[test]
+    fn test_workload_distribution() {
+        let mut balancer = WorkloadBalancer::new(3);
+        let agent1 = balancer.assign_task_to_least_busy();
+        balancer.record_task_assignment(agent1);
+        
+        let agent2 = balancer.assign_task_to_least_busy();
+        assert_ne!(agent1, agent2);
+        
+        balancer.record_task_assignment(agent2);
+        let agent3 = balancer.assign_task_to_least_busy();
+        assert_eq!(balancer.average_load(), 1);
+    }
+
+    #[test]
+    fn test_critical_file_registry() {
+        assert!(CriticalFileLockRegistry::CRITICAL_FILES.len() >= 12);
+        assert!(CriticalFileLockRegistry::CRITICAL_FILES
+            .contains(&"kernel/src/memory_safety_audit.rs"));
+    }
+
+    #[test]
+    fn test_deadlock_detection() {
+        let mut dash = CoordinationDashboard::new();
+        dash.register_agent(1).ok();
+        
+        let mut task1 = Task::new(1, 5);
+        let mut task2 = Task::new(2, 5);
+        task2.add_dependency(1).ok();
+        
+        dash.add_task(task1).ok();
+        dash.add_task(task2).ok();
+        dash.assign_task(1, 1).ok();
+        dash.assign_task(2, 1).ok();
+        
+        assert!(!dash.detect_deadlock());
+    }
+}
