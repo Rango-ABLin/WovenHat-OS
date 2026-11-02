@@ -78,3 +78,18 @@ input fixture passes on 1/2/4 CPUs after negotiation. Full Windows, expanded
 production desktop journeys and inherited matrices must pass before acceptance. The earlier interrupted 90-case graphics run is
 not reused as a passing gate. No complete modernization or hardware release
 claim is made.
+
+## Stage 20.3 desktop-userspace CI compositing repair - 2026-11-02
+
+Actions run `41464712512`, job `125348295893`, reached the Stage 20.3 F1
+launcher check and failed its pixel oracle. The oracle's 235-opacity
+expectation was correct: flat launcher, Quick Settings and Notification Center
+backgrounds had been alpha-blended against the magenta transparent key before
+a keyed blit, rather than composited over the desktop. They now use
+`Painter::blend_rounded`; their keyed overlays render content only. The 3D
+texture path retains its seeded backgrounds and 216-opacity underlay. The
+Stage 20.3 oracle is restored to 235, as are the flat-panel expectations in
+Stages 20.6 and 20.10. WovenShell release Clippy/build, host all-target
+Clippy, and kernel target Clippy for Stages 20.3, 20.6, 20.9, 20.10 and 20.17
+with the workflow-provided image paths pass. The QEMU 1/2/4-CPU runtime gate
+is still open because QEMU/OVMF are unavailable in this sandbox.

@@ -1,13 +1,18 @@
 # Agent coordination (Claude Code and Codex)
 
-## Codex - desktop-userspace Stage 20.3 oracle repair (2026-11-02)
+## Codex - desktop-userspace Stage 20.3 compositing repair (2026-11-02)
 
-Investigated kernel Actions run `41464712512`, job `125348295893`. Stage 20.3
-fails at its first F1 launcher check because the independent launcher-panel
-pixel oracle expected opacity 235 while WovenShell renders the panel at 216.
-The acceptance expectation now matches the visible panel opacity; no production
-behavior changed. The sandbox has no QEMU binary, so runtime acceptance remains
-unverified and the stage is not being marked accepted.
+Correction to the initial diagnosis in commit `7674121f`: the Stage 20.3 oracle
+was right to expect opacity 235. The flat panel background had been drawn with
+rounded alpha blending onto the magenta transparent key, then copied as an
+opaque keyed overlay, so it did not blend over the desktop as intended. Flat
+launcher, Quick Settings and Notification Center backgrounds now use the
+compositor's rounded blend path; keyed overlays draw content only. The 3D
+underlay path remains unchanged, and flat-panel oracles in Stages 20.3, 20.6
+and 20.10 expect the correct opacity 235. WovenShell release Clippy/build,
+host all-target Clippy, and kernel target Clippy for Stages 20.3, 20.6, 20.9,
+20.10 and 20.17 pass. QEMU is not available in this sandbox, so the 1/2/4-CPU
+runtime acceptance remains open.
 
 ## Codex - drivers-radio Stage 20.15 session gate (2026-11-02)
 

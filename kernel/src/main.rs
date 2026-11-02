@@ -11464,6 +11464,7 @@ fn stage20_10_self_test() -> bool {
     const START_FILL: u32 = rgb(52, 96, 180);
     const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_CARD_OPACITY: u8 = 235;
     const QUIET: u32 = rgb(90, 170, 170);
     const UNSET: u32 = 0x0100_0000;
     const WEAVE_PITCH: i32 = 96;
@@ -11772,7 +11773,9 @@ fn stage20_10_self_test() -> bool {
                 let lx = x - x0;
                 let ly = y - y0;
                 let expected = match image.pixel(lx, ly) {
-                    Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
+                    Some(UNSET) | None => {
+                        blend_pixel(PANEL_FILL, beneath(x, y), PANEL_CARD_OPACITY)
+                    }
                     Some(pixel) => pixel,
                 };
                 if compositor::pixel(x, y) != Ok(expected) {
@@ -13466,6 +13469,7 @@ fn stage20_6_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const ACCENT: u32 = rgb(76, 190, 188);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_CARD_OPACITY: u8 = 235;
     const TOAST_FILL: u32 = rgb(28, 32, 44);
     const RED: u32 = rgb(200, 60, 60);
     const UNSET: u32 = 0x0100_0000;
@@ -13675,7 +13679,7 @@ fn stage20_6_self_test() -> bool {
         } else if y < panel_y + 15 {
             rgb(28, 115, 145)
         } else {
-            blend_pixel(PANEL_FILL, beneath(x, y), 216)
+            blend_pixel(PANEL_FILL, beneath(x, y), PANEL_CARD_OPACITY)
         }
     };
     let panel = mouse::keyboard_loopback(0x3b)
@@ -14481,7 +14485,7 @@ fn stage20_3_self_test() -> bool {
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
-    const LAUNCHER_OPACITY: u8 = 216;
+    const LAUNCHER_OPACITY: u8 = 235;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(

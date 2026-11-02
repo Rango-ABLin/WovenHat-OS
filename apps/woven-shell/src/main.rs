@@ -270,6 +270,7 @@ const PANEL_WIDTH: i32 = 160;
 const PANEL_ROW: i32 = 14;
 const PANEL_FILL: u32 = rgb(28, 32, 44);
 const PANEL_OPACITY: u8 = 216;
+const PANEL_CARD_OPACITY: u8 = 235;
 const PANEL_TITLE: &str = "WovenStart";
 
 static THEME_MODE: AtomicU8 = AtomicU8::new(0);
@@ -1709,10 +1710,6 @@ impl Desktop {
     fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
         let inner = (area.width - 2) as usize;
-        // Rounded, near-opaque card, matching the lock screen, Quick
-        // Settings and Notification Center chrome, instead of a hard-edged
-        // square outline with a flat header block.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
         draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
         canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_accent());
         canvas.fill_rect(
@@ -2890,13 +2887,6 @@ impl Desktop {
     /// perspective projection samples.
     fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        // A rounded, near-opaque card instead of a hard-edged square outline
-        // with a flat header block, Windows-11-style like the lock screen's
-        // card. `render()`'s keyed overlay leaves the handful of corner
-        // pixels outside the rounding untouched, so the square backdrop tint
-        // `blend()` already laid down under this shows through there as a
-        // soft drop shadow rather than a visible seam.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
         canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_accent());
         canvas.fill_rect(
             x + CHROME_RADIUS as i32,
@@ -3160,10 +3150,6 @@ impl Desktop {
     /// mode's perspective projection samples.
     fn paint_center_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        // Same rounded, near-opaque card treatment as the Quick Settings
-        // panel and the lock screen, instead of a hard-edged square outline
-        // with a flat header block.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
         canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_accent());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
         canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, theme_text());
@@ -3718,19 +3704,43 @@ impl Desktop {
 
         let panel = self.panel_area().intersect(area);
         if !panel.is_empty() {
-            painter.blend(panel, theme_panel(), PANEL_OPACITY);
+            if self.three_d {
+                painter.blend(panel, theme_panel(), PANEL_OPACITY);
+            } else {
+                painter.blend_rounded(
+                    panel,
+                    panel,
+                    CHROME_RADIUS,
+                    theme_panel(),
+                    PANEL_CARD_OPACITY,
+                );
+            }
             painter.overlay(panel, |canvas| self.render_panel(canvas));
         }
 
         let qs = self.qs_area().intersect(area);
         if !qs.is_empty() {
-            painter.blend(qs, theme_panel(), PANEL_OPACITY);
+            if self.three_d {
+                painter.blend(qs, theme_panel(), PANEL_OPACITY);
+            } else {
+                painter.blend_rounded(qs, qs, CHROME_RADIUS, theme_panel(), PANEL_CARD_OPACITY);
+            }
             painter.overlay(qs, |canvas| self.render_qs(canvas));
         }
 
         let center = self.center_area().intersect(area);
         if !center.is_empty() {
-            painter.blend(center, theme_panel(), PANEL_OPACITY);
+            if self.three_d {
+                painter.blend(center, theme_panel(), PANEL_OPACITY);
+            } else {
+                painter.blend_rounded(
+                    center,
+                    center,
+                    CHROME_RADIUS,
+                    theme_panel(),
+                    PANEL_CARD_OPACITY,
+                );
+            }
             painter.overlay(center, |canvas| self.render_center(canvas));
         }
 

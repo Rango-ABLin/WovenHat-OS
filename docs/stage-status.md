@@ -1,13 +1,19 @@
 # Stage status
 
-## Stage 20.3 desktop-userspace CI follow-up - 2026-11-02 - FIX INTEGRATED
+## Stage 20.3 desktop-userspace CI follow-up - 2026-11-02 - FIX INTEGRATED / RUNTIME OPEN
 
-Kernel Actions run `41464712512`, job `125348295893`, failed on the first
-Stage 20.3 launcher assertion. The independent panel-color oracle expected
-opacity 235, but WovenShell's launcher panel uses opacity 216. Updated the
-oracle for the translucent panel and unselected rows; production behavior is
-unchanged. This sandbox has no QEMU binary, so the 1/2/4-CPU runtime gate is
-still unverified and this change does not claim Stage 20.3 acceptance.
+Kernel Actions run `41464712512`, job `125348295893`, failed at the F1 launcher
+check. The original opacity-235 oracle was correct: flat panel content was
+alpha-blended against the magenta transparency key and then copied over the
+desktop as a keyed overlay. The flat launcher, Quick Settings and Notification
+Center now blend rounded backgrounds directly over the composed desktop and
+leave their keyed overlays for text/icons; the 3D texture/underlay path is
+preserved. The Stage 20.3 oracle is restored to opacity 235, and the same
+flat-panel opacity is reflected in the Stage 20.6 and 20.10 oracles. WovenShell
+release Clippy/build, host all-target Clippy, and kernel target Clippy for
+Stages 20.3, 20.6, 20.9, 20.10 and 20.17 pass. QEMU is unavailable in this
+sandbox, so the relevant 1/2/4-CPU runtime gates remain open and this does not
+claim stage acceptance.
 
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 

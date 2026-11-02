@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Flat translucent desktop panels (2026-11-02)
+
+In WovenShell's flat mode, panel backgrounds are composited with
+`Painter::blend_rounded` over the existing desktop; keyed overlays are for
+opaque text and icons only. Alpha-blending a panel fill on the overlay canvas
+uses the magenta transparent key as its under-color, and the keyed blit then
+covers rather than blends with the desktop. The 3D panel path seeds its
+off-screen texture and keeps its separate underlay.
+
 ## POSIX static-libc bootstrap (2026-10-28)
 
 The POSIX port uses pinned upstream musl 1.2.6 and keeps WovenHat adaptation
