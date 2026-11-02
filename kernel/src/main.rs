@@ -155,6 +155,7 @@ mod memory_safety_audit;
 mod bounded_capacity_analyzer;
 mod deterministic_fault_injection;
 mod documentation_generator;
+mod qemu_perf_regression;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
