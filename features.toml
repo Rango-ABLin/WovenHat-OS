@@ -1,0 +1,128 @@
+# WovenHat OS Test Feature Metadata
+# Auto-generated mapping of Cargo.toml features to test orchestration
+
+[metadata]
+version = "1.0"
+generated = "2026-11-02"
+description = "Feature gate metadata for test orchestration and parallel execution"
+
+# Stage 10: Async I/O Completion
+[features.stage10-7-test]
+description = "Stage 10.7: Asynchronous TCP"
+test_marker = "[S10.7] userspace async TCP connect/send/recv + EOF/pinning/cancel/teardown: PASSED"
+dependencies = ["stage10-6-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 180
+test_script = "test-stage10-7-tcp.py"
+category = "async"
+
+[features.stage10-8-test]
+description = "Stage 10.8: Unified Completion Port / Wait-Many"
+test_marker = "[S10.8] completion ports + batch/cancel/timeout/teardown/SMP: PASSED"
+dependencies = ["stage10-7-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+test_script = "test-feature-qemu.py"
+category = "async"
+
+[features.stage10-6-test]
+description = "Stage 10.6: Async Network Operations"
+test_marker = "[S10.6]"
+dependencies = []
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "async"
+
+# Stage 11: Process & Userspace
+[features.stage11-1-test]
+description = "Stage 11.1: Process Model"
+test_marker = "[S11.1]"
+dependencies = ["stage10-7-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "processes"
+
+[features.stage11-2-test]
+description = "Stage 11.2: Multithreaded Processes"
+test_marker = "[S11.2]"
+dependencies = ["stage11-1-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "threads"
+
+[features.stage11-5-test]
+description = "Stage 11.5: Program Loader"
+test_marker = "[S11.5]"
+dependencies = ["stage11-2-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "loader"
+
+# Stage 12: Storage
+[features.stage12-1-test]
+description = "Stage 12.1: VFS 2.0"
+test_marker = "[S12.1]"
+dependencies = ["stage11-1-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "storage"
+
+[features.stage12-2-test]
+description = "Stage 12.2: WovenFS"
+test_marker = "[S12.2]"
+dependencies = ["stage12-1-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 120
+category = "storage"
+
+# Stage 14: Networking
+[features.stage14-1-test]
+description = "Stage 14.1: UDP"
+test_marker = "[S14.1]"
+dependencies = ["stage10-6-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 180
+test_script = "test-network-qemu.py"
+category = "network"
+
+[features.stage14-2-test]
+description = "Stage 14.2: IPv6"
+test_marker = "[S14.2]"
+dependencies = ["stage14-1-test"]
+cpus = [1, 2, 4]
+timeout_seconds = 180
+category = "network"
+
+# Parallelization Groups
+# Stages with no cross-dependencies can run simultaneously
+[parallelization]
+async_stages = [
+  "stage10-6-test",
+  "stage10-7-test", # needs 10.6
+  "stage10-8-test", # needs 10.7
+]
+
+storage_stages = [
+  "stage12-1-test",
+  "stage12-2-test", # needs 12.1
+]
+
+network_stages = [
+  "stage14-1-test",
+  "stage14-2-test", # needs 14.1
+]
+
+process_stages = [
+  "stage11-1-test",
+  "stage11-2-test", # needs 11.1
+  "stage11-5-test", # needs 11.2
+]
+
+# Independent chains (can run in parallel)
+independent = [
+  ["stage10-6-test", "stage10-7-test", "stage10-8-test"],
+  ["stage11-1-test", "stage11-2-test", "stage11-5-test"],
+  ["stage12-1-test", "stage12-2-test"],
+  ["stage14-1-test", "stage14-2-test"],
+]
+
