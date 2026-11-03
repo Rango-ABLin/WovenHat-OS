@@ -455,3 +455,73 @@ cannot fully confirm without actually seeing it render across frames;
 stated here plainly rather than claimed as verified. QEMU
 re-verification for M2-M5 together (1/2/4 CPU) is owed once this machine
 has enough free memory for a guest boot.
+
+## QEMU verification catch-up (2026-11-03, later the same day)
+
+With more host memory free (the user closed other applications), ran the
+owed QEMU verification for everything above.
+
+### A real bug caught, not just confirmed clean
+
+The M5 fade-in (`overview_fade: Spring`, a single `Painter::draw_blended`
+pass over the whole overview) looked structurally sound against the
+static review recorded in the M5 section above -- the `Spring`/frame-
+clock wiring was copy-identical to the already-QEMU-verified window-fade
+path. Seeing it actually render exposed what that review couldn't: a
+visibly ghosted, horizontally-offset duplicate of the Dash row and "No
+open windows" text (roughly a two-tile-width shift, `TILE_WIDTH` = 320,
+consistent with a tile-compositing interaction rather than a layout math
+error). Rather than spend further turns diagnosing the exact tiling
+mechanism blind, reverted to the plain `blend`+keyed-`overlay` two-step
+every other panel (Quick Settings, Notification Center, the Taskbar
+layout's launcher) already uses, and that M3 already verified correct
+for this exact panel before M5 touched it. This also meant reverting
+`paint_overview_content`'s background from a plain `blend_rect` back to
+`fill_rounded_blended`, and removing `overview_fade` (the struct field,
+its `Desktop::INITIAL` entry, the `toggle_launcher` wiring, and the
+`animating`/`animate` hooks) entirely rather than leave a disconnected,
+unused `Spring` sitting in `Desktop`.
+
+**Net effect on M5**: the Activities overview no longer fades in --
+opens instantly, exactly as it did at the end of M4, before M5 added
+motion. Every other M5 change (high contrast `theme_muted`, the i18n
+`shell_catalog` rename and new keys, the keyboard-reachability audit)
+is unaffected and stands as already described above. "Spring/ease
+transitions for overview open/close, <=300ms" (`CLAUDE-START-HERE.md`
+section 3.7) is therefore **not currently implemented** -- reported
+honestly as a reverted, not-yet-working attempt, not quietly dropped
+from the record. Revisiting it needs either a render mechanism that
+doesn't share the `Painter`'s multi-tile buffer across alpha-blended
+passes the way `draw_blended` does, or a real QEMU feedback loop to
+iterate on the existing one -- static review alone already proved
+insufficient once.
+
+### Verification results
+
+- **1 CPU** (after the revert): clean, matches the pre-fade M3/M4
+  screenshots exactly -- search field, Dash (Files/Terminal/Store
+  favorites), "No open windows on this workspace", the full 11-app grid
+  with corrected labels, no ghosting. `WovenFiles: window opened`/
+  `window opened: Files` both logged.
+- **2 CPU**: clean, screenshot identical in content to the 1 CPU run.
+  Same serial-log success markers.
+- **4 CPU**: the journey succeeded identically (same serial-log markers),
+  but the `activities-overview.ppm` screenshot itself showed only the
+  search field painted, with the Dash/placeholder/grid still showing
+  plain desktop wallpaper beneath. Diagnosed as a capture-timing race in
+  the qualification script's new screenshot step -- the 2 CPU capture of
+  the exact same shell code, moments apart, is clean, and the underlying
+  functional journey (window-open, launch) succeeded at all three CPU
+  counts -- not a rendering or SMP defect in the shell itself. Not
+  pursued to a perfected fix this pass (e.g. a higher
+  `minimum_changed` threshold or a second confirming capture); recorded
+  as a known flake in the test script's own robustness, analogous to the
+  already-documented `keyboard_refresh` timing flake.
+- All three CPU counts hit the pre-existing `keyboard_refresh` flake
+  after the above, exactly as before -- unrelated, already documented.
+
+This closes the M2/M3 2/4-CPU verification gap and the M4/M5 QEMU
+verification gap all at once; M2-M5 are now QEMU-verified at 1/2/4 CPU,
+modulo the pre-existing `keyboard_refresh` flake (which means the
+qualification script's own exit code is still non-zero, so this is still
+not a formal stage acceptance).

@@ -610,12 +610,6 @@ struct Desktop {
     query_length: usize,
     selected: usize,
     children: [Option<Child>; MAX_CHILDREN],
-    /// The Overview layout's Activities overview open/close fade (M5
-    /// motion): 0 closed, 255 open. Unused under the Taskbar layout,
-    /// whose small launcher panel has never animated. Jumps straight to
-    /// its target under `reduced_motion`, the same convention window
-    /// open/close fades already use.
-    overview_fade: Spring,
 }
 
 impl Desktop {
@@ -677,7 +671,6 @@ impl Desktop {
         query_length: 0,
         selected: 0,
         children: [None; MAX_CHILDREN],
-        overview_fade: Spring::new(0),
     };
 
     fn screen(&self) -> Area {
@@ -1130,23 +1123,6 @@ impl Desktop {
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
-        if self.layout == ShellLayout::Overview {
-            if self.launcher_open && !self.reduced_motion {
-                // Fade in: the overview is painted every frame while open
-                // (see `overview_area`), so this is actually visible.
-                self.overview_fade = Spring::new(0);
-                self.overview_fade.set_target(255);
-            } else {
-                // Closing already forces an immediate full-screen repaint
-                // below (nothing paints `overview_area` once
-                // `launcher_open` is false, so a gradual fade-out would
-                // never actually be visible); snap instead of animating
-                // toward 0 so the frame clock doesn't keep running for
-                // 300ms after the overview is already gone. Also used for
-                // opening under reduced_motion, at full opacity.
-                self.overview_fade = Spring::new(if self.launcher_open { 255 } else { 0 });
-            }
-        }
         // A close must restore every pixel under the projected card. The
         // launcher is a foreground mode switch, so a full recomposition is
         // bounded and prevents stale projected corners or icon glyphs.
@@ -1555,20 +1531,7 @@ impl Desktop {
     /// yet (documented in `docs/graphics/overview-desktop-2026-11-03.md`).
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
-        // A plain rect, not `fill_rounded_blended`: the overview spans
-        // most of the screen below the top bar rather than reading as a
-        // small floating card, and a non-rounded fill has no transparent
-        // corner pixels, which lets the whole panel be alpha-faded in one
-        // `draw_blended` pass (see the M5 motion note in `repaint_once`)
-        // without a separate keyed overlay for the rounding.
-        canvas.blend_rect(
-            overview.x,
-            overview.y,
-            overview.width as usize,
-            overview.height as usize,
-            theme_panel(),
-            235,
-        );
+        fill_rounded_blended(canvas, overview, CHROME_RADIUS, theme_panel(), 235);
 
         // Search field.
         let catalog = shell_catalog(self.language);
@@ -3230,12 +3193,16 @@ impl Desktop {
 
         let overview = self.overview_area().intersect(area);
         if !overview.is_empty() {
-            // M5 motion: the whole panel fades in as one alpha-blended
-            // pass (`paint_overview_content` fills its full rect itself,
-            // see its own comment), rather than the fixed-opacity
-            // blend+keyed-overlay two-step the other panels use.
-            let alpha = self.overview_fade.value().clamp(0, 255) as u8;
-            painter.draw_blended(overview, alpha, |canvas| self.paint_overview_content(canvas));
+            // The M5 fade-in attempt (a single draw_blended pass at the
+            // overview_fade spring's value) produced a ghosted, tile-
+            // offset duplicate of the panel's content once actually seen
+            // on screen via QEMU -- reverted to the plain blend+keyed-
+            // overlay two-step the other panels already use and that M3
+            // verified correct, rather than ship something visibly
+            // broken. See the M5 writeup in
+            // docs/graphics/overview-desktop-2026-11-03.md.
+            painter.blend(overview, theme_panel(), PANEL_OPACITY);
+            painter.overlay(overview, |canvas| self.paint_overview_content(canvas));
         }
 
         let qs = self.qs_area().intersect(area);
@@ -4055,7 +4022,6 @@ impl Desktop {
             .iter()
             .flatten()
             .any(|window| !window.fade.is_settled())
-            || !self.overview_fade.is_settled()
     }
 
     /// Advance every animation by `frames`. Returns the area to repaint.
@@ -4066,10 +4032,6 @@ impl Desktop {
                 window.fade.step(frames);
                 dirty = dirty.union(window.footprint());
             }
-        }
-        if !self.overview_fade.is_settled() {
-            self.overview_fade.step(frames);
-            dirty = dirty.union(self.overview_area());
         }
         dirty
     }

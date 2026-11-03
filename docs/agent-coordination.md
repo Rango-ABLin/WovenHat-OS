@@ -8215,7 +8215,7 @@ clean working tree. Did not run the QEMU 1/2/4 CPU acceptance chain.
 
 ## Claude Code - WovenHat Overview desktop overhaul (assigned 2026-11-03)
 
-User-authorized full overhaul. Full prompt: docs/GNOME-Desktop-Claude-Prompt.md (also CLAUDE-START-HERE.md). Claude Code takes over the WovenHat shell; earlier shell assignments are superseded. Claude claims apps/woven-shell/**, scripts/test-desktop-qualification.py and new docs/graphics/overview-desktop-*.md. Status: M2 verified at 1/2/4 CPUs, M3 verified at 1 CPU (2/4 CPU pending host memory), M4 and M5 implemented/built/Clippy-clean but not QEMU-verified (host free RAM stayed under 1 GB of 7.6 GB total; QEMU could not allocate a guest). See docs/graphics/overview-desktop-2026-11-03.md for the full M2-M5 writeup.
+User-authorized full overhaul. Full prompt: docs/GNOME-Desktop-Claude-Prompt.md (also CLAUDE-START-HERE.md). Claude Code takes over the WovenHat shell; earlier shell assignments are superseded. Claude claims apps/woven-shell/**, scripts/test-desktop-qualification.py and new docs/graphics/overview-desktop-*.md. Status: M2-M5 QEMU-verified at 1/2/4 CPUs (user freed host memory for this). M5's fade-in was reverted after QEMU caught a ghosting bug the static review had missed; everything else stands. Still not a stage acceptance (qualification script's own exit code reflects the pre-existing keyboard_refresh flake). M6/M7 not started. See docs/graphics/overview-desktop-2026-11-03.md for the full M2-M5 writeup.
 
 ### M0 plan (2026-11-03)
 

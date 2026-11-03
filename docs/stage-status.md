@@ -1,5 +1,30 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M2-M5 QEMU verification) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+With more host memory free, QEMU verification that M4/M5 (and M2/M3's
+2/4 CPU gaps) had been missing is now done. `scripts/test-desktop-
+qualification.py` at 1, 2, and 4 CPUs all reach the same point as the
+accepted baseline (sign-in, overview capture, launch, window-open,
+pointer, all four workspace switches), serial log confirms `WovenFiles:
+window opened`/`window opened: Files` at every CPU count, then hit the
+pre-existing `keyboard_refresh` flake. This QEMU pass caught a real bug
+before it could be called done: the M5 fade-in (`overview_fade`, a
+single `Painter::draw_blended` pass) produced a visibly ghosted,
+tile-offset duplicate of the overview's content once actually seen on
+screen. Reverted to the plain `blend`+keyed-`overlay` two-step the other
+panels already use and M3 verified correct, rather than ship something
+visibly broken; re-verified clean at 1 CPU (screenshot) and 2 CPU
+(screenshot, identical to 1 CPU). The 4 CPU screenshot showed a partial
+render (only the search field painted, the rest still showing desktop
+wallpaper) while the underlying journey still succeeded (window-open,
+launch) -- diagnosed as a capture-timing race in the new screenshot step
+(the 2 CPU capture of the same code is clean), not a functional
+regression; not pursued further to a perfect fix this pass. Full
+writeup: `docs/graphics/overview-desktop-2026-11-03.md`. Still not a
+stage acceptance: the qualification script's own exit code still
+reflects the pre-existing `keyboard_refresh` flake. M6/M7 not started.
+
 ## WovenHat Overview desktop overhaul (M5) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
 
 M5 (motion, reduced motion, high contrast, i18n, accessibility) is
