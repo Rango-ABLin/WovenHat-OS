@@ -21,27 +21,43 @@ While watching an interactive QEMU session, the user reported: **"the
 pointer could jitter and jumble when moving from one position to the
 other."**
 
-**FIXED, 2026-11-03** (commit `51cde6aa`). Root cause: a relative PS/2
-mouse and an absolute USB tablet are both attached in every QEMU launcher
-this project uses, and QEMU's `usb-tablet` does not disable the emulated
-PS/2 mouse -- so every host mouse movement produced *both* a relative
-`PointerMove` delta and an absolute `PointerAbsolute` report, two
-independent, uncoordinated sources for the same physical motion, applied
-verbatim by `apps/woven-shell`'s `handle_input`. Fixed with a sticky
-latch in `kernel/src/woven_input.rs::publish()`: once an absolute report
-is seen, relative deltas are dropped rather than fought over. Verified:
-kernel build/clippy clean, and the real `scripts/
-test-desktop-qualification.py` journey at 1 CPU (which also attaches
-`usb-tablet` and drives all its clicks/drags via QMP relative input)
-still passes identically to every prior run -- only the known
-pre-existing `keyboard_refresh` flake, confirming the fix didn't
-silently swallow that harness's own input. **Not yet verified**: an
-actual human moving a real mouse over the live interactive window after
-this fix (the original report was made that way) -- the next session (or
-later this one, if there's runway) should relaunch `RUN-DESKTOP.ps1` and
-have the user confirm the jitter is gone, since QMP-synthetic-input
-verification and a real human's mouse movement are not quite the same
-test.
+**PARTIALLY FIXED / STILL OPEN, 2026-11-03.** First fix (commit
+`51cde6aa`): a relative PS/2 mouse and an absolute USB tablet are both
+attached in every QEMU launcher this project uses, and QEMU's
+`usb-tablet` does not disable the emulated PS/2 mouse -- so every host
+mouse movement produced *both* a relative `PointerMove` delta and an
+absolute `PointerAbsolute` report, two independent, uncoordinated sources
+for the same physical motion, applied verbatim by `apps/woven-shell`'s
+`handle_input`. Fixed with a sticky latch in
+`kernel/src/woven_input.rs::publish()`: once an absolute report is seen,
+relative deltas are dropped. Verified safe against the automated harness
+(`scripts/test-desktop-qualification.py` at 1 CPU, identical to every
+prior run -- only the known `keyboard_refresh` flake).
+
+**Real-user interactive testing after the fix, with the host under heavy
+memory pressure (761MB free of 8GB, Windows "Memory Compression" alone
+using 693MB, several other apps running): user reported "still jitters
+and the loader is not continuous; it jumps and chokes."** After the user
+closed some other host applications (free memory rose to ~1020MB) and a
+retest: **"not so smooth but better."** So host resource contention is a
+real, confirmed, significant contributing factor (consistent with the
+boot-splash spinner already being correctly wall-clock-paced in code,
+per `kernel/src/main.rs`'s own comments -- a design that assumes
+reasonably consistent host scheduling) -- but it is not the *whole*
+story, since even with more free RAM the user still described it as "not
+so smooth." **Do not consider this closed.** Two real possibilities for
+the remainder, neither confirmed: (a) the absolute-device latch from the
+first fix may not actually be engaging during genuine interactive mouse
+movement the way it does for the automated harness's explicit QMP
+relative-input calls (this was never directly verified -- only inferred
+from safety, not confirmed to be helping); (b) a second, independent
+smoothness issue in frame delivery/pacing under real host scheduling
+variance, separate from the pointer-source conflict entirely. The user
+chose to move on to other work rather than keep chasing this further
+right now ("we can go to other tasks") -- next session should resume
+here with real diagnostics (e.g., log whenever the latch actually trips,
+confirm from the serial log during a live interactive session whether
+`PointerAbsolute` events are arriving at all) rather than guessing again.
 
 The user also asked generally that **the OS be sharper and graphics run
 more smoothly** once the current milestone is done — read that as
@@ -179,6 +195,30 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: pointer-jitter fix confirmed only partial)
+
+Relaunched `RUN-DESKTOP.ps1` with the `51cde6aa` fix applied and asked
+the user to test with a real mouse, as planned in the entry below. Result:
+still jittery, and additionally the boot-splash spinner itself was
+described as discontinuous ("jumps and chokes") -- a symptom unrelated to
+pointer input at all. Checked host memory: only 761MB free of 8GB, with
+Windows "Memory Compression" using 693MB and several other apps running
+-- strong signal of host contention. Asked the user how to proceed
+(free host RAM and retest / keep digging in the kernel regardless / both);
+they chose to free RAM first. Attempting to stop the QEMU process myself
+was blocked by the permission classifier (same as earlier this session);
+asked the user to close it and other apps themselves. They did (free
+memory rose to ~1020MB) and a clean retest showed real improvement
+("not so smooth but better") but not a full fix. User chose to move on to
+other work rather than keep iterating on this right now. Corrected the
+defect entry above from "FIXED" to "PARTIALLY FIXED / STILL OPEN" --
+overclaiming a fix that real-world testing didn't actually confirm was a
+mistake to catch and correct immediately, not leave for a future session
+to discover the hard way. Next session should resume with real
+diagnostics (log every time the absolute-pointer latch trips; confirm
+`PointerAbsolute` events are even arriving during genuine interactive use)
+rather than another blind guess.
 
 ### 2026-11-03 (session: pointer-jitter root cause found and fixed)
 
