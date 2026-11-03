@@ -1,5 +1,48 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M1) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+User-authorized full takeover of `apps/woven-shell` per `CLAUDE-START-HERE.md`,
+superseding the earlier bottom-taskbar/Windows-11-style assignment. M0
+(coordination, claimed paths) and the first pass of M1 (behavior-preserving
+module split) are done: `main.rs` (4,644 lines) is split into `tokens.rs`
+(colors/sizes/high-contrast theme resolution), `geometry.rs` (Area/Dirty
+damage tracking), `textures.rs` (static .bss render-target buffers),
+`icons.rs` (app-tile drawing), `model.rs` (Window/App/Child/Note/Toast),
+and `painter.rs` (the tile-chunked renderer), leaving `main.rs` at 3,743
+lines, almost entirely the `struct Desktop`/`impl Desktop` event loop and
+`fn main`. Each slice is verified with `cargo build`/`cargo clippy --target
+x86_64-unknown-none -- -D warnings` inside `apps/woven-shell`; nothing in
+`impl Desktop` itself has moved yet, since its ~80 methods are interleaved
+by feature history (e.g. Quick Settings and lock-screen methods alternate
+line-by-line) rather than grouped by concern, so splitting it safely is a
+much larger, slower undertaking than the six clean extractions done so far.
+
+Also found and confirmed NOT a regression: `scripts/test-desktop-
+qualification.py --cpus 1` times out waiting for a materially changed
+framebuffer during a Files keyboard-refresh check, even though the serial
+log shows the refresh happened and sign-in/launch/pointer/workspace-switch
+all succeeded. Reproduced identically against the pre-change commit
+(`48fc4a27`) in an isolated worktree -- this is a pre-existing flake in the
+qualification harness or its framebuffer-diff threshold, unrelated to this
+work. Recorded in `docs/agent-coordination.md`.
+
+Separately, the Stage 10.7 acceptance chain (`RUN-STAGE10.7.ps1`) run
+earlier this session passed Stages up through 10.6 on 1/2/4 CPUs (host
+lint, Stage 10.6 preservation); Stage 10.7 itself failed only because
+`python3` on this machine resolves to a dead Windows Store app-execution-
+alias stub rather than a real interpreter (`python` is the real one,
+3.14.7) -- an environment issue, not a kernel defect.
+
+M2 (the actual new Overview top bar, clock/calendar popover and system
+menu, gated behind a `--layout` flag with the legacy taskbar chrome kept
+as the `--layout=taskbar` rollback path) has not started: it is new UI
+work requiring real design/implementation and a QEMU screenshot +
+keyboard-journey verification on 1/2/4 CPUs, not a mechanical refactor,
+and is being scoped deliberately rather than rushed in the same pass as
+M1's module split. No stage acceptance or modernization claim is made for
+M2-M7.
+
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 
 The full appearance/features proposal is authorized. Work resumes at the open
