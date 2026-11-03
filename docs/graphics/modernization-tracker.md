@@ -19,28 +19,35 @@ action outside normal commit-and-push.
 
 While watching an interactive QEMU session, the user reported: **"the
 pointer could jitter and jumble when moving from one position to the
-other."** Treat this as a real, reported bug to root-cause, not folded
-silently into general polish — it most directly maps to Phase 5's
-"efficient cursor updates" bullet and Phase 1's "sharp... rendering"
-acceptance criterion. The user also asked generally that **the OS be
-sharper and graphics run more smoothly** once the current milestone is
-done — read that as reinforcing Phase 1/2/7's existing acceptance
-criteria (sharp text/edges, no stretching, measured frame times), not as
-a new separate phase.
+other."**
 
-Suggested places to look first (not yet investigated this session — audit
-before assuming the cause): `WPMV` pointer-move message handling in
-`apps/woven-shell/src/main.rs` (every app's `gui.rs` also independently
-tracks `pointer`/`pointer_pressed` from forwarded `WPMV`/`WPBT` — check
-for inconsistent coordinate scaling between logical and physical pixels,
-especially under the 2x display-scale path, and for any place pointer
-position is drawn one frame behind the actual forwarded coordinate); the
-`usb-tablet` QEMU device `RUN-DESKTOP.ps1` attaches for host/guest pointer
-alignment (confirm it isn't itself a source of input jitter under `whpx`
-vs `tcg`); and the compositor's cursor-presentation path in
-`kernel/src/compositor.rs`/`kernel/src/display.rs` (is the cursor drawn
-via damage-region partial repaint, and could a stale damage rect leave a
-one-frame-old cursor image visible briefly during fast movement?).
+**FIXED, 2026-11-03** (commit `51cde6aa`). Root cause: a relative PS/2
+mouse and an absolute USB tablet are both attached in every QEMU launcher
+this project uses, and QEMU's `usb-tablet` does not disable the emulated
+PS/2 mouse -- so every host mouse movement produced *both* a relative
+`PointerMove` delta and an absolute `PointerAbsolute` report, two
+independent, uncoordinated sources for the same physical motion, applied
+verbatim by `apps/woven-shell`'s `handle_input`. Fixed with a sticky
+latch in `kernel/src/woven_input.rs::publish()`: once an absolute report
+is seen, relative deltas are dropped rather than fought over. Verified:
+kernel build/clippy clean, and the real `scripts/
+test-desktop-qualification.py` journey at 1 CPU (which also attaches
+`usb-tablet` and drives all its clicks/drags via QMP relative input)
+still passes identically to every prior run -- only the known
+pre-existing `keyboard_refresh` flake, confirming the fix didn't
+silently swallow that harness's own input. **Not yet verified**: an
+actual human moving a real mouse over the live interactive window after
+this fix (the original report was made that way) -- the next session (or
+later this one, if there's runway) should relaunch `RUN-DESKTOP.ps1` and
+have the user confirm the jitter is gone, since QMP-synthetic-input
+verification and a real human's mouse movement are not quite the same
+test.
+
+The user also asked generally that **the OS be sharper and graphics run
+more smoothly** once the current milestone is done — read that as
+reinforcing Phase 1/2/7's existing acceptance criteria (sharp text/edges,
+no stretching, measured frame times), not as a new separate phase. Not
+yet addressed beyond the pointer fix above.
 
 **After the graphics mandate is complete** (all phases in the table below
 at an honest "DONE" or explicitly accepted "PARTIAL with no further
@@ -172,6 +179,26 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: pointer-jitter root cause found and fixed)
+
+Root-caused and fixed the user-reported pointer jitter (commit
+`51cde6aa`): a relative PS/2 mouse and an absolute USB tablet are both
+attached in every launcher this project uses, and QEMU's `usb-tablet`
+doesn't disable the emulated PS/2 mouse, so every host movement produced
+two independent, uncoordinated position updates for the shell to apply.
+Fixed with a sticky "absolute wins once seen" latch in
+`kernel/src/woven_input.rs::publish()`. Verified kernel build/clippy
+clean, and -- importantly, since the fix touches the one shared input
+path every acceptance gate depends on -- ran the real `scripts/
+test-desktop-qualification.py` journey at 1 CPU (which also attaches
+`usb-tablet` and drives every click/drag through QMP *relative* input)
+end to end before committing: identical to every prior accepted run,
+only the known `keyboard_refresh` flake, confirming the fix didn't
+silently break that harness's own relative-mouse-driven input. Relaunched
+`RUN-DESKTOP.ps1` afterward so the user can confirm with a real mouse,
+interactively, that the jitter is actually gone (asked, not yet
+confirmed as of this entry).
 
 ### 2026-11-03 (session: tried -display sdl for interactive visibility, reverted)
 
