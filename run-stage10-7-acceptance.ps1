@@ -10,8 +10,21 @@ function Resolve-PythonCommand {
     foreach ($candidate in @("python3", "python")) {
         $command = Get-Command $candidate -ErrorAction SilentlyContinue
         if (-not $command) { continue }
-        $version = & $candidate --version 2>&1
-        if ($LASTEXITCODE -eq 0) { return $candidate }
+        # The Windows Store app-execution-alias stub (what `python3`
+        # resolves to when no real interpreter is installed under that
+        # name) writes to stderr and exits non-zero; under this script's
+        # own $ErrorActionPreference = "Stop", a native command's stderr
+        # output becomes a terminating exception, not just a non-zero
+        # $LASTEXITCODE, so this must be caught, not just checked.
+        try {
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & $candidate --version *> $null
+            $ErrorActionPreference = $previous
+            if ($LASTEXITCODE -eq 0) { return $candidate }
+        } catch {
+            $ErrorActionPreference = $previous
+        }
     }
     throw "No working Python interpreter found (tried python3, python)"
 }
