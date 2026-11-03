@@ -54,8 +54,15 @@ image = desktop.build_hardware_demo(out)
     # second, independent virtio-gpu-pci device the kernel's own PCI probe
     # (compositor::attach_gpu_outputs -> virtio_gpu::Gpu::probe) can find
     # and drive after boot, rather than replacing the boot display device.
+    # id=gpu0 lets a QMP `screendump` target this device specifically via
+    # device='gpu0', head=0 (confirmed necessary: screendump with no
+    # device/head targets the default/-vga std console, not this one, even
+    # though the kernel is genuinely presenting to the virtio-gpu scanout).
+    # The interactive QEMU window itself still only shows the -vga std
+    # console, not this content -- see docs/graphics/
+    # modernization-tracker.md's Phase 1/6 rows.
     $displayArgs = if ($Display -eq 'virtio-gpu') {
-        @('-vga', 'std', '-device', 'virtio-gpu-pci')
+        @('-vga', 'std', '-device', 'virtio-gpu-pci,id=gpu0')
     } else {
         @('-vga', 'std')
     }
