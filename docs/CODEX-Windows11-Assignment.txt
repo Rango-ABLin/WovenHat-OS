@@ -1,0 +1,196 @@
+================================================================================
+             CODEX ASSIGNMENT: Windows 11-Style Desktop Implementation
+================================================================================
+
+PROJECT: Implement a Windows 11-Inspired Desktop for WovenHat-OS
+
+OVERVIEW:
+Build a modern Windows 11-style desktop with a bottom taskbar, app launcher,
+and integrated system management. Key features:
+- Bottom taskbar (50px) with pinned/running apps
+- Start Menu app launcher (Super key)
+- App Switcher with window previews (Alt+Tab)
+- System tray (clock, battery, volume, WiFi, settings)
+- Notifications (toasts + action center)
+- Window snap layouts
+- Settings integration
+- Theme system (light/dark modes)
+
+CRITICAL DESIGN REQUIREMENT:
+✓ TASKBAR AT BOTTOM (like Windows 11)
+✗ NO top bar
+✗ NO GNOME Activities overlay
+✗ NO workspace preview
+
+DELIVERABLES:
+1. wovenhat-windows-shell (main desktop shell)
+   - 8 modules for all desktop features
+   
+2. wovenhat-settings-daemon (background service)
+   - System settings management
+   
+3. wovenhat-action-center (notification hub)
+   - Notification history and Do Not Disturb
+
+TIMELINE: 8 Days (4 Phases of 2 Days Each)
+
+PHASE 1 (Days 1-2): Foundation
+  Tasks:
+    - Project setup and IPC framework
+    - Taskbar at bottom (50px height)
+    - Start button and clock display
+    - WovenShell integration
+  DONE WHEN: Taskbar visible with working time display
+
+PHASE 2 (Days 3-4): Core Features
+  Tasks:
+    - Start Menu launcher (fullscreen or side panel)
+    - App icons on taskbar (pinned + running)
+    - App Switcher (Alt+Tab with thumbnails)
+    - Taskbar hover preview (show all app windows)
+  DONE WHEN: All 4 features working smoothly
+
+PHASE 3 (Days 5-6): System Integration
+  Tasks:
+    - System Tray (WiFi, volume, battery, settings, power menu)
+    - Notifications (toasts + action center)
+    - Window snap layouts (Super+arrow keys)
+    - Theme switching (light/dark mode)
+    - Keyboard shortcuts
+  DONE WHEN: All 8 core features functional
+
+PHASE 4 (Days 7-8): Quality & Performance
+  Tasks:
+    - Performance profiling and optimization
+    - Memory optimization (< 50MB target)
+    - Visual polish (animations, shadows, spacing)
+    - Bug fixes and refinement
+    - QEMU acceptance gate preparation
+  DONE WHEN: All acceptance criteria met
+
+PERFORMANCE TARGETS:
+✓ Taskbar: 60 FPS (16ms per frame)
+✓ Start Menu animation: smooth 0.2s transition
+✓ App Switcher: instant response (< 50ms)
+✓ Taskbar hover: < 100ms window generation
+✓ Memory: < 50MB total footprint
+✓ Startup: < 2 seconds to responsive desktop
+
+CODE QUALITY REQUIREMENTS:
+✓ Clippy: ZERO warnings (cargo clippy -- -D warnings)
+✓ QEMU gates: all pass (1/2/4 CPU)
+✓ No regressions in existing WovenHat functionality
+✓ Visual regression tests match specification
+
+ACCEPTANCE CRITERIA (ALL MUST PASS):
+✓ Taskbar renders at bottom of screen at boot
+✓ Start button opens Start Menu with Super key
+✓ App icons display on taskbar (pinned + running)
+✓ Alt+Tab shows all running apps with thumbnails
+✓ Hover over taskbar icon shows window previews
+✓ System tray displays: time, battery, volume, WiFi, settings
+✓ Notifications appear as toasts (auto-dismiss 4s)
+✓ Action Center accessible from notification area
+✓ Window snap layouts work (Super+Left/Right arrows)
+✓ Window maximize/minimize work (Super+Up/Down)
+✓ Theme switching functional (light/dark modes)
+✓ Settings persist after reboot
+✓ 60 FPS performance verified on taskbar
+✓ < 50MB memory footprint confirmed
+✓ Clippy: zero warnings on all modules
+✓ QEMU qualification: 1/2/4 CPU gates pass
+✓ No crashes or hangs in extended usage
+✓ All keyboard shortcuts responsive
+✓ Visual polish complete (spacing, alignment, colors)
+
+REVIEW CHECKPOINTS:
+- Daily: Brief status on completed modules
+- After Phase 1: Taskbar screenshot showing time and buttons
+- After Phase 2: Start Menu demo and app icons on taskbar
+- After Phase 3: Full feature demo with performance data
+- After Phase 4: Final acceptance test results and profiling
+
+RESOURCES PROVIDED:
+- docs/Windows11-Desktop-Specification.md (full technical spec)
+- docs/CODEX-Windows11-Assignment.txt (this file)
+- docs/Implementation-Verification-Checklist.json (verification criteria)
+
+STARTING POINT:
+Repository: c:\Users\antho\WovenHat-OS
+Key files to study:
+  - apps/woven-shell/ (window manager integration)
+  - kernel/src/display.rs (graphics subsystem)
+  - libwoven/src/graphics/ (rendering library)
+  - scripts/test-desktop-qualification.py (QEMU acceptance gate)
+
+TECHNICAL CONSTRAINTS:
+✓ Language: Rust (no_std for kernel, std for supporting services)
+✓ Dependencies: Only WovenHat ecosystem + Rust standard
+✓ No new kernel changes needed
+✓ Use existing graphics syscalls and window management
+✓ D-Bus-like IPC for message passing between components
+
+TASKBAR DESIGN (Non-Negotiable):
+- Location: BOTTOM of screen (50px height)
+- Left: Windows logo/Start button (36x36px)
+- Center: Pinned & running app icons (40x40px each, 8px padding)
+- Right: Clock (HH:MM), Battery (%), Volume icon, Settings, Power menu
+- Always visible and interactive
+- Semi-transparent background (if possible, blurred)
+- Accent color bar on focused app (2-3px)
+
+START MENU DESIGN:
+- Trigger: Windows logo button OR Super key OR right-click desktop
+- Display: Fullscreen overlay (modern Windows 11 style)
+- Content:
+  * Search bar at top (real-time filtering)
+  * Pinned apps section (drag-to-reorder)
+  * Recently used apps section
+  * All apps in 4x3 grid with categories
+  * Right-click: Pin, Unpin, Info
+- Design: Dark theme (default), rounded corners on tiles
+
+SYSTEM TRAY DESIGN:
+- Clock: HH:MM (click shows calendar)
+- Battery: percentage + health indicator
+- Volume: icon + slider on hover
+- WiFi: connection status icon
+- Settings: gear icon (opens Settings app)
+- Power: power button (Sleep, Restart, Shutdown)
+- Notification area: click to open Action Center
+
+NOTIFICATIONS DESIGN:
+- Toast popups: bottom-right corner, above taskbar
+- Animation: slide-in from right
+- Auto-dismiss: 4 seconds for normal, 10s for important
+- Priority levels: Normal, Important, Critical
+- Action Center: accessible from notification icon
+- Shows: last 24 hours of notifications, grouped by app
+
+STATUS TRACKING:
+- Current: Ready for Codex implementation assignment
+- Expected Start: Immediately
+- Expected Completion: 8 days (Phase 4 completion)
+- Verification: Parallel review by Claude Code (this agent)
+
+NEXT STEP:
+Codex begins Phase 1 immediately:
+1. Create project structure for wovenhat-windows-shell
+2. Implement taskbar rendering at bottom
+3. Display Start button and clock
+4. Integrate with WovenShell
+5. Report: Taskbar visible and functional
+
+Claude Code will:
+1. Monitor progress through all phases
+2. Review code quality (Clippy, warnings)
+3. Verify performance metrics
+4. Run QEMU acceptance gates (1/2/4 CPU)
+5. Visual regression testing against specification
+6. Final sign-off on acceptability
+
+DECISION LOGIC:
+READY FOR PRODUCTION if ALL acceptance criteria pass.
+NOT READY if any criterion fails—return to Phase 4 for fixes.
+
+================================================================================

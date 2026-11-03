@@ -241,10 +241,9 @@ name = "wovenhat-os"
 version = "0.8.0"
 edition = "2024"
 
-[dependencies]
-ovmf-prebuilt = "0.2.4"
 
 [build-dependencies]
+ovmf-prebuilt = "0.2.4"
 kernel = { package = "wovenhat-kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
 ed25519-compact = { version = "2.6", default-features = false }

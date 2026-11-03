@@ -1,0 +1,120 @@
+================================================================================
+                    CODEX ASSIGNMENT: GNOME Desktop Implementation
+================================================================================
+
+PROJECT: Implement a GNOME-Inspired Desktop Environment for WovenHat-OS
+
+OVERVIEW:
+Build a complete, modern desktop shell that integrates with the existing 
+WovenShell window manager and kernel graphics subsystem. This will include:
+- Activities overview (app launcher + window switcher)
+- Top bar (system panel with clock, status, power menu)  
+- Notifications system (toasts + notification center)
+- App launcher with search and categories
+- Window management (snap, maximize, Alt+Tab, workspaces)
+- Settings integration (display, audio, network, power)
+- Keyboard shortcuts and themes
+
+DELIVERABLES:
+1. wovenhat-gnome-shell (main desktop shell service)
+   - 8-10 modules for all desktop features
+   
+2. wovenhat-settings-daemon (background service)
+   - System settings management
+   
+3. wovenhat-notifications (notification service)
+   - Notification queue and persistence
+
+TIMELINE: 8 days (4 phases of 2 days each)
+
+PHASE 1 (Days 1-2): Foundation
+  - Project setup and IPC framework
+  - Top bar implementation
+  - WovenShell integration
+  DONE WHEN: Top bar renders with time and power menu
+
+PHASE 2 (Days 3-4): Core Features
+  - Activities overview
+  - App launcher and search
+  - Window switcher and thumbnails
+  - Workspace switching
+  DONE WHEN: All 4 features working smoothly
+
+PHASE 3 (Days 5-6): System Integration
+  - Notifications system
+  - Settings integration
+  - Theme system
+  - Keyboard shortcuts
+  DONE WHEN: All 8 core features functional
+
+PHASE 4 (Days 7-8): Quality & Performance
+  - Performance profiling and optimization
+  - Memory optimization
+  - Bug fixes and polish
+  - QEMU acceptance gate preparation
+  DONE WHEN: All acceptance criteria met
+
+PERFORMANCE TARGETS:
+✓ Top bar: 60 FPS (16ms per frame)
+✓ Activities animations: smooth 0.3s transitions
+✓ App search: < 100ms response
+✓ Memory: < 50MB total
+✓ Startup: < 2 seconds
+
+CODE QUALITY REQUIREMENTS:
+✓ Clippy: ZERO warnings (cargo clippy -- -D warnings)
+✓ QEMU gates: all pass (1/2/4 CPU)
+✓ No regressions in existing WovenHat functionality
+✓ Visual regression tests pass
+
+ACCEPTANCE CRITERIA (ALL MUST PASS):
+✓ Desktop boots to Activities-ready state
+✓ All 8 core features fully implemented
+✓ 60 FPS performance verified
+✓ < 50MB memory footprint
+✓ Clippy: zero warnings on all modules
+✓ QEMU qualification: 1/2/4 CPU gates pass
+✓ Visual Polish: spacing, alignment, animations match spec
+✓ No crashes or hangs in extended usage
+✓ Keyboard shortcuts all responsive
+✓ Settings persist after reboot
+
+REVIEW CHECKPOINTS:
+- Daily: Brief status on completed modules
+- After Phase 1: Top bar screenshot and functionality
+- After Phase 2: Activities demo and performance metrics
+- After Phase 3: All features working, performance data
+- After Phase 4: Final acceptance test results
+
+RESOURCES PROVIDED:
+- docs/GNOME-Desktop-Implementation-Brief.md (full spec)
+- docs/Codex-GNOME-Implementation-Prompt.md (implementation guide)
+- docs/Implementation-Verification-Checklist.json (verification criteria)
+
+STARTING POINT:
+Repository: c:\Users\antho\WovenHat-OS
+Key files to study:
+  - apps/woven-shell/ (window manager integration)
+  - kernel/src/display.rs (graphics subsystem)
+  - libwoven/src/graphics/ (rendering library)
+  - scripts/test-desktop-qualification.py (QEMU acceptance gate)
+
+TECHNICAL CONSTRAINTS:
+✓ Language: Rust (no_std for kernel, std for supporting services)
+✓ Dependencies: Only WovenHat ecosystem + Rust standard
+✓ No new kernel changes needed
+✓ Use existing graphics syscalls and window management
+✓ D-Bus-like IPC for message passing
+
+STATUS TRACKING:
+- Current: Ready for Codex implementation assignment
+- Expected Start: Immediately
+- Expected Completion: 8 days (Phase 4 completion)
+- Verification: Parallel review by Claude Code
+
+NEXT STEP:
+Send this brief to Codex with the supporting documentation files.
+Codex will begin with Phase 1 implementation immediately.
+Claude Code will monitor progress and review for quality/performance.
+
+================================================================================
