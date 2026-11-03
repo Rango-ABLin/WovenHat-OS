@@ -15,11 +15,12 @@ const MAX_PREVIEW: usize = 2048;
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
+/// The shared WovenUI theme (tokens.rs-equivalent for apps): surface,
+/// accent, text, disabled and focus colors, unified with
+/// apps/woven-shell's own palette so every first-party app reads as one
+/// system rather than each choosing its own accent independently.
+const THEME: Theme = Theme::DARK;
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
 const BUTTON_X: i32 = 220;
 const BUTTON_Y: i32 = 206;
 const BUTTON_WIDTH: usize = 80;
@@ -70,16 +71,9 @@ fn draw_files(
     refresh_button: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
-    Label::new(Frame::new(PANEL_X + 6, PANEL_Y + 4, 180, 16), "/mnt").draw(canvas, theme);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
+    Label::new(Frame::new(PANEL_X + 6, PANEL_Y + 4, 180, 16), "/mnt").draw(canvas, THEME);
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
     for index in 0..MAX_ENTRIES {
@@ -100,7 +94,7 @@ fn draw_files(
                     PANEL_X + 6,
                     PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
                     text,
-                    TEXT,
+                    THEME.text,
                 );
                 shown += 1;
             }
@@ -112,18 +106,18 @@ fn draw_files(
             PANEL_X + 6,
             PANEL_Y + 6 + LINE_HEIGHT,
             "(empty or unavailable)",
-            TEXT,
+            THEME.text,
         );
     }
     let mut digits = [0u8; 20];
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut digits);
     if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", TEXT);
-        canvas.draw_text(PANEL_X + 66, PANEL_Y + 194, refresh_text, ACCENT);
+        canvas.draw_text(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", THEME.text);
+        canvas.draw_text(PANEL_X + 66, PANEL_Y + 194, refresh_text, THEME.accent);
     }
-    refresh_button.draw(canvas, theme);
+    refresh_button.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
-        let color = if pressed { TEXT } else { POINTER_MARKER };
+        let color = if pressed { THEME.text } else { POINTER_MARKER };
         canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, color);
     }
 }
