@@ -155,6 +155,8 @@ libwoven::entry!(main);
 
 mod tokens;
 use tokens::*;
+mod geometry;
+use geometry::{Area, Dirty};
 
 /// The first desktop release keeps a small, curated set of shortcuts visible
 /// so the desktop feels useful before the launcher is opened. The catalog
@@ -692,10 +694,6 @@ fn lighten(color: u32, amount: u8) -> u32 {
         mix((color & 0xff) as u8),
     )
 }
-
-/// A rectangle in screen coordinates.
-mod geometry;
-use geometry::{Area, Dirty};
 
 #[derive(Clone, Copy)]
 struct Window {
