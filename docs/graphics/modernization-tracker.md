@@ -134,7 +134,7 @@ existing `apps/woven-shell/src/tokens.rs` + `libwoven::ui::Theme` system.
 | 6 | GPU backend | PARTIAL — probe/mode-set/presentation all confirmed genuinely working; interactive window visibility still unresolved | `kernel/src/virtio_gpu.rs` has a real VirtIO-GPU 2D API and `compositor.rs` calls `Gpu::probe()` in production. **2026-11-03: fully confirmed working**, resolving the earlier same-day "frozen frame" ambiguity. The apparent freeze was never a kernel bug: QMP `screendump` with no `device`/`head` arguments silently defaults to the `-vga std` boot console, not the virtio-gpu scanout. `scripts/test-stage20-14-monitors.py` (an existing, pre-built test harness for this exact thing) does `qmp('screendump', ..., device='gpu0', head=head)` -- adding `id=gpu0` to the `-device virtio-gpu-pci` argument and passing `device='gpu0', head=0` on the QMP call captures the **real, correct, live virtio-gpu frame**: a 640x480 screendump showing the actual WovenHat sign-in screen (repalleted navy-to-teal wallpaper, "Sign in" / "ada" / "lin" account list, "Enter PIN" prompt) -- genuinely rendered through the VirtIO-GPU 2D presentation path (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`), not the boot splash. Evidence: `target/desktop-interactive-20261103-191134-967/gpu0-head0.png`. **Remaining open item, narrowed further**: the QEMU window a human actually sees still shows the frozen `-vga std` boot splash, not this content -- automated/QMP-driven verification of virtio-gpu rendering now works (the important thing for Phase 9's QA automation), but a person watching the interactive window does not yet see GPU-backed output. Tried `-display sdl` (QEMU opened an extra, zero-size, title-less window handle alongside the same `-vga std` console window -- confirmed via `GetWindowRect`; no second rendered head appeared) -- reverted, not kept in `RUN-DESKTOP.ps1`. Not yet tried: the GL-accelerated `virtio-gpu-gl-pci` variant with `max_outputs=2`/`gl=on` the stage20-14 harness uses, or QEMU's Ctrl+Alt+2/3 head-switching hotkeys (untested whether they apply to a non-GL `virtio-gpu-pci` device at all). This is now a lower-priority cosmetic gap, not a correctness gap -- the GPU path itself is proven working. `virtio_gpu::self_test()` (feature `stage20-14-test`) still untested this session. |
 | 7 | Animations | PARTIAL | `Spring`-based window fade-in, overview transitions, and a reduced-motion switch exist (M5). Not yet measured: input-to-display latency, repaint cost, memory/CPU under animation — Phase 7 explicitly asks for recorded frame-time distributions, not a claimed FPS number. Add real measurement before expanding animation scope. |
 | 8 | App UI modernization | **DONE** for color tokens | All first-party GUI apps migrated to `libwoven::ui::Theme::DARK` (commits `33715764`..`9212da32`, 2026-11-03). Not yet done: window-chrome and keyboard-convention consistency beyond color (the mandate's "window chrome and keyboard conventions" phrase) — audit each app's title bar/close-button/focus-ring behavior against the shell's own conventions. |
-| 9 | QA automation | PARTIAL | `scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture, retry-until-materially-different) exists and runs at 1/2/4 CPU. Missing: automated pixel/tolerance comparison against reference images (today comparison is manual, via the Read tool on PNG conversions) — Phase 2's and Phase 9's acceptance criteria both ask for this. Consider a small reference-image diff script before claiming Phase 2/9 "done." |
+| 9 | QA automation | PARTIAL, reference-image comparison now exists | `scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture, retry-until-materially-different) exists and runs at 1/2/4 CPU. **2026-11-03: added `scripts/compare-against-reference.py`** -- a standalone pixel/tolerance comparison tool (reuses `test-desktop-qualification.py`'s own `parse_ppm`/`changed_pixels` rather than duplicating them; accepts PPM or any Pillow-readable format on either side; reports changed-pixel fraction and max per-channel delta; fails on dimension mismatch regardless of tolerance). Self-tested against 5 synthetic fixtures (identical/small-diff-pass/small-diff-fail/large-diff/dimension-mismatch) covering every code path, all correct. First real reference image committed: `docs/graphics/reference-screenshots/sign-in-virtio-gpu-640x480.png` (the sign-in screen, captured through the now-confirmed-working virtio-gpu path). **Not yet done**: this tool is not wired into `test-desktop-qualification.py`'s own journey as an automatic step -- it exists and works standalone, but nothing calls it yet during the normal acceptance run. Next step: decide whether to wire it in (and at what tolerance, for which captured frames) or keep it manual/opt-in; either way, more reference images are needed to cover more than the one sign-in scene before this phase can be called more than "partial." |
 | 10 | Release qualification | NOT STARTED as a single gate | Don't start this until Phases 1-9 above are each at least "PARTIAL with a clear remaining list," per the mandate's own ordering. |
 
 ## Phase 0 audit facts (established 2026-11-03, re-verify if stale)
@@ -195,6 +195,28 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: Phase 9 reference-image comparison tool)
+
+Continued the milestone at the user's request. Built
+`scripts/compare-against-reference.py`, a standalone pixel/tolerance
+comparison tool closing the Phase 2/9 "compare against reference images"
+acceptance gap this tracker had flagged as missing. Reuses the existing
+`parse_ppm`/`changed_pixels` helpers from `test-desktop-qualification.py`
+rather than duplicating PPM parsing. Self-tested against 5 synthetic
+fixtures generated with PIL (identical, small-diff-under-tolerance,
+small-diff-over-tolerance, large-diff, dimension-mismatch) -- all five
+behaved correctly. Captured a real reference image through the now-working
+virtio-gpu path (`RUN-DESKTOP.ps1 -Display virtio-gpu`, QMP `screendump`
+with `device='gpu0', head=0`): the sign-in screen, saved as
+`docs/graphics/reference-screenshots/sign-in-virtio-gpu-640x480.png`, with
+a README documenting the convention (one file per scene, replace
+deliberately when a change intentionally alters appearance, never let a
+reference go stale silently). Sanity-checked the tool against this real
+reference matching itself: 0 changed pixels, PASS. Stopped the QEMU
+instance used for capture cleanly. Not yet done: wiring this tool into the
+main qualification journey automatically, and capturing more reference
+scenes beyond the one sign-in screen -- recorded in the Phase 9 row.
 
 ### 2026-11-03 (session: Phase 2 2D-engine audit)
 
