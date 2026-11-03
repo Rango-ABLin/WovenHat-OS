@@ -8,9 +8,19 @@
 //! never overwritten in place but alternated between two checkpoint slots.
 //!
 //! The implementation is deliberately bounded: fixed inode and directory
-//! capacity, eight direct blocks per inode, and no heap allocation.
+//! capacity and eight direct blocks per inode. Files of up to
+//! [`MAX_FILE_SIZE`] bytes live in those direct blocks and are replaced inside
+//! one journal transaction. Larger files (up to [`MAX_FILE_BYTES`]) use a
+//! copy-on-write Merkle block tree: new blocks are written to free space that
+//! nothing references, flushed, and only then published by committing the
+//! inode, so a crash leaves either the old or the new file. Block allocation
+//! and release for such a file span several small transactions; a crash
+//! between them can only leak allocated-but-unreferenced blocks, which
+//! `reclaim_unreferenced` returns to the free pool.
 
 use crate::block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
+#[cfg(not(test))]
+use alloc::vec::Vec;
 #[cfg(not(test))]
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,7 +51,20 @@ pub const JOURNAL_BLOCKS: u32 = MAX_TXN_BLOCKS as u32 + 2;
 pub const INODE_SIZE: usize = 128;
 pub const INODES_PER_BLOCK: usize = SECTOR_SIZE / INODE_SIZE;
 pub const DIRECT_BLOCKS: usize = 8;
+/// Largest file stored in the inode's direct blocks. It is also the chunk
+/// size callers use for stack buffers, so it is deliberately unchanged.
 pub const MAX_FILE_SIZE: usize = DIRECT_BLOCKS * SECTOR_SIZE;
+
+/// A tree node holds 31 sixteen-byte `(block, checksum)` entries followed by
+/// its own 8-byte checksum, filling one sector.
+const TREE_FANOUT: usize = 31;
+const TREE_ENTRY: usize = 16;
+const TREE_CHECKSUM_AT: usize = SECTOR_SIZE - 8;
+const MAX_TREE_DEPTH: usize = 4;
+/// Largest file the block tree can describe (about 451 MiB).
+pub const MAX_FILE_BYTES: usize = TREE_FANOUT.pow(MAX_TREE_DEPTH as u32) * SECTOR_SIZE;
+/// The tree root lives in the inode's six formerly spare bytes.
+const TREE_ROOT_MAX: u64 = (1 << 48) - 1;
 
 pub const DIR_ENTRY_SIZE: usize = 64;
 pub const DIR_ENTRIES_PER_BLOCK: usize = SECTOR_SIZE / DIR_ENTRY_SIZE;
@@ -286,6 +309,11 @@ pub struct Inode {
     /// this field existed already decodes as 0 here, so no format-version
     /// change is needed.
     pub xattr_block: u64,
+    /// Root of the block tree for files larger than [`MAX_FILE_SIZE`], 0 =
+    /// direct-block file. Stored in bytes 114..120, previously always zero,
+    /// so existing inodes decode as direct-block files. For a tree file
+    /// `direct` is all zero and `data_checksum` is the root node's checksum.
+    pub tree_root: u64,
 }
 
 const INODE_CHECKSUM_AT: usize = 120;
@@ -302,6 +330,7 @@ impl Inode {
             direct: [0; DIRECT_BLOCKS],
             kind: 0,
             xattr_block: 0,
+            tree_root: 0,
         }
     }
 
@@ -323,6 +352,7 @@ impl Inode {
         }
         raw[104..106].copy_from_slice(&self.kind.to_le_bytes());
         raw[106..114].copy_from_slice(&self.xattr_block.to_le_bytes());
+        raw[114..120].copy_from_slice(&(self.tree_root & TREE_ROOT_MAX).to_le_bytes()[..6]);
         let checksum = fnv1a(&raw[..INODE_CHECKSUM_AT]);
         raw[INODE_CHECKSUM_AT..INODE_CHECKSUM_AT + 8].copy_from_slice(&checksum.to_le_bytes());
     }
@@ -351,6 +381,11 @@ impl Inode {
             direct,
             kind: read_u16(raw, 104),
             xattr_block: read_u64(raw, 106),
+            tree_root: {
+                let mut bytes = [0u8; 8];
+                bytes[..6].copy_from_slice(&raw[114..120]);
+                u64::from_le_bytes(bytes)
+            },
         })
     }
 }
@@ -558,6 +593,60 @@ fn inode_location(sb: &SuperBlock, inode: u64) -> (u64, usize) {
     let lba = sb.inode_start + index / INODES_PER_BLOCK as u64;
     let offset = (index % INODES_PER_BLOCK as u64) as usize * INODE_SIZE;
     (lba, offset)
+}
+
+/// Data blocks needed for `size` bytes.
+fn tree_data_blocks(size: usize) -> usize {
+    size.div_ceil(SECTOR_SIZE)
+}
+
+/// Levels needed to address `blocks` data blocks (`blocks >= 1`).
+fn tree_depth_for(blocks: usize) -> usize {
+    let mut depth = 1;
+    let mut capacity = TREE_FANOUT;
+    while capacity < blocks {
+        capacity *= TREE_FANOUT;
+        depth += 1;
+    }
+    depth
+}
+
+/// Data blocks covered by each child of a node at `level` (leaf level is 1).
+fn tree_span(level: usize) -> usize {
+    TREE_FANOUT.pow((level - 1) as u32)
+}
+
+/// Encode up to [`TREE_FANOUT`] `(block, checksum)` entries into a node
+/// sector. Returns the sector and the node's own checksum, which its parent
+/// records, so every block is authenticated from the inode downward.
+fn tree_node_encode(entries: &[(u64, u64)]) -> ([u8; SECTOR_SIZE], u64) {
+    let mut sector = [0u8; SECTOR_SIZE];
+    for (index, (block, checksum)) in entries.iter().enumerate() {
+        let at = index * TREE_ENTRY;
+        sector[at..at + 8].copy_from_slice(&block.to_le_bytes());
+        sector[at + 8..at + 16].copy_from_slice(&checksum.to_le_bytes());
+    }
+    let node_checksum = fnv1a(&sector[..TREE_CHECKSUM_AT]);
+    sector[TREE_CHECKSUM_AT..].copy_from_slice(&node_checksum.to_le_bytes());
+    (sector, node_checksum)
+}
+
+/// Decode a node, requiring its stored checksum to match both its contents
+/// and the checksum its parent recorded.
+fn tree_node_decode(
+    sector: &[u8; SECTOR_SIZE],
+    expected: u64,
+) -> Result<[(u64, u64); TREE_FANOUT], Error> {
+    let stored = read_u64(sector, TREE_CHECKSUM_AT);
+    if stored != expected || fnv1a(&sector[..TREE_CHECKSUM_AT]) != stored {
+        return Err(Error::Corrupt);
+    }
+    let mut entries = [(0u64, 0u64); TREE_FANOUT];
+    for (index, entry) in entries.iter_mut().enumerate() {
+        let at = index * TREE_ENTRY;
+        *entry = (read_u64(sector, at), read_u64(sector, at + 8));
+    }
+    Ok(entries)
 }
 
 /// Direct, unjournalled metadata write. Only `format` may use this, before any
@@ -1252,8 +1341,12 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Replace a file's contents, as one transaction.
     pub fn write_file(&mut self, inode: u64, data: &[u8], now: u64) -> Result<(), Error> {
-        if data.len() > MAX_FILE_SIZE {
+        if data.len() > MAX_FILE_BYTES {
             return Err(Error::TooLarge);
+        }
+        let current = self.inode(inode)?;
+        if data.len() > MAX_FILE_SIZE || (current.is_used() && current.tree_root != 0) {
+            return self.write_file_tree(inode, data, now);
         }
         let mut txn = Transaction::new();
         let mut node = self.inode_staged(&txn, inode)?;
@@ -1303,6 +1396,9 @@ impl<D: BlockDevice> Volume<D> {
         if out.len() < size {
             return Err(Error::TooLarge);
         }
+        if node.tree_root != 0 {
+            return self.read_tree(&node, 0, &mut out[..size]);
+        }
         let mut copied = 0;
         for slot in 0..DIRECT_BLOCKS {
             if copied >= size {
@@ -1348,6 +1444,13 @@ impl<D: BlockDevice> Volume<D> {
                 return Err(Error::NotEmpty);
             }
         }
+        // A tree file's blocks are released after the unlink commits, so a
+        // crash leaks them for the scrub instead of freeing referenced blocks.
+        let tree_blocks = if node.kind == KIND_FILE && node.tree_root != 0 {
+            self.collect_tree(&node, false)?
+        } else {
+            Vec::new()
+        };
         for slot in 0..DIRECT_BLOCKS {
             if node.direct[slot] != 0 {
                 let block = node.direct[slot];
@@ -1362,7 +1465,8 @@ impl<D: BlockDevice> Volume<D> {
         self.stage_dir_entry(&mut txn, &dir, position, &DirEntry::empty())?;
         dir.modified = now;
         self.stage_inode(&mut txn, dir_inode, &dir)?;
-        self.commit(&txn)
+        self.commit(&txn)?;
+        self.release_blocks(&tree_blocks)
     }
 
     pub fn unlink_path(&mut self, path: &str, now: u64) -> Result<(), Error> {
@@ -1370,7 +1474,406 @@ impl<D: BlockDevice> Volume<D> {
         self.unlink(parent, &name, now)
     }
 
+    // ------------------------------------------------------- block trees
+
+    fn check_data_block(&self, block: u64) -> Result<(), Error> {
+        let sb = self.super_block;
+        if block < sb.data_start || block >= sb.total_blocks {
+            return Err(Error::Corrupt);
+        }
+        Ok(())
+    }
+
+    /// Mark `count` free blocks allocated, one bitmap sector per transaction.
+    ///
+    /// Nothing references the blocks yet, so a crash after any batch leaks
+    /// them without exposing partial state. Out of space releases what was
+    /// taken so the failure leaves the volume unchanged.
+    fn reserve_blocks(&mut self, count: usize) -> Result<Vec<u64>, Error> {
+        let sb = self.super_block;
+        let bits = (SECTOR_SIZE * 8) as u64;
+        let mut taken: Vec<u64> = Vec::with_capacity(count);
+        let first = sb.data_start / bits;
+        let last = (sb.total_blocks - 1) / bits;
+        for index in first..=last {
+            if taken.len() == count {
+                break;
+            }
+            let lba = sb.bitmap_start + index;
+            let mut sector = self.read_block(lba)?;
+            let mut changed = false;
+            'sector: for (byte_index, byte) in sector.iter_mut().enumerate() {
+                if *byte == 0xff {
+                    continue;
+                }
+                for bit in 0..8 {
+                    let block = index * bits + (byte_index * 8 + bit) as u64;
+                    if block < sb.data_start {
+                        continue;
+                    }
+                    if block >= sb.total_blocks {
+                        break 'sector;
+                    }
+                    if *byte & (1 << bit) == 0 {
+                        *byte |= 1 << bit;
+                        taken.push(block);
+                        changed = true;
+                        if taken.len() == count {
+                            break 'sector;
+                        }
+                    }
+                }
+            }
+            if changed {
+                let mut txn = Transaction::new();
+                txn.stage(lba, &sector)?;
+                self.commit(&txn)?;
+            }
+        }
+        if taken.len() < count {
+            // Best effort: a failure here only leaks blocks for the scrub.
+            let _ = self.release_blocks(&taken);
+            return Err(Error::NoSpace);
+        }
+        Ok(taken)
+    }
+
+    /// Return blocks to the free pool, one bitmap sector per transaction.
+    ///
+    /// Callers publish the change that stops referencing the blocks first, so
+    /// a crash part-way leaks blocks and never frees one still in use.
+    fn release_blocks(&mut self, blocks: &[u64]) -> Result<(), Error> {
+        let sb = self.super_block;
+        let mut sorted = blocks.to_vec();
+        sorted.sort_unstable();
+        let mut position = 0;
+        while position < sorted.len() {
+            let (lba, _, _) = bitmap_location(&sb, sorted[position]);
+            let mut sector = self.read_block(lba)?;
+            while position < sorted.len() {
+                let block = sorted[position];
+                let (block_lba, byte, mask) = bitmap_location(&sb, block);
+                if block_lba != lba {
+                    break;
+                }
+                self.check_data_block(block)?;
+                if sector[byte] & mask == 0 {
+                    return Err(Error::Corrupt);
+                }
+                sector[byte] &= !mask;
+                position += 1;
+            }
+            let mut txn = Transaction::new();
+            txn.stage(lba, &sector)?;
+            self.commit(&txn)?;
+        }
+        Ok(())
+    }
+
+    /// Every block of a tree file, nodes and data. Structure, checksums and
+    /// block ranges are verified; `verify_data` also reads every data block.
+    fn collect_tree(&mut self, node: &Inode, verify_data: bool) -> Result<Vec<u64>, Error> {
+        let size = node.size as usize;
+        if node.tree_root == 0 || size == 0 || size > MAX_FILE_BYTES {
+            return Err(Error::Corrupt);
+        }
+        let blocks = tree_data_blocks(size);
+        let depth = tree_depth_for(blocks);
+        let mut out = Vec::with_capacity(blocks + blocks / TREE_FANOUT + depth);
+        self.collect_node(
+            depth,
+            node.tree_root,
+            node.data_checksum,
+            blocks,
+            verify_data,
+            &mut out,
+        )?;
+        let mut sorted = out.clone();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(Error::Corrupt);
+        }
+        Ok(out)
+    }
+
+    fn collect_node(
+        &mut self,
+        level: usize,
+        lba: u64,
+        checksum: u64,
+        remaining: usize,
+        verify_data: bool,
+        out: &mut Vec<u64>,
+    ) -> Result<(), Error> {
+        self.check_data_block(lba)?;
+        let sector = self.read_block(lba)?;
+        let entries = tree_node_decode(&sector, checksum)?;
+        out.push(lba);
+        let span = tree_span(level);
+        let children = remaining.div_ceil(span);
+        for (index, entry) in entries.iter().enumerate() {
+            if index >= children {
+                if *entry != (0, 0) {
+                    return Err(Error::Corrupt);
+                }
+                continue;
+            }
+            let covered = (remaining - index * span).min(span);
+            if level == 1 {
+                self.check_data_block(entry.0)?;
+                if verify_data && fnv1a(&self.read_block(entry.0)?) != entry.1 {
+                    return Err(Error::Corrupt);
+                }
+                out.push(entry.0);
+            } else {
+                self.collect_node(level - 1, entry.0, entry.1, covered, verify_data, out)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Read `out.len()` bytes (clamped to the file) at `offset`, verifying the
+    /// checksum chain from the inode to each data block touched.
+    fn read_tree(&mut self, node: &Inode, offset: usize, out: &mut [u8]) -> Result<usize, Error> {
+        let size = node.size as usize;
+        if size == 0 || size > MAX_FILE_BYTES {
+            return Err(Error::Corrupt);
+        }
+        if offset >= size {
+            return Ok(0);
+        }
+        let want = out.len().min(size - offset);
+        let depth = tree_depth_for(tree_data_blocks(size));
+        type Cached = Option<(u64, u64, [(u64, u64); TREE_FANOUT])>;
+        let mut cache: [Cached; MAX_TREE_DEPTH] = [None; MAX_TREE_DEPTH];
+        let mut copied = 0;
+        while copied < want {
+            let position = offset + copied;
+            let index = position / SECTOR_SIZE;
+            let within = position % SECTOR_SIZE;
+            let mut lba = node.tree_root;
+            let mut checksum = node.data_checksum;
+            let mut leaf = (0u64, 0u64);
+            for level in (1..=depth).rev() {
+                let entries = match cache[level - 1] {
+                    Some((cached_lba, cached_sum, entries))
+                        if cached_lba == lba && cached_sum == checksum =>
+                    {
+                        entries
+                    }
+                    _ => {
+                        self.check_data_block(lba)?;
+                        let sector = self.read_block(lba)?;
+                        let entries = tree_node_decode(&sector, checksum)?;
+                        cache[level - 1] = Some((lba, checksum, entries));
+                        entries
+                    }
+                };
+                let entry = entries[(index / tree_span(level)) % TREE_FANOUT];
+                if entry.0 == 0 {
+                    return Err(Error::Corrupt);
+                }
+                if level == 1 {
+                    leaf = entry;
+                } else {
+                    lba = entry.0;
+                    checksum = entry.1;
+                }
+            }
+            self.check_data_block(leaf.0)?;
+            let sector = self.read_block(leaf.0)?;
+            if fnv1a(&sector) != leaf.1 {
+                return Err(Error::Corrupt);
+            }
+            let take = (SECTOR_SIZE - within).min(want - copied);
+            out[copied..copied + take].copy_from_slice(&sector[within..within + take]);
+            copied += take;
+        }
+        Ok(copied)
+    }
+
+    /// Write data blocks and tree nodes into reserved, unreferenced blocks and
+    /// return the root `(block, checksum)`. `blocks` holds the data blocks
+    /// first, then the nodes bottom-up.
+    fn build_tree(&mut self, data: &[u8], blocks: &[u64]) -> Result<(u64, u64), Error> {
+        let mut entries: Vec<(u64, u64)> = Vec::with_capacity(data.len().div_ceil(SECTOR_SIZE));
+        for (index, chunk) in data.chunks(SECTOR_SIZE).enumerate() {
+            let mut sector = [0u8; SECTOR_SIZE];
+            sector[..chunk.len()].copy_from_slice(chunk);
+            self.device.write_sector(blocks[index], &sector)?;
+            entries.push((blocks[index], fnv1a(&sector)));
+        }
+        let mut next = entries.len();
+        loop {
+            let mut parents: Vec<(u64, u64)> = Vec::with_capacity(entries.len() / TREE_FANOUT + 1);
+            for group in entries.chunks(TREE_FANOUT) {
+                let (sector, checksum) = tree_node_encode(group);
+                self.device.write_sector(blocks[next], &sector)?;
+                parents.push((blocks[next], checksum));
+                next += 1;
+            }
+            entries = parents;
+            if entries.len() == 1 {
+                break;
+            }
+        }
+        self.device.flush()?;
+        Ok(entries[0])
+    }
+
+    /// Replace a file's contents using the copy-on-write block tree.
+    ///
+    /// New blocks are written and flushed before one inode commit publishes
+    /// them; the old blocks are released afterwards. Both versions coexist
+    /// until then, so the volume needs room for the old and the new file.
+    fn write_file_tree(&mut self, inode: u64, data: &[u8], now: u64) -> Result<(), Error> {
+        let mut node = self.inode(inode)?;
+        if !node.is_used() {
+            return Err(Error::NotFound);
+        }
+        if node.kind != KIND_FILE {
+            return Err(Error::NotADirectory);
+        }
+
+        let mut old: Vec<u64> = Vec::new();
+        for block in node.direct.iter().copied().filter(|block| *block != 0) {
+            self.check_data_block(block)?;
+            old.push(block);
+        }
+        if node.tree_root != 0 {
+            old.extend(self.collect_tree(&node, false)?);
+        }
+        let mut sorted = old.clone();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(Error::Corrupt);
+        }
+
+        let blocks = tree_data_blocks(data.len());
+        if blocks == 0 {
+            node.direct = [0; DIRECT_BLOCKS];
+            node.tree_root = 0;
+            node.data_checksum = fnv1a(data);
+        } else {
+            let mut nodes = 0;
+            let mut below = blocks;
+            while below > 1 || nodes == 0 {
+                below = below.div_ceil(TREE_FANOUT);
+                nodes += below;
+            }
+            let reserved = self.reserve_blocks(blocks + nodes)?;
+            let root = match self.build_tree(data, &reserved) {
+                Ok(root) if root.0 <= TREE_ROOT_MAX => root,
+                Ok(_) => {
+                    let _ = self.release_blocks(&reserved);
+                    return Err(Error::NoSpace);
+                }
+                Err(error) => {
+                    let _ = self.release_blocks(&reserved);
+                    return Err(error);
+                }
+            };
+            node.direct = [0; DIRECT_BLOCKS];
+            node.tree_root = root.0;
+            node.data_checksum = root.1;
+        }
+        node.size = data.len() as u64;
+        node.modified = now;
+
+        let mut txn = Transaction::new();
+        self.stage_inode(&mut txn, inode, &node)?;
+        self.commit(&txn)?;
+        self.release_blocks(&old)
+    }
+
     // ------------------------------------------------------ extended attrs
+
+    /// Read `out.len()` bytes (clamped to the file) starting at `offset`,
+    /// returning the count; 0 at or past end of file. Tree files verify only
+    /// the blocks touched; direct-block files verify their whole-file checksum.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn read_file_at(
+        &mut self,
+        inode: u64,
+        offset: u64,
+        out: &mut [u8],
+    ) -> Result<usize, Error> {
+        let node = self.inode(inode)?;
+        if !node.is_used() {
+            return Err(Error::NotFound);
+        }
+        if node.kind != KIND_FILE {
+            return Err(Error::NotADirectory);
+        }
+        let offset = usize::try_from(offset).map_err(|_| Error::TooLarge)?;
+        if node.tree_root != 0 {
+            return self.read_tree(&node, offset, out);
+        }
+        let mut whole = [0u8; MAX_FILE_SIZE];
+        let size = self.read_file(inode, &mut whole)?;
+        if offset >= size {
+            return Ok(0);
+        }
+        let take = out.len().min(size - offset);
+        out[..take].copy_from_slice(&whole[offset..offset + take]);
+        Ok(take)
+    }
+
+    /// Free allocated data-region blocks that no inode references.
+    ///
+    /// Large-file writes and removals span several transactions, so a crash
+    /// between them leaks blocks (never exposes or double-frees them). This
+    /// scrub recomputes the referenced set and releases the rest, returning
+    /// how many blocks it freed.
+    #[cfg(any(test, feature = "stage12-2-xattr-test"))]
+    pub fn reclaim_unreferenced(&mut self) -> Result<u64, Error> {
+        let sb = self.super_block;
+        let mut referenced: Vec<u64> = Vec::new();
+        for number in 1..=u64::from(sb.inode_count) {
+            let node = self.inode(number)?;
+            if !node.is_used() {
+                continue;
+            }
+            referenced.extend(node.direct.iter().copied().filter(|block| *block != 0));
+            if node.xattr_block != 0 {
+                referenced.push(node.xattr_block);
+            }
+            if node.tree_root != 0 {
+                referenced.extend(self.collect_tree(&node, false)?);
+            }
+        }
+        referenced.sort_unstable();
+
+        let bits = (SECTOR_SIZE * 8) as u64;
+        let mut freed = 0u64;
+        for index in 0..u64::from(sb.bitmap_blocks) {
+            let lba = sb.bitmap_start + index;
+            let mut sector = self.read_block(lba)?;
+            let mut changed = false;
+            for (byte_index, byte) in sector.iter_mut().enumerate() {
+                for bit in 0..8 {
+                    if *byte & (1 << bit) == 0 {
+                        continue;
+                    }
+                    let block = index * bits + (byte_index * 8 + bit) as u64;
+                    if block < sb.data_start || block >= sb.total_blocks {
+                        continue;
+                    }
+                    if referenced.binary_search(&block).is_err() {
+                        *byte &= !(1 << bit);
+                        freed += 1;
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                let mut txn = Transaction::new();
+                txn.stage(lba, &sector)?;
+                self.commit(&txn)?;
+            }
+        }
+        Ok(freed)
+    }
 
     #[cfg(any(test, feature = "stage12-2-xattr-test"))]
     fn valid_xattr_name(name: &str) -> Result<(), Error> {
@@ -1582,11 +2085,24 @@ impl<D: BlockDevice> Volume<D> {
         let txn = Transaction::new();
         let mut seen = [0u64; 64];
         let mut seen_len = 0usize;
+        let mut tree_seen: Vec<u64> = Vec::new();
 
         for number in 1..=u64::from(sb.inode_count) {
             let node = self.inode(number)?;
             if !node.is_used() {
                 continue;
+            }
+            if node.tree_root != 0 {
+                if node.kind != KIND_FILE || node.direct.iter().any(|block| *block != 0) {
+                    return Err(Error::Corrupt);
+                }
+                let blocks = self.collect_tree(&node, true)?;
+                for block in &blocks {
+                    if !self.bitmap_get(&txn, *block)? {
+                        return Err(Error::Corrupt);
+                    }
+                }
+                tree_seen.extend(blocks);
             }
             for slot in 0..DIRECT_BLOCKS {
                 let block = node.direct[slot];
@@ -1629,6 +2145,15 @@ impl<D: BlockDevice> Volume<D> {
 
         let root = self.inode(sb.root_inode)?;
         if root.kind != KIND_DIR {
+            return Err(Error::Corrupt);
+        }
+
+        tree_seen.sort_unstable();
+        if tree_seen.windows(2).any(|pair| pair[0] == pair[1])
+            || tree_seen
+                .iter()
+                .any(|block| seen[..seen_len].contains(block))
+        {
             return Err(Error::Corrupt);
         }
 
