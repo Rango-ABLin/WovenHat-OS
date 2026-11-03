@@ -8162,3 +8162,53 @@ for WovenHat-OS. This is ready for Codex implementation immediately.
 implementation. Performance and code quality are non-negotiable. 
 All 18 acceptance criteria must pass before production sign-off.
 
+## Claude Code - fixed bare host build/clippy/test breakage across desktop, radio, storage, and core (2026-11-03)
+
+User reported errors surfacing in desktop userspace, drivers-radio, runtime-
+storage PCIe, and "sometimes" core foundation. Root cause was a single,
+shared problem, not four separate ones: `kernel/src/main.rs`'s `no_std`,
+`no_main`, `feature(alloc_error_handler)`, `#[panic_handler]`, and
+`#[alloc_error_handler]`, and `kernel/src/heap.rs`'s `#[global_allocator]`,
+were all gated only on `cfg(not(test))`. `kernel` is a real `[workspace]`
+member (`Cargo.toml`), so any bare `cargo build`/`cargo clippy` (no
+`--target`, no `-p` -- exactly what the Stage 10.7 gate's "Host lint" step
+and ad hoc host builds run) tries to compile `wovenhat-kernel` directly for
+the *host* triple too, not only via the explicit `x86_64-unknown-none`
+artifact-dependency path in the root `[build-dependencies]`. Since
+`not(test)` is also true for that host build, the crate still declared its
+own freestanding `panic_impl`/global allocator/alloc-error-handler, which
+now collided with `std` (and `libwoven`'s own allocator) because
+`libwoven`'s `[target.'cfg(not(target_os = "none"))'.dependencies]
+oxideav-webp` -- correctly scoped to the host-only webp decode path -- gets
+pulled in during that same host build. This is exactly the kind of
+intermittent, cross-cutting failure (desktop app builds, radio/wifi test
+builds, storage/PCIe test builds, and the root "core foundation" build all
+share this one host-target compile step) the user was seeing, and explains
+the "sometimes" -- it only reproduces when something forces an actual bare
+host build of the kernel member, not under `--target` or `-p`.
+
+Fix: changed all six gates from `cfg(not(test))`/`cfg_attr(not(test), ...)`
+to `cfg(all(not(test), target_os = "none"))` (`kernel/src/main.rs` lines
+2-3, 14, 308, 17961-17962, 17972-17973; `kernel/src/heap.rs` line 42). This
+makes the freestanding-only items apply only to the real
+`x86_64-unknown-none` kernel target, not to every non-test host compile;
+the existing `cfg(test)` std-mode code paths elsewhere in the file already
+proved this crate compiles fine as an ordinary (non-bare-metal) binary, so
+this is a narrow, mechanical fix with no behavior change to the actual
+kernel image. Considered and rejected moving `kernel` from `members` to
+`exclude` in root `Cargo.toml` (matching the existing apps pattern) -- that
+broke `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D
+warnings` outright (a cargo internal panic in feature resolution, since an
+excluded path can no longer be resolved as an independent feature unit),
+which is the exact command AGENTS.md's stage feature gates section
+requires for every stage feature; reverted that attempt.
+
+Verified (host-only; **not** a full Stage 10.7 QEMU gate run -- that still
+needs `RUN-STAGE10.7.ps1` before this can be called a stage acceptance):
+`cargo build`, `cargo clippy -- -D warnings`, `cargo clippy --all-targets
+-- -D warnings`, `cargo clippy -p wovenhat-kernel --target
+x86_64-unknown-none -- -D warnings`, and `cargo test` (full host suite,
+including `pci_*`, `wifi_tlv`/`wifi_firmware_tlv`, `heap`, `irq_lock`,
+`irq_mailbox`, `thread_registry`, `wovenfs_crash`) all pass clean from a
+clean working tree. Did not run the QEMU 1/2/4 CPU acceptance chain.
+

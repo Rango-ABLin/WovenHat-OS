@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "qemu-test", allow(dead_code, unused_imports))]
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![cfg_attr(all(not(test), target_os = "none"), no_std)]
+#![cfg_attr(all(not(test), target_os = "none"), no_main)]
 #![cfg_attr(
     test,
     allow(
@@ -11,7 +11,7 @@
     )
 )]
 #![feature(abi_x86_interrupt)]
-#![cfg_attr(not(test), feature(alloc_error_handler))]
+#![cfg_attr(all(not(test), target_os = "none"), feature(alloc_error_handler))]
 
 extern crate alloc;
 
@@ -305,7 +305,7 @@ use bootloader_api::{config::Mapping, entry_point, info::Optional, BootInfo, Boo
 
 use console::Console;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 use core::{alloc::Layout, panic::PanicInfo};
 use shell::Shell;
 
@@ -17958,7 +17958,7 @@ fn halt() -> ! {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     serial::write_fmt(format_args!(
@@ -17969,7 +17969,7 @@ fn alloc_error_handler(layout: Layout) -> ! {
     halt()
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     panic::kernel_panic(info)
