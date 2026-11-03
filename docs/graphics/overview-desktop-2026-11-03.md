@@ -604,6 +604,60 @@ heap-growing data structure), so the *shape* of any increase is bounded
 by construction the same way the rest of the shell already is, even
 though the exact byte count isn't measurable right now.
 
+## M6 follow-up: steady-state interactive recompose (graphics mandate Phase 7, 2026-11-03)
+
+M6's section above explicitly flagged this as a known gap: "A steady-state
+recompose (window move, workspace switch) was not separately measured this
+pass... measuring a representative *interactive* recompose would need a
+second log point inside the input-driven repaint path, left for a
+follow-up." This closes it, as part of the graphics-modernization mandate's
+Phase 7 ("record actual frame-time distributions rather than claiming an
+arbitrary frame rate").
+
+### What was added
+
+A single timing point around the main event loop's repaint-and-present
+step (`apps/woven-shell/src/main.rs`, just before `for &area in
+dirty.areas() { desktop.repaint(...) }` through `compositor_present()`),
+logged only when the batch actually had dirty area to paint. Every
+non-empty dirty batch is a genuine input-driven recompose -- a keystroke,
+pointer move, window drag, workspace switch, or animation tick -- so this
+one instrumentation point gives a real distribution across actual
+interaction types, rather than one hand-picked scenario, with no change
+to `repaint`'s or `repaint_once`'s internal control flow (same
+minimal-risk approach M6 used for the first-paint number).
+
+### Real measured numbers (software/QEMU-TCG, single CPU, host under real memory pressure at the time -- not native hardware)
+
+From `audit-artifacts/desktop-qualification-1793728344924059900/serial.log`
+(the standard `scripts/test-desktop-qualification.py` journey -- sign-in,
+overview, launch, window-open, workspace switches -- which passed
+identically to every prior accepted run, only the known pre-existing
+`keyboard_refresh` flake, confirming this instrumentation didn't regress
+anything):
+
+| Metric | Measured (18 samples) | Notes |
+|---|---|---|
+| Min | 0 ticks (< 10 ms) | Several samples: a dirty batch that resolved to a trivially cheap repaint (e.g. a single small damage rect). |
+| Median | 235 ticks = 2.35 s | |
+| Mean | 235.5 ticks = 2.355 s | |
+| Max | 889 ticks = 8.89 s | The slowest sample in this run. Worth reporting honestly rather than omitting: this host was measurably under real memory pressure during this same session (as low as ~761 MB free of 8 GB at one point, with Windows "Memory Compression" itself using ~693 MB) while investigating the separately-reported pointer-jitter/spinner-choppiness issue, and this measurement was taken on the same constrained host, under single-CPU TCG (no hardware acceleration). These numbers should not be read as representative of native-hardware or even a properly-resourced VM's performance -- they are real, but real-under-contention. A repeat measurement on an unloaded host, and ideally under `whpx` instead of `tcg`, would give a cleaner steady-state number; not done this pass. |
+
+### What this does and doesn't establish
+
+Per the mandate's own instruction ("report real numbers, including
+failures"), this is reported as-is rather than re-run until a cleaner
+number appeared. It establishes that steady-state interactive recompose
+*can* now be measured continuously (every frame, not a one-off), which is
+the actual gap M6 left open. It does not establish a clean performance
+baseline free of host-contention noise -- that needs a repeat run on an
+unloaded host, left for a future pass. Input-to-display latency
+specifically (distinct from recompose time: the gap between a physical
+input event arriving and the corresponding frame reaching the display) is
+still not measured -- this instrumentation times polling-to-present
+within one loop iteration, which is a reasonable proxy but not the same
+measurement the mandate's Phase 7 asks for by name.
+
 ## M7: the layout cutover
 
 ### What was removed

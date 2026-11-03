@@ -3778,11 +3778,30 @@ fn main(args: Args) -> ! {
         for &area in desktop.check_clients().areas() {
             dirty.add(area);
         }
+        // M7 follow-up (flagged in docs/graphics/overview-desktop-2026-11-03.md's
+        // M6 section as a known gap): a real, measured steady-state interactive
+        // recompose time, not just the one-off first-paint number M6 captured.
+        // Every non-empty dirty batch this loop produces is a genuine
+        // input-driven recompose (a keystroke, pointer move, window drag,
+        // workspace switch, animation tick, ...), so timing the repaint+present
+        // step here gives a real distribution across actual interaction types
+        // rather than one cherry-picked scenario, with no new instrumentation
+        // point needed per interaction kind.
+        let timed = !dirty.areas().is_empty();
+        let recompose_start = if timed { libwoven::ticks() } else { 0 };
         for &area in dirty.areas() {
             desktop.repaint(&mut painter, area);
         }
         if libwoven::compositor_present().is_err() {
             fail(7);
+        }
+        if timed {
+            let elapsed = libwoven::ticks().saturating_sub(recompose_start);
+            let mut digits = [0u8; 20];
+            log(&[
+                b"woven-shell: interactive recompose ticks=",
+                libwoven::format_u64(elapsed, &mut digits),
+            ]);
         }
     }
 }
