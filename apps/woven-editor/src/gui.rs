@@ -5,11 +5,8 @@ use libwoven::{Canvas, GraphicsSurface, rgb};
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 170;
 const BUTTON_WIDTH: usize = 80;
@@ -63,52 +60,45 @@ fn draw_editor(
     refresh: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenEditor",
     )
-    .draw(canvas, theme);
+    .draw(canvas, THEME);
     Label::new(Frame::new(PANEL_X + 10, PANEL_Y + 36, 180, 16), "Workspace").draw(
         canvas,
         Theme {
-            text: ACCENT,
-            ..theme
+            text: THEME.accent,
+            ..THEME
         },
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Files available", ACCENT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Files available", THEME.accent);
     let count = entry_count();
     let mut digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 102, "Entries ", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 102, "Entries ", THEME.text);
     let count_text = libwoven::format_u64(count as u64, &mut digits);
     if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text(PANEL_X + 58, PANEL_Y + 102, text, ACCENT);
+        canvas.draw_text(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", THEME.text);
     let mut refresh_digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", TEXT);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, ACCENT);
+        canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
     }
-    refresh.draw(canvas, theme);
+    refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
             i32::from(y).saturating_sub(2),
             5,
             5,
-            if pressed { TEXT } else { POINTER_MARKER },
+            if pressed { THEME.text } else { POINTER_MARKER },
         );
     }
 }
