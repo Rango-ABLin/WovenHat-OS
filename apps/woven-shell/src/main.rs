@@ -305,7 +305,7 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
 /// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
 /// several KiB, and the user stack is 16 KiB (see `DesktopState`), so even a
 /// transient by-value copy on the way into a static overflowed it.
-fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
+fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
     use libwoven::i18n::Language;
     let entries: &[(&str, &str)] = match language {
         Language::English => &[
@@ -318,6 +318,12 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
             ("enter_pin", "Enter PIN"),
             ("wrong_pin", "Wrong PIN"),
             ("try_again_shortly", "Try again shortly"),
+            // M5: the Overview layout's top bar and Activities overview
+            // (new strings since M2/M3, not part of the already-accepted
+            // lock-screen gates above).
+            ("activities", "Activities"),
+            ("type_to_search", "Type to search"),
+            ("no_open_windows", "No open windows on this workspace"),
         ],
         Language::Chichewa => &[
             ("sign_in", "Lowani"),
@@ -329,6 +335,9 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
             ("enter_pin", "Lowetsani PIN"),
             ("wrong_pin", "PIN Yolakwika"),
             ("try_again_shortly", "Yesaninso Posachedwa"),
+            ("activities", "Zochitika"),
+            ("type_to_search", "Lembani kufunafuna"),
+            ("no_open_windows", "Palibe mawindo otseguka pa gawo ili"),
         ],
     };
     for (key, value) in entries {
@@ -336,42 +345,45 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
     }
 }
 
-/// Both lock-screen catalogs, const-initialized to `Catalog::new()` (an
-/// all-zero value LLVM places in `.bss`, not `.data`) and filled in place on
-/// first use, so no by-value `Catalog` is ever constructed on the stack.
-struct LockCatalogs {
+/// Both shell catalogs (lock screen, top bar, Activities overview),
+/// const-initialized to `Catalog::new()` (an all-zero value LLVM places in
+/// `.bss`, not `.data`) and filled in place on first use, so no by-value
+/// `Catalog` is ever constructed on the stack.
+struct ShellCatalogs {
     english: UnsafeCell<libwoven::i18n::Catalog>,
     chichewa: UnsafeCell<libwoven::i18n::Catalog>,
     built: UnsafeCell<bool>,
 }
 
-// SAFETY: the shell is single-threaded, and `lock_catalog` takes the only reference.
-unsafe impl Sync for LockCatalogs {}
+// SAFETY: the shell is single-threaded, and `shell_catalog` takes the only reference.
+unsafe impl Sync for ShellCatalogs {}
 
-static LOCK_CATALOGS: LockCatalogs = LockCatalogs {
+static SHELL_CATALOGS: ShellCatalogs = ShellCatalogs {
     english: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     chichewa: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     built: UnsafeCell::new(false),
 };
 
-/// The lock screen's translatable strings for `language`, built once
-/// (lazily, in place) through `libwoven::i18n::Catalog` (Stage 26.5).
-/// English values are byte-for-byte the literals every already-accepted
-/// lock-screen gate expects, so the default language changes nothing;
-/// Chichewa is a best-effort demo translation, not a reviewed localization.
-fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
+/// The shell's translatable strings for `language` -- the lock screen,
+/// and, since M5, the Overview top bar and Activities overview -- built
+/// once (lazily, in place) through `libwoven::i18n::Catalog` (Stage
+/// 26.5). English values are byte-for-byte the literals every
+/// already-accepted lock-screen gate expects, so the default language
+/// changes nothing; Chichewa is a best-effort demo translation, not a
+/// reviewed localization.
+fn shell_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
     use libwoven::i18n::Language;
     // SAFETY: single-threaded; build-once guarded by `built`, and every
     // reference handed out is immutable.
     unsafe {
-        if !*LOCK_CATALOGS.built.get() {
-            fill_lock_catalog(&mut *LOCK_CATALOGS.english.get(), Language::English);
-            fill_lock_catalog(&mut *LOCK_CATALOGS.chichewa.get(), Language::Chichewa);
-            *LOCK_CATALOGS.built.get() = true;
+        if !*SHELL_CATALOGS.built.get() {
+            fill_shell_catalog(&mut *SHELL_CATALOGS.english.get(), Language::English);
+            fill_shell_catalog(&mut *SHELL_CATALOGS.chichewa.get(), Language::Chichewa);
+            *SHELL_CATALOGS.built.get() = true;
         }
         match language {
-            Language::English => &*LOCK_CATALOGS.english.get(),
-            Language::Chichewa => &*LOCK_CATALOGS.chichewa.get(),
+            Language::English => &*SHELL_CATALOGS.english.get(),
+            Language::Chichewa => &*SHELL_CATALOGS.chichewa.get(),
         }
     }
 }
@@ -598,6 +610,12 @@ struct Desktop {
     query_length: usize,
     selected: usize,
     children: [Option<Child>; MAX_CHILDREN],
+    /// The Overview layout's Activities overview open/close fade (M5
+    /// motion): 0 closed, 255 open. Unused under the Taskbar layout,
+    /// whose small launcher panel has never animated. Jumps straight to
+    /// its target under `reduced_motion`, the same convention window
+    /// open/close fades already use.
+    overview_fade: Spring,
 }
 
 impl Desktop {
@@ -659,6 +677,7 @@ impl Desktop {
         query_length: 0,
         selected: 0,
         children: [None; MAX_CHILDREN],
+        overview_fade: Spring::new(0),
     };
 
     fn screen(&self) -> Area {
@@ -764,9 +783,11 @@ impl Desktop {
     fn start_area(&self) -> Area {
         let width = match self.layout {
             ShellLayout::Taskbar => START_WIDTH as i32,
-            // Wide enough for the longer "Activities" label.
+            // Wide enough for the translated "Activities" label, whatever
+            // its length in the active language.
             ShellLayout::Overview => {
-                font::text_width(ACTIVITIES_LABEL) as i32 + 2 * ACTIVITIES_PADDING
+                let label = shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL);
+                font::text_width(label) as i32 + 2 * ACTIVITIES_PADDING
             }
         };
         Area::new(START_X, self.taskbar_top() + 4, width, START_HEIGHT as i32)
@@ -1109,6 +1130,23 @@ impl Desktop {
         self.launcher_open = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
+        if self.layout == ShellLayout::Overview {
+            if self.launcher_open && !self.reduced_motion {
+                // Fade in: the overview is painted every frame while open
+                // (see `overview_area`), so this is actually visible.
+                self.overview_fade = Spring::new(0);
+                self.overview_fade.set_target(255);
+            } else {
+                // Closing already forces an immediate full-screen repaint
+                // below (nothing paints `overview_area` once
+                // `launcher_open` is false, so a gradual fade-out would
+                // never actually be visible); snap instead of animating
+                // toward 0 so the frame clock doesn't keep running for
+                // 300ms after the overview is already gone. Also used for
+                // opening under reduced_motion, at full opacity.
+                self.overview_fade = Spring::new(if self.launcher_open { 255 } else { 0 });
+            }
+        }
         // A close must restore every pixel under the projected card. The
         // launcher is a foreground mode switch, so a full recomposition is
         // bounded and prevents stale projected corners or icon glyphs.
@@ -1462,7 +1500,7 @@ impl Desktop {
         canvas.draw_text(
             activities.x + ACTIVITIES_PADDING,
             self.text_y(),
-            ACTIVITIES_LABEL,
+            shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL),
             theme_text(),
         );
 
@@ -1517,9 +1555,23 @@ impl Desktop {
     /// yet (documented in `docs/graphics/overview-desktop-2026-11-03.md`).
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
-        fill_rounded_blended(canvas, overview, CHROME_RADIUS, theme_panel(), 235);
+        // A plain rect, not `fill_rounded_blended`: the overview spans
+        // most of the screen below the top bar rather than reading as a
+        // small floating card, and a non-rounded fill has no transparent
+        // corner pixels, which lets the whole panel be alpha-faded in one
+        // `draw_blended` pass (see the M5 motion note in `repaint_once`)
+        // without a separate keyed overlay for the rounding.
+        canvas.blend_rect(
+            overview.x,
+            overview.y,
+            overview.width as usize,
+            overview.height as usize,
+            theme_panel(),
+            235,
+        );
 
         // Search field.
+        let catalog = shell_catalog(self.language);
         let search = self.overview_search_area();
         fill_rounded(canvas, search, CHROME_RADIUS_SMALL, theme_taskbar());
         let query = &self.query[..self.query_length];
@@ -1527,8 +1579,8 @@ impl Desktop {
             canvas.draw_text(
                 search.x + 6,
                 search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
-                "Type to search",
-                rgb(150, 160, 175),
+                catalog.lookup("type_to_search", "Type to search"),
+                theme_muted(),
             );
         } else {
             let mut buffer = [0u8; 32];
@@ -1566,8 +1618,8 @@ impl Desktop {
             canvas.draw_text(
                 overview.x + OVERVIEW_MARGIN,
                 self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
-                "No open windows on this workspace",
-                rgb(150, 160, 175),
+                catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                theme_muted(),
             );
         } else {
             for (index, window) in entries.iter().enumerate() {
@@ -1902,7 +1954,7 @@ impl Desktop {
         });
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
-        let catalog = lock_catalog(self.language);
+        let catalog = shell_catalog(self.language);
 
         // A frosted card behind the sign-in/lock content, Windows-11-style,
         // instead of text floating directly on the dimmed wallpaper.
@@ -3178,8 +3230,12 @@ impl Desktop {
 
         let overview = self.overview_area().intersect(area);
         if !overview.is_empty() {
-            painter.blend(overview, theme_panel(), PANEL_OPACITY);
-            painter.overlay(overview, |canvas| self.paint_overview_content(canvas));
+            // M5 motion: the whole panel fades in as one alpha-blended
+            // pass (`paint_overview_content` fills its full rect itself,
+            // see its own comment), rather than the fixed-opacity
+            // blend+keyed-overlay two-step the other panels use.
+            let alpha = self.overview_fade.value().clamp(0, 255) as u8;
+            painter.draw_blended(overview, alpha, |canvas| self.paint_overview_content(canvas));
         }
 
         let qs = self.qs_area().intersect(area);
@@ -3999,6 +4055,7 @@ impl Desktop {
             .iter()
             .flatten()
             .any(|window| !window.fade.is_settled())
+            || !self.overview_fade.is_settled()
     }
 
     /// Advance every animation by `frames`. Returns the area to repaint.
@@ -4009,6 +4066,10 @@ impl Desktop {
                 window.fade.step(frames);
                 dirty = dirty.union(window.footprint());
             }
+        }
+        if !self.overview_fade.is_settled() {
+            self.overview_fade.step(frames);
+            dirty = dirty.union(self.overview_area());
         }
         dirty
     }

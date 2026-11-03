@@ -1,5 +1,30 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M5) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
+
+M5 (motion, reduced motion, high contrast, i18n, accessibility) is
+implemented, built, and Clippy-clean; **not QEMU-verified this pass**,
+same host-memory constraint as M4 (free RAM stayed under 1 GB of 7.6 GB
+total). Added: a reduced-motion-respecting fade-in for the Activities
+overview (`overview_fade: Spring`, wired into the existing
+`animating`/`animate`/`tick` frame clock exactly like window fade-in
+already was); a `theme_muted()` high-contrast-aware color for
+placeholder/secondary text (the only new-surface text that wasn't
+already routed through an existing `theme_*` helper); and i18n for every
+new string from M2-M4 (Activities, search placeholder, "no open windows")
+via the lock screen's existing `Catalog` mechanism, renamed
+`shell_catalog` since it now serves more than the lock screen,
+English/Chichewa both covered, existing lock-screen key/value pairs left
+byte-for-byte unchanged. Audited keyboard reachability of every M2-M4
+control: search/grid/Dash/window-cards in the overview are keyboard-
+complete (Tab cycles, Enter launches/selects, F1/click-outside closes);
+Quick Settings and the Notification Center have **no keyboard path at
+all**, in either layout -- a real, pre-existing gap (not introduced by
+this work) that the `Key` ABI's lack of modifier keys or spare F-keys
+makes impossible to close without a reviewed ABI extension, same
+category as the already-documented missing Esc/arrow-key gaps. Full
+writeup: `docs/graphics/overview-desktop-2026-11-03.md`.
+
 ## WovenHat Overview desktop overhaul (M4) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
 
 M4 (Dash, Alt+Tab switcher, snap shortcuts, notification placement) is

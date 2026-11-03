@@ -150,6 +150,18 @@ pub fn theme_text() -> u32 {
     TEXT
 }
 
+/// Secondary/placeholder text (M5): a muted gray normally, but
+/// high-contrast mode wants maximum contrast against its own panel
+/// color (black, see `theme_panel`), not a muted tone, so this is a
+/// separate color rather than `theme_text` at reduced opacity.
+pub fn theme_muted() -> u32 {
+    if high_contrast() {
+        rgb(255, 255, 255)
+    } else {
+        rgb(150, 160, 175)
+    }
+}
+
 pub fn theme_panel() -> u32 {
     if high_contrast() {
         rgb(0, 0, 0)

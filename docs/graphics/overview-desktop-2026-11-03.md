@@ -1,11 +1,11 @@
-# WovenHat Overview desktop: M2 top bar, M3 Activities overview, M4 Dash/switcher
+# WovenHat Overview desktop: M2-M5
 
-2026-11-03. Covers M2-M4 of `CLAUDE-START-HERE.md`'s milestone table:
+2026-11-03. Covers M2-M5 of `CLAUDE-START-HERE.md`'s milestone table:
 the Overview top bar (clock/calendar popover, system menu), the
-Activities overview (search, window cards, app grid), and the Dash,
-window switcher, snap shortcuts, and notification placement. M1 (the
-behavior-preserving `main.rs` module split) is covered separately in
-`docs/agent-coordination.md`.
+Activities overview (search, window cards, app grid), the Dash/window
+switcher/snap/notification placement, and motion/high-contrast/i18n/
+accessibility. M1 (the behavior-preserving `main.rs` module split) is
+covered separately in `docs/agent-coordination.md`.
 
 ## What M2 delivers
 
@@ -343,3 +343,115 @@ than M2/M3's QEMU-confirmed verification, and is reported as such -- not
 a stage acceptance, and QEMU re-verification (1/2/4 CPU, matching M2/M3's
 journeys) is still owed once this machine has enough free memory for a
 guest boot.
+
+## M5: motion, high contrast, i18n, accessibility
+
+### Motion
+
+Added `Desktop::overview_fade: Spring`, wired into the existing
+`animating`/`animate`/`tick` frame clock exactly the way window fade-in
+already was (same `Spring` type, same `is_settled`/`step` pattern) --
+the overview now fades in (0 to 255 opacity) when opened under the
+Overview layout, respecting `reduced_motion` (jumps straight to full
+opacity instead of animating, the same convention window open/close
+already used). Close is a **snap, not a fade-out**: `toggle_launcher`
+already forces an immediate full-screen repaint on close (pre-existing,
+for the launcher's 3D-projection-corner cleanup -- see
+`panel_damage_area`'s doc comment), so a gradual fade-out would never
+actually be visible once `launcher_open` is false and `overview_area`
+reads empty; animating toward 0 regardless would just keep the 20ms
+frame clock running for ~300ms after the panel is already gone, for no
+visible benefit. Documented as a deliberate asymmetry, not an oversight.
+
+Implementing the fade required one structural change: `paint_overview_
+content`'s background was `fill_rounded_blended` (rounded corners, like
+the smaller floating panels); switched to a plain `canvas.blend_rect`,
+since the overview spans most of the screen below the top bar rather
+than reading as a small floating card, and a non-rounded fill has no
+transparent corner pixels -- which matters because `draw_blended`
+(`Painter`, already existing, used unchanged) blends the *entire*
+rendered canvas at a uniform alpha with no keyed-transparency handling;
+a rounded corner's untouched pixels would have blended in whatever stale
+tile-buffer content was left from a previous frame.
+
+### High contrast
+
+Every other new surface (top bar, overview panel background, search
+field fill, window cards, grid text) was already routed through an
+existing `theme_*` helper (`theme_taskbar`, `theme_panel`, `theme_text`,
+`theme_accent`, `theme_entry`) and so was already high-contrast-correct
+without any M5 change -- confirmed by reading `paint_top_bar_content`/
+`paint_overview_content` fully, not assumed. The one gap: the search
+field's "Type to search" placeholder and the "No open windows" message
+used a literal muted gray (`rgb(150, 160, 175)`), not a `theme_*` call.
+Added `theme_muted()` (`tokens.rs`): the same muted gray normally, but
+pure white in high-contrast mode -- deliberately *not* a dimmer shade of
+`theme_text`, since high-contrast mode's whole point is maximum
+legibility over a subtle "this is secondary text" visual cue, the same
+tradeoff `theme_accent`'s own high-contrast branch (plain yellow) already
+makes elsewhere.
+
+Dash and app-grid icon colors (`icons::icon_colors`, per-app brand
+colors) are **not** high-contrast-aware -- confirmed this is pre-existing
+behavior shared by every caller of `draw_app_icon` (the desktop
+shortcuts, the legacy launcher panel, now the overview too), not
+something this work introduced or should silently "fix" by changing a
+widely-depended-on existing function's behavior outside this pass's
+scope.
+
+### i18n
+
+Renamed the lock screen's `fill_lock_catalog`/`lock_catalog`/
+`LOCK_CATALOGS`/`LockCatalogs` to `fill_shell_catalog`/`shell_catalog`/
+`SHELL_CATALOGS`/`ShellCatalogs` (a mechanical rename only -- every
+existing English/Chichewa key and value is byte-for-byte unchanged, the
+doc comment's note that "English values are byte-for-byte the literals
+every already-accepted lock-screen gate expects" still holds) since the
+one `Catalog`-per-language mechanism now serves the top bar and overview
+too, not just the lock screen. Added three new keys (`activities`,
+`type_to_search`, `no_open_windows`) in both languages, well within
+`libwoven::i18n::MAX_TRANSLATIONS` (32; 12 used). The Activities button's
+width (`start_area`) and its label (`paint_top_bar_content`) both now
+resolve the same catalog lookup, so the button is sized correctly for
+whichever language's string is actually drawn, not hardcoded to the
+English string's width.
+
+### Accessibility: keyboard reachability audit
+
+Every M2-M4 control was checked against what `handle_input` actually
+wires up, not assumed reachable:
+
+- **Keyboard-complete**: Activities (F1, already existed), search typing
+  and Tab-cycling through the app grid (`launcher_key`, already existed,
+  unchanged), Enter to launch the selected result, closing via F1 again
+  or clicking outside.
+- **Mouse-only, no keyboard path at all**: window cards, Dash icons (both
+  new in M3/M4 -- `Tab` only cycles the one list `launcher_key` already
+  drives, the filtered app grid, and the ABI has no second list-cycling
+  key to spare for the others), and, pre-existing and **not introduced
+  by this work**, Quick Settings/the system menu button and the
+  Notification Center/calendar popover, in *either* layout -- confirmed
+  by grep that `toggle_qs`/`toggle_center` are called only from pointer-
+  button handling, never from any `Key` match arm. This is the most
+  significant accessibility gap found this session. It cannot be closed
+  without a reviewed `Key`-ABI extension (a modifier bit, or dedicated
+  keys for these specific panels) -- out of scope to add unreviewed per
+  AGENTS.md, same category as the already-documented missing Esc and
+  arrow-key gaps. Recorded here as a concrete, scoped follow-up: whoever
+  picks up the `Key` ABI extension should close all of Esc, arrow-key
+  grid/thumbnail/Dash navigation, and QS/Notification-Center keyboard
+  access in one reviewed pass, since they share the same root cause.
+
+### Verification
+
+`cargo build`/`cargo clippy --target x86_64-unknown-none -- -D warnings`
+clean; `cargo test --test shell_input` passes. **No QEMU verification
+this pass**, same constraint as M4: this machine's free RAM stayed under
+1 GB of 7.6 GB total throughout. The fade animation in particular is
+inherently a perceptual/visual correctness question that static review
+can reason about (the `Spring`/`draw_blended` mechanics are sound,
+reused unchanged from the already-QEMU-verified window-fade path) but
+cannot fully confirm without actually seeing it render across frames;
+stated here plainly rather than claimed as verified. QEMU
+re-verification for M2-M5 together (1/2/4 CPU) is owed once this machine
+has enough free memory for a guest boot.
