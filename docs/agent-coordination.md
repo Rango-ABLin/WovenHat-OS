@@ -8515,3 +8515,54 @@ additions, and wallpaper variants beyond the one sample asset
 complete; the layout cutover, the app theme migration, and this first
 asset pass are done, but a larger asset pass remains open if wanted.
 
+## Claude Code - graphics modernization mandate: claim + tracker created (2026-11-03)
+
+The user pasted the full "WovenHat OS Complete Graphics Modernization
+Mandate" (10 phases: display/DPI, 2D engine, typography, design system,
+compositor, GPU backend, animations, app modernization, QA, release
+qualification) and gave standing authorization to execute it autonomously,
+phase by phase, resuming automatically every time Claude Code's credit
+resets, until it is fully done.
+
+**Claiming**: `kernel/src/display.rs`, `kernel/src/compositor.rs`,
+`kernel/src/virtio_gpu.rs`, `kernel/src/ttf.rs`,
+`libwoven/src/lib.rs`'s `graphics`/`ui` modules, `apps/woven-shell/**`
+(already claimed), and `RUN-DESKTOP.ps1`, for this mandate's duration.
+Codex: if you need any of these paths, check
+`docs/graphics/modernization-tracker.md`'s Current status table first and
+coordinate here before editing, since this is a long-running, many-session
+effort being tracked centrally.
+
+**The full, persistent plan, current phase-by-phase status, and a
+"resume here" pointer live in `docs/graphics/modernization-tracker.md`
+-- not in this file.** That document is designed to be read cold by a
+fresh session with no memory of this conversation: it archives the
+mandate's full text verbatim, records real file-inventory facts (line
+counts, module locations, what's actually wired vs. dead/test-gated code)
+gathered from this session's audit, and has an explicit "HOW TO RESUME"
+section at the top. Any future session picking up this work reads that
+file first, not this entry.
+
+One resolved design question worth restating here since it's easy to get
+wrong: the mandate's Phase 4 asks for a bottom taskbar, which directly
+contradicts the user's own earlier, already-executed decision (M7,
+commit `3ddb6e9d`) to delete the taskbar in favor of WovenHat Overview.
+Resolution (detailed in the tracker): Overview's top bar + Activities
+overview + dash supersede the mandate's taskbar/Start-menu bullets. Do
+not rebuild a taskbar without asking the user first.
+
+Status at the point this entry was written: Phase 0 (audit) done: real
+file inventory gathered via grep (counts, module locations, wiring
+status) and merged into the tracker's status table. Phases 1 and 6 have
+a concrete, agreed next step (wire a virtio-gpu device into the
+interactive/qualification QEMU launchers and confirm `compositor.rs`'s
+existing `Gpu::probe()` call actually succeeds against it -- it has
+never been exercised because `RUN-DESKTOP.ps1` currently attaches
+`-vga std`). Phase 3 (typography) is flagged as the highest-value,
+highest-risk remaining item: real TTF/antialiased text rendering exists
+in `libwoven::graphics` but has zero production call sites; wiring it
+into Ring-3 apps needs either a new syscall or VFS font-staging, either
+of which needs a written threat review per AGENTS.md before
+implementation. No phase work beyond the audit has started yet; the next
+session should start at Phase 1/6's virtio-gpu-device wiring.
+
