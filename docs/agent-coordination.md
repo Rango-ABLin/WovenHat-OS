@@ -8215,7 +8215,7 @@ clean working tree. Did not run the QEMU 1/2/4 CPU acceptance chain.
 
 ## Claude Code - WovenHat Overview desktop overhaul (assigned 2026-11-03)
 
-User-authorized full overhaul. Full prompt: docs/GNOME-Desktop-Claude-Prompt.md (also CLAUDE-START-HERE.md). Claude Code takes over the WovenHat shell; earlier shell assignments are superseded. Claude claims apps/woven-shell/**, scripts/test-desktop-qualification.py and new docs/graphics/overview-desktop-*.md. Status: M0 IN PROGRESS.
+User-authorized full overhaul. Full prompt: docs/GNOME-Desktop-Claude-Prompt.md (also CLAUDE-START-HERE.md). Claude Code takes over the WovenHat shell; earlier shell assignments are superseded. Claude claims apps/woven-shell/**, scripts/test-desktop-qualification.py and new docs/graphics/overview-desktop-*.md. Status: M2 verified at 1/2/4 CPUs (structural level; qualification script's own exit code still reflects the pre-existing keyboard_refresh flake, not a stage acceptance).
 
 ### M0 plan (2026-11-03)
 
@@ -8230,4 +8230,60 @@ Sequence: M0 (this entry) -> M1 (behavior-preserving `main.rs` module split + `t
 Five behavior-preserving module-split commits landed (`tokens.rs`, `geometry.rs`, `textures.rs`, `icons.rs`, `model.rs`; `main.rs` 4,644 -> 3,883 lines), each verified with `cargo build`/`cargo clippy --target x86_64-unknown-none -- -D warnings` inside `apps/woven-shell`. The Stage 10.7 chain from earlier this session finished: Stages up to 10.6 passed on 1/2/4 CPUs; Stage 10.7 itself failed only because `python3` on this machine resolves to a dead Windows Store app-execution-alias stub rather than a real interpreter (the real one is at `python`, Python 3.14.7) -- an environment issue, not a kernel defect.
 
 Running `scripts/test-desktop-qualification.py --cpus 1` (required by M1's gate) failed: "timed out waiting for a materially changed framebuffer 'keyboard_refresh'" during the Files app journey, after sign-in, launch, pointer clicks and workspace switching all succeeded and the serial log shows `WovenFiles: keyboard refreshed` actually happening. Rather than assume my module split caused this, checked out the pre-change commit (`48fc4a27`, before any `apps/woven-shell` edits) into a separate worktree (`C:\WovenHat-OS-baseline`, removed after) and reran the identical check: **same exact failure** on the untouched baseline. This confirms it is a pre-existing flake in the qualification harness or its framebuffer-diff threshold, not a regression from M1's extractions. Continuing M1 on that basis; this flake is a separate, pre-existing issue from the shell takeover and is not blocking M1's gate, but is recorded here so it is not re-investigated as a regression later.
+
+### M2: Overview top bar (2026-11-03)
+
+Full design writeup: `docs/graphics/overview-desktop-2026-11-03.md`.
+Summary: added `ShellLayout` (`Taskbar`/`Overview`, selected by a new
+`--layout` flag; Overview is now the default, per the user-authorized
+design), branched the handful of already-shared geometry functions
+(`taskbar_top`, `clock_area`, `badge_area`, `start_area`, `panel_area`,
+`qs_area`, `center_area`, `work_area`) rather than duplicating
+`handle_input`/`repaint_once`/3D-render logic, and added
+`paint_top_bar_content` (Activities button, centered clock, workspace
+switcher, system-menu button, unread badge). The two popover content
+painters (`paint_qs_content`, `paint_center_content`) needed no changes
+at all -- confirmed they're pure functions of an `Area` before reusing
+them.
+
+QEMU verification caught a real regression before it could land: four
+functions (`open`, `resized`, `toggle_scale`, `drag_to_pointer`)
+independently duplicated "available height above the bottom taskbar"
+arithmetic instead of calling `work_area()`, and broke once
+`taskbar_top()` started returning `0` for Overview -- `open()`'s height
+check became an inverted, always-empty range, so **every** window-open
+request was rejected (`woven-shell: window open rejected` where the
+baseline logs `window opened: Files`). Fixed all four with one shared
+`(area_top, area_height)` computation; this is exactly the kind of thing
+a build+clippy pass alone would not have caught, only a real QEMU boot
+that actually opens a window and reads the serial log.
+
+Disk space blocked the first verification attempt: `target`/
+`.cargo-build` had grown to ~22 GB each (44 GB total, git-ignored,
+reproducible), leaving only 11 GB free, and QEMU failed to allocate guest
+memory-backend files as a result ("cannot set up guest memory 'vga.vram'/
+'pc.ram': No such file or directory"). Removed both directories (not
+`audit-artifacts/`, which stays protected) and rebuilt from scratch,
+freeing ~25 GB; QEMU then started normally.
+
+After the fix, `scripts/test-desktop-qualification.py` at **1, 2, and 4
+CPUs** all reach the same point as the known-good baseline -- sign-in,
+launch, window-open, pointer clicks, all four workspace switches all
+succeed, serial log confirms `WovenFiles: window opened` and `keyboard
+refreshed` at every CPU count -- then hit the pre-existing
+`keyboard_refresh` flake documented above, unrelated to any of this work.
+Screenshots under
+`audit-artifacts/desktop-qualification-1793696849620925300/` visually
+confirm the designed layout (top bar, rounded Activities pill, centered
+clock, right-side cluster) and that the Files window opens correctly
+positioned below the bar. Evidence for all three CPU counts:
+`audit-artifacts/desktop-qualification-{1793696849620925300 (1 CPU),
+1793697025294069600 (2 CPU), 1793697131547554400 (4 CPU)}/`.
+
+M2 is functionally verified at the structural level (layout, window
+placement, popovers, CPU matrix); it is not yet a stage acceptance in the
+`docs/stage-status.md` sense -- the keyboard_refresh flake means the
+qualification script's own exit code is still a failure, even though the
+failure point is identical to the accepted baseline's. M3-M7 remain not
+started.
 

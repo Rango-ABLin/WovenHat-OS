@@ -1,5 +1,28 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M2) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M2 (the Overview top bar: Activities button, centered clock/calendar
+popover reusing Notification Center state, system menu reusing Quick
+Settings state) is implemented and verified at the structural level on
+1/2/4 CPUs. Full design and verification: `docs/graphics/overview-
+desktop-2026-11-03.md`. `--layout=overview` is now the shell's default
+(`--layout=taskbar` is the rollback path). QEMU verification caught and
+fixed a real regression before it landed: `open`/`resized`/
+`toggle_scale`/`drag_to_pointer` each independently duplicated "available
+height above the bottom taskbar" arithmetic, which broke once the
+Overview top bar made `taskbar_top()` return `0` (every window-open
+request was rejected); fixed with one shared `(area_top, area_height)`
+computation. At 1, 2, and 4 CPUs the qualification journey reaches the
+same point as the accepted pre-change baseline (sign-in, launch,
+window-open, pointer, all four workspace switches), then hits the
+pre-existing `keyboard_refresh` framebuffer-diff flake recorded below
+(not a regression, reproduces on the untouched baseline). This is not a
+stage acceptance: the qualification script's own exit code still reports
+failure because of that flake. M3-M7 (Activities overview, dash/
+switcher, motion/accessibility/i18n, performance budgets, default
+cutover) have not started.
+
 ## WovenHat Overview desktop overhaul (M1) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
 
 User-authorized full takeover of `apps/woven-shell` per `CLAUDE-START-HERE.md`,

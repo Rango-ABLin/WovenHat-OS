@@ -2272,14 +2272,23 @@ impl Desktop {
             self.desktop_width
         };
         self.height = info.height as i32;
-        let top = self.taskbar_top();
+        // See `open`'s identical `(area_top, area_height)` computation: the
+        // usable band's bounds, excluding the bar wherever it sits.
+        let (area_top, area_height) = match self.layout {
+            ShellLayout::Taskbar => (0, self.taskbar_top()),
+            ShellLayout::Overview => (
+                self.taskbar_top() + TASKBAR_HEIGHT,
+                self.height - TASKBAR_HEIGHT,
+            ),
+        };
         for window in self.windows.iter_mut().flatten() {
             window.x = window
                 .x
                 .clamp(0, (self.desktop_width - window.width).max(0));
-            window.y = window
-                .y
-                .clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+            window.y = window.y.clamp(
+                area_top + TITLE_HEIGHT,
+                (area_top + area_height - window.height).max(area_top + TITLE_HEIGHT),
+            );
         }
         self.pointer = (
             self.pointer.0.min(self.desktop_width - 1),
@@ -2949,9 +2958,23 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        // The screen's usable band, excluding the bar wherever it sits:
+        // `area_top` is its top edge, `area_height` its height. For the
+        // bottom taskbar this is (0, taskbar_top()); for the Overview top
+        // bar it is (taskbar_top() + TASKBAR_HEIGHT, height - TASKBAR_HEIGHT).
+        // `work_area()` expresses the same region as a `Frame`; computed
+        // again here as plain bounds since that's what this validation and
+        // placement arithmetic need.
+        let (area_top, area_height) = match self.layout {
+            ShellLayout::Taskbar => (0, self.taskbar_top()),
+            ShellLayout::Overview => (
+                self.taskbar_top() + TASKBAR_HEIGHT,
+                self.height - TASKBAR_HEIGHT,
+            ),
+        };
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
-            || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
+            || !(1..=area_height - TITLE_HEIGHT).contains(&height)
         {
             log(&[b"woven-shell: window open rejected"]);
             return Dirty::new();
@@ -2961,9 +2984,9 @@ impl Desktop {
         };
         let offset = CASCADE_ORIGIN + (self.opened % 6) * CASCADE_STEP;
         self.opened += 1;
-        // Keep the whole frame above the taskbar and on screen.
+        // Keep the whole frame inside the usable band and on screen.
         let x = offset.min((self.width - width).max(0));
-        let y = offset.min((self.taskbar_top() - height).max(TITLE_HEIGHT));
+        let y = offset.min((area_top + area_height - height).max(area_top + TITLE_HEIGHT));
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
@@ -3076,10 +3099,15 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
-        let top = self.taskbar_top();
+        // See `open`'s identical `area_height` computation: the usable
+        // band's height, excluding the bar wherever it sits.
+        let area_height = match self.layout {
+            ShellLayout::Taskbar => self.taskbar_top(),
+            ShellLayout::Overview => self.height - TASKBAR_HEIGHT,
+        };
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
-            || !(1..=top - TITLE_HEIGHT).contains(&height)
+            || !(1..=area_height - TITLE_HEIGHT).contains(&height)
         {
             log(&[b"woven-shell: WRSZ rejected: token or geometry"]);
             return empty;
@@ -3552,14 +3580,27 @@ impl Desktop {
         let Some((slot, grab_x, grab_y)) = self.drag else {
             return empty;
         };
+        // See `open`'s identical `(area_top, area_height)` computation: the
+        // usable band's bounds, excluding the bar wherever it sits.
+        // Computed before borrowing `window` mutably below.
+        let (area_top, area_height) = match self.layout {
+            ShellLayout::Taskbar => (0, self.taskbar_top()),
+            ShellLayout::Overview => (
+                self.taskbar_top() + TASKBAR_HEIGHT,
+                self.height - TASKBAR_HEIGHT,
+            ),
+        };
+        let desktop_width = self.desktop_width;
+        let pointer = self.pointer;
         let Some(window) = self.windows[slot].as_mut() else {
             return empty;
         };
         let before = window.footprint();
-        let top = self.height - TASKBAR_HEIGHT;
-        window.x = (self.pointer.0 - grab_x).clamp(0, (self.desktop_width - window.width).max(0));
-        window.y =
-            (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        window.x = (pointer.0 - grab_x).clamp(0, (desktop_width - window.width).max(0));
+        window.y = (pointer.1 - grab_y).clamp(
+            area_top + TITLE_HEIGHT,
+            (area_top + area_height - window.height).max(area_top + TITLE_HEIGHT),
+        );
         let after = window.footprint();
         if after == before {
             empty
