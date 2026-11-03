@@ -773,6 +773,33 @@ impl Desktop {
         (found, count)
     }
 
+    /// M6: a real, measured search-filter latency number (not assumed),
+    /// logged each time the query actually changes. Uses only the
+    /// existing `libwoven::ticks()` clock and `log()` -- no new
+    /// capability. `self.app_count` is the catalog size actually loaded
+    /// this boot; report it alongside the latency, since the design
+    /// brief's "over 64 apps" budget assumes `MAX_APPS` (64) entries and
+    /// the demo catalog fixture currently has far fewer.
+    fn log_search_latency(&self) {
+        let start = libwoven::ticks();
+        let (_, count) = self.filtered();
+        let elapsed = libwoven::ticks().saturating_sub(start);
+        let mut digits = [0u8; 20];
+        let elapsed_text = libwoven::format_u64(elapsed, &mut digits);
+        let mut count_digits = [0u8; 20];
+        let count_text = libwoven::format_u64(count as u64, &mut count_digits);
+        let mut catalog_digits = [0u8; 20];
+        let catalog_text = libwoven::format_u64(self.app_count as u64, &mut catalog_digits);
+        log(&[
+            b"woven-shell: search latency ticks=",
+            elapsed_text,
+            b" matches=",
+            count_text,
+            b" catalog=",
+            catalog_text,
+        ]);
+    }
+
     fn start_area(&self) -> Area {
         let width = match self.layout {
             ShellLayout::Taskbar => START_WIDTH as i32,
@@ -1182,10 +1209,12 @@ impl Desktop {
                     self.query_length += 1;
                 }
                 self.selected = 0;
+                self.log_search_latency();
             }
             Key::Backspace => {
                 self.query_length = self.query_length.saturating_sub(1);
                 self.selected = 0;
+                self.log_search_latency();
             }
             Key::Tab => {
                 let count = self.filtered().1;
