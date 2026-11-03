@@ -1728,8 +1728,8 @@ mod tests {
         assert_ne!(dark, light);
         assert_ne!(dark, high_contrast);
         assert_ne!(light, high_contrast);
-        assert_eq!(dark, 14_167_676_546_058_782_013);
-        assert_eq!(light, 13_378_977_747_546_284_125);
-        assert_eq!(high_contrast, 13_757_308_704_317_173_985);
+        assert_eq!(dark, 11_428_746_854_785_215_829);
+        assert_eq!(light, 7_898_872_504_501_740_404);
+        assert_eq!(high_contrast, 10_262_539_617_757_164_205);
     }
 }

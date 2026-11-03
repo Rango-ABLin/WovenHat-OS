@@ -10818,6 +10818,30 @@ pub mod graphics {
             }
         }
 
+        /// A rounded-rect drop shadow: `rounded_rect_blended` offset by
+        /// (`offset_x`, `offset_y`) from `rect`, same size and radius. One
+        /// shared primitive for the "dark rounded rect behind a lighter
+        /// one" elevation pattern used by app-tile icons and window
+        /// chrome, instead of each call site computing its own offset
+        /// rect and calling `rounded_rect`/`rounded_rect_blended` by hand.
+        pub fn shadow(
+            &mut self,
+            rect: Rect,
+            offset_x: i32,
+            offset_y: i32,
+            radius: usize,
+            color: Color,
+            opacity: u8,
+        ) {
+            let shadow_rect = Rect::new(
+                rect.x.saturating_add(offset_x),
+                rect.y.saturating_add(offset_y),
+                rect.width,
+                rect.height,
+            );
+            self.rounded_rect_blended(shadow_rect, radius, color, opacity);
+        }
+
         /// Fill a rounded rectangle with a top-to-bottom colour gradient:
         /// the same corner mask as `rounded_rect`, with the fill colour
         /// interpolated by row instead of constant, so chrome like the
@@ -15105,6 +15129,35 @@ mod tests {
         assert_eq!(pixels[5], Color::WHITE.packed());
         assert_eq!(pixels[10], Color::WHITE.packed());
         assert_eq!(pixels[15], Color::TITLE.packed());
+    }
+
+    #[test]
+    fn wovengraphics_shadow_is_offset_and_blended() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [Color::WHITE.packed(); 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            // A 2x2 opaque white square at (1, 1) (the tile), then its
+            // shadow offset by (1, 1) at half opacity, same size -- the
+            // shadow is drawn first so the square's own fill stays pure
+            // white, and the shadow is visible only where the square does
+            // not cover it.
+            renderer.shadow(Rect::new(1, 1, 2, 2), 1, 1, 0, Color::BLACK, 128);
+            renderer.rounded_rect(Rect::new(1, 1, 2, 2), 0, Color::WHITE);
+        }
+        // (1,1) and (2,2): the square itself, opaque white, unaffected by
+        // the shadow drawn under it.
+        assert_eq!(pixels[1 * 4 + 1], Color::WHITE.packed());
+        assert_eq!(pixels[2 * 4 + 2], Color::WHITE.packed());
+        // (3,3): only the shadow's offset square reaches here, blended
+        // black-over-white at half opacity -- neither pure white (no
+        // shadow drawn) nor pure black (not blended, full opacity).
+        assert_ne!(pixels[3 * 4 + 3], Color::WHITE.packed());
+        assert_ne!(pixels[3 * 4 + 3], Color::BLACK.packed());
+        // (0,0): outside both rects entirely, untouched background.
+        assert_eq!(pixels[0], Color::WHITE.packed());
     }
 
     #[test]
