@@ -1,10 +1,11 @@
-# WovenHat Overview desktop: M2-M6
+# WovenHat Overview desktop: M2-M7
 
-2026-11-03. Covers M2-M6 of `CLAUDE-START-HERE.md`'s milestone table:
+2026-11-03. Covers M2-M7 of `CLAUDE-START-HERE.md`'s milestone table:
 the Overview top bar (clock/calendar popover, system menu), the
 Activities overview (search, window cards, app grid), the Dash/window
 switcher/snap/notification placement, motion/high-contrast/i18n/
-accessibility, and the measured performance/memory record. M1 (the
+accessibility, the measured performance/memory record, and the M7
+layout cutover (legacy taskbar code removal). M1 (the
 behavior-preserving `main.rs` module split) is covered separately in
 `docs/agent-coordination.md`.
 
@@ -602,3 +603,87 @@ following the codebase's existing patterns (fixed-size arrays, no new
 heap-growing data structure), so the *shape* of any increase is bounded
 by construction the same way the rest of the shell already is, even
 though the exact byte count isn't measurable right now.
+
+## M7: the layout cutover
+
+### What was removed
+
+With M2-M6 verified at 1/2/4 CPU and the full `RUN-STAGE10.7.ps1` gate
+passing, removed the `ShellLayout` enum and `--layout` CLI flag entirely
+-- Overview is now the shell's only layout, not a default with a
+rollback flag. Deleted with it: `paint_taskbar_content`,
+`render_taskbar_3d` (the whole legacy bottom-taskbar rendering, ~210
+lines), the Taskbar-only small launcher panel (`panel_area`,
+`paint_panel_content`, `render_panel`, `render_panel_3d`, and its
+offscreen `LauncherPanelTexture`), the taskbar's own offscreen
+`TaskbarTexture`, `entry_area` (the per-window taskbar entry, never
+given an Overview equivalent since M4's Dash), and the dead
+taskbar-entry-click handler in `handle_input`. Every `match self.layout
+{ Taskbar => ..., Overview => ... }` across the shell collapsed to its
+Overview branch; the compiler's own `dead_code`/`unused_imports`
+warnings (with warnings denied, so nothing could be missed silently)
+found every orphaned constant and function this left behind in
+`tokens.rs` and `textures.rs` (`START_WIDTH`, `START_LABEL`,
+`START_ICON*`, `ENTRY_X`/`ENTRY_WIDTH`/`ENTRY_GAP`/`ENTRY_CHARS`,
+`PANEL_X`/`PANEL_WIDTH`/`PANEL_TITLE`, and the launcher/taskbar texture
+types and their size constants). `main.rs`: ~4,640 -> ~3,793 lines.
+
+### Two real bugs found and fixed while deleting, not introduced by it
+
+Confirmed by reading, not assumed: `launcher_key` and `forward_pointer_
+move` still referenced the now-deleted `panel_area()` directly instead
+of `overview_area()`. `panel_area()` had always returned empty once
+Overview became the default back in M2 (it only applied to the Taskbar
+branch), so these were **pre-existing bugs that predate this cutover**:
+`launcher_key`'s dirty-area tracking returned an empty `Area` on every
+keystroke in the Overview layout (the search field still updated
+visually, just via the periodic idle-frame-clock catch-up rather than
+an immediate repaint -- not a correctness bug, just a latent one-frame-
+period lag never actually observed because it's imperceptible under
+test automation), and `forward_pointer_move`'s "don't forward pointer
+motion to a window under a floating panel" check never covered the
+Overview overview at all. Both fixed by substituting `overview_area()`
+-- the cutover's forced review of every `panel_area()` caller is what
+surfaced these, not something that would have been found by grepping
+for the literal string "ShellLayout".
+
+### One new shared helper
+
+The five sites validating or clamping window geometry against the
+screen's usable band (`open`, `resized`, `toggle_scale`,
+`drag_to_pointer`, `work_area`) each duplicated the same `(area_top,
+area_height)` -- or, for `work_area`, the equivalent `Frame` -- computed
+from `taskbar_top()` and `TASKBAR_HEIGHT`. Extracted one `usable_band(&self)
+-> (i32, i32)` method and had all five call it, rather than leaving five
+near-identical inline computations now that there's only one layout to
+compute them for.
+
+### Verification
+
+`cargo build`/`cargo clippy --target x86_64-unknown-none -- -D
+warnings`: zero warnings, not just zero errors. `scripts/test-desktop-
+qualification.py` at 1, 2, and 4 CPUs: all three reach the same point as
+every prior accepted run (sign-in, overview, launch, window-open,
+pointer, all four workspace switches), confirmed via serial log
+(`WovenFiles: window opened`/`window opened: Files` at every CPU count)
+and, at 1 CPU, three screenshots (`desktop-signed-in.ppm`,
+`activities-overview.ppm`, `files-window-open.ppm`) visually identical
+to the pre-cutover baseline -- the `usable_band()` refactor placed the
+Files window correctly below the bar with no overlap or corruption, and
+the top bar/overview render exactly as before. All three CPU counts then
+hit the pre-existing `keyboard_refresh` flake, same as every prior run.
+Evidence: `audit-artifacts/desktop-qualification-{1793712148697202900
+(1 CPU), 1793712338867984900 (2 CPU), 1793712485560248100 (4 CPU)}/`.
+
+### What M7 still doesn't cover
+
+`CLAUDE-START-HERE.md`'s overhaul-scope paragraph (separate from the
+M1-M7 milestone table itself) also asks for every first-party app under
+`apps/` to adopt new visual tokens/chrome through `libwoven::ui`, and a
+new original wallpaper/icon asset set under `assets/`. Neither has
+started. Confirmed earlier this session (Phase 0 audit for the
+graphics-modernization mandate) that none of the 15 apps reference
+`libwoven::ui::Theme` dynamically -- each hardcodes its own local color
+constants -- so this is genuinely separate, large, per-app work with its
+own review and verification burden, not a side effect of the shell
+cutover. Not claimed done here.

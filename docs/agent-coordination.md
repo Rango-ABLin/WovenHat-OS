@@ -8419,9 +8419,39 @@ First fully-passing full-Windows-gate run this session. Evidence:
 `audit-artifacts/acceptance-20261103-141715-448/`. Recorded in
 `docs/stage-status.md`.
 
-M1-M6 confirmed not to have regressed any prior-stage acceptance. Next:
-planning (not yet executing) the M7 cutover -- making `--layout=overview`
-the hard default and removing the legacy taskbar code -- which is large
-and semi-irreversible, so it'll be scoped and checked in on before any
-deletion happens.
+M1-M6 confirmed not to have regressed any prior-stage acceptance.
+
+## Claude Code - M7 cutover executed and verified (2026-11-03)
+
+User confirmed to proceed after reviewing the plan. Removed `ShellLayout`,
+the `--layout` flag, `paint_taskbar_content`, `render_taskbar_3d`, the
+Taskbar-only launcher panel and its offscreen texture, and every
+`match self.layout` branch (collapsed to Overview, the only remaining
+layout); extracted a shared `usable_band()` helper replacing five
+duplicated window-placement computations. `main.rs` ~4,640 -> ~3,793
+lines. Build/Clippy both zero-warning (warnings denied, used
+deliberately to find every piece of now-dead code in `main.rs`,
+`tokens.rs`, and `textures.rs`).
+
+Found and fixed two real, pre-existing bugs while deleting
+`panel_area()` (not introduced by the cutover -- they existed since M2
+made Overview the default): `launcher_key` and `forward_pointer_move`
+still referenced `panel_area()` directly instead of `overview_area()`,
+so the overview's dirty-area tracking and pointer-forwarding exclusion
+were both silently wrong for the (already-default) Overview layout.
+Fixed by substituting `overview_area()` in both.
+
+QEMU-verified at 1/2/4 CPU: `scripts/test-desktop-qualification.py`
+reaches the same point as every prior accepted run at every CPU count,
+confirmed via serial log and (1 CPU) three screenshots visually
+identical to the pre-cutover baseline -- no regression. All three hit
+only the pre-existing `keyboard_refresh` flake, as always. Full
+writeup: `docs/graphics/overview-desktop-2026-11-03.md`.
+
+**Explicitly not done**: the 15-app visual-token overhaul and new
+wallpaper/icon assets `CLAUDE-START-HERE.md`'s overhaul-scope paragraph
+also asks for -- confirmed none of the 15 apps use `libwoven::ui::Theme`
+dynamically, so this is separate, large, per-app work with its own
+review burden. M7 is not claimed complete; only the layout-cutover
+portion is.
 

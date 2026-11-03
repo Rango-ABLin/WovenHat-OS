@@ -158,10 +158,7 @@ use tokens::*;
 mod geometry;
 use geometry::{Area, Dirty};
 mod textures;
-use textures::{
-    CENTER_TEXTURE, LAUNCHER_PANEL_TEXTURE, QS_PANEL_TEXTURE, TASKBAR_TEXTURE, TILE,
-    TILE_DEPTH_3D, TOAST_TEXTURE,
-};
+use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXTURE};
 
 /// The first desktop release keeps a small, curated set of shortcuts visible
 /// so the desktop feels useful before the launcher is opened. The catalog
@@ -175,7 +172,7 @@ const DESKTOP_ICON_STEP: i32 = 76;
 const DESKTOP_ICON_SIZE: i32 = 32;
 
 mod icons;
-use icons::{app_icon, draw_app_icon, AppIcon};
+use icons::{app_icon, draw_app_icon};
 
 /// Notifications remembered for the Notification Center.
 const MAX_NOTES: usize = 8;
@@ -478,15 +475,6 @@ use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
 mod painter;
 use painter::Painter;
 
-/// Which chrome the shell draws: the legacy bottom taskbar, or the new
-/// WovenHat Overview top bar. Overview is the default; `--layout=taskbar`
-/// is the explicit rollback path kept until M7 removes the legacy chrome.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ShellLayout {
-    Taskbar,
-    Overview,
-}
-
 /// The Overview top bar's "Activities" button label. Opens the Activities
 /// overview (M3): search, this workspace's window cards, and the app grid.
 const ACTIVITIES_LABEL: &str = "Activities";
@@ -494,11 +482,7 @@ const ACTIVITIES_LABEL: &str = "Activities";
 const ACTIVITIES_PADDING: i32 = 10;
 
 /// Activities overview layout (M3). Reuses `launcher_open`/`query`/
-/// `selected`/`filtered()` as its shared search/selection state -- the
-/// Taskbar layout's small launcher panel and the Overview layout's
-/// full-screen overview are two presentations of the same state, never
-/// both open at once (`panel_area`/`overview_area` are mutually exclusive
-/// on `self.layout`).
+/// `selected`/`filtered()` as its shared search/selection state.
 const OVERVIEW_MARGIN: i32 = 16;
 const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 8;
 const OVERVIEW_THUMB_ROW_HEIGHT: i32 = 90;
@@ -519,8 +503,6 @@ const OVERVIEW_DASH_ROW_HEIGHT: i32 = OVERVIEW_DASH_ICON;
 const DASH_MAX: usize = 8;
 
 struct Desktop {
-    /// Which chrome to draw and hit-test: see [`ShellLayout`].
-    layout: ShellLayout,
     /// The primary monitor's width; the taskbar spans it.
     width: i32,
     /// The whole desktop's width, across every monitor.
@@ -615,8 +597,6 @@ struct Desktop {
 impl Desktop {
     /// The state before `main` fills in the display, options and catalog.
     const INITIAL: Desktop = Desktop {
-        // Overview is the new default; `--layout=taskbar` switches this.
-        layout: ShellLayout::Overview,
         width: 0,
         desktop_width: 0,
         height: 0,
@@ -693,16 +673,27 @@ impl Desktop {
             .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
     }
 
+    /// The Overview top bar sits flush at the top of the screen. Kept as a
+    /// function (always 0) rather than inlined at every call site: M7
+    /// removed the Taskbar layout this distinguished, but callers still
+    /// read naturally as "the bar's top edge, plus N" either way.
     fn taskbar_top(&self) -> i32 {
-        match self.layout {
-            ShellLayout::Taskbar => self.height - TASKBAR_HEIGHT,
-            // The Overview top bar sits flush at the top of the screen.
-            ShellLayout::Overview => 0,
-        }
+        0
     }
 
     fn taskbar(&self) -> Area {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
+    }
+
+    /// The screen's usable band, excluding the top bar: `(top, height)`.
+    /// Shared by every window-placement/clamp site that needs to keep
+    /// windows clear of the bar (`work_area`, `open`, `resized`,
+    /// `toggle_scale`, `drag_to_pointer`).
+    fn usable_band(&self) -> (i32, i32) {
+        (
+            self.taskbar_top() + TASKBAR_HEIGHT,
+            self.height - TASKBAR_HEIGHT,
+        )
     }
 
     /// Row for taskbar text: seven glyph rows centred in the bar below its
@@ -711,18 +702,10 @@ impl Desktop {
         self.taskbar_top() + 9
     }
 
+    /// GNOME-style: centered in the top bar, not right-aligned.
     fn clock_area(&self) -> Area {
-        let x = match self.layout {
-            ShellLayout::Taskbar => self.width - CLOCK_WIDTH,
-            // GNOME-style: centered in the top bar, not right-aligned.
-            ShellLayout::Overview => (self.width - CLOCK_WIDTH) / 2,
-        };
+        let x = (self.width - CLOCK_WIDTH) / 2;
         Area::new(x, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
-    }
-
-    fn entry_area(&self, index: usize) -> Area {
-        let x = ENTRY_X + index as i32 * (ENTRY_WIDTH + ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, ENTRY_WIDTH, START_HEIGHT as i32)
     }
 
     fn tray_area(&self, index: usize) -> Area {
@@ -730,26 +713,16 @@ impl Desktop {
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
+    /// Centered, dropping down from the top bar (M4): the fixed
+    /// TOAST_MARGIN from the screen's own top edge alone would land the
+    /// toast under/behind the bar, since the bar occupies that band.
     fn toast_area(&self) -> Area {
-        match self.layout {
-            // Top-right, clear of the bottom taskbar (unchanged).
-            ShellLayout::Taskbar => Area::new(
-                self.width - TOAST_WIDTH - TOAST_MARGIN,
-                TOAST_MARGIN,
-                TOAST_WIDTH,
-                TOAST_HEIGHT,
-            ),
-            // Centered, dropping down from the top bar (M4): the fixed
-            // TOAST_MARGIN from the screen's own top edge would otherwise
-            // land the toast under/behind the bar, since the bar now
-            // occupies that band itself.
-            ShellLayout::Overview => Area::new(
-                (self.width - TOAST_WIDTH) / 2,
-                self.taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN,
-                TOAST_WIDTH,
-                TOAST_HEIGHT,
-            ),
-        }
+        Area::new(
+            (self.width - TOAST_WIDTH) / 2,
+            self.taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN,
+            TOAST_WIDTH,
+            TOAST_HEIGHT,
+        )
     }
 
     fn cursor_area(&self) -> Area {
@@ -800,65 +773,32 @@ impl Desktop {
         ]);
     }
 
+    /// Wide enough for the translated "Activities" label, whatever its
+    /// length in the active language.
     fn start_area(&self) -> Area {
-        let width = match self.layout {
-            ShellLayout::Taskbar => START_WIDTH as i32,
-            // Wide enough for the translated "Activities" label, whatever
-            // its length in the active language.
-            ShellLayout::Overview => {
-                let label = shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL);
-                font::text_width(label) as i32 + 2 * ACTIVITIES_PADDING
-            }
-        };
+        let label = shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL);
+        let width = font::text_width(label) as i32 + 2 * ACTIVITIES_PADDING;
         Area::new(START_X, self.taskbar_top() + 4, width, START_HEIGHT as i32)
     }
 
-    /// The launcher panel, sized to its rows, above the start button; empty
-    /// while closed.
-    /// The Taskbar layout's small launcher panel, above the Start button.
-    /// The Overview layout uses the full-screen `overview_area` instead
-    /// (M3); the two are mutually exclusive.
-    fn panel_area(&self) -> Area {
-        if !self.launcher_open || self.layout != ShellLayout::Taskbar {
-            return Area::new(0, 0, 0, 0);
-        }
-        let rows = 2 + self.filtered().1.max(1) as i32;
-        let height = rows * PANEL_ROW + 2;
-        let y = self.taskbar_top() - 2 - height;
-        Area::new(PANEL_X, y, PANEL_WIDTH, height)
-    }
 
     /// The perspective card can leave a few pixels outside its flat source
     /// rectangle at the receded top corners. Include that halo in damage so
     /// closing or filtering the launcher cannot leave an old projected edge
     /// on the wallpaper.
+    /// The Overview's full-screen overview isn't a 3D-projected card (see
+    /// `render_desktop`'s documented flat-only limitation for this chrome),
+    /// so it needs no projection halo -- unlike the legacy taskbar
+    /// launcher panel this once also covered, removed in M7.
     fn panel_damage_area(&self) -> Area {
-        let panel = self.panel_area();
-        let mut dirty = if panel.is_empty() {
-            panel
-        } else {
-            panel
-                .union(Area::new(
-                    panel.x - 24,
-                    panel.y - 24,
-                    panel.width + 48,
-                    panel.height + 28,
-                ))
-                .intersect(self.screen())
-        };
-        // The Overview layout's full-screen overview isn't a 3D-projected
-        // card (see `render_desktop`'s documented flat-only limitation for
-        // the new chrome), so it needs no projection halo.
-        dirty = dirty.union(self.overview_area());
-        dirty
+        self.overview_area()
     }
 
     /// The Activities overview (M3): search, this workspace's window
-    /// cards, and the app grid, filling the screen below the Overview top
-    /// bar. Empty unless the Overview layout's launcher is open -- the
-    /// Taskbar layout always uses the small `panel_area` instead.
+    /// cards, and the app grid, filling the screen below the top bar.
+    /// Empty unless the launcher is open.
     fn overview_area(&self) -> Area {
-        if !self.launcher_open || self.layout != ShellLayout::Overview {
+        if !self.launcher_open {
             return Area::new(0, 0, 0, 0);
         }
         Area::new(
@@ -971,169 +911,6 @@ impl Desktop {
         )
     }
 
-    /// The panel's overlay: border, title row, selection and text, drawn at
-    /// `area`'s own position in `canvas`. Used both for the ordinary flat
-    /// 2D panel and, rendered once at local origin into an offscreen
-    /// texture, as the source the 3D mode's perspective projection samples.
-    /// Its background is blended separately, so what lies beneath shows
-    /// through.
-    fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
-        let (x, y) = (area.x, area.y);
-        let inner = (area.width - 2) as usize;
-        // Rounded, near-opaque card, matching the lock screen, Quick
-        // Settings and Notification Center chrome, instead of a hard-edged
-        // square outline with a flat header block.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
-        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_accent());
-        canvas.fill_rect(
-            x + CHROME_RADIUS as i32,
-            y + PANEL_ROW,
-            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
-            1,
-            theme_accent(),
-        );
-
-        let mut search = [0u8; MAX_QUERY + 3];
-        search[..2].copy_from_slice(b"> ");
-        search[2..2 + self.query_length].copy_from_slice(&self.query[..self.query_length]);
-        search[2 + self.query_length] = b'_';
-        let text = core::str::from_utf8(&search[..3 + self.query_length]).unwrap_or("");
-        canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, text, theme_text());
-
-        let (found, count) = self.filtered();
-        if count == 0 {
-            canvas.draw_text(x + 6, y + 1 + 2 * PANEL_ROW + 4, "No matches", theme_text());
-        }
-        for (row, &index) in found[..count].iter().enumerate() {
-            let Some(app) = &self.apps[index] else {
-                continue;
-            };
-            let row_y = y + 1 + (2 + row as i32) * PANEL_ROW;
-            if row == self.selected {
-                fill_rounded(
-                    canvas,
-                    Area::new(x + 2, row_y, inner as i32 - 2, PANEL_ROW),
-                    CHROME_RADIUS_SMALL,
-                    theme_entry(true),
-                );
-            }
-            draw_app_icon(
-                canvas,
-                x + 4,
-                row_y + 1,
-                app_icon(app.name()),
-                12,
-                row == self.selected,
-            );
-            let text = core::str::from_utf8(app.name()).unwrap_or("?");
-            canvas.draw_text(x + 22, row_y + 4, text, theme_text());
-        }
-    }
-
-    fn render_panel(&self, canvas: &mut Canvas<'_>) {
-        // Keep launcher text and icons crisp in the foreground. The desktop,
-        // taskbar, title bars, and wallpaper retain their 3D presentation;
-        // this card intentionally follows the taskbar's readable-surface
-        // treatment instead of perspective-compressing bitmap glyphs.
-        self.paint_panel_content(canvas, self.panel_area());
-    }
-
-    /// The launcher panel, perspective-projected as a card tilted back in
-    /// 3D (its bottom edge stays put; its top edge recedes and narrows)
-    /// instead of blitted flat. Same technique as
-    /// [`Self::render_qs_3d`]: the flat content is rendered once into
-    /// `LAUNCHER_PANEL_TEXTURE` at local origin, then sampled by two
-    /// `textured_triangle_3d` calls per tile `canvas` this is invoked for.
-    #[allow(dead_code)]
-    fn render_panel_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let texture_pixels = unsafe { &mut *LAUNCHER_PANEL_TEXTURE.0.get() };
-        let Some(mut texture) = Canvas::new(
-            texture_pixels,
-            0,
-            0,
-            area.width as usize,
-            area.height as usize,
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        // The content painter intentionally draws only the panel's visible
-        // overlay pixels because the flat path starts from a transparent
-        // keyed canvas.  The 3D source texture is persistent scratch storage,
-        // so seed its active footprint with the translucent panel background
-        // before every repaint or a prior selection/glyph can leak into the
-        // next projected frame.
-        texture.shade(|x, y| {
-            blend(
-                theme_panel(),
-                wallpaper(area.x + x, area.y + y, self.height),
-                PANEL_OPACITY,
-            )
-        });
-        self.paint_panel_content(&mut texture, Area::new(0, 0, area.width, area.height));
-        // The projected quad is narrower than the flat panel's footprint at
-        // its receded top edge, so the corners it no longer covers still
-        // need the real desktop background rather than whatever this
-        // tile's shared scratch buffer held. Painted before the depth
-        // buffer below is (re-)cleared: `render_desktop_background` clears
-        // and uses that same shared buffer for its own projection, so
-        // calling it after this function's own clear would corrupt the
-        // depth test this function's own triangles depend on.
-        self.render_desktop_background(canvas);
-
-        let half_width = (area.width / 2) << 16;
-        let half_height = ((area.height - 1) << 16) / 2;
-        const DISTANCE: i32 = 200 << 16;
-        const TILT_DEPTH: i32 = 70 << 16;
-        let camera = Camera::new(
-            DISTANCE,
-            DISTANCE,
-            area.x + area.width / 2,
-            area.y + area.height / 2,
-        );
-        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
-            camera.project(-half_width, -half_height, TILT_DEPTH),
-            camera.project(half_width, -half_height, TILT_DEPTH),
-            camera.project(-half_width, half_height, 0),
-            camera.project(half_width, half_height, 0),
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        let vertex =
-            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
-
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) = DepthBuffer::new(
-            depth_values,
-            canvas.x(),
-            canvas.y(),
-            canvas.width(),
-            canvas.height(),
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        depth.clear(u16::MAX);
-        let mut renderer = Renderer::new(canvas);
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_left, 0, 0),
-            vertex(top_right, 255, 0),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_right, 255, 0),
-            vertex(bottom_right, 255, 255),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-    }
-
     /// Open or close the launcher. Returns the area to repaint.
     fn toggle_launcher(&mut self) -> Area {
         let closing = self.launcher_open;
@@ -1201,7 +978,7 @@ impl Desktop {
 
     /// Keys while the launcher is open edit the search and choose.
     fn launcher_key(&mut self, key: Key) -> Area {
-        let before = self.panel_area();
+        let before = self.overview_area();
         match key {
             Key::Char(character) if (' '..='~').contains(&character) => {
                 if self.query_length < MAX_QUERY {
@@ -1232,7 +1009,7 @@ impl Desktop {
             // Tiling waits until the launcher closes.
             Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
         }
-        before.union(self.panel_area())
+        before.union(self.overview_area())
     }
 
     /// Reap launched applications that have exited.
@@ -1439,26 +1216,12 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        match self.layout {
-            ShellLayout::Taskbar => {
-                if self.three_d {
-                    self.render_taskbar_3d(canvas);
-                }
-                // Taskbar preparation may restore its backdrop; shortcuts
-                // belong above the wallpaper and must not be erased by that
-                // preparation.
-                self.paint_desktop_icons(canvas);
-                self.paint_taskbar_content(canvas);
-            }
-            ShellLayout::Overview => {
-                // The Overview top bar does not yet have a 3D perspective
-                // presentation (unlike the legacy taskbar's render_taskbar_3d):
-                // it always renders flat for now. Documented, not faked --
-                // see docs/graphics/overview-desktop-2026-11-03.md.
-                self.paint_desktop_icons(canvas);
-                self.paint_top_bar_content(canvas);
-            }
-        }
+        // The top bar does not yet have a 3D perspective presentation
+        // (unlike the legacy taskbar's render_taskbar_3d, removed in M7):
+        // it always renders flat for now. Documented, not faked -- see
+        // docs/graphics/overview-desktop-2026-11-03.md.
+        self.paint_desktop_icons(canvas);
+        self.paint_top_bar_content(canvas);
     }
 
     /// The Overview top bar's content: its translucent fill and bottom
@@ -1665,219 +1428,6 @@ impl Desktop {
         }
     }
 
-    /// The taskbar's content -- its translucent fill, accent top border,
-    /// start button, window entries, clock, workspace switcher, account
-    /// name, Quick Settings button, and unread badge -- drawn at its own
-    /// real screen position in `canvas`. Used both for the ordinary flat
-    /// 2D taskbar and, rendered once into an offscreen texture at that same
-    /// position (so every `self.taskbar_top()`-based Area in here lands in
-    /// the texture exactly where it would on screen), as the source the 3D
-    /// mode's perspective projection samples.
-    fn paint_taskbar_content(&self, canvas: &mut Canvas<'_>) {
-        let top = self.taskbar_top();
-        let width = self.width as usize;
-        let height = self.height;
-        // This painter also receives desktop tiles above the taskbar. Shade
-        // only the bar's backdrop, preserving shortcuts and avoiding duplicate
-        // full-tile wallpaper work during every pointer/window repaint.
-        let left = canvas.x().max(0);
-        let right = (canvas.x() + canvas.width() as i32).min(self.width);
-        let first_row = canvas.y().max(top);
-        let last_row = (canvas.y() + canvas.height() as i32).min(height);
-        for y in first_row..last_row {
-            for x in left..right {
-                canvas.set(x, y, wallpaper(x, y, height));
-            }
-        }
-        canvas.blend_rect(
-            0,
-            top,
-            width,
-            TASKBAR_HEIGHT as usize,
-            theme_taskbar(),
-            TASKBAR_OPACITY,
-        );
-        canvas.fill_rect(0, top, width, 1, theme_accent());
-
-        // The taskbar band itself stays flat and full-width (rounding a
-        // screen-edge-spanning bar would look wrong); only the self-contained
-        // Start button gets the rounded chrome treatment. A subtle top-lit
-        // gradient, matching the window title bars, reads less flat than a
-        // single fill colour.
-        let start_area = Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32);
-        let start_fill = theme_start_fill();
-        Renderer::new(canvas).rounded_rect_gradient(
-            rect_of(start_area),
-            CHROME_RADIUS,
-            color_of(lighten(start_fill, 24)),
-            color_of(start_fill),
-        );
-        let icon_x = START_X + START_ICON_MARGIN;
-        let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
-        for (row, line) in START_ICON.iter().enumerate() {
-            for (column, cell) in line.iter().enumerate() {
-                let color = match cell {
-                    b'A' => START_ICON_A,
-                    b'D' => START_ICON_D,
-                    _ => continue,
-                };
-                canvas.set(icon_x + column as i32, icon_y + row as i32, color);
-            }
-        }
-        let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
-        canvas.draw_text(label_x, self.text_y(), START_LABEL, theme_text());
-
-        let focused = self.focused();
-        for (index, (slot, window)) in self.entries().enumerate() {
-            let area = self.entry_area(index);
-            let fill = theme_entry(Some(slot) == focused);
-            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
-            let mut buffer = [0u8; 32];
-            let length = label(
-                &window.title[..window.title_length],
-                ENTRY_CHARS,
-                &mut buffer,
-            );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(area.x + 4, self.text_y(), text, theme_text());
-        }
-
-        let (bytes, length) = clock_text(self.time, self.seconds);
-        let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-        let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
-        canvas.draw_text(clock_x, self.text_y(), text, theme_text());
-
-        // The workspace switcher, left of the Quick Settings button.
-        for index in 0..WORKSPACES {
-            let area = self.workspace_area(index);
-            let fill = theme_entry(index == self.workspace);
-            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
-            let digit = [b'1' + index as u8];
-            canvas.draw_text(
-                area.x + 3,
-                self.text_y(),
-                core::str::from_utf8(&digit).unwrap_or("?"),
-                theme_text(),
-            );
-        }
-
-        // The signed-in account's name, left of the workspace switcher.
-        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
-            let name = core::str::from_utf8(account.name()).unwrap_or("?");
-            let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
-            canvas.draw_text(x, self.text_y(), name, theme_text());
-        }
-
-        // The Quick Settings button.
-        let button = self.qs_button();
-        let fill = theme_entry(self.qs_open);
-        fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
-        canvas.draw_text(button.x + 5, self.text_y(), "Q", theme_text());
-
-        // The unread badge, just left of the clock: a count up to 9.
-        if self.unread > 0 {
-            let badge = self.badge_area();
-            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
-            let digit = [b'0' + self.unread.min(9) as u8];
-            canvas.draw_text(
-                badge.x + 3,
-                badge.y + 2,
-                core::str::from_utf8(&digit).unwrap_or("?"),
-                theme_text(),
-            );
-        }
-    }
-
-    /// The taskbar, perspective-projected as a card tilted back in 3D (its
-    /// bottom edge -- the bottom of the screen -- stays put; its top edge
-    /// recedes and narrows slightly, a shallower tilt than the desktop
-    /// floor since it is a much thinner strip) instead of blitted flat.
-    /// The flat content is rendered once into `TASKBAR_TEXTURE` at the
-    /// taskbar's own real position (see [`Self::paint_taskbar_content`]),
-    /// then sampled by two `textured_triangle_3d` calls per tile `canvas`
-    /// this is invoked for.
-    fn render_taskbar_3d(&self, canvas: &mut Canvas<'_>) {
-        let top = self.taskbar_top();
-        if canvas.y() + canvas.height() as i32 <= top || canvas.y() >= self.height {
-            return;
-        }
-        let width = self.width;
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let texture_pixels = unsafe { &mut *TASKBAR_TEXTURE.0.get() };
-        let Some(mut texture) = Canvas::new(
-            texture_pixels,
-            0,
-            top,
-            width as usize,
-            TASKBAR_HEIGHT as usize,
-        ) else {
-            return self.paint_taskbar_content(canvas);
-        };
-        self.paint_taskbar_content(&mut texture);
-        // The projected quad is narrower than the flat taskbar's footprint
-        // at its receded top edge, so the sliver it no longer covers still
-        // needs the real desktop background (itself 3D-projected, since 3D
-        // mode is already on here) rather than stale tile content. Painted
-        // before the depth buffer below is (re-)cleared:
-        // `render_desktop_background` clears and uses that same shared
-        // buffer for its own projection, so calling it after this
-        // function's own clear would corrupt the depth test this
-        // function's own triangles depend on.
-        self.render_desktop_background(canvas);
-
-        let half_width = (width / 2) << 16;
-        let half_height = ((TASKBAR_HEIGHT - 1) << 16) / 2;
-        const DISTANCE: i32 = 200 << 16;
-        const TILT_DEPTH: i32 = 30 << 16;
-        // Keep the taskbar's receded edge attached to the full primary
-        // monitor width. Perspective would otherwise pull the top corners
-        // inward, leaving the outer taskbar pixels uncovered. The 23/20
-        // compensation is the exact inverse of DISTANCE/(DISTANCE+depth)
-        // for this fixed 30-on-200 tilt, while retaining the depth gradient.
-        let top_half_width = half_width.saturating_mul(23) / 20;
-        let camera = Camera::new(DISTANCE, DISTANCE, width / 2, top + TASKBAR_HEIGHT / 2);
-        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
-            camera.project(-top_half_width, -half_height, TILT_DEPTH),
-            camera.project(top_half_width, -half_height, TILT_DEPTH),
-            camera.project(-half_width, half_height, 0),
-            camera.project(half_width, half_height, 0),
-        ) else {
-            return self.paint_taskbar_content(canvas);
-        };
-        let vertex =
-            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
-
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) = DepthBuffer::new(
-            depth_values,
-            canvas.x(),
-            canvas.y(),
-            canvas.width(),
-            canvas.height(),
-        ) else {
-            return self.paint_taskbar_content(canvas);
-        };
-        depth.clear(u16::MAX);
-        let mut renderer = Renderer::new(canvas);
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_left, 0, 0),
-            vertex(top_right, 255, 0),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_right, 255, 0),
-            vertex(bottom_right, 255, 255),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-    }
-
     /// The Quick Settings button, left of the tray's last icon slot.
     fn qs_button(&self) -> Area {
         let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
@@ -1891,10 +1441,7 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
-        let y = match self.layout {
-            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
-            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
-        };
+        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
         Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
@@ -2586,15 +2133,7 @@ impl Desktop {
             self.desktop_width
         };
         self.height = info.height as i32;
-        // See `open`'s identical `(area_top, area_height)` computation: the
-        // usable band's bounds, excluding the bar wherever it sits.
-        let (area_top, area_height) = match self.layout {
-            ShellLayout::Taskbar => (0, self.taskbar_top()),
-            ShellLayout::Overview => (
-                self.taskbar_top() + TASKBAR_HEIGHT,
-                self.height - TASKBAR_HEIGHT,
-            ),
-        };
+        let (area_top, area_height) = self.usable_band();
         for window in self.windows.iter_mut().flatten() {
             window.x = window
                 .x
@@ -2621,26 +2160,19 @@ impl Desktop {
     fn badge_area(&self) -> Area {
         let (_, length) = clock_text(self.time, self.seconds);
         let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
-        let clock_x = match self.layout {
-            ShellLayout::Taskbar => self.width - CLOCK_MARGIN - clock_width,
-            ShellLayout::Overview => (self.width - clock_width) / 2,
-        };
+        let clock_x = (self.width - clock_width) / 2;
         Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
     }
 
-    /// The Notification Center, sized to its rows, above the taskbar's right
-    /// end; empty while closed.
+    /// The Notification Center, sized to its rows, drops down from the
+    /// clock, calendar/notification-popover style; empty while closed.
     fn center_area(&self) -> Area {
         if !self.center_open {
             return Area::new(0, 0, 0, 0);
         }
         let count = self.notes.iter().flatten().count();
         let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
-        let y = match self.layout {
-            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
-            // Drops down from the clock, calendar/notification-popover style.
-            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
-        };
+        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
         Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
@@ -3133,15 +2665,8 @@ impl Desktop {
 
         let focused = self.focused();
         // Windows may sit on any monitor; only the bar's own band is excluded.
-        let above_taskbar = match self.layout {
-            ShellLayout::Taskbar => Area::new(0, 0, self.desktop_width, self.taskbar_top()),
-            ShellLayout::Overview => Area::new(
-                0,
-                self.taskbar_top() + TASKBAR_HEIGHT,
-                self.desktop_width,
-                self.height - TASKBAR_HEIGHT,
-            ),
-        };
+        let (band_top, band_height) = self.usable_band();
+        let above_taskbar = Area::new(0, band_top, self.desktop_width, band_height);
         for &slot in &self.stack[..self.stacked] {
             let Some(window) = &self.windows[slot] else {
                 continue;
@@ -3214,12 +2739,6 @@ impl Desktop {
             }
         }
 
-        let panel = self.panel_area().intersect(area);
-        if !panel.is_empty() {
-            painter.blend(panel, theme_panel(), PANEL_OPACITY);
-            painter.overlay(panel, |canvas| self.render_panel(canvas));
-        }
-
         let overview = self.overview_area().intersect(area);
         if !overview.is_empty() {
             // The M5 fade-in attempt (a single draw_blended pass at the
@@ -3286,20 +2805,10 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
-        // The screen's usable band, excluding the bar wherever it sits:
-        // `area_top` is its top edge, `area_height` its height. For the
-        // bottom taskbar this is (0, taskbar_top()); for the Overview top
-        // bar it is (taskbar_top() + TASKBAR_HEIGHT, height - TASKBAR_HEIGHT).
-        // `work_area()` expresses the same region as a `Frame`; computed
-        // again here as plain bounds since that's what this validation and
-        // placement arithmetic need.
-        let (area_top, area_height) = match self.layout {
-            ShellLayout::Taskbar => (0, self.taskbar_top()),
-            ShellLayout::Overview => (
-                self.taskbar_top() + TASKBAR_HEIGHT,
-                self.height - TASKBAR_HEIGHT,
-            ),
-        };
+        // `work_area()` expresses the same usable band as a `Frame`;
+        // `usable_band()` gives it as plain bounds, what this validation
+        // and placement arithmetic need.
+        let (area_top, area_height) = self.usable_band();
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
             || !(1..=area_height - TITLE_HEIGHT).contains(&height)
@@ -3364,15 +2873,8 @@ impl Desktop {
 
     /// Where windows may go: the screen above the taskbar.
     fn work_area(&self) -> Frame {
-        match self.layout {
-            ShellLayout::Taskbar => Frame::new(0, 0, self.width, self.taskbar_top()),
-            ShellLayout::Overview => Frame::new(
-                0,
-                self.taskbar_top() + TASKBAR_HEIGHT,
-                self.width,
-                self.height - TASKBAR_HEIGHT,
-            ),
-        }
+        let (top, height) = self.usable_band();
+        Frame::new(0, top, self.width, height)
     }
 
     /// Put window `slot` in `frame`, title bar included: move it now, and if
@@ -3427,12 +2929,7 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
-        // See `open`'s identical `area_height` computation: the usable
-        // band's height, excluding the bar wherever it sits.
-        let area_height = match self.layout {
-            ShellLayout::Taskbar => self.taskbar_top(),
-            ShellLayout::Overview => self.height - TASKBAR_HEIGHT,
-        };
+        let (_, area_height) = self.usable_band();
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
             || !(1..=area_height - TITLE_HEIGHT).contains(&height)
@@ -3690,21 +3187,7 @@ impl Desktop {
                     }
                     return empty;
                 }
-                if self.launcher_open && self.layout == ShellLayout::Taskbar {
-                    // A click on an application launches it; anywhere else
-                    // outside the panel closes the launcher.
-                    let panel = self.panel_area();
-                    if !panel.contains(x, y) {
-                        return self.toggle_launcher();
-                    }
-                    let row = (y - panel.y - 1) / PANEL_ROW - 2;
-                    let (found, count) = self.filtered();
-                    if row >= 0 && (row as usize) < count {
-                        return self.launch(found[row as usize]);
-                    }
-                    return empty;
-                }
-                if self.launcher_open && self.layout == ShellLayout::Overview {
+                if self.launcher_open {
                     // Anywhere outside the overview closes it.
                     let overview = self.overview_area();
                     if !overview.contains(x, y) {
@@ -3754,22 +3237,6 @@ impl Desktop {
                         return self.launch(app_index);
                     }
                     return empty;
-                }
-                // A taskbar entry focuses its window. The Overview top bar
-                // does not show a per-window entry list yet (M4 adds the
-                // equivalent dash/switcher); skip this hit test there so a
-                // window's unused legacy entry_area (which still inherits
-                // the bar's new top position) cannot shadow a click on the
-                // real top bar controls occupying that same space.
-                if self.layout == ShellLayout::Taskbar {
-                    let entry = self
-                        .entries()
-                        .enumerate()
-                        .find(|(index, _)| self.entry_area(*index).contains(x, y))
-                        .map(|(_, (slot, _))| slot);
-                    if let Some(slot) = entry {
-                        return self.focus(slot);
-                    }
                 }
                 // Desktop shortcuts are below windows in the visual stack;
                 // only activate one when no window frame covers the click.
@@ -3911,7 +3378,7 @@ impl Desktop {
         });
         let slot = if let Some(slot) = captured {
             Some(slot)
-        } else if self.panel_area().contains(x, y)
+        } else if self.overview_area().contains(x, y)
             || self.qs_area().contains(x, y)
             || self.center_area().contains(x, y)
         {
@@ -3959,16 +3426,8 @@ impl Desktop {
         let Some((slot, grab_x, grab_y)) = self.drag else {
             return empty;
         };
-        // See `open`'s identical `(area_top, area_height)` computation: the
-        // usable band's bounds, excluding the bar wherever it sits.
         // Computed before borrowing `window` mutably below.
-        let (area_top, area_height) = match self.layout {
-            ShellLayout::Taskbar => (0, self.taskbar_top()),
-            ShellLayout::Overview => (
-                self.taskbar_top() + TASKBAR_HEIGHT,
-                self.height - TASKBAR_HEIGHT,
-            ),
-        };
+        let (area_top, area_height) = self.usable_band();
         let desktop_width = self.desktop_width;
         let pointer = self.pointer;
         let Some(window) = self.windows[slot].as_mut() else {
@@ -4189,14 +3648,6 @@ fn main(args: Args) -> ! {
                 if desktop.accounts.iter().all(Option::is_none) {
                     fail(9);
                 }
-            }
-            b"--layout" => {
-                index += 1;
-                desktop.layout = match args.get(index) {
-                    Some(b"taskbar") => ShellLayout::Taskbar,
-                    Some(b"overview") => ShellLayout::Overview,
-                    _ => fail(1),
-                };
             }
             _ => fail(1),
         }

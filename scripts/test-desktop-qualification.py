@@ -490,15 +490,16 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
 
             launch_started = time.monotonic()
             qmp.key("f1", 90)
-            # Overview journey (M3): F1 opens the Activities overview on
-            # the default --layout=overview; capture it before typing so
-            # the search field, window cards and app grid are visible,
-            # unfiltered. Same screenshot call works unchanged for
-            # --layout=taskbar's small launcher panel. The shell's frame
-            # clock is up to 250ms while idle (see main.rs's module doc),
-            # so retry against the pre-F1 baseline rather than a fixed
-            # sleep, the same pattern the files-window-open capture below
-            # already uses.
+            # Overview journey (M3): F1 opens the Activities overview;
+            # capture it before typing so the search field, window cards
+            # and app grid are visible, unfiltered. (M7 removed the
+            # earlier --layout=taskbar/--layout=overview flag and the
+            # legacy taskbar chrome it selected between -- Overview is
+            # the only layout now.) The shell's frame clock is up to
+            # 250ms while idle (see main.rs's module doc), so retry
+            # against the pre-F1 baseline rather than a fixed sleep, the
+            # same pattern the files-window-open capture below already
+            # uses.
             _, _, pre_overview_pixels = parse_ppm(baseline)
             overview_frame = output / "activities-overview.ppm"
             capture_until_changed(

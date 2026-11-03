@@ -27,44 +27,16 @@ pub const TASKBAR: u32 = rgb(10, 18, 30);
 pub const TASKBAR_OPACITY: u8 = 216;
 pub const ACCENT: u32 = rgb(76, 190, 188);
 pub const START_X: i32 = 4;
-pub const START_WIDTH: usize = 44;
 pub const START_HEIGHT: usize = 16;
 pub const START_FILL: u32 = rgb(28, 115, 145);
-pub const START_LABEL: &str = "Woven";
-/// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
-/// crossing over and under. `A` is the strand that is on top, `D` the one
-/// beneath it; `.` is transparent (the button fill shows through).
-pub const START_ICON: [&[u8; 8]; 8] = [
-    b"AA..AA..",
-    b"AA..AA..",
-    b"..DD..DD",
-    b"..DD..DD",
-    b"AA..AA..",
-    b"AA..AA..",
-    b"..DD..DD",
-    b"..DD..DD",
-];
-pub const START_ICON_SIZE: i32 = 8;
-pub const START_ICON_A: u32 = rgb(235, 225, 190);
-pub const START_ICON_D: u32 = rgb(165, 125, 70);
-/// Left margin from the button's edge to the icon, chosen so it clears the
-/// background-fill sample point Stage 20.1's self-test reads at `(6, top+6)`.
-pub const START_ICON_MARGIN: i32 = 3;
-pub const START_ICON_GAP: i32 = 2;
 pub const TEXT: u32 = rgb(255, 255, 255);
 /// Clock text is right-aligned this far from the right edge.
 pub const CLOCK_MARGIN: i32 = 6;
 /// Room for the widest clock reading, `HH:MM:SS`, plus its margin.
 pub const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
 
-/// Taskbar window entries, left to right after the start button.
-pub const ENTRY_X: i32 = START_X + START_WIDTH as i32 + 8;
-pub const ENTRY_WIDTH: i32 = 80;
-pub const ENTRY_GAP: i32 = 4;
 pub const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
 pub const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
-/// Characters of a title that fit in an entry.
-pub const ENTRY_CHARS: usize = ((ENTRY_WIDTH - 8) / font::ADVANCE) as usize;
 
 /// Tray icons, right to left from the clock.
 pub const TRAY_ICON: i32 = 16;
@@ -125,12 +97,9 @@ pub const MAX_EXEC: usize = 96;
 pub const MAX_QUERY: usize = 16;
 pub const MAX_CHILDREN: usize = 32;
 
-pub const PANEL_X: i32 = 4;
-pub const PANEL_WIDTH: i32 = 160;
 pub const PANEL_ROW: i32 = 14;
 pub const PANEL_FILL: u32 = rgb(28, 32, 44);
 pub const PANEL_OPACITY: u8 = 216;
-pub const PANEL_TITLE: &str = "WovenStart";
 
 pub static THEME_MODE: AtomicU8 = AtomicU8::new(0);
 

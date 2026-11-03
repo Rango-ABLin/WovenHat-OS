@@ -1,5 +1,45 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M7 cutover) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP OVERHAUL NOT STARTED
+
+M7's layout-cutover-and-verification half is done: removed the
+`ShellLayout` enum, the `--layout` CLI flag, `paint_taskbar_content`,
+`render_taskbar_3d`, the Taskbar-only small launcher panel and its
+offscreen texture, and every `match self.layout` branch across the shell
+(`taskbar_top`, `clock_area`, `badge_area`, `start_area`, `panel_area`
+[deleted], `qs_area`, `center_area`, `work_area`, `toast_area`,
+`render_desktop`, `open`, `resized`, `toggle_scale`, `drag_to_pointer`,
+`repaint_once`'s shadow-exclusion band, and the dead taskbar-entry-click
+handler in `handle_input`). The five duplicated `(area_top, area_height)`
+window-placement computations collapsed into one new `usable_band()`
+helper. `apps/woven-shell/src/main.rs` went from ~4,640 to ~3,793 lines;
+`cargo build`/`cargo clippy --target x86_64-unknown-none -- -D warnings`
+both clean with zero warnings (not just zero errors -- the compiler's own
+dead-code warnings were used to find every orphaned function/constant
+this removal left behind, including in `tokens.rs` and `textures.rs`).
+
+QEMU-verified at 1, 2, and 4 CPUs: `scripts/test-desktop-
+qualification.py` reaches the same point as every prior accepted run
+(sign-in, overview capture, launch, window-open, pointer, all four
+workspace switches), confirmed via serial log and three screenshots
+(desktop, Files window, Activities overview) visually identical to the
+pre-cutover baseline -- no regression from the removal or the
+`usable_band()` refactor -- then hits the pre-existing `keyboard_refresh`
+flake at every CPU count, same as always. M7's "full RUN-STAGE10.7.ps1
+Windows gate plus desktop journeys on 1/2/4 CPUs" requirement is now
+satisfied for the shell-code-removal scope specifically (the Windows
+gate itself passed earlier today, see below).
+
+**Not done, explicitly**: the 15-app visual-token overhaul ("update
+every first-party app... to the new visual tokens, window chrome and
+keyboard conventions") and the new original wallpaper/icon asset set
+under `assets/` that `CLAUDE-START-HERE.md`'s overhaul-scope paragraph
+also asks for. Confirmed earlier this session that none of the 15 apps
+reference `libwoven::ui::Theme` dynamically (each hardcodes its own
+local colors), so this is genuinely separate, large, per-app work, not
+a side effect of the shell cutover. M7 is not being claimed complete;
+only the layout-cutover-and-verification portion is.
+
 ## Full Stage 10.7 Windows gate - 2026-11-03 - PASSED
 
 `RUN-STAGE10.7.ps1` (host unittest discovery, host Clippy lint, the full
