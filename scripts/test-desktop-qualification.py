@@ -489,7 +489,24 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             screenshots.append(baseline.name)
 
             launch_started = time.monotonic()
-            for key in ("f1", "f", "i", "l", "e", "s", "ret"):
+            qmp.key("f1", 90)
+            # Overview journey (M3): F1 opens the Activities overview on
+            # the default --layout=overview; capture it before typing so
+            # the search field, window cards and app grid are visible,
+            # unfiltered. Same screenshot call works unchanged for
+            # --layout=taskbar's small launcher panel. The shell's frame
+            # clock is up to 250ms while idle (see main.rs's module doc),
+            # so retry against the pre-F1 baseline rather than a fixed
+            # sleep, the same pattern the files-window-open capture below
+            # already uses.
+            _, _, pre_overview_pixels = parse_ppm(baseline)
+            overview_frame = output / "activities-overview.ppm"
+            capture_until_changed(
+                qmp, overview_frame, pre_overview_pixels, time.monotonic() + args.frame_timeout,
+                timings, "overview", 1000
+            )
+            screenshots.append(overview_frame.name)
+            for key in ("f", "i", "l", "e", "s", "ret"):
                 qmp.key(key, 90)
                 time.sleep(0.12)
             wait_marker(serial, "WovenFiles: window opened", launch_started + args.input_timeout,

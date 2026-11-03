@@ -475,12 +475,27 @@ enum ShellLayout {
     Overview,
 }
 
-/// The Overview top bar's "Activities" button label (stands in for the
-/// full Activities overview, which lands in M3; for now it opens the same
-/// launcher panel the legacy `WovenStart`/F1 button does).
+/// The Overview top bar's "Activities" button label. Opens the Activities
+/// overview (M3): search, this workspace's window cards, and the app grid.
 const ACTIVITIES_LABEL: &str = "Activities";
 /// Horizontal padding inside the Activities button, each side.
 const ACTIVITIES_PADDING: i32 = 10;
+
+/// Activities overview layout (M3). Reuses `launcher_open`/`query`/
+/// `selected`/`filtered()` as its shared search/selection state -- the
+/// Taskbar layout's small launcher panel and the Overview layout's
+/// full-screen overview are two presentations of the same state, never
+/// both open at once (`panel_area`/`overview_area` are mutually exclusive
+/// on `self.layout`).
+const OVERVIEW_MARGIN: i32 = 16;
+const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 8;
+const OVERVIEW_THUMB_ROW_HEIGHT: i32 = 90;
+const OVERVIEW_THUMB_WIDTH: i32 = 140;
+const OVERVIEW_THUMB_HEIGHT: i32 = 74;
+const OVERVIEW_THUMB_GAP: i32 = 10;
+const OVERVIEW_CELL_WIDTH: i32 = 72;
+const OVERVIEW_CELL_HEIGHT: i32 = 64;
+const OVERVIEW_CELL_GAP: i32 = 8;
 
 struct Desktop {
     /// Which chrome to draw and hit-test: see [`ShellLayout`].
@@ -737,18 +752,16 @@ impl Desktop {
 
     /// The launcher panel, sized to its rows, above the start button; empty
     /// while closed.
+    /// The Taskbar layout's small launcher panel, above the Start button.
+    /// The Overview layout uses the full-screen `overview_area` instead
+    /// (M3); the two are mutually exclusive.
     fn panel_area(&self) -> Area {
-        if !self.launcher_open {
+        if !self.launcher_open || self.layout != ShellLayout::Taskbar {
             return Area::new(0, 0, 0, 0);
         }
         let rows = 2 + self.filtered().1.max(1) as i32;
         let height = rows * PANEL_ROW + 2;
-        let y = match self.layout {
-            // Opens upward from the bottom taskbar's Start button.
-            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
-            // Opens downward from the Overview top bar's Activities button.
-            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
-        };
+        let y = self.taskbar_top() - 2 - height;
         Area::new(PANEL_X, y, PANEL_WIDTH, height)
     }
 
@@ -758,17 +771,97 @@ impl Desktop {
     /// on the wallpaper.
     fn panel_damage_area(&self) -> Area {
         let panel = self.panel_area();
-        if panel.is_empty() {
-            return panel;
+        let mut dirty = if panel.is_empty() {
+            panel
+        } else {
+            panel
+                .union(Area::new(
+                    panel.x - 24,
+                    panel.y - 24,
+                    panel.width + 48,
+                    panel.height + 28,
+                ))
+                .intersect(self.screen())
+        };
+        // The Overview layout's full-screen overview isn't a 3D-projected
+        // card (see `render_desktop`'s documented flat-only limitation for
+        // the new chrome), so it needs no projection halo.
+        dirty = dirty.union(self.overview_area());
+        dirty
+    }
+
+    /// The Activities overview (M3): search, this workspace's window
+    /// cards, and the app grid, filling the screen below the Overview top
+    /// bar. Empty unless the Overview layout's launcher is open -- the
+    /// Taskbar layout always uses the small `panel_area` instead.
+    fn overview_area(&self) -> Area {
+        if !self.launcher_open || self.layout != ShellLayout::Overview {
+            return Area::new(0, 0, 0, 0);
         }
-        panel
-            .union(Area::new(
-                panel.x - 24,
-                panel.y - 24,
-                panel.width + 48,
-                panel.height + 28,
-            ))
-            .intersect(self.screen())
+        Area::new(
+            0,
+            self.taskbar_top() + TASKBAR_HEIGHT,
+            self.width,
+            self.height - TASKBAR_HEIGHT,
+        )
+    }
+
+    /// The search field, top of the overview.
+    fn overview_search_area(&self) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN,
+            overview.y + OVERVIEW_MARGIN,
+            overview.width - 2 * OVERVIEW_MARGIN,
+            OVERVIEW_SEARCH_HEIGHT,
+        )
+    }
+
+    /// Top of the window-thumbnails row, below the search field.
+    fn overview_thumb_row_top(&self) -> i32 {
+        self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN
+    }
+
+    /// Window-card `index`'s area, left to right, one per current-workspace
+    /// window ([`Self::entries`]); a title-card placeholder, not a live
+    /// thumbnail, since the compositor ABI has no scaled blit (see
+    /// `docs/graphics/overview-desktop-2026-11-03.md`).
+    fn overview_thumb_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
+            self.overview_thumb_row_top(),
+            OVERVIEW_THUMB_WIDTH,
+            OVERVIEW_THUMB_HEIGHT,
+        )
+    }
+
+    /// Top of the app grid, below the (always reserved) thumbnails row.
+    fn overview_grid_top(&self) -> i32 {
+        self.overview_thumb_row_top() + OVERVIEW_THUMB_ROW_HEIGHT + OVERVIEW_MARGIN
+    }
+
+    /// Grid columns that fit the overview's width.
+    fn overview_cols(&self) -> usize {
+        let overview = self.overview_area();
+        let available = overview.width - 2 * OVERVIEW_MARGIN + OVERVIEW_CELL_GAP;
+        (available / (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP)).max(1) as usize
+    }
+
+    /// App grid cell `index`'s area (row-major). `MAX_APPS` (64) always
+    /// fits within the rows a typical desktop height offers at this cell
+    /// size without paging; a future larger catalog would need real paging
+    /// here, not assumed by this layout.
+    fn overview_cell_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        let cols = self.overview_cols();
+        let (col, row) = (index % cols, index / cols);
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + col as i32 * (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP),
+            self.overview_grid_top() + row as i32 * (OVERVIEW_CELL_HEIGHT + OVERVIEW_CELL_GAP),
+            OVERVIEW_CELL_WIDTH,
+            OVERVIEW_CELL_HEIGHT,
+        )
     }
 
     /// The panel's overlay: border, title row, selection and text, drawn at
@@ -1346,6 +1439,109 @@ impl Desktop {
                 badge.x + 3,
                 badge.y + 2,
                 core::str::from_utf8(&digit).unwrap_or("?"),
+                theme_text(),
+            );
+        }
+    }
+
+    /// The Activities overview's content (M3): search field, this
+    /// workspace's window cards, and the filtered app grid, drawn at its
+    /// own real screen position in `canvas`. Flat only, like
+    /// `paint_top_bar_content` -- no 3D presentation for the new chrome
+    /// yet (documented in `docs/graphics/overview-desktop-2026-11-03.md`).
+    fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
+        let overview = self.overview_area();
+        fill_rounded_blended(canvas, overview, CHROME_RADIUS, theme_panel(), 235);
+
+        // Search field.
+        let search = self.overview_search_area();
+        fill_rounded(canvas, search, CHROME_RADIUS_SMALL, theme_taskbar());
+        let query = &self.query[..self.query_length];
+        if query.is_empty() {
+            canvas.draw_text(
+                search.x + 6,
+                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                "Type to search",
+                rgb(150, 160, 175),
+            );
+        } else {
+            let mut buffer = [0u8; 32];
+            let length = label(query, MAX_QUERY, &mut buffer);
+            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+            canvas.draw_text(
+                search.x + 6,
+                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                text,
+                theme_text(),
+            );
+        }
+
+        // This workspace's window cards: a title-card placeholder per
+        // window, not a live thumbnail -- the compositor ABI has no scaled
+        // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
+        let entries: [Option<&Window>; MAX_WINDOWS] = {
+            let mut cards = [None; MAX_WINDOWS];
+            for (slot, (_, window)) in self.entries().enumerate() {
+                if slot < MAX_WINDOWS {
+                    cards[slot] = Some(window);
+                }
+            }
+            cards
+        };
+        if entries.iter().all(Option::is_none) {
+            canvas.draw_text(
+                overview.x + OVERVIEW_MARGIN,
+                self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
+                "No open windows on this workspace",
+                rgb(150, 160, 175),
+            );
+        } else {
+            for (index, window) in entries.iter().enumerate() {
+                let Some(window) = window else { continue };
+                let card = self.overview_thumb_area(index);
+                fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
+                outline(canvas, card, theme_accent());
+                let mut buffer = [0u8; 32];
+                let length = label(
+                    &window.title[..window.title_length],
+                    ((card.width - 8) / font::ADVANCE) as usize,
+                    &mut buffer,
+                );
+                let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+                canvas.draw_text(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
+            }
+        }
+
+        // The app grid, filtered by the search field.
+        let (found, count) = self.filtered();
+        for (index, &app_index) in found[..count].iter().enumerate() {
+            let Some(app) = self.apps[app_index] else { continue };
+            let cell = self.overview_cell_area(index);
+            draw_app_icon(
+                canvas,
+                cell.x + (cell.width - DESKTOP_ICON_SIZE) / 2,
+                cell.y + 2,
+                app_icon(app.name()),
+                DESKTOP_ICON_SIZE,
+                index == self.selected,
+            );
+            // Catalog names are "Woven<App>"; the grid already shows the
+            // WovenHat-branded icon beside each one, so the repeated
+            // prefix only costs width better spent on the rest of the
+            // name before truncation.
+            let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
+            let mut buffer = [0u8; 32];
+            let length = label(
+                display_name,
+                (cell.width / font::ADVANCE) as usize,
+                &mut buffer,
+            );
+            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+            let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
+            canvas.draw_text(
+                text_x.max(cell.x),
+                cell.y + DESKTOP_ICON_SIZE + 6,
+                text,
                 theme_text(),
             );
         }
@@ -2906,6 +3102,12 @@ impl Desktop {
             painter.overlay(panel, |canvas| self.render_panel(canvas));
         }
 
+        let overview = self.overview_area().intersect(area);
+        if !overview.is_empty() {
+            painter.blend(overview, theme_panel(), PANEL_OPACITY);
+            painter.overlay(overview, |canvas| self.paint_overview_content(canvas));
+        }
+
         let qs = self.qs_area().intersect(area);
         if !qs.is_empty() {
             painter.blend(qs, theme_panel(), PANEL_OPACITY);
@@ -3362,7 +3564,7 @@ impl Desktop {
                     }
                     return empty;
                 }
-                if self.launcher_open {
+                if self.launcher_open && self.layout == ShellLayout::Taskbar {
                     // A click on an application launches it; anywhere else
                     // outside the panel closes the launcher.
                     let panel = self.panel_area();
@@ -3373,6 +3575,34 @@ impl Desktop {
                     let (found, count) = self.filtered();
                     if row >= 0 && (row as usize) < count {
                         return self.launch(found[row as usize]);
+                    }
+                    return empty;
+                }
+                if self.launcher_open && self.layout == ShellLayout::Overview {
+                    // Anywhere outside the overview closes it.
+                    let overview = self.overview_area();
+                    if !overview.contains(x, y) {
+                        return self.toggle_launcher();
+                    }
+                    // A window card focuses that window and closes the
+                    // overview -- "open, search, launch, close; focus
+                    // restored" also covers picking an existing window.
+                    let card = self
+                        .entries()
+                        .enumerate()
+                        .find(|(index, _)| self.overview_thumb_area(*index).contains(x, y))
+                        .map(|(_, (slot, _))| slot);
+                    if let Some(slot) = card {
+                        let closed = self.toggle_launcher();
+                        return closed.union(self.focus(slot));
+                    }
+                    // An app grid cell launches it.
+                    let (found, count) = self.filtered();
+                    if let Some(app_index) = (0..count)
+                        .find(|&index| self.overview_cell_area(index).contains(x, y))
+                        .map(|index| found[index])
+                    {
+                        return self.launch(app_index);
                     }
                     return empty;
                 }

@@ -1,9 +1,10 @@
-# WovenHat Overview desktop: M2 top bar
+# WovenHat Overview desktop: M2 top bar, M3 Activities overview
 
-2026-11-03. Covers M2 of `CLAUDE-START-HERE.md`'s milestone table: the
-Overview top bar, its clock/calendar popover reuse, and its system menu.
-M1 (the behavior-preserving `main.rs` module split) is covered separately
-in `docs/agent-coordination.md`.
+2026-11-03. Covers M2 and M3 of `CLAUDE-START-HERE.md`'s milestone table:
+the Overview top bar (clock/calendar popover, system menu) and the
+Activities overview (search, window cards, app grid). M1 (the
+behavior-preserving `main.rs` module split) is covered separately in
+`docs/agent-coordination.md`.
 
 ## What M2 delivers
 
@@ -130,3 +131,129 @@ clippy pass alone would not have found this.
   follow-on work once more Overview-specific code accumulates (M3's
   Activities overview, M4's dash), per CLAUDE-START-HERE.md's "split
   main.rs into modules as you go."
+
+## M3: the Activities overview
+
+### What M3 delivers
+
+The Activities button now opens a real full-screen overview
+(`Desktop::overview_area`, `Desktop::paint_overview_content`) instead of
+M2's interim bridge to the small launcher panel. `panel_area` (the
+Taskbar layout's small panel) and `overview_area` are mutually exclusive
+on `self.layout`; both are driven by the same shared
+`launcher_open`/`query`/`selected`/`filtered()` state the launcher
+already had, so `toggle_launcher`, `launcher_key`, `filtered`, and
+`launch` needed **no changes at all** -- confirmed each was already
+layout-agnostic (no hardcoded position, no `taskbar_top()` dependency)
+before relying on that, the same verification discipline M2 used for
+`paint_qs_content`/`paint_center_content`.
+
+Layout, top to bottom inside `overview_area`:
+
+1. **Search field** (`overview_search_area`): shows "Type to search" when
+   empty, or the typed query otherwise, via the existing `label()`
+   truncation helper.
+2. **This workspace's window cards** (`overview_thumb_area`, one per
+   `Desktop::entries()` result, up to `MAX_WINDOWS`): a title-card
+   placeholder per window -- a rounded, outlined tile with the window's
+   title -- not a live thumbnail. **Confirmed before choosing this**: grepped
+   `libwoven::lib.rs`'s `syscall::graphics_compositor_blit_*` family; only
+   1:1 region/keyed/damage blits exist, no scaled variant, so a live
+   thumbnail would need a new compositor capability. Per
+   `CLAUDE-START-HERE.md`'s own instruction ("if the graphics ABI has no
+   scaled blit, document it and render title-card placeholders rather
+   than adding kernel capability without review"), used the placeholder
+   and documented it here instead. When no windows are open, shows "No
+   open windows on this workspace" rather than an empty gap.
+3. **App grid** (`overview_cell_area`, row-major, column count computed
+   from the overview's width): each cell reuses `icons::draw_app_icon`
+   directly, including its existing `selected` parameter for the outline
+   -- this **is** the "visible focus ring" the design brief asks for,
+   with zero new drawing code. Grid labels strip a leading "Woven" prefix
+   (the icon already carries that branding) so longer names like
+   "WovenCalculator" fit the cell without truncating to "WovenCalcula".
+   `MAX_APPS` (64) always fits the rows a typical desktop height offers
+   at the chosen cell size without real paging; a future larger catalog
+   would need actual paging logic, not assumed here.
+
+Click handling (`handle_input`, gated `self.layout == ShellLayout::
+Overview`): a window card focuses that window and closes the overview
+(`focus`+`toggle_launcher`, areas unioned so both repaints land); a grid
+cell launches that app (`launch`, which already closes the overview
+itself); anywhere else closes it. Keyboard (`launcher_key`, already
+shared, unchanged): `Tab` cycles the selected result, `Enter` launches
+it, `Backspace`/printable characters edit the query.
+
+### A design-brief requirement the keyboard ABI can't deliver
+
+Before implementing "Esc closes" and "Tab/arrow keyboard navigation"
+(both named explicitly in `CLAUDE-START-HERE.md` section 3.3), checked
+`libwoven::Key` (`libwoven/src/lib.rs`): it has exactly `Char`, `Enter`,
+`Backspace`, `Tab`, and `F1`-`F4` -- **no `Escape` and no arrow-key
+variants at all**. Adding either would mean extending the kernel's own
+keyboard-scancode-to-`Key` translation, a kernel-ABI change that
+AGENTS.md says to stop and ask about rather than add unreviewed. Did not
+add it. Instead:
+
+- **Close**: click-outside (implemented) or the Activities button/F1
+  toggle (already closes when open, pre-existing behavior) -- genuinely
+  equivalent functionality to Esc, just not that literal key. This
+  mirrors the brief's own stated fallback for the unavailable Super key
+  ("the fallback is F1 and a hot corner").
+- **Keyboard navigation**: `Tab`-cycling through filtered results is
+  fully implemented (pre-existing `launcher_key` logic, unchanged); arrow
+  keys are not, and can't be, until a separate, reviewed change extends
+  the `Key` ABI.
+
+### Bug found via the screenshots themselves, not build/clippy
+
+The qualification script's F1+type+Enter sequence already existed before
+M3 (it was testing the state machine, not the visuals). First pass of
+the new `activities-overview.ppm` capture used a blind `capture_frame` +
+fixed 0.5s sleep; two consecutive runs produced two *different* wrong
+screenshots (one showing a stale lock-screen frame, one showing no
+visible change at all) while the shell's own serial-log markers
+(sign-in/launch/window-open) succeeded both times -- diagnosed as the
+capture racing the shell's own up-to-250ms idle frame clock (documented
+in `main.rs`'s module doc) under QEMU/TCG timing variance, not a shell
+defect. Fixed by switching to `capture_until_changed` against the pre-F1
+baseline frame, the same retry-until-materially-different pattern the
+script already uses for the post-launch screenshot, instead of guessing
+at a longer fixed sleep.
+
+Once the capture itself was trustworthy, it caught one real (if purely
+cosmetic) issue: `MAX_APP_NAME`-length catalog names truncated in the
+grid ("WovenCalculator" -> "WovenCalcula"). Fixed with the "Woven"-prefix
+strip described above.
+
+### Verification
+
+- `cargo build`/`cargo clippy --target x86_64-unknown-none -- -D
+  warnings` clean inside `apps/woven-shell` throughout.
+- `scripts/test-desktop-qualification.py --cpus 1 --frame-timeout 15
+  --input-timeout 40` (generous timeouts -- see below): reaches the same
+  point as the accepted baseline (sign-in, overview capture, launch,
+  window-open, pointer, all four workspace switches), serial log confirms
+  `WovenFiles: window opened`/`window opened: Files`, then hits the
+  pre-existing `keyboard_refresh` flake. `activities-overview.ppm`
+  (`audit-artifacts/desktop-qualification-1793699470831967700/`) visually
+  confirms: search placeholder, "No open windows on this workspace", and
+  all 11 catalog apps in a clean 7-column grid with icons and corrected
+  labels.
+- **2 and 4 CPU: not completed.** Blocked by this machine's own memory
+  exhaustion -- `Get-CimInstance Win32_OperatingSystem` showed under 1 GB
+  free out of 7.6 GB total physical RAM, with QEMU unable to allocate a
+  5 GB guest as a direct result ("cannot set up guest memory 'pc.ram'"),
+  independent of disk space (33 GB free at the time) or stale QEMU
+  processes. Not retried further pending more host memory being available
+  (closing other running applications, or rerunning when the machine is
+  less loaded); this is an honest gap, not silently skipped.
+- Separately, this session saw two one-off QEMU/timing hiccups that did
+  not reproduce on retry (a `WinError 10054`/guest-memory QEMU startup
+  failure, and one boot that ran at roughly 2x normal tick-count latency
+  and exceeded the qualification script's default `--frame-timeout 5`
+  before reaching the Files-launch step) -- both environment variance
+  under back-to-back QEMU runs, not code defects. The longer
+  `--frame-timeout`/`--input-timeout` values used for verification above
+  are a per-session workaround and were not written into the script's
+  permanent defaults, which would mask real regressions for other runs.

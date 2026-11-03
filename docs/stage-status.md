@@ -1,5 +1,25 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M3) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M3 (the Activities overview: search field, this workspace's window cards,
+app grid) is implemented and verified at 1 CPU; 2 and 4 CPU are pending,
+blocked by this machine's own memory exhaustion (7.6 GB total RAM, under
+1 GB free with other applications running), not by anything in the code.
+Full design, the `Key`-enum ABI gap found for Esc/arrow-key navigation,
+and the test-script capture-timing fix: `docs/graphics/overview-
+desktop-2026-11-03.md`. The Activities button now opens a real
+full-screen overview (`overview_area`, `paint_overview_content`) instead
+of M2's interim bridge to the small launcher panel; window thumbnails are
+title-card placeholders (confirmed no scaled-blit syscall exists before
+choosing that fallback, per the design brief's own guidance). At 1 CPU
+the qualification journey (including the new `activities-overview.ppm`
+capture) reaches the same point as the accepted baseline, screenshots
+confirm the overview renders correctly (search placeholder, "No open
+windows" message, all 11 catalog apps in a 7-column grid with corrected
+labels), then hits the pre-existing `keyboard_refresh` flake. Not a stage
+acceptance. M4-M7 have not started.
+
 ## WovenHat Overview desktop overhaul (M2) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
 
 M2 (the Overview top bar: Activities button, centered clock/calendar
