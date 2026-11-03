@@ -1,11 +1,12 @@
-# WovenHat Overview desktop: M2-M5
+# WovenHat Overview desktop: M2-M6
 
-2026-11-03. Covers M2-M5 of `CLAUDE-START-HERE.md`'s milestone table:
+2026-11-03. Covers M2-M6 of `CLAUDE-START-HERE.md`'s milestone table:
 the Overview top bar (clock/calendar popover, system menu), the
 Activities overview (search, window cards, app grid), the Dash/window
-switcher/snap/notification placement, and motion/high-contrast/i18n/
-accessibility. M1 (the behavior-preserving `main.rs` module split) is
-covered separately in `docs/agent-coordination.md`.
+switcher/snap/notification placement, motion/high-contrast/i18n/
+accessibility, and the measured performance/memory record. M1 (the
+behavior-preserving `main.rs` module split) is covered separately in
+`docs/agent-coordination.md`.
 
 ## What M2 delivers
 
@@ -525,3 +526,79 @@ verification gap all at once; M2-M5 are now QEMU-verified at 1/2/4 CPU,
 modulo the pre-existing `keyboard_refresh` flake (which means the
 qualification script's own exit code is still non-zero, so this is still
 not a formal stage acceptance).
+
+## M6: measured performance/memory record
+
+Section 6 of `CLAUDE-START-HERE.md` asks to "establish baseline numbers
+first... frame time of a full recompose, shell resident memory, time
+from boot to responsive desktop, search latency over 64 apps" and
+"report real numbers, including failures." Took that literally: added
+only instrumentation that reuses existing, already-accepted mechanisms
+(`libwoven::ticks()`, `log()`) rather than a new profiling capability,
+and report what's actually measurable with the current ABI rather than
+estimate or invent the rest.
+
+### What was added
+
+- **`Desktop::log_search_latency`** (`main.rs`, called from
+  `launcher_key`'s `Char`/`Backspace` arms, i.e. every time the search
+  query actually changes): times `self.filtered()` with `libwoven::
+  ticks()` immediately before and after, logs the elapsed ticks, the
+  match count, and `self.app_count` (the catalog size actually loaded
+  this boot). The catalog size is logged alongside the latency
+  deliberately: the design brief's budget assumes a 64-app catalog
+  (`MAX_APPS`), and the demo fixture this measurement actually ran
+  against has far fewer, so the number needs that context to mean
+  anything.
+- **A full-recompose timer** around `fn main`'s first `desktop.repaint(
+  &mut painter, desktop.screen())` call: this is a genuine full-screen
+  recompose by construction (the very first paint, `area == screen()`),
+  so no extra bookkeeping was needed to identify that case. Deliberately
+  measured from *outside* `repaint`/`repaint_once` rather than
+  instrumented internally: both have several early-return paths (a
+  vanished-surface retry loop, a locked-screen short-circuit), and
+  wrapping timing around all of them correctly would have meant touching
+  control flow in functions this session didn't otherwise need to
+  change, for a single-measurement-point's sake. Measuring the one
+  already-known-full-screen call from outside gets the same number with
+  zero risk to that code.
+
+### Real measured numbers (software/QEMU-TCG, single CPU, cold first boot -- not native hardware)
+
+From `audit-artifacts/desktop-qualification-1793707375520064000/
+serial.log`, `libwoven::time::TICKS_PER_SECOND = 100` (1 tick = 10 ms):
+
+| Metric | Measured | Notes |
+|---|---|---|
+| Boot to desktop ready | 448 ticks = 4.48 s | Sum of every `[BOOT PROFILE]` step's own delta, kernel-measured, not estimated. Covers UEFI handoff through `WovenShell desktop started`; does not include the automated sign-in step after that, which is test-harness-paced key-press timing, not a shell performance number. |
+| Full recompose (first paint) | 129 ticks = 1.29 s | The very first frame: wallpaper + taskbar/top-bar + desktop icons recomposed from nothing, under software TCG rendering on one virtual CPU. A steady-state recompose (window move, workspace switch) was not separately measured this pass -- the instrumentation point chosen was the one genuinely risk-free to add; measuring a representative *interactive* recompose would need a second log point inside the input-driven repaint path, left for a follow-up. |
+| Search-filter latency | 0 ticks (< 10 ms) | Against the actual 11-app demo catalog, not the 64-app budget the brief assumes. A linear scan over 11 bounded-length string comparisons is expected to be far under one tick; this number says "too fast to resolve at 100 Hz for this catalog size," not "0 ms precisely," and should be re-measured once/if a 64-app fixture exists. |
+| Shell resident memory | **Not measured** | No per-process memory-stats syscall exists in `libwoven` (checked: grepped for `memory`/`stats`/`resident` in `libwoven/src/lib.rs`, found nothing). Adding one is a new kernel capability and needs its own review (userspace pointer validation, what a process may query about itself vs. others, bounded response size) -- out of scope to add unreviewed just to produce a number for this doc. The kernel's own `[HEAP] mapped=8388608 bytes` boot log line is real but measures the *kernel's* heap, not the shell process specifically, so it isn't reported here as a stand-in. |
+
+### What this does and doesn't establish
+
+This is a **first measurement**, not a regression baseline with a
+"before" to compare against -- there was no equivalent instrumentation
+in the pre-Overview (Taskbar-only) codebase to diff against, and adding
+retroactive instrumentation to the old code path to produce a legacy
+comparison number was judged lower value than being honest that no such
+comparison exists yet. Future milestones (or a dedicated follow-up) that
+touch these numbers again should diff against the ones recorded here.
+"No regression of legacy layout timings" (the brief's other M6
+requirement) is therefore not something this pass can claim either way
+for frame/boot timing -- only functional parity (M2's QEMU verification
+that both layouts boot and compose correctly) was checked, not relative
+performance.
+
+"Shell static memory increase" (the brief's third M6 requirement) is
+likewise not reported as a number, for the same reason resident memory
+isn't: nothing in the current ABI exposes it. What can be said instead,
+precisely: the new code added across M2-M6 is six new modules (`tokens.
+rs`, `geometry.rs`, `textures.rs`, `icons.rs`, `model.rs`, `painter.rs`
+from M1) plus roughly 900 lines of new logic directly in `main.rs`
+(`ShellLayout`, the top bar, the overview, the Dash, the i18n catalog
+additions, this instrumentation) -- all static/`.bss` allocations
+following the codebase's existing patterns (fixed-size arrays, no new
+heap-growing data structure), so the *shape* of any increase is bounded
+by construction the same way the rest of the shell already is, even
+though the exact byte count isn't measurable right now.

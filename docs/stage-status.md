@@ -1,5 +1,26 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M6) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M6 (measured performance/memory record) is implemented, built,
+Clippy-clean, and QEMU-verified with real captured numbers -- not
+estimates. Added two lightweight log instrumentation points, both
+reusing only the existing `libwoven::ticks()` clock and `log()` (no new
+syscall or kernel capability): `log_search_latency` (search-filter cost
+each time the query changes) and a full-screen-recompose timer around
+the shell's first paint (`fn main`, a genuine full recompose by
+construction). Measured, software/QEMU-TCG, single CPU, cold first boot:
+boot-to-desktop-ready 448 ticks (4.48 s); full recompose 129 ticks
+(1.29 s); search-filter latency 0 ticks (under the 10 ms tick
+resolution) against the demo catalog's actual 11 apps -- the design
+brief's "search latency over 64 apps" budget assumes `MAX_APPS` (64)
+entries, which the current catalog fixture doesn't reach, reported
+honestly rather than extrapolated. Shell resident memory is **not
+measurable** with the current `libwoven` ABI: no per-process memory
+stats syscall exists, and adding one is a new kernel capability needing
+its own review, out of scope to add unreviewed for a measurement. Full
+numbers and methodology: `docs/graphics/overview-desktop-2026-11-03.md`.
+
 ## WovenHat Overview desktop overhaul (M2-M5 QEMU verification) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
 
 With more host memory free, QEMU verification that M4/M5 (and M2/M3's

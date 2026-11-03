@@ -4248,7 +4248,21 @@ fn main(args: Args) -> ! {
     let mut catalog_digits = [0u8; 20];
     let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_digits);
     log(&[b"woven-shell: catalog entries=", catalog_count]);
+    // M6: a real, measured full-recompose frame time (not assumed). This
+    // first paint is a genuine full-screen recompose by construction, so
+    // no extra bookkeeping is needed to pick that case out, unlike the
+    // general repaint() entry point this session chose not to instrument
+    // internally (multiple early-return paths; measuring from outside a
+    // single known-full-screen call avoided touching that control flow).
+    let recompose_start = libwoven::ticks();
     desktop.repaint(&mut painter, desktop.screen());
+    let recompose_ticks = libwoven::ticks().saturating_sub(recompose_start);
+    let mut recompose_digits = [0u8; 20];
+    let recompose_text = libwoven::format_u64(recompose_ticks, &mut recompose_digits);
+    log(&[
+        b"woven-shell: full recompose ticks=",
+        recompose_text,
+    ]);
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
         fail(6);
