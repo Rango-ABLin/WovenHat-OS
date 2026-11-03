@@ -20,12 +20,9 @@ const GUI_HEIGHT: u32 = 240;
 const MAX_GUI_WIDTH: usize = 320;
 const MAX_GUI_HEIGHT: usize = 240;
 const BACKGROUND: u32 = rgb(12, 16, 28);
-const PANEL: u32 = rgb(29, 38, 60);
 const PANEL_DARK: u32 = rgb(21, 28, 45);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const MUTED: u32 = rgb(170, 185, 205);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 210;
 const BUTTON_Y: i32 = 195;
 const BUTTON_WIDTH: usize = 92;
@@ -202,19 +199,12 @@ fn render_gui(
         20,
         canvas.width().saturating_sub(48),
         canvas.height().saturating_sub(40),
-        PANEL,
+        THEME.surface,
     );
     canvas.fill_rect(24, 20, canvas.width().saturating_sub(48), 42, PANEL_DARK);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
-    Label::new(Frame::new(42, 34, 180, 16), "WovenInstaller").draw(&mut canvas, theme);
+    Label::new(Frame::new(42, 34, 180, 16), "WovenInstaller").draw(&mut canvas, THEME);
     let (title, detail) = screen_text(state.screen);
-    canvas.draw_text(42, 82, title, ACCENT);
+    canvas.draw_text(42, 82, title, THEME.accent);
     canvas.draw_text(42, 103, detail, MUTED);
     let target_status = match inventory {
         InventoryStatus::Available => "Target service: available",
@@ -248,14 +238,14 @@ fn render_gui(
         "Close",
     );
     close.pressed = pressed;
-    close.draw(&mut canvas, theme);
+    close.draw(&mut canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(1),
             i32::from(y).saturating_sub(1),
             3,
             3,
-            ACCENT,
+            THEME.accent,
         );
     }
     window.write_canvas(&canvas).is_ok()
@@ -335,7 +325,7 @@ fn draw_field(canvas: &mut Canvas<'_>, x: i32, y: i32, label: &str, value: &[u8]
     }
     canvas.draw_text(x, y, label, MUTED);
     if let Ok(text) = core::str::from_utf8(value) {
-        canvas.draw_text(x + 76, y, text, TEXT);
+        canvas.draw_text(x + 76, y, text, THEME.text);
     }
 }
 
