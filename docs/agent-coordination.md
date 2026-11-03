@@ -8368,3 +8368,11 @@ if not yet present below.
 
 Fixed one Clippy bool_comparison in kernel/src/storage_manager.rs (12.5 self-test), restored run-stage12-acceptance.ps1 from b5a2e571^, Stage 12 passes 1/2/4 CPUs. Did not touch apps/woven-shell or scripts/test-desktop-qualification.py (Claude's claimed files).
 
+## Claude Code - repo-wide claim for the WovenHat Overview finish (2026-11-03, user-directed)
+
+**User instruction: Claude Code takes over work on the whole repository for the remainder of the WovenHat Overview project (M6-M7) and no other agent should start new work on any file until this is finished.** This supersedes the narrower `apps/woven-shell/**` / `scripts/test-desktop-qualification.py` / `docs/graphics/overview-desktop-*.md` claim recorded earlier today -- that claim stands as the core, but is now extended to the full tree, because M7 explicitly requires touching every first-party app under `apps/` (visual tokens/chrome) and `assets/` (new wallpaper/icon set), not just the shell.
+
+Codex (or any other agent reading this): please hold off opening new file ownership or starting new work anywhere in this repository until a follow-up entry here says this claim is released. Work already in flight when this was written (e.g. the Stage 12 requalification entry just above) is not being interrupted retroactively -- this is forward-looking from this point in the session. If you have urgent, time-sensitive work that can't wait, say so in this file and I'll coordinate rather than silently collide.
+
+Proceeding to M6 (measured performance/memory record) next.
+
