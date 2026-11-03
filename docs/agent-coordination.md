@@ -8212,3 +8212,16 @@ including `pci_*`, `wifi_tlv`/`wifi_firmware_tlv`, `heap`, `irq_lock`,
 `irq_mailbox`, `thread_registry`, `wovenfs_crash`) all pass clean from a
 clean working tree. Did not run the QEMU 1/2/4 CPU acceptance chain.
 
+
+## Claude Code - WovenHat Overview desktop overhaul (assigned 2026-11-03)
+
+User-authorized full overhaul. Full prompt: docs/GNOME-Desktop-Claude-Prompt.md (also CLAUDE-START-HERE.md). Claude Code takes over the WovenHat shell; earlier shell assignments are superseded. Claude claims apps/woven-shell/**, scripts/test-desktop-qualification.py and new docs/graphics/overview-desktop-*.md. Status: M0 IN PROGRESS.
+
+### M0 plan (2026-11-03)
+
+Checked `git status`/`git log` on `apps/woven-shell/**`, `scripts/test-desktop-qualification.py` and `docs/graphics/` before starting: clean, no other agent's uncommitted edits in these paths. Proceeding per CLAUDE-START-HERE.md's milestone table.
+
+Known constraint while working: a separate Stage 10.7 host/QEMU acceptance chain (`RUN-STAGE10.7.ps1`) was started earlier this session and may still be running. AGENTS.md and CLAUDE-START-HERE.md section 4 both require only one acceptance/QEMU chain at a time (fixed host ports, shared `CARGO_BUILD_BUILD_DIR`/`CARGO_TARGET_DIR`). M1's shell-only build/clippy/host-test work does not touch QEMU and is safe to run concurrently; any step that invokes `scripts/test-desktop-qualification.py` or other QEMU journeys (M1's qualification gate onward) is held until that chain finishes and its result is recorded, to avoid port/output-path collisions.
+
+Sequence: M0 (this entry) -> M1 (behavior-preserving `main.rs` module split + `tokens.rs`, shell lint + host tests, then the existing desktop-qualification gate once QEMU is free) -> M2..M7 per the milestone table, one commit per accepted milestone, gates reported plainly (pass/fail, not assumed).
+
