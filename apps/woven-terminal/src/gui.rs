@@ -5,12 +5,9 @@ use libwoven::{Canvas, GraphicsSurface, rgb};
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
 const BACKGROUND: u32 = rgb(10, 14, 22);
-const PANEL: u32 = rgb(25, 34, 48);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const MUTED: u32 = rgb(150, 170, 190);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 170;
 const BUTTON_WIDTH: usize = 80;
@@ -57,33 +54,26 @@ fn draw(
     clear: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenTerminal",
     )
-    .draw(canvas, theme);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 94, "cat PATH", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 142, ">", ACCENT);
+    .draw(canvas, THEME);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", THEME.accent);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 94, "cat PATH", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", THEME.text);
+    canvas.draw_text(PANEL_X + 10, PANEL_Y + 142, ">", THEME.accent);
     if let Ok(text) = core::str::from_utf8(line) {
-        canvas.draw_text(PANEL_X + 20, PANEL_Y + 142, text, ACCENT);
+        canvas.draw_text(PANEL_X + 20, PANEL_Y + 142, text, THEME.accent);
     }
     if let Ok(text) = core::str::from_utf8(status) {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, TEXT);
+        canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, THEME.text);
     }
-    clear.draw(canvas, theme);
+    clear.draw(canvas, THEME);
     canvas.draw_text(
         PANEL_X + 10,
         PANEL_Y + 174,
@@ -91,7 +81,7 @@ fn draw(
         MUTED,
     );
     if let Some((x, y)) = pointer {
-        let color = if pressed { TEXT } else { POINTER_MARKER };
+        let color = if pressed { THEME.text } else { POINTER_MARKER };
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
             i32::from(y).saturating_sub(2),
