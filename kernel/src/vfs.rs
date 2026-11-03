@@ -2,7 +2,8 @@ use crate::irq_lock::IrqMutex as Mutex;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::config::{
-    MAX_OPEN_FILES, MAX_PATH_SIZE as PATH_CAPACITY, MAX_VFS_NODES as MAX_NODES, VFS_NODE_CAPACITY,
+    LARGE_ASSET_CAPACITY, LARGE_ASSET_SLOTS, MAX_OPEN_FILES, MAX_PATH_SIZE as PATH_CAPACITY,
+    MAX_VFS_NODES as MAX_NODES, VFS_NODE_CAPACITY,
 };
 
 pub const NODE_CAPACITY: usize = VFS_NODE_CAPACITY;
@@ -32,6 +33,12 @@ struct Node {
     path: [u8; PATH_CAPACITY],
     path_length: usize,
     data: [u8; NODE_CAPACITY],
+    /// `Some(index)` when this node's bytes live in
+    /// `Registry::large_buffers[index]` instead of `data` (graphics-
+    /// modernization Phase 3: the bundled NotoSans TTF is 607 KiB, over
+    /// `NODE_CAPACITY`). Read-only; never set by the normal `insert` path,
+    /// only by `insert_large`.
+    large: Option<usize>,
     backing: Option<DiskPath>,
     length: usize,
     writable: bool,
@@ -48,6 +55,7 @@ impl Node {
             path: [0; PATH_CAPACITY],
             path_length: 0,
             data: [0; NODE_CAPACITY],
+            large: None,
             backing: None,
             length: 0,
             writable: false,
@@ -101,6 +109,7 @@ impl Node {
         self.path.fill(0);
         self.path_length = 0;
         self.data.fill(0);
+        self.large = None;
         self.backing = None;
         self.length = 0;
         self.writable = false;
@@ -162,6 +171,11 @@ struct Registry {
     versions: [u64; MAX_NODES],
     generations: [u64; MAX_NODES],
     nodes: [Node; MAX_NODES],
+    /// Backing storage for nodes whose `large` field is `Some(index)` --
+    /// see `Node::large`'s doc comment. Deliberately separate from `nodes`'
+    /// own `data` arrays so the common case (`MAX_NODES` small files) is
+    /// not taxed by the rare large-asset case.
+    large_buffers: [[u8; LARGE_ASSET_CAPACITY]; LARGE_ASSET_SLOTS],
 }
 
 impl Registry {
@@ -185,6 +199,7 @@ impl Registry {
             nodes,
             versions: [0; MAX_NODES],
             generations: [0; MAX_NODES],
+            large_buffers: [[0; LARGE_ASSET_CAPACITY]; LARGE_ASSET_SLOTS],
         }
     }
 
@@ -193,7 +208,69 @@ impl Registry {
             nodes: [Node::empty(); MAX_NODES],
             versions: [0; MAX_NODES],
             generations: [0; MAX_NODES],
+            large_buffers: [[0; LARGE_ASSET_CAPACITY]; LARGE_ASSET_SLOTS],
         }
+    }
+
+    /// Insert a read-only node whose content exceeds `NODE_CAPACITY`,
+    /// backed by one of the bounded `large_buffers` slots instead of the
+    /// node's own `data` array. Everything else (path validation, parent
+    /// lookup, path collision) matches `insert` exactly; only the content
+    /// storage differs. A free slot is found by scanning for a
+    /// `large_buffers` index no currently-occupied node references, rather
+    /// than tracking occupancy separately -- `LARGE_ASSET_SLOTS` is small
+    /// enough (2) that an O(slots * nodes) scan is negligible and this
+    /// avoids a second piece of state that could drift out of sync with
+    /// the nodes themselves.
+    fn insert_large(&mut self, path: &str, data: &[u8]) -> Result<usize, Error> {
+        validate_absolute_path(path)?;
+        if data.len() > LARGE_ASSET_CAPACITY {
+            return Err(Error::Full);
+        }
+        if self.nodes.iter().any(|node| node.matches(path)) {
+            return Err(Error::AlreadyExists);
+        }
+        if path != "/" {
+            let parent = parent_path(path).ok_or(Error::InvalidPath)?;
+            let Some(parent_node) = self
+                .nodes
+                .iter()
+                .find(|n| n.matches(parent) && n.kind == NodeKind::Directory)
+            else {
+                return Err(Error::NotFound);
+            };
+            if !access_allowed(parent_node, true) {
+                return Err(Error::ReadOnly);
+            }
+        }
+        let slot = self
+            .nodes
+            .iter()
+            .position(|node| !node.occupied)
+            .ok_or(Error::Full)?;
+        let large_index = (0..LARGE_ASSET_SLOTS)
+            .find(|&candidate| {
+                !self
+                    .nodes
+                    .iter()
+                    .any(|n| n.occupied && n.large == Some(candidate))
+            })
+            .ok_or(Error::Full)?;
+        self.large_buffers[large_index][..data.len()].copy_from_slice(data);
+        let node = &mut self.nodes[slot];
+        node.path[..path.len()].copy_from_slice(path.as_bytes());
+        node.path_length = path.len();
+        node.large = Some(large_index);
+        node.length = data.len();
+        node.writable = false;
+        node.mode = 0o444;
+        node.kind = NodeKind::File;
+        node.occupied = true;
+        let credentials = crate::task::current_credentials_if_running()
+            .unwrap_or(crate::task::Credentials::ROOT);
+        node.uid = credentials.uid;
+        node.gid = credentials.gid;
+        Ok(slot)
     }
 
     fn insert(&mut self, path: &str, data: &[u8], writable: bool) -> Result<usize, Error> {
@@ -322,6 +399,7 @@ impl Registry {
         node.occupied = false;
         node.path_length = 0;
         node.length = 0;
+        node.large = None;
         node.backing = None;
         node.writable = false;
         node.data.fill(0);
@@ -785,6 +863,15 @@ pub enum Error {
 
 pub fn create_read_only(path: &str, data: &[u8]) -> Result<(), Error> {
     REGISTRY.lock().insert(path, data, false).map(|_| ())
+}
+
+/// `create_read_only`, for content that exceeds `NODE_CAPACITY` (bounded
+/// instead by `LARGE_ASSET_CAPACITY`, of which only `LARGE_ASSET_SLOTS`
+/// exist system-wide -- see `Node::large`'s doc comment). Reads through
+/// the normal `open`/`read_all`/syscall path exactly like any other VFS
+/// file; only the backing storage differs.
+pub fn create_read_only_large(path: &str, data: &[u8]) -> Result<(), Error> {
+    REGISTRY.lock().insert_large(path, data).map(|_| ())
 }
 
 /// Import disk metadata without copying the file payload into VFS RAM storage.
@@ -1276,7 +1363,13 @@ fn read_from(
             }
             let count = core::cmp::min(node.length - offset, buffer.len());
             if node.backing.is_none() || count == 0 {
-                buffer[..count].copy_from_slice(&node.data[offset..offset + count]);
+                if let Some(large_index) = node.large {
+                    buffer[..count].copy_from_slice(
+                        &registry.large_buffers[large_index][offset..offset + count],
+                    );
+                } else {
+                    buffer[..count].copy_from_slice(&node.data[offset..offset + count]);
+                }
                 crate::file_frames::overlay(
                     node_index,
                     node_generation,

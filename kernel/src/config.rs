@@ -91,6 +91,23 @@ pub const MAX_VFS_NODES: usize = 64;
 /// Never put a buffer of this size on a kernel stack.
 pub const VFS_NODE_CAPACITY: usize = 256 * 1024;
 
+/// Number of oversized, read-only system assets the VFS can hold alongside
+/// its normal `VFS_NODE_CAPACITY`-bounded nodes (graphics-modernization
+/// Phase 3: the bundled NotoSans TTF is 607 KiB, well over
+/// `VFS_NODE_CAPACITY`). Kept deliberately tiny and separate from
+/// `MAX_VFS_NODES`/`VFS_NODE_CAPACITY` rather than raising the general node
+/// capacity, which would multiply every one of the 64 ordinary nodes'
+/// static footprint to fit the rare large file: `MAX_VFS_NODES *
+/// VFS_NODE_CAPACITY` is 16 MiB today; raising `VFS_NODE_CAPACITY` alone to
+/// fit one ~607 KiB asset would cost roughly +24 MiB for no benefit to the
+/// other 63 node slots. This table costs only
+/// `LARGE_ASSET_SLOTS * LARGE_ASSET_CAPACITY`.
+pub const LARGE_ASSET_SLOTS: usize = 2;
+
+/// Capacity of each large-asset slot (bytes). Sized for the bundled
+/// NotoSans TTF (607,572 bytes) with headroom, never put on a kernel stack.
+pub const LARGE_ASSET_CAPACITY: usize = 768 * 1024;
+
 /// Maximum ELF loadable segments accepted by the loader.
 pub const MAX_ELF_SEGMENTS: usize = 8;
 

@@ -6867,6 +6867,32 @@ const SYSTEM_WALLPAPER_SHA256: [u8; 32] = [
     0x47, 0xe2, 0x05, 0xb9, 0xb0, 0x67, 0x6f, 0x90,
     0x8c, 0xda, 0x21, 0xdf, 0x31, 0x60, 0xe4, 0x4b,
 ];
+// Graphics-modernization Phase 3 (typography): stage the already-bundled
+// Noto Sans TTF (kernel/src/ttf.rs's own `bundled_face()` already embeds
+// the same file for a kernel-side self-test) into the VFS at boot, the
+// same way the wallpaper BMP is staged, through `vfs::create_read_only_large`
+// (the font is 607 KiB, over `vfs::NODE_CAPACITY`'s 256 KiB -- see that
+// function's doc comment and docs/graphics/modernization-tracker.md's
+// Phase 3 entry for why a dedicated bounded large-asset slot was added
+// instead of raising the general VFS node capacity). Ring-3 apps read it
+// like any other VFS file -- no new syscall, no new capability.
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../assets/fonts/NotoSans-Regular.ttf"
+));
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT_MANIFEST: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../assets/fonts/manifest.toml"
+));
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT_SHA256: [u8; 32] = [
+    0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c,
+    0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
+    0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50,
+    0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
+];
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -8206,6 +8232,12 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper path collision"));
         return false;
     }
+    if vfs::stat("/share/fonts/NotoSans-Regular.ttf").is_ok()
+        || vfs::stat("/share/fonts/manifest.toml").is_ok()
+    {
+        serial::write_line(format_args!("[APPS] font path collision"));
+        return false;
+    }
     let valid_wallpaper = if SYSTEM_WALLPAPER.len() < 54 {
         false
     } else {
@@ -8261,6 +8293,18 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper validation failed"));
         return false;
     }
+    let font_digest: [u8; 32] = Sha256::digest(SYSTEM_FONT).into();
+    if SYSTEM_FONT.len() < 4
+        || &SYSTEM_FONT[..4] != b"\x00\x01\x00\x00"
+        || font_digest != SYSTEM_FONT_SHA256
+        || !SYSTEM_FONT_MANIFEST.windows(7).any(|window| window == b"OFL-1.1")
+        || !SYSTEM_FONT_MANIFEST
+            .windows(16)
+            .any(|window| window == b"notosans-regular")
+    {
+        serial::write_line(format_args!("[APPS] font validation failed"));
+        return false;
+    }
     let share_created = if vfs::stat("/share").is_err() {
         if vfs::mkdir("/share").is_err() {
             return false;
@@ -8285,6 +8329,17 @@ fn install_production_system_apps() -> bool {
     }
     let wallpapers_created = if vfs::stat("/share/wallpapers").is_err() {
         if vfs::mkdir("/share/wallpapers").is_err() {
+            return false;
+        }
+        true
+    } else {
+        false
+    };
+    let fonts_created = if vfs::stat("/share/fonts").is_err() {
+        if vfs::mkdir("/share/fonts").is_err() {
+            if wallpapers_created {
+                let _ = vfs::remove("/share/wallpapers");
+            }
             return false;
         }
         true
@@ -8336,6 +8391,9 @@ fn install_production_system_apps() -> bool {
             let _ = vfs::remove(rollback.catalog_path);
             let _ = vfs::remove(rollback.binary_path);
         }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
         if wallpapers_created {
             let _ = vfs::remove("/share/wallpapers");
         }
@@ -8358,6 +8416,52 @@ fn install_production_system_apps() -> bool {
             let _ = vfs::remove(rollback.catalog_path);
             let _ = vfs::remove(rollback.binary_path);
         }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
+        if wallpapers_created {
+            let _ = vfs::remove("/share/wallpapers");
+        }
+        if applications_created {
+            let _ = vfs::remove("/share/applications");
+        }
+        if share_created {
+            let _ = vfs::remove("/share");
+        }
+        return false;
+    }
+    if vfs::create_read_only_large("/share/fonts/NotoSans-Regular.ttf", SYSTEM_FONT).is_err() {
+        let _ = vfs::remove("/share/wallpapers/manifest.toml");
+        let _ = vfs::remove("/share/wallpapers/wovenhat-gradient.bmp");
+        for rollback in apps {
+            let _ = vfs::remove(rollback.catalog_path);
+            let _ = vfs::remove(rollback.binary_path);
+        }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
+        if wallpapers_created {
+            let _ = vfs::remove("/share/wallpapers");
+        }
+        if applications_created {
+            let _ = vfs::remove("/share/applications");
+        }
+        if share_created {
+            let _ = vfs::remove("/share");
+        }
+        return false;
+    }
+    if vfs::create_read_only("/share/fonts/manifest.toml", SYSTEM_FONT_MANIFEST).is_err() {
+        let _ = vfs::remove("/share/fonts/NotoSans-Regular.ttf");
+        let _ = vfs::remove("/share/wallpapers/manifest.toml");
+        let _ = vfs::remove("/share/wallpapers/wovenhat-gradient.bmp");
+        for rollback in apps {
+            let _ = vfs::remove(rollback.catalog_path);
+            let _ = vfs::remove(rollback.binary_path);
+        }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
         if wallpapers_created {
             let _ = vfs::remove("/share/wallpapers");
         }
@@ -8378,10 +8482,17 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper VFS readback failed"));
         return false;
     }
+    let mut font_probe = alloc::vec![0u8; SYSTEM_FONT.len()];
+    if vfs::read_all("/share/fonts/NotoSans-Regular.ttf", &mut font_probe) != Ok(SYSTEM_FONT.len())
+    {
+        serial::write_line(format_args!("[APPS] font VFS readback failed"));
+        return false;
+    }
     serial::write_line(format_args!(
-        "[APPS] {} signed applications and licensed wallpaper installed; wallpaper VFS readback {} bytes",
+        "[APPS] {} signed applications, licensed wallpaper, and licensed font installed; wallpaper VFS readback {} bytes, font VFS readback {} bytes",
         installed,
-        wallpaper_probe.len()
+        wallpaper_probe.len(),
+        font_probe.len()
     ));
     true
 }
