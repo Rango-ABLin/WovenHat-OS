@@ -380,7 +380,7 @@ pub fn mount_registry_self_test() -> bool {
     let Some(queried) = query_mount(mp1.mount_id) else {
         return false;
     };
-    if queried.mount_id != mp1.mount_id || queried.disk_info.removable != true {
+    if queried.mount_id != mp1.mount_id || !queried.disk_info.removable {
         return false;
     }
     

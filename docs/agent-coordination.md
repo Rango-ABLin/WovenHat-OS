@@ -8287,3 +8287,84 @@ qualification script's own exit code is still a failure, even though the
 failure point is identical to the accepted baseline's. M3-M7 remain not
 started.
 
+### M3: Activities overview (2026-11-03)
+
+Full design writeup: `docs/graphics/overview-desktop-2026-11-03.md`
+(updated). Summary: the Activities button now opens a real full-screen
+overview (`overview_area`, `paint_overview_content`) instead of the M2
+interim bridge to the small launcher panel: a search field, this
+workspace's window cards (title-card placeholders -- confirmed no scaled
+blit exists in the compositor ABI before choosing that fallback, per the
+brief's own guidance), and a filtered app grid reusing `icons::
+draw_app_icon`'s existing selection ring for the "visible focus ring"
+requirement. `panel_area`/`overview_area` are mutually exclusive on
+`self.layout`; `panel_damage_area` unions in whichever is active so
+`toggle_launcher`'s existing dirty-tracking needed no changes. The
+underlying state machine (`toggle_launcher`, `launcher_key`, `filtered`,
+`launch`) needed zero changes -- confirmed layout-agnostic before relying
+on that, same pattern as M2's popover reuse.
+
+Checked the `Key` enum (`libwoven::lib.rs`) before promising the design
+brief's "Esc closes" and "Tab/arrow keyboard navigation": there is no
+`Escape` or arrow-key variant at all, only `Char`/`Enter`/`Backspace`/
+`Tab`/`F1`-`F4`. Documented this ABI gap rather than silently dropping
+the feature or adding kernel capability without review (AGENTS.md): close
+is via click-outside or F1/Activities-click toggle (already correct,
+equivalent functionality); only Tab-cycling is available for keyboard
+selection, not arrow keys, until the HID/Key ABI is extended (a separate,
+reviewed change, matching CLAUDE-START-HERE.md's own stated fallback
+pattern for the unavailable Super key).
+
+Extended `scripts/test-desktop-qualification.py` with an
+`activities-overview.ppm` capture between the existing F1 press and the
+"files"+Enter typing, per the brief's explicit instruction to extend this
+script with overview journeys. First cut used a blind `capture_frame` +
+fixed 0.5s sleep and produced two different wrong-looking screenshots
+across two runs (once showing a stale lock-screen frame, once showing no
+visible change at all) while the shell's own serial-log markers
+(sign-in/launch/window-open) succeeded in both -- diagnosed as the
+capture racing the shell's up-to-250ms idle frame clock (documented in
+`main.rs`'s module doc) under QEMU/TCG timing variance, not a shell
+defect; replaced it with `capture_until_changed` against the pre-F1
+baseline, the same retry-until-materially-different pattern the script
+already uses for the post-launch screenshot, rather than guessing at a
+longer fixed sleep.
+
+This session also hit real host-timing variability independent of any
+of the above: one qualification run failed outright with QEMU unable to
+allocate guest memory ("cannot set up guest memory 'pc.ram'") despite
+36 GB free disk and no stale QEMU processes -- a transient resource-
+release race from running qualification boots back-to-back; and one run
+booted at roughly 2x its normal tick-count latency and timed out at the
+default `--frame-timeout 5` before ever reaching the Files-launch step.
+Neither reproduced a second time; both are recorded here as environment
+notes, not baked into the script's permanent timeout defaults (which
+would mask real regressions for other runs). Verification runs after
+that used `--frame-timeout 15 --input-timeout 40` for margin and a 15s
+pause between CPU counts; this is a per-session workaround, not a
+change to the gate's own defaults.
+
+Caught one real, if minor, issue from the screenshots themselves (not
+from a build/clippy pass): grid labels for longer catalog names
+("WovenCalculator", "WovenSecurity", "WovenTerminal") truncated to
+"WovenCalcula"/"WovenSecurit"/"WovenTermina" at the chosen cell width.
+Fixed by stripping the redundant "Woven" prefix for the grid's display
+label only (the catalog name used for matching/launching is untouched).
+
+Verified at 1 CPU: `scripts/test-desktop-qualification.py` reaches the
+same point as the known-good baseline (sign-in, overview capture, launch,
+window-open, pointer, all four workspace switches), then hits the
+pre-existing `keyboard_refresh` flake. Screenshot
+(`audit-artifacts/desktop-qualification-1793699470831967700/
+activities-overview.ppm`) confirms the overview renders correctly: search
+field placeholder, "No open windows on this workspace" (correct, no
+windows are open yet at that point in the journey), and all 11 catalog
+apps in a clean 7-column grid with their icons and corrected labels.
+2/4 CPU results recorded after this entry was written, or still pending
+if not yet present below.
+
+
+## Stage 12 requalification (2026-11-03)
+
+Fixed one Clippy bool_comparison in kernel/src/storage_manager.rs (12.5 self-test), restored run-stage12-acceptance.ps1 from b5a2e571^, Stage 12 passes 1/2/4 CPUs. Did not touch apps/woven-shell or scripts/test-desktop-qualification.py (Claude's claimed files).
+

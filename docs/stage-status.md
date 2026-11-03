@@ -66,6 +66,30 @@ and is being scoped deliberately rather than rushed in the same pass as
 M1's module split. No stage acceptance or modernization claim is made for
 M2-M7.
 
+## Stage 12 Filesystem and Storage requalification - 2026-11-03 - PASSED BOUNDED GATE
+
+Stages 12.1-12.5 were requalified at current head. A Stage 12.5 self-test
+assertion failed warning-denying Clippy (`bool_comparison` in
+`kernel/src/storage_manager.rs`); it was rewritten as a logically identical
+negation, with no assertion weakened. `run-stage12-acceptance.ps1` had been
+deleted by cleanup commit `b5a2e571` and was restored byte-identical from
+`b5a2e571^`.
+
+Passed: target Clippy with each of `stage12-1..5-test` and
+`stage12-2-xattr-test`; `cargo clippy --all-targets -- -D warnings`; full
+host `cargo test`; `tests/wovenfs_crash.rs` (20 tests, every-write-boundary
+crash replay, xattr atomicity); and QEMU stages 12.1-12.5 at 1/2/4 CPUs, all
+exit 33, marker `=== STAGE 12 ACCEPTANCE: PASS ===`. Evidence:
+`audit-artifacts/stage12-requal/` and `audit-artifacts/stage12.{1..5}-{1,2,4}cpu-1793699*`.
+
+Not claimed (unchanged open items): WovenFS is not the mounted system
+filesystem (FAT32 still holds the boot volume and `/mnt`; product decision
+pending); physical power-loss and USB qualification need Administrator
+elevation and explicit erase authorization; real measured-root key evidence
+for 12.3 needs a platform TPM/firmware backend on hardware. The full
+`RUN-STAGE10.7.ps1` Windows gate and the other-stage matrices were not
+re-run in this pass.
+
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 
 The full appearance/features proposal is authorized. Work resumes at the open
