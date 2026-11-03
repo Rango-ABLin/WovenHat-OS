@@ -127,7 +127,7 @@ existing `apps/woven-shell/src/tokens.rs` + `libwoven::ui::Theme` system.
 |---|---|---|---|
 | 0 | Source audit | **DONE** (ongoing — re-verify facts below if stale) | Re-run the audit checklist below before each new phase of work, since other agents/auto-commits may have changed files. |
 | 1 | Display/DPI | PARTIAL | `RUN-DESKTOP.ps1 -Display virtio-gpu` works and is QMP-verifiable end to end (see Phase 6 row). Still open: making the GPU-backed frame visible in the actual interactive window (not just via QMP screendump), then audit bilinear/scaled-image filtering quality. |
-| 2 | 2D engine | PARTIAL | Audit `libwoven::graphics::Renderer` (in `libwoven/src/lib.rs`, `pub mod graphics` starting line 359) against the Phase 2 checklist: antialiased paths/curves confirmed to exist (`fill_compound_path_antialiased`); confirm gradient fills, clipping, and transform-matrix support exist or are missing, with file:line evidence, before claiming done. |
+| 2 | 2D engine | PARTIAL, more complete than it first looked | **2026-11-03 audit of `libwoven::graphics::Renderer`** (`libwoven/src/lib.rs`): confirmed present with real tests (not just stubs) -- antialiased compound-path fills (`fill_compound_path_antialiased`/`_blended`, line 11779+); gradients (`vertical_gradient`/`horizontal_gradient`, line 10936/10961, plus `rounded_rect_gradient`/`rounded_rect_top_gradient` for title-bar-style fills, line 10826/10883 -- all clip to their target rect, per `wovengraphics_gradients_clip_extreme_rectangles` at line 15163); clipping (`clip`/`clip_line_to_bounds`, line 13624/11950, tested by `wovengraphics_renderer_clips_gradient_stroke_and_image` at line 15091); a real 16.16 fixed-point affine `Transform` (`xx/xy/yx/yy/tx/ty`, line 555) with `scale`/`translate` constructors and a `map()` that applies the full matrix -- **but no `rotate()` convenience constructor**, so rotation is only reachable by hand-filling the matrix fields with fixed-point sin/cos, not a first-class operation yet. **Real gap found**: no shared drop-shadow/elevation primitive in `libwoven` -- shadows are drawn ad hoc per call site (confirmed in `apps/woven-shell/src/icons.rs`'s app-tile shadow, a one-off offset `fill_rounded` behind the tile) rather than through one reusable function, which is exactly the "prefer reusable rendering primitives over repeated application-specific drawing logic" the mandate's Phase 2 section asks to avoid. Next concrete step: extract a shared `shadow`/`elevation` primitive into `libwoven::graphics::Renderer` and migrate the existing ad hoc call sites onto it; add a `Transform::rotate()` constructor if any call site actually needs rotation (none found yet -- don't add unused API). |
 | 3 | Typography | **NOT WIRED** (real gap) | `TrueTypeFace`/`FontFallback`/`TextInputState`/`layout_text*` exist in `libwoven::graphics` with real antialiased rendering, but have **zero production call sites** — the entire visible shell UI uses the 5x7 bitmap font (`kernel/src/font.rs`). The font itself (`assets/fonts/NotoSans-Regular.ttf`) is `include_bytes!`'d into the **kernel** (`kernel/src/ttf.rs:503`), not reachable from Ring-3 apps without a new syscall or VFS font-staging at boot. This is the single highest-value, highest-risk item in the whole mandate — do it carefully, with a written threat review per AGENTS.md before adding any new syscall/capability, and get the user's sign-off on the approach (syscall vs. VFS-stage) before implementing either. |
 | 4 | Design system | **DONE**, reframed (see conflict note above) | None pending beyond what Phase 2/3/7 unlock. The M1-M7 Overview build plus the 2026-11-03 app visual-token overhaul (all first-party GUI apps on `libwoven::ui::Theme::DARK`) satisfy this phase's intent. |
 | 5 | Compositor | PARTIAL, better than it looks | `kernel/src/display.rs` already has damage-region tracking and present-only-dirty-regions (not a naive full redraw); `apps/woven-shell`'s `Painter` is tile-chunked with `blend`/`overlay` keyed transparency. Audit against the remaining Phase 5 bullets specifically: occlusion handling, multi-monitor scanout correctness, crash recovery of a client surface mid-frame — write findings with file:line evidence before claiming more than "partial." |
@@ -195,6 +195,29 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: Phase 2 2D-engine audit)
+
+With the user's blessing to move to other work after the pointer-jitter
+investigation, did the Phase 2 audit this tracker had been deferring.
+`libwoven::graphics::Renderer` is more complete than the earlier generic
+"PARTIAL" status suggested: real antialiased compound-path fills,
+gradients (vertical/horizontal/rounded-rect, all clip-tested), a real
+`clip()`, and a 16.16 fixed-point affine `Transform` with `scale`/
+`translate` -- all with actual unit tests, not stubs. Two real, scoped
+gaps found and recorded in the Phase 2 row: no `Transform::rotate()`
+convenience constructor (not currently used by any call site, so not
+urgent to add speculatively), and no shared drop-shadow/elevation
+primitive in `libwoven` -- window shadows (`apps/woven-shell`'s layered
+`FOCUSED_SHADOW`/`UNFOCUSED_SHADOW` band system) and icon-tile shadows
+(`icons.rs`'s single offset `fill_rounded`) are each implemented ad hoc
+at their call site rather than sharing one primitive, which is exactly
+what the mandate's Phase 2 section asks to avoid. Did not attempt the
+extraction this entry -- the two shadow styles have different enough
+requirements (multi-band alpha-tied-to-fade vs. single flat offset) that
+unifying them needs real design thought, not a rushed refactor this late
+in an already-long session with the host still recently under memory
+pressure. Left as the concrete next step in the Phase 2 row.
 
 ### 2026-11-03 (session: pointer-jitter fix confirmed only partial)
 
