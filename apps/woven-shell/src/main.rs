@@ -466,7 +466,25 @@ use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
 mod painter;
 use painter::Painter;
 
+/// Which chrome the shell draws: the legacy bottom taskbar, or the new
+/// WovenHat Overview top bar. Overview is the default; `--layout=taskbar`
+/// is the explicit rollback path kept until M7 removes the legacy chrome.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShellLayout {
+    Taskbar,
+    Overview,
+}
+
+/// The Overview top bar's "Activities" button label (stands in for the
+/// full Activities overview, which lands in M3; for now it opens the same
+/// launcher panel the legacy `WovenStart`/F1 button does).
+const ACTIVITIES_LABEL: &str = "Activities";
+/// Horizontal padding inside the Activities button, each side.
+const ACTIVITIES_PADDING: i32 = 10;
+
 struct Desktop {
+    /// Which chrome to draw and hit-test: see [`ShellLayout`].
+    layout: ShellLayout,
     /// The primary monitor's width; the taskbar spans it.
     width: i32,
     /// The whole desktop's width, across every monitor.
@@ -561,6 +579,8 @@ struct Desktop {
 impl Desktop {
     /// The state before `main` fills in the display, options and catalog.
     const INITIAL: Desktop = Desktop {
+        // Overview is the new default; `--layout=taskbar` switches this.
+        layout: ShellLayout::Overview,
         width: 0,
         desktop_width: 0,
         height: 0,
@@ -638,7 +658,11 @@ impl Desktop {
     }
 
     fn taskbar_top(&self) -> i32 {
-        self.height - TASKBAR_HEIGHT
+        match self.layout {
+            ShellLayout::Taskbar => self.height - TASKBAR_HEIGHT,
+            // The Overview top bar sits flush at the top of the screen.
+            ShellLayout::Overview => 0,
+        }
     }
 
     fn taskbar(&self) -> Area {
@@ -652,12 +676,12 @@ impl Desktop {
     }
 
     fn clock_area(&self) -> Area {
-        Area::new(
-            self.width - CLOCK_WIDTH,
-            self.taskbar_top(),
-            CLOCK_WIDTH,
-            TASKBAR_HEIGHT,
-        )
+        let x = match self.layout {
+            ShellLayout::Taskbar => self.width - CLOCK_WIDTH,
+            // GNOME-style: centered in the top bar, not right-aligned.
+            ShellLayout::Overview => (self.width - CLOCK_WIDTH) / 2,
+        };
+        Area::new(x, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
     }
 
     fn entry_area(&self, index: usize) -> Area {
@@ -701,12 +725,14 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        Area::new(
-            START_X,
-            self.taskbar_top() + 4,
-            START_WIDTH as i32,
-            START_HEIGHT as i32,
-        )
+        let width = match self.layout {
+            ShellLayout::Taskbar => START_WIDTH as i32,
+            // Wide enough for the longer "Activities" label.
+            ShellLayout::Overview => {
+                font::text_width(ACTIVITIES_LABEL) as i32 + 2 * ACTIVITIES_PADDING
+            }
+        };
+        Area::new(START_X, self.taskbar_top() + 4, width, START_HEIGHT as i32)
     }
 
     /// The launcher panel, sized to its rows, above the start button; empty
@@ -717,12 +743,13 @@ impl Desktop {
         }
         let rows = 2 + self.filtered().1.max(1) as i32;
         let height = rows * PANEL_ROW + 2;
-        Area::new(
-            PANEL_X,
-            self.taskbar_top() - 2 - height,
-            PANEL_WIDTH,
-            height,
-        )
+        let y = match self.layout {
+            // Opens upward from the bottom taskbar's Start button.
+            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
+            // Opens downward from the Overview top bar's Activities button.
+            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
+        };
+        Area::new(PANEL_X, y, PANEL_WIDTH, height)
     }
 
     /// The perspective card can leave a few pixels outside its flat source
@@ -1210,13 +1237,118 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        if self.three_d {
-            self.render_taskbar_3d(canvas);
+        match self.layout {
+            ShellLayout::Taskbar => {
+                if self.three_d {
+                    self.render_taskbar_3d(canvas);
+                }
+                // Taskbar preparation may restore its backdrop; shortcuts
+                // belong above the wallpaper and must not be erased by that
+                // preparation.
+                self.paint_desktop_icons(canvas);
+                self.paint_taskbar_content(canvas);
+            }
+            ShellLayout::Overview => {
+                // The Overview top bar does not yet have a 3D perspective
+                // presentation (unlike the legacy taskbar's render_taskbar_3d):
+                // it always renders flat for now. Documented, not faked --
+                // see docs/graphics/overview-desktop-2026-11-03.md.
+                self.paint_desktop_icons(canvas);
+                self.paint_top_bar_content(canvas);
+            }
         }
-        // Taskbar preparation may restore its backdrop; shortcuts belong
-        // above the wallpaper and must not be erased by that preparation.
-        self.paint_desktop_icons(canvas);
-        self.paint_taskbar_content(canvas);
+    }
+
+    /// The Overview top bar's content: its translucent fill and bottom
+    /// accent line, the Activities button, the centered clock, the
+    /// workspace switcher, the system menu button, and the unread badge --
+    /// drawn at its own real screen position in `canvas`. Reuses the exact
+    /// same drawing primitives and `theme_*` colors as the legacy taskbar's
+    /// `paint_taskbar_content`, but is a separate function because the
+    /// chrome itself (labels, layout, what's shown) differs.
+    fn paint_top_bar_content(&self, canvas: &mut Canvas<'_>) {
+        let top = self.taskbar_top();
+        let width = self.width as usize;
+        let height = self.height;
+        let left = canvas.x().max(0);
+        let right = (canvas.x() + canvas.width() as i32).min(self.width);
+        let first_row = canvas.y().max(top);
+        let last_row = (canvas.y() + canvas.height() as i32).min(height);
+        for y in first_row..last_row {
+            for x in left..right {
+                canvas.set(x, y, wallpaper(x, y, height));
+            }
+        }
+        canvas.blend_rect(
+            0,
+            top,
+            width,
+            TASKBAR_HEIGHT as usize,
+            theme_taskbar(),
+            TASKBAR_OPACITY,
+        );
+        // The accent line sits at the bar's bottom edge (where a top bar
+        // visually meets the desktop below it), mirroring the legacy
+        // taskbar's accent line at its top edge.
+        canvas.fill_rect(0, top + TASKBAR_HEIGHT - 1, width, 1, theme_accent());
+
+        let activities = self.start_area();
+        let fill = theme_start_fill();
+        Renderer::new(canvas).rounded_rect_gradient(
+            rect_of(activities),
+            CHROME_RADIUS,
+            color_of(lighten(fill, 24)),
+            color_of(fill),
+        );
+        canvas.draw_text(
+            activities.x + ACTIVITIES_PADDING,
+            self.text_y(),
+            ACTIVITIES_LABEL,
+            theme_text(),
+        );
+
+        let (bytes, length) = clock_text(self.time, self.seconds);
+        let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+        let clock_x = (self.width - font::text_width(text) as i32) / 2;
+        canvas.draw_text(clock_x, self.text_y(), text, theme_text());
+
+        // The workspace switcher, left of the system menu button, same as
+        // the legacy taskbar (workspace_area is already derived from
+        // qs_button's position, so this needs no new geometry).
+        for index in 0..WORKSPACES {
+            let area = self.workspace_area(index);
+            let fill = theme_entry(index == self.workspace);
+            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
+            let digit = [b'1' + index as u8];
+            canvas.draw_text(
+                area.x + 3,
+                self.text_y(),
+                core::str::from_utf8(&digit).unwrap_or("?"),
+                theme_text(),
+            );
+        }
+
+        // The system menu button: reuses Quick Settings' own state/actions
+        // (toggle_qs, qs_rows, paint_qs_content), just docked in the top
+        // bar's status cluster instead of the bottom taskbar.
+        let button = self.qs_button();
+        let fill = theme_entry(self.qs_open);
+        fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
+        // A plain ASCII glyph stands in for a dedicated menu icon until a
+        // later iconography pass (libwoven::icons) adds one.
+        canvas.draw_text(button.x + 5, self.text_y(), "=", theme_text());
+
+        if self.unread > 0 {
+            let badge = self.badge_area();
+            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
+            let digit = [b'0' + self.unread.min(9) as u8];
+            canvas.draw_text(
+                badge.x + 3,
+                badge.y + 2,
+                core::str::from_utf8(&digit).unwrap_or("?"),
+                theme_text(),
+            );
+        }
     }
 
     /// The taskbar's content -- its translucent fill, accent top border,
@@ -1445,12 +1577,11 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
-        Area::new(
-            self.width - 4 - CENTER_WIDTH,
-            self.taskbar_top() - 2 - height,
-            CENTER_WIDTH,
-            height,
-        )
+        let y = match self.layout {
+            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
+            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
+        };
+        Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
     /// The toggles as they currently read.
@@ -2167,7 +2298,10 @@ impl Desktop {
     fn badge_area(&self) -> Area {
         let (_, length) = clock_text(self.time, self.seconds);
         let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
-        let clock_x = self.width - CLOCK_MARGIN - clock_width;
+        let clock_x = match self.layout {
+            ShellLayout::Taskbar => self.width - CLOCK_MARGIN - clock_width,
+            ShellLayout::Overview => (self.width - clock_width) / 2,
+        };
         Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
     }
 
@@ -2179,12 +2313,12 @@ impl Desktop {
         }
         let count = self.notes.iter().flatten().count();
         let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
-        Area::new(
-            self.width - 4 - CENTER_WIDTH,
-            self.taskbar_top() - 2 - height,
-            CENTER_WIDTH,
-            height,
-        )
+        let y = match self.layout {
+            ShellLayout::Taskbar => self.taskbar_top() - 2 - height,
+            // Drops down from the clock, calendar/notification-popover style.
+            ShellLayout::Overview => self.taskbar_top() + TASKBAR_HEIGHT + 2,
+        };
+        Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
     /// The Notification Center's overlay: border, title row with Clear, and
@@ -2675,8 +2809,16 @@ impl Desktop {
         }
 
         let focused = self.focused();
-        // Windows may sit on any monitor; only the taskbar band is excluded.
-        let above_taskbar = Area::new(0, 0, self.desktop_width, self.taskbar_top());
+        // Windows may sit on any monitor; only the bar's own band is excluded.
+        let above_taskbar = match self.layout {
+            ShellLayout::Taskbar => Area::new(0, 0, self.desktop_width, self.taskbar_top()),
+            ShellLayout::Overview => Area::new(
+                0,
+                self.taskbar_top() + TASKBAR_HEIGHT,
+                self.desktop_width,
+                self.height - TASKBAR_HEIGHT,
+            ),
+        };
         for &slot in &self.stack[..self.stacked] {
             let Some(window) = &self.windows[slot] else {
                 continue;
@@ -2871,7 +3013,15 @@ impl Desktop {
 
     /// Where windows may go: the screen above the taskbar.
     fn work_area(&self) -> Frame {
-        Frame::new(0, 0, self.width, self.taskbar_top())
+        match self.layout {
+            ShellLayout::Taskbar => Frame::new(0, 0, self.width, self.taskbar_top()),
+            ShellLayout::Overview => Frame::new(
+                0,
+                self.taskbar_top() + TASKBAR_HEIGHT,
+                self.width,
+                self.height - TASKBAR_HEIGHT,
+            ),
+        }
     }
 
     /// Put window `slot` in `frame`, title bar included: move it now, and if
@@ -3198,14 +3348,21 @@ impl Desktop {
                     }
                     return empty;
                 }
-                // A taskbar entry focuses its window.
-                let entry = self
-                    .entries()
-                    .enumerate()
-                    .find(|(index, _)| self.entry_area(*index).contains(x, y))
-                    .map(|(_, (slot, _))| slot);
-                if let Some(slot) = entry {
-                    return self.focus(slot);
+                // A taskbar entry focuses its window. The Overview top bar
+                // does not show a per-window entry list yet (M4 adds the
+                // equivalent dash/switcher); skip this hit test there so a
+                // window's unused legacy entry_area (which still inherits
+                // the bar's new top position) cannot shadow a click on the
+                // real top bar controls occupying that same space.
+                if self.layout == ShellLayout::Taskbar {
+                    let entry = self
+                        .entries()
+                        .enumerate()
+                        .find(|(index, _)| self.entry_area(*index).contains(x, y))
+                        .map(|(_, (slot, _))| slot);
+                    if let Some(slot) = entry {
+                        return self.focus(slot);
+                    }
                 }
                 // Desktop shortcuts are below windows in the visual stack;
                 // only activate one when no window frame covers the click.
@@ -3612,6 +3769,14 @@ fn main(args: Args) -> ! {
                 if desktop.accounts.iter().all(Option::is_none) {
                     fail(9);
                 }
+            }
+            b"--layout" => {
+                index += 1;
+                desktop.layout = match args.get(index) {
+                    Some(b"taskbar") => ShellLayout::Taskbar,
+                    Some(b"overview") => ShellLayout::Overview,
+                    _ => fail(1),
+                };
             }
             _ => fail(1),
         }
