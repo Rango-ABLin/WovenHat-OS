@@ -15,6 +15,40 @@ continue. Do stop and ask if you hit a genuine fork in the road the mandate
 doesn't resolve (see "Open conflict" below) or a destructive/irreversible
 action outside normal commit-and-push.
 
+## User-reported defects to prioritize (added 2026-11-03)
+
+While watching an interactive QEMU session, the user reported: **"the
+pointer could jitter and jumble when moving from one position to the
+other."** Treat this as a real, reported bug to root-cause, not folded
+silently into general polish — it most directly maps to Phase 5's
+"efficient cursor updates" bullet and Phase 1's "sharp... rendering"
+acceptance criterion. The user also asked generally that **the OS be
+sharper and graphics run more smoothly** once the current milestone is
+done — read that as reinforcing Phase 1/2/7's existing acceptance
+criteria (sharp text/edges, no stretching, measured frame times), not as
+a new separate phase.
+
+Suggested places to look first (not yet investigated this session — audit
+before assuming the cause): `WPMV` pointer-move message handling in
+`apps/woven-shell/src/main.rs` (every app's `gui.rs` also independently
+tracks `pointer`/`pointer_pressed` from forwarded `WPMV`/`WPBT` — check
+for inconsistent coordinate scaling between logical and physical pixels,
+especially under the 2x display-scale path, and for any place pointer
+position is drawn one frame behind the actual forwarded coordinate); the
+`usb-tablet` QEMU device `RUN-DESKTOP.ps1` attaches for host/guest pointer
+alignment (confirm it isn't itself a source of input jitter under `whpx`
+vs `tcg`); and the compositor's cursor-presentation path in
+`kernel/src/compositor.rs`/`kernel/src/display.rs` (is the cursor drawn
+via damage-region partial repaint, and could a stale damage rect leave a
+one-frame-old cursor image visible briefly during fast movement?).
+
+**After the graphics mandate is complete** (all phases in the table below
+at an honest "DONE" or explicitly accepted "PARTIAL with no further
+planned work"), the next queued task is making WovenFS the system
+filesystem — see
+`docs/filesystem/wovenfs-system-migration-tracker.md`. Do not start that
+until this mandate is actually finished; it is sequenced, not parallel.
+
 ## HOW TO RESUME (read this first, every time)
 
 1. Read `AGENTS.md`, `docs/stage-status.md`, `docs/agent-coordination.md`
@@ -138,6 +172,20 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: follow-up instructions captured)
+
+User reported pointer jitter/jumble during movement in the interactive
+QEMU session, and asked for the OS to be sharper and graphics smoother
+once this milestone completes; both captured above as prioritized items
+within this mandate's existing phases (not a new phase). User also queued
+a sequenced follow-on task for after this mandate: make WovenFS the
+system filesystem, FAT32 restricted to the ESP and removable media only,
+explicitly without reclassifying Stage 12.2/12.4. That task has its own
+tracker: `docs/filesystem/wovenfs-system-migration-tracker.md`. No code
+changed this entry; still at the same point as the previous entry below —
+Phase 1/6's virtio-gpu-device wiring is still the next concrete
+implementation step.
 
 ### 2026-11-03 (session: tracker creation)
 
