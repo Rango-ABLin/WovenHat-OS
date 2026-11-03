@@ -8376,3 +8376,37 @@ Codex (or any other agent reading this): please hold off opening new file owners
 
 Proceeding to M6 (measured performance/memory record) next.
 
+## Claude Code - M7: fixed Stage 10.7 python3 dependency, reverted unguarded WFS regression (2026-11-03)
+
+Starting M7 (make Overview the default, remove legacy taskbar code,
+update every first-party app's visual tokens, full `RUN-STAGE10.7.ps1`
+gate). Two fixes before attempting the gate itself:
+
+1. `run-stage10-7-acceptance.ps1` hardcoded `python3`, which resolves to
+   a dead Windows Store app-execution-alias stub on this machine (`python`
+   is the real interpreter) -- the same issue found and reported earlier
+   this session, now actually fixed. Two commits: the first fallback
+   attempt still crashed (PowerShell 5.1 turns a native command's stderr
+   into a terminating exception under `$ErrorActionPreference = "Stop"`,
+   so the `$LASTEXITCODE` check was never reached), the second wraps the
+   probe in try/catch and was verified standalone before use.
+2. Running the full gate with that fixed surfaced a real test failure:
+   `tests/wovenfs_crash.rs`'s `a_file_larger_than_the_direct_block_
+   limit_is_refused` expected `Err(TooLarge)` and got `Ok(())`. Traced to
+   `0bb3c75c` ("Update", an auto-commit with no entry here or in
+   `docs/stage-status.md`): a 528-line, single-commit addition of a WFS
+   block-tree structure for files beyond the existing direct-block limit,
+   entirely unguarded by a stage feature flag and without updating the
+   test whose accepted assertion it silently invalidated. **Reverted**
+   (`f2cd9808`) to restore the accepted Stage 7.6 gate rather than either
+   leave it broken or finish someone else's unreviewed, undocumented
+   kernel on-disk-format change unilaterally -- a block-tree extension to
+   WFS is real work needing its own crash-safety review, feature gate,
+   and tests, per AGENTS.md. Re-ran `cargo test --test wovenfs_crash`
+   (20/20 pass), kernel-target build, and host Clippy after the revert,
+   all clean. The 528 lines are fully recoverable from `0bb3c75c` in
+   history for whoever wants to resume this properly gated.
+
+Re-running the full `RUN-STAGE10.7.ps1` gate now with both fixes in
+place.
+
