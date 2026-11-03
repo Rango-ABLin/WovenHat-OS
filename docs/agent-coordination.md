@@ -8410,3 +8410,18 @@ gate). Two fixes before attempting the gate itself:
 Re-running the full `RUN-STAGE10.7.ps1` gate now with both fixes in
 place.
 
+**Result: PASS, exit code 0.** Host unittest discovery, host Clippy lint,
+the full Stage 10.6 preservation chain (memory/boot regression matrix:
+10x1 CPU, 30x2 CPU, 20x4 CPU, every run PASS exit 33), and Stage 10.7's
+own isolated async-TCP boots at 1/2/4 CPUs (host-side TCP exchange
+verified: connect + 2x TX + RX + FIN/EOF, each CPU count) all passed.
+First fully-passing full-Windows-gate run this session. Evidence:
+`audit-artifacts/acceptance-20261103-141715-448/`. Recorded in
+`docs/stage-status.md`.
+
+M1-M6 confirmed not to have regressed any prior-stage acceptance. Next:
+planning (not yet executing) the M7 cutover -- making `--layout=overview`
+the hard default and removing the legacy taskbar code -- which is large
+and semi-irreversible, so it'll be scoped and checked in on before any
+deletion happens.
+

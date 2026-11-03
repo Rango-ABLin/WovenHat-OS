@@ -1,5 +1,31 @@
 # Stage status
 
+## Full Stage 10.7 Windows gate - 2026-11-03 - PASSED
+
+`RUN-STAGE10.7.ps1` (host unittest discovery, host Clippy lint, the full
+Stage 10.6 preservation chain including the memory/boot regression
+matrix -- 10x1 CPU, 30x2 CPU, 20x4 CPU, all PASS exit 33 -- and Stage
+10.7's own isolated async-TCP boots at 1/2/4 CPUs) passed completely,
+exit code 0, for the first time this session. Two fixes were needed to
+get the gate running at all: `run-stage10-7-acceptance.ps1`'s hardcoded
+`python3` (resolves to a dead Windows Store alias stub on this machine)
+replaced with a verified `Resolve-PythonCommand` fallback, and an
+undocumented, unguarded 528-line WFS block-tree feature (commit
+`0bb3c75c`, no coordination entry, no feature flag, broke
+`tests/wovenfs_crash.rs`'s accepted `a_file_larger_than_the_direct_
+block_limit_is_refused` assertion) reverted via `f2cd9808`. Both
+recorded in `docs/agent-coordination.md`. Evidence:
+`audit-artifacts/acceptance-20261103-141715-448/`.
+
+This confirms the WovenHat Overview work (M1-M6) did not regress any
+prior-stage acceptance. M7's own gate ("Full RUN-STAGE10.7.ps1 Windows
+gate plus desktop journeys on 1/2/4 CPUs; all prior-stage acceptance
+still passes") now has its Windows-gate half satisfied; the desktop-
+journeys half (`scripts/test-desktop-qualification.py` at 1/2/4 CPU
+against the final M7 cutover state) is still open, pending the actual
+cutover (making `--layout=overview` the hard default, removing the
+legacy taskbar code) which has not started.
+
 ## WovenHat Overview desktop overhaul (M6) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
 
 M6 (measured performance/memory record) is implemented, built,
