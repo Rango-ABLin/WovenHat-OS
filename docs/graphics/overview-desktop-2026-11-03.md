@@ -1,8 +1,9 @@
-# WovenHat Overview desktop: M2 top bar, M3 Activities overview
+# WovenHat Overview desktop: M2 top bar, M3 Activities overview, M4 Dash/switcher
 
-2026-11-03. Covers M2 and M3 of `CLAUDE-START-HERE.md`'s milestone table:
-the Overview top bar (clock/calendar popover, system menu) and the
-Activities overview (search, window cards, app grid). M1 (the
+2026-11-03. Covers M2-M4 of `CLAUDE-START-HERE.md`'s milestone table:
+the Overview top bar (clock/calendar popover, system menu), the
+Activities overview (search, window cards, app grid), and the Dash,
+window switcher, snap shortcuts, and notification placement. M1 (the
 behavior-preserving `main.rs` module split) is covered separately in
 `docs/agent-coordination.md`.
 
@@ -257,3 +258,88 @@ strip described above.
   `--frame-timeout`/`--input-timeout` values used for verification above
   are a per-session workaround and were not written into the script's
   permanent defaults, which would mask real regressions for other runs.
+
+## M4: Dash, window switcher, snap shortcuts, notification placement
+
+### What was already there, confirmed by reading the code, not assumed
+
+Before writing anything new, checked whether M4's window-management
+requirements were already satisfied:
+
+- **"Alt+Tab switcher with focus restoration."** `libwoven::Key` has no
+  modifier-key concept at all (confirmed again, same ABI already
+  documented for M3's Esc/arrow-key gap) -- `Alt+Tab` cannot be
+  distinguished from plain `Tab` at the ABI level. Read `handle_input`'s
+  existing bare-`Tab` handler (`InputEvent::Key(Key::Tab)`, outside the
+  launcher) and `raise()`: `raise` rotates the focused slot to the end of
+  `self.stack` (bottom-to-top, last = focused), so repeatedly focusing
+  `self.stack[..stacked].first()` -- what bare `Tab` already does --
+  cycles every window on the workspace in strict MRU order, exactly an
+  Alt+Tab switcher's behavior. `focus()` already includes the taskbar/top
+  bar in its returned dirty area and leaves window content untouched, so
+  focus restoration (switching away and back repaints correctly) was
+  already correct. **No code changed for this.**
+- **Snap halves.** `handle_input`'s drag-release-at-the-screen-edge path
+  already calls `layout::half(self.work_area(), x > 0)`, and
+  `work_area()` was already made layout-aware in M2. Drag-to-edge snap
+  already works correctly for both layouts. **No code changed for this
+  either.** The keyboard variant ("Super/Alt+arrows") is blocked by the
+  same missing-arrow-key `Key` ABI gap as M3's keyboard navigation --
+  documented here rather than silently dropped, consistent with the
+  established pattern.
+- **Tiling (F2) and workspace keys (F3/F4).** Untouched; confirmed no
+  M2/M3/M4 change in this session reaches `toggle_tiling`,
+  `switch_workspace`, or `move_focused_to_next_workspace`.
+
+### What's new: the Dash
+
+A Dash row (`overview_dash_area`, `dash_apps`) between the search field
+and the window-cards row: favorites (the same curated three-app set as
+the existing desktop shortcuts, `DESKTOP_ICON_NAMES`, resolved through
+the existing `desktop_icon_app` helper -- no new hardcoded app list) plus
+any other app with a running instance (`Desktop::children`), deduplicated,
+bounded to `DASH_MAX` (8). Icon-only, no label, distinct from the
+labeled app grid below it. Clicking a Dash icon focuses a running
+instance if one exists (found by matching a `children` entry's pid
+against open windows' `owner`) or launches it otherwise, closing the
+overview either way.
+
+**Favorites persistence**: per `CLAUDE-START-HERE.md`'s explicit
+constraint ("Persistent theme/accent/wallpaper writes need an authorized
+per-user mechanism; there is no broad `/etc` write capability. Do not add
+one to satisfy this feature"), favorites are the same fixed curated set
+as the desktop shortcuts, not user-customizable. Deferred, not faked.
+
+### Notification placement
+
+`toast_area` is now layout-aware: Taskbar keeps its unchanged top-right
+position; Overview centers the toast and drops it below the top bar
+(`taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN`) instead of the old
+fixed `TOAST_MARGIN` from the screen's own top edge, which would have
+rendered the toast partially behind the 24px top bar -- a real,
+previously-unnoticed visual bug in the M2/M3 code this M4 pass fixed
+while implementing the explicitly-requested "toast under the top bar
+center" placement. DND and the lock-screen rule (notification remembered,
+never shown) were already correctly implemented in the pre-existing
+`NOTE` message handler (`if self.dnd || self.locked { ... no toast ... }`
+while `remember()` always records it) -- confirmed by reading, no change
+needed.
+
+### Verification
+
+`cargo build`/`cargo clippy --target x86_64-unknown-none -- -D warnings`
+clean; `cargo test --test shell_input` passes. **No QEMU verification
+this pass**: `Get-CimInstance Win32_OperatingSystem` showed under 1 GB
+free out of this machine's 7.6 GB total physical RAM throughout, so QEMU
+could not allocate a guest at all (not even far enough to reach the
+earlier "cannot set up guest memory" point -- guest creation itself was
+infeasible). Verified instead by: careful reading of every touched
+function and its call sites before editing (documented above), a full
+diff review after the edits, and reasoning through the overview's
+vertical layout arithmetic (search + margin + Dash row + margin + thumb
+row + margin + at least one grid row comfortably fits the smallest
+screen height this codebase boots at). This is explicitly a lower bar
+than M2/M3's QEMU-confirmed verification, and is reported as such -- not
+a stage acceptance, and QEMU re-verification (1/2/4 CPU, matching M2/M3's
+journeys) is still owed once this machine has enough free memory for a
+guest boot.

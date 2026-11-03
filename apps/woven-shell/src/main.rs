@@ -496,6 +496,15 @@ const OVERVIEW_THUMB_GAP: i32 = 10;
 const OVERVIEW_CELL_WIDTH: i32 = 72;
 const OVERVIEW_CELL_HEIGHT: i32 = 64;
 const OVERVIEW_CELL_GAP: i32 = 8;
+/// The Dash (M4): favorites and running apps, one row below the search
+/// field. Icon-only, no label -- GNOME-dash-style, not the labeled app
+/// grid below it.
+const OVERVIEW_DASH_ICON: i32 = 40;
+const OVERVIEW_DASH_GAP: i32 = 10;
+const OVERVIEW_DASH_ROW_HEIGHT: i32 = OVERVIEW_DASH_ICON;
+/// Favorites (the same curated set as the desktop shortcuts) plus running
+/// apps, deduplicated, bounded to this many Dash entries.
+const DASH_MAX: usize = 8;
 
 struct Desktop {
     /// Which chrome to draw and hit-test: see [`ShellLayout`].
@@ -710,12 +719,25 @@ impl Desktop {
     }
 
     fn toast_area(&self) -> Area {
-        Area::new(
-            self.width - TOAST_WIDTH - TOAST_MARGIN,
-            TOAST_MARGIN,
-            TOAST_WIDTH,
-            TOAST_HEIGHT,
-        )
+        match self.layout {
+            // Top-right, clear of the bottom taskbar (unchanged).
+            ShellLayout::Taskbar => Area::new(
+                self.width - TOAST_WIDTH - TOAST_MARGIN,
+                TOAST_MARGIN,
+                TOAST_WIDTH,
+                TOAST_HEIGHT,
+            ),
+            // Centered, dropping down from the top bar (M4): the fixed
+            // TOAST_MARGIN from the screen's own top edge would otherwise
+            // land the toast under/behind the bar, since the bar now
+            // occupies that band itself.
+            ShellLayout::Overview => Area::new(
+                (self.width - TOAST_WIDTH) / 2,
+                self.taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN,
+                TOAST_WIDTH,
+                TOAST_HEIGHT,
+            ),
+        }
     }
 
     fn cursor_area(&self) -> Area {
@@ -817,9 +839,53 @@ impl Desktop {
         )
     }
 
-    /// Top of the window-thumbnails row, below the search field.
-    fn overview_thumb_row_top(&self) -> i32 {
+    /// Top of the Dash row, below the search field.
+    fn overview_dash_row_top(&self) -> i32 {
         self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN
+    }
+
+    /// Dash entry `index`'s area, left to right. See [`Self::dash_apps`].
+    fn overview_dash_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_DASH_ICON + OVERVIEW_DASH_GAP),
+            self.overview_dash_row_top(),
+            OVERVIEW_DASH_ICON,
+            OVERVIEW_DASH_ICON,
+        )
+    }
+
+    /// Favorites (the same curated set as the desktop shortcuts,
+    /// `DESKTOP_ICON_NAMES`) first, then any other app with a running
+    /// instance ([`Self::children`]) not already a favorite, deduplicated,
+    /// bounded to `DASH_MAX`.
+    fn dash_apps(&self) -> ([usize; DASH_MAX], usize) {
+        let mut apps = [0usize; DASH_MAX];
+        let mut count = 0;
+        for index in 0..DESKTOP_ICON_NAMES.len() {
+            if count >= DASH_MAX {
+                break;
+            }
+            if let Some(app_index) = self.desktop_icon_app(index) {
+                apps[count] = app_index;
+                count += 1;
+            }
+        }
+        for child in self.children.iter().flatten() {
+            if count >= DASH_MAX {
+                break;
+            }
+            if !apps[..count].contains(&child.app) {
+                apps[count] = child.app;
+                count += 1;
+            }
+        }
+        (apps, count)
+    }
+
+    /// Top of the window-thumbnails row, below the Dash.
+    fn overview_thumb_row_top(&self) -> i32 {
+        self.overview_dash_row_top() + OVERVIEW_DASH_ROW_HEIGHT + OVERVIEW_MARGIN
     }
 
     /// Window-card `index`'s area, left to right, one per current-workspace
@@ -1474,6 +1540,14 @@ impl Desktop {
                 text,
                 theme_text(),
             );
+        }
+
+        // The Dash: favorites and running apps, icon-only.
+        let (dash_apps, dash_count) = self.dash_apps();
+        for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
+            let Some(app) = self.apps[app_index] else { continue };
+            let area = self.overview_dash_area(index);
+            draw_app_icon(canvas, area.x, area.y, app_icon(app.name()), OVERVIEW_DASH_ICON, false);
         }
 
         // This workspace's window cards: a title-card placeholder per
@@ -3595,6 +3669,29 @@ impl Desktop {
                     if let Some(slot) = card {
                         let closed = self.toggle_launcher();
                         return closed.union(self.focus(slot));
+                    }
+                    // A Dash icon focuses a running instance, or launches
+                    // one if none is running.
+                    let (dash_apps, dash_count) = self.dash_apps();
+                    let dash_hit = (0..dash_count)
+                        .find(|&index| self.overview_dash_area(index).contains(x, y))
+                        .map(|index| dash_apps[index]);
+                    if let Some(app_index) = dash_hit {
+                        let running = self
+                            .children
+                            .iter()
+                            .flatten()
+                            .find(|child| child.app == app_index)
+                            .and_then(|child| {
+                                self.windows
+                                    .iter()
+                                    .position(|window| window.is_some_and(|w| w.owner == child.pid))
+                            });
+                        if let Some(slot) = running {
+                            let closed = self.toggle_launcher();
+                            return closed.union(self.focus(slot));
+                        }
+                        return self.launch(app_index);
                     }
                     // An app grid cell launches it.
                     let (found, count) = self.filtered();

@@ -1,5 +1,23 @@
 # Stage status
 
+## WovenHat Overview desktop overhaul (M4) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
+
+M4 (Dash, Alt+Tab switcher, snap shortcuts, notification placement) is
+implemented, built, and Clippy-clean, but **not QEMU-verified this pass**:
+this machine's free RAM stayed under 1 GB (of 7.6 GB total) throughout,
+so QEMU could not allocate a guest at all, let alone boot one. Stated
+plainly rather than silently skipped or claimed otherwise. Full writeup,
+including which M4 requirements were already satisfied by pre-existing
+code (confirmed by reading, not assumed) and which are blocked by the
+same missing-arrow-key ABI gap M3 documented for Esc:
+`docs/graphics/overview-desktop-2026-11-03.md`. Added: the Dash
+(favorites + running apps, `dash_apps`/`overview_dash_area`, in the
+overview below the search field) and a layout-aware `toast_area` (now
+centered under the Overview top bar instead of overlapping it). Verified
+by build/Clippy and static review only; `cargo test --test shell_input`
+still passes. QEMU re-verification (1/2/4 CPU) is owed once this
+machine has enough free memory for a guest boot.
+
 ## WovenHat Overview desktop overhaul (M3) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
 
 M3 (the Activities overview: search field, this workspace's window cards,
