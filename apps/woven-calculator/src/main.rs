@@ -117,7 +117,7 @@ fn draw_gui(
         canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", THEME.accent);
     }
     evaluate_button.draw(canvas, THEME);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter evaluates", THEME.text);
+    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter: evaluate", THEME.text);
     // The desktop owns the cursor; clients draw only control hover state.
 }
 

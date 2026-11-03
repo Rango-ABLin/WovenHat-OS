@@ -77,7 +77,7 @@ fn draw(
     canvas.draw_text(
         PANEL_X + 10,
         PANEL_Y + 174,
-        "Enter submits; Backspace edits",
+        "Enter: submit  Backspace: edit",
         MUTED,
     );
     if let Some((x, y)) = pointer {
