@@ -1,6 +1,6 @@
 # Stage status
 
-## WovenHat Overview desktop overhaul (M7 cutover) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP OVERHAUL NOT STARTED
+## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, ASSETS NOT STARTED
 
 M7's layout-cutover-and-verification half is done: removed the
 `ShellLayout` enum, the `--layout` CLI flag, `paint_taskbar_content`,
@@ -30,15 +30,28 @@ Windows gate plus desktop journeys on 1/2/4 CPUs" requirement is now
 satisfied for the shell-code-removal scope specifically (the Windows
 gate itself passed earlier today, see below).
 
-**Not done, explicitly**: the 15-app visual-token overhaul ("update
-every first-party app... to the new visual tokens, window chrome and
-keyboard conventions") and the new original wallpaper/icon asset set
+**App visual-token overhaul: done.** Every first-party app with GUI
+chrome (`woven-files`, `woven-terminal`, `woven-editor`, `woven-images`,
+`woven-monitor`, `woven-store`, `woven-update`, `woven-security`,
+`woven-calculator`, `woven-installer`) now draws through
+`libwoven::ui::Theme::DARK` instead of locally hardcoded color consts
+(`PANEL`/`ACCENT`/`TEXT`/`BUTTON`), matching `woven-shell`'s own
+established accent (`Theme::DARK.accent` was retuned from
+`rgb(100,220,180)` to `rgb(76,190,188)` to match). `woven-settings`
+already supported `Theme::DARK`/`LIGHT`/`HIGH_CONTRAST` dynamically
+before this pass and needed no change. `woven-recovery`, `woven-search`,
+`woven-ai`, and `woven-package` are CLI-only (no GUI/`Painter`/`Theme`
+call sites) and are confirmed to need no migration. Each app verified
+individually via `cargo build --target x86_64-unknown-none` and
+`cargo clippy --target x86_64-unknown-none -- -D warnings`, both clean;
+IPC and accepted behavior untouched (color/token substitution only, no
+geometry or protocol changes). Committed as one small commit per app.
+
+**Not done, explicitly**: the new original wallpaper/icon asset set
 under `assets/` that `CLAUDE-START-HERE.md`'s overhaul-scope paragraph
-also asks for. Confirmed earlier this session that none of the 15 apps
-reference `libwoven::ui::Theme` dynamically (each hardcodes its own
-local colors), so this is genuinely separate, large, per-app work, not
-a side effect of the shell cutover. M7 is not being claimed complete;
-only the layout-cutover-and-verification portion is.
+also asks for. This remains separate, not-yet-started work. M7 is not
+being claimed complete; the layout cutover and the app theme migration
+are both done, but the asset set is outstanding.
 
 ## Full Stage 10.7 Windows gate - 2026-11-03 - PASSED
 

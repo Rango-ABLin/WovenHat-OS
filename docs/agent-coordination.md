@@ -8448,10 +8448,40 @@ identical to the pre-cutover baseline -- no regression. All three hit
 only the pre-existing `keyboard_refresh` flake, as always. Full
 writeup: `docs/graphics/overview-desktop-2026-11-03.md`.
 
-**Explicitly not done**: the 15-app visual-token overhaul and new
-wallpaper/icon assets `CLAUDE-START-HERE.md`'s overhaul-scope paragraph
-also asks for -- confirmed none of the 15 apps use `libwoven::ui::Theme`
-dynamically, so this is separate, large, per-app work with its own
-review burden. M7 is not claimed complete; only the layout-cutover
-portion is.
+**Explicitly not done** (at the time of the cutover commit): the
+15-app visual-token overhaul and new wallpaper/icon assets
+`CLAUDE-START-HERE.md`'s overhaul-scope paragraph also asks for.
+
+## Claude Code - app visual-token overhaul executed and verified (2026-11-03)
+
+Migrated every first-party app with GUI chrome onto
+`libwoven::ui::Theme::DARK`, removing each app's locally hardcoded
+`PANEL`/`ACCENT`/`TEXT`/`BUTTON` color consts: `woven-files`,
+`woven-terminal`, `woven-editor`, `woven-images`, `woven-monitor`,
+`woven-store`, `woven-update`, `woven-security`, `woven-calculator`,
+`woven-installer`. Retuned `Theme::DARK.accent` from `rgb(100,220,180)`
+to `rgb(76,190,188)` first, to match `woven-shell`'s own established
+accent, so every app now shares one accent color with the shell.
+`woven-settings` already used `Theme::DARK`/`LIGHT`/`HIGH_CONTRAST`
+dynamically (with its own theme-mode switch) and needed no change.
+Confirmed `woven-recovery`, `woven-search`, `woven-ai`, and
+`woven-package` are CLI-only (no GUI/`Painter`/`Theme` call sites in
+any of their source files) -- no migration applies to them.
+
+Mechanical, per-app refactor: remove the local color consts, add
+`const THEME: Theme = Theme::DARK;`, replace every call site
+(`PANEL`->`THEME.surface`, `ACCENT`->`THEME.accent`, `TEXT`->`THEME.text`,
+`BUTTON`->`THEME.disabled`, the manually-constructed `Theme { ... }`
+literal -> `THEME` directly). App-specific colors with no `Theme`
+equivalent (`BACKGROUND`, `MUTED`, `POINTER_MARKER`, `woven-installer`'s
+`PANEL_DARK`) were kept as-is. No geometry, IPC or accepted-behavior
+changes in any app. Each app verified individually: `cargo build
+--target x86_64-unknown-none` and `cargo clippy --target
+x86_64-unknown-none -- -D warnings`, both clean, zero warnings.
+Committed as one small commit per app (`33715764` through `9212da32`).
+
+**Still not done**: the new original wallpaper/icon asset set under
+`assets/` that `CLAUDE-START-HERE.md`'s overhaul-scope paragraph also
+asks for. M7 is not claimed complete; the layout cutover and the app
+theme migration are both done, but the asset set is outstanding.
 
