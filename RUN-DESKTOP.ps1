@@ -3,6 +3,14 @@ param(
     [ValidateSet(1, 2, 4)][int]$Cpus = 2,
     [string]$Memory = '5G',
     [ValidateSet('whpx', 'tcg')][string]$Accelerator = 'whpx',
+    # 'std' is the long-proven UEFI/GOP framebuffer path every prior
+    # qualification run has exercised. 'virtio-gpu' is opt-in: it attaches
+    # a virtio-gpu-pci device so the kernel's compositor::attach_gpu_outputs()
+    # (which calls virtio_gpu::Gpu::probe() in the production, non-test-gated
+    # path) has a real device to find, instead of always falling back to
+    # Error::NoDisplay. Default stays 'std' so existing callers/behavior are
+    # unaffected.
+    [ValidateSet('std', 'virtio-gpu')][string]$Display = 'std',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -38,10 +46,24 @@ image = desktop.build_hardware_demo(out)
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     $accelOption = if ($Accelerator -eq 'whpx') { 'whpx' } else { 'tcg,thread=multi,tb-size=256' }
+    # The UEFI bootloader (the uefi crate's GOP console protocol) needs a
+    # GOP-capable boot framebuffer to hand off before the kernel starts, or
+    # it panics (confirmed: 'std' VGA replaced outright with 'none' + a
+    # virtio-gpu-pci device panics at uefi::proto::console::gop during
+    # boot). So 'virtio-gpu' mode keeps '-vga std' for boot and *adds* a
+    # second, independent virtio-gpu-pci device the kernel's own PCI probe
+    # (compositor::attach_gpu_outputs -> virtio_gpu::Gpu::probe) can find
+    # and drive after boot, rather than replacing the boot display device.
+    $displayArgs = if ($Display -eq 'virtio-gpu') {
+        @('-vga', 'std', '-device', 'virtio-gpu-pci')
+    } else {
+        @('-vga', 'std')
+    }
     $qemuArgs = @(
         '-accel', $accelOption, '-machine', 'pc',
         '-m', $Memory, '-smp', "$Cpus", '-name', 'WovenHat Desktop',
-        '-serial', "file:$runDir/serial.log", '-no-reboot', '-vga', 'std',
+        '-serial', "file:$runDir/serial.log", '-no-reboot'
+    ) + $displayArgs + @(
         '-qmp', "tcp:127.0.0.1:$port,server=on,wait=off",
         '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
         '-drive', "if=none,id=boot,format=raw,readonly=on,file=$Image",

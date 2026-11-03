@@ -103,12 +103,12 @@ existing `apps/woven-shell/src/tokens.rs` + `libwoven::ui::Theme` system.
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
 | 0 | Source audit | **DONE** (ongoing — re-verify facts below if stale) | Re-run the audit checklist below before each new phase of work, since other agents/auto-commits may have changed files. |
-| 1 | Display/DPI | PARTIAL | Wire `-device virtio-gpu-pci` into `RUN-DESKTOP.ps1`/qualification harness as an opt-in path and confirm `compositor.rs`'s `virtio_gpu::Gpu::probe()` actually succeeds against it (today it always falls back to `NoDisplay` because the launcher attaches `-vga std`, not a virtio-gpu device). Then audit bilinear/scaled-image filtering quality. |
+| 1 | Display/DPI | PARTIAL | `RUN-DESKTOP.ps1 -Display virtio-gpu` now exists (see Phase 6 row — `Gpu::probe()` confirmed to succeed) but the resulting frame is **not visible in any QEMU window**; see the 2026-11-03 findings below before doing more display work. Next: fix or diagnose that presentation gap, then audit bilinear/scaled-image filtering quality. |
 | 2 | 2D engine | PARTIAL | Audit `libwoven::graphics::Renderer` (in `libwoven/src/lib.rs`, `pub mod graphics` starting line 359) against the Phase 2 checklist: antialiased paths/curves confirmed to exist (`fill_compound_path_antialiased`); confirm gradient fills, clipping, and transform-matrix support exist or are missing, with file:line evidence, before claiming done. |
 | 3 | Typography | **NOT WIRED** (real gap) | `TrueTypeFace`/`FontFallback`/`TextInputState`/`layout_text*` exist in `libwoven::graphics` with real antialiased rendering, but have **zero production call sites** — the entire visible shell UI uses the 5x7 bitmap font (`kernel/src/font.rs`). The font itself (`assets/fonts/NotoSans-Regular.ttf`) is `include_bytes!`'d into the **kernel** (`kernel/src/ttf.rs:503`), not reachable from Ring-3 apps without a new syscall or VFS font-staging at boot. This is the single highest-value, highest-risk item in the whole mandate — do it carefully, with a written threat review per AGENTS.md before adding any new syscall/capability, and get the user's sign-off on the approach (syscall vs. VFS-stage) before implementing either. |
 | 4 | Design system | **DONE**, reframed (see conflict note above) | None pending beyond what Phase 2/3/7 unlock. The M1-M7 Overview build plus the 2026-11-03 app visual-token overhaul (all first-party GUI apps on `libwoven::ui::Theme::DARK`) satisfy this phase's intent. |
 | 5 | Compositor | PARTIAL, better than it looks | `kernel/src/display.rs` already has damage-region tracking and present-only-dirty-regions (not a naive full redraw); `apps/woven-shell`'s `Painter` is tile-chunked with `blend`/`overlay` keyed transparency. Audit against the remaining Phase 5 bullets specifically: occlusion handling, multi-monitor scanout correctness, crash recovery of a client surface mid-frame — write findings with file:line evidence before claiming more than "partial." |
-| 6 | GPU backend | PARTIAL, more built than wired | `kernel/src/virtio_gpu.rs` (953 lines) has a real VirtIO-GPU 2D/3D API (`Gpu::probe`, `create_resource_3d`, `set_scanout_resource`, `present`, a `VirglStream` command builder) and `compositor.rs` already calls `virtio_gpu::Gpu::probe()` in the production path — it's just never exercised because the interactive/qualification launchers don't attach a virtio-gpu device. First step is Phase 1's launcher change; only after that works should this phase's "experimental accelerated rendering" bullet be attempted. `virtio_gpu::self_test()` exists but is gated behind `feature = "stage20-14-test"` — run it (`cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings` + the matching QEMU gate if one exists) before assuming it currently passes. |
+| 6 | GPU backend | PARTIAL — probe/mode-set confirmed working; presentation to a visible window not yet confirmed | `kernel/src/virtio_gpu.rs` (953 lines) has a real VirtIO-GPU 2D/3D API and `compositor.rs` calls `Gpu::probe()` in production. **2026-11-03: confirmed live** — `RUN-DESKTOP.ps1 -Display virtio-gpu` (new flag, keeps `-vga std` for UEFI/GOP boot and *adds* `-device virtio-gpu-pci`) boots clean to `[DISPLAY] virtio-gpu mode head=0 640x480` / `[DISPLAY] virtio-gpu: 1 monitors` / `[SESSION] WovenShell desktop started`, no panics. **But** the one QEMU window that opens (`QEMU (WovenHat Desktop)`, confirmed via Win32 `EnumWindows` — only one visible top-level window exists for the process) stays frozen on the pre-switch boot splash frame; two QMP `screendump`s taken ~seconds apart are byte-identical, both showing the "Starting desktop" spinner at the position it was in before the switch to virtio-gpu, even though the serial log says the desktop finished booting and did a full recompose. So either (a) QEMU's default display backend only ever shows the first/`-vga std` head and never surfaces a second GPU's scanout in any window (would need `-display` options or per-head windows this launcher doesn't configure), or (b) the kernel's virtio-gpu `present()`/`present_rect()` path has a real bug (e.g. not sending `RESOURCE_FLUSH` correctly, or flushing the wrong resource) and nothing is actually being drawn to that scanout at all — **not distinguished yet, needs follow-up**: try `-display sdl,gl=on` or `-display gtk,gl=on` (software/virgl paths differ), try explicitly uncommenting `virtio_gpu::self_test()`'s own 2-scanout-oriented checks under `stage20-14-test` to see if its independent host-side verification (if any exists) catches a real presentation bug distinct from "QEMU just doesn't show this head." Evidence: `target/desktop-interactive-20261103-190611-569/` (serial.log, live-screendump.png, live-screendump2.png). Don't claim Phase 6 further "done" than this until that ambiguity is resolved. `virtio_gpu::self_test()` itself still untested this session (gated behind `feature = "stage20-14-test"`, not run). |
 | 7 | Animations | PARTIAL | `Spring`-based window fade-in, overview transitions, and a reduced-motion switch exist (M5). Not yet measured: input-to-display latency, repaint cost, memory/CPU under animation — Phase 7 explicitly asks for recorded frame-time distributions, not a claimed FPS number. Add real measurement before expanding animation scope. |
 | 8 | App UI modernization | **DONE** for color tokens | All first-party GUI apps migrated to `libwoven::ui::Theme::DARK` (commits `33715764`..`9212da32`, 2026-11-03). Not yet done: window-chrome and keyboard-convention consistency beyond color (the mandate's "window chrome and keyboard conventions" phrase) — audit each app's title bar/close-button/focus-ring behavior against the shell's own conventions. |
 | 9 | QA automation | PARTIAL | `scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture, retry-until-materially-different) exists and runs at 1/2/4 CPU. Missing: automated pixel/tolerance comparison against reference images (today comparison is manual, via the Read tool on PNG conversions) — Phase 2's and Phase 9's acceptance criteria both ask for this. Consider a small reference-image diff script before claiming Phase 2/9 "done." |
@@ -172,6 +172,39 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-03 (session: Phase 1/6 virtio-gpu wiring attempted)
+
+Did the queued Phase 1/6 next step. Added `-Display` (`std`/`virtio-gpu`)
+to `RUN-DESKTOP.ps1`. First attempt (`-vga none -device virtio-gpu-pci`,
+replacing std VGA outright) panicked the UEFI bootloader at
+`uefi::proto::console::gop.rs:304` — the bootloader needs a GOP
+framebuffer to hand off before the kernel starts, so std VGA can't simply
+be dropped. Fixed by keeping `-vga std` for boot and *adding*
+`virtio-gpu-pci` as a second device. That booted clean:
+`virtio_gpu::Gpu::probe()` succeeds, mode gets set
+(`head=0 640x480`), the shell starts normally, no panics, no fallback to
+`NoDisplay`. This is a real step forward — first time this code path has
+been exercised at all, interactively or in any prior qualification run
+(the qualification harness also only ever used `-vga std`).
+
+But: captured two QMP `screendump`s a few seconds apart and they're
+byte-identical, frozen on the pre-switch boot splash, and Win32
+`EnumWindows` confirms only one visible window exists for the QEMU
+process. So the virtio-gpu frame is not reaching anything visible, even
+though the kernel thinks it finished booting and recomposing. Documented
+as an open, undiagnosed ambiguity in the Phase 6 row above (QEMU display
+multiplexing vs. a real presentation bug in `virtio_gpu.rs`/
+`compositor.rs`) rather than guessing. Did not have runway this session
+to dig further (reading `kernel/src/virtio_gpu.rs`'s `present`/
+`present_rect` implementation line-by-line against the VirtIO-GPU 2D spec,
+or experimenting with QEMU `-display` backends, is the honest next step).
+Stopped the test QEMU process cleanly; it was not left running.
+
+`RUN-DESKTOP.ps1`'s new `-Display` flag is a real, working, non-breaking
+addition (default unchanged, syntax-checked) and is committed regardless
+of the open presentation question — it's useful infrastructure for
+whoever investigates next.
 
 ### 2026-11-03 (session: follow-up instructions captured)
 
