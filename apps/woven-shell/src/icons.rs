@@ -2,11 +2,12 @@
 //! preserving): the small glyph-per-app enum, its name/color/shared-icon-id
 //! lookups, and the tile painter that draws it.
 
+use libwoven::graphics::Renderer;
 use libwoven::{rgb, Canvas};
 
 use crate::geometry::Area;
 use crate::tokens::theme_accent;
-use crate::{fill_rounded, outline};
+use crate::{color_of, fill_rounded, outline, rect_of};
 
 #[derive(Clone, Copy)]
 pub enum AppIcon {
@@ -91,9 +92,11 @@ pub fn draw_app_icon(
 ) {
     let (fill, ink) = icon_colors(icon);
     // A rounded tile with a soft offset shadow, Fluent-style, instead of a
-    // hard-edged square with a flat black square behind it.
+    // hard-edged square with a flat black square behind it. Uses the
+    // shared `Renderer::shadow` primitive rather than a second hand-offset
+    // `fill_rounded` call.
     let radius = (size / 4).max(1) as usize;
-    fill_rounded(canvas, Area::new(x + 1, y + 2, size, size), radius, rgb(0, 0, 0));
+    Renderer::new(canvas).shadow(rect_of(Area::new(x, y, size, size)), 1, 2, radius, color_of(rgb(0, 0, 0)), u8::MAX);
     fill_rounded(canvas, Area::new(x, y, size, size), radius, fill);
     canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
     if selected {
