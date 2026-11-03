@@ -66,6 +66,9 @@ image = desktop.build_hardware_demo(out)
     } else {
         @('-vga', 'std')
     }
+    # Tried '-display sdl' to get a human-visible per-head window for the
+    # virtio-gpu scanout: it still only shows the -vga std console (tested
+    # 2026-11-03, see docs/graphics/modernization-tracker.md). Not used.
     $qemuArgs = @(
         '-accel', $accelOption, '-machine', 'pc',
         '-m', $Memory, '-smp', "$Cpus", '-name', 'WovenHat Desktop',
