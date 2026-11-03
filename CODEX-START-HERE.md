@@ -238,3 +238,5 @@ Search response:          < 100ms
 Claude Code is standing by for Phase 1 review.
 
 Good luck! Users are waiting for this desktop. 🚀
+
+> SUPERSEDED 2026-11-03: shell work now belongs to Claude Code. See docs/agent-coordination.md and CLAUDE-START-HERE.md. Do not start this assignment.
