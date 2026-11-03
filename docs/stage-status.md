@@ -1,6 +1,6 @@
 # Stage status
 
-## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, ASSETS NOT STARTED
+## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul + asset pass) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, FIRST ASSET PASS DONE
 
 M7's layout-cutover-and-verification half is done: removed the
 `ShellLayout` enum, the `--layout` CLI flag, `paint_taskbar_content`,
@@ -47,11 +47,24 @@ individually via `cargo build --target x86_64-unknown-none` and
 IPC and accepted behavior untouched (color/token substitution only, no
 geometry or protocol changes). Committed as one small commit per app.
 
-**Not done, explicitly**: the new original wallpaper/icon asset set
-under `assets/` that `CLAUDE-START-HERE.md`'s overhaul-scope paragraph
-also asks for. This remains separate, not-yet-started work. M7 is not
-being claimed complete; the layout cutover and the app theme migration
-are both done, but the asset set is outstanding.
+**Asset set: first pass done.** `kernel/build.rs`'s generated wallpaper
+sample (`assets/wallpapers/wovenhat-gradient-160x90`) was an unrelated
+orange/brown gradient; replaced with a procedural navy-to-teal gradient
+using the shell's own `WALLPAPER_TOP`/`WALLPAPER_BOTTOM` palette plus
+its diagonal weave-motif tint, so the sample now matches the live
+desktop (also fixed a pre-existing BGR/RGB byte-order bug in the
+generator). `apps/woven-shell/src/icons.rs`'s app-tile icon set gained
+`AppIcon::Monitor` and `AppIcon::Installer` (previously generic
+fallback), covering every app in the kernel's launcher catalog with a
+distinct icon. `cargo build`/`cargo clippy --target x86_64-unknown-none
+-- -D warnings` clean for both `kernel` and `apps/woven-shell`.
+
+**Not done, explicitly**: a full redesigned icon pack beyond the two
+additions above, and wallpaper variants beyond the one existing sample
+(light/high-contrast/additional original compositions). M7 is not being
+claimed complete; the layout cutover, the app theme migration, and this
+first asset pass are done, but a larger asset pass remains open if
+wanted.
 
 ## Full Stage 10.7 Windows gate - 2026-11-03 - PASSED
 

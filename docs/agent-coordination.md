@@ -8480,8 +8480,38 @@ changes in any app. Each app verified individually: `cargo build
 x86_64-unknown-none -- -D warnings`, both clean, zero warnings.
 Committed as one small commit per app (`33715764` through `9212da32`).
 
-**Still not done**: the new original wallpaper/icon asset set under
-`assets/` that `CLAUDE-START-HERE.md`'s overhaul-scope paragraph also
-asks for. M7 is not claimed complete; the layout cutover and the app
-theme migration are both done, but the asset set is outstanding.
+## Claude Code - first asset pass: wallpaper palette fix + two new icons (2026-11-03)
+
+`kernel/build.rs` generated the `assets/wallpapers/` sample BMP
+(`wovenhat-gradient-160x90`, `woven-images`'s "Licensed wallpaper"
+preview) as an orange/brown horizontal gradient with no relation to the
+shell's actual desktop background. Replaced it with a procedural
+navy-to-teal vertical gradient using `woven-shell`'s own
+`WALLPAPER_TOP`/`WALLPAPER_BOTTOM` palette plus a faint diagonal
+basket-weave tint matching its `wallpaper()` weave motif, so the sample
+now visually matches the live desktop. Also fixed a pre-existing
+BGR/RGB byte-order bug in the generator (BMP pixel data is BGR;
+`decode_bmp_rgba` reads it correctly as B/G/R, but the old generator
+wrote R/G/B in that slot order, swapping red and blue on decode).
+Dimensions/format unchanged; `assets/wallpapers/manifest.toml` updated
+with the new sha256 and description (license unchanged, CC0-1.0).
+
+`apps/woven-shell/src/icons.rs`'s app-tile icon set covered 8 of the 11
+apps actually in the kernel's launcher catalog (`kernel/src/main.rs`'s
+`Name=Woven*` entries); `WovenMonitor` and `WovenInstaller` fell back to
+the generic glyph. Added `AppIcon::Monitor` (blue, display+stand glyph)
+and `AppIcon::Installer` (green, package glyph) so every launchable app
+has a distinct tile.
+
+Verified: `cargo build`/`cargo clippy --target x86_64-unknown-none --
+-D warnings` clean (zero warnings) for both `kernel` and
+`apps/woven-shell`. Not QEMU-screenshot-verified this pass (data/color
+change only, no geometry/protocol change); the next desktop-qualification
+run will show it.
+
+**Still not done**: a full redesigned icon pack beyond these two
+additions, and wallpaper variants beyond the one sample asset
+(light/high-contrast/additional compositions). M7 is not claimed
+complete; the layout cutover, the app theme migration, and this first
+asset pass are done, but a larger asset pass remains open if wanted.
 

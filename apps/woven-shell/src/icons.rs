@@ -20,6 +20,8 @@ pub enum AppIcon {
     Editor,
     Update,
     Ai,
+    Monitor,
+    Installer,
     Generic,
 }
 
@@ -35,6 +37,8 @@ pub fn app_icon(name: &[u8]) -> AppIcon {
         b"Editor" | b"WovenEditor" => AppIcon::Editor,
         b"Update" | b"WovenUpdate" => AppIcon::Update,
         b"AI" | b"WovenAI" => AppIcon::Ai,
+        b"Monitor" | b"WovenMonitor" => AppIcon::Monitor,
+        b"Installer" | b"WovenInstaller" => AppIcon::Installer,
         _ => AppIcon::Generic,
     }
 }
@@ -51,6 +55,8 @@ fn icon_colors(icon: AppIcon) -> (u32, u32) {
         AppIcon::Editor => (rgb(170, 112, 55), rgb(255, 236, 172)),
         AppIcon::Update => (rgb(48, 132, 156), rgb(210, 255, 255)),
         AppIcon::Ai => (rgb(112, 74, 164), rgb(235, 210, 255)),
+        AppIcon::Monitor => (rgb(60, 108, 150), rgb(198, 236, 255)),
+        AppIcon::Installer => (rgb(92, 140, 92), rgb(214, 250, 214)),
         AppIcon::Generic => (rgb(74, 88, 112), rgb(220, 230, 242)),
     }
 }
@@ -64,9 +70,12 @@ fn shared_icon_id(icon: AppIcon) -> libwoven::icons::IconId {
         AppIcon::Security => libwoven::icons::IconId::Security,
         AppIcon::Images => libwoven::icons::IconId::Images,
         AppIcon::Calculator => libwoven::icons::IconId::Calculator,
-        AppIcon::Editor | AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
-            libwoven::icons::IconId::Generic
-        }
+        AppIcon::Editor
+        | AppIcon::Update
+        | AppIcon::Ai
+        | AppIcon::Monitor
+        | AppIcon::Installer
+        | AppIcon::Generic => libwoven::icons::IconId::Generic,
     }
 }
 
@@ -135,6 +144,15 @@ pub fn draw_app_icon(
         AppIcon::Settings => {
             canvas.fill_rect(left, top + 2, span, 3, ink);
             canvas.fill_rect(left + 3, top - 1, 3, span + 2, ink);
+        }
+        AppIcon::Monitor => {
+            canvas.fill_rect(left, top, span, span.saturating_sub(3), ink);
+            canvas.fill_rect(left + span as i32 / 2 - 1, top + span as i32 - 2, 2, 3, ink);
+        }
+        AppIcon::Installer => {
+            canvas.fill_rect(left + 2, top - 1, 2, span.saturating_sub(2), ink);
+            canvas.fill_rect(left, top + span as i32 - 4, span, 2, ink);
+            canvas.fill_rect(left, top + span as i32, span, 2, ink);
         }
         AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
             canvas.fill_rect(left, top + 2, span, 2, ink);

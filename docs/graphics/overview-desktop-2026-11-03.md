@@ -675,15 +675,64 @@ hit the pre-existing `keyboard_refresh` flake, same as every prior run.
 Evidence: `audit-artifacts/desktop-qualification-{1793712148697202900
 (1 CPU), 1793712338867984900 (2 CPU), 1793712485560248100 (4 CPU)}/`.
 
-### What M7 still doesn't cover
+### App visual-token overhaul (2026-11-03)
 
-`CLAUDE-START-HERE.md`'s overhaul-scope paragraph (separate from the
-M1-M7 milestone table itself) also asks for every first-party app under
-`apps/` to adopt new visual tokens/chrome through `libwoven::ui`, and a
-new original wallpaper/icon asset set under `assets/`. Neither has
-started. Confirmed earlier this session (Phase 0 audit for the
-graphics-modernization mandate) that none of the 15 apps reference
-`libwoven::ui::Theme` dynamically -- each hardcodes its own local color
-constants -- so this is genuinely separate, large, per-app work with its
-own review and verification burden, not a side effect of the shell
-cutover. Not claimed done here.
+Done, as a separate follow-on pass after the M7 cutover. Every
+first-party app with GUI chrome -- `woven-files`, `woven-terminal`,
+`woven-editor`, `woven-images`, `woven-monitor`, `woven-store`,
+`woven-update`, `woven-security`, `woven-calculator`, `woven-installer`
+-- now draws through `libwoven::ui::Theme::DARK` instead of locally
+hardcoded `PANEL`/`ACCENT`/`TEXT`/`BUTTON` color constants and a
+manually-reconstructed `Theme { ... }` literal at each draw call.
+`Theme::DARK.accent` was retuned first, from `rgb(100,220,180)` to
+`rgb(76,190,188)`, to match `apps/woven-shell`'s own established accent,
+so the shell and every app now share one accent color. `woven-settings`
+already supported `Theme::DARK`/`LIGHT`/`HIGH_CONTRAST` dynamically
+(its own theme-mode switch) and needed no change. `woven-recovery`,
+`woven-search`, `woven-ai`, and `woven-package` were confirmed to be
+CLI-only -- no GUI, `Painter`, or `Theme` call sites in any of their
+source files -- so no migration applies. Each app verified individually:
+`cargo build --target x86_64-unknown-none` and `cargo clippy --target
+x86_64-unknown-none -- -D warnings`, both clean, zero warnings; diffs
+reviewed to confirm pure color/token substitution with no geometry, IPC,
+or accepted-behavior changes. Committed as one small commit per app.
+
+### New asset set (2026-11-03)
+
+Also done, as a bounded first pass (not every icon/wallpaper variant
+`CLAUDE-START-HERE.md` could eventually ask for, but the concrete gap
+found and closed this session):
+
+- **Wallpaper**: `kernel/build.rs` generated the `assets/wallpapers/`
+  sample BMP (`wovenhat-gradient-160x90`, used as `woven-images`'s
+  "Licensed wallpaper" preview) with an orange/brown horizontal gradient
+  unrelated to the shell's actual desktop background. Replaced it with a
+  procedural navy-to-teal vertical gradient using the shell's own
+  `WALLPAPER_TOP`/`WALLPAPER_BOTTOM` palette (`rgb(11,29,58)` ->
+  `rgb(16,78,82)`), plus a faint diagonal basket-weave tint matching the
+  shell's `wallpaper()` weave motif -- the sample asset now visually
+  matches the live desktop instead of looking like an unrelated stock
+  gradient. Also fixed a pre-existing BGR/RGB byte-order bug in the
+  generator (BMP pixel data is BGR; the old code wrote R/G/B in that
+  slot order, which `libwoven::media::decode_bmp_rgba`'s correct
+  B/G/R-order read would have rendered with red and blue channels
+  swapped). Dimensions (160x90) and format (BMP24) unchanged, so
+  `woven-images`'s dimension check and `woven-shell`'s wallpaper-staging
+  path are unaffected. `assets/wallpapers/manifest.toml` updated with
+  the new description and sha256 (CC0-1.0, unchanged license).
+- **Icons**: `apps/woven-shell/src/icons.rs`'s app-tile icon set
+  (Fluent-style rounded tile, per-app fill/ink colors, a geometric glyph,
+  and a shared background from `libwoven::icons::IconPack`) already
+  covered 8 of the 11 apps the kernel's launcher catalog actually lists
+  (`kernel/src/main.rs`'s `Name=Woven*` entries); `WovenMonitor` and
+  `WovenInstaller` fell back to the generic glyph. Added distinct
+  `AppIcon::Monitor` (blue, a filled display with a small stand glyph)
+  and `AppIcon::Installer` (green, a package/box glyph) variants, so
+  every launchable app now has a distinct tile. Verified via `cargo
+  build`/`cargo clippy --target x86_64-unknown-none -- -D warnings` for
+  `apps/woven-shell`, both clean.
+
+Not done: a full redesigned icon pack beyond these two additions, and
+any wallpaper variants beyond the one existing sample asset (light
+theme, high-contrast, or additional original compositions). Those
+remain open if the user wants a larger pass later.
