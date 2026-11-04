@@ -3,14 +3,12 @@ param(
     [ValidateSet(1, 2, 4)][int]$Cpus = 2,
     [string]$Memory = '5G',
     [ValidateSet('whpx', 'tcg')][string]$Accelerator = 'whpx',
-    # 'std' is the long-proven UEFI/GOP framebuffer path every prior
-    # qualification run has exercised. 'virtio-gpu' is opt-in: it attaches
-    # a virtio-gpu-pci device so the kernel's compositor::attach_gpu_outputs()
+    # 'virtio-gpu' keeps the long-proven UEFI/GOP framebuffer path and adds a
+    # virtio-gpu-pci device so the kernel's compositor::attach_gpu_outputs()
     # (which calls virtio_gpu::Gpu::probe() in the production, non-test-gated
-    # path) has a real device to find, instead of always falling back to
-    # Error::NoDisplay. Default stays 'std' so existing callers/behavior are
-    # unaffected.
-    [ValidateSet('std', 'virtio-gpu')][string]$Display = 'std',
+    # path) has a real device to find. The GTK tabs expose the live GPU head
+    # while VGA remains available for the UEFI boot console.
+    [ValidateSet('std', 'virtio-gpu')][string]$Display = 'virtio-gpu',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
 $ErrorActionPreference = 'Stop'

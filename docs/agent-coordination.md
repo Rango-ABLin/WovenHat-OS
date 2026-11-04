@@ -90,6 +90,15 @@ midpoint coverage. `libwoven` host tests: 211 passed; warning-denying Clippy
 passed. The interactive GTK GPU-tab handoff remains the current display
 selection; GPU-default qualification is still open.
 
+## Codex - Graphics modernization Phase 1 GPU default (2026-11-04)
+
+Promoted `RUN-DESKTOP.ps1`'s verified two-device mode to the default. It
+retains `-vga std` for UEFI GOP boot and adds `virtio-gpu-pci,id=gpu0` with
+GTK `show-tabs=on`. A fresh default launch reached the virtio display,
+WovenShell startup, and repeated interactive recomposes; QMP closed the
+session cleanly. A GPU-only `-vga none` boot remains unsupported because the
+UEFI GOP handoff panics, so that mode is not enabled.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:
