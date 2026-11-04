@@ -20,7 +20,12 @@ pub struct Theme {
 impl Theme {
     pub const DARK: Self = Self {
         surface: crate::rgb(45, 65, 90),
-        accent: crate::rgb(100, 220, 180),
+        // The WovenHat Overview brand teal (apps/woven-shell's ACCENT),
+        // not the earlier unrelated mint-green: this is the one color
+        // every first-party app should now agree on, since it is what
+        // the shell itself (top bar, buttons, focus rings) is already
+        // built and QEMU-verified against.
+        accent: crate::rgb(76, 190, 188),
         text: crate::rgb(235, 240, 250),
         disabled: crate::rgb(76, 84, 100),
         focus: crate::rgb(255, 205, 96),
@@ -1723,8 +1728,8 @@ mod tests {
         assert_ne!(dark, light);
         assert_ne!(dark, high_contrast);
         assert_ne!(light, high_contrast);
-        assert_eq!(dark, 14_167_676_546_058_782_013);
-        assert_eq!(light, 13_378_977_747_546_284_125);
-        assert_eq!(high_contrast, 13_757_308_704_317_173_985);
+        assert_eq!(dark, 11_428_746_854_785_215_829);
+        assert_eq!(light, 7_898_872_504_501_740_404);
+        assert_eq!(high_contrast, 10_262_539_617_757_164_205);
     }
 }

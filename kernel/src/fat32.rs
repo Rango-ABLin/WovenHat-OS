@@ -156,7 +156,7 @@ pub struct SpaceInfo {
     pub fs_info_free_count: Option<u32>,
     pub fs_info_next_free: Option<u32>,
     pub fs_info_matches: bool,
-    first_free_cluster: Option<u32>,
+    pub(crate) first_free_cluster: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

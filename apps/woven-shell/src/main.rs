@@ -140,215 +140,25 @@
 
 use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::Ordering;
 
 use libwoven::graphics::{
-    Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
+    Camera, Color, DepthBuffer, Rect, Renderer, TrueTypeFace, Vertex3, Vertex3Field, Vertex3Tex,
 };
 use libwoven::layout::{self, Frame};
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
-    InputEvent, Key, Region, Spring, TRANSPARENT,
+    InputEvent, Key, Spring,
 };
 
 libwoven::entry!(main);
 
-/// Wallpaper gradient, top to bottom.
-const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
-/// The weave: faint diagonal bands over the gradient, `WEAVE_PITCH` pixels
-/// wide. Axis-aligned squares with a highlight seam at each boundary read
-/// as a literal checkerboard at screen scale rather than a fabric texture,
-/// so this runs along the diagonal instead, with no seam line, a wider
-/// pitch and lower contrast.
-const WEAVE: u32 = rgb(255, 255, 255);
-const WEAVE_SHADE: u32 = rgb(0, 0, 0);
-const WEAVE_TINT_OPACITY: u8 = 6;
-const WEAVE_PITCH: i32 = 220;
-
-const TASKBAR_HEIGHT: i32 = 24;
-const TASKBAR: u32 = rgb(10, 18, 30);
-const TASKBAR_OPACITY: u8 = 216;
-const ACCENT: u32 = rgb(76, 190, 188);
-const START_X: i32 = 4;
-const START_WIDTH: usize = 44;
-const START_HEIGHT: usize = 16;
-const START_FILL: u32 = rgb(28, 115, 145);
-const START_LABEL: &str = "Woven";
-/// The WovenStart icon: a basket-weave glyph, two shades suggesting strands
-/// crossing over and under. `A` is the strand that is on top, `D` the one
-/// beneath it; `.` is transparent (the button fill shows through).
-const START_ICON: [&[u8; 8]; 8] = [
-    b"AA..AA..",
-    b"AA..AA..",
-    b"..DD..DD",
-    b"..DD..DD",
-    b"AA..AA..",
-    b"AA..AA..",
-    b"..DD..DD",
-    b"..DD..DD",
-];
-const START_ICON_SIZE: i32 = 8;
-const START_ICON_A: u32 = rgb(235, 225, 190);
-const START_ICON_D: u32 = rgb(165, 125, 70);
-/// Left margin from the button's edge to the icon, chosen so it clears the
-/// background-fill sample point Stage 20.1's self-test reads at `(6, top+6)`.
-const START_ICON_MARGIN: i32 = 3;
-const START_ICON_GAP: i32 = 2;
-const TEXT: u32 = rgb(255, 255, 255);
-/// Clock text is right-aligned this far from the right edge.
-const CLOCK_MARGIN: i32 = 6;
-/// Room for the widest clock reading, `HH:MM:SS`, plus its margin.
-const CLOCK_WIDTH: i32 = 8 * font::ADVANCE + CLOCK_MARGIN;
-
-/// Taskbar window entries, left to right after the start button.
-const ENTRY_X: i32 = START_X + START_WIDTH as i32 + 8;
-const ENTRY_WIDTH: i32 = 80;
-const ENTRY_GAP: i32 = 4;
-const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
-const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
-/// Characters of a title that fit in an entry.
-const ENTRY_CHARS: usize = ((ENTRY_WIDTH - 8) / font::ADVANCE) as usize;
-
-/// Tray icons, right to left from the clock.
-const TRAY_ICON: i32 = 16;
-const TRAY_GAP: i32 = 4;
-const MAX_TRAY: usize = 4;
-
-const TITLE_HEIGHT: i32 = 14;
-// Teal-tinted, matching ACCENT/START_FILL, instead of an unrelated
-// saturated blue that clashed with the rest of the desktop's palette.
-const TITLE_ACTIVE: u32 = rgb(24, 98, 128);
-const TITLE_INACTIVE: u32 = rgb(38, 44, 56);
-const MAX_TITLE: usize = 24;
-/// Shadow bands, outermost first, as (offset, opacity) of black over what
-/// lies beneath. The focused window's shadow is deeper: its elevation.
-const FOCUSED_SHADOW: [(i32, u8); 2] = [(8, 24), (4, 48)];
-const UNFOCUSED_SHADOW: [(i32, u8); 2] = [(4, 20), (2, 40)];
-/// The furthest any shadow band reaches beyond its window.
-const SHADOW_REACH: i32 = 8;
-const SHADOW: u32 = rgb(0, 0, 0);
-
-/// The close control: a square at the right of the title bar.
-const CLOSE_SIZE: i32 = 10;
-const CLOSE_FILL: u32 = rgb(170, 60, 60);
-const MAX_WINDOWS: usize = 4;
-/// Workspaces, and the switcher boxes that show them.
-const WORKSPACES: usize = 4;
-const WORKSPACE_BOX: i32 = 12;
-const WORKSPACE_GAP: i32 = 2;
-/// New windows cascade from here, this far apart.
-const CASCADE_ORIGIN: i32 = 40;
-const CASCADE_STEP: i32 = 24;
-
-const TOAST_WIDTH: i32 = 180;
-const TOAST_HEIGHT: i32 = 22;
-const TOAST_MARGIN: i32 = 8;
-const TOAST_OPACITY: u8 = 216;
-const TOAST_CHARS: usize = ((TOAST_WIDTH - 12) / font::ADVANCE) as usize;
-const TOAST_TICKS: u64 = 4 * libwoven::time::TICKS_PER_SECOND;
-
-/// The pointer: `B` black outline, `W` white fill, `.` transparent. The tip
-/// is the top-left pixel.
-const CURSOR: [&[u8; 7]; 10] = [
-    b"B......", b"BB.....", b"BWB....", b"BWWB...", b"BWWWB..", b"BWWWWB.", b"BWWWWWB", b"BWWBBBB",
-    b"BWB....", b"BB.....",
-];
-const CURSOR_WIDTH: i32 = 7;
-const CURSOR_HEIGHT: i32 = 10;
-
-/// The application catalog: one `*.app` file per application.
-const CATALOG: &str = "/share/applications";
-// The launcher stores catalog metadata in process-owned memory rather than
-// truncating the production catalog at its old ten-entry fixture size. This
-// is a generous staging capacity; the kernel still validates every catalog
-// entry and rejects malformed or resource-exhausting inputs.
-const MAX_APPS: usize = 64;
-const MAX_APP_NAME: usize = 20;
-const MAX_EXEC: usize = 96;
-const MAX_QUERY: usize = 16;
-const MAX_CHILDREN: usize = 32;
-
-const PANEL_X: i32 = 4;
-const PANEL_WIDTH: i32 = 160;
-const PANEL_ROW: i32 = 14;
-const PANEL_FILL: u32 = rgb(28, 32, 44);
-const PANEL_OPACITY: u8 = 216;
-const PANEL_TITLE: &str = "WovenStart";
-
-static THEME_MODE: AtomicU8 = AtomicU8::new(0);
-
-fn high_contrast() -> bool {
-    THEME_MODE.load(Ordering::Relaxed) != 0
-}
-
-fn theme_accent() -> u32 {
-    if high_contrast() {
-        rgb(255, 255, 0)
-    } else {
-        ACCENT
-    }
-}
-
-fn theme_text() -> u32 {
-    TEXT
-}
-
-fn theme_panel() -> u32 {
-    if high_contrast() {
-        rgb(0, 0, 0)
-    } else {
-        PANEL_FILL
-    }
-}
-
-fn theme_taskbar() -> u32 {
-    if high_contrast() {
-        rgb(0, 0, 0)
-    } else {
-        TASKBAR
-    }
-}
-
-fn theme_toast() -> u32 {
-    theme_panel()
-}
-
-fn theme_title(focused: bool) -> u32 {
-    if high_contrast() {
-        if focused {
-            theme_accent()
-        } else {
-            rgb(80, 80, 80)
-        }
-    } else if focused {
-        TITLE_ACTIVE
-    } else {
-        TITLE_INACTIVE
-    }
-}
-
-fn theme_start_fill() -> u32 {
-    if high_contrast() {
-        rgb(0, 0, 0)
-    } else {
-        START_FILL
-    }
-}
-
-fn theme_entry(active: bool) -> u32 {
-    if high_contrast() {
-        if active {
-            theme_accent()
-        } else {
-            rgb(0, 0, 0)
-        }
-    } else if active {
-        ENTRY_ACTIVE
-    } else {
-        ENTRY_INACTIVE
-    }
-}
+mod tokens;
+use tokens::*;
+mod geometry;
+use geometry::{Area, Dirty};
+mod textures;
+use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXTURE};
 
 /// The first desktop release keeps a small, curated set of shortcuts visible
 /// so the desktop feels useful before the launcher is opened. The catalog
@@ -361,154 +171,8 @@ const DESKTOP_ICON_Y: i32 = 52;
 const DESKTOP_ICON_STEP: i32 = 76;
 const DESKTOP_ICON_SIZE: i32 = 32;
 
-#[derive(Clone, Copy)]
-enum AppIcon {
-    Files,
-    Terminal,
-    Store,
-    Settings,
-    Security,
-    Images,
-    Calculator,
-    Editor,
-    Update,
-    Ai,
-    Generic,
-}
-
-fn app_icon(name: &[u8]) -> AppIcon {
-    match name {
-        b"Files" | b"WovenFiles" => AppIcon::Files,
-        b"Terminal" | b"WovenTerminal" => AppIcon::Terminal,
-        b"Store" | b"WovenStore" => AppIcon::Store,
-        b"Settings" | b"WovenSettings" => AppIcon::Settings,
-        b"Security" | b"WovenSecurity" => AppIcon::Security,
-        b"Images" | b"WovenImages" => AppIcon::Images,
-        b"Calculator" | b"WovenCalculator" => AppIcon::Calculator,
-        b"Editor" | b"WovenEditor" => AppIcon::Editor,
-        b"Update" | b"WovenUpdate" => AppIcon::Update,
-        b"AI" | b"WovenAI" => AppIcon::Ai,
-        _ => AppIcon::Generic,
-    }
-}
-
-fn icon_colors(icon: AppIcon) -> (u32, u32) {
-    match icon {
-        AppIcon::Files => (rgb(45, 150, 190), rgb(170, 230, 232)),
-        AppIcon::Terminal => (rgb(35, 45, 62), rgb(100, 220, 172)),
-        AppIcon::Store => (rgb(175, 82, 105), rgb(255, 210, 170)),
-        AppIcon::Settings => (rgb(88, 105, 150), rgb(224, 232, 255)),
-        AppIcon::Security => (rgb(54, 126, 112), rgb(210, 255, 218)),
-        AppIcon::Images => (rgb(68, 126, 186), rgb(255, 220, 120)),
-        AppIcon::Calculator => (rgb(124, 82, 160), rgb(242, 216, 255)),
-        AppIcon::Editor => (rgb(170, 112, 55), rgb(255, 236, 172)),
-        AppIcon::Update => (rgb(48, 132, 156), rgb(210, 255, 255)),
-        AppIcon::Ai => (rgb(112, 74, 164), rgb(235, 210, 255)),
-        AppIcon::Generic => (rgb(74, 88, 112), rgb(220, 230, 242)),
-    }
-}
-
-fn shared_icon_id(icon: AppIcon) -> libwoven::icons::IconId {
-    match icon {
-        AppIcon::Files => libwoven::icons::IconId::Files,
-        AppIcon::Terminal => libwoven::icons::IconId::Terminal,
-        AppIcon::Store => libwoven::icons::IconId::Store,
-        AppIcon::Settings => libwoven::icons::IconId::Settings,
-        AppIcon::Security => libwoven::icons::IconId::Security,
-        AppIcon::Images => libwoven::icons::IconId::Images,
-        AppIcon::Calculator => libwoven::icons::IconId::Calculator,
-        AppIcon::Editor | AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
-            libwoven::icons::IconId::Generic
-        }
-    }
-}
-
-/// Draw a compact, legible app tile. The glyphs are deliberately geometric so
-/// they stay crisp in both the flat and 3D launcher textures.
-fn draw_app_icon(
-    canvas: &mut Canvas<'_>,
-    x: i32,
-    y: i32,
-    icon: AppIcon,
-    size: i32,
-    selected: bool,
-) {
-    let (fill, ink) = icon_colors(icon);
-    // A rounded tile with a soft offset shadow, Fluent-style, instead of a
-    // hard-edged square with a flat black square behind it.
-    let radius = (size / 4).max(1) as usize;
-    fill_rounded(canvas, Area::new(x + 1, y + 2, size, size), radius, rgb(0, 0, 0));
-    fill_rounded(canvas, Area::new(x, y, size, size), radius, fill);
-    canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
-    if selected {
-        outline(
-            canvas,
-            Area::new(x - 1, y - 1, size + 2, size + 2),
-            theme_accent(),
-        );
-    }
-    let left = x + size / 4;
-    let top = y + size / 3;
-    let span = (size / 2).max(4) as usize;
-    match icon {
-        AppIcon::Files => {
-            canvas.fill_rect(left, top - 2, span / 2 + 2, 3, ink);
-            canvas.fill_rect(left, top, span, span / 2 + 2, ink);
-        }
-        AppIcon::Terminal => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left, top + 4, 2, 2, ink);
-            canvas.fill_rect(left + 4, top + 4, span.saturating_sub(4), 2, ink);
-        }
-        AppIcon::Store => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left + 2, top + 4, span.saturating_sub(4), 2, ink);
-            canvas.fill_rect(left + 2, top + 8, span.saturating_sub(4), 2, ink);
-        }
-        AppIcon::Security => {
-            canvas.fill_rect(left + 2, top - 1, span.saturating_sub(4), 2, ink);
-            canvas.fill_rect(left, top + 1, span, 5, ink);
-            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
-        }
-        AppIcon::Images => {
-            canvas.fill_rect(left, top + 3, span, span.saturating_sub(2), ink);
-            canvas.fill_rect(left + 3, top, 3, 3, ink);
-        }
-        AppIcon::Calculator => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left, top + 4, 2, 2, ink);
-            canvas.fill_rect(left + 5, top + 4, 2, 2, ink);
-            canvas.fill_rect(left, top + 8, 2, 2, ink);
-            canvas.fill_rect(left + 5, top + 8, 2, 2, ink);
-        }
-        AppIcon::Editor => {
-            canvas.fill_rect(left + 2, top - 1, 3, span + 2, ink);
-            canvas.fill_rect(left, top + span as i32, span, 2, ink);
-        }
-        AppIcon::Settings => {
-            canvas.fill_rect(left, top + 2, span, 3, ink);
-            canvas.fill_rect(left + 3, top - 1, 3, span + 2, ink);
-        }
-        AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
-            canvas.fill_rect(left, top + 2, span, 2, ink);
-            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
-        }
-    }
-    let scale = (size.max(8) as usize / libwoven::icons::ICON_SIZE).clamp(1, 16);
-    let _ = libwoven::icons::IconPack::draw(
-        canvas,
-        x + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
-        y + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
-        shared_icon_id(icon),
-        if selected {
-            libwoven::icons::IconState::Active
-        } else {
-            libwoven::icons::IconState::Normal
-        },
-        libwoven::icons::IconTheme::Dark,
-        scale,
-    );
-}
+mod icons;
+use icons::{app_icon, draw_app_icon};
 
 /// Notifications remembered for the Notification Center.
 const MAX_NOTES: usize = 8;
@@ -561,7 +225,6 @@ const CENTER_CHARS: usize = ((CENTER_WIDTH - 12) / font::ADVANCE) as usize;
 
 const TILE_WIDTH: usize = 320;
 const TILE_HEIGHT: usize = 40;
-const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 
 /// The shell wakes at least four times a second for the clock, the toast
 /// timer and window liveness.
@@ -574,99 +237,6 @@ const RESIZE_GRACE: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 const ANIMATION_PERIOD: u64 = 2;
 const KEY_ENTER: u8 = 1;
 const KEY_BACKSPACE: u8 = 2;
-
-/// The one tile buffer, in .bss rather than on the stack.
-struct TileBuffer(UnsafeCell<[u32; TILE_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `main` takes the only reference.
-unsafe impl Sync for TileBuffer {}
-
-static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
-
-/// The Quick Settings panel's maximum pixel footprint, flat-rendered once
-/// per repaint into this offscreen texture, then sampled by the 3D desktop
-/// mode's perspective projection. `.bss`, not the stack, for the same reason
-/// as `TILE`.
-const QS_PANEL_MAX_HEIGHT: usize = (1 + QS_ROWS) * PANEL_ROW as usize + 2;
-const QS_PANEL_PIXELS: usize = CENTER_WIDTH as usize * QS_PANEL_MAX_HEIGHT;
-
-struct QsPanelTexture(UnsafeCell<[u32; QS_PANEL_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `render_qs_3d` takes the only reference.
-unsafe impl Sync for QsPanelTexture {}
-
-static QS_PANEL_TEXTURE: QsPanelTexture = QsPanelTexture(UnsafeCell::new([0; QS_PANEL_PIXELS]));
-
-/// The launcher panel's maximum pixel footprint (every catalog entry
-/// matching, `MAX_APPS` rows), flat-rendered once per repaint into this
-/// offscreen texture, then sampled by the 3D desktop mode's perspective
-/// projection.
-const LAUNCHER_PANEL_MAX_HEIGHT: usize = (2 + MAX_APPS) * PANEL_ROW as usize + 2;
-const LAUNCHER_PANEL_PIXELS: usize = PANEL_WIDTH as usize * LAUNCHER_PANEL_MAX_HEIGHT;
-
-struct LauncherPanelTexture(UnsafeCell<[u32; LAUNCHER_PANEL_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `render_panel_3d` takes the
-// only reference.
-unsafe impl Sync for LauncherPanelTexture {}
-
-static LAUNCHER_PANEL_TEXTURE: LauncherPanelTexture =
-    LauncherPanelTexture(UnsafeCell::new([0; LAUNCHER_PANEL_PIXELS]));
-
-/// The Notification Center's maximum pixel footprint (`MAX_NOTES` rows),
-/// flat-rendered once per repaint into this offscreen texture, then
-/// sampled by the 3D desktop mode's perspective projection.
-const CENTER_MAX_HEIGHT: usize = (1 + MAX_NOTES) * PANEL_ROW as usize + 2;
-const CENTER_PIXELS: usize = CENTER_WIDTH as usize * CENTER_MAX_HEIGHT;
-
-struct CenterTexture(UnsafeCell<[u32; CENTER_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `render_center_3d` takes the
-// only reference.
-unsafe impl Sync for CenterTexture {}
-
-static CENTER_TEXTURE: CenterTexture = CenterTexture(UnsafeCell::new([0; CENTER_PIXELS]));
-
-/// The toast's fixed pixel footprint, flat-rendered once per repaint into
-/// this offscreen texture, then sampled by the 3D desktop mode's
-/// perspective projection.
-const TOAST_PIXELS: usize = TOAST_WIDTH as usize * TOAST_HEIGHT as usize;
-
-struct ToastTexture(UnsafeCell<[u32; TOAST_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `render_toast_3d` takes the
-// only reference.
-unsafe impl Sync for ToastTexture {}
-
-static TOAST_TEXTURE: ToastTexture = ToastTexture(UnsafeCell::new([0; TOAST_PIXELS]));
-
-/// The taskbar's maximum pixel footprint, flat-rendered once per repaint
-/// into this offscreen texture, then sampled by the 3D desktop mode's
-/// perspective projection. `MAX_TASKBAR_WIDTH` mirrors the kernel
-/// compositor's own `MAX_WIDTH` bound (two 1280-pixel monitors side by
-/// side), since the taskbar spans the primary monitor's full width.
-const MAX_TASKBAR_WIDTH: usize = 2560;
-const TASKBAR_PIXELS: usize = MAX_TASKBAR_WIDTH * TASKBAR_HEIGHT as usize;
-
-struct TaskbarTexture(UnsafeCell<[u32; TASKBAR_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and `render_taskbar_3d` takes the
-// only reference.
-unsafe impl Sync for TaskbarTexture {}
-
-static TASKBAR_TEXTURE: TaskbarTexture = TaskbarTexture(UnsafeCell::new([0; TASKBAR_PIXELS]));
-
-/// A depth buffer sized for one `TILE`-sized render pass, shared by every 3D
-/// surface (the Quick Settings panel, title bars, the wallpaper, and so on):
-/// each one clears it before use and none holds it across a call, so they
-/// never need their own copy.
-struct TileDepthBuffer(UnsafeCell<[u16; TILE_PIXELS]>);
-
-// SAFETY: the shell is single-threaded, and each 3D render function takes
-// the only reference, for the duration of that call only.
-unsafe impl Sync for TileDepthBuffer {}
-
-static TILE_DEPTH_3D: TileDepthBuffer = TileDepthBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 
 /// The desktop's state, in .bss too: the user stack is 16 KiB, and the state
 /// built in `main`'s frame, with the catalog loader's on top, overflowed it.
@@ -732,7 +302,7 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
 /// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
 /// several KiB, and the user stack is 16 KiB (see `DesktopState`), so even a
 /// transient by-value copy on the way into a static overflowed it.
-fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
+fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::i18n::Language) {
     use libwoven::i18n::Language;
     let entries: &[(&str, &str)] = match language {
         Language::English => &[
@@ -745,6 +315,12 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
             ("enter_pin", "Enter PIN"),
             ("wrong_pin", "Wrong PIN"),
             ("try_again_shortly", "Try again shortly"),
+            // M5: the Overview taskbar and launcher overview
+            // (new strings since M2/M3, not part of the already-accepted
+            // lock-screen gates above).
+            ("start", "Start"),
+            ("type_to_search", "Type to search"),
+            ("no_open_windows", "No open windows on this workspace"),
         ],
         Language::Chichewa => &[
             ("sign_in", "Lowani"),
@@ -756,6 +332,9 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
             ("enter_pin", "Lowetsani PIN"),
             ("wrong_pin", "PIN Yolakwika"),
             ("try_again_shortly", "Yesaninso Posachedwa"),
+            ("start", "Yambani"),
+            ("type_to_search", "Lembani kufunafuna"),
+            ("no_open_windows", "Palibe mawindo otseguka pa gawo ili"),
         ],
     };
     for (key, value) in entries {
@@ -763,42 +342,45 @@ fn fill_lock_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven::
     }
 }
 
-/// Both lock-screen catalogs, const-initialized to `Catalog::new()` (an
-/// all-zero value LLVM places in `.bss`, not `.data`) and filled in place on
-/// first use, so no by-value `Catalog` is ever constructed on the stack.
-struct LockCatalogs {
+/// Both shell catalogs (lock screen, taskbar, launcher overview),
+/// const-initialized to `Catalog::new()` (an all-zero value LLVM places in
+/// `.bss`, not `.data`) and filled in place on first use, so no by-value
+/// `Catalog` is ever constructed on the stack.
+struct ShellCatalogs {
     english: UnsafeCell<libwoven::i18n::Catalog>,
     chichewa: UnsafeCell<libwoven::i18n::Catalog>,
     built: UnsafeCell<bool>,
 }
 
-// SAFETY: the shell is single-threaded, and `lock_catalog` takes the only reference.
-unsafe impl Sync for LockCatalogs {}
+// SAFETY: the shell is single-threaded, and `shell_catalog` takes the only reference.
+unsafe impl Sync for ShellCatalogs {}
 
-static LOCK_CATALOGS: LockCatalogs = LockCatalogs {
+static SHELL_CATALOGS: ShellCatalogs = ShellCatalogs {
     english: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     chichewa: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     built: UnsafeCell::new(false),
 };
 
-/// The lock screen's translatable strings for `language`, built once
-/// (lazily, in place) through `libwoven::i18n::Catalog` (Stage 26.5).
-/// English values are byte-for-byte the literals every already-accepted
-/// lock-screen gate expects, so the default language changes nothing;
-/// Chichewa is a best-effort demo translation, not a reviewed localization.
-fn lock_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
+/// The shell's translatable strings for `language` -- the lock screen,
+/// and, since M5, the taskbar and launcher overview -- built
+/// once (lazily, in place) through `libwoven::i18n::Catalog` (Stage
+/// 26.5). English values are byte-for-byte the literals every
+/// already-accepted lock-screen gate expects, so the default language
+/// changes nothing; Chichewa is a best-effort demo translation, not a
+/// reviewed localization.
+fn shell_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n::Catalog {
     use libwoven::i18n::Language;
     // SAFETY: single-threaded; build-once guarded by `built`, and every
     // reference handed out is immutable.
     unsafe {
-        if !*LOCK_CATALOGS.built.get() {
-            fill_lock_catalog(&mut *LOCK_CATALOGS.english.get(), Language::English);
-            fill_lock_catalog(&mut *LOCK_CATALOGS.chichewa.get(), Language::Chichewa);
-            *LOCK_CATALOGS.built.get() = true;
+        if !*SHELL_CATALOGS.built.get() {
+            fill_shell_catalog(&mut *SHELL_CATALOGS.english.get(), Language::English);
+            fill_shell_catalog(&mut *SHELL_CATALOGS.chichewa.get(), Language::Chichewa);
+            *SHELL_CATALOGS.built.get() = true;
         }
         match language {
-            Language::English => &*LOCK_CATALOGS.english.get(),
-            Language::Chichewa => &*LOCK_CATALOGS.chichewa.get(),
+            Language::English => &*SHELL_CATALOGS.english.get(),
+            Language::Chichewa => &*SHELL_CATALOGS.chichewa.get(),
         }
     }
 }
@@ -863,13 +445,6 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
     Renderer::new(canvas).rounded_rect_blended(rect_of(area), radius, color_of(color), opacity);
 }
 
-/// A top-to-bottom gradient fill in `area`, replacing a flat `fill_rect` call
-/// for chrome that reads better with a subtle highlight (title bars, the
-/// taskbar, the Start button) rather than a single flat colour.
-fn fill_gradient(canvas: &mut Canvas<'_>, area: Area, top: u32, bottom: u32) {
-    Renderer::new(canvas).vertical_gradient(rect_of(area), color_of(top), color_of(bottom));
-}
-
 /// A filled circle of `diameter` centred at `(center_x, center_y)`. A circle
 /// is a square rounded rectangle whose radius is half its side, so this
 /// reuses `rounded_rect` rather than adding a second corner-distance
@@ -877,6 +452,15 @@ fn fill_gradient(canvas: &mut Canvas<'_>, area: Area, top: u32, bottom: u32) {
 fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
     let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
     fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
+}
+
+/// Borrow the staged system face through its read-only lazy file mapping.
+/// Parsing the bounded table directory is cheap; glyph outlines remain
+/// demand-paged from the shared mapping and never inflate this ELF's `.bss`.
+fn system_font_face() -> Option<TrueTypeFace<'static>> {
+    libwoven::graphics::load_system_font_mapping()
+        .ok()
+        .and_then(|bytes| TrueTypeFace::from_bytes(bytes).ok())
 }
 
 /// `color`, lightened toward white by `amount` (0..=255) -- used to derive a
@@ -894,485 +478,41 @@ fn lighten(color: u32, amount: u8) -> u32 {
     )
 }
 
-/// A rectangle in screen coordinates.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Area {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-}
+mod model;
+use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
 
-impl Area {
-    const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
+mod painter;
+use painter::Painter;
 
-    const fn is_empty(self) -> bool {
-        self.width <= 0 || self.height <= 0
-    }
+/// The desktop taskbar's launcher affordance. Opens the Start overview:
+/// search, current-workspace windows, and the application grid.
+const START_LABEL: &str = "Start";
+const START_BUTTON_WIDTH: i32 = 58;
+const START_ICON_SIZE: i32 = 14;
+const TASKBAR_ENTRY_WIDTH: i32 = 48;
+const TASKBAR_ENTRY_GAP: i32 = 4;
 
-    fn contains(self, x: i32, y: i32) -> bool {
-        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
-    }
-
-    fn intersect(self, other: Self) -> Self {
-        let x = self.x.max(other.x);
-        let y = self.y.max(other.y);
-        let right = (self.x + self.width).min(other.x + other.width);
-        let bottom = (self.y + self.height).min(other.y + other.height);
-        Self::new(x, y, right - x, bottom - y)
-    }
-
-    fn union(self, other: Self) -> Self {
-        if self.is_empty() {
-            return other;
-        }
-        if other.is_empty() {
-            return self;
-        }
-        let x = self.x.min(other.x);
-        let y = self.y.min(other.y);
-        let right = (self.x + self.width).max(other.x + other.width);
-        let bottom = (self.y + self.height).max(other.y + other.height);
-        Self::new(x, y, right - x, bottom - y)
-    }
-
-    /// This area as a region of a layer whose top-left is `(x, y)`.
-    fn relative_to(self, x: i32, y: i32) -> Region {
-        Region {
-            x: (self.x - x) as u16,
-            y: (self.y - y) as u16,
-            width: self.width as u16,
-            height: self.height as u16,
-        }
-    }
-}
-
-/// Most separate areas [`Dirty`] keeps.
-const DIRTY_AREAS: usize = 4;
-
-/// The areas to repaint this frame, kept apart while merging them would
-/// repaint pixels that did not change: one bounding box over a window at the
-/// top left and the tray at the bottom right covers most of the screen.
-struct Dirty {
-    areas: [Area; DIRTY_AREAS],
-    len: usize,
-}
-
-impl Dirty {
-    const fn new() -> Self {
-        Self {
-            areas: [Area::new(0, 0, 0, 0); DIRTY_AREAS],
-            len: 0,
-        }
-    }
-
-    fn of(area: Area) -> Self {
-        let mut dirty = Self::new();
-        dirty.add(area);
-        dirty
-    }
-
-    fn add(&mut self, area: Area) {
-        if area.is_empty() {
-            return;
-        }
-        let size = |area: Area| i64::from(area.width) * i64::from(area.height);
-        // Absorb every area whose merge costs no more than the two apart.
-        let mut area = area;
-        let mut index = 0;
-        while index < self.len {
-            let other = self.areas[index];
-            if size(other.union(area)) <= size(other) + size(area) {
-                area = area.union(other);
-                self.len -= 1;
-                self.areas[index] = self.areas[self.len];
-                index = 0;
-            } else {
-                index += 1;
-            }
-        }
-        if self.len < DIRTY_AREAS {
-            self.areas[self.len] = area;
-            self.len += 1;
-            return;
-        }
-        // Full: merge into the area that grows least.
-        let mut best = 0;
-        for index in 1..self.len {
-            let growth = |i: usize| size(self.areas[i].union(area)) - size(self.areas[i]);
-            if growth(index) < growth(best) {
-                best = index;
-            }
-        }
-        self.areas[best] = self.areas[best].union(area);
-    }
-
-    fn areas(&self) -> &[Area] {
-        &self.areas[..self.len]
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Window {
-    owner: process::Id,
-    /// Opt-in avoids sending unknown tags to strict legacy clients.
-    cancellation_protocol: bool,
-    token: u64,
-    /// Top-left of the client area; the title bar sits above it.
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    title: [u8; MAX_TITLE],
-    title_length: usize,
-    /// Opacity, 0 to 255: animated from 0 as the window opens.
-    fade: Spring,
-    /// The workspace the window belongs to.
-    workspace: usize,
-    /// Until this tick, a resize has been requested and the owner may be
-    /// swapping surfaces: a failed blit of the old one does not mean it
-    /// exited.
-    resizing_until: libwoven::time::Ticks,
-}
-
-impl Window {
-    fn alpha(&self) -> u8 {
-        self.fade.value().clamp(0, 255) as u8
-    }
-
-    fn title_area(&self) -> Area {
-        Area::new(self.x, self.y - TITLE_HEIGHT, self.width, TITLE_HEIGHT)
-    }
-
-    fn body(&self) -> Area {
-        Area::new(self.x, self.y, self.width, self.height)
-    }
-
-    fn frame(&self) -> Area {
-        self.title_area().union(self.body())
-    }
-
-    /// Everything the window and its deepest shadow can cover: what to
-    /// repaint when it opens, closes, moves or changes elevation.
-    fn footprint(&self) -> Area {
-        let frame = self.frame();
-        frame.union(Area::new(
-            frame.x + SHADOW_REACH,
-            frame.y + SHADOW_REACH,
-            frame.width,
-            frame.height,
-        ))
-    }
-
-    /// The close control, or nothing on a window too narrow to carry one.
-    fn close_area(&self) -> Area {
-        if self.width < 4 * CLOSE_SIZE {
-            return Area::new(0, 0, 0, 0);
-        }
-        Area::new(
-            self.x + self.width - CLOSE_SIZE - 2,
-            self.y - TITLE_HEIGHT + 2,
-            CLOSE_SIZE,
-            CLOSE_SIZE,
-        )
-    }
-}
-
-#[derive(Clone, Copy)]
-struct TrayIcon {
-    token: u64,
-}
-
-#[derive(Clone, Copy)]
-struct App {
-    name: [u8; MAX_APP_NAME],
-    name_length: usize,
-    exec: [u8; MAX_EXEC],
-    exec_length: usize,
-}
-
-impl App {
-    fn name(&self) -> &[u8] {
-        &self.name[..self.name_length]
-    }
-
-    /// Parse a catalog entry: `Name=` and `Exec=` lines, both required.
-    fn parse(text: &[u8]) -> Option<Self> {
-        let mut app = Self {
-            name: [0; MAX_APP_NAME],
-            name_length: 0,
-            exec: [0; MAX_EXEC],
-            exec_length: 0,
-        };
-        for line in text.split(|byte| *byte == b'\n') {
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            if let Some(name) = line.strip_prefix(b"Name=") {
-                if name.is_empty() || name.len() > MAX_APP_NAME {
-                    return None;
-                }
-                app.name[..name.len()].copy_from_slice(name);
-                app.name_length = name.len();
-            } else if let Some(exec) = line.strip_prefix(b"Exec=") {
-                if exec.is_empty() || exec.len() > MAX_EXEC {
-                    return None;
-                }
-                app.exec[..exec.len()].copy_from_slice(exec);
-                app.exec_length = exec.len();
-            }
-        }
-        (app.name_length > 0 && app.exec_length > 0).then_some(app)
-    }
-
-    /// The command line, with `%p` replaced by the shell's process id.
-    fn command<'a>(&self, shell: process::Id, buffer: &'a mut [u8; 128]) -> Option<&'a str> {
-        let mut digits = [0u8; 20];
-        let pid = libwoven::format_u64(shell.0, &mut digits);
-        let exec = &self.exec[..self.exec_length];
-        let mut length = 0;
-        let mut index = 0;
-        while index < exec.len() {
-            let part: &[u8] = if exec[index..].starts_with(b"%p") {
-                index += 2;
-                pid
-            } else {
-                index += 1;
-                &exec[index - 1..index]
-            };
-            buffer
-                .get_mut(length..length + part.len())?
-                .copy_from_slice(part);
-            length += part.len();
-        }
-        core::str::from_utf8(&buffer[..length]).ok()
-    }
-}
-
-/// Load the catalog, sorted by name. A missing catalog, or no `FileRead`,
-/// leaves the launcher empty rather than stopping the shell.
-/// The apps are written into `apps`, which starts empty; returns how many.
-fn load_catalog(apps: &mut [Option<App>; MAX_APPS]) -> usize {
-    let mut count = 0;
-    let mut name = [0u8; libwoven::MAX_NAME];
-    let mut index = 0;
-    while count < MAX_APPS {
-        let Ok((length, is_directory)) = libwoven::read_dir(CATALOG, index, &mut name) else {
-            break;
-        };
-        index += 1;
-        if is_directory || !name[..length].ends_with(b".app") {
-            continue;
-        }
-        let mut path = [0u8; 128];
-        let prefix = CATALOG.as_bytes();
-        let total = prefix.len() + 1 + length;
-        if total > path.len() {
-            continue;
-        }
-        path[..prefix.len()].copy_from_slice(prefix);
-        path[prefix.len()] = b'/';
-        path[prefix.len() + 1..total].copy_from_slice(&name[..length]);
-        let Ok(path) = core::str::from_utf8(&path[..total]) else {
-            continue;
-        };
-        let Ok(descriptor) = libwoven::open(path) else {
-            continue;
-        };
-        let mut text = [0u8; 256];
-        let read = libwoven::read(descriptor, &mut text);
-        let _ = libwoven::close(descriptor);
-        let Some(app) = read.ok().and_then(|length| App::parse(&text[..length])) else {
-            continue;
-        };
-        // Insertion sort by name, so the list reads alphabetically.
-        let mut position = count;
-        while position > 0 && apps[position - 1].is_some_and(|other: App| other.name() > app.name())
-        {
-            apps[position] = apps[position - 1];
-            position -= 1;
-        }
-        apps[position] = Some(app);
-        count += 1;
-    }
-    count
-}
-
-/// Whether `name` contains `query`, ignoring ASCII case.
-fn matches(name: &[u8], query: &[u8]) -> bool {
-    query.is_empty()
-        || name
-            .windows(query.len())
-            .any(|window| window.eq_ignore_ascii_case(query))
-}
-
-#[derive(Clone, Copy)]
-struct Child {
-    pid: process::Id,
-    app: usize,
-}
-
-/// One remembered notification, already formatted for its row:
-/// `source: text`, cut to what fits.
-#[derive(Clone, Copy)]
-struct Note {
-    text: [u8; 32],
-    length: usize,
-}
-
-struct Toast {
-    text: [u8; 32],
-    length: usize,
-    until: libwoven::time::Ticks,
-}
-
-/// The staging surface and the tile buffer the shell renders into.
-struct Painter<'a> {
-    staging: GraphicsSurface,
-    tile: &'a mut [u32],
-}
-
-impl Painter<'_> {
-    /// [`draw`](Self::draw), blended at `opacity` over what is composed.
-    fn draw_blended(&mut self, area: Area, opacity: u8, render: impl Fn(&mut Canvas<'_>)) {
-        let mut y = area.y;
-        while y < area.y + area.height {
-            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
-            let mut x = area.x;
-            while x < area.x + area.width {
-                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
-                let Some(mut canvas) =
-                    Canvas::new(self.tile, x, y, width as usize, height as usize)
-                else {
-                    fail(16);
-                };
-                render(&mut canvas);
-                let region = Region {
-                    x: 0,
-                    y: 0,
-                    width: width as u16,
-                    height: height as u16,
-                };
-                if self.staging.write_canvas(&canvas).is_err()
-                    || self
-                        .staging
-                        .present_region_blended(region, x, y, opacity)
-                        .is_err()
-                {
-                    fail(17);
-                }
-                x += width;
-            }
-            y += height;
-        }
-    }
-
-    /// Render an overlay over `area` with `render`, on a canvas pre-filled
-    /// with the transparent key, and copy it with a keyed blit: only what
-    /// `render` drew lands, over what is already composed.
-    fn overlay(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
-        let mut y = area.y;
-        while y < area.y + area.height {
-            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
-            let mut x = area.x;
-            while x < area.x + area.width {
-                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
-                let Some(mut canvas) =
-                    Canvas::new(self.tile, x, y, width as usize, height as usize)
-                else {
-                    fail(14);
-                };
-                canvas.fill_rect(x, y, width as usize, height as usize, TRANSPARENT);
-                render(&mut canvas);
-                let region = Region {
-                    x: 0,
-                    y: 0,
-                    width: width as u16,
-                    height: height as u16,
-                };
-                if self.staging.write_canvas(&canvas).is_err()
-                    || self.staging.present_region_keyed(region, x, y).is_err()
-                {
-                    fail(15);
-                }
-                x += width;
-            }
-            y += height;
-        }
-    }
-
-    /// Blend `color` over `area` with uniform `opacity`, in chunks no larger
-    /// than the staging surface.
-    fn blend(&mut self, area: Area, color: u32, opacity: u8) {
-        let mut y = area.y;
-        while y < area.y + area.height {
-            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
-            let mut x = area.x;
-            while x < area.x + area.width {
-                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
-                let Some(mut canvas) =
-                    Canvas::new(self.tile, x, y, width as usize, height as usize)
-                else {
-                    fail(12);
-                };
-                canvas.fill_rect(x, y, width as usize, height as usize, color);
-                let region = Region {
-                    x: 0,
-                    y: 0,
-                    width: width as u16,
-                    height: height as u16,
-                };
-                if self.staging.write_canvas(&canvas).is_err()
-                    || self
-                        .staging
-                        .present_region_blended(region, x, y, opacity)
-                        .is_err()
-                {
-                    fail(13);
-                }
-                x += width;
-            }
-            y += height;
-        }
-    }
-
-    /// Render `area` with `render` in chunks no larger than the staging
-    /// surface, uploading and blitting each.
-    fn draw(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
-        let mut y = area.y;
-        while y < area.y + area.height {
-            let height = (area.y + area.height - y).min(TILE_HEIGHT as i32);
-            let mut x = area.x;
-            while x < area.x + area.width {
-                let width = (area.x + area.width - x).min(TILE_WIDTH as i32);
-                let Some(mut canvas) =
-                    Canvas::new(self.tile, x, y, width as usize, height as usize)
-                else {
-                    fail(10);
-                };
-                render(&mut canvas);
-                let region = Region {
-                    x: 0,
-                    y: 0,
-                    width: width as u16,
-                    height: height as u16,
-                };
-                if self.staging.write_canvas(&canvas).is_err()
-                    || self.staging.present_region(region, x, y).is_err()
-                {
-                    fail(11);
-                }
-                x += width;
-            }
-            y += height;
-        }
-    }
-}
+/// Launcher overview layout (M3). Reuses `launcher_open`/`query`/
+/// `selected`/`filtered()` as its shared search/selection state.
+const OVERVIEW_MARGIN: i32 = 16;
+const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 16;
+const OVERVIEW_THUMB_ROW_HEIGHT: i32 = 90;
+const OVERVIEW_THUMB_WIDTH: i32 = 140;
+const OVERVIEW_THUMB_HEIGHT: i32 = 74;
+const OVERVIEW_THUMB_GAP: i32 = 10;
+const OVERVIEW_CELL_WIDTH: i32 = 96;
+const OVERVIEW_CELL_HEIGHT: i32 = 92;
+const OVERVIEW_CELL_GAP: i32 = 12;
+const OVERVIEW_APP_ICON_SIZE: i32 = 48;
+/// The Dash (M4): favorites and running apps, one row below the search
+/// field. Icon-only, no label -- GNOME-dash-style, not the labeled app
+/// grid below it.
+const OVERVIEW_DASH_ICON: i32 = 40;
+const OVERVIEW_DASH_GAP: i32 = 10;
+const OVERVIEW_DASH_ROW_HEIGHT: i32 = OVERVIEW_DASH_ICON;
+/// Favorites (the same curated set as the desktop shortcuts) plus running
+/// apps, deduplicated, bounded to this many Dash entries.
+const DASH_MAX: usize = 8;
 
 struct Desktop {
     /// The primary monitor's width; the taskbar spans it.
@@ -1545,12 +685,25 @@ impl Desktop {
             .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
     }
 
+    /// The taskbar sits flush at the top of the screen. Keep this as a
+    /// function so every layout calculation shares one chrome origin.
     fn taskbar_top(&self) -> i32 {
-        self.height - TASKBAR_HEIGHT
+        0
     }
 
     fn taskbar(&self) -> Area {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
+    }
+
+    /// The screen's usable band, excluding the taskbar: `(top, height)`.
+    /// Shared by every window-placement/clamp site that needs to keep
+    /// windows clear of the bar (`work_area`, `open`, `resized`,
+    /// `toggle_scale`, `drag_to_pointer`).
+    fn usable_band(&self) -> (i32, i32) {
+        (
+            self.taskbar_top() + TASKBAR_HEIGHT,
+            self.height - TASKBAR_HEIGHT,
+        )
     }
 
     /// Row for taskbar text: seven glyph rows centred in the bar below its
@@ -1559,18 +712,10 @@ impl Desktop {
         self.taskbar_top() + 9
     }
 
+    /// Centered in the taskbar, not right-aligned.
     fn clock_area(&self) -> Area {
-        Area::new(
-            self.width - CLOCK_WIDTH,
-            self.taskbar_top(),
-            CLOCK_WIDTH,
-            TASKBAR_HEIGHT,
-        )
-    }
-
-    fn entry_area(&self, index: usize) -> Area {
-        let x = ENTRY_X + index as i32 * (ENTRY_WIDTH + ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, ENTRY_WIDTH, START_HEIGHT as i32)
+        let x = (self.width - CLOCK_WIDTH) / 2;
+        Area::new(x, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
     }
 
     fn tray_area(&self, index: usize) -> Area {
@@ -1578,10 +723,13 @@ impl Desktop {
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
+    /// Centered, dropping down from the taskbar (M4): the fixed
+    /// TOAST_MARGIN from the screen's own top edge alone would land the
+    /// toast under/behind the bar, since the bar occupies that band.
     fn toast_area(&self) -> Area {
         Area::new(
-            self.width - TOAST_WIDTH - TOAST_MARGIN,
-            TOAST_MARGIN,
+            (self.width - TOAST_WIDTH) / 2,
+            self.taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN,
             TOAST_WIDTH,
             TOAST_HEIGHT,
         )
@@ -1608,211 +756,186 @@ impl Desktop {
         (found, count)
     }
 
+    /// M6: a real, measured search-filter latency number (not assumed),
+    /// logged each time the query actually changes. Uses only the
+    /// existing `libwoven::ticks()` clock and `log()` -- no new
+    /// capability. `self.app_count` is the catalog size actually loaded
+    /// this boot; report it alongside the latency, since the design
+    /// brief's "over 64 apps" budget assumes `MAX_APPS` (64) entries and
+    /// the demo catalog fixture currently has far fewer.
+    fn log_search_latency(&self) {
+        let start = libwoven::ticks();
+        let (_, count) = self.filtered();
+        let elapsed = libwoven::ticks().saturating_sub(start);
+        let mut digits = [0u8; 20];
+        let elapsed_text = libwoven::format_u64(elapsed, &mut digits);
+        let mut count_digits = [0u8; 20];
+        let count_text = libwoven::format_u64(count as u64, &mut count_digits);
+        let mut catalog_digits = [0u8; 20];
+        let catalog_text = libwoven::format_u64(self.app_count as u64, &mut catalog_digits);
+        log(&[
+            b"woven-shell: search latency ticks=",
+            elapsed_text,
+            b" matches=",
+            count_text,
+            b" catalog=",
+            catalog_text,
+        ]);
+    }
+
+    /// Fixed launcher button geometry keeps the taskbar stable across
+    /// languages and avoids shifting the centered clock.
     fn start_area(&self) -> Area {
         Area::new(
             START_X,
             self.taskbar_top() + 4,
-            START_WIDTH as i32,
+            START_BUTTON_WIDTH,
             START_HEIGHT as i32,
         )
     }
 
-    /// The launcher panel, sized to its rows, above the start button; empty
-    /// while closed.
-    fn panel_area(&self) -> Area {
-        if !self.launcher_open {
-            return Area::new(0, 0, 0, 0);
-        }
-        let rows = 2 + self.filtered().1.max(1) as i32;
-        let height = rows * PANEL_ROW + 2;
+    fn taskbar_entry_area(&self, index: usize) -> Area {
+        let x = self.start_area().x
+            + self.start_area().width
+            + 8
+            + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
         Area::new(
-            PANEL_X,
-            self.taskbar_top() - 2 - height,
-            PANEL_WIDTH,
-            height,
+            x,
+            self.taskbar_top() + 4,
+            TASKBAR_ENTRY_WIDTH,
+            START_HEIGHT as i32,
         )
     }
 
-    /// The perspective card can leave a few pixels outside its flat source
-    /// rectangle at the receded top corners. Include that halo in damage so
-    /// closing or filtering the launcher cannot leave an old projected edge
-    /// on the wallpaper.
+    /// The full-screen launcher has no projected halo; its bounded overview
+    /// area is the complete damage region.
     fn panel_damage_area(&self) -> Area {
-        let panel = self.panel_area();
-        if panel.is_empty() {
-            return panel;
-        }
-        panel
-            .union(Area::new(
-                panel.x - 24,
-                panel.y - 24,
-                panel.width + 48,
-                panel.height + 28,
-            ))
-            .intersect(self.screen())
+        self.overview_area()
     }
 
-    /// The panel's overlay: border, title row, selection and text, drawn at
-    /// `area`'s own position in `canvas`. Used both for the ordinary flat
-    /// 2D panel and, rendered once at local origin into an offscreen
-    /// texture, as the source the 3D mode's perspective projection samples.
-    /// Its background is blended separately, so what lies beneath shows
-    /// through.
-    fn paint_panel_content(&self, canvas: &mut Canvas<'_>, area: Area) {
-        let (x, y) = (area.x, area.y);
-        let inner = (area.width - 2) as usize;
-        // Rounded, near-opaque card, matching the lock screen, Quick
-        // Settings and Notification Center chrome, instead of a hard-edged
-        // square outline with a flat header block.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        draw_app_icon(canvas, x + 4, y + 3, AppIcon::Generic, 8, false);
-        canvas.draw_text(x + 16, y + 5, PANEL_TITLE, theme_accent());
-        canvas.fill_rect(
-            x + CHROME_RADIUS as i32,
-            y + PANEL_ROW,
-            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
-            1,
-            theme_accent(),
-        );
-
-        let mut search = [0u8; MAX_QUERY + 3];
-        search[..2].copy_from_slice(b"> ");
-        search[2..2 + self.query_length].copy_from_slice(&self.query[..self.query_length]);
-        search[2 + self.query_length] = b'_';
-        let text = core::str::from_utf8(&search[..3 + self.query_length]).unwrap_or("");
-        canvas.draw_text(x + 6, y + 1 + PANEL_ROW + 4, text, theme_text());
-
-        let (found, count) = self.filtered();
-        if count == 0 {
-            canvas.draw_text(x + 6, y + 1 + 2 * PANEL_ROW + 4, "No matches", theme_text());
+    /// The launcher overview (M3): search, this workspace's window cards,
+    /// and the app grid, filling the screen below the taskbar.
+    /// Empty unless the launcher is open.
+    fn overview_area(&self) -> Area {
+        if !self.launcher_open {
+            return Area::new(0, 0, 0, 0);
         }
-        for (row, &index) in found[..count].iter().enumerate() {
-            let Some(app) = &self.apps[index] else {
-                continue;
-            };
-            let row_y = y + 1 + (2 + row as i32) * PANEL_ROW;
-            if row == self.selected {
-                fill_rounded(
-                    canvas,
-                    Area::new(x + 2, row_y, inner as i32 - 2, PANEL_ROW),
-                    CHROME_RADIUS_SMALL,
-                    theme_entry(true),
-                );
+        Area::new(
+            0,
+            self.taskbar_top() + TASKBAR_HEIGHT,
+            self.width,
+            self.height - TASKBAR_HEIGHT,
+        )
+    }
+
+    /// The search field, top of the overview.
+    fn overview_search_area(&self) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN,
+            overview.y + OVERVIEW_MARGIN,
+            overview.width - 2 * OVERVIEW_MARGIN,
+            OVERVIEW_SEARCH_HEIGHT,
+        )
+    }
+
+    /// Top of the Dash row, below the search field.
+    fn overview_dash_row_top(&self) -> i32 {
+        self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN
+    }
+
+    /// Dash entry `index`'s area, left to right. See [`Self::dash_apps`].
+    fn overview_dash_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_DASH_ICON + OVERVIEW_DASH_GAP),
+            self.overview_dash_row_top(),
+            OVERVIEW_DASH_ICON,
+            OVERVIEW_DASH_ICON,
+        )
+    }
+
+    /// Favorites (the same curated set as the desktop shortcuts,
+    /// `DESKTOP_ICON_NAMES`) first, then any other app with a running
+    /// instance ([`Self::children`]) not already a favorite, deduplicated,
+    /// bounded to `DASH_MAX`.
+    fn dash_apps(&self) -> ([usize; DASH_MAX], usize) {
+        let mut apps = [0usize; DASH_MAX];
+        let mut count = 0;
+        for index in 0..DESKTOP_ICON_NAMES.len() {
+            if count >= DASH_MAX {
+                break;
             }
-            draw_app_icon(
-                canvas,
-                x + 4,
-                row_y + 1,
-                app_icon(app.name()),
-                12,
-                row == self.selected,
-            );
-            let text = core::str::from_utf8(app.name()).unwrap_or("?");
-            canvas.draw_text(x + 22, row_y + 4, text, theme_text());
+            if let Some(app_index) = self.desktop_icon_app(index) {
+                apps[count] = app_index;
+                count += 1;
+            }
         }
+        for child in self.children.iter().flatten() {
+            if count >= DASH_MAX {
+                break;
+            }
+            if !apps[..count].contains(&child.app) {
+                apps[count] = child.app;
+                count += 1;
+            }
+        }
+        (apps, count)
     }
 
-    fn render_panel(&self, canvas: &mut Canvas<'_>) {
-        // Keep launcher text and icons crisp in the foreground. The desktop,
-        // taskbar, title bars, and wallpaper retain their 3D presentation;
-        // this card intentionally follows the taskbar's readable-surface
-        // treatment instead of perspective-compressing bitmap glyphs.
-        self.paint_panel_content(canvas, self.panel_area());
+    /// Top of the window-thumbnails row, below the Dash.
+    fn overview_thumb_row_top(&self) -> i32 {
+        self.overview_dash_row_top() + OVERVIEW_DASH_ROW_HEIGHT + OVERVIEW_MARGIN
     }
 
-    /// The launcher panel, perspective-projected as a card tilted back in
-    /// 3D (its bottom edge stays put; its top edge recedes and narrows)
-    /// instead of blitted flat. Same technique as
-    /// [`Self::render_qs_3d`]: the flat content is rendered once into
-    /// `LAUNCHER_PANEL_TEXTURE` at local origin, then sampled by two
-    /// `textured_triangle_3d` calls per tile `canvas` this is invoked for.
-    #[allow(dead_code)]
-    fn render_panel_3d(&self, canvas: &mut Canvas<'_>, area: Area) {
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let texture_pixels = unsafe { &mut *LAUNCHER_PANEL_TEXTURE.0.get() };
-        let Some(mut texture) = Canvas::new(
-            texture_pixels,
-            0,
-            0,
-            area.width as usize,
-            area.height as usize,
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        // The content painter intentionally draws only the panel's visible
-        // overlay pixels because the flat path starts from a transparent
-        // keyed canvas.  The 3D source texture is persistent scratch storage,
-        // so seed its active footprint with the translucent panel background
-        // before every repaint or a prior selection/glyph can leak into the
-        // next projected frame.
-        texture.shade(|x, y| {
-            blend(
-                theme_panel(),
-                wallpaper(area.x + x, area.y + y, self.height),
-                PANEL_OPACITY,
-            )
-        });
-        self.paint_panel_content(&mut texture, Area::new(0, 0, area.width, area.height));
-        // The projected quad is narrower than the flat panel's footprint at
-        // its receded top edge, so the corners it no longer covers still
-        // need the real desktop background rather than whatever this
-        // tile's shared scratch buffer held. Painted before the depth
-        // buffer below is (re-)cleared: `render_desktop_background` clears
-        // and uses that same shared buffer for its own projection, so
-        // calling it after this function's own clear would corrupt the
-        // depth test this function's own triangles depend on.
-        self.render_desktop_background(canvas);
+    /// Window-card `index`'s area, left to right, one per current-workspace
+    /// window ([`Self::entries`]); a title-card placeholder, not a live
+    /// thumbnail, since the compositor ABI has no scaled blit (see
+    /// `docs/graphics/overview-desktop-2026-11-03.md`).
+    fn overview_thumb_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
+            self.overview_thumb_row_top(),
+            OVERVIEW_THUMB_WIDTH,
+            OVERVIEW_THUMB_HEIGHT,
+        )
+    }
 
-        let half_width = (area.width / 2) << 16;
-        let half_height = ((area.height - 1) << 16) / 2;
-        const DISTANCE: i32 = 200 << 16;
-        const TILT_DEPTH: i32 = 70 << 16;
-        let camera = Camera::new(
-            DISTANCE,
-            DISTANCE,
-            area.x + area.width / 2,
-            area.y + area.height / 2,
-        );
-        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
-            camera.project(-half_width, -half_height, TILT_DEPTH),
-            camera.project(half_width, -half_height, TILT_DEPTH),
-            camera.project(-half_width, half_height, 0),
-            camera.project(half_width, half_height, 0),
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        let vertex =
-            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+    /// Top of the app grid, below the (always reserved) thumbnails row.
+    fn overview_grid_top(&self) -> i32 {
+        let has_windows = self.entries().next().is_some();
+        self.overview_dash_row_top()
+            + OVERVIEW_DASH_ROW_HEIGHT
+            + OVERVIEW_MARGIN
+            + if has_windows {
+                OVERVIEW_THUMB_ROW_HEIGHT + OVERVIEW_MARGIN
+            } else {
+                0
+            }
+    }
 
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) = DepthBuffer::new(
-            depth_values,
-            canvas.x(),
-            canvas.y(),
-            canvas.width(),
-            canvas.height(),
-        ) else {
-            return self.paint_panel_content(canvas, area);
-        };
-        depth.clear(u16::MAX);
-        let mut renderer = Renderer::new(canvas);
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_left, 0, 0),
-            vertex(top_right, 255, 0),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_right, 255, 0),
-            vertex(bottom_right, 255, 255),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
+    /// Grid columns that fit the overview's width.
+    fn overview_cols(&self) -> usize {
+        let overview = self.overview_area();
+        let available = overview.width - 2 * OVERVIEW_MARGIN + OVERVIEW_CELL_GAP;
+        (available / (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP)).max(1) as usize
+    }
+
+    /// App grid cell `index`'s area (row-major). `MAX_APPS` (64) always
+    /// fits within the rows a typical desktop height offers at this cell
+    /// size without paging; a future larger catalog would need real paging
+    /// here, not assumed by this layout.
+    fn overview_cell_area(&self, index: usize) -> Area {
+        let overview = self.overview_area();
+        let cols = self.overview_cols();
+        let (col, row) = (index % cols, index / cols);
+        Area::new(
+            overview.x + OVERVIEW_MARGIN + col as i32 * (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP),
+            self.overview_grid_top() + row as i32 * (OVERVIEW_CELL_HEIGHT + OVERVIEW_CELL_GAP),
+            OVERVIEW_CELL_WIDTH,
+            OVERVIEW_CELL_HEIGHT,
+        )
     }
 
     /// Open or close the launcher. Returns the area to repaint.
@@ -1864,7 +987,7 @@ impl Desktop {
         if !started {
             let mut message = [0u8; 64];
             let prefix = b"Could not start ";
-            let length = (prefix.len() + app.name_length).min(message.len());
+            let length = (prefix.len() + app.name().len()).min(message.len());
             message[..prefix.len()].copy_from_slice(prefix);
             message[prefix.len()..length].copy_from_slice(&app.name()[..length - prefix.len()]);
             let mut text = [0u8; 32];
@@ -1882,7 +1005,7 @@ impl Desktop {
 
     /// Keys while the launcher is open edit the search and choose.
     fn launcher_key(&mut self, key: Key) -> Area {
-        let before = self.panel_area();
+        let before = self.overview_area();
         match key {
             Key::Char(character) if (' '..='~').contains(&character) => {
                 if self.query_length < MAX_QUERY {
@@ -1890,10 +1013,12 @@ impl Desktop {
                     self.query_length += 1;
                 }
                 self.selected = 0;
+                self.log_search_latency();
             }
             Key::Backspace => {
                 self.query_length = self.query_length.saturating_sub(1);
                 self.selected = 0;
+                self.log_search_latency();
             }
             Key::Tab => {
                 let count = self.filtered().1;
@@ -1911,7 +1036,7 @@ impl Desktop {
             // Tiling waits until the launcher closes.
             Key::Char(_) | Key::F2 | Key::F3 | Key::F4 => {}
         }
-        before.union(self.panel_area())
+        before.union(self.overview_area())
     }
 
     /// Reap launched applications that have exited.
@@ -2110,7 +1235,7 @@ impl Desktop {
             );
             let width = font::text_width(name) as i32;
             let text_x = area.x + ((area.width - width) / 2).max(0);
-            canvas.draw_text(text_x, area.y + 40, name, theme_text());
+            canvas.draw_text_system(text_x, area.y + 40, name, theme_text());
         }
     }
 
@@ -2118,30 +1243,18 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        if self.three_d {
-            self.render_taskbar_3d(canvas);
-        }
-        // Taskbar preparation may restore its backdrop; shortcuts belong
-        // above the wallpaper and must not be erased by that preparation.
         self.paint_desktop_icons(canvas);
         self.paint_taskbar_content(canvas);
     }
 
-    /// The taskbar's content -- its translucent fill, accent top border,
-    /// start button, window entries, clock, workspace switcher, account
-    /// name, Quick Settings button, and unread badge -- drawn at its own
-    /// real screen position in `canvas`. Used both for the ordinary flat
-    /// 2D taskbar and, rendered once into an offscreen texture at that same
-    /// position (so every `self.taskbar_top()`-based Area in here lands in
-    /// the texture exactly where it would on screen), as the source the 3D
-    /// mode's perspective projection samples.
+    /// The taskbar content: its translucent fill and bottom accent line, the
+    /// Start launcher, current-workspace window entries, the centered clock,
+    /// workspace switcher, the system menu button, and the unread badge --
+    /// drawn at its own real screen position in `canvas`.
     fn paint_taskbar_content(&self, canvas: &mut Canvas<'_>) {
         let top = self.taskbar_top();
         let width = self.width as usize;
         let height = self.height;
-        // This painter also receives desktop tiles above the taskbar. Shade
-        // only the bar's backdrop, preserving shortcuts and avoiding duplicate
-        // full-tile wallpaper work during every pointer/window repaint.
         let left = canvas.x().max(0);
         let right = (canvas.x() + canvas.width() as i32).min(self.width);
         let first_row = canvas.y().max(top);
@@ -2159,63 +1272,75 @@ impl Desktop {
             theme_taskbar(),
             TASKBAR_OPACITY,
         );
-        canvas.fill_rect(0, top, width, 1, theme_accent());
+        // The accent line marks the taskbar's boundary with the desktop.
+        canvas.fill_rect(0, top + TASKBAR_HEIGHT - 1, width, 1, theme_accent());
 
-        // The taskbar band itself stays flat and full-width (rounding a
-        // screen-edge-spanning bar would look wrong); only the self-contained
-        // Start button gets the rounded chrome treatment. A subtle top-lit
-        // gradient, matching the window title bars, reads less flat than a
-        // single fill colour.
-        let start_area = Area::new(START_X, top + 4, START_WIDTH as i32, START_HEIGHT as i32);
-        let start_fill = theme_start_fill();
+        let start = self.start_area();
+        let catalog = shell_catalog(self.language);
+        let fill = theme_start_fill();
         Renderer::new(canvas).rounded_rect_gradient(
-            rect_of(start_area),
+            rect_of(start),
             CHROME_RADIUS,
-            color_of(lighten(start_fill, 24)),
-            color_of(start_fill),
+            color_of(lighten(fill, 24)),
+            color_of(fill),
         );
-        let icon_x = START_X + START_ICON_MARGIN;
-        let icon_y = top + 4 + (START_HEIGHT as i32 - START_ICON_SIZE) / 2;
-        for (row, line) in START_ICON.iter().enumerate() {
-            for (column, cell) in line.iter().enumerate() {
-                let color = match cell {
-                    b'A' => START_ICON_A,
-                    b'D' => START_ICON_D,
-                    _ => continue,
-                };
-                canvas.set(icon_x + column as i32, icon_y + row as i32, color);
-            }
-        }
-        let label_x = icon_x + START_ICON_SIZE + START_ICON_GAP;
-        canvas.draw_text(label_x, self.text_y(), START_LABEL, theme_text());
+        canvas.draw_text_system(
+            start.x + 24,
+            self.text_y(),
+            catalog.lookup("start", START_LABEL),
+            theme_text(),
+        );
 
-        let focused = self.focused();
+        let icon_left = start.x + 7;
+        let icon_top = start.y + (start.height - START_ICON_SIZE) / 2;
+        for (dx, dy, color) in [
+            (0, 0, theme_accent()),
+            (8, 0, theme_text()),
+            (0, 8, theme_text()),
+            (8, 8, theme_accent()),
+        ] {
+            fill_rounded(canvas, Area::new(icon_left + dx, icon_top + dy, 6, 6), 1, color);
+        }
+
         for (index, (slot, window)) in self.entries().enumerate() {
-            let area = self.entry_area(index);
-            let fill = theme_entry(Some(slot) == focused);
-            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
-            let mut buffer = [0u8; 32];
-            let length = label(
-                &window.title[..window.title_length],
-                ENTRY_CHARS,
-                &mut buffer,
+            let area = self.taskbar_entry_area(index);
+            let active = self.focused() == Some(slot);
+            fill_rounded(
+                canvas,
+                area,
+                CHROME_RADIUS_SMALL,
+                if active {
+                    lighten(theme_entry(true), 12)
+                } else {
+                    theme_entry(false)
+                },
             );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(area.x + 4, self.text_y(), text, theme_text());
+            draw_app_icon(
+                canvas,
+                area.x + 2,
+                area.y + 1,
+                app_icon(&window.title[..window.title_length]),
+                14,
+                false,
+            );
+            let mut title = [0u8; 32];
+            let length = label(&window.title[..window.title_length], 5, &mut title);
+            let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+            canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-        let clock_x = self.width - CLOCK_MARGIN - font::text_width(text) as i32;
-        canvas.draw_text(clock_x, self.text_y(), text, theme_text());
+        let clock_x = (self.width - font::text_width(text) as i32) / 2;
+        canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
-        // The workspace switcher, left of the Quick Settings button.
+        // The workspace switcher sits left of the system menu button.
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
             let fill = theme_entry(index == self.workspace);
             fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let digit = [b'1' + index as u8];
-            canvas.draw_text(
+            canvas.draw_text_system(
                 area.x + 3,
                 self.text_y(),
                 core::str::from_utf8(&digit).unwrap_or("?"),
@@ -2223,25 +1348,19 @@ impl Desktop {
             );
         }
 
-        // The signed-in account's name, left of the workspace switcher.
-        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
-            let name = core::str::from_utf8(account.name()).unwrap_or("?");
-            let x = self.workspace_area(0).x - 6 - font::text_width(name) as i32;
-            canvas.draw_text(x, self.text_y(), name, theme_text());
-        }
-
-        // The Quick Settings button.
+        // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
         let fill = theme_entry(self.qs_open);
         fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
-        canvas.draw_text(button.x + 5, self.text_y(), "Q", theme_text());
+        for row in 0..3 {
+            canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
+        }
 
-        // The unread badge, just left of the clock: a count up to 9.
         if self.unread > 0 {
             let badge = self.badge_area();
             fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
             let digit = [b'0' + self.unread.min(9) as u8];
-            canvas.draw_text(
+            canvas.draw_text_system(
                 badge.x + 3,
                 badge.y + 2,
                 core::str::from_utf8(&digit).unwrap_or("?"),
@@ -2250,94 +1369,123 @@ impl Desktop {
         }
     }
 
-    /// The taskbar, perspective-projected as a card tilted back in 3D (its
-    /// bottom edge -- the bottom of the screen -- stays put; its top edge
-    /// recedes and narrows slightly, a shallower tilt than the desktop
-    /// floor since it is a much thinner strip) instead of blitted flat.
-    /// The flat content is rendered once into `TASKBAR_TEXTURE` at the
-    /// taskbar's own real position (see [`Self::paint_taskbar_content`]),
-    /// then sampled by two `textured_triangle_3d` calls per tile `canvas`
-    /// this is invoked for.
-    fn render_taskbar_3d(&self, canvas: &mut Canvas<'_>) {
-        let top = self.taskbar_top();
-        if canvas.y() + canvas.height() as i32 <= top || canvas.y() >= self.height {
-            return;
+    /// The launcher overview's content (M3): search field, this
+    /// workspace's window cards, and the filtered app grid, drawn at its
+    /// own real screen position in `canvas`; no alternate legacy chrome is
+    /// rendered behind this overview.
+    fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
+        let overview = self.overview_area();
+        fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 248);
+
+        // Search field.
+        let catalog = shell_catalog(self.language);
+        let search = self.overview_search_area();
+        fill_rounded(canvas, search, CHROME_RADIUS, theme_taskbar());
+        let query = &self.query[..self.query_length];
+        if query.is_empty() {
+            canvas.draw_text_system(
+                search.x + 6,
+                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                catalog.lookup("type_to_search", "Type to search"),
+                theme_muted(),
+            );
+        } else {
+            let mut buffer = [0u8; 32];
+            let length = label(query, MAX_QUERY, &mut buffer);
+            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+            canvas.draw_text_system(
+                search.x + 6,
+                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                text,
+                theme_text(),
+            );
         }
-        let width = self.width;
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let texture_pixels = unsafe { &mut *TASKBAR_TEXTURE.0.get() };
-        let Some(mut texture) = Canvas::new(
-            texture_pixels,
-            0,
-            top,
-            width as usize,
-            TASKBAR_HEIGHT as usize,
-        ) else {
-            return self.paint_taskbar_content(canvas);
-        };
-        self.paint_taskbar_content(&mut texture);
-        // The projected quad is narrower than the flat taskbar's footprint
-        // at its receded top edge, so the sliver it no longer covers still
-        // needs the real desktop background (itself 3D-projected, since 3D
-        // mode is already on here) rather than stale tile content. Painted
-        // before the depth buffer below is (re-)cleared:
-        // `render_desktop_background` clears and uses that same shared
-        // buffer for its own projection, so calling it after this
-        // function's own clear would corrupt the depth test this
-        // function's own triangles depend on.
-        self.render_desktop_background(canvas);
 
-        let half_width = (width / 2) << 16;
-        let half_height = ((TASKBAR_HEIGHT - 1) << 16) / 2;
-        const DISTANCE: i32 = 200 << 16;
-        const TILT_DEPTH: i32 = 30 << 16;
-        // Keep the taskbar's receded edge attached to the full primary
-        // monitor width. Perspective would otherwise pull the top corners
-        // inward, leaving the outer taskbar pixels uncovered. The 23/20
-        // compensation is the exact inverse of DISTANCE/(DISTANCE+depth)
-        // for this fixed 30-on-200 tilt, while retaining the depth gradient.
-        let top_half_width = half_width.saturating_mul(23) / 20;
-        let camera = Camera::new(DISTANCE, DISTANCE, width / 2, top + TASKBAR_HEIGHT / 2);
-        let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) = (
-            camera.project(-top_half_width, -half_height, TILT_DEPTH),
-            camera.project(top_half_width, -half_height, TILT_DEPTH),
-            camera.project(-half_width, half_height, 0),
-            camera.project(half_width, half_height, 0),
-        ) else {
-            return self.paint_taskbar_content(canvas);
-        };
-        let vertex =
-            |(x, y, depth): (i32, i32, u16), u: u8, v: u8| Vertex3Tex::new(x, y, depth, u, v);
+        // The Dash: favorites and running apps, icon-only.
+        let (dash_apps, dash_count) = self.dash_apps();
+        for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
+            let Some(app) = self.apps[app_index] else { continue };
+            let area = self.overview_dash_area(index);
+            draw_app_icon(canvas, area.x, area.y, app_icon(app.name()), OVERVIEW_DASH_ICON, false);
+        }
 
-        // SAFETY: single-threaded; this is the only live reference, and it
-        // does not outlive this call.
-        let depth_values = unsafe { &mut *TILE_DEPTH_3D.0.get() };
-        let Some(mut depth) = DepthBuffer::new(
-            depth_values,
-            canvas.x(),
-            canvas.y(),
-            canvas.width(),
-            canvas.height(),
-        ) else {
-            return self.paint_taskbar_content(canvas);
+        // This workspace's window cards: a title-card placeholder per
+        // window, not a live thumbnail -- the compositor ABI has no scaled
+        // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
+        let entries: [Option<&Window>; MAX_WINDOWS] = {
+            let mut cards = [None; MAX_WINDOWS];
+            for (slot, (_, window)) in self.entries().enumerate() {
+                if slot < MAX_WINDOWS {
+                    cards[slot] = Some(window);
+                }
+            }
+            cards
         };
-        depth.clear(u16::MAX);
-        let mut renderer = Renderer::new(canvas);
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_left, 0, 0),
-            vertex(top_right, 255, 0),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
-        renderer.textured_triangle_3d(
-            &mut depth,
-            vertex(top_right, 255, 0),
-            vertex(bottom_right, 255, 255),
-            vertex(bottom_left, 0, 255),
-            &texture,
-        );
+        if entries.iter().all(Option::is_none) {
+            canvas.draw_text_system(
+                overview.x + OVERVIEW_MARGIN,
+                self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
+                catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                theme_muted(),
+            );
+        } else {
+            for (index, window) in entries.iter().enumerate() {
+                let Some(window) = window else { continue };
+                let card = self.overview_thumb_area(index);
+                fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
+                outline(canvas, card, theme_accent());
+                let mut buffer = [0u8; 32];
+                let length = label(
+                    &window.title[..window.title_length],
+                    ((card.width - 8) / font::ADVANCE) as usize,
+                    &mut buffer,
+                );
+                let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+                canvas.draw_text_system(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
+            }
+        }
+
+        // The app grid, filtered by the search field.
+        let (found, count) = self.filtered();
+        for (index, &app_index) in found[..count].iter().enumerate() {
+            let Some(app) = self.apps[app_index] else { continue };
+            let cell = self.overview_cell_area(index);
+            if index == self.selected {
+                fill_rounded(
+                    canvas,
+                    Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
+                    CHROME_RADIUS,
+                    lighten(theme_taskbar(), 18),
+                );
+            }
+            draw_app_icon(
+                canvas,
+                cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
+                cell.y + 2,
+                app_icon(app.name()),
+                OVERVIEW_APP_ICON_SIZE,
+                index == self.selected,
+            );
+            // Catalog names are "Woven<App>"; the grid already shows the
+            // WovenHat-branded icon beside each one, so the repeated
+            // prefix only costs width better spent on the rest of the
+            // name before truncation.
+            let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
+            let mut buffer = [0u8; 32];
+            let length = label(
+                display_name,
+                (cell.width / font::ADVANCE) as usize,
+                &mut buffer,
+            );
+            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+            let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
+            canvas.draw_text_system(
+                text_x.max(cell.x),
+                cell.y + OVERVIEW_APP_ICON_SIZE + 12,
+                text,
+                theme_text(),
+            );
+        }
     }
 
     /// The Quick Settings button, left of the tray's last icon slot.
@@ -2353,12 +1501,8 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
-        Area::new(
-            self.width - 4 - CENTER_WIDTH,
-            self.taskbar_top() - 2 - height,
-            CENTER_WIDTH,
-            height,
-        )
+        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
     /// The toggles as they currently read.
@@ -2409,7 +1553,7 @@ impl Desktop {
         });
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
-        let catalog = lock_catalog(self.language);
+        let catalog = shell_catalog(self.language);
 
         // A frosted card behind the sign-in/lock content, Windows-11-style,
         // instead of text floating directly on the dimmed wallpaper.
@@ -2427,7 +1571,7 @@ impl Desktop {
             fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, theme_accent());
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
-            canvas.draw_text(
+            canvas.draw_text_system(
                 self.width / 2 - font::text_width(glyph) as i32 / 2,
                 avatar_y - 3,
                 glyph,
@@ -2436,7 +1580,18 @@ impl Desktop {
 
             // The sign-in prompt, then the accounts, the chosen one marked.
             let text = catalog.lookup("sign_in", "Sign in");
-            canvas.draw_text(centred(text), middle - 52, text, theme_text());
+            if let Some(face) = system_font_face() {
+                canvas.draw_text_ttf(
+                    centred(text),
+                    middle - 52,
+                    text,
+                    theme_text(),
+                    &face,
+                    12,
+                );
+            } else {
+                canvas.draw_text_system(centred(text), middle - 52, text, theme_text());
+            }
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {
@@ -2444,7 +1599,7 @@ impl Desktop {
                 }
                 line[2..2 + account.name().len()].copy_from_slice(account.name());
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
-                canvas.draw_text(
+                canvas.draw_text_system(
                     centred(text),
                     middle - 38 + index as i32 * 10,
                     text,
@@ -2453,13 +1608,13 @@ impl Desktop {
             }
         } else if self.mode == LockMode::ChangePin {
             let text = catalog.lookup("change_pin", "Change PIN");
-            canvas.draw_text(centred(text), middle - 34, text, theme_text());
+            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
         } else {
             let text = catalog.lookup("locked", "Locked");
-            canvas.draw_text(centred(text), middle - 34, text, theme_text());
+            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-            canvas.draw_text(centred(clock), middle - 20, clock, theme_text());
+            canvas.draw_text_system(centred(clock), middle - 20, clock, theme_text());
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
             match self.change_pin {
@@ -2477,7 +1632,7 @@ impl Desktop {
                 LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
-        canvas.draw_text(centred(prompt), middle - 4, prompt, theme_text());
+        canvas.draw_text_system(centred(prompt), middle - 4, prompt, theme_text());
         let dots = self.entry_length as i32;
         if dots > 0 {
             let left = (self.width - (dots * 10 - 4)) / 2;
@@ -2839,7 +1994,7 @@ impl Desktop {
         // `blend()` already laid down under this shows through there as a
         // soft drop shadow rather than a visible seam.
         fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_accent());
+        canvas.draw_text_system(x + 6, y + 5, QS_TITLE, theme_accent());
         canvas.fill_rect(
             x + CHROME_RADIUS as i32,
             y + PANEL_ROW,
@@ -2848,7 +2003,7 @@ impl Desktop {
             theme_accent(),
         );
         for (row, text) in self.qs_rows().iter().enumerate() {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + (1 + row as i32) * PANEL_ROW + 4,
                 text,
@@ -3049,14 +2204,15 @@ impl Desktop {
             self.desktop_width
         };
         self.height = info.height as i32;
-        let top = self.taskbar_top();
+        let (area_top, area_height) = self.usable_band();
         for window in self.windows.iter_mut().flatten() {
             window.x = window
                 .x
                 .clamp(0, (self.desktop_width - window.width).max(0));
-            window.y = window
-                .y
-                .clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+            window.y = window.y.clamp(
+                area_top + TITLE_HEIGHT,
+                (area_top + area_height - window.height).max(area_top + TITLE_HEIGHT),
+            );
         }
         self.pointer = (
             self.pointer.0.min(self.desktop_width - 1),
@@ -3075,24 +2231,20 @@ impl Desktop {
     fn badge_area(&self) -> Area {
         let (_, length) = clock_text(self.time, self.seconds);
         let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
-        let clock_x = self.width - CLOCK_MARGIN - clock_width;
+        let clock_x = (self.width - clock_width) / 2;
         Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
     }
 
-    /// The Notification Center, sized to its rows, above the taskbar's right
-    /// end; empty while closed.
+    /// The Notification Center, sized to its rows, drops down from the
+    /// clock, calendar/notification-popover style; empty while closed.
     fn center_area(&self) -> Area {
         if !self.center_open {
             return Area::new(0, 0, 0, 0);
         }
         let count = self.notes.iter().flatten().count();
         let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
-        Area::new(
-            self.width - 4 - CENTER_WIDTH,
-            self.taskbar_top() - 2 - height,
-            CENTER_WIDTH,
-            height,
-        )
+        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
+        Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
     /// The Notification Center's overlay: border, title row with Clear, and
@@ -3106,9 +2258,9 @@ impl Desktop {
         // panel and the lock screen, instead of a hard-edged square outline
         // with a flat header block.
         fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_accent());
+        canvas.draw_text_system(x + 6, y + 5, CENTER_TITLE, theme_accent());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
-        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, theme_text());
+        canvas.draw_text_system(clear_x, y + 5, CENTER_CLEAR, theme_text());
         canvas.fill_rect(
             x + CHROME_RADIUS as i32,
             y + PANEL_ROW,
@@ -3120,7 +2272,7 @@ impl Desktop {
         for (row, note) in self.notes.iter().flatten().enumerate() {
             any = true;
             let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + (1 + row as i32) * PANEL_ROW + 4,
                 text,
@@ -3128,7 +2280,7 @@ impl Desktop {
             );
         }
         if !any {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + PANEL_ROW + 4,
                 "No notifications",
@@ -3284,22 +2436,42 @@ impl Desktop {
         before.union(self.center_area()).union(self.taskbar())
     }
 
-    fn render_title(window: &Window, focused: bool, canvas: &mut Canvas<'_>, three_d: bool) {
+    fn render_title(
+        window: &Window,
+        focused: bool,
+        canvas: &mut Canvas<'_>,
+        three_d: bool,
+        height: i32,
+    ) {
         let area = window.title_area();
         let fill = theme_title(focused);
         if three_d {
             Self::render_title_3d(area, fill, canvas);
         } else {
-            // A subtle top-to-bottom highlight instead of one flat colour.
-            // Square corners here: the title bar sits directly against the
-            // window body below it, and rounding only the title independently
-            // would show a seam where the two meet.
-            fill_gradient(canvas, area, lighten(fill, 40), fill);
+            // Rounded top corners, square bottom: the standard modern
+            // window shape (Windows, macOS, GNOME all use it) -- the title
+            // bar's bottom edge sits flush against the square body below
+            // it, while its top corners read as a floating card rather
+            // than a flat slab. The rounded fill below leaves the handful
+            // of corner pixels outside the curve untouched, and `draw`
+            // presents this canvas opaquely from a reused scratch buffer
+            // (no transparent-key compositing here, unlike the floating
+            // panels), so those pixels must be given real content -- the
+            // desktop wallpaper, the common case for what is behind a
+            // window's top corners -- rather than left holding whatever an
+            // earlier, unrelated draw call put in the shared scratch tile.
+            canvas.shade(|x, y| wallpaper(x, y, height));
+            Renderer::new(canvas).rounded_rect_top_gradient(
+                rect_of(area),
+                CHROME_RADIUS_SMALL,
+                color_of(lighten(fill, 40)),
+                color_of(fill),
+            );
         }
         let close = window.close_area();
         if !close.is_empty() {
             fill_rounded(canvas, close, CHROME_RADIUS_SMALL, CLOSE_FILL);
-            canvas.draw_text(close.x + 3, close.y + 2, "x", theme_text());
+            canvas.draw_text_system(close.x + 3, close.y + 2, "x", theme_text());
         }
         let mut buffer = [0u8; 32];
         let reserved = if close.is_empty() {
@@ -3310,7 +2482,7 @@ impl Desktop {
         let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-        canvas.draw_text(area.x + 4, area.y + 4, text, theme_text());
+        canvas.draw_text_system(area.x + 4, area.y + 4, text, theme_text());
     }
 
     /// A window's title-bar fill, perspective-projected as a card tilted
@@ -3391,7 +2563,7 @@ impl Desktop {
         // chrome, instead of a hard-edged square outline.
         fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
-        canvas.draw_text(area.x + 6, area.y + 8, text, theme_text());
+        canvas.draw_text_system(area.x + 6, area.y + 8, text, theme_text());
     }
 
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {
@@ -3563,12 +2735,22 @@ impl Desktop {
         }
 
         let focused = self.focused();
-        // Windows may sit on any monitor; only the taskbar band is excluded.
-        let above_taskbar = Area::new(0, 0, self.desktop_width, self.taskbar_top());
-        for &slot in &self.stack[..self.stacked] {
+        // Windows may sit on any monitor; only the bar's own band is excluded.
+        let (band_top, band_height) = self.usable_band();
+        let above_taskbar = Area::new(0, band_top, self.desktop_width, band_height);
+        for (stack_index, &slot) in self.stack[..self.stacked].iter().enumerate() {
             let Some(window) = &self.windows[slot] else {
                 continue;
             };
+            // Window bodies are submitted with an opaque blit. If a fully
+            // opaque higher window contains this entire footprint, neither
+            // the lower title/body nor its shadow can affect final pixels.
+            // Skip it before issuing any client blits. The stack is capped by
+            // MAX_WINDOWS, so this bounded scan cannot turn repaint into an
+            // unbounded scene walk.
+            if self.frame_is_fully_occluded(stack_index, window.footprint()) {
+                continue;
+            }
             let bands = if Some(slot) == focused {
                 FOCUSED_SHADOW
             } else {
@@ -3599,11 +2781,11 @@ impl Desktop {
                 let active = Some(slot) == focused;
                 if alpha == u8::MAX {
                     painter.draw(title, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d)
+                        Self::render_title(window, active, canvas, self.three_d, self.height)
                     });
                 } else {
                     painter.draw_blended(title, alpha, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d)
+                        Self::render_title(window, active, canvas, self.three_d, self.height)
                     });
                 }
             }
@@ -3637,10 +2819,18 @@ impl Desktop {
             }
         }
 
-        let panel = self.panel_area().intersect(area);
-        if !panel.is_empty() {
-            painter.blend(panel, theme_panel(), PANEL_OPACITY);
-            painter.overlay(panel, |canvas| self.render_panel(canvas));
+        let overview = self.overview_area().intersect(area);
+        if !overview.is_empty() {
+            // The M5 fade-in attempt (a single draw_blended pass at the
+            // overview_fade spring's value) produced a ghosted, tile-
+            // offset duplicate of the panel's content once actually seen
+            // on screen via QEMU -- reverted to the plain blend+keyed-
+            // overlay two-step the other panels already use and that M3
+            // verified correct, rather than ship something visibly
+            // broken. See the M5 writeup in
+            // docs/graphics/overview-desktop-2026-11-03.md.
+            painter.blend(overview, theme_panel(), PANEL_OPACITY);
+            painter.overlay(overview, |canvas| self.paint_overview_content(canvas));
         }
 
         let qs = self.qs_area().intersect(area);
@@ -3660,6 +2850,16 @@ impl Desktop {
             painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
         None
+    }
+
+    fn frame_is_fully_occluded(&self, stack_index: usize, footprint: Area) -> bool {
+        self.stack[stack_index + 1..self.stacked]
+            .iter()
+            .filter_map(|&higher_slot| self.windows[higher_slot].as_ref())
+            .any(|higher| {
+                higher.alpha() == u8::MAX
+                    && higher.frame().intersect(footprint) == footprint
+            })
     }
 
     fn raise(&mut self, slot: usize) {
@@ -3695,9 +2895,13 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
+        // `work_area()` expresses the same usable band as a `Frame`;
+        // `usable_band()` gives it as plain bounds, what this validation
+        // and placement arithmetic need.
+        let (area_top, area_height) = self.usable_band();
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
-            || !(1..=self.taskbar_top() - TITLE_HEIGHT).contains(&height)
+            || !(1..=area_height - TITLE_HEIGHT).contains(&height)
         {
             log(&[b"woven-shell: window open rejected"]);
             return Dirty::new();
@@ -3707,9 +2911,9 @@ impl Desktop {
         };
         let offset = CASCADE_ORIGIN + (self.opened % 6) * CASCADE_STEP;
         self.opened += 1;
-        // Keep the whole frame above the taskbar and on screen.
+        // Keep the whole frame inside the usable band and on screen.
         let x = offset.min((self.width - width).max(0));
-        let y = offset.min((self.taskbar_top() - height).max(TITLE_HEIGHT));
+        let y = offset.min((area_top + area_height - height).max(area_top + TITLE_HEIGHT));
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
@@ -3759,7 +2963,8 @@ impl Desktop {
 
     /// Where windows may go: the screen above the taskbar.
     fn work_area(&self) -> Frame {
-        Frame::new(0, 0, self.width, self.taskbar_top())
+        let (top, height) = self.usable_band();
+        Frame::new(0, top, self.width, height)
     }
 
     /// Put window `slot` in `frame`, title bar included: move it now, and if
@@ -3814,10 +3019,10 @@ impl Desktop {
         let token = u64::from_le_bytes(message[4..12].try_into().unwrap_or([0; 8]));
         let width = i32::from(u16::from_le_bytes([message[12], message[13]]));
         let height = i32::from(u16::from_le_bytes([message[14], message[15]]));
-        let top = self.taskbar_top();
+        let (_, area_height) = self.usable_band();
         if libwoven::surface_owner(token) != owner
             || !(1..=self.width).contains(&width)
-            || !(1..=top - TITLE_HEIGHT).contains(&height)
+            || !(1..=area_height - TITLE_HEIGHT).contains(&height)
         {
             log(&[b"woven-shell: WRSZ rejected: token or geometry"]);
             return empty;
@@ -3995,6 +3200,12 @@ impl Desktop {
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
                 }
+                let taskbar_slot = self.entries().enumerate().find_map(|(index, (slot, _))| {
+                    self.taskbar_entry_area(index).contains(x, y).then_some(slot)
+                });
+                if let Some(slot) = taskbar_slot {
+                    return self.focus(slot);
+                }
                 // The Quick Settings button, and its panel's rows.
                 if self.qs_button().contains(x, y) {
                     return self.toggle_qs();
@@ -4073,27 +3284,55 @@ impl Desktop {
                     return empty;
                 }
                 if self.launcher_open {
-                    // A click on an application launches it; anywhere else
-                    // outside the panel closes the launcher.
-                    let panel = self.panel_area();
-                    if !panel.contains(x, y) {
+                    // Anywhere outside the overview closes it.
+                    let overview = self.overview_area();
+                    if !overview.contains(x, y) {
                         return self.toggle_launcher();
                     }
-                    let row = (y - panel.y - 1) / PANEL_ROW - 2;
+                    // A window card focuses that window and closes the
+                    // overview -- "open, search, launch, close; focus
+                    // restored" also covers picking an existing window.
+                    let card = self
+                        .entries()
+                        .enumerate()
+                        .find(|(index, _)| self.overview_thumb_area(*index).contains(x, y))
+                        .map(|(_, (slot, _))| slot);
+                    if let Some(slot) = card {
+                        let closed = self.toggle_launcher();
+                        return closed.union(self.focus(slot));
+                    }
+                    // A Dash icon focuses a running instance, or launches
+                    // one if none is running.
+                    let (dash_apps, dash_count) = self.dash_apps();
+                    let dash_hit = (0..dash_count)
+                        .find(|&index| self.overview_dash_area(index).contains(x, y))
+                        .map(|index| dash_apps[index]);
+                    if let Some(app_index) = dash_hit {
+                        let running = self
+                            .children
+                            .iter()
+                            .flatten()
+                            .find(|child| child.app == app_index)
+                            .and_then(|child| {
+                                self.windows
+                                    .iter()
+                                    .position(|window| window.is_some_and(|w| w.owner == child.pid))
+                            });
+                        if let Some(slot) = running {
+                            let closed = self.toggle_launcher();
+                            return closed.union(self.focus(slot));
+                        }
+                        return self.launch(app_index);
+                    }
+                    // An app grid cell launches it.
                     let (found, count) = self.filtered();
-                    if row >= 0 && (row as usize) < count {
-                        return self.launch(found[row as usize]);
+                    if let Some(app_index) = (0..count)
+                        .find(|&index| self.overview_cell_area(index).contains(x, y))
+                        .map(|index| found[index])
+                    {
+                        return self.launch(app_index);
                     }
                     return empty;
-                }
-                // A taskbar entry focuses its window.
-                let entry = self
-                    .entries()
-                    .enumerate()
-                    .find(|(index, _)| self.entry_area(*index).contains(x, y))
-                    .map(|(_, (slot, _))| slot);
-                if let Some(slot) = entry {
-                    return self.focus(slot);
                 }
                 // Desktop shortcuts are below windows in the visual stack;
                 // only activate one when no window frame covers the click.
@@ -4235,7 +3474,7 @@ impl Desktop {
         });
         let slot = if let Some(slot) = captured {
             Some(slot)
-        } else if self.panel_area().contains(x, y)
+        } else if self.overview_area().contains(x, y)
             || self.qs_area().contains(x, y)
             || self.center_area().contains(x, y)
         {
@@ -4283,14 +3522,19 @@ impl Desktop {
         let Some((slot, grab_x, grab_y)) = self.drag else {
             return empty;
         };
+        // Computed before borrowing `window` mutably below.
+        let (area_top, area_height) = self.usable_band();
+        let desktop_width = self.desktop_width;
+        let pointer = self.pointer;
         let Some(window) = self.windows[slot].as_mut() else {
             return empty;
         };
         let before = window.footprint();
-        let top = self.height - TASKBAR_HEIGHT;
-        window.x = (self.pointer.0 - grab_x).clamp(0, (self.desktop_width - window.width).max(0));
-        window.y =
-            (self.pointer.1 - grab_y).clamp(TITLE_HEIGHT, (top - window.height).max(TITLE_HEIGHT));
+        window.x = (pointer.0 - grab_x).clamp(0, (desktop_width - window.width).max(0));
+        window.y = (pointer.1 - grab_y).clamp(
+            area_top + TITLE_HEIGHT,
+            (area_top + area_height - window.height).max(area_top + TITLE_HEIGHT),
+        );
         let after = window.footprint();
         if after == before {
             empty
@@ -4551,7 +3795,21 @@ fn main(args: Args) -> ! {
     let mut catalog_digits = [0u8; 20];
     let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_digits);
     log(&[b"woven-shell: catalog entries=", catalog_count]);
+    // M6: a real, measured full-recompose frame time (not assumed). This
+    // first paint is a genuine full-screen recompose by construction, so
+    // no extra bookkeeping is needed to pick that case out, unlike the
+    // general repaint() entry point this session chose not to instrument
+    // internally (multiple early-return paths; measuring from outside a
+    // single known-full-screen call avoided touching that control flow).
+    let recompose_start = libwoven::ticks();
     desktop.repaint(&mut painter, desktop.screen());
+    let recompose_ticks = libwoven::ticks().saturating_sub(recompose_start);
+    let mut recompose_digits = [0u8; 20];
+    let recompose_text = libwoven::format_u64(recompose_ticks, &mut recompose_digits);
+    log(&[
+        b"woven-shell: full recompose ticks=",
+        recompose_text,
+    ]);
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
         fail(6);
@@ -4616,11 +3874,30 @@ fn main(args: Args) -> ! {
         for &area in desktop.check_clients().areas() {
             dirty.add(area);
         }
+        // M7 follow-up (flagged in docs/graphics/overview-desktop-2026-11-03.md's
+        // M6 section as a known gap): a real, measured steady-state interactive
+        // recompose time, not just the one-off first-paint number M6 captured.
+        // Every non-empty dirty batch this loop produces is a genuine
+        // input-driven recompose (a keystroke, pointer move, window drag,
+        // workspace switch, animation tick, ...), so timing the repaint+present
+        // step here gives a real distribution across actual interaction types
+        // rather than one cherry-picked scenario, with no new instrumentation
+        // point needed per interaction kind.
+        let timed = !dirty.areas().is_empty();
+        let recompose_start = if timed { libwoven::ticks() } else { 0 };
         for &area in dirty.areas() {
             desktop.repaint(&mut painter, area);
         }
         if libwoven::compositor_present().is_err() {
             fail(7);
+        }
+        if timed {
+            let elapsed = libwoven::ticks().saturating_sub(recompose_start);
+            let mut digits = [0u8; 20];
+            log(&[
+                b"woven-shell: interactive recompose ticks=",
+                libwoven::format_u64(elapsed, &mut digits),
+            ]);
         }
     }
 }

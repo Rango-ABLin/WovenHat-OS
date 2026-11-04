@@ -357,6 +357,68 @@ pub mod time {
     pub const TICKS_PER_SECOND: u64 = 100;
 }
 pub mod graphics {
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    const SYSTEM_FONT_BYTES: usize = 621_572;
+    const SYSTEM_FONT_MAPPING_BYTES: u64 = 622_592;
+    static SYSTEM_FONT_BASE: AtomicU64 = AtomicU64::new(0);
+
+    // Keeps the fixed userspace image within the established loader-size
+    // budget while covering the hottest repeated UI glyphs.
+    const GLYPH_CACHE_CAPACITY: usize = 64;
+    pub(crate) const GLYPH_CACHE_WIDTH: usize = 24;
+    pub(crate) const GLYPH_CACHE_HEIGHT: usize = 24;
+    pub(crate) const GLYPH_CACHE_PIXELS: usize = GLYPH_CACHE_WIDTH * GLYPH_CACHE_HEIGHT;
+
+    #[derive(Clone, Copy)]
+    struct RasterGlyphCacheEntry {
+        font_id: usize,
+        character: u32,
+        scale: u16,
+        valid: bool,
+        alpha: [u8; GLYPH_CACHE_PIXELS],
+    }
+
+    const EMPTY_RASTER_GLYPH_CACHE_ENTRY: RasterGlyphCacheEntry = RasterGlyphCacheEntry {
+        font_id: 0,
+        character: 0,
+        scale: 0,
+        valid: false,
+        alpha: [0; GLYPH_CACHE_PIXELS],
+    };
+
+    struct RasterGlyphCache {
+        busy: core::sync::atomic::AtomicBool,
+        entries: core::cell::UnsafeCell<[RasterGlyphCacheEntry; GLYPH_CACHE_CAPACITY]>,
+        next: core::sync::atomic::AtomicUsize,
+    }
+
+    // SAFETY: access to entries is serialized by busy. The cache contains no
+    // borrowed data, only bounded glyph coverage bytes and scalar keys.
+    unsafe impl Sync for RasterGlyphCache {}
+
+    static RASTER_GLYPH_CACHE: RasterGlyphCache = RasterGlyphCache {
+        busy: core::sync::atomic::AtomicBool::new(false),
+        entries: core::cell::UnsafeCell::new(
+            [EMPTY_RASTER_GLYPH_CACHE_ENTRY; GLYPH_CACHE_CAPACITY],
+        ),
+        next: core::sync::atomic::AtomicUsize::new(0),
+    };
+
+    struct SystemFaceCache {
+        busy: core::sync::atomic::AtomicBool,
+        face: core::cell::UnsafeCell<Option<TrueTypeFace<'static>>>,
+    }
+
+    // SAFETY: busy serializes the only mutable access; the face borrows the
+    // process-lifetime read-only font mapping and contains no mutable state.
+    unsafe impl Sync for SystemFaceCache {}
+
+    static SYSTEM_FACE_CACHE: SystemFaceCache = SystemFaceCache {
+        busy: core::sync::atomic::AtomicBool::new(false),
+        face: core::cell::UnsafeCell::new(None),
+    };
+
     /// A format-independent sRGB colour used by WovenGraphics.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Color {
@@ -604,6 +666,16 @@ pub mod graphics {
             )
         }
 
+        /// Create a rotation around the origin in whole degrees. The
+        /// coefficients use the same signed 16.16 format as the rest of the
+        /// affine transform and use a bounded integer sine approximation, so
+        /// this remains deterministic and floating-point-free in userspace.
+        pub fn rotate(degrees: i32) -> Self {
+            let sine = sin_degrees(degrees);
+            let cosine = sin_degrees(degrees.saturating_add(90));
+            Self::new(cosine, -sine, sine, cosine, 0, 0)
+        }
+
         fn map(self, x: i32, y: i32) -> (i32, i32) {
             let mapped_x = (i128::from(self.xx) * i128::from(x)
                 + i128::from(self.xy) * i128::from(y)
@@ -620,6 +692,20 @@ pub mod graphics {
                 mapped_y.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32,
             )
         }
+    }
+
+    fn sin_degrees(degrees: i32) -> i32 {
+        let normalized = degrees.rem_euclid(360);
+        let (sign, angle) = if normalized <= 180 {
+            (1i64, i64::from(normalized))
+        } else {
+            (-1i64, i64::from(normalized - 180))
+        };
+        let distance = angle.min(180 - angle);
+        let product = distance * (180 - distance);
+        let numerator = 4 * product * (1 << 16);
+        let denominator = 40_500 - product;
+        (sign * (numerator / denominator)) as i32
     }
 
     /// Metrics for a UTF-8 string after the bounded shared-font fallback has
@@ -7035,6 +7121,119 @@ pub mod graphics {
         }
     }
 
+    pub(crate) fn cached_glyph(
+        face: &TrueTypeFace<'_>,
+        character: char,
+        scale: u16,
+        output: &mut [u8; GLYPH_CACHE_PIXELS],
+    ) -> bool {
+        let font_id = face.bytes.as_ptr() as usize;
+        if RASTER_GLYPH_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            // SAFETY: busy is held exclusively for this access.
+            let entries = unsafe { &*RASTER_GLYPH_CACHE.entries.get() };
+            if let Some(entry) = entries.iter().find(|entry| {
+                entry.valid
+                    && entry.font_id == font_id
+                    && entry.character == character as u32
+                    && entry.scale == scale
+            }) {
+                output.copy_from_slice(&entry.alpha);
+                RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+                return true;
+            }
+            RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+        }
+
+        let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
+        let Some(mut canvas) = super::Canvas::new(
+            &mut pixels,
+            0,
+            0,
+            GLYPH_CACHE_WIDTH,
+            GLYPH_CACHE_HEIGHT,
+        ) else {
+            return false;
+        };
+        let ascent = i32::from(scale) * 4 / 5;
+        let mut renderer = Renderer::new(&mut canvas);
+        if face
+            .render_glyph(
+                character,
+                Point::new(0, ascent),
+                scale,
+                Color::WHITE,
+                &mut renderer,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        let mut alpha = [0_u8; GLYPH_CACHE_PIXELS];
+        for (index, pixel) in canvas.pixels().iter().copied().enumerate() {
+            alpha[index] = (pixel >> 16) as u8;
+        }
+
+        if RASTER_GLYPH_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            let slot = RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed)
+                % GLYPH_CACHE_CAPACITY;
+            // SAFETY: busy is held exclusively for this access.
+            unsafe {
+                (*RASTER_GLYPH_CACHE.entries.get())[slot] = RasterGlyphCacheEntry {
+                    font_id,
+                    character: character as u32,
+                    scale,
+                    valid: true,
+                    alpha,
+                };
+            }
+            RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+        }
+        output.copy_from_slice(&alpha);
+        true
+    }
+
+    pub(crate) fn load_system_font_face() -> Option<&'static TrueTypeFace<'static>> {
+        let bytes = load_system_font_mapping().ok()?;
+        if SYSTEM_FACE_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            // SAFETY: busy is held exclusively for this access.
+            let cached = unsafe { &*SYSTEM_FACE_CACHE.face.get() };
+            if let Some(face) = cached.as_ref()
+                && face.bytes.as_ptr() == bytes.as_ptr()
+                && face.bytes.len() == bytes.len()
+            {
+                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+                return Some(face);
+            }
+            let Some(face) = TrueTypeFace::from_bytes(bytes).ok() else {
+                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+                return None;
+            };
+            // SAFETY: the mapping remains valid until process teardown.
+            let face = unsafe {
+                core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face)
+            };
+            unsafe {
+                *SYSTEM_FACE_CACHE.face.get() = Some(face);
+            }
+            SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+            // SAFETY: the cache remains initialized for process lifetime.
+            return unsafe { (&*SYSTEM_FACE_CACHE.face.get()).as_ref() };
+        }
+        None
+    }
+
     fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
         Some(u16::from_be_bytes([
             *bytes.get(offset)?,
@@ -10580,7 +10779,8 @@ pub mod graphics {
     /// A projected 3D vertex that samples a source surface instead of
     /// carrying its own colour: `u`/`v` are normalized 0-255 across the
     /// source's width/height, the same precision as a [`Color`] channel.
-    /// See [`Renderer::textured_triangle_3d`].
+    /// See [`Renderer::textured_triangle_3d`], which bilinearly filters the
+    /// source surface while projecting it.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Vertex3Tex {
         pub x: i32,
@@ -10818,6 +11018,30 @@ pub mod graphics {
             }
         }
 
+        /// A rounded-rect drop shadow: `rounded_rect_blended` offset by
+        /// (`offset_x`, `offset_y`) from `rect`, same size and radius. One
+        /// shared primitive for the "dark rounded rect behind a lighter
+        /// one" elevation pattern used by app-tile icons and window
+        /// chrome, instead of each call site computing its own offset
+        /// rect and calling `rounded_rect`/`rounded_rect_blended` by hand.
+        pub fn shadow(
+            &mut self,
+            rect: Rect,
+            offset_x: i32,
+            offset_y: i32,
+            radius: usize,
+            color: Color,
+            opacity: u8,
+        ) {
+            let shadow_rect = Rect::new(
+                rect.x.saturating_add(offset_x),
+                rect.y.saturating_add(offset_y),
+                rect.width,
+                rect.height,
+            );
+            self.rounded_rect_blended(shadow_rect, radius, color, opacity);
+        }
+
         /// Fill a rounded rectangle with a top-to-bottom colour gradient:
         /// the same corner mask as `rounded_rect`, with the fill colour
         /// interpolated by row instead of constant, so chrome like the
@@ -10869,6 +11093,66 @@ pub mod graphics {
                     if dx * dx + dy * dy <= r2 {
                         self.canvas.set(x, y, color.packed());
                     }
+                }
+            }
+        }
+
+        /// Fill a top-to-bottom gradient rectangle whose top-left and
+        /// top-right corners are rounded and whose bottom corners stay
+        /// square -- a window title bar sitting flush on its square body,
+        /// the shape every modern desktop compositor (Windows, macOS,
+        /// GNOME) uses for a floating window, instead of either a fully
+        /// square title bar or one whose independently-rounded bottom
+        /// corners would show a seam against the square body beneath it.
+        pub fn rounded_rect_top_gradient(
+            &mut self,
+            rect: Rect,
+            radius: usize,
+            top: Color,
+            bottom: Color,
+        ) {
+            if rect.is_empty() {
+                return;
+            }
+            let radius = radius.min(rect.width.min(rect.height) / 2);
+            let Some((column, row, columns, rows)) =
+                self.canvas.clip(rect.x, rect.y, rect.width, rect.height)
+            else {
+                return;
+            };
+            let right = rect_end(rect.x, rect.width);
+            let radius = i32::try_from(radius).unwrap_or(i32::MAX);
+            let r = radius as i64;
+            let r2 = r * r;
+            let last = i128::try_from(rect.height.saturating_sub(1).max(1)).unwrap_or(i128::MAX);
+            let corner_y = rect.y.saturating_add(radius);
+            for canvas_row in row..row + rows {
+                let y = self.canvas.y + canvas_row as i32;
+                let offset = (i128::from(y) - i128::from(rect.y)).clamp(0, last);
+                let t = (offset * 255 / last) as u8;
+                let color = Color::rgb(
+                    lerp(top.red, bottom.red, t),
+                    lerp(top.green, bottom.green, t),
+                    lerp(top.blue, bottom.blue, t),
+                );
+                let in_top_band = y < corner_y;
+                for canvas_column in column..column + columns {
+                    let x = self.canvas.x + canvas_column as i32;
+                    if in_top_band {
+                        let corner_x = if x < rect.x.saturating_add(radius) {
+                            rect.x.saturating_add(radius)
+                        } else if x > right.saturating_sub(radius) {
+                            right.saturating_sub(radius)
+                        } else {
+                            x
+                        };
+                        let dx = i64::from(x) - i64::from(corner_x);
+                        let dy = i64::from(y) - i64::from(corner_y);
+                        if dx * dx + dy * dy > r2 {
+                            continue;
+                        }
+                    }
+                    self.canvas.set(x, y, color.packed());
                 }
             }
         }
@@ -11212,7 +11496,7 @@ pub mod graphics {
         }
 
         /// As [`Self::triangle_3d`], but each covered pixel samples `source`
-        /// (nearest-neighbour, by the affine-interpolated `u`/`v`) instead of
+        /// (bilinearly, by the affine-interpolated `u`/`v`) instead of
         /// interpolating a flat per-vertex colour. This is how an existing
         /// 2D surface -- a window's own rendered `Canvas`, unchanged -- becomes
         /// one textured face of a 3D scene: the desktop projects windows as
@@ -11308,11 +11592,7 @@ pub mod graphics {
                         third_edge.abs(),
                         area.abs(),
                     );
-                    let sample_x =
-                        source.x() + (usize::from(u) * (source.width() - 1) / 255) as i32;
-                    let sample_y =
-                        source.y() + (usize::from(v) * (source.height() - 1) / 255) as i32;
-                    if let Some(sampled) = source.get(sample_x, sample_y) {
+                    if let Some(sampled) = sample_texture_bilinear(source, u, v) {
                         self.canvas.set(x, y, sampled);
                     }
                 }
@@ -11988,6 +12268,44 @@ pub mod graphics {
         ((start * (255 - amount) as u16 + end * amount as u16 + 127) / 255) as u8
     }
 
+    fn sample_texture_bilinear(source: &crate::Canvas<'_>, u: u8, v: u8) -> Option<u32> {
+        let width = source.width();
+        let height = source.height();
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        let scaled_x = usize::from(u) * width.saturating_sub(1);
+        let scaled_y = usize::from(v) * height.saturating_sub(1);
+        let x0 = scaled_x / 255;
+        let y0 = scaled_y / 255;
+        let x1 = x0.saturating_add(1).min(width.saturating_sub(1));
+        let y1 = y0.saturating_add(1).min(height.saturating_sub(1));
+        let x_amount = (scaled_x % 255) as u8;
+        let y_amount = (scaled_y % 255) as u8;
+        let x = source.x();
+        let y = source.y();
+
+        let top_left = source.get(x + x0 as i32, y + y0 as i32)?;
+        let top_right = source.get(x + x1 as i32, y + y0 as i32)?;
+        let bottom_left = source.get(x + x0 as i32, y + y1 as i32)?;
+        let bottom_right = source.get(x + x1 as i32, y + y1 as i32)?;
+        let channel = |shift: u32| -> u8 {
+            let top = lerp(
+                ((top_left >> shift) & 0xff) as u8,
+                ((top_right >> shift) & 0xff) as u8,
+                x_amount,
+            );
+            let bottom = lerp(
+                ((bottom_left >> shift) & 0xff) as u8,
+                ((bottom_right >> shift) & 0xff) as u8,
+                x_amount,
+            );
+            lerp(top, bottom, y_amount)
+        };
+        Some(crate::rgb(channel(16), channel(8), channel(0)))
+    }
+
     fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i128 {
         (i128::from(bx) - i128::from(ax)) * (i128::from(py) - i128::from(ay))
             - (i128::from(by) - i128::from(ay)) * (i128::from(px) - i128::from(ax))
@@ -12029,6 +12347,43 @@ pub mod graphics {
             + i128::from(third) * third_weight;
         ((sum + total / 2) / total).clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
     }
+
+    /// Map the staged NotoSans TTF read-only and demand-paged. The mapping is
+    /// backed by the VFS file rather than a large per-process static buffer,
+    /// so every GUI process keeps only the pages it actually touches. The
+    /// kernel validates the file mapping and owns its lifetime through process
+    /// teardown; this function exposes only the fixed, validated font span.
+    pub fn load_system_font_mapping() -> Result<&'static [u8], crate::Error> {
+        let mut base = SYSTEM_FONT_BASE.load(Ordering::Acquire);
+        if base == 0 {
+            let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
+            let mapped = crate::mmap_file_lazy(descriptor, SYSTEM_FONT_MAPPING_BYTES, 0);
+            // The lazy mapping retains its file reference after close; do not
+            // leak a descriptor just to keep the read-only mapping alive.
+            let _ = crate::close(descriptor);
+            base = mapped?;
+            let _ = SYSTEM_FONT_BASE.compare_exchange(0, base, Ordering::AcqRel, Ordering::Acquire);
+            base = SYSTEM_FONT_BASE.load(Ordering::Acquire);
+        }
+        if base == 0 {
+            return Err(crate::Error::Failed);
+        }
+        // SAFETY: mmap_file_lazy returns a read-only userspace mapping of the
+        // validated system font, the file size is fixed by the staged asset,
+        // and the mapping remains valid until this process exits.
+        Ok(unsafe { core::slice::from_raw_parts(base as *const u8, SYSTEM_FONT_BYTES) })
+    }
+
+    /// Copy the staged font into caller-owned storage for bounded callers that
+    /// cannot use a lazy mapping. Prefer [`load_system_font_mapping`] for GUI
+    /// rendering so large font pages remain demand-paged and shared by the
+    /// kernel's file mapping cache.
+    pub fn load_system_font_bytes(buffer: &mut [u8]) -> Result<usize, crate::Error> {
+        let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
+        let result = crate::read_all(descriptor, buffer);
+        let _ = crate::close(descriptor);
+        result
+    }
 }
 pub mod notifications {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -12059,6 +12414,7 @@ pub mod syscall {
     pub const WRITE: u64 = 1;
     pub const FILE_WRITE: u64 = 10;
     pub const OPEN: u64 = 2;
+    pub const OPEN_ACCESS: u64 = 254;
     pub const EXIT: u64 = 3;
     pub const GETPID: u64 = 4;
     pub const WAITPID: u64 = 5;
@@ -12068,6 +12424,9 @@ pub mod syscall {
     pub const GETGID: u64 = 14;
     pub const EXEC: u64 = 15;
     pub const FORK: u64 = 16;
+    pub const DUP: u64 = 22;
+    pub const PIPE: u64 = 23;
+    pub const DUP2: u64 = 24;
     pub const STAT: u64 = 17;
     pub const MKDIR: u64 = 19;
     pub const CHDIR: u64 = 20;
@@ -12075,6 +12434,15 @@ pub mod syscall {
     pub const GETPPID: u64 = 25;
     pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
+    /// Map an open file's contents read-only and demand-paged (no write
+    /// permission required, unlike `MMAP_FILE_SHARED`, whose kernel-side
+    /// permission check requires write access -- not a fit for a read-only
+    /// VFS node like a bundled font. Pages are loaded from the file lazily
+    /// as touched rather than copied eagerly into a static buffer, so this
+    /// avoids inflating the caller's own ELF data segment the way a large
+    /// `static` buffer does (see docs/graphics/modernization-tracker.md's
+    /// Phase 3 entries, 2026-11-04, for why that matters).
+    pub const MMAP_FILE_LAZY: u64 = 60;
     pub const UNLINK: u64 = 28;
     pub const SLEEP: u64 = 29;
     pub const RENAME: u64 = 30;
@@ -12088,7 +12456,9 @@ pub mod syscall {
     pub const SETSID: u64 = 245;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
+    pub const ENV_SET: u64 = 52;
     pub const ENV_COUNT: u64 = 53;
+    pub const ENV_ENTRY: u64 = 54;
     pub const SPAWN_COMMAND: u64 = 57;
     pub const READDIR: u64 = 18;
     pub const NOTIFICATION_POLL: u64 = 95;
@@ -12257,6 +12627,14 @@ pub mod syscall {
         unsafe { invoke(OPEN, path as u64, path_len as u64, flags) }
     }
 
+    /// Open with access bits: 1=read, 2=write, 4=create.
+    ///
+    /// # Safety
+    /// `path` must be readable for `path_len` bytes.
+    pub unsafe fn open_access(path: *const u8, path_len: usize, access: u64) -> u64 {
+        unsafe { invoke(OPEN_ACCESS, path as u64, path_len as u64, access) }
+    }
+
     /// Release a descriptor.
     ///
     /// # Safety
@@ -12265,16 +12643,64 @@ pub mod syscall {
         unsafe { invoke(CLOSE, descriptor, 0, 0) }
     }
 
+    /// Duplicate a descriptor into a new descriptor.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dup(descriptor: u64) -> u64 {
+        unsafe { invoke(DUP, descriptor, 0, 0) }
+    }
+
+    /// Duplicate `old` into exactly `new`.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dup2(old: u64, new: u64) -> u64 {
+        unsafe { invoke(DUP2, old, new, 0) }
+    }
+
+    /// Create a read/write pipe, packed as read descriptor in the low half
+    /// and write descriptor in the high half.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn pipe() -> u64 {
+        unsafe { invoke(PIPE, 0, 0, 0) }
+    }
+
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn lseek(descriptor: u64, offset: u64) -> u64 {
         unsafe { invoke(LSEEK, descriptor, offset, 0) }
     }
 
+    /// Map `length` bytes of `descriptor`'s content starting at `offset`,
+    /// read-only, demand-paged. Returns the mapping's base address.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace; `descriptor` must stay open
+    /// for the mapping's lifetime (closing it does not itself invalidate
+    /// an established mapping, matching this codebase's `LazyFile`, which
+    /// captures its own file reference at mapping time, but this is kept
+    /// open regardless for the caller's own clarity rather than relying on
+    /// that).
+    pub unsafe fn mmap_file_lazy(descriptor: u64, length: u64, offset: u64) -> u64 {
+        unsafe { invoke(MMAP_FILE_LAZY, descriptor, length, offset) }
+    }
+
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn getpid() -> u64 {
         unsafe { invoke(GETPID, 0, 0, 0) }
+    }
+
+    /// Fork the current process. The child resumes with a zero return value;
+    /// the parent receives the child's process identifier.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn fork() -> u64 {
+        unsafe { invoke(FORK, 0, 0, 0) }
     }
 
     /// # Safety
@@ -13611,8 +14037,62 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Blend a bounded alpha mask over the canvas in one clipped pass.
+    ///
+    /// The mask is intentionally caller-owned and fixed-size at the glyph
+    /// cache boundary; this keeps cached text rendering allocation-free while
+    /// avoiding one rectangle clip calculation per covered glyph pixel.
+    pub(crate) fn blend_alpha_mask(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+        alpha: &[u8],
+        color: u32,
+    ) {
+        let Some(mask_len) = width.checked_mul(height) else {
+            return;
+        };
+        let Some(alpha) = alpha.get(..mask_len) else {
+            return;
+        };
+        let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
+            return;
+        };
+        let source_column = column.saturating_add(
+            usize::try_from(i128::from(self.x) - i128::from(x))
+                .unwrap_or(0),
+        );
+        let source_row = row.saturating_add(
+            usize::try_from(i128::from(self.y) - i128::from(y))
+                .unwrap_or(0),
+        );
+        for mask_row in 0..rows {
+            let mask_start = (source_row + mask_row) * width + source_column;
+            let target_start = (row + mask_row) * self.width + column;
+            for (target, opacity) in self.pixels[target_start..target_start + columns]
+                .iter_mut()
+                .zip(&alpha[mask_start..mask_start + columns])
+            {
+                if *opacity != 0 {
+                    *target = blend(color, *target, *opacity) & 0x00ff_ffff;
+                }
+            }
+        }
+    }
+
     /// Draw `text` with the kernel's font, top-left at `(x, y)`. Newlines
     /// start a new line at `x`.
+    ///
+    /// The font itself is a hard 1-bit-per-pixel 5x7 grid -- replacing it
+    /// with a true anti-aliased or proportional font is a much larger
+    /// project (a rasterizer, a new glyph set, and a pass over every pixel
+    /// offset in every caller that currently assumes this exact cell size).
+    /// Short of that, every glyph pixel adjacent to a lit one gets a
+    /// partial-coverage fringe, softening the diagonal stair-step edges
+    /// that otherwise read as a blocky, dated bitmap font, without
+    /// changing the glyph's cell size or any caller's layout math.
     pub fn draw_text(&mut self, x: i32, y: i32, text: &str, color: u32) {
         let (mut cursor_x, mut cursor_y) = (x, y);
         for character in text.chars() {
@@ -13621,18 +14101,117 @@ impl<'a> Canvas<'a> {
                 cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
                 continue;
             }
-            for (row, bits) in font::glyph(character).iter().enumerate() {
+            let glyph = font::glyph(character);
+            let bit_at = |row: i32, column: i32| -> bool {
+                if row < 0 || column < 0 || column >= font::WIDTH as i32 {
+                    return false;
+                }
+                let Some(bits) = usize::try_from(row).ok().and_then(|row| glyph.get(row)) else {
+                    return false;
+                };
+                bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0
+            };
+            for row in 0..glyph.len() as i32 {
                 for column in 0..font::WIDTH as i32 {
-                    if bits & (1 << (font::WIDTH as i32 - 1 - column)) != 0 {
-                        self.set(
-                            cursor_x.saturating_add(column),
-                            cursor_y.saturating_add(row as i32),
-                            color,
-                        );
+                    let (px, py) = (cursor_x.saturating_add(column), cursor_y.saturating_add(row));
+                    if bit_at(row, column) {
+                        self.set(px, py, color);
+                        continue;
+                    }
+                    let mut neighbours = 0u32;
+                    for dr in -1..=1 {
+                        for dc in -1..=1 {
+                            if (dr, dc) != (0, 0) && bit_at(row + dr, column + dc) {
+                                neighbours += 1;
+                            }
+                        }
+                    }
+                    if neighbours > 0 {
+                        let opacity = (neighbours * 32).min(140) as u8;
+                        self.blend_pixel(px, py, color, opacity);
                     }
                 }
             }
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
+        }
+    }
+
+    /// Draw `text` through a real antialiased TrueType face instead of the
+    /// kernel's 5x7 bitmap font, graphics-modernization Phase 3 (see
+    /// `docs/graphics/modernization-tracker.md`). Deliberately keeps the
+    /// same fixed per-character advance (`font::ADVANCE`) and newline
+    /// behaviour as `draw_text`, rather than the font's own proportional
+    /// glyph widths: every existing caller's layout math (string-width
+    /// calculations, column alignment, panel sizing) was built assuming a
+    /// fixed-pitch cell, and this stays a drop-in replacement for
+    /// `draw_text` at the same call site rather than requiring a
+    /// layout-wide migration to go with it. A character the face has no
+    /// glyph for is skipped (left blank) rather than falling back to the
+    /// bitmap glyph for just that one character, which would look like
+    /// two different fonts spliced together; NotoSans covers the full
+    /// ASCII range this codebase actually uses.
+    ///
+    /// `x`/`y` are the top-left of the text, matching `draw_text`'s
+    /// convention; `TrueTypeFace::render_glyph` positions by baseline, so
+    /// this computes one internally (`scale * 4 / 5`, roughly a typical
+    /// ascent-to-em ratio -- there is no public ascent/descent accessor on
+    /// `TrueTypeFace` to use the font's own metric instead).
+    pub fn draw_text_ttf(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        color: u32,
+        face: &crate::graphics::TrueTypeFace<'_>,
+        scale: u16,
+    ) {
+        let (mut cursor_x, mut cursor_y) = (x, y);
+        let unpacked = crate::graphics::Color::rgb(
+            (color >> 16) as u8,
+            (color >> 8) as u8,
+            color as u8,
+        );
+        for character in text.chars() {
+            if character == '\n' {
+                cursor_x = x;
+                cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
+                continue;
+            }
+            let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
+            if crate::graphics::cached_glyph(face, character, scale, &mut alpha) {
+                self.blend_alpha_mask(
+                    cursor_x,
+                    cursor_y,
+                    crate::graphics::GLYPH_CACHE_WIDTH,
+                    crate::graphics::GLYPH_CACHE_HEIGHT,
+                    &alpha,
+                    color,
+                );
+            } else {
+                let ascent = i32::from(scale) * 4 / 5;
+                let mut renderer = crate::graphics::Renderer::new(self);
+                let _ = face.render_glyph(
+                    character,
+                    crate::graphics::Point::new(cursor_x, cursor_y.saturating_add(ascent)),
+                    scale,
+                    unpacked,
+                    &mut renderer,
+                );
+            }
+            cursor_x = cursor_x.saturating_add(font::ADVANCE);
+        }
+    }
+
+    /// Draw through the staged system TrueType face when available, falling
+    /// back to the bounded bitmap font if the optional VFS asset is absent.
+    /// The fixed-cell advance remains identical to [`Self::draw_text`], so
+    /// existing layout calculations stay stable while production GUI text
+    /// gains antialiased glyphs.
+    pub fn draw_text_system(&mut self, x: i32, y: i32, text: &str, color: u32) {
+        if let Some(face) = crate::graphics::load_system_font_face() {
+            self.draw_text_ttf(x, y, text, color, face, 12);
+        } else {
+            self.draw_text(x, y, text, color);
         }
     }
 }
@@ -14593,10 +15172,44 @@ pub fn open(path: &str) -> Result<u64, Error> {
     check(unsafe { syscall::open(path.as_ptr(), path.len(), 0) })
 }
 
+/// Open a path with bounded access bits: 1=read, 2=write, 4=create.
+pub fn open_access(path: &str, access: u64) -> Result<u64, Error> {
+    if access & !7 != 0 || access & 3 == 0 || (access & 4 != 0 && access & 2 == 0) {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::open_access(path.as_ptr(), path.len(), access) })
+}
+
 /// Close a descriptor.
 pub fn close(descriptor: u64) -> Result<(), Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// Duplicate a descriptor, returning the new descriptor.
+pub fn dup(descriptor: u64) -> Result<u64, Error> {
+    check(unsafe { syscall::dup(descriptor) })
+}
+
+/// Duplicate `old` into exactly `new`.
+pub fn dup2(old: u64, new: u64) -> Result<(), Error> {
+    check(unsafe { syscall::dup2(old, new) }).map(|_| ())
+}
+
+/// Create a pipe and return `(read_descriptor, write_descriptor)`.
+pub fn pipe() -> Result<(u64, u64), Error> {
+    let packed = check(unsafe { syscall::pipe() })?;
+    Ok((packed & 0xffff_ffff, packed >> 32))
+}
+
+/// Map `length` bytes of `descriptor`'s content starting at `offset`,
+/// read-only and demand-paged, returning the mapping's base address.
+/// `length` must be a positive multiple of 4096; round a file's real size
+/// up to the next page if needed (reading past the real end of file within
+/// the final page is defined to return zero bytes there, not an error).
+pub fn mmap_file_lazy(descriptor: u64, length: u64, offset: u64) -> Result<u64, Error> {
+    // SAFETY: integer-only call; the descriptor is the caller's to manage.
+    check(unsafe { syscall::mmap_file_lazy(descriptor, length, offset) })
 }
 
 /// Move a descriptor's read/write offset to an absolute byte position.
@@ -14815,6 +15428,48 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
     check(result).map(process::Id)
 }
 
+/// Fork the current process. The child receives id zero.
+pub fn fork() -> Result<process::Id, Error> {
+    check(unsafe { syscall::fork() }).map(process::Id)
+}
+
+/// Replace the current image from a command line. Success never returns.
+pub fn exec(command: &str) -> Result<(), Error> {
+    check(unsafe { syscall::exec(command.as_ptr(), command.len()) }).map(|_| ())
+}
+
+/// Read one bounded environment value into `out`, returning its length.
+pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+    if key.is_empty() || key.len() >= 96 || out.is_empty() || out.len() > 96 {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::invoke(syscall::ENV_GET, key.as_ptr() as u64, key.len() as u64, out.as_mut_ptr() as u64) })
+        .map(|length| length as usize)
+}
+
+/// Set one bounded environment value.
+pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), Error> {
+    if key.is_empty() || key.len() >= 96 || value.len() >= 96 {
+        return Err(Error::Failed);
+    }
+    let packed = key.len() as u64 | ((value.len() as u64) << 32);
+    check(unsafe { syscall::invoke(syscall::ENV_SET, key.as_ptr() as u64, packed, value.as_ptr() as u64) }).map(|_| ())
+}
+
+/// Return the number of inherited environment entries.
+pub fn env_count() -> Result<usize, Error> {
+    check(unsafe { syscall::invoke(syscall::ENV_COUNT, 0, 0, 0) }).map(|count| count as usize)
+}
+
+/// Read one `KEY=VALUE` environment entry into `out`.
+pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, Error> {
+    if out.is_empty() || out.len() > 96 {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::invoke(syscall::ENV_ENTRY, index as u64, out.as_mut_ptr() as u64, out.len() as u64) })
+        .map(|length| length as usize)
+}
+
 /// Wait for a child process, returning its zero-extended 32-bit exit payload.
 /// Cast a successful value to `i32` to recover a signed status. A running child
 /// returns `Error::WouldBlock`; an invalid/non-child wait returns `Error::Failed`.
@@ -15019,6 +15674,35 @@ mod tests {
     }
 
     #[test]
+    fn wovengraphics_shadow_is_offset_and_blended() {
+        use crate::graphics::{Color, Rect, Renderer};
+
+        let mut pixels = [Color::WHITE.packed(); 16];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 4, 4).unwrap();
+            let mut renderer = Renderer::new(&mut canvas);
+            // A 2x2 opaque white square at (1, 1) (the tile), then its
+            // shadow offset by (1, 1) at half opacity, same size -- the
+            // shadow is drawn first so the square's own fill stays pure
+            // white, and the shadow is visible only where the square does
+            // not cover it.
+            renderer.shadow(Rect::new(1, 1, 2, 2), 1, 1, 0, Color::BLACK, 128);
+            renderer.rounded_rect(Rect::new(1, 1, 2, 2), 0, Color::WHITE);
+        }
+        // (1,1) and (2,2): the square itself, opaque white, unaffected by
+        // the shadow drawn under it.
+        assert_eq!(pixels[1 * 4 + 1], Color::WHITE.packed());
+        assert_eq!(pixels[2 * 4 + 2], Color::WHITE.packed());
+        // (3,3): only the shadow's offset square reaches here, blended
+        // black-over-white at half opacity -- neither pure white (no
+        // shadow drawn) nor pure black (not blended, full opacity).
+        assert_ne!(pixels[3 * 4 + 3], Color::WHITE.packed());
+        assert_ne!(pixels[3 * 4 + 3], Color::BLACK.packed());
+        // (0,0): outside both rects entirely, untouched background.
+        assert_eq!(pixels[0], Color::WHITE.packed());
+    }
+
+    #[test]
     fn wovengraphics_stroke_clips_extreme_rectangle() {
         use crate::graphics::{Color, Rect, Renderer};
 
@@ -15195,6 +15879,36 @@ mod tests {
     }
 
     #[test]
+    fn wovengraphics_textured_3d_bilinear_filter_blends_between_texels() {
+        use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
+
+        let mut source_pixels = [
+            0x00ff_0000, // red
+            0x0000_ff00, // green
+            0x0000_00ff, // blue
+            0x00ff_ffff, // white
+        ];
+        let source = Canvas::new(&mut source_pixels, 0, 0, 2, 2).unwrap();
+        let mut pixels = [0u32; 25];
+        let mut depths = [u16::MAX; 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 5, 5).unwrap();
+            Renderer::new(&mut canvas).textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 1, 0, 0),
+                Vertex3Tex::new(4, 0, 1, 255, 0),
+                Vertex3Tex::new(0, 4, 1, 0, 255),
+                &source,
+            );
+        }
+        // At (2,2), the triangle supplies u=v=128. All four source texels
+        // therefore contribute, producing the neutral midpoint rather than
+        // one of the four nearest-neighbour texels.
+        assert_eq!(pixels[2 * 5 + 2], 0x0080_8080);
+    }
+
+    #[test]
     fn wovengraphics_textured_3d_depth_rejects_far_triangles() {
         use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
 
@@ -15309,6 +16023,27 @@ mod tests {
         }
         assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
         assert_eq!(pixels[35], 0);
+    }
+
+    #[test]
+    fn wovengraphics_transform_rotation_is_fixed_point_and_bounded() {
+        use crate::graphics::Transform;
+
+        assert_eq!(Transform::rotate(0), Transform::IDENTITY);
+        assert_eq!(
+            Transform::rotate(90),
+            Transform::new(0, -(1 << 16), 1 << 16, 0, 0, 0)
+        );
+        assert_eq!(
+            Transform::rotate(-90),
+            Transform::new(0, 1 << 16, -(1 << 16), 0, 0, 0)
+        );
+        assert_eq!(Transform::rotate(180), Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0));
+
+        let diagonal = Transform::rotate(45);
+        assert!(diagonal.xx > 46_000 && diagonal.xx < 47_000);
+        assert_eq!(diagonal.xx, diagonal.yy);
+        assert_eq!(diagonal.xy, -diagonal.yx);
     }
 
     #[test]

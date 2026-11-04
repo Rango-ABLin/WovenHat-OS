@@ -8,7 +8,7 @@ use crate::gdb_debugger::{self, Action, RegisterContext};
 use crate::gdb_stub;
 
 /// Result of a session packet after any reply has been encoded.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionAction {
     Reply(usize),
     Continue,
@@ -22,7 +22,7 @@ pub enum SessionAction {
 }
 
 /// Protocol lifecycle for one debugger attachment.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Session {
     active: bool,
     stopped: bool,

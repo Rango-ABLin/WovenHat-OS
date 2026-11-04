@@ -5,11 +5,8 @@ use libwoven::{Canvas, GraphicsSurface, rgb};
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 170;
 const BUTTON_WIDTH: usize = 80;
@@ -51,10 +48,10 @@ fn draw_number(
     value: u64,
     digits: &mut [u8; 20],
 ) {
-    canvas.draw_text(x, y, label, TEXT);
+    canvas.draw_text_system(x, y, label, THEME.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, ACCENT);
+        canvas.draw_text_system(x + label.len() as i32 * 6, y, text, THEME.accent);
     }
 }
 
@@ -78,20 +75,13 @@ fn draw_monitor(
     refresh: &Button<'_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenMonitor",
     )
-    .draw(canvas, theme);
+    .draw(canvas, THEME);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 34, 180, 16),
         "System snapshot",
@@ -99,8 +89,8 @@ fn draw_monitor(
     .draw(
         canvas,
         Theme {
-            text: ACCENT,
-            ..theme
+            text: THEME.accent,
+            ..THEME
         },
     );
     let mut digits = [0u8; 20];
@@ -130,9 +120,9 @@ fn draw_monitor(
             &mut digits,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Clock unavailable", TEXT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 52, "Clock unavailable", THEME.text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Display", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 84, "Display", THEME.accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -159,9 +149,9 @@ fn draw_monitor(
             &mut digits,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 100, "Display unavailable", TEXT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 100, "Display unavailable", THEME.text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 132, "Storage", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 132, "Storage", THEME.accent);
     draw_number(
         canvas,
         PANEL_X + 10,
@@ -179,14 +169,14 @@ fn draw_monitor(
         u64::from(refresh_count),
         &mut refresh_digits,
     );
-    refresh.draw(canvas, theme);
+    refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
             i32::from(y).saturating_sub(2),
             5,
             5,
-            if pressed { TEXT } else { POINTER_MARKER },
+            if pressed { THEME.text } else { POINTER_MARKER },
         );
     }
 }

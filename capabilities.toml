@@ -1,0 +1,49 @@
+# Capability-Driven Code Organization Definitions
+
+[capabilities.Console]
+description = 'Serial console output and logging'
+modules = ['serial', 'debug']
+
+[capabilities.TimerRead]
+description = 'Read monotonic system clock'
+modules = ['timer']
+
+[capabilities.FileRead]
+description = 'Read from filesystems'
+modules = ['vfs', 'fat32', 'wovenfs']
+
+[capabilities.FileWrite]
+description = 'Write to filesystems'
+modules = ['vfs', 'fat32', 'wovenfs']
+depends_on = ['FileRead']
+
+[capabilities.NetworkIo]
+description = 'Network send/receive'
+modules = ['network', 'async_network']
+
+[capabilities.StorageIo]
+description = 'Block device I/O'
+modules = ['block_io', 'async_block']
+depends_on = ['DeviceIo']
+
+[capabilities.Camera]
+description = 'Camera/webcam access'
+modules = ['hal/camera', 'device/camera']
+depends_on = ['DeviceIo']
+
+[capabilities.DisplayIo]
+description = 'Graphics output'
+modules = ['compositor', 'graphics', 'hal/gpu']
+
+# Subsystem groups
+[groups.Core]
+description = 'Essential kernel subsystems'
+capabilities = ['Console', 'TimerRead']
+
+[groups.Storage]
+description = 'Storage and filesystem subsystems'
+capabilities = ['FileRead', 'FileWrite', 'StorageIo']
+
+[groups.Desktop]
+description = 'Desktop environment capabilities'
+capabilities = ['DisplayIo', 'Camera', 'Console']

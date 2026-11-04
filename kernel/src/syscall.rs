@@ -1635,13 +1635,13 @@ fn sys_exec(user_path: u64, length: u64) -> u64 {
     crate::task::exec_current(program)
 }
 
-/// Execute a whitespace-delimited command line from userspace.
+/// Execute a bounded shell-normalized command line from userspace.
 ///
 /// Stage 6 keeps the existing `exec(path,len)` ABI intact and adds this
 /// argument-bearing form for the interactive shell. Bare command names are
 /// resolved under `/bin`; paths containing `/` are used verbatim. The parser
-/// intentionally supports simple ASCII whitespace only for now (no quoting or
-/// environment expansion), bounded by userspace::MAX_ARGV/MAX_ARGV_BYTES.
+/// supports quotes and backslash escapes; environment expansion and operators
+/// are deliberately owned by the userspace shell.
 fn sys_exec_command(user_line: u64, length: u64) -> u64 {
     let actor = crate::task::current_process_id();
     if !crate::task::current_has(crate::capability::Capability::FileRead)
@@ -1669,22 +1669,30 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
     let mut ranges = [(0_usize, 0_usize); crate::userspace::MAX_ARGV];
     let mut argc = 0_usize;
     let mut cursor = 0_usize;
+    let mut write = 0_usize;
     while cursor < length {
-        while cursor < length && command[cursor].is_ascii_whitespace() {
-            cursor += 1;
+        while cursor < length && command[cursor].is_ascii_whitespace() { cursor += 1; }
+        if cursor == length { break; }
+        if argc == crate::userspace::MAX_ARGV { return SYSCALL_ERROR; }
+        let start = write;
+        let mut quote = 0u8;
+        while cursor < length {
+            let byte = command[cursor];
+            if byte == b'\\' && quote != b'\'' {
+                cursor += 1;
+                if cursor == length { return SYSCALL_ERROR; }
+                command[write] = command[cursor]; write += 1; cursor += 1;
+            } else if byte == b'\'' || byte == b'"' {
+                if quote == 0 { quote = byte; } else if quote == byte { quote = 0; }
+                cursor += 1;
+            } else if byte.is_ascii_whitespace() && quote == 0 {
+                break;
+            } else {
+                command[write] = byte; write += 1; cursor += 1;
+            }
         }
-        if cursor == length {
-            break;
-        }
-        if argc == crate::userspace::MAX_ARGV {
-            return SYSCALL_ERROR;
-        }
-        let start = cursor;
-        while cursor < length && !command[cursor].is_ascii_whitespace() {
-            cursor += 1;
-        }
-        ranges[argc] = (start, cursor);
-        argc += 1;
+        if quote != 0 || start == write { return SYSCALL_ERROR; }
+        ranges[argc] = (start, write); argc += 1;
     }
     if argc == 0 {
         return SYSCALL_ERROR;
@@ -1780,21 +1788,26 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
     let mut argc = 0_usize;
     let mut cursor = 0_usize;
     while cursor < length {
-        while cursor < length && command[cursor].is_ascii_whitespace() {
-            cursor += 1;
-        }
-        if cursor == length {
-            break;
-        }
-        if argc == crate::userspace::MAX_ARGV {
-            return SYSCALL_ERROR;
-        }
+        while cursor < length && command[cursor].is_ascii_whitespace() { cursor += 1; }
+        if cursor == length { break; }
+        if argc == crate::userspace::MAX_ARGV { return SYSCALL_ERROR; }
         let start = cursor;
-        while cursor < length && !command[cursor].is_ascii_whitespace() {
-            cursor += 1;
+        let mut quote = 0u8;
+        while cursor < length {
+            let byte = command[cursor];
+            if byte == b'\\' && quote != b'\'' {
+                cursor += 1;
+                if cursor == length { return SYSCALL_ERROR; }
+                cursor += 1;
+            } else if byte == b'\'' || byte == b'"' {
+                if quote == 0 { quote = byte; } else if quote == byte { quote = 0; }
+                cursor += 1;
+            } else if byte.is_ascii_whitespace() && quote == 0 {
+                break;
+            } else { cursor += 1; }
         }
-        ranges[argc] = (start, cursor);
-        argc += 1;
+        if quote != 0 || start == cursor { return SYSCALL_ERROR; }
+        ranges[argc] = (start, cursor); argc += 1;
     }
     if argc == 0 {
         return SYSCALL_ERROR;

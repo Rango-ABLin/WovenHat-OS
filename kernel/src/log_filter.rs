@@ -81,6 +81,22 @@ pub fn min_level() -> Level {
 pub fn set_min_level(_level: Level) {}
 
 #[cfg(not(feature = "log-filter"))]
+pub const fn level_to_u8(level: Level) -> u8 {
+    level as u8
+}
+
+#[cfg(not(feature = "log-filter"))]
+pub const fn u8_to_level(value: u8) -> Level {
+    match value {
+        0 => Level::Error,
+        1 => Level::Warn,
+        2 => Level::Info,
+        3 => Level::Debug,
+        _ => Level::Trace,
+    }
+}
+
+#[cfg(not(feature = "log-filter"))]
 #[inline(always)]
 pub fn min_level() -> Level {
     Level::Trace // pass-through when filter is disabled

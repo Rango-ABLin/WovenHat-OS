@@ -126,6 +126,22 @@ impl State {
         self.initialized = true;
     }
 
+    fn init_without_framebuffer(&mut self) {
+        self.ptr = 0;
+        self.len = 0;
+        self.width = 0;
+        self.height = 0;
+        self.stride = 0;
+        self.bytes_per_pixel = 0;
+        self.format = Format::Other;
+        self.cursor_x = 40;
+        self.cursor_y = 40;
+        self.start_x = 40;
+        self.scale = 2;
+        self.info = None;
+        self.initialized = true;
+    }
+
     fn clear(&mut self) {
         if !self.initialized || self.display_owned {
             return;
@@ -316,6 +332,13 @@ pub fn init(buffer: &mut [u8], info: FrameBufferInfo) {
         PANIC_FB_READY.store(true, Ordering::Release);
     }
     TERMINAL.lock().init(buffer, info);
+}
+
+/// Mark the terminal as initialized when the bootloader supplied no GOP
+/// framebuffer. Text output remains a no-op until a display backend is
+/// available, while the compositor may still take ownership of a GPU output.
+pub fn init_without_framebuffer() {
+    TERMINAL.lock().init_without_framebuffer();
 }
 
 struct PanicWriter<'a> {

@@ -1,9 +1,25 @@
 // Keyboard, pointer, scroll, touch, pen and game-controller events are
 // production (Stage 13.16); the device-kind table belongs to the Stage 13.7
 // probe.
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::irq_lock::IrqMutex as Mutex;
 
 const INPUT_QUEUE_CAPACITY: usize = 128;
+
+/// Sticky latch: once an absolute pointing device (a USB tablet, typically)
+/// has reported a position, relative `PointerMove` events are dropped at
+/// `publish`. A relative PS/2 mouse and an absolute USB tablet both exist as
+/// independent, uncoordinated event sources for the same physical host
+/// mouse movement when both are attached (QEMU's `usb-tablet` does not
+/// disable the emulated PS/2 mouse), so without this, every host movement
+/// produces both a relative delta and an absolute report, interleaved in
+/// publish order, and the cursor visibly jitters/jumps between the two
+/// positions. The absolute device wins once seen, matching the documented
+/// intent of attaching it ("aligns host and guest pointer positions", see
+/// `RUN-DESKTOP.ps1`) -- it is the one device whose position cannot drift
+/// from the host's.
+static ABSOLUTE_POINTER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "stage13-7-test")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +212,15 @@ pub fn publish(event: Event) -> bool {
     // and the diagnostic console, whoever holds focus.
     if event == Event::Key(Key::F12) {
         crate::session::toggle_console();
+        return true;
+    }
+    if matches!(event, Event::PointerAbsolute { .. }) {
+        ABSOLUTE_POINTER_ACTIVE.store(true, Ordering::Relaxed);
+    } else if matches!(event, Event::PointerMove { .. })
+        && ABSOLUTE_POINTER_ACTIVE.load(Ordering::Relaxed)
+    {
+        // Swallowed, not a capacity drop: intentionally discarded so it
+        // cannot fight the absolute device's position for the same motion.
         return true;
     }
     let mut focus = FOCUS.lock();

@@ -2848,6 +2848,22 @@ tracking; `Volume::check()` applies the same complete-tree integrity boundary.
 Mounted system policy and physical flash qualification remain open. See the Stage 15
 write-through audit.
 
+## WovenFS system-volume migration probe increment (2026-11-04)
+
+The migration has a non-destructive native probe boundary. `wfs::Volume::probe`
+reads and validates both superblock slots without replaying journals or writing,
+and requires a valid WovenFS superblock before returning success. The
+Stage 12.5 storage-manager build exposes `inspect_system_device`, which reports
+a typed `FilesystemKind::WovenFs` candidate without changing the established
+FAT32 `inspect_device` path used for removable media. Production root mounting
+now probes WovenFS before FAT32 and checks validated GPT EFI/basic-data entries;
+the selected WovenFS volume can publish at `/mnt`, with native task write,
+rename, unlink, read, ensure, and teardown paths. The disposable installer has
+an exact WovenFS v1 formatter and deterministic verifier. FAT32-specific
+space/check reporting, all service persistence callers, and installed-image
+boot qualification remain open; no physical-device write is part of this
+increment.
+
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
 ASLR geometry correction (2026-10-20): the graph-loader keeps the independent
@@ -3366,7 +3382,7 @@ map wording that says 8 KiB is historical and is superseded by
 | `font.rs`, `display.rs` | 5Ã—7 ASCII font (also compiled into libwoven); `Surface` (opaque `blit`, `blit_region` for exposed-region redraw, uniform-opacity `blend`, `write_pixels` for client uploads), bounded `Damage` (regions that form exactly a rectangle merge; a full list collapses to one bounding box) and the single format-resolving presentation path (`present_scaled`, integer display scale, each row converted once and copied to the physical rows it covers; `present` is scale 1; `Surface::scaled_row` serves the virtio-gpu heads) |
 | `user_graphics.rs`, `compositor.rs` | Owner-tagged, generation-checked client surfaces (syscalls 98â€“101, 104), up to 1920Ã—1200 within a 4 MB per-process and 16 MB system pixel budget, behind a preemption lock (not interrupts-off) with allocation and freeing outside it and the kernel-held compositor surface they are blitted onto (102â€“103); `blit` snapshots under the registry lock and releases it before taking the compositor lock, so the two rank-10 locks never nest. Presentation borrows the framebuffer through `terminal::with_framebuffer` (lock order compositor â†’ terminal), and display ownership suppresses terminal rendering while the compositor presents. Userspace reaches the compositor only with `DisplayIo` and the single-holder lease (syscalls 105â€“106), released on exit; every client token is bound to the calling process before the registry sees it. A presenting holder also takes input focus: `woven_input` routes events to its private bounded queue (syscall 107, `InputIo`) until it exits; syscall 108 sleeps for the next event with a single registered waiter woken by `publish` after `FOCUS` is released (lock order scheduler â†’ compositor â†’ FOCUS). A client may share one of its surfaces with one process (syscall 109); the lease holder composites it with syscall 110, authorised by the slot's grant rather than the token. Syscall 111 sleeps over input and the pid mailbox at once; `ipc::send` wakes the mailbox's single waiter after releasing the IPC lock. Clients declare damage on their surfaces (syscall 112); the holder sleeps on it via `WaitAny` and copies only the damaged region (syscall 113). The boot compositor is sized to the framebuffer (clamped to 1920Ã—1200), and every framebuffer writer, including the boot `Console`, goes through the terminal lock. Stacking, raise and per-window focus are window-manager policy in userspace (Stage 19.11), built on the lease, focus, `WaitAny`, shared surfaces and IPC |
 | `panic.rs`, `benchmark.rs` | Failure reporting and existing benchmark support |
-| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus the typed `graphics::{Color, Rect, Renderer}` WovenGraphics boundary, `Canvas` software rendering, caller-owned `DepthBuffer`/`Vertex3` software 3D triangles, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120â€“121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200â€“201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 64 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame. The kernel's feature-gated VirtIO-GPU test path separately uses a bounded `VirglStream` encoder for checked VIRGL command framing; it is transport validation only until a visible GPU frame is accepted |
+| `libwoven/`, `apps/hello`, `apps/hello-gui`, `apps/woven-shell` | The userspace API (one thin wrapper per syscall, plus the typed `graphics::{Color, Rect, Renderer}` WovenGraphics boundary, `Canvas` software rendering, caller-owned `DepthBuffer`/`Vertex3` software 3D triangles, the shared kernel font, and a fixed-point `Spring` for animation, and `accounts`, local accounts held as a salt and `PBKDF2-HMAC-SHA256(PIN, salt, PBKDF2_ITERATIONS)`) and the Ring-3 programs. Each app is its own crate with a large-code-model `link.x` (whose `.l*` sections must be placed explicitly) and a `build.rs` that relinks when it changes. `woven-shell` is the desktop, with four workspaces (per-workspace stacks, a taskbar switcher, F3/F4): it holds the compositor lease and recomposes exposed rectangles from its own software layers and clients' shared surfaces (region blits, syscalls 120â€“121), hosting applications over an IPC protocol (`WOPN`, `TRAY`, `NOTE`, `WCLS`, and `WSIZ`/`WRSZ` for resizing; `libwoven::layout` tiles them); shadows and other translucent layers use region blends (syscalls 200â€“201), and text, borders and the pointer are overlays copied with a keyed blit that skips the transparent key (syscall 202), so nothing is read back from the screen. With `--accounts` it starts at a sign-in screen, and its lock screen asks for the signed-in account's PIN. A user stack is 64 KiB (`UserStack::SIZE`), so the shell keeps its tile buffer and desktop state in statics (.bss), never in `main`'s frame. As of the WovenHat Overview takeover (2026-11-03, M1), `apps/woven-shell/src/main.rs` is being split into modules behavior-preservingly: `tokens.rs` (colors/sizes/theme), `geometry.rs` (`Area`/`Dirty`), `textures.rs` (the `.bss` render-target buffers), `icons.rs` (app-tile drawing), `model.rs` (`Window`/`App`/`Child`/`Note`/`Toast`), and `painter.rs` (the tile-chunked renderer); `struct Desktop`/`impl Desktop` (the event loop, repaint, launcher, lock screen, Quick Settings, Notification Center, tiling/workspaces, 3D render paths) remains in `main.rs` as one block for now, since its methods are interleaved by feature history rather than grouped by concern. The kernel's feature-gated VirtIO-GPU test path separately uses a bounded `VirglStream` encoder for checked VIRGL command framing; it is transport validation only until a visible GPU frame is accepted |
 | `tests/`, `scripts/`, `run-stage*-acceptance.ps1` | Host regressions, QEMU orchestration and stage preservation gates |
 
 ## Stage 6 filesystem concurrency boundary
@@ -4710,3 +4726,13 @@ aborted action, but saturated-mailbox retry is not yet qualified. This is
 single-threaded bounded userspace state; there are no new syscalls, kernel
 objects, locks, unsafe blocks or capabilities. See
 `docs/graphics/modern-desktop-implementation-2026-10-29.md` for scope and gates.
+
+## WovenFS bounded system-filesystem completion — 2026-11-04
+
+The storage boundary maps WovenFS-backed `df` and `fscheck` to native
+bitmap/tree reports. Identity, TPM, update, package, and storage persistence
+callers resolve the root-aware native WovenFS volume. The disposable
+installed-image harness provisions a GPT WovenFS system partition and reaches
+the qualification marker on 1/2/4 CPUs. This is disposable-image
+qualification only; physical power-loss and removable-hardware qualification
+remain separate release gates.

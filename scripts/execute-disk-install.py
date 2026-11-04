@@ -12,8 +12,8 @@ formatted volume's root directory.
 
 This remains a disposable-file-image boundary only: it never opens a device
 path, never mounts anything, and does not claim bootability, hardware
-qualification, or release certification. Only the ``fat32`` filesystem choice
-is supported; ``ext4``/``wovenfs`` real formatting is not implemented.
+qualification, or release certification. FAT32 and the native WovenFS choice
+are supported; ext4 remains outside this executor.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ def _load(name: str, filename: str) -> Any:
 
 layout = _load("disk_install_layout", "build-file-image-layout.py")
 filesystem = _load("disk_install_filesystem", "format-file-image-fs.py")
+wovenfs = _load("disk_install_wovenfs", "format-wovenfs-file-image.py")
 efi = _load("disk_install_efi", "prepare-uefi-boot-artifact.py")
 
 
@@ -86,8 +87,8 @@ def _load_plan(path: Path, image_digest: str, image_size: int) -> dict[str, Any]
         raise InstallError("plan schema is not woveninstaller-plan-v1")
     if plan.get("partition_table") != "gpt":
         raise InstallError("plan is not a GPT plan")
-    if plan.get("filesystem") != "fat32":
-        raise InstallError("only the fat32 filesystem is supported by the real executor")
+    if plan.get("filesystem") not in ("fat32", "wovenfs"):
+        raise InstallError("the real executor supports only fat32 or wovenfs")
     operations = plan.get("operations")
     if not isinstance(operations, dict) or operations.get("disk_io") != "none":
         raise InstallError("plan is not a file-only validated plan")
@@ -133,7 +134,8 @@ def execute(image: Path, plan_file: Path, *, artifact: Path | None = None, fixtu
         if inject_failure == "after-layout":
             raise InstallError("injected failure after layout build")
 
-        filesystem.format_image(target, plan_file, harness_created=True, settings=plan["settings"])
+        formatter = filesystem if plan["filesystem"] == "fat32" else wovenfs
+        formatter.format_image(target, plan_file, harness_created=True, settings=plan["settings"])
         if inject_failure == "after-format":
             raise InstallError("injected failure after filesystem format")
 
@@ -142,9 +144,9 @@ def execute(image: Path, plan_file: Path, *, artifact: Path | None = None, fixtu
             raise InstallError("injected failure after EFI artifact install")
 
         layout_result = layout.verify(target, plan_file)
-        filesystem_result = filesystem.verify(target, plan_file, settings=plan["settings"])
+        filesystem_result = formatter.verify(target, plan_file, settings=plan["settings"])
         efi_result = efi.verify(target, plan_file)
-        installed_settings = filesystem.read_installed_settings(target, plan_file)
+        installed_settings = formatter.read_installed_settings(target, plan_file)
         if installed_settings != plan["settings"]:
             raise InstallError("installed settings readback does not match the plan")
         if layout_result.get("valid") is not True or filesystem_result.get("valid") is not True or efi_result.get("valid") is not True:

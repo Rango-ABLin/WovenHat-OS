@@ -94,6 +94,7 @@ stage27-2-test = ["qemu-test", "kernel/stage27-2-test"]
 stage27-5-test = ["qemu-test", "kernel/stage27-5-test"]
 stage27-5-recovery-test = ["qemu-test", "kernel/stage27-5-recovery-test"]
 stage28-installer-test = ["qemu-test", "kernel/stage28-installer-test"]
+installed-wovenfs-test = ["qemu-test", "kernel/installed-wovenfs-qualification"]
 stage31-process-crash-test = ["qemu-test", "kernel/stage31-process-crash-test"]
 s03-process-lifecycle-test = ["qemu-test", "kernel/s03-process-lifecycle-test"]
 s03-keyboard-injection-test = ["qemu-test", "kernel/s03-keyboard-injection-test"]
@@ -241,10 +242,9 @@ name = "wovenhat-os"
 version = "0.8.0"
 edition = "2024"
 
-[dependencies]
-ovmf-prebuilt = "0.2.4"
 
 [build-dependencies]
+ovmf-prebuilt = "0.2.4"
 kernel = { package = "wovenhat-kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
 ed25519-compact = { version = "2.6", default-features = false }

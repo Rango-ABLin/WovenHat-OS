@@ -40,7 +40,7 @@ impl RegisterContext {
 }
 
 /// The bounded action a decoded debugger command requests.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Reply,
     Continue,

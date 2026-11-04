@@ -39,7 +39,7 @@ static GROW_OWNER: AtomicUsize = AtomicUsize::new(0);
 #[cfg(not(test))]
 static GROW_PRESSURE: AtomicBool = AtomicBool::new(false);
 
-#[cfg_attr(not(test), global_allocator)]
+#[cfg_attr(all(not(test), target_os = "none"), global_allocator)]
 static ALLOCATOR: TrackedAllocator = TrackedAllocator;
 // Allocation can occur beneath paging, frame, process, or audit guards. The
 // heap metadata never acquires another ranked lock during runtime allocation.

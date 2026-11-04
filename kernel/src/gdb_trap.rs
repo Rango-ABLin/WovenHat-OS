@@ -6,7 +6,7 @@
 
 use crate::gdb_session::Session;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopReason {
     Breakpoint,
     SingleStep,

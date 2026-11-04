@@ -23,7 +23,7 @@ const FG_B: u8 = 230;
 /// concurrently, and console text is suppressed while the compositor owns the
 /// display. Each operation takes the lock once, not once per pixel.
 pub struct Console {
-    info: FrameBufferInfo,
+    info: Option<FrameBufferInfo>,
 
     cursor_x: usize,
     cursor_y: usize,
@@ -48,7 +48,7 @@ pub struct Console {
 impl Console {
     /// Create the console. `terminal::init` must already have been given the
     /// framebuffer; until then every drawing operation is a no-op.
-    pub fn new(info: FrameBufferInfo, x: usize, y: usize, scale: usize) -> Self {
+    pub fn new(info: Option<FrameBufferInfo>, x: usize, y: usize, scale: usize) -> Self {
         Self {
             info,
             cursor_x: x,
@@ -89,12 +89,15 @@ impl Console {
     /// smooth regardless of how the boot stages are spaced.
     #[cfg(feature = "system-apps")]
     pub fn show_splash_frame(&mut self, frame: usize) {
+        let Some(info) = self.info else {
+            return;
+        };
         let quiet = self.quiet;
         self.quiet = false;
         self.clear();
 
-        let centre_x = self.info.width / 2;
-        let centre_y = self.info.height / 2;
+        let centre_x = info.width / 2;
+        let centre_y = info.height / 2;
 
         // 24 points instead of 12 (precomputed: no libm in this no_std
         // kernel, so the ring is a lookup table, not trig at boot time).
@@ -201,13 +204,13 @@ impl Console {
 
         let title = "WOVENHAT";
         let title_width = title.chars().count() * 6 * self.scale;
-        let x = self.info.width.saturating_sub(title_width) / 2;
+        let x = info.width.saturating_sub(title_width) / 2;
         let y = centre_y.saturating_add(48);
         self.set_cursor_position(x, y);
         self.print(title);
         self.newline();
         self.set_cursor_position(
-            (self.info.width / 2).saturating_sub(12 * self.scale),
+            (info.width / 2).saturating_sub(12 * self.scale),
             y + 18 * self.scale,
         );
         self.print("Starting desktop");
@@ -219,8 +222,11 @@ impl Console {
     }
 
     fn ensure_room(&mut self) {
+        let Some(info) = self.info else {
+            return;
+        };
         let line_height = 9 * self.scale;
-        if self.cursor_y + 8 * self.scale < self.info.height {
+        if self.cursor_y + 8 * self.scale < info.height {
             return;
         }
         self.scroll(line_height);
@@ -228,7 +234,10 @@ impl Console {
     }
 
     fn scroll(&mut self, rows: usize) {
-        if rows == 0 || rows >= self.info.height || self.info.bytes_per_pixel == 0 {
+        let Some(info) = self.info else {
+            return;
+        };
+        if rows == 0 || rows >= info.height || info.bytes_per_pixel == 0 {
             self.clear();
             return;
         }
@@ -275,7 +284,7 @@ impl Console {
 
         self.cursor_x += 6 * self.scale;
 
-        if self.cursor_x + 6 * self.scale >= self.info.width {
+        if self.info.is_some_and(|info| self.cursor_x + 6 * self.scale >= info.width) {
             self.newline();
         }
     }
@@ -291,8 +300,11 @@ impl Console {
     }
 
     pub fn set_cursor_position(&mut self, x: usize, y: usize) {
-        self.cursor_x = core::cmp::min(x, self.info.width.saturating_sub(1));
-        self.cursor_y = core::cmp::min(y, self.info.height.saturating_sub(1));
+        let Some(info) = self.info else {
+            return;
+        };
+        self.cursor_x = core::cmp::min(x, info.width.saturating_sub(1));
+        self.cursor_y = core::cmp::min(y, info.height.saturating_sub(1));
     }
 
     pub fn backspace(&mut self) {
@@ -321,8 +333,11 @@ impl Console {
     /// unchanged region is never recopied.
     #[cfg(any(test, feature = "qemu-test"))]
     pub fn render_desktop(&mut self, desktop: &Desktop) {
-        let width = self.info.width;
-        let height = self.info.height;
+        let Some(info) = self.info else {
+            return;
+        };
+        let width = info.width;
+        let height = info.height;
         let surface = self
             .desktop_surface
             .get_or_insert_with(|| Surface::new(width, height));

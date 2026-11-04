@@ -297,7 +297,6 @@ fn ends_with_marker(bytes: &[u8]) -> bool {
 /// Called from the panic handler alongside the human-readable register dump so
 /// a machine-readable crash parser can extract the fault context without
 /// parsing the freeform text block.
-#[cfg(not(test))]
 pub fn emit_panic_dump(rip: u64, rsp: u64, cr2: u64) {
     const PANIC_DUMP_BYTES: usize = 256;
     let mut buf = [0u8; PANIC_DUMP_BYTES];

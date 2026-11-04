@@ -3,6 +3,10 @@ param(
     [ValidateSet(1, 2, 4)][int]$Cpus = 2,
     [string]$Memory = '5G',
     [ValidateSet('whpx', 'tcg')][string]$Accelerator = 'whpx',
+    # Both VirtIO-GPU modes use one virtio-vga device. It supplies the
+    # UEFI/GOP framebuffer and the kernel's compositor::attach_gpu_outputs()
+    # transport together, so no stale secondary VGA display exists.
+    [ValidateSet('std', 'virtio-gpu', 'virtio-gpu-only')][string]$Display = 'virtio-gpu-only',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -38,10 +42,23 @@ image = desktop.build_hardware_demo(out)
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     $accelOption = if ($Accelerator -eq 'whpx') { 'whpx' } else { 'tcg,thread=multi,tb-size=256' }
+    # The GPU modes deliberately use a single virtio-vga display. The
+    # historical two-device path is not retained because QEMU's default
+    # screendump/window selection could remain on stale VGA output.
+    # id=gpu0 lets a QMP `screendump` target this device specifically via
+    # device='gpu0', head=0 when a device-specific capture is desired.
+    $displayArgs = if ($Display -eq 'virtio-gpu') {
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800')
+    } elseif ($Display -eq 'virtio-gpu-only') {
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800')
+    } else {
+        @('-vga', 'std')
+    }
     $qemuArgs = @(
         '-accel', $accelOption, '-machine', 'pc',
         '-m', $Memory, '-smp', "$Cpus", '-name', 'WovenHat Desktop',
-        '-serial', "file:$runDir/serial.log", '-no-reboot', '-vga', 'std',
+        '-serial', "file:$runDir/serial.log", '-no-reboot'
+    ) + $displayArgs + @(
         '-qmp', "tcp:127.0.0.1:$port,server=on,wait=off",
         '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
         '-drive', "if=none,id=boot,format=raw,readonly=on,file=$Image",

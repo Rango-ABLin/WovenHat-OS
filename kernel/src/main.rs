@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "qemu-test", allow(dead_code, unused_imports))]
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![cfg_attr(all(not(test), target_os = "none"), no_std)]
+#![cfg_attr(all(not(test), target_os = "none"), no_main)]
 #![cfg_attr(
     test,
     allow(
@@ -11,7 +11,7 @@
     )
 )]
 #![feature(abi_x86_interrupt)]
-#![cfg_attr(not(test), feature(alloc_error_handler))]
+#![cfg_attr(all(not(test), target_os = "none"), feature(alloc_error_handler))]
 
 extern crate alloc;
 
@@ -149,6 +149,15 @@ mod serial;
 mod service_supervisor;
 mod session;
 mod shell;
+mod structured_logging;
+mod telemetry_hooks;
+mod memory_safety_audit;
+mod bounded_capacity_analyzer;
+mod deterministic_fault_injection;
+mod documentation_generator;
+mod qemu_perf_regression;
+mod compiler_fuzzing;
+mod agent_coordination;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
@@ -296,7 +305,7 @@ use bootloader_api::{config::Mapping, entry_point, info::Optional, BootInfo, Boo
 
 use console::Console;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 use core::{alloc::Layout, panic::PanicInfo};
 use shell::Shell;
 
@@ -358,17 +367,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     };
     let boot_info_address = boot_info as *const BootInfo as u64;
 
-    let framebuffer = match &mut boot_info.framebuffer {
-        Optional::Some(framebuffer) => framebuffer,
-        Optional::None => halt(),
+    let info = match &mut boot_info.framebuffer {
+        Optional::Some(framebuffer) => {
+            let info = framebuffer.info();
+            let buffer = framebuffer.buffer_mut();
+            terminal::init(buffer, info);
+            Some(info)
+        }
+        Optional::None => {
+            // A UEFI machine may have no GOP framebuffer when the launcher
+            // intentionally supplies only a VirtIO-GPU. Keep boot alive so
+            // compositor::attach_gpu_outputs() can establish the first
+            // display instead of halting before PCI discovery.
+            terminal::init_without_framebuffer();
+            None
+        }
     };
-
-    let info = framebuffer.info();
-    let buffer = framebuffer.buffer_mut();
-    let framebuffer_address = buffer.as_ptr() as u64;
+    let framebuffer_address = boot_info
+        .framebuffer
+        .as_ref()
+        .map(|framebuffer| framebuffer.buffer().as_ptr() as u64)
+        .unwrap_or(0);
     let stack_probe = &info as *const _ as u64;
 
-    terminal::init(buffer, info);
     let mut console = Console::new(info, 40, 40, 2);
 
     #[cfg(feature = "system-apps")]
@@ -1681,10 +1702,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     kind: device::DeviceKind::Block,
                     irq: None,
                 });
-                serial::write_line(format_args!(
-                    "[FS] FAT32 mounted at /mnt; imported {} entries",
-                    count
-                ));
+                if storage::mnt_wovenfs() {
+                    serial::write_line(format_args!(
+                        "[FS] WovenFS mounted at /mnt; imported {} entries",
+                        count
+                    ));
+                } else {
+                    serial::write_line(format_args!(
+                        "[FS] FAT32 mounted at /mnt; imported {} entries",
+                        count
+                    ));
+                }
             }
             storage::MountStatus::NoDevice => {
                 serial::write_line(format_args!("[FS] no ATA disk; continuing with RAM VFS"))
@@ -3038,9 +3066,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage22-3-test"),
         not(feature = "stage22-5-test"),
         not(feature = "stage27-5-recovery-test"),
-        not(feature = "stage24-3-test")
+        not(feature = "stage24-3-test"),
+        not(feature = "installed-wovenfs-qualification")
     ))]
     serial::write_line(format_args!("[STORAGE MUTATION] recovery injection armed"));
+    #[cfg(not(feature = "installed-wovenfs-qualification"))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -5731,7 +5761,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage11-compiler-test")]
-    run_compiler_loader_gate();
+    {
+        run_compiler_loader_gate();
+        run_compiler_fuzzing_campaign();
+    }
     #[cfg(feature = "stage11-5-test")]
     {
         if !userspace::elf_loader_self_test() || !userspace::shared_library_self_test() {
@@ -6537,6 +6570,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
+    #[cfg(feature = "installed-wovenfs-qualification")]
+    {
+        let _ = vfs::mkdir("/mnt");
+        let _ = ata::init();
+        let _ = storage::mount_ata_root();
+        if !storage::installed_wovenfs_self_test() {
+            serial::write_line(format_args!(
+                "[INSTALLED WOVENFS] df/fscheck/persistence: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+        ));
+    }
     #[cfg(feature = "qemu-test")]
     qemu_test_exit_success();
 
@@ -6553,6 +6601,88 @@ fn run_compiler_loader_gate() {
         qemu_test_exit_failure();
     }
     serial::write_line(format_args!("[S11.COMPILER] signed toolchain PIE: PASSED"));
+}
+
+#[cfg(feature = "stage11-compiler-test")]
+#[inline(never)]
+fn run_compiler_fuzzing_campaign() {
+    use compiler_fuzzing::{FuzzingCampaign, FuzzTestGenerator};
+
+    serial::write_line(format_args!("[S11.FUZZ] Campaign Framework: Initializing"));
+    serial::write_line(format_args!("[S11.FUZZ] Target: {} test cases across 5 strategies", 
+        FuzzTestGenerator::total_test_count()));
+
+    let mut campaign = FuzzingCampaign::new(0xdead_beef_u64);
+    
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 1: Structure Variation (250 tests)"));
+    if !campaign.run_structure_variation_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Structure Variation: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Structure Variation: {} passed",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 2: Type Combinations (250 tests)"));
+    if !campaign.run_type_combination_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Type Combinations: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Type Combinations: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 3: Unsafe Block Patterns (250 tests)"));
+    if !campaign.run_unsafe_block_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Unsafe Block Patterns: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Unsafe Block Patterns: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 4: Attribute Variations (250 tests)"));
+    if !campaign.run_attribute_variation_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Attribute Variations: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Attribute Variations: {} total tests so far",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Strategy 5: Edge Case Patterns (250 tests)"));
+    if !campaign.run_edge_case_campaign() {
+        serial::write_line(format_args!("[S11.FUZZ] Edge Case Patterns: FAILED"));
+        qemu_test_exit_failure();
+    }
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Edge Case Patterns: {} total tests completed",
+        campaign.engine.tests_run
+    ));
+
+    serial::write_line(format_args!("[S11.FUZZ] Campaign Complete"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Results: {} tests, {}% pass rate, {}% crash rate",
+        campaign.engine.tests_run,
+        campaign.engine.pass_rate(),
+        campaign.engine.crash_rate()
+    ));
+
+    if campaign.verify_success_criteria() {
+        serial::write_line(format_args!("[S11.FUZZ] Success Criteria: PASSED"));
+        serial::write_line(format_args!(
+            "[S11.FUZZ] Coverage: {} variants exercised",
+            campaign.coverage.total_variants()
+        ));
+        qemu_test_exit_success();
+    } else {
+        serial::write_line(format_args!("[S11.FUZZ] Success Criteria: FAILED"));
+        qemu_test_exit_failure();
+    }
 }
 
 #[cfg(feature = "stage27-5-recovery-test")]
@@ -6768,10 +6898,36 @@ const SYSTEM_WALLPAPER_MANIFEST: &[u8] = include_bytes!(concat!(
 ));
 #[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER_SHA256: [u8; 32] = [
-    0x7c, 0x05, 0x9d, 0x7f, 0x59, 0x8f, 0x22, 0x08,
-    0x79, 0xa4, 0xf1, 0xaf, 0x16, 0x38, 0x8d, 0xf0,
-    0x47, 0xc0, 0xb7, 0x26, 0xcd, 0x0e, 0xaf, 0x2b,
-    0x26, 0x24, 0x31, 0x7b, 0x20, 0x8f, 0x9d, 0xe9,
+    0x92, 0x40, 0x01, 0xb6, 0x6b, 0x65, 0x16, 0xac,
+    0x8d, 0x9d, 0x8c, 0xba, 0x3c, 0x2f, 0xc3, 0x1b,
+    0x47, 0xe2, 0x05, 0xb9, 0xb0, 0x67, 0x6f, 0x90,
+    0x8c, 0xda, 0x21, 0xdf, 0x31, 0x60, 0xe4, 0x4b,
+];
+// Graphics-modernization Phase 3 (typography): stage the already-bundled
+// Noto Sans TTF (kernel/src/ttf.rs's own `bundled_face()` already embeds
+// the same file for a kernel-side self-test) into the VFS at boot, the
+// same way the wallpaper BMP is staged, through `vfs::create_read_only_large`
+// (the font is 607 KiB, over `vfs::NODE_CAPACITY`'s 256 KiB -- see that
+// function's doc comment and docs/graphics/modernization-tracker.md's
+// Phase 3 entry for why a dedicated bounded large-asset slot was added
+// instead of raising the general VFS node capacity). Ring-3 apps read it
+// like any other VFS file -- no new syscall, no new capability.
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../assets/fonts/NotoSans-Regular.ttf"
+));
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT_MANIFEST: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../assets/fonts/manifest.toml"
+));
+#[cfg(feature = "system-apps")]
+const SYSTEM_FONT_SHA256: [u8; 32] = [
+    0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c,
+    0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
+    0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50,
+    0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
 ];
 
 #[cfg(any(
@@ -8112,6 +8268,12 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper path collision"));
         return false;
     }
+    if vfs::stat("/share/fonts/NotoSans-Regular.ttf").is_ok()
+        || vfs::stat("/share/fonts/manifest.toml").is_ok()
+    {
+        serial::write_line(format_args!("[APPS] font path collision"));
+        return false;
+    }
     let valid_wallpaper = if SYSTEM_WALLPAPER.len() < 54 {
         false
     } else {
@@ -8167,6 +8329,18 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper validation failed"));
         return false;
     }
+    let font_digest: [u8; 32] = Sha256::digest(SYSTEM_FONT).into();
+    if SYSTEM_FONT.len() < 4
+        || &SYSTEM_FONT[..4] != b"\x00\x01\x00\x00"
+        || font_digest != SYSTEM_FONT_SHA256
+        || !SYSTEM_FONT_MANIFEST.windows(7).any(|window| window == b"OFL-1.1")
+        || !SYSTEM_FONT_MANIFEST
+            .windows(16)
+            .any(|window| window == b"notosans-regular")
+    {
+        serial::write_line(format_args!("[APPS] font validation failed"));
+        return false;
+    }
     let share_created = if vfs::stat("/share").is_err() {
         if vfs::mkdir("/share").is_err() {
             return false;
@@ -8191,6 +8365,17 @@ fn install_production_system_apps() -> bool {
     }
     let wallpapers_created = if vfs::stat("/share/wallpapers").is_err() {
         if vfs::mkdir("/share/wallpapers").is_err() {
+            return false;
+        }
+        true
+    } else {
+        false
+    };
+    let fonts_created = if vfs::stat("/share/fonts").is_err() {
+        if vfs::mkdir("/share/fonts").is_err() {
+            if wallpapers_created {
+                let _ = vfs::remove("/share/wallpapers");
+            }
             return false;
         }
         true
@@ -8242,6 +8427,9 @@ fn install_production_system_apps() -> bool {
             let _ = vfs::remove(rollback.catalog_path);
             let _ = vfs::remove(rollback.binary_path);
         }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
         if wallpapers_created {
             let _ = vfs::remove("/share/wallpapers");
         }
@@ -8264,6 +8452,52 @@ fn install_production_system_apps() -> bool {
             let _ = vfs::remove(rollback.catalog_path);
             let _ = vfs::remove(rollback.binary_path);
         }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
+        if wallpapers_created {
+            let _ = vfs::remove("/share/wallpapers");
+        }
+        if applications_created {
+            let _ = vfs::remove("/share/applications");
+        }
+        if share_created {
+            let _ = vfs::remove("/share");
+        }
+        return false;
+    }
+    if vfs::create_read_only_large("/share/fonts/NotoSans-Regular.ttf", SYSTEM_FONT).is_err() {
+        let _ = vfs::remove("/share/wallpapers/manifest.toml");
+        let _ = vfs::remove("/share/wallpapers/wovenhat-gradient.bmp");
+        for rollback in apps {
+            let _ = vfs::remove(rollback.catalog_path);
+            let _ = vfs::remove(rollback.binary_path);
+        }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
+        if wallpapers_created {
+            let _ = vfs::remove("/share/wallpapers");
+        }
+        if applications_created {
+            let _ = vfs::remove("/share/applications");
+        }
+        if share_created {
+            let _ = vfs::remove("/share");
+        }
+        return false;
+    }
+    if vfs::create_read_only("/share/fonts/manifest.toml", SYSTEM_FONT_MANIFEST).is_err() {
+        let _ = vfs::remove("/share/fonts/NotoSans-Regular.ttf");
+        let _ = vfs::remove("/share/wallpapers/manifest.toml");
+        let _ = vfs::remove("/share/wallpapers/wovenhat-gradient.bmp");
+        for rollback in apps {
+            let _ = vfs::remove(rollback.catalog_path);
+            let _ = vfs::remove(rollback.binary_path);
+        }
+        if fonts_created {
+            let _ = vfs::remove("/share/fonts");
+        }
         if wallpapers_created {
             let _ = vfs::remove("/share/wallpapers");
         }
@@ -8284,10 +8518,17 @@ fn install_production_system_apps() -> bool {
         serial::write_line(format_args!("[APPS] wallpaper VFS readback failed"));
         return false;
     }
+    let mut font_probe = alloc::vec![0u8; SYSTEM_FONT.len()];
+    if vfs::read_all("/share/fonts/NotoSans-Regular.ttf", &mut font_probe) != Ok(SYSTEM_FONT.len())
+    {
+        serial::write_line(format_args!("[APPS] font VFS readback failed"));
+        return false;
+    }
     serial::write_line(format_args!(
-        "[APPS] {} signed applications and licensed wallpaper installed; wallpaper VFS readback {} bytes",
+        "[APPS] {} signed applications, licensed wallpaper, and licensed font installed; wallpaper VFS readback {} bytes, font VFS readback {} bytes",
         installed,
-        wallpaper_probe.len()
+        wallpaper_probe.len(),
+        font_probe.len()
     ));
     true
 }
@@ -17864,7 +18105,7 @@ fn halt() -> ! {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     serial::write_fmt(format_args!(
@@ -17875,7 +18116,7 @@ fn alloc_error_handler(layout: Layout) -> ! {
     halt()
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "none"))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     panic::kernel_panic(info)

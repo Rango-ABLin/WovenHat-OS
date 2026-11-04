@@ -36,6 +36,7 @@ stage11-exit-status-test = ["stage11-2-test"]
 stage11-3-test = ["qemu-test"]
 stage11-4-test = ["qemu-test"]
 stage11-5-test = ["qemu-test"]
+stage_11 = ["qemu-test"]
 # Stage 11.6: ModulePlan, per-thread StagedSegments, and rollback fixture.
 stage11-6-test = ["qemu-test"]
 # Execute unmodified compiler output before the unchanged loader gate exits.
@@ -132,6 +133,9 @@ stage27-5-test = ["qemu-test", "stage15-2-test", "stage22-3-test"]
 # Keep this independent: the Stage 15.2 block exits QEMU on its own marker.
 stage27-5-recovery-test = ["qemu-test"]
 stage28-installer-test = ["qemu-test"]
+# Keep a distinct artifact feature identity so Cargo's freestanding artifact
+# dependency cannot reuse a pre-qualification kernel image.
+installed-wovenfs-qualification = ["qemu-test"]
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
 # S03 bounded process lifecycle acceptance: fork/wait/reap and process-group

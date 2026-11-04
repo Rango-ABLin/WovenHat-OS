@@ -74,12 +74,13 @@ class DiskInstallExecutorTests(unittest.TestCase):
         settings = MODULE.filesystem.read_installed_settings(self.image, self.plan)
         self.assertEqual(settings, SETTINGS)
 
-    def test_rejects_non_fat32_filesystem(self):
+    def test_accepts_wovenfs_filesystem(self):
         raw = json.loads(self.plan.read_text(encoding="utf-8"))
         raw["plan"]["filesystem"] = "wovenfs"
         self.plan.write_text(json.dumps(raw), encoding="utf-8")
-        with self.assertRaisesRegex(MODULE.InstallError, "fat32"):
-            MODULE.execute(self.image, self.plan)
+        result = MODULE.execute(self.image, self.plan)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["filesystem"]["filesystem"], "wovenfs")
 
     def test_symlink_and_protected_identity_are_refused(self):
         link = self.root / "link.img"

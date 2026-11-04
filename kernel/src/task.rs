@@ -4632,7 +4632,10 @@ fn open_current_with_access(
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+    if (path.starts_with("/wfs/")
+        || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs()))
+        && !crate::wfs::vfs_mounted()
+    {
         return Err(FileError::NotFound);
     }
     if (read && !authorize_current_file_path(&path, false))
@@ -4660,7 +4663,9 @@ fn open_current_with_access(
             {
                 return Err(FileError::NotFound);
             }
-            if path.starts_with("/wfs/") {
+            if path.starts_with("/wfs/")
+                || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs())
+            {
                 crate::wfs::ensure_vfs_path(&path, crate::timer::ticks())
                     .map_err(map_wfs_file_error)?;
                 vfs::create_read_only(&path, &[]).map_err(map_vfs_file_error)?;
@@ -4852,7 +4857,10 @@ pub fn write_current(descriptor: u64, buffer: &[u8]) -> Result<usize, FileError>
             let mut path_bytes = [0u8; crate::config::MAX_PATH_SIZE];
             let (path_length, offset) = vfs::file_path_and_offset(id, &mut path_bytes)
                 .map_err(|_| FileError::BadDescriptor)?;
-            if path_bytes[..path_length].starts_with(b"/wfs/") {
+            if path_bytes[..path_length].starts_with(b"/wfs/")
+                || (path_bytes[..path_length].starts_with(b"/mnt/")
+                    && crate::storage::mnt_wovenfs())
+            {
                 let path = core::str::from_utf8(&path_bytes[..path_length])
                     .map_err(|_| FileError::BadDescriptor)?;
                 let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
@@ -5062,7 +5070,7 @@ pub fn stat_path(path: &str) -> Result<vfs::Stat, FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+    if native_wfs_path(&path) && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
     if !authorize_current_file_path(&path, false) {
@@ -5077,7 +5085,7 @@ pub fn readdir_path(path: &str, index: usize) -> Result<vfs::DirEntry, FileError
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+    if native_wfs_path(&path) && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
     if !authorize_current_file_path(&path, false) {
@@ -5092,7 +5100,7 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+    if native_wfs_path(&path) && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
     if !authorize_current_file_path(&path, true) {
@@ -5104,7 +5112,7 @@ pub fn mkdir_path(path: &str) -> Result<(), FileError> {
     if is_mnt_child(&path) {
         ensure_mnt_parent(&path)?;
     }
-    if path.starts_with("/wfs/") {
+    if native_wfs_path(&path) {
         if vfs::stat(&path).is_ok() {
             return Err(FileError::AlreadyExists);
         }
@@ -7276,7 +7284,7 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if path.starts_with("/wfs/") && !crate::wfs::vfs_mounted() {
+    if native_wfs_path(&path) && !crate::wfs::vfs_mounted() {
         return Err(FileError::NotFound);
     }
     if !authorize_current_file_path(&path, true) {
@@ -7290,7 +7298,7 @@ pub fn unlink_current(path: &str) -> Result<(), FileError> {
         vfs::can_remove(&path).map_err(map_vfs_file_error)?;
         vfs::prepare_remove(&path).map_err(map_vfs_file_error)?;
         crate::storage::delete_path(&path).map_err(map_mutation_file_error)?;
-    } else if path.starts_with("/wfs/") {
+    } else if native_wfs_path(&path) {
         vfs::can_remove(&path).map_err(map_vfs_file_error)?;
         crate::wfs::unlink_vfs_path(&path, crate::timer::ticks()).map_err(map_wfs_file_error)?;
     }
@@ -7303,8 +7311,10 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     }
     let old = resolve_path_for_current(old)?;
     let new = resolve_path_for_current(new)?;
-    if (old.starts_with("/wfs/") || new.starts_with("/wfs/"))
-        && (!old.starts_with("/wfs/") || !new.starts_with("/wfs/") || !crate::wfs::vfs_mounted())
+    if (native_wfs_path(&old) || native_wfs_path(&new))
+        && (!native_wfs_path(&old)
+            || !native_wfs_path(&new)
+            || !crate::wfs::vfs_mounted())
     {
         return Err(FileError::NotFound);
     }
@@ -7322,8 +7332,8 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
         ensure_mnt_parent(&new)?;
         vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
         crate::storage::rename_path(&old, &new).map_err(map_mutation_file_error)?;
-    } else if old.starts_with("/wfs/") || new.starts_with("/wfs/") {
-        if !old.starts_with("/wfs/") || !new.starts_with("/wfs/") {
+    } else if native_wfs_path(&old) || native_wfs_path(&new) {
+        if !native_wfs_path(&old) || !native_wfs_path(&new) {
             return Err(FileError::NotFound);
         }
         vfs::can_rename(&old, &new).map_err(map_vfs_file_error)?;
@@ -7332,7 +7342,7 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     }
     match vfs::rename(&old, &new).map_err(map_vfs_file_error) {
         Ok(()) => Ok(()),
-        Err(error) if old.starts_with("/wfs/") && new.starts_with("/wfs/") => {
+        Err(error) if native_wfs_path(&old) && native_wfs_path(&new) => {
             // Restore the native name if the in-memory publication failed.
             let _ = crate::wfs::rename_vfs_path(&new, &old, crate::timer::ticks());
             Err(error)
@@ -7372,6 +7382,11 @@ fn map_persist_file_error(error: crate::storage::PersistError) -> FileError {
         _ => FileError::NotFound,
     }
 }
+fn native_wfs_path(path: &str) -> bool {
+    path.starts_with("/wfs/")
+        || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs())
+}
+
 fn is_mnt_child(path: &str) -> bool {
     path.starts_with("/mnt/")
 }

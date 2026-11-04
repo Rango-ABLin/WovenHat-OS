@@ -1,0 +1,162 @@
+# WovenHat OS Syscall Definitions
+# This file defines syscalls with type-safe parameters and auto-generates bindings
+
+[metadata]
+version = "1.0"
+description = "Type-safe syscall definitions for code generation"
+
+# Completion Port Syscalls (Stage 10.8)
+[syscalls.CompletionPortCreate]
+number = 82
+description = "Create a completion port for the current process"
+returns = "u64"
+parameters = []
+
+[syscalls.CompletionPortClose]
+number = 83
+description = "Close an owned completion port"
+returns = "i32"
+parameters = [
+    { name = "port", type = "u64", description = "Port handle" }
+]
+
+[syscalls.CompletionPortAssociate]
+number = 84
+description = "Associate an async operation with a completion port"
+returns = "i32"
+parameters = [
+    { name = "operation", type = "u64", description = "Operation handle" },
+    { name = "port", type = "u64", description = "Port handle" },
+    { name = "cookie", type = "u64", description = "Application cookie" }
+]
+
+[syscalls.CompletionPortPoll]
+number = 85
+description = "Non-blocking poll of completion port events"
+returns = "u64"
+parameters = [
+    { name = "port", type = "u64", description = "Port handle" },
+    { name = "destination", type = "usize", description = "User buffer pointer" },
+    { name = "capacity", type = "u64", description = "Max events (1-8)" }
+]
+
+[syscalls.CompletionPortWait]
+number = 86
+description = "Block until at least one event is available or timeout expires"
+returns = "u64"
+parameters = [
+    { name = "port", type = "u64", description = "Port handle" },
+    { name = "destination", type = "usize", description = "User buffer pointer" },
+    { name = "options", type = "usize", description = "Options pointer (capacity, timeout)" }
+]
+
+# Async Operation Syscalls (Stage 10.3)
+[syscalls.AsyncCreate]
+number = 64
+description = "Create an asynchronous operation handle"
+returns = "u64"
+parameters = [
+    { name = "class", type = "u32", description = "AsyncClass enum value" }
+]
+
+[syscalls.AsyncPoll]
+number = 65
+description = "Non-blocking poll of async operation completion"
+returns = "u64"
+parameters = [
+    { name = "handle", type = "u64", description = "Operation handle" },
+    { name = "completion", type = "usize", description = "User buffer for Completion struct" }
+]
+
+[syscalls.AsyncCancel]
+number = 67
+description = "Cancel an async operation"
+returns = "i32"
+parameters = [
+    { name = "handle", type = "u64", description = "Operation handle" }
+]
+
+# Process Management Syscalls
+[syscalls.Exit]
+number = 3
+description = "Exit current process with status code"
+returns = "!"
+parameters = [
+    { name = "status", type = "i32", description = "Exit status code" }
+]
+
+[syscalls.Getpid]
+number = 4
+description = "Get current process ID"
+returns = "u64"
+parameters = []
+
+[syscalls.Yield]
+number = 7
+description = "Yield to scheduler"
+returns = "i32"
+parameters = []
+
+[syscalls.Getticks]
+number = 31
+description = "Get current monotonic tick count"
+returns = "u64"
+parameters = []
+
+# I/O Syscalls
+[syscalls.Read]
+number = 0
+description = "Read from a file descriptor"
+returns = "i64"
+parameters = [
+    { name = "fd", type = "u32", description = "File descriptor" },
+    { name = "buffer", type = "usize", description = "User buffer pointer" },
+    { name = "length", type = "u64", description = "Number of bytes to read" }
+]
+
+[syscalls.Write]
+number = 1
+description = "Write to a file descriptor"
+returns = "i64"
+parameters = [
+    { name = "fd", type = "u32", description = "File descriptor" },
+    { name = "buffer", type = "usize", description = "User buffer pointer" },
+    { name = "length", type = "u64", description = "Number of bytes to write" }
+]
+
+[syscalls.Open]
+number = 2
+description = "Open a file"
+returns = "i32"
+parameters = [
+    { name = "path", type = "usize", description = "Path string pointer" },
+    { name = "length", type = "u64", description = "Path string length" }
+]
+
+[syscalls.Close]
+number = 6
+description = "Close a file descriptor"
+returns = "i32"
+parameters = [
+    { name = "fd", type = "u32", description = "File descriptor" }
+]
+
+# Memory Syscalls
+[syscalls.Mmap]
+number = 8
+description = "Map memory for current process"
+returns = "u64"
+parameters = [
+    { name = "length", type = "u64", description = "Number of bytes to map" },
+    { name = "flags", type = "u64", description = "Mapping flags" }
+]
+
+[syscalls.Munmap]
+number = 9
+description = "Unmap memory from current process"
+returns = "i32"
+parameters = [
+    { name = "address", type = "u64", description = "Virtual address to unmap" },
+    { name = "length", type = "u64", description = "Number of bytes to unmap" }
+]
+

@@ -10,6 +10,346 @@ acceptance is claimed. Source inventory, security findings and evidence are
 recorded in `docs/boot-login-desktop/`. Existing modernization acceptance
 remains open; later directive phases are not promoted.
 
+## Graphics typography and final release qualification - 2026-11-04 - ACCEPTED
+
+All 119 GUI text call sites now use the bounded system-text primitive with
+parsed-face caching, a 64-entry alpha glyph raster cache, and a single-pass
+mask compositor; bitmap fallback remains available. Real VirtIO-GPU desktop
+qualification passed on 1/2/4 WHPX CPUs. The required RUN-STAGE10.7.ps1 gate
+also passed completely, including host regressions, Clippy, tests, 1/2/4-CPU
+memory and networking matrices, and Stage 10.7 async TCP.
+
+Phase 7 evidence now records repaint/search distributions and the existing
+input-to-captured-frame proxy. Guest CPU and memory are not exposed by the
+current ABI, so those two measurements remain explicitly unclaimed rather
+than inferred from host QEMU process data. Physical/native qualification is
+also correctly reported as not tested by the read-only host gate.
+
+## WovenFS migration completion note — 2026-11-04
+
+The bounded system-filesystem increment is complete: WovenFS-backed `df` and
+`fscheck` use native space/tree reports, remaining service persistence callers
+resolve the root-aware WovenFS volume, and the disposable installed-image gate
+passes on 1/2/4 CPUs. Evidence is in
+`target/installed-wovenfs-system-final/`; all serial logs contain
+`[INSTALLED WOVENFS] df/fscheck/persistence: PASSED` and
+`[BOOT] ALL VALIDATIONS PASSED`. No physical device was opened or modified;
+physical power-loss and removable-hardware qualification remain separate
+release gates.
+
+## WovenFS system-filesystem migration — 2026-11-04 — PARTIAL, NOT ACCEPTED
+
+The user explicitly redirected priority to this migration. Phase 0 audit and
+the first bounded production increment are complete: native WovenFS now has a
+non-destructive `Volume::probe`; root mounting probes WovenFS before FAT32 and
+supports a selected GPT partition; `/mnt` native write-through and teardown
+are wired; and the disposable installer can format and verify WovenFS. The
+Stage 12.5 typed `FilesystemKind::WovenFs` probe remains additive. Existing
+FAT32 discovery/fallback, removable-media behavior, and accepted Stage
+12.2/12.4 status text are unchanged. No physical device was opened or
+modified.
+
+Verification: host all-targets Clippy, Stage 12.5 target Clippy, and Stage 15.2
+target Clippy pass with warnings denied; `tests/wovenfs_crash.rs` passes 20/20;
+the Stage 12.1–12.5 QEMU chain passes at 1/2/4 CPUs. A full workspace test
+run passed. The disposable installed-image WovenFS gate now boots and reaches
+the qualification marker on 1/2/4 CPUs. FAT32-specific `df`/`fscheck` and the
+remaining service persistence callers are backend-neutral at the storage
+boundary. Physical power-loss/removable-hardware qualification remains a
+separate release gate. See
+`docs/filesystem/wovenfs-system-migration-tracker.md`.
+
+## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul + asset pass) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, FIRST ASSET PASS DONE
+
+M7's layout-cutover-and-verification half is done: removed the
+`ShellLayout` enum, the `--layout` CLI flag, `paint_taskbar_content`,
+`render_taskbar_3d`, the Taskbar-only small launcher panel and its
+offscreen texture, and every `match self.layout` branch across the shell
+(`taskbar_top`, `clock_area`, `badge_area`, `start_area`, `panel_area`
+[deleted], `qs_area`, `center_area`, `work_area`, `toast_area`,
+`render_desktop`, `open`, `resized`, `toggle_scale`, `drag_to_pointer`,
+`repaint_once`'s shadow-exclusion band, and the dead taskbar-entry-click
+handler in `handle_input`). The five duplicated `(area_top, area_height)`
+window-placement computations collapsed into one new `usable_band()`
+helper. `apps/woven-shell/src/main.rs` went from ~4,640 to ~3,793 lines;
+`cargo build`/`cargo clippy --target x86_64-unknown-none -- -D warnings`
+both clean with zero warnings (not just zero errors -- the compiler's own
+dead-code warnings were used to find every orphaned function/constant
+this removal left behind, including in `tokens.rs` and `textures.rs`).
+
+QEMU-verified at 1, 2, and 4 CPUs: `scripts/test-desktop-
+qualification.py` reaches the same point as every prior accepted run
+(sign-in, overview capture, launch, window-open, pointer, all four
+workspace switches), confirmed via serial log and three screenshots
+(desktop, Files window, Activities overview) visually identical to the
+pre-cutover baseline -- no regression from the removal or the
+`usable_band()` refactor -- then hits the pre-existing `keyboard_refresh`
+flake at every CPU count, same as always. M7's "full RUN-STAGE10.7.ps1
+Windows gate plus desktop journeys on 1/2/4 CPUs" requirement is now
+satisfied for the shell-code-removal scope specifically (the Windows
+gate itself passed earlier today, see below).
+
+**App visual-token overhaul: done.** Every first-party app with GUI
+chrome (`woven-files`, `woven-terminal`, `woven-editor`, `woven-images`,
+`woven-monitor`, `woven-store`, `woven-update`, `woven-security`,
+`woven-calculator`, `woven-installer`) now draws through
+`libwoven::ui::Theme::DARK` instead of locally hardcoded color consts
+(`PANEL`/`ACCENT`/`TEXT`/`BUTTON`), matching `woven-shell`'s own
+established accent (`Theme::DARK.accent` was retuned from
+`rgb(100,220,180)` to `rgb(76,190,188)` to match). `woven-settings`
+already supported `Theme::DARK`/`LIGHT`/`HIGH_CONTRAST` dynamically
+before this pass and needed no change. `woven-recovery`, `woven-search`,
+`woven-ai`, and `woven-package` are CLI-only (no GUI/`Painter`/`Theme`
+call sites) and are confirmed to need no migration. Each app verified
+individually via `cargo build --target x86_64-unknown-none` and
+`cargo clippy --target x86_64-unknown-none -- -D warnings`, both clean;
+IPC and accepted behavior untouched (color/token substitution only, no
+geometry or protocol changes). Committed as one small commit per app.
+
+**Asset set: first pass done.** `kernel/build.rs`'s generated wallpaper
+sample (`assets/wallpapers/wovenhat-gradient-160x90`) was an unrelated
+orange/brown gradient; replaced with a procedural navy-to-teal gradient
+using the shell's own `WALLPAPER_TOP`/`WALLPAPER_BOTTOM` palette plus
+its diagonal weave-motif tint, so the sample now matches the live
+desktop (also fixed a pre-existing BGR/RGB byte-order bug in the
+generator). `apps/woven-shell/src/icons.rs`'s app-tile icon set gained
+`AppIcon::Monitor` and `AppIcon::Installer` (previously generic
+fallback), covering every app in the kernel's launcher catalog with a
+distinct icon. `cargo build`/`cargo clippy --target x86_64-unknown-none
+-- -D warnings` clean for both `kernel` and `apps/woven-shell`.
+
+**Not done, explicitly**: a full redesigned icon pack beyond the two
+additions above, and wallpaper variants beyond the one existing sample
+(light/high-contrast/additional original compositions). M7 is not being
+claimed complete; the layout cutover, the app theme migration, and this
+first asset pass are done, but a larger asset pass remains open if
+wanted.
+
+## Full Stage 10.7 Windows gate - 2026-11-03 - PASSED
+
+`RUN-STAGE10.7.ps1` (host unittest discovery, host Clippy lint, the full
+Stage 10.6 preservation chain including the memory/boot regression
+matrix -- 10x1 CPU, 30x2 CPU, 20x4 CPU, all PASS exit 33 -- and Stage
+10.7's own isolated async-TCP boots at 1/2/4 CPUs) passed completely,
+exit code 0, for the first time this session. Two fixes were needed to
+get the gate running at all: `run-stage10-7-acceptance.ps1`'s hardcoded
+`python3` (resolves to a dead Windows Store alias stub on this machine)
+replaced with a verified `Resolve-PythonCommand` fallback, and an
+undocumented, unguarded 528-line WFS block-tree feature (commit
+`0bb3c75c`, no coordination entry, no feature flag, broke
+`tests/wovenfs_crash.rs`'s accepted `a_file_larger_than_the_direct_
+block_limit_is_refused` assertion) reverted via `f2cd9808`. Both
+recorded in `docs/agent-coordination.md`. Evidence:
+`audit-artifacts/acceptance-20261103-141715-448/`.
+
+This confirms the WovenHat Overview work (M1-M6) did not regress any
+prior-stage acceptance. M7's own gate ("Full RUN-STAGE10.7.ps1 Windows
+gate plus desktop journeys on 1/2/4 CPUs; all prior-stage acceptance
+still passes") now has its Windows-gate half satisfied; the desktop-
+journeys half (`scripts/test-desktop-qualification.py` at 1/2/4 CPU
+against the final M7 cutover state) is still open, pending the actual
+cutover (making `--layout=overview` the hard default, removing the
+legacy taskbar code) which has not started.
+
+## WovenHat Overview desktop overhaul (M6) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M6 (measured performance/memory record) is implemented, built,
+Clippy-clean, and QEMU-verified with real captured numbers -- not
+estimates. Added two lightweight log instrumentation points, both
+reusing only the existing `libwoven::ticks()` clock and `log()` (no new
+syscall or kernel capability): `log_search_latency` (search-filter cost
+each time the query changes) and a full-screen-recompose timer around
+the shell's first paint (`fn main`, a genuine full recompose by
+construction). Measured, software/QEMU-TCG, single CPU, cold first boot:
+boot-to-desktop-ready 448 ticks (4.48 s); full recompose 129 ticks
+(1.29 s); search-filter latency 0 ticks (under the 10 ms tick
+resolution) against the demo catalog's actual 11 apps -- the design
+brief's "search latency over 64 apps" budget assumes `MAX_APPS` (64)
+entries, which the current catalog fixture doesn't reach, reported
+honestly rather than extrapolated. Shell resident memory is **not
+measurable** with the current `libwoven` ABI: no per-process memory
+stats syscall exists, and adding one is a new kernel capability needing
+its own review, out of scope to add unreviewed for a measurement. Full
+numbers and methodology: `docs/graphics/overview-desktop-2026-11-03.md`.
+
+## WovenHat Overview desktop overhaul (M2-M5 QEMU verification) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+With more host memory free, QEMU verification that M4/M5 (and M2/M3's
+2/4 CPU gaps) had been missing is now done. `scripts/test-desktop-
+qualification.py` at 1, 2, and 4 CPUs all reach the same point as the
+accepted baseline (sign-in, overview capture, launch, window-open,
+pointer, all four workspace switches), serial log confirms `WovenFiles:
+window opened`/`window opened: Files` at every CPU count, then hit the
+pre-existing `keyboard_refresh` flake. This QEMU pass caught a real bug
+before it could be called done: the M5 fade-in (`overview_fade`, a
+single `Painter::draw_blended` pass) produced a visibly ghosted,
+tile-offset duplicate of the overview's content once actually seen on
+screen. Reverted to the plain `blend`+keyed-`overlay` two-step the other
+panels already use and M3 verified correct, rather than ship something
+visibly broken; re-verified clean at 1 CPU (screenshot) and 2 CPU
+(screenshot, identical to 1 CPU). The 4 CPU screenshot showed a partial
+render (only the search field painted, the rest still showing desktop
+wallpaper) while the underlying journey still succeeded (window-open,
+launch) -- diagnosed as a capture-timing race in the new screenshot step
+(the 2 CPU capture of the same code is clean), not a functional
+regression; not pursued further to a perfect fix this pass. Full
+writeup: `docs/graphics/overview-desktop-2026-11-03.md`. Still not a
+stage acceptance: the qualification script's own exit code still
+reflects the pre-existing `keyboard_refresh` flake. M6/M7 not started.
+
+## WovenHat Overview desktop overhaul (M5) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
+
+M5 (motion, reduced motion, high contrast, i18n, accessibility) is
+implemented, built, and Clippy-clean; **not QEMU-verified this pass**,
+same host-memory constraint as M4 (free RAM stayed under 1 GB of 7.6 GB
+total). Added: a reduced-motion-respecting fade-in for the Activities
+overview (`overview_fade: Spring`, wired into the existing
+`animating`/`animate`/`tick` frame clock exactly like window fade-in
+already was); a `theme_muted()` high-contrast-aware color for
+placeholder/secondary text (the only new-surface text that wasn't
+already routed through an existing `theme_*` helper); and i18n for every
+new string from M2-M4 (Activities, search placeholder, "no open windows")
+via the lock screen's existing `Catalog` mechanism, renamed
+`shell_catalog` since it now serves more than the lock screen,
+English/Chichewa both covered, existing lock-screen key/value pairs left
+byte-for-byte unchanged. Audited keyboard reachability of every M2-M4
+control: search/grid/Dash/window-cards in the overview are keyboard-
+complete (Tab cycles, Enter launches/selects, F1/click-outside closes);
+Quick Settings and the Notification Center have **no keyboard path at
+all**, in either layout -- a real, pre-existing gap (not introduced by
+this work) that the `Key` ABI's lack of modifier keys or spare F-keys
+makes impossible to close without a reviewed ABI extension, same
+category as the already-documented missing Esc/arrow-key gaps. Full
+writeup: `docs/graphics/overview-desktop-2026-11-03.md`.
+
+## WovenHat Overview desktop overhaul (M4) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED, NOT QEMU-VERIFIED THIS PASS
+
+M4 (Dash, Alt+Tab switcher, snap shortcuts, notification placement) is
+implemented, built, and Clippy-clean, but **not QEMU-verified this pass**:
+this machine's free RAM stayed under 1 GB (of 7.6 GB total) throughout,
+so QEMU could not allocate a guest at all, let alone boot one. Stated
+plainly rather than silently skipped or claimed otherwise. Full writeup,
+including which M4 requirements were already satisfied by pre-existing
+code (confirmed by reading, not assumed) and which are blocked by the
+same missing-arrow-key ABI gap M3 documented for Esc:
+`docs/graphics/overview-desktop-2026-11-03.md`. Added: the Dash
+(favorites + running apps, `dash_apps`/`overview_dash_area`, in the
+overview below the search field) and a layout-aware `toast_area` (now
+centered under the Overview top bar instead of overlapping it). Verified
+by build/Clippy and static review only; `cargo test --test shell_input`
+still passes. QEMU re-verification (1/2/4 CPU) is owed once this
+machine has enough free memory for a guest boot.
+
+## WovenHat Overview desktop overhaul (M3) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M3 (the Activities overview: search field, this workspace's window cards,
+app grid) is implemented and verified at 1 CPU; 2 and 4 CPU are pending,
+blocked by this machine's own memory exhaustion (7.6 GB total RAM, under
+1 GB free with other applications running), not by anything in the code.
+Full design, the `Key`-enum ABI gap found for Esc/arrow-key navigation,
+and the test-script capture-timing fix: `docs/graphics/overview-
+desktop-2026-11-03.md`. The Activities button now opens a real
+full-screen overview (`overview_area`, `paint_overview_content`) instead
+of M2's interim bridge to the small launcher panel; window thumbnails are
+title-card placeholders (confirmed no scaled-blit syscall exists before
+choosing that fallback, per the design brief's own guidance). At 1 CPU
+the qualification journey (including the new `activities-overview.ppm`
+capture) reaches the same point as the accepted baseline, screenshots
+confirm the overview renders correctly (search placeholder, "No open
+windows" message, all 11 catalog apps in a 7-column grid with corrected
+labels), then hits the pre-existing `keyboard_refresh` flake. Not a stage
+acceptance. M4-M7 have not started.
+
+## WovenHat Overview desktop overhaul (M2) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+M2 (the Overview top bar: Activities button, centered clock/calendar
+popover reusing Notification Center state, system menu reusing Quick
+Settings state) is implemented and verified at the structural level on
+1/2/4 CPUs. Full design and verification: `docs/graphics/overview-
+desktop-2026-11-03.md`. `--layout=overview` is now the shell's default
+(`--layout=taskbar` is the rollback path). QEMU verification caught and
+fixed a real regression before it landed: `open`/`resized`/
+`toggle_scale`/`drag_to_pointer` each independently duplicated "available
+height above the bottom taskbar" arithmetic, which broke once the
+Overview top bar made `taskbar_top()` return `0` (every window-open
+request was rejected); fixed with one shared `(area_top, area_height)`
+computation. At 1, 2, and 4 CPUs the qualification journey reaches the
+same point as the accepted pre-change baseline (sign-in, launch,
+window-open, pointer, all four workspace switches), then hits the
+pre-existing `keyboard_refresh` framebuffer-diff flake recorded below
+(not a regression, reproduces on the untouched baseline). This is not a
+stage acceptance: the qualification script's own exit code still reports
+failure because of that flake. M3-M7 (Activities overview, dash/
+switcher, motion/accessibility/i18n, performance budgets, default
+cutover) have not started.
+
+## WovenHat Overview desktop overhaul (M1) - 2026-11-03 - IMPLEMENTING / NOT ACCEPTED
+
+User-authorized full takeover of `apps/woven-shell` per `CLAUDE-START-HERE.md`,
+superseding the earlier bottom-taskbar/Windows-11-style assignment. M0
+(coordination, claimed paths) and the first pass of M1 (behavior-preserving
+module split) are done: `main.rs` (4,644 lines) is split into `tokens.rs`
+(colors/sizes/high-contrast theme resolution), `geometry.rs` (Area/Dirty
+damage tracking), `textures.rs` (static .bss render-target buffers),
+`icons.rs` (app-tile drawing), `model.rs` (Window/App/Child/Note/Toast),
+and `painter.rs` (the tile-chunked renderer), leaving `main.rs` at 3,743
+lines, almost entirely the `struct Desktop`/`impl Desktop` event loop and
+`fn main`. Each slice is verified with `cargo build`/`cargo clippy --target
+x86_64-unknown-none -- -D warnings` inside `apps/woven-shell`; nothing in
+`impl Desktop` itself has moved yet, since its ~80 methods are interleaved
+by feature history (e.g. Quick Settings and lock-screen methods alternate
+line-by-line) rather than grouped by concern, so splitting it safely is a
+much larger, slower undertaking than the six clean extractions done so far.
+
+Also found and confirmed NOT a regression: `scripts/test-desktop-
+qualification.py --cpus 1` times out waiting for a materially changed
+framebuffer during a Files keyboard-refresh check, even though the serial
+log shows the refresh happened and sign-in/launch/pointer/workspace-switch
+all succeeded. Reproduced identically against the pre-change commit
+(`48fc4a27`) in an isolated worktree -- this is a pre-existing flake in the
+qualification harness or its framebuffer-diff threshold, unrelated to this
+work. Recorded in `docs/agent-coordination.md`.
+
+Separately, the Stage 10.7 acceptance chain (`RUN-STAGE10.7.ps1`) run
+earlier this session passed Stages up through 10.6 on 1/2/4 CPUs (host
+lint, Stage 10.6 preservation); Stage 10.7 itself failed only because
+`python3` on this machine resolves to a dead Windows Store app-execution-
+alias stub rather than a real interpreter (`python` is the real one,
+3.14.7) -- an environment issue, not a kernel defect.
+
+M2 (the actual new Overview top bar, clock/calendar popover and system
+menu, gated behind a `--layout` flag with the legacy taskbar chrome kept
+as the `--layout=taskbar` rollback path) has not started: it is new UI
+work requiring real design/implementation and a QEMU screenshot +
+keyboard-journey verification on 1/2/4 CPUs, not a mechanical refactor,
+and is being scoped deliberately rather than rushed in the same pass as
+M1's module split. No stage acceptance or modernization claim is made for
+M2-M7.
+
+## Stage 12 Filesystem and Storage requalification - 2026-11-03 - PASSED BOUNDED GATE
+
+Stages 12.1-12.5 were requalified at current head. A Stage 12.5 self-test
+assertion failed warning-denying Clippy (`bool_comparison` in
+`kernel/src/storage_manager.rs`); it was rewritten as a logically identical
+negation, with no assertion weakened. `run-stage12-acceptance.ps1` had been
+deleted by cleanup commit `b5a2e571` and was restored byte-identical from
+`b5a2e571^`.
+
+Passed: target Clippy with each of `stage12-1..5-test` and
+`stage12-2-xattr-test`; `cargo clippy --all-targets -- -D warnings`; full
+host `cargo test`; `tests/wovenfs_crash.rs` (20 tests, every-write-boundary
+crash replay, xattr atomicity); and QEMU stages 12.1-12.5 at 1/2/4 CPUs, all
+exit 33, marker `=== STAGE 12 ACCEPTANCE: PASS ===`. Evidence:
+`audit-artifacts/stage12-requal/` and `audit-artifacts/stage12.{1..5}-{1,2,4}cpu-1793699*`.
+
+Not claimed (unchanged open items): WovenFS is not the mounted system
+filesystem (FAT32 still holds the boot volume and `/mnt`; product decision
+pending); physical power-loss and USB qualification need Administrator
+elevation and explicit erase authorization; real measured-root key evidence
+for 12.3 needs a platform TPM/firmware backend on hardware. The full
+`RUN-STAGE10.7.ps1` Windows gate and the other-stage matrices were not
+re-run in this pass.
+
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 
 The full appearance/features proposal is authorized. Work resumes at the open

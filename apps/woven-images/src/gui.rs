@@ -6,11 +6,8 @@ use libwoven::{rgb, Canvas, GraphicsSurface};
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 170;
 const BUTTON_WIDTH: usize = 80;
@@ -142,14 +139,14 @@ fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
 
 fn draw_thumbnail(canvas: &mut Canvas<'_>, image: Option<(&[u32], usize, usize)>) {
     let Some((pixels, width, height)) = image else {
-        canvas.draw_text(182, 72, "Wallpaper unavailable", TEXT);
+        canvas.draw_text_system(182, 72, "Wallpaper unavailable", THEME.text);
         return;
     };
     let x0 = 182i32;
     let y0 = 70i32;
     let target_width = 140usize;
     let target_height = 78usize;
-    canvas.fill_rect(x0 - 2, y0 - 2, target_width + 4, target_height + 4, ACCENT);
+    canvas.fill_rect(x0 - 2, y0 - 2, target_width + 4, target_height + 4, THEME.accent);
     for y in 0..target_height {
         let source_y = y * height / target_height;
         for x in 0..target_width {
@@ -172,20 +169,13 @@ fn draw_images(
     wallpaper: Option<(&[u32], usize, usize)>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    let theme = Theme {
-        surface: PANEL,
-        accent: ACCENT,
-        text: TEXT,
-        disabled: BUTTON,
-        focus: ACCENT,
-    };
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenImages",
     )
-    .draw(canvas, theme);
+    .draw(canvas, THEME);
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 36, 180, 16),
         "Image workspace",
@@ -193,36 +183,36 @@ fn draw_images(
     .draw(
         canvas,
         Theme {
-            text: ACCENT,
-            ..theme
+            text: THEME.accent,
+            ..THEME
         },
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 88, "Image files", ACCENT);
-    canvas.draw_text(182, 54, "Licensed wallpaper", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 88, "Image files", THEME.accent);
+    canvas.draw_text_system(182, 54, "Licensed wallpaper", THEME.accent);
     draw_thumbnail(canvas, wallpaper);
     let mut digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 106, "Entries ", TEXT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 106, "Entries ", THEME.text);
     let count_text = libwoven::format_u64(image_count() as u64, &mut digits);
     if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text(PANEL_X + 58, PANEL_Y + 106, text, ACCENT);
+        canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 106, text, THEME.accent);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 138, "PNG  JPEG  GIF  BMP", TEXT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 160, "CLI: --list PATH", TEXT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 138, "PNG  JPEG  GIF  BMP", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 160, "CLI: --list PATH", THEME.text);
     let mut refresh_digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", TEXT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, ACCENT);
+        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
     }
-    refresh.draw(canvas, theme);
+    refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
             i32::from(y).saturating_sub(2),
             5,
             5,
-            if pressed { TEXT } else { POINTER_MARKER },
+            if pressed { THEME.text } else { POINTER_MARKER },
         );
     }
 }

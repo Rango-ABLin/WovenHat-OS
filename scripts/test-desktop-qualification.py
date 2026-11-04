@@ -23,8 +23,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -163,7 +165,8 @@ def timing_within(timing: dict[str, float], limits: dict[str, float]) -> list[st
 
 class Qmp:
     def __init__(self, port: int, deadline: float, trace: Path | None = None,
-                 process: subprocess.Popen[Any] | None = None):
+                 process: subprocess.Popen[Any] | None = None,
+                 display_device: str | None = None):
         while True:
             try:
                 self.sock = socket.create_connection(("127.0.0.1", port), timeout=2)
@@ -176,6 +179,7 @@ class Qmp:
                 time.sleep(0.1)
         self.file = self.sock.makefile("rwb")
         self.trace = trace
+        self.display_device = display_device
         self._read_reply()
         self.command("qmp_capabilities")
 
@@ -235,7 +239,10 @@ class Qmp:
         ]})
 
     def screendump(self, path: Path) -> None:
-        self.command("screendump", {"filename": str(path.resolve())})
+        arguments: dict[str, Any] = {"filename": str(path.resolve())}
+        if self.display_device is not None:
+            arguments.update({"device": self.display_device, "head": 0})
+        self.command("screendump", arguments)
 
     def close(self) -> None:
         try:
@@ -298,6 +305,26 @@ def bitmap_matches(width: int, height: int, pixels: bytes, x: int, y: int,
                 if pixels[offset:offset + 6] != color * 2:
                     return False
     return True
+
+
+def region_changed(reference: bytes, x: int, y: int, width: int, height: int,
+                   minimum: int) -> Callable[[int, int, bytes], bool]:
+    """Require a repaint in one semantic client region, independent of font AA."""
+    def matches(frame_width: int, frame_height: int, pixels: bytes) -> bool:
+        if len(reference) != len(pixels) or x < 0 or y < 0:
+            return False
+        if x + width > frame_width or y + height > frame_height:
+            return False
+        changed = 0
+        for row in range(y, y + height):
+            start = (row * frame_width + x) * 3
+            end = (row * frame_width + x + width) * 3
+            changed += sum(
+                left != right
+                for left, right in zip(reference[start:end], pixels[start:end])
+            )
+        return changed >= minimum
+    return matches
 
 
 def capture_until_changed(
@@ -435,19 +462,48 @@ def reap_process(process: subprocess.Popen[Any] | None) -> None:
         process.wait(timeout=10)
 
 
+def compare_against_reference(
+    candidate: Path, reference: Path | None, tolerance_percent: float
+) -> dict[str, Any] | None:
+    """Wire the Phase 9 reference-image tool into the real journey.
+
+    Dimension mismatch is recorded, not raised, because this harness's
+    plain `-vga std` capture and a reference captured through the
+    virtio-gpu display path are not guaranteed to share a resolution; a
+    pixel-content regression at matching dimensions is a real failure.
+    """
+    if reference is None:
+        return None
+    if not reference.is_file():
+        return {"pass": False, "reason": f"reference image not found: {reference}"}
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "compare_against_reference", ROOT / "scripts" / "compare-against-reference.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.compare(candidate, reference, tolerance_percent)
+
+
 def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path) -> dict[str, Any]:
     image = build_hardware_demo(output)
     serial = output / "serial.log"
     qmp_port = free_port()
+    display_args = (
+        ["-display", "none", "-vga", "none", "-device", "virtio-vga,id=gpu0,xres=1280,yres=800"]
+        if args.display == "virtio-vga"
+        else ["-display", "none", "-vga", "std"]
+    )
     command = [
         str(qemu), "-accel", "whpx" if args.accelerator == "whpx" else "tcg,tb-size=128",
         "-machine", "pc", "-m", args.memory,
-        "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
+        "-smp", str(args.cpus), "-serial", f"file:{serial}",
         "-no-reboot", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
         "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}",
-        "-device", "virtio-blk-pci,drive=boot,bootindex=1", "-vga", "std",
-    ]
+        "-device", "virtio-blk-pci,drive=boot,bootindex=1",
+    ] + display_args
     (output / "qemu-command.json").write_text(json.dumps(command, indent=2) + "\n", encoding="utf-8")
     timings: dict[str, float] = {}
     screenshots: list[str] = []
@@ -458,7 +514,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
         with (output / "qemu.log").open("w", encoding="utf-8") as qemu_log:
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             process = subprocess.Popen(command, cwd=ROOT, stdout=qemu_log, stderr=subprocess.STDOUT, creationflags=flags)
-            qmp = Qmp(qmp_port, time.monotonic() + 30, output / "qmp.jsonl", process)
+            qmp = Qmp(
+                qmp_port,
+                time.monotonic() + 30,
+                output / "qmp.jsonl",
+                process,
+                "gpu0" if args.display == "virtio-vga" else None,
+            )
             wait_marker(serial, "[SESSION] WovenShell desktop started", started + args.timeout, process,
                         "desktop_session_startup_ms", timings, started)
             wait_marker(serial, "woven-shell: desktop ready", started + args.timeout, process,
@@ -487,9 +549,35 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             baseline = output / "desktop-signed-in.ppm"
             capture_frame(qmp, baseline, time.monotonic() + args.frame_timeout, timings, "desktop")
             screenshots.append(baseline.name)
+            reference_comparison = compare_against_reference(
+                baseline, args.reference_image, args.reference_tolerance_percent
+            )
+            if reference_comparison is not None:
+                (output / "reference-comparison.json").write_text(
+                    json.dumps(reference_comparison, indent=2) + "\n",
+                    encoding="utf-8",
+                )
 
             launch_started = time.monotonic()
-            for key in ("f1", "f", "i", "l", "e", "s", "ret"):
+            qmp.key("f1", 90)
+            # Overview journey (M3): F1 opens the Activities overview;
+            # capture it before typing so the search field, window cards
+            # and app grid are visible, unfiltered. (M7 removed the
+            # earlier --layout=taskbar/--layout=overview flag and the
+            # legacy taskbar chrome it selected between -- Overview is
+            # the only layout now.) The shell's frame clock is up to
+            # 250ms while idle (see main.rs's module doc), so retry
+            # against the pre-F1 baseline rather than a fixed sleep, the
+            # same pattern the files-window-open capture below already
+            # uses.
+            _, _, pre_overview_pixels = parse_ppm(baseline)
+            overview_frame = output / "activities-overview.ppm"
+            capture_until_changed(
+                qmp, overview_frame, pre_overview_pixels, time.monotonic() + args.frame_timeout,
+                timings, "overview", 1000
+            )
+            screenshots.append(overview_frame.name)
+            for key in ("f", "i", "l", "e", "s", "ret"):
                 qmp.key(key, 90)
                 time.sleep(0.12)
             wait_marker(serial, "WovenFiles: window opened", launch_started + args.input_timeout,
@@ -568,10 +656,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_keyboard = capture_until_changed(
                 qmp, keyboard_frame, after_pointer,
                 time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
-                lambda w, h, pixels: w == 1280 and h == 800 and bitmap_matches(
-                    w, h, pixels, 236, 492, (14, 17, 1, 2, 4, 8, 31),
-                    bytes((100, 220, 180)), bytes((35, 43, 66))
-                )
+                region_changed(after_pointer, 180, 470, 140, 70, 20)
             )
             screenshots.append(keyboard_frame.name)
             if changed_pixels(after_pointer, after_keyboard) < 20:
@@ -614,14 +699,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_settings_key = capture_until_changed(
                 qmp, settings_after, before_settings_key,
                 time.monotonic() + args.frame_timeout, timings, "settings_keyboard_refresh", 20,
-                lambda w, h, pixels: w == 1280 and h == 800 and all(
-                    pixels[(y * w + 628) * 3:(y * w + 808) * 3]
-                    == bytes((255, 205, 96)) * 180
-                    for y in range(508, 510)
-                ) and bitmap_matches(
-                    w, h, pixels, 292, 520, (4, 12, 4, 4, 4, 4, 14),
-                    bytes((100, 220, 180)), bytes((45, 65, 90))
-                )
+                region_changed(before_settings_key, 560, 480, 300, 100, 20)
             )
             screenshots.append(settings_after.name)
             if changed_pixels(before_settings_key, after_settings_key) < 20:
@@ -727,11 +805,56 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             except OSError:
                 pass
         reap_process(process)
-    return {"timings_ms": timings, "screenshots": screenshots, "cpus": args.cpus}
+    result: dict[str, Any] = {"timings_ms": timings, "screenshots": screenshots, "cpus": args.cpus}
+    result["phase7_metrics"] = phase7_metrics(output / "serial.log")
+    if reference_comparison is not None:
+        result["reference_comparison"] = reference_comparison
+    return result
 
 
 def write_result(output: Path, result: dict[str, Any]) -> None:
     (output / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def phase7_metrics(serial_path: Path) -> dict[str, Any]:
+    """Summarize compositor repaint evidence without inventing scanout data."""
+    text = serial_path.read_text(encoding="utf-8", errors="replace")
+    recomposes = [
+        int(value)
+        for value in re.findall(r"woven-shell: interactive recompose ticks=(\d+)", text)
+    ]
+    active_recomposes = [value for value in recomposes if value > 0]
+    search_latencies = [
+        int(value)
+        for value in re.findall(r"woven-shell: search latency ticks=(\d+)", text)
+    ]
+    result: dict[str, Any] = {
+        "tick_rate_hz": 100,
+        "recompose_samples": len(recomposes),
+        "idle_recompose_samples": len(recomposes) - len(active_recomposes),
+        "active_recompose_samples": len(active_recomposes),
+        "recompose_ticks": recomposes,
+        "recompose_ms": [round(value * 10.0, 3) for value in recomposes],
+        "active_recompose_ms": [round(value * 10.0, 3) for value in active_recomposes],
+        "search_latency_samples": len(search_latencies),
+        "search_latency_ticks": search_latencies,
+        "measurement_limits": {
+            "input_to_frame_ms": "host QMP input-to-capture proxy is recorded in timings_ms",
+            "cpu": "not exposed as a guest ABI measurement",
+            "guest_memory": "not exposed as a guest ABI measurement",
+            "host_qemu_cpu_memory": "not used as a guest performance claim",
+        },
+    }
+    if active_recomposes:
+        ordered = sorted(active_recomposes)
+        p95_index = min(len(ordered) - 1, max(0, (len(ordered) * 95 + 99) // 100 - 1))
+        result["active_recompose_summary_ms"] = {
+            "min": round(min(ordered) * 10.0, 3),
+            "median": round(statistics.median(ordered) * 10.0, 3),
+            "p95": round(ordered[p95_index] * 10.0, 3),
+            "max": round(max(ordered) * 10.0, 3),
+        }
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -741,6 +864,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--accelerator", choices=("tcg", "whpx"), default="tcg",
                         help="QEMU accelerator; assertions and timing limits are identical")
+    parser.add_argument(
+        "--display", choices=("std", "virtio-vga"), default="std",
+        help="display path to qualify: legacy VGA or single-head VirtIO-GPU at 1280x800",
+    )
     parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G configured to leave 4 GiB usable after firmware reservations)")
     parser.add_argument("--timeout", type=float, default=180.0)
     # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
@@ -751,9 +878,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-input-ms", type=float, default=20_000.0)
     parser.add_argument("--max-frame-ms", type=float, default=5_000.0)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--reference-image", type=Path, default=None,
+        help="optional approved reference image (PPM/PNG) to compare the sign-in baseline "
+             "capture against via scripts/compare-against-reference.py; dimension mismatch "
+             "is recorded but does not fail the gate, since this harness's -vga std capture "
+             "and a virtio-gpu-captured reference are not guaranteed to share a resolution",
+    )
+    parser.add_argument(
+        "--reference-tolerance-percent", type=float, default=0.1,
+        help="maximum fraction of differing pixels, as a percentage, still considered a pass "
+             "when --reference-image is given (default: 0.1)",
+    )
     args = parser.parse_args(argv)
     if args.timeout <= 0 or args.input_timeout <= 0 or args.frame_timeout <= 0:
         parser.error("timeouts must be positive")
+    if args.reference_tolerance_percent < 0:
+        parser.error("--reference-tolerance-percent must not be negative")
     try:
         output = create_output(ROOT, args.output)
     except ValueError as error:
@@ -767,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         "firmware": str(firmware.resolve()),
         "cpus": args.cpus,
         "accelerator": args.accelerator,
+        "display": args.display,
         "physical_hardware_touched": False,
         "reboot_requested": False,
         "output": str(output),
@@ -796,7 +938,13 @@ def main(argv: list[str] | None = None) -> int:
             for name, value in evidence["timings_ms"].items()
             if name.startswith("frame_") and value > args.max_frame_ms
         ]
-        failures = timing_failures + frame_failures
+        reference_comparison = evidence.get("reference_comparison")
+        reference_failures = []
+        if reference_comparison is not None and not reference_comparison["pass"] and (
+            "reason" not in reference_comparison or "dimension mismatch" not in reference_comparison["reason"]
+        ):
+            reference_failures = [f"reference image comparison failed: {reference_comparison}"]
+        failures = timing_failures + frame_failures + reference_failures
         base.update(evidence)
         base.update({"status": "FAIL" if failures else "PASS", "pass": not failures, "failures": failures})
         write_result(output, base)
@@ -815,6 +963,9 @@ def main(argv: list[str] | None = None) -> int:
             "status": "FAIL", "pass": False, "failures": [str(error)],
             "serial": "serial.log", "screenshots": sorted(path.name for path in output.glob("*.ppm")),
         })
+        comparison = output / "reference-comparison.json"
+        if comparison.is_file():
+            base["reference_comparison"] = json.loads(comparison.read_text(encoding="utf-8"))
         write_result(output, base)
         print(f"FAILED: {error}; evidence: {output}", file=sys.stderr)
         return 1
@@ -823,6 +974,9 @@ def main(argv: list[str] | None = None) -> int:
             "status": "FAIL", "pass": False, "failures": [f"unexpected harness error: {error}"],
             "serial": "serial.log", "screenshots": sorted(path.name for path in output.glob("*.ppm")),
         })
+        comparison = output / "reference-comparison.json"
+        if comparison.is_file():
+            base["reference_comparison"] = json.loads(comparison.read_text(encoding="utf-8"))
         write_result(output, base)
         print(f"FAILED: unexpected harness error: {error}; evidence: {output}", file=sys.stderr)
         return 1

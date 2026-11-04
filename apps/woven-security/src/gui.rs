@@ -1,13 +1,11 @@
+use libwoven::ui::Theme;
 use libwoven::{rgb, Canvas, GraphicsSurface};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 200;
 const BACKGROUND: u32 = rgb(14, 18, 30);
-const PANEL: u32 = rgb(35, 43, 66);
-const ACCENT: u32 = rgb(100, 220, 180);
-const TEXT: u32 = rgb(235, 240, 250);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON: u32 = rgb(45, 65, 90);
+const THEME: Theme = Theme::DARK;
 const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 145;
 const BUTTON_WIDTH: usize = 80;
@@ -151,10 +149,10 @@ fn draw_number(
     value: u64,
     digits: &mut [u8; 20],
 ) {
-    canvas.draw_text(x, y, label, TEXT);
+    canvas.draw_text_system(x, y, label, THEME.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, ACCENT);
+        canvas.draw_text_system(x + label.len() as i32 * 6, y, text, THEME.accent);
     }
 }
 
@@ -177,17 +175,17 @@ fn draw_security(
     admin: &AdminUi,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
-    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, PANEL);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 8, "WovenSecurity", TEXT);
+    canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 8, "WovenSecurity", THEME.text);
     if admin.mode != 0 {
         draw_admin(canvas, admin);
         if let Some((x, y)) = pointer {
-            canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+            canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { THEME.text } else { POINTER_MARKER });
         }
         return;
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Current identity", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 36, "Current identity", THEME.accent);
     let mut digits = [0u8; 20];
     // SAFETY: argument-free identity query.
     draw_number(canvas, PANEL_X + 10, PANEL_Y + 54, "UID ", unsafe {
@@ -197,9 +195,9 @@ fn draw_security(
     draw_number(canvas, PANEL_X + 150, PANEL_Y + 54, "GID ", unsafe {
         libwoven::syscall::getgid()
     }, &mut digits);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 88, "Audit trail", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 88, "Audit trail", THEME.accent);
     draw_number(canvas, PANEL_X + 10, PANEL_Y + 106, "Entries ", audit_count(), &mut digits);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 140, "Bounded view: 16 events", TEXT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 140, "Bounded view: 16 events", THEME.text);
     let mut refresh_digits = [0u8; 20];
     draw_number(
         canvas,
@@ -214,22 +212,22 @@ fn draw_security(
         BUTTON_Y,
         BUTTON_WIDTH,
         BUTTON_HEIGHT,
-        if pressed { ACCENT } else { BUTTON },
+        if pressed { THEME.accent } else { THEME.disabled },
     );
-    canvas.draw_text(BUTTON_X + 14, BUTTON_Y + 6, "Refresh", TEXT);
+    canvas.draw_text_system(BUTTON_X + 14, BUTTON_Y + 6, "Refresh", THEME.text);
     if let Some((x, y)) = pointer {
-        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { TEXT } else { POINTER_MARKER });
+        canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, if pressed { THEME.text } else { POINTER_MARKER });
     }
 }
 
 fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
     if admin.mode == MODE_ACCESS_DENIED {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 48, "Administrator access denied", TEXT);
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, "Press A to try again", TEXT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 48, "Administrator access denied", THEME.text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 82, "Press A to try again", THEME.text);
         return;
     }
     if admin.mode != MODE_DIRECTORY {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator access", ACCENT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 36, "Administrator access", THEME.accent);
         let (prompt, source) = match admin.mode {
             MODE_AUTH_NAME => ("Account name", &admin.name[..admin.name_length]),
             MODE_AUTH_PIN | MODE_ADD_USER_PIN => {
@@ -238,14 +236,14 @@ fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
                     *byte = b'*';
                 }
                 let text = core::str::from_utf8(&field[..admin.pin_length]).unwrap_or("");
-                canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, text, TEXT);
+                canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 82, text, THEME.text);
                 let prompt = if admin.mode == MODE_AUTH_PIN {
                     "Administrator PIN"
                 } else {
                     "New user PIN"
                 };
-                canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
-                canvas.draw_text(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", TEXT);
+                canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 60, prompt, THEME.text);
+                canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", THEME.text);
                 return;
             }
             MODE_ADD_USER_NAME => ("New user name", &admin.input[..admin.input_length]),
@@ -260,34 +258,34 @@ fn draw_admin(canvas: &mut Canvas<'_>, admin: &AdminUi) {
             MODE_SET_LOCKOUT => ("Max failures (1-32)", &admin.input[..admin.input_length]),
             _ => ("Administrator access", &[] as &[u8]),
         };
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 60, prompt, TEXT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 60, prompt, THEME.text);
         let text = core::str::from_utf8(source).unwrap_or("");
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 82, text, TEXT);
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", TEXT);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 82, text, THEME.text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 116, "Enter: continue", THEME.text);
         return;
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 36, "Administrator directory", ACCENT);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Users", ACCENT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 36, "Administrator directory", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 52, "Users", THEME.accent);
     let mut digits = [0u8; 20];
     for (row, item) in admin.users.iter().take(5).enumerate() {
         let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
         let y = PANEL_Y + 68 + row as i32 * 14;
         draw_number(canvas, PANEL_X + 10, y, "", u64::from(item.id), &mut digits);
-        canvas.draw_text(PANEL_X + 40, y, name, TEXT);
+        canvas.draw_text_system(PANEL_X + 40, y, name, THEME.text);
         if item.administrator {
-            canvas.draw_text(PANEL_X + 140, y, "admin", ACCENT);
+            canvas.draw_text_system(PANEL_X + 140, y, "admin", THEME.accent);
         }
     }
-    canvas.draw_text(PANEL_X + 190, PANEL_Y + 52, "Groups", ACCENT);
+    canvas.draw_text_system(PANEL_X + 190, PANEL_Y + 52, "Groups", THEME.accent);
     for (row, item) in admin.groups.iter().take(5).enumerate() {
         let name = core::str::from_utf8(&item.name[..item.length]).unwrap_or("?");
         let y = PANEL_Y + 68 + row as i32 * 14;
         draw_number(canvas, PANEL_X + 190, y, "", u64::from(item.id), &mut digits);
-        canvas.draw_text(PANEL_X + 220, y, name, TEXT);
+        canvas.draw_text_system(PANEL_X + 220, y, name, THEME.text);
     }
     draw_number(canvas, PANEL_X + 10, PANEL_Y + 150, "Users ", admin.user_count as u64, &mut digits);
     draw_number(canvas, PANEL_X + 110, PANEL_Y + 150, "Groups ", admin.group_count as u64, &mut digits);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 168, "U user G group M/R member D delete L lockout", TEXT);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 168, "U user G group M/R member D delete L lockout", THEME.text);
 }
 
 fn refresh_admin(ui: &mut AdminUi) -> bool {

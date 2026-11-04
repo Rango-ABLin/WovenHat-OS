@@ -110,8 +110,12 @@ def main() -> int:
         "tcg,tb-size=128",
         "-machine",
         "pc",
+        # The current kernel reserves a large measured/graphics address space
+        # during UEFI handoff; use the supported 5 GiB QEMU profile so the
+        # package-service acceptance exercises the guest rather than failing
+        # inside bootloader segment mapping.
         "-m",
-        "256M",
+        "5G",
         "-smp",
         str(args.cpus),
         "-display",
