@@ -61,6 +61,26 @@ next prerequisite and must be run before calling this slice fully accepted.
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Graphics modernization Phase 1 resume (2026-11-04)
+
+Taking the first unfinished row in `docs/graphics/modernization-tracker.md`:
+make the VirtIO-GPU-backed desktop frame visible in the interactive QEMU
+window, then audit filtering quality. Scope is restricted to the existing
+display/compositor/interactive launcher path; preserve the accepted software
+fallback and do not broaden into native GPU qualification. Baseline
+shell/kernel checks are required before graphics edits, followed by a real
+interactive-QEMU or equivalent visible-frame proof and updated tracker
+evidence.
+
+The baseline passed: WovenShell target Clippy and all 210 libwoven host tests.
+The GPU split was reproduced in a real QEMU run: `gpu0/head=0` captured the
+live VirtIO-GPU frame while the default VGA output was separate. A temporary
+kernel framebuffer mirror was tested and reverted because it did not bridge
+the QEMU device split and added presentation cost. QEMU GTK `show-tabs=on` is
+now enabled by `RUN-DESKTOP.ps1 -Display virtio-gpu`, exposing the live GPU
+interface to an interactive user while retaining VGA for UEFI GOP boot.
+Evidence: `target/desktop-interactive-20261104-130400-092`.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:

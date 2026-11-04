@@ -58,17 +58,16 @@ image = desktop.build_hardware_demo(out)
     # device='gpu0', head=0 (confirmed necessary: screendump with no
     # device/head targets the default/-vga std console, not this one, even
     # though the kernel is genuinely presenting to the virtio-gpu scanout).
-    # The interactive QEMU window itself still only shows the -vga std
-    # console, not this content -- see docs/graphics/
-    # modernization-tracker.md's Phase 1/6 rows.
+    # The interactive GTK window exposes both graphical interfaces as tabs;
+    # select the virtio-gpu tab to watch the live compositor frame.
     $displayArgs = if ($Display -eq 'virtio-gpu') {
-        @('-vga', 'std', '-device', 'virtio-gpu-pci,id=gpu0')
+        # Keep VGA as the UEFI GOP boot console, but expose QEMU's GTK display
+        # tabs so an interactive user can switch from the stale VGA console to
+        # the live virtio-gpu head. QMP still targets it explicitly as gpu0.
+        @('-display', 'gtk,show-tabs=on', '-vga', 'std', '-device', 'virtio-gpu-pci,id=gpu0')
     } else {
         @('-vga', 'std')
     }
-    # Tried '-display sdl' to get a human-visible per-head window for the
-    # virtio-gpu scanout: it still only shows the -vga std console (tested
-    # 2026-11-03, see docs/graphics/modernization-tracker.md). Not used.
     $qemuArgs = @(
         '-accel', $accelOption, '-machine', 'pc',
         '-m', $Memory, '-smp', "$Cpus", '-name', 'WovenHat Desktop',
