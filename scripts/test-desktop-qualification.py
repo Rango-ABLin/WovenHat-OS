@@ -455,6 +455,30 @@ def reap_process(process: subprocess.Popen[Any] | None) -> None:
         process.wait(timeout=10)
 
 
+def compare_against_reference(
+    candidate: Path, reference: Path | None, tolerance_percent: float
+) -> dict[str, Any] | None:
+    """Wire the Phase 9 reference-image tool into the real journey.
+
+    Dimension mismatch is recorded, not raised, because this harness's
+    plain `-vga std` capture and a reference captured through the
+    virtio-gpu display path are not guaranteed to share a resolution; a
+    pixel-content regression at matching dimensions is a real failure.
+    """
+    if reference is None:
+        return None
+    if not reference.is_file():
+        return {"pass": False, "reason": f"reference image not found: {reference}"}
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "compare_against_reference", ROOT / "scripts" / "compare-against-reference.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.compare(candidate, reference, tolerance_percent)
+
+
 def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path) -> dict[str, Any]:
     image = build_hardware_demo(output)
     serial = output / "serial.log"
@@ -507,6 +531,14 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             baseline = output / "desktop-signed-in.ppm"
             capture_frame(qmp, baseline, time.monotonic() + args.frame_timeout, timings, "desktop")
             screenshots.append(baseline.name)
+            reference_comparison = compare_against_reference(
+                baseline, args.reference_image, args.reference_tolerance_percent
+            )
+            if reference_comparison is not None:
+                (output / "reference-comparison.json").write_text(
+                    json.dumps(reference_comparison, indent=2) + "\n",
+                    encoding="utf-8",
+                )
 
             launch_started = time.monotonic()
             qmp.key("f1", 90)
@@ -755,7 +787,10 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             except OSError:
                 pass
         reap_process(process)
-    return {"timings_ms": timings, "screenshots": screenshots, "cpus": args.cpus}
+    result: dict[str, Any] = {"timings_ms": timings, "screenshots": screenshots, "cpus": args.cpus}
+    if reference_comparison is not None:
+        result["reference_comparison"] = reference_comparison
+    return result
 
 
 def write_result(output: Path, result: dict[str, Any]) -> None:
@@ -779,9 +814,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-input-ms", type=float, default=20_000.0)
     parser.add_argument("--max-frame-ms", type=float, default=5_000.0)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--reference-image", type=Path, default=None,
+        help="optional approved reference image (PPM/PNG) to compare the sign-in baseline "
+             "capture against via scripts/compare-against-reference.py; dimension mismatch "
+             "is recorded but does not fail the gate, since this harness's -vga std capture "
+             "and a virtio-gpu-captured reference are not guaranteed to share a resolution",
+    )
+    parser.add_argument(
+        "--reference-tolerance-percent", type=float, default=0.1,
+        help="maximum fraction of differing pixels, as a percentage, still considered a pass "
+             "when --reference-image is given (default: 0.1)",
+    )
     args = parser.parse_args(argv)
     if args.timeout <= 0 or args.input_timeout <= 0 or args.frame_timeout <= 0:
         parser.error("timeouts must be positive")
+    if args.reference_tolerance_percent < 0:
+        parser.error("--reference-tolerance-percent must not be negative")
     try:
         output = create_output(ROOT, args.output)
     except ValueError as error:
@@ -824,7 +873,13 @@ def main(argv: list[str] | None = None) -> int:
             for name, value in evidence["timings_ms"].items()
             if name.startswith("frame_") and value > args.max_frame_ms
         ]
-        failures = timing_failures + frame_failures
+        reference_comparison = evidence.get("reference_comparison")
+        reference_failures = []
+        if reference_comparison is not None and not reference_comparison["pass"] and (
+            "reason" not in reference_comparison or "dimension mismatch" not in reference_comparison["reason"]
+        ):
+            reference_failures = [f"reference image comparison failed: {reference_comparison}"]
+        failures = timing_failures + frame_failures + reference_failures
         base.update(evidence)
         base.update({"status": "FAIL" if failures else "PASS", "pass": not failures, "failures": failures})
         write_result(output, base)
@@ -843,6 +898,9 @@ def main(argv: list[str] | None = None) -> int:
             "status": "FAIL", "pass": False, "failures": [str(error)],
             "serial": "serial.log", "screenshots": sorted(path.name for path in output.glob("*.ppm")),
         })
+        comparison = output / "reference-comparison.json"
+        if comparison.is_file():
+            base["reference_comparison"] = json.loads(comparison.read_text(encoding="utf-8"))
         write_result(output, base)
         print(f"FAILED: {error}; evidence: {output}", file=sys.stderr)
         return 1
@@ -851,6 +909,9 @@ def main(argv: list[str] | None = None) -> int:
             "status": "FAIL", "pass": False, "failures": [f"unexpected harness error: {error}"],
             "serial": "serial.log", "screenshots": sorted(path.name for path in output.glob("*.ppm")),
         })
+        comparison = output / "reference-comparison.json"
+        if comparison.is_file():
+            base["reference_comparison"] = json.loads(comparison.read_text(encoding="utf-8"))
         write_result(output, base)
         print(f"FAILED: unexpected harness error: {error}; evidence: {output}", file=sys.stderr)
         return 1

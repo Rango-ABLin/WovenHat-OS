@@ -132,7 +132,9 @@ projected-surface filtering are implemented and unit-tested; and WovenShell
 skips a lower window only when an opaque higher frame contains the lower
 window's complete footprint, including shadow reach. Remaining acceptance
 work is visual/performance evidence, not a stale-VGA or missing-occlusion
-implementation gap.
+implementation gap. Phase 9's reference comparator is now also wired into
+the real qualification as an opt-in sign-in baseline check; its result is
+persisted even when a later journey assertion fails.
 
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
@@ -214,6 +216,20 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-04 (session: Phase 9 qualification wiring completed)
+
+Finished the pending Phase 9 harness increment. `--reference-image` and
+`--reference-tolerance-percent` now invoke the existing comparator during the
+real sign-in capture, and the comparison is persisted both as
+`reference-comparison.json` and inside `result.json` even when a later gate
+raises `GateFailure`. Deterministic checks passed: identical reference
+comparison reported zero changed pixels; the prior VGA capture correctly
+reported a 1280x800 versus 640x480 dimension mismatch; Python syntax checks
+passed. Real one-CPU QEMU evidence:
+`audit-artifacts/desktop-qualification-1793794228646146800/`. It reached
+desktop and sign-in, recorded the expected dimension mismatch, then failed
+only at the existing materially-changed overview framebuffer assertion.
 
 ### 2026-11-04 (session: Phase 5 occlusion acceptance and shadow correction)
 

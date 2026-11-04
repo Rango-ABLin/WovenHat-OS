@@ -8706,3 +8706,31 @@ disposable installed-image gate passes on 1/2/4 CPUs; evidence is in
 modified. The WovenFS batch branch commits bounded entries independently;
 FAT32's existing multi-entry journal path is unchanged.
 
+
+## Claude Code - Graphics modernization Phase 9 wiring (2026-11-04)
+
+Resuming `docs/graphics/modernization-tracker.md`'s Phase 9 row: the
+reference-image comparison tool existed standalone but nothing called it
+during the real qualification journey. Confirmed Codex's recent Phase
+1/5/6 graphics commits (GPU-only default, stale VGA removal, occlusion) are
+already in `master` and moved on to WovenFS, so no overlap. Claiming
+`scripts/test-desktop-qualification.py` and
+`docs/graphics/reference-screenshots/` for this focused increment only
+(not re-touching display/compositor/shell source). Adding an opt-in
+`--reference-image`/`--reference-tolerance-percent` wiring so the sign-in
+baseline capture is automatically compared when a reference is supplied,
+with a dimension mismatch recorded rather than failing the gate (the
+harness still boots `-vga std`, while the existing committed reference was
+captured through the virtio-gpu path, so a resolution mismatch is possible
+and expected, not a regression). Default behavior is unchanged when no
+reference is passed. Verifying end to end with a real 1-CPU run next.
+
+## Codex - Graphics modernization Phase 5 occlusion acceptance (2026-11-04)
+
+Continued the existing WovenShell compositor claim. Corrected the bounded
+occlusion predicate to use the lower window's complete `footprint()` so
+shadows are not incorrectly discarded. Targeted shell Clippy and workspace
+all-targets Clippy pass. The one-CPU QEMU qualification reached desktop and
+sign-in but hit the known overview framebuffer material-change flake; its
+evidence is preserved under
+`audit-artifacts/desktop-qualification-1793793781279682800/`.
