@@ -8786,3 +8786,12 @@ CPUs. Evidence is preserved in the three passing desktop-qualification
 directories recorded in the graphics tracker. The desktop harness now records
 repaint/search summaries and explicitly reports that CPU and guest memory are
 not exposed by the current guest ABI.
+
+## Codex - Launcher visual refinement pass (2026-11-04)
+
+Interactive QEMU inspection found the launcher icons still had the old
+low-resolution IconPack overlay over the rounded tiles. Removed that overlay,
+rebuilt app glyphs with antialiased rounded primitives and softer shadows, and
+refined the overview grid to larger 96x92 cells with 48-pixel tiles and no
+empty thumbnail reservation when no windows are open. Shell target Clippy
+passes with warnings denied.
