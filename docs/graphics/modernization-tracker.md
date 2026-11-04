@@ -204,6 +204,17 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 
 ## Session log (append a dated entry every time you stop; newest first)
 
+### 2026-11-04 (session: Phase 5 bounded window occlusion)
+
+Added a bounded occlusion pass to `apps/woven-shell`: while composing the
+bottom-to-top window stack, a lower frame is skipped when a higher fully
+opaque frame completely contains it. This removes redundant title/body/shadow
+work without changing translucent windows or partial overlaps. The scan is
+bounded by `MAX_WINDOWS`; no ABI or ownership behavior changed. Validation:
+WovenShell target Clippy passed. Full desktop QEMU acceptance was not started
+because an existing qualification QEMU chain was still active; it remains
+untouched per the one-chain rule.
+
 ### 2026-11-04 (session: Phase 1 projected-surface filtering)
 
 Audited the existing scaled-image path and confirmed that the compositor's

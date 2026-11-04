@@ -125,6 +125,14 @@ so the interactive window and QMP default cannot remain attached to a stale
 secondary VGA scanout. A fresh default launch recorded the single-device
 arguments and booted through the already-verified VirtIO-GPU desktop path.
 
+## Codex - Graphics modernization Phase 5 occlusion increment (2026-11-04)
+
+Added bounded whole-window occlusion culling to WovenShell repainting. Lower
+windows are skipped only when a higher window is fully opaque and contains the
+entire lower frame; translucent and partial-overlap cases retain the existing
+paint path. WovenShell target Clippy passed. A full QEMU chain is pending
+because an existing qualification QEMU process is active and was not touched.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:

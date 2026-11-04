@@ -2667,10 +2667,19 @@ impl Desktop {
         // Windows may sit on any monitor; only the bar's own band is excluded.
         let (band_top, band_height) = self.usable_band();
         let above_taskbar = Area::new(0, band_top, self.desktop_width, band_height);
-        for &slot in &self.stack[..self.stacked] {
+        for (stack_index, &slot) in self.stack[..self.stacked].iter().enumerate() {
             let Some(window) = &self.windows[slot] else {
                 continue;
             };
+            // Window bodies are submitted with an opaque blit. If a fully
+            // opaque higher window contains this entire frame, neither the
+            // lower title/body nor its shadow can affect the final pixels.
+            // Skip it before issuing any client blits. The stack is capped by
+            // MAX_WINDOWS, so this bounded scan cannot turn repaint into an
+            // unbounded scene walk.
+            if self.frame_is_fully_occluded(stack_index, window.frame()) {
+                continue;
+            }
             let bands = if Some(slot) == focused {
                 FOCUSED_SHADOW
             } else {
@@ -2770,6 +2779,13 @@ impl Desktop {
             painter.overlay(cursor, |canvas| self.render_cursor(canvas));
         }
         None
+    }
+
+    fn frame_is_fully_occluded(&self, stack_index: usize, frame: Area) -> bool {
+        self.stack[stack_index + 1..self.stacked]
+            .iter()
+            .filter_map(|&higher_slot| self.windows[higher_slot].as_ref())
+            .any(|higher| higher.alpha() == u8::MAX && higher.frame().intersect(frame) == frame)
     }
 
     fn raise(&mut self, slot: usize) {
