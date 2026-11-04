@@ -4791,3 +4791,59 @@ fn lookup_refuses_an_entry_naming_an_out_of_range_inode() {
         "unpatched image: a.txt lookup must succeed"
     );
 }
+
+/// `stage_write` (wfs.rs line 1179) checks `!bitmap_get(txn, node.direct[slot])?`
+/// and returns `Err(Error::Corrupt)` when an in-place rewrite would target a block
+/// the bitmap marks free.  Without this guard, writing through a stale block pointer
+/// would silently overwrite whatever the allocator has since given that block to.
+///
+/// The parallel `check()` path (`check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free`)
+/// detects the same bitmap inconsistency but only during a consistency check, not on
+/// write.  This test verifies the write-time guard fires before any sector is modified.
+#[test]
+fn write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free() {
+    let base = formatted();
+
+    // Create a.txt (5 bytes, one block) and record its inode.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt")
+    };
+
+    // Record direct[0] — the block the inode currently points to.
+    let block0 = read_inode_direct0(&base, file_inode);
+
+    // Control: on the unpatched image, write_file succeeds.
+    {
+        let ctrl = base.fork(None);
+        let mut v = Volume::mount(ctrl.clone()).expect("mount ctrl");
+        v.write_file(file_inode, b"world", 2)
+            .expect("control: write_file must succeed on the unpatched image");
+    }
+
+    // Fork and clear the bitmap bit for block0.  The inode struct is unchanged
+    // (direct[0] still points to block0), so mount() and checked_inode() accept
+    // the image; only the runtime write path will discover the inconsistency.
+    let image = base.fork(None);
+    clear_bitmap_block(&image, block0);
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // write_file must refuse: direct[0] != 0 but the bitmap says block0 is free.
+    assert_eq!(
+        volume.write_file(file_inode, b"world", 2),
+        Err(Error::Corrupt),
+        "write_file must return Corrupt when the existing block is not in the bitmap"
+    );
+
+    // The refused write must not have modified the image.
+    assert!(
+        image.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+}

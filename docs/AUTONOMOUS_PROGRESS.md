@@ -1,5 +1,74 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that write_file refuses a file whose existing block the bitmap marks free
+
+Branch: `auto/wovenhat-development` (base `71ae6829`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1179) contains the guard:
+
+```rust
+} else if !self.bitmap_get(txn, node.direct[slot])? {
+    // Rewriting in place a block the bitmap calls free would
+    // overwrite whatever the allocator has since given it to.
+    return Err(Error::Corrupt);
+}
+```
+
+This fires inside `write_file` when the inode has a non-zero block pointer
+(`direct[slot] != 0`) for a slot that the new write needs (`slot < needed`),
+but the block allocation bitmap says that block is free.  Without this guard,
+writing through a stale block pointer would silently overwrite whatever the
+allocator has since assigned that block to.
+
+The parallel `check()` path
+(`check_refuses_a_file_inode_naming_a_block_the_bitmap_marks_free`) detects
+the same inconsistency at consistency-check time, and is covered.  But no test
+exercised the write-time guard.  A bitmap-inconsistent image mounts without
+error (because `checked_inode` does not consult the bitmap; `check()` is a
+separate opt-in call), so the write-side guard is the only mechanism that
+prevents a file write from corrupting unrelated data at runtime.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free`:
+
+- Calls `formatted()` and creates `a.txt` (5 bytes, one block) via `create_file`,
+  recording its inode.
+- Records `block0 = direct[0]` via `read_inode_direct0`.
+- Control: on the unpatched image, `write_file(file_inode, b"world", 2)` succeeds.
+- Forks the image and calls `clear_bitmap_block(&image, block0)` to mark `block0`
+  free in the bitmap without touching the inode.  `mount()` and `checked_inode()`
+  still accept the image because they do not check the bitmap.
+- Snapshots the image before the refused write.
+- Asserts `write_file(file_inode, b"world", 2)` returns `Err(Error::Corrupt)`:
+  `slot 0 < needed = 1`, `direct[0] != 0`, `bitmap_get(block0)` returns false.
+- Asserts the image was not modified by the refused write.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **91 passed / 0 failed** (was 90; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test uses a single-block file.  A two-block file where only `direct[1]`
+  has its bitmap bit cleared while `direct[0]` is valid would fire the same guard
+  on the second iteration (slot 1); the single-block case is sufficient to prove
+  the guard fires.
+- No production code changed — the guard already existed in `stage_write`; only
+  the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that lookup refuses an entry naming an out-of-range inode
 
 Branch: `auto/wovenhat-development` (base `4c8de8d5`). Working tree was clean.
