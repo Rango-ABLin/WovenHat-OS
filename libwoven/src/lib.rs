@@ -10580,7 +10580,8 @@ pub mod graphics {
     /// A projected 3D vertex that samples a source surface instead of
     /// carrying its own colour: `u`/`v` are normalized 0-255 across the
     /// source's width/height, the same precision as a [`Color`] channel.
-    /// See [`Renderer::textured_triangle_3d`].
+    /// See [`Renderer::textured_triangle_3d`], which bilinearly filters the
+    /// source surface while projecting it.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Vertex3Tex {
         pub x: i32,
@@ -11296,7 +11297,7 @@ pub mod graphics {
         }
 
         /// As [`Self::triangle_3d`], but each covered pixel samples `source`
-        /// (nearest-neighbour, by the affine-interpolated `u`/`v`) instead of
+        /// (bilinearly, by the affine-interpolated `u`/`v`) instead of
         /// interpolating a flat per-vertex colour. This is how an existing
         /// 2D surface -- a window's own rendered `Canvas`, unchanged -- becomes
         /// one textured face of a 3D scene: the desktop projects windows as
@@ -11392,11 +11393,7 @@ pub mod graphics {
                         third_edge.abs(),
                         area.abs(),
                     );
-                    let sample_x =
-                        source.x() + (usize::from(u) * (source.width() - 1) / 255) as i32;
-                    let sample_y =
-                        source.y() + (usize::from(v) * (source.height() - 1) / 255) as i32;
-                    if let Some(sampled) = source.get(sample_x, sample_y) {
+                    if let Some(sampled) = sample_texture_bilinear(source, u, v) {
                         self.canvas.set(x, y, sampled);
                     }
                 }
@@ -12070,6 +12067,44 @@ pub mod graphics {
         let start = start as u16;
         let end = end as u16;
         ((start * (255 - amount) as u16 + end * amount as u16 + 127) / 255) as u8
+    }
+
+    fn sample_texture_bilinear(source: &crate::Canvas<'_>, u: u8, v: u8) -> Option<u32> {
+        let width = source.width();
+        let height = source.height();
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        let scaled_x = usize::from(u) * width.saturating_sub(1);
+        let scaled_y = usize::from(v) * height.saturating_sub(1);
+        let x0 = scaled_x / 255;
+        let y0 = scaled_y / 255;
+        let x1 = x0.saturating_add(1).min(width.saturating_sub(1));
+        let y1 = y0.saturating_add(1).min(height.saturating_sub(1));
+        let x_amount = (scaled_x % 255) as u8;
+        let y_amount = (scaled_y % 255) as u8;
+        let x = source.x();
+        let y = source.y();
+
+        let top_left = source.get(x + x0 as i32, y + y0 as i32)?;
+        let top_right = source.get(x + x1 as i32, y + y0 as i32)?;
+        let bottom_left = source.get(x + x0 as i32, y + y1 as i32)?;
+        let bottom_right = source.get(x + x1 as i32, y + y1 as i32)?;
+        let channel = |shift: u32| -> u8 {
+            let top = lerp(
+                ((top_left >> shift) & 0xff) as u8,
+                ((top_right >> shift) & 0xff) as u8,
+                x_amount,
+            );
+            let bottom = lerp(
+                ((bottom_left >> shift) & 0xff) as u8,
+                ((bottom_right >> shift) & 0xff) as u8,
+                x_amount,
+            );
+            lerp(top, bottom, y_amount)
+        };
+        Some(crate::rgb(channel(16), channel(8), channel(0)))
     }
 
     fn edge(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i128 {
@@ -15549,6 +15584,36 @@ mod tests {
         // instead: black, not red, so u/v genuinely vary across the
         // triangle rather than a flat fill.
         assert_eq!(pixels[3], 0);
+    }
+
+    #[test]
+    fn wovengraphics_textured_3d_bilinear_filter_blends_between_texels() {
+        use crate::graphics::{DepthBuffer, Renderer, Vertex3Tex};
+
+        let mut source_pixels = [
+            0x00ff_0000, // red
+            0x0000_ff00, // green
+            0x0000_00ff, // blue
+            0x00ff_ffff, // white
+        ];
+        let source = Canvas::new(&mut source_pixels, 0, 0, 2, 2).unwrap();
+        let mut pixels = [0u32; 25];
+        let mut depths = [u16::MAX; 25];
+        {
+            let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
+            let mut depth = DepthBuffer::new(&mut depths, 0, 0, 5, 5).unwrap();
+            Renderer::new(&mut canvas).textured_triangle_3d(
+                &mut depth,
+                Vertex3Tex::new(0, 0, 1, 0, 0),
+                Vertex3Tex::new(4, 0, 1, 255, 0),
+                Vertex3Tex::new(0, 4, 1, 0, 255),
+                &source,
+            );
+        }
+        // At (2,2), the triangle supplies u=v=128. All four source texels
+        // therefore contribute, producing the neutral midpoint rather than
+        // one of the four nearest-neighbour texels.
+        assert_eq!(pixels[2 * 5 + 2], 0x0080_8080);
     }
 
     #[test]

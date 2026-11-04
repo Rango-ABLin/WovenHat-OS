@@ -81,6 +81,15 @@ now enabled by `RUN-DESKTOP.ps1 -Display virtio-gpu`, exposing the live GPU
 interface to an interactive user while retaining VGA for UEFI GOP boot.
 Evidence: `target/desktop-interactive-20261104-130400-092`.
 
+## Codex - Graphics modernization Phase 1 filtering increment (2026-11-04)
+
+The scaled projected-surface audit found nearest-neighbour sampling in
+`libwoven::Renderer::textured_triangle_3d`. Replaced it with bounded bilinear
+filtering over the existing `Canvas`, preserving endpoint samples and adding
+midpoint coverage. `libwoven` host tests: 211 passed; warning-denying Clippy
+passed. The interactive GTK GPU-tab handoff remains the current display
+selection; GPU-default qualification is still open.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:
