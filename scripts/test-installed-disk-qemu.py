@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from typing import Iterable, Sequence
 
 
@@ -51,6 +53,106 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_wovenfs_formatter():
+    script = ROOT / "scripts" / "format-wovenfs-file-image.py"
+    spec = importlib.util.spec_from_file_location("installed_wovenfs_formatter", script)
+    if spec is None or spec.loader is None:
+        raise InstalledDiskGateError("WovenFS formatter is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _wovenfs_partition(image: Path) -> tuple[int, int]:
+    with image.open("rb") as stream:
+        stream.seek(SECTOR)
+        header = stream.read(SECTOR)
+        if header[:8] != GPT_SIGNATURE:
+            raise InstalledDiskGateError("installed image lacks a GPT header")
+        entries_lba = int.from_bytes(header[72:80], "little")
+        entry_count = int.from_bytes(header[80:84], "little")
+        entry_size = int.from_bytes(header[84:88], "little")
+        if entry_count == 0 or entry_count > 128 or entry_size < 128 or entry_size > SECTOR:
+            raise InstalledDiskGateError("GPT partition array is outside bounded limits")
+        stream.seek(entries_lba * SECTOR)
+        entries = stream.read(entry_count * entry_size)
+    esp_type = bytes.fromhex("28732ac11ff8d211ba4b00a0c93ec93b")
+    candidates = []
+    for index in range(entry_count):
+        entry = entries[index * entry_size:(index + 1) * entry_size]
+        if len(entry) < entry_size or entry[:16] == b"\0" * 16:
+            continue
+        first = int.from_bytes(entry[32:40], "little")
+        last = int.from_bytes(entry[40:48], "little")
+        if last < first or first == 0:
+            continue
+        if entry[:16] != esp_type:
+            candidates.append((first * SECTOR, (last - first + 1) * SECTOR))
+    if not candidates:
+        raise InstalledDiskGateError("GPT image has no non-ESP system partition")
+    return candidates[0]
+
+
+def _add_wovenfs_partition(image: Path) -> None:
+    old_total = image.stat().st_size // SECTOR
+    new_total = old_total + 32768
+    first_lba = old_total
+    last_lba = new_total - 34
+    with image.open("r+b") as stream:
+        stream.truncate(new_total * SECTOR)
+        stream.seek(2 * SECTOR)
+        entries = bytearray(stream.read(128 * 128))
+        if len(entries) != 128 * 128:
+            raise InstalledDiskGateError("GPT partition array is truncated")
+        entries[128:144] = bytes.fromhex("a2a0d0ebe5b9334487c068b6b72699c7")
+        entries[144:160] = bytes.fromhex("7b1e3c5a2d9f4f4b9c2d4e6a8b0c1d2e")
+        entries[160:176] = first_lba.to_bytes(8, "little") + last_lba.to_bytes(8, "little")
+        entries[192:208] = b"WovenFS System".ljust(16, b"\0")
+        entries_crc = zlib.crc32(entries) & 0xFFFFFFFF
+        stream.seek(2 * SECTOR)
+        stream.write(entries)
+        stream.seek(SECTOR)
+        primary = bytearray(stream.read(SECTOR))
+        header_size = int.from_bytes(primary[12:16], "little")
+        primary[32:40] = (new_total - 1).to_bytes(8, "little")
+        primary[48:56] = last_lba.to_bytes(8, "little")
+        primary[88:92] = entries_crc.to_bytes(4, "little")
+        primary[16:20] = b"\0" * 4
+        primary[16:20] = (zlib.crc32(primary[:header_size]) & 0xFFFFFFFF).to_bytes(4, "little")
+        stream.seek(SECTOR)
+        stream.write(primary)
+        stream.seek((new_total - 33) * SECTOR)
+        stream.write(entries)
+        backup = bytearray(primary)
+        backup[24:32] = (new_total - 1).to_bytes(8, "little")
+        backup[32:40] = (1).to_bytes(8, "little")
+        backup[72:80] = (new_total - 33).to_bytes(8, "little")
+        backup[16:20] = b"\0" * 4
+        backup[16:20] = (zlib.crc32(backup[:header_size]) & 0xFFFFFFFF).to_bytes(4, "little")
+        stream.seek((new_total - 1) * SECTOR)
+        stream.write(backup)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def provision_wovenfs_system(image: Path) -> dict[str, object]:
+    try:
+        offset, size = _wovenfs_partition(image)
+    except InstalledDiskGateError:
+        _add_wovenfs_partition(image)
+        offset, size = _wovenfs_partition(image)
+    if size < 16 * SECTOR or size % SECTOR:
+        raise InstalledDiskGateError("WovenFS system partition is too small or unaligned")
+    formatter = _load_wovenfs_formatter()
+    data = formatter._build(size, {"qualification": "installed"})
+    with image.open("r+b") as stream:
+        stream.seek(offset)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {"filesystem": "wovenfs", "offset": offset, "bytes": size, "sha256": hashlib.sha256(data).hexdigest(), "physical_device_access": "none"}
 
 
 def regular_file(path: Path, label: str, *, must_exist: bool = True) -> Path:
@@ -93,7 +195,7 @@ def validate_source_image(path: Path) -> dict[str, object]:
     }
 
 
-def install_exact_disk_image(source: Path, destination: Path) -> dict[str, object]:
+def install_exact_disk_image(source: Path, destination: Path, *, filesystem: str = "fat32") -> dict[str, object]:
     """Atomically install a complete file-backed UEFI image.
 
     This is deliberately an image-level equivalent, not a raw-device writer.
@@ -126,13 +228,24 @@ def install_exact_disk_image(source: Path, destination: Path) -> dict[str, objec
             except FileNotFoundError:
                 pass
     installed = validate_source_image(target)
-    if installed["sha256"] != source_info["sha256"]:
+    provisioning = None
+    if filesystem == "wovenfs":
+        provisioning = provision_wovenfs_system(target)
+        installed = validate_source_image(target)
+    elif filesystem != "fat32":
+        raise InstalledDiskGateError(f"unsupported installed filesystem: {filesystem}")
+    if filesystem == "fat32" and installed["sha256"] != source_info["sha256"]:
         raise InstalledDiskGateError("installed disk digest differs from source image")
     return {
         "source": source_info,
         "installed": installed,
-        "exact_digest_match": True,
-        "install_mode": "atomic-file-backed-exact-uefi-image-copy",
+        "exact_digest_match": filesystem == "fat32",
+        "install_mode": (
+            "atomic-file-backed-exact-uefi-image-copy"
+            if filesystem == "fat32"
+            else "atomic-file-backed-uefi-image-copy-with-wovenfs-system-provisioning"
+        ),
+        "provisioning": provisioning,
         "physical_device_access": "none",
     }
 
@@ -152,6 +265,7 @@ def build_qemu_command(
     serial: Path,
     qmp: Path,
     cpus: int,
+    filesystem: str = "fat32",
 ) -> list[str]:
     """Build a QEMU command containing only the installed disk as storage."""
     if cpus not in (1, 2, 4):
@@ -164,9 +278,9 @@ def build_qemu_command(
         "-accel",
         "tcg,tb-size=128",
         "-machine",
-        "q35",
+        "pc" if filesystem == "wovenfs" else "q35",
         "-m",
-        "4G",
+        "2G",
         "-smp",
         str(cpus),
         "-display",
@@ -183,14 +297,27 @@ def build_qemu_command(
     ]
     if firmware_vars is not None:
         command.extend(["-drive", f"if=pflash,format=raw,file={firmware_vars}"])
-    command.extend(
-        [
-            "-drive",
-            f"if=none,id=installed,format=raw,readonly=on,file={installed_disk}",
-            "-device",
-            "virtio-blk-pci,drive=installed,bootindex=1",
-        ]
-    )
+    drive = f"if=none,id=installed,format=raw,file={installed_disk}"
+    if filesystem == "fat32":
+        drive = f"if=none,id=installed,format=raw,readonly=on,file={installed_disk}"
+    if filesystem == "wovenfs":
+        command.extend(
+            [
+                "-drive",
+                f"if=none,id=installed,format=raw,file={installed_disk}",
+                "-device",
+                "ide-hd,bus=ide.0,drive=installed",
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "-drive",
+                drive,
+                "-device",
+                "virtio-blk-pci,drive=installed,bootindex=1",
+            ]
+        )
     return command
 
 
@@ -266,6 +393,7 @@ def run_profile(
     output_root: Path,
     cpus: int,
     timeout: float,
+    filesystem: str,
 ) -> dict[str, object]:
     profile = output_root / f"{cpus}cpu"
     profile.mkdir(parents=True, exist_ok=False)
@@ -273,11 +401,11 @@ def run_profile(
     serial = profile / "serial.log"
     qemu_log = profile / "qemu.log"
     qmp = profile / "qmp.sock"
-    install = install_exact_disk_image(source, installed)
+    install = install_exact_disk_image(source, installed, filesystem=filesystem)
     vars_copy = None
     if firmware_vars is not None:
         vars_copy = _copy_vars(firmware_vars, profile / "OVMF_VARS.fd")
-    command = build_qemu_command(qemu, firmware, vars_copy, installed, serial, qmp, cpus)
+    command = build_qemu_command(qemu, firmware, vars_copy, installed, serial, qmp, cpus, filesystem)
     started = time.monotonic()
     timeout_error = None
     try:
@@ -337,6 +465,7 @@ def run_gate(
     output_root: Path,
     cpus: Iterable[int],
     timeout: float,
+    filesystem: str,
 ) -> dict[str, object]:
     source_info = validate_source_image(source)
     if DEVICE_PATH_RE.search(str(output_root)):
@@ -346,7 +475,7 @@ def run_gate(
     output_root.mkdir(parents=True, exist_ok=False)
     results = []
     for profile in cpus:
-        results.append(run_profile(source_info_path(source_info), qemu, firmware, firmware_vars, output_root, profile, timeout))
+        results.append(run_profile(source_info_path(source_info), qemu, firmware, firmware_vars, output_root, profile, timeout, filesystem))
     passed = all(bool(item["guest"]["guest_execution"]) for item in results)
     result = {
         "schema": "woven-installed-disk-qemu-v1",
@@ -354,6 +483,7 @@ def run_gate(
         "host_preparation": {"source": source_info, "physical_device_access": "none"},
         "guest_execution": passed,
         "media_attached": False,
+        "filesystem": filesystem,
         "profiles": results,
     }
     (output_root / "result.json").write_text(json_dumps(result) + "\n", encoding="utf-8")
@@ -367,6 +497,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--qemu", type=Path)
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--firmware-vars", type=Path)
+    parser.add_argument("--filesystem", choices=("fat32", "wovenfs"), default="fat32")
     cpu_group = parser.add_mutually_exclusive_group()
     cpu_group.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     cpu_group.add_argument("--all-cpus", action="store_true")
@@ -389,6 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_root=output,
             cpus=profiles,
             timeout=args.timeout,
+            filesystem=args.filesystem,
         )
     except (InstalledDiskGateError, OSError, ValueError) as exc:
         print(f"INSTALLED-DISK-RELEASE: FAIL: {exc}", file=sys.stderr)

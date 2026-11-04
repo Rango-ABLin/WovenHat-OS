@@ -217,30 +217,14 @@ pub fn mount_ata_root() -> MountStatus {
         let mut disk = disk;
         let disk = &mut disk;
         if crate::wfs::Volume::probe(disk).is_ok() {
-            return match crate::wfs::mount_device_into_vfs(disk, "/mnt") {
-                crate::wfs::MountOutcome::Mounted(count) => {
-                    MNT_BACKEND.store(BACKEND_WOVENFS, Ordering::Release);
-                    MountStatus::Mounted(count)
-                }
-                crate::wfs::MountOutcome::NoDevice => MountStatus::NoDevice,
-                crate::wfs::MountOutcome::NotWovenFs
-                | crate::wfs::MountOutcome::Failed => MountStatus::Failed,
-            };
+            return mount_wovenfs_aliases(disk);
         }
         if let Some(partition) = wovenfs_partition(disk) {
             let mut view = match partition::PartitionDevice::new(disk, partition) {
                 Ok(view) => view,
                 Err(_) => return MountStatus::Failed,
             };
-            return match crate::wfs::mount_device_into_vfs(&mut view, "/mnt") {
-                crate::wfs::MountOutcome::Mounted(count) => {
-                    MNT_BACKEND.store(BACKEND_WOVENFS, Ordering::Release);
-                    MountStatus::Mounted(count)
-                }
-                crate::wfs::MountOutcome::NoDevice => MountStatus::NoDevice,
-                crate::wfs::MountOutcome::NotWovenFs
-                | crate::wfs::MountOutcome::Failed => MountStatus::Failed,
-            };
+            return mount_wovenfs_aliases(&mut view);
         }
         let direct = mount_device(disk);
         if direct != MountStatus::NotFat32 {
@@ -285,13 +269,30 @@ pub fn mount_ata_root() -> MountStatus {
 fn wovenfs_partition(
     device: &mut impl crate::block::BlockDevice,
 ) -> Option<partition::Partition> {
-    let partitions = gpt::fat_partitions(device).ok()?;
+    let partitions = match gpt::fat_partitions(device) {
+        Ok(partitions) => partitions,
+        Err(_) => {
+            return None;
+        }
+    };
     partitions.into_iter().find(|partition| {
         let Ok(mut view) = partition::PartitionDevice::new(device, *partition) else {
             return false;
         };
         crate::wfs::Volume::probe(&mut view).is_ok()
     })
+}
+
+fn mount_wovenfs_aliases(device: &mut impl crate::block::BlockDevice) -> MountStatus {
+    let count = match crate::wfs::mount_device_into_vfs(&mut *device, "/mnt") {
+        crate::wfs::MountOutcome::Mounted(count) => count,
+        crate::wfs::MountOutcome::NoDevice => return MountStatus::NoDevice,
+        crate::wfs::MountOutcome::NotWovenFs | crate::wfs::MountOutcome::Failed => {
+            return MountStatus::Failed
+        }
+    };
+    MNT_BACKEND.store(BACKEND_WOVENFS, Ordering::Release);
+    MountStatus::Mounted(count)
 }
 
 /// The boot-sector label of the FAT32 volume the mount finds on `device`:
@@ -2206,6 +2207,35 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
     if !mnt_mounted() {
         return Err(unavailable_persist_error());
     }
+    if mnt_wovenfs() {
+        for (path, data) in paths {
+            if !path.starts_with("/mnt/")
+                || path[5..].is_empty()
+                || data.len() > crate::wfs::MAX_FILE_SIZE
+                || path[5..]
+                    .split('/')
+                    .any(|component| component.is_empty() || component == "." || component == "..")
+            {
+                return Err(PersistError::BadName);
+            }
+            let mut image = [0u8; crate::wfs::MAX_FILE_SIZE];
+            let native = crate::wfs::write_vfs_path_at_with_publish(
+                path,
+                0,
+                data,
+                &mut image,
+                crate::timer::ticks(),
+                |_, _, _| Ok::<(), ()>(()),
+            );
+            match native {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => return Err(PersistError::Failed),
+                Err(_) => return Err(PersistError::Failed),
+            }
+        }
+        mark_mnt_dirty();
+        return Ok(());
+    }
     if !block_io::primary_ata_present() {
         return Err(PersistError::NoDevice);
     }
@@ -3241,6 +3271,29 @@ pub fn fat32_writable() -> bool {
     mnt_mounted() && block_io::primary_ata_present()
 }
 
+pub fn system_volume_writable() -> bool {
+    mnt_mounted() && block_io::with_root(|disk| !disk.is_read_only()).unwrap_or(false)
+}
+
+#[cfg(feature = "installed-wovenfs-qualification")]
+pub fn installed_wovenfs_self_test() -> bool {
+    if !mnt_wovenfs() || !system_volume_writable() {
+        return false;
+    }
+    const PATH: &str = "/mnt/INSTALL.JSON";
+    const DATA: &[u8] = b"WovenFS installed boot qualification\n";
+    if persist_paths_atomic(&[(PATH, DATA)]).is_err() {
+        return false;
+    }
+    let mut readback = [0u8; DATA.len()];
+    let persisted = read_disk_file(PATH, 0, &mut readback) == Ok(DATA.len())
+        && readback == DATA;
+    let space = df_mnt().is_ok();
+    let consistent = matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches);
+    let removed = delete_path(PATH).is_ok();
+    persisted && space && consistent && removed
+}
+
 pub fn remount_mnt() -> MountStatus {
     FILE_PAGES.lock().invalidate();
     mount_ata_root()
@@ -3282,6 +3335,21 @@ pub fn df_mnt() -> Result<fat32::SpaceInfo, SpaceError> {
     if !mnt_mounted() {
         return Err(unavailable_space_error());
     }
+    if mnt_wovenfs() {
+        let Some(info) = with_wovenfs_root(|volume| volume.space_info()) else {
+            return Err(SpaceError::NoDevice);
+        };
+        let info = info.map_err(|_| SpaceError::Failed)?;
+        return Ok(fat32::SpaceInfo {
+            total_clusters: u32::try_from(info.total_blocks).map_err(|_| SpaceError::Failed)?,
+            free_clusters: u32::try_from(info.free_blocks).map_err(|_| SpaceError::Failed)?,
+            bytes_per_cluster: crate::block::SECTOR_SIZE as u32,
+            fs_info_free_count: None,
+            fs_info_next_free: None,
+            fs_info_matches: true,
+            first_free_cluster: None,
+        });
+    }
     if !block_io::primary_ata_present() {
         return Err(SpaceError::NoDevice);
     }
@@ -3293,11 +3361,45 @@ pub fn fscheck_mnt() -> Result<fat32::CheckReport, SpaceError> {
     if !mnt_mounted() {
         return Err(unavailable_space_error());
     }
+    if mnt_wovenfs() {
+        let Some(report) = with_wovenfs_root(|volume| volume.check_report()) else {
+            return Err(SpaceError::NoDevice);
+        };
+        let report = report.map_err(|_| SpaceError::Failed)?;
+        return Ok(fat32::CheckReport {
+            files: report.files,
+            directories: report.directories,
+            total_clusters: u32::try_from(report.total_blocks)
+                .map_err(|_| SpaceError::Failed)?,
+            free_clusters: u32::try_from(report.free_blocks).map_err(|_| SpaceError::Failed)?,
+            fs_info_free_count: None,
+            fs_info_matches: true,
+        });
+    }
     if !block_io::primary_ata_present() {
         return Err(SpaceError::NoDevice);
     }
     let mut disk = block_io::primary_ata();
     check_on_device(&mut disk)
+}
+
+fn with_wovenfs_root<R>(
+    operation: impl FnOnce(&mut crate::wfs::Volume<&mut dyn crate::block::BlockDevice>) -> R,
+) -> Option<R> {
+    block_io::with_root(|disk| {
+        let mut disk = disk;
+        if crate::wfs::Volume::probe(&mut disk).is_ok() {
+            let device: &mut dyn crate::block::BlockDevice = &mut disk;
+            let mut volume = crate::wfs::Volume::mount(device).ok()?;
+            return Some(operation(&mut volume));
+        }
+        let partition = wovenfs_partition(&mut disk)?;
+        let mut view = partition::PartitionDevice::new(&mut disk, partition).ok()?;
+        let device: &mut dyn crate::block::BlockDevice = &mut view;
+        let mut volume = crate::wfs::Volume::mount(device).ok()?;
+        Some(operation(&mut volume))
+    })
+    .flatten()
 }
 
 fn df_on_device(

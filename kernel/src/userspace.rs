@@ -6728,7 +6728,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
     x86_64::instructions::interrupts::without_interrupts(|| {
         const PATH: &str = "/mnt/vmsync.txt";
         const MARKER: &[u8] = b"WOVENHAT MSYNC OK\n";
-        if !crate::storage::fat32_writable() {
+        if !crate::storage::system_volume_writable() {
             return false;
         }
         if crate::vfs::stat(PATH).is_ok() {

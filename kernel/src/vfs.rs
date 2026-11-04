@@ -1273,7 +1273,9 @@ pub fn commit_backend_write(
         .get_mut(node_index)
         .filter(|node| node.occupied && node.kind == NodeKind::File)
         .ok_or(Error::InvalidDescriptor)?;
-    if !node.path_str().starts_with("/wfs/") {
+    if !node.path_str().starts_with("/wfs/")
+        && !(node.path_str().starts_with("/mnt/") && crate::storage::mnt_wovenfs())
+    {
         return Err(Error::InvalidDescriptor);
     }
     node.data.fill(0);

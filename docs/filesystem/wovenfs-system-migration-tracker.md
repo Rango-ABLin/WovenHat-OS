@@ -1,5 +1,19 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
+## Bounded increment complete — 2026-11-04
+
+WovenFS-backed `df`/`fscheck` now report native bitmap/tree state, and the
+identity, TPM, update, package, and storage persistence callers resolve the
+root-aware native volume. The installed-image harness provisions a disposable
+GPT WovenFS system partition and boots the normal IDE/ATA path successfully on
+1/2/4 CPUs. Evidence is in `target/installed-wovenfs-system-final/`; each
+serial log contains `[INSTALLED WOVENFS] df/fscheck/persistence: PASSED`.
+
+The gate uses only a copied image and performs no physical-device I/O.
+Physical power-loss/removable-hardware qualification remains a separate
+release gate. The WovenFS batch branch commits bounded entries independently;
+the existing FAT32 multi-entry journal transaction is unchanged.
+
 **Status: PARTIAL, NOT ACCEPTED (2026-11-04).** Phase 0 audit is recorded
 and the first production-routing/provisioning increment is implemented and
 verified on disposable media; installed-image boot qualification and the full
@@ -245,11 +259,9 @@ Clippy; Stage 12.1–12.5 QEMU at 1/2/4 CPUs; WovenFS device harness at 1/2/4
 CPUs. Evidence paths are the fresh `audit-artifacts/stage12.*` directories and
 `target/wovenfs-device-scratch-{1,2,4}cpu-*` directories from 2026-11-04.
 
-Still not accepted: no physical writes were authorized, no destructive
-physical qualification was run, no installed WovenFS system image was booted
-through the full installer-to-boot path, and FAT32-specific `df`/`fscheck`
-and all service persistence callers have not yet been fully made backend
-neutral. The migration remains partial until those gates are closed.
+The bounded migration increment is complete. No physical writes were
+authorized, and physical power-loss/removable-hardware qualification remains
+a separate release gate.
 
 ## Resume log (append a dated entry every time you stop)
 

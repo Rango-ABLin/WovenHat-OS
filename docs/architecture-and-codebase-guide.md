@@ -4713,3 +4713,13 @@ aborted action, but saturated-mailbox retry is not yet qualified. This is
 single-threaded bounded userspace state; there are no new syscalls, kernel
 objects, locks, unsafe blocks or capabilities. See
 `docs/graphics/modern-desktop-implementation-2026-10-29.md` for scope and gates.
+
+## WovenFS bounded system-filesystem completion — 2026-11-04
+
+The storage boundary maps WovenFS-backed `df` and `fscheck` to native
+bitmap/tree reports. Identity, TPM, update, package, and storage persistence
+callers resolve the root-aware native WovenFS volume. The disposable
+installed-image harness provisions a GPT WovenFS system partition and reaches
+the qualification marker on 1/2/4 CPUs. This is disposable-image
+qualification only; physical power-loss and removable-hardware qualification
+remain separate release gates.

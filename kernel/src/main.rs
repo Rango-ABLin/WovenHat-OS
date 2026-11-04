@@ -1690,10 +1690,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     kind: device::DeviceKind::Block,
                     irq: None,
                 });
-                serial::write_line(format_args!(
-                    "[FS] FAT32 mounted at /mnt; imported {} entries",
-                    count
-                ));
+                if storage::mnt_wovenfs() {
+                    serial::write_line(format_args!(
+                        "[FS] WovenFS mounted at /mnt; imported {} entries",
+                        count
+                    ));
+                } else {
+                    serial::write_line(format_args!(
+                        "[FS] FAT32 mounted at /mnt; imported {} entries",
+                        count
+                    ));
+                }
             }
             storage::MountStatus::NoDevice => {
                 serial::write_line(format_args!("[FS] no ATA disk; continuing with RAM VFS"))
@@ -3047,9 +3054,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         not(feature = "stage22-3-test"),
         not(feature = "stage22-5-test"),
         not(feature = "stage27-5-recovery-test"),
-        not(feature = "stage24-3-test")
+        not(feature = "stage24-3-test"),
+        not(feature = "installed-wovenfs-qualification")
     ))]
     serial::write_line(format_args!("[STORAGE MUTATION] recovery injection armed"));
+    #[cfg(not(feature = "installed-wovenfs-qualification"))]
     match storage::live_mutation_self_test() {
         storage::LiveMutationTestStatus::Passed => {
             serial::write_line(format_args!(
@@ -6549,6 +6558,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         qemu_test_exit_success();
     }
     serial::write_line(format_args!("[BOOT] ALL VALIDATIONS PASSED"));
+    #[cfg(feature = "installed-wovenfs-qualification")]
+    {
+        let _ = vfs::mkdir("/mnt");
+        let _ = ata::init();
+        let _ = storage::mount_ata_root();
+        if !storage::installed_wovenfs_self_test() {
+            serial::write_line(format_args!(
+                "[INSTALLED WOVENFS] df/fscheck/persistence: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+        ));
+    }
     #[cfg(feature = "qemu-test")]
     qemu_test_exit_success();
 

@@ -90,9 +90,9 @@ def _super(total: int, sequence: int = 1) -> bytes:
     return bytes(raw)
 
 
-def _inode(mode: int, links: int, size: int, kind: int, direct: list[int], created: int = 0) -> bytes:
+def _inode(mode: int, links: int, size: int, kind: int, direct: list[int], created: int = 0, data_checksum: int = 0) -> bytes:
     raw = bytearray(INODE_SIZE)
-    struct.pack_into("<IIQQQQ", raw, 0, mode, links, size, created, created, 0)
+    struct.pack_into("<IIQQQQ", raw, 0, mode, links, size, created, created, data_checksum)
     for index, block in enumerate(direct[:DIRECT_BLOCKS]):
         struct.pack_into("<Q", raw, 40 + index * 8, block)
     struct.pack_into("<H", raw, 104, kind)
@@ -136,7 +136,7 @@ def _build(size: int, settings: dict[str, Any] | None) -> bytes:
         root[:64] = _entry(file_inode, KIND_FILE, b"INSTALL.JSON")
         raw[file_block * SECTOR:file_block * SECTOR + len(payload)] = payload
         raw[(inode_start + 0) * SECTOR:(inode_start + 1) * SECTOR] = _inode(0o040755, 2, SECTOR, KIND_DIR, [root_block])
-        raw[inode_start * SECTOR + INODE_SIZE:inode_start * SECTOR + 2 * INODE_SIZE] = _inode(0o100600, 1, len(payload), KIND_FILE, [file_block])
+        raw[inode_start * SECTOR + INODE_SIZE:inode_start * SECTOR + 2 * INODE_SIZE] = _inode(0o100600, 1, len(payload), KIND_FILE, [file_block], data_checksum=_fnv(payload))
         inode_count = 2
     else:
         raw[inode_start * SECTOR:inode_start * SECTOR + INODE_SIZE] = _inode(0o040755, 2, SECTOR, KIND_DIR, [root_block])

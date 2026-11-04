@@ -8582,3 +8582,13 @@ planning; source implementation starts only after the defect inventory is
 recorded in the migration tracker. Existing graphics claims remain intact
 for their claimed files unless an overlap is explicitly coordinated.
 
+## Codex - WovenFS completion pass (2026-11-04)
+
+Completed the bounded system-filesystem increment under the existing
+filesystem/storage claim. WovenFS root selection, backend-neutral `df` and
+`fscheck`, and remaining service persistence callers are complete. The
+disposable installed-image gate passes on 1/2/4 CPUs; evidence is in
+`target/installed-wovenfs-system-final/`. No physical device was opened or
+modified. The WovenFS batch branch commits bounded entries independently;
+FAT32's existing multi-entry journal path is unchanged.
+

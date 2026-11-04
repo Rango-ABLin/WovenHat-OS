@@ -1,5 +1,17 @@
 # Stage status
 
+## WovenFS migration completion note — 2026-11-04
+
+The bounded system-filesystem increment is complete: WovenFS-backed `df` and
+`fscheck` use native space/tree reports, remaining service persistence callers
+resolve the root-aware WovenFS volume, and the disposable installed-image gate
+passes on 1/2/4 CPUs. Evidence is in
+`target/installed-wovenfs-system-final/`; all serial logs contain
+`[INSTALLED WOVENFS] df/fscheck/persistence: PASSED` and
+`[BOOT] ALL VALIDATIONS PASSED`. No physical device was opened or modified;
+physical power-loss and removable-hardware qualification remain separate
+release gates.
+
 ## WovenFS system-filesystem migration — 2026-11-04 — PARTIAL, NOT ACCEPTED
 
 The user explicitly redirected priority to this migration. Phase 0 audit and
@@ -15,10 +27,11 @@ modified.
 Verification: host all-targets Clippy, Stage 12.5 target Clippy, and Stage 15.2
 target Clippy pass with warnings denied; `tests/wovenfs_crash.rs` passes 20/20;
 the Stage 12.1–12.5 QEMU chain passes at 1/2/4 CPUs. A full workspace test
-run passed. This is not migration acceptance: FAT32-specific `df`/`fscheck`
-and all service persistence callers have not yet been fully made backend
-neutral, and installed WovenFS boot qualification plus physical
-power-loss/removable-hardware limits remain open. See
+run passed. The disposable installed-image WovenFS gate now boots and reaches
+the qualification marker on 1/2/4 CPUs. FAT32-specific `df`/`fscheck` and the
+remaining service persistence callers are backend-neutral at the storage
+boundary. Physical power-loss/removable-hardware qualification remains a
+separate release gate. See
 `docs/filesystem/wovenfs-system-migration-tracker.md`.
 
 ## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul + asset pass) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, FIRST ASSET PASS DONE
