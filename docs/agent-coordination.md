@@ -61,6 +61,15 @@ next prerequisite and must be run before calling this slice fully accepted.
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenTerminal bounded shell acceptance (2026-11-04)
+
+The previously pending QEMU prerequisite for the bounded shell slice passed
+on 1/2/4 CPUs using `scripts/test-terminal-qemu.py`. Quoting, environment
+expansion, pipelines, redirection, background jobs, `jobs`/`fg`, and PTY
+session/foreground-group setup are covered. Evidence is retained in
+`audit-artifacts/woven-terminal-{1,2,4}cpu/`. This is a bounded software
+acceptance; POSIX breadth and physical terminal qualification remain open.
+
 ## Codex - Graphics modernization Phase 1 resume (2026-11-04)
 
 Taking the first unfinished row in `docs/graphics/modernization-tracker.md`:

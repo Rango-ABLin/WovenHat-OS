@@ -1,5 +1,16 @@
 # Stage status
 
+## WovenTerminal bounded shell acceptance - 2026-11-04 - ACCEPTED (SOFTWARE BOUNDARY)
+
+The bounded command shell now passes its dedicated Ring-3 QEMU acceptance on
+1/2/4 CPUs. The gate covers quote/backslash parsing, `$NAME` and `${NAME}`
+expansion, pipelines, input/output/stderr redirection including append,
+background jobs, `jobs`/`fg`, and interactive PTY session/foreground-group
+setup. Evidence is retained in
+`audit-artifacts/woven-terminal-{1,2,4}cpu/`. Full POSIX compatibility,
+physical terminal qualification, and broader shell utilities remain outside
+this bounded acceptance.
+
 ## Graphics typography and final release qualification - 2026-11-04 - ACCEPTED
 
 All 119 GUI text call sites now use the bounded system-text primitive with
