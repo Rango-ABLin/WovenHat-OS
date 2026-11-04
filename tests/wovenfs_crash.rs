@@ -4714,3 +4714,80 @@ fn unlink_refuses_an_entry_naming_a_directory_kind_inode() {
         .expect("unlink must succeed on a KIND_FILE inode");
     mount_consistent(&base, "after a valid unlink");
 }
+
+/// `lookup` (wfs.rs lines 978–982) guards:
+///
+/// ```text
+/// if entry.inode > u64::from(self.super_block.inode_count)
+///     || !self.inode(entry.inode)?.is_used()
+/// {
+///     return Err(Error::Corrupt);
+/// }
+/// ```
+///
+/// The first branch rejects an entry whose inode field names a slot beyond the
+/// end of the inode table.  Without it, `self.inode(entry.inode)?` would
+/// propagate `Err(Error::NotFound)` (the return value of `inode()` for
+/// out-of-range numbers), changing the error from `Corrupt` to `NotFound` and
+/// making a corrupt image look like a missing file.
+///
+/// `check_refuses_a_directory_entry_with_inode_number_out_of_range` already
+/// exercises `check()` for this scenario but does not call `lookup()`.  This
+/// test covers the runtime path that every directory operation takes before
+/// operating on the entry.
+#[test]
+fn lookup_refuses_an_entry_naming_an_out_of_range_inode() {
+    let (base, block, index) = two_file_root();
+
+    let a_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.lookup(1, "a.txt").expect("a.txt").inode
+    };
+
+    // Patch a.txt's directory entry inode field (bytes 0–7) to inode_count + 1,
+    // which is one past the last valid inode slot.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+
+    // Snapshot: lookup must not write anything.
+    let before = image.sectors();
+
+    // lookup must return Corrupt, not NotFound.
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "a.txt"),
+        Err(Error::Corrupt),
+        "lookup must return Corrupt for a directory entry with an out-of-range inode"
+    );
+
+    // The image must be unchanged.
+    assert!(
+        image.sectors() == before,
+        "a refused lookup must not modify the image"
+    );
+
+    // Control: b.txt is unmodified and still resolves.
+    let b_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount base");
+        volume.lookup(1, "b.txt").expect("b.txt").inode
+    };
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "b.txt")
+            .map(|e| e.inode),
+        Ok(b_inode),
+        "b.txt must still resolve on the patched image"
+    );
+
+    // Control: on the unpatched base image, a.txt lookup succeeds and returns a_inode.
+    assert_eq!(
+        Volume::mount(base)
+            .expect("mount")
+            .lookup(1, "a.txt")
+            .map(|e| e.inode),
+        Ok(a_inode),
+        "unpatched image: a.txt lookup must succeed"
+    );
+}
