@@ -2672,12 +2672,12 @@ impl Desktop {
                 continue;
             };
             // Window bodies are submitted with an opaque blit. If a fully
-            // opaque higher window contains this entire frame, neither the
-            // lower title/body nor its shadow can affect the final pixels.
+            // opaque higher window contains this entire footprint, neither
+            // the lower title/body nor its shadow can affect final pixels.
             // Skip it before issuing any client blits. The stack is capped by
             // MAX_WINDOWS, so this bounded scan cannot turn repaint into an
             // unbounded scene walk.
-            if self.frame_is_fully_occluded(stack_index, window.frame()) {
+            if self.frame_is_fully_occluded(stack_index, window.footprint()) {
                 continue;
             }
             let bands = if Some(slot) == focused {
@@ -2781,11 +2781,14 @@ impl Desktop {
         None
     }
 
-    fn frame_is_fully_occluded(&self, stack_index: usize, frame: Area) -> bool {
+    fn frame_is_fully_occluded(&self, stack_index: usize, footprint: Area) -> bool {
         self.stack[stack_index + 1..self.stacked]
             .iter()
             .filter_map(|&higher_slot| self.windows[higher_slot].as_ref())
-            .any(|higher| higher.alpha() == u8::MAX && higher.frame().intersect(frame) == frame)
+            .any(|higher| {
+                higher.alpha() == u8::MAX
+                    && higher.frame().intersect(footprint) == footprint
+            })
     }
 
     fn raise(&mut self, slot: usize) {

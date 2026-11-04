@@ -123,6 +123,17 @@ existing `apps/woven-shell/src/tokens.rs` + `libwoven::ui::Theme` system.
 
 ## Current status (updated each session — keep this table accurate)
 
+### Current-status reconciliation (2026-11-04)
+
+The older phase descriptions below contain historical snapshots retained for
+provenance. Current implementation facts are: the interactive launcher uses
+one `virtio-vga` device with `-vga none`; `Transform::rotate()` and bilinear
+projected-surface filtering are implemented and unit-tested; and WovenShell
+skips a lower window only when an opaque higher frame contains the lower
+window's complete footprint, including shadow reach. Remaining acceptance
+work is visual/performance evidence, not a stale-VGA or missing-occlusion
+implementation gap.
+
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
 | 0 | Source audit | **DONE** (ongoing — re-verify facts below if stale) | Re-run the audit checklist below before each new phase of work, since other agents/auto-commits may have changed files. |
@@ -203,6 +214,19 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-04 (session: Phase 5 occlusion acceptance and shadow correction)
+
+Corrected the bounded occlusion predicate to compare a lower window's full
+`footprint()` rather than only its title/body frame, preserving visible
+shadows unless an opaque higher window covers them too. Targeted WovenShell
+Clippy and workspace `cargo clippy --all-targets -- -D warnings` both passed.
+The one-CPU real-QEMU qualification reached desktop and signed-in states but
+failed the existing materially-changed overview framebuffer assertion after
+the harness retry limit; serial evidence shows normal boot, input, and
+recompose activity with no graphics error. Evidence:
+`audit-artifacts/desktop-qualification-1793793781279682800/`. This is recorded
+as a qualification failure/known harness flake, not as a pass.
 
 ### 2026-11-04 (session: Phase 5 bounded window occlusion)
 
