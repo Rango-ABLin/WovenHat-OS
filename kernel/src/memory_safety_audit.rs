@@ -197,7 +197,7 @@ impl LockOrderingAuditor {
     pub fn verify_acquire(&mut self, rank: LockRank) -> AuditResult {
         for held_rank in self.held_locks[..self.lock_count].iter().flatten() {
             if rank <= *held_rank {
-                    return AuditResult::Fail(AuditError::LockOrderingViolation);
+                return AuditResult::Fail(AuditError::LockOrderingViolation);
                 if rank <= *held_rank {
                     return AuditResult::Fail(AuditError::LockOrderingViolation);
                 }

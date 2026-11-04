@@ -216,7 +216,7 @@ pub fn decode_chunked_body(bytes: &[u8], output: &mut [u8]) -> Result<usize, Bod
 
 #[cfg(test)]
 mod tests {
-    use super::{BodyError, ParseError, decode_chunked_body, parse_endpoint, parse_response_head};
+    use super::{decode_chunked_body, parse_endpoint, parse_response_head, BodyError, ParseError};
 
     #[test]
     fn endpoint_parser_defaults_ports_and_rejects_credentials() {

@@ -144,7 +144,7 @@ fn validate_input(input: &[u8]) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BROKER_ABI, Error, Operation, Request, Response};
+    use super::{Error, Operation, Request, Response, BROKER_ABI};
 
     #[test]
     fn request_round_trip_is_bounded() {

@@ -114,9 +114,24 @@ pub fn snapshot() -> Snapshot {
 #[cfg(feature = "s05-memory-pressure-test")]
 pub fn self_test() -> bool {
     let candidates = [
-        Candidate { process_id: 11, task_id: 4, class_rank: 1, mapped_pages: 2 },
-        Candidate { process_id: 12, task_id: 5, class_rank: 0, mapped_pages: 1 },
-        Candidate { process_id: 13, task_id: 6, class_rank: 0, mapped_pages: 4 },
+        Candidate {
+            process_id: 11,
+            task_id: 4,
+            class_rank: 1,
+            mapped_pages: 2,
+        },
+        Candidate {
+            process_id: 12,
+            task_id: 5,
+            class_rank: 0,
+            mapped_pages: 1,
+        },
+        Candidate {
+            process_id: 13,
+            task_id: 6,
+            class_rank: 0,
+            mapped_pages: 4,
+        },
     ];
     classify(80, 100) == Level::Normal
         && classify(20, 100) == Level::Moderate

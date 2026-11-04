@@ -1015,8 +1015,8 @@ pub fn execute_script<'a, const N: usize, const V: usize>(
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutError, PaintCommand, ParseError, ScriptError, StyleSheet, Viewport, execute_script,
-        layout, layout_with_stylesheet, paint, paint_with_stylesheet, parse_html, render,
+        execute_script, layout, layout_with_stylesheet, paint, paint_with_stylesheet, parse_html,
+        render, LayoutError, PaintCommand, ParseError, ScriptError, StyleSheet, Viewport,
     };
 
     #[test]

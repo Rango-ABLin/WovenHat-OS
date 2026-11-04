@@ -51,5 +51,8 @@ fn main() {
     }
     let path = out_dir.join("wovenhat-wallpaper.bmp");
     fs::write(&path, bytes).expect("failed to write generated wallpaper");
-    println!("cargo:rustc-env=WOVENHAT_WALLPAPER_IMAGE={}", path.display());
+    println!(
+        "cargo:rustc-env=WOVENHAT_WALLPAPER_IMAGE={}",
+        path.display()
+    );
 }

@@ -6,7 +6,7 @@
 //! switch; the kernel must still authorize any effective-credential change
 //! and audit it before integrating this with task creation.
 
-use crate::accounts::{MAX_NAME, MAX_PIN, hash_pin};
+use crate::accounts::{hash_pin, MAX_NAME, MAX_PIN};
 
 pub const MAX_USERS: usize = 16;
 pub const MAX_GROUPS: usize = 16;
@@ -1518,11 +1518,9 @@ mod tests {
             authority.change_password(b"ada", b"wrong", b"new-salt", b"5678"),
             Err(Error::WrongPassword)
         );
-        assert!(
-            authority
-                .change_password(b"ada", b"1234", b"new-salt", b"5678")
-                .is_ok()
-        );
+        assert!(authority
+            .change_password(b"ada", b"1234", b"new-salt", b"5678")
+            .is_ok());
         let session = authority.open_named_session(b"ada", b"5678").unwrap();
         assert_eq!(
             authority.open_named_session(b"ada", b"1234"),
@@ -1599,15 +1597,13 @@ mod tests {
         assert_eq!(user.name(), b"admin");
         assert!(user.administrator);
         assert_eq!(query.user(1), None);
-        assert!(
-            authority
-                .admin_query(
-                    session,
-                    ADMIN_QUERY_USERS,
-                    &mut [0; ADMIN_USER_RECORD_BYTES]
-                )
-                .is_err()
-        );
+        assert!(authority
+            .admin_query(
+                session,
+                ADMIN_QUERY_USERS,
+                &mut [0; ADMIN_USER_RECORD_BYTES]
+            )
+            .is_err());
     }
 
     #[test]

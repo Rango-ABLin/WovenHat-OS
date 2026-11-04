@@ -1,6 +1,8 @@
 //! Bounded runtime module lifecycle joining namespace and dynamic TLS state.
 
-use crate::dynamic_tls::{Dtv, Error as TlsError, ModuleId as TlsModuleId, Registry as TlsRegistry};
+use crate::dynamic_tls::{
+    Dtv, Error as TlsError, ModuleId as TlsModuleId, Registry as TlsRegistry,
+};
 use crate::elf_loader::ImagePlan;
 use crate::module_namespace::{Error as NamespaceError, ModuleId, Namespace};
 
@@ -39,11 +41,20 @@ pub struct RuntimeModules {
 
 impl RuntimeModules {
     pub const fn new() -> Self {
-        Self { namespace: Namespace::new(), tls: TlsRegistry::new(), pairs: [None; MAX_MODULES] }
+        Self {
+            namespace: Namespace::new(),
+            tls: TlsRegistry::new(),
+            pairs: [None; MAX_MODULES],
+        }
     }
 
     /// Load a module's namespace identity and TLS template transactionally.
-    pub fn load(&mut self, initializer: &[u8], memory_size: usize, alignment: usize) -> Result<ModuleId, Error> {
+    pub fn load(
+        &mut self,
+        initializer: &[u8],
+        memory_size: usize,
+        alignment: usize,
+    ) -> Result<ModuleId, Error> {
         let namespace = self.namespace.load().map_err(|error| match error {
             NamespaceError::Capacity => Error::Capacity,
             other => Error::Namespace(other),
@@ -78,7 +89,9 @@ impl RuntimeModules {
             return Err(Error::InvalidImage);
         }
         for index in 0..phnum {
-            let header = phoff.checked_add(index.checked_mul(phentsize).ok_or(Error::InvalidImage)?).ok_or(Error::InvalidImage)?;
+            let header = phoff
+                .checked_add(index.checked_mul(phentsize).ok_or(Error::InvalidImage)?)
+                .ok_or(Error::InvalidImage)?;
             if header.checked_add(56).ok_or(Error::InvalidImage)? > image.len() {
                 return Err(Error::InvalidImage);
             }
@@ -100,13 +113,25 @@ impl RuntimeModules {
 
     /// Admit a complete validated ELF image, including modules without PT_TLS.
     /// The returned plan is the contract consumed by a future kernel mapper.
-    pub fn load_elf_image(&mut self, image: &[u8], load_bias: u64) -> Result<(ModuleId, ImagePlan), Error> {
+    pub fn load_elf_image(
+        &mut self,
+        image: &[u8],
+        load_bias: u64,
+    ) -> Result<(ModuleId, ImagePlan), Error> {
         let plan = ImagePlan::parse(image, load_bias).map_err(|_| Error::InvalidImage)?;
         let id = if let Some(tls) = plan.tls {
             let offset = usize::try_from(tls.file_offset).map_err(|_| Error::InvalidImage)?;
-            let end = offset.checked_add(usize::try_from(tls.file_size).map_err(|_| Error::InvalidImage)?).ok_or(Error::InvalidImage)?;
-            if end > image.len() { return Err(Error::InvalidImage); }
-            self.load(&image[offset..end], usize::try_from(tls.memory_size).map_err(|_| Error::InvalidImage)?, usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?)?
+            let end = offset
+                .checked_add(usize::try_from(tls.file_size).map_err(|_| Error::InvalidImage)?)
+                .ok_or(Error::InvalidImage)?;
+            if end > image.len() {
+                return Err(Error::InvalidImage);
+            }
+            self.load(
+                &image[offset..end],
+                usize::try_from(tls.memory_size).map_err(|_| Error::InvalidImage)?,
+                usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?,
+            )?
         } else {
             self.load(&[], 0, 1)?
         };
@@ -121,8 +146,13 @@ impl RuntimeModules {
             let offset = usize::try_from(tls.file_offset).map_err(|_| Error::InvalidImage)?;
             let file_size = usize::try_from(tls.file_size).map_err(|_| Error::InvalidImage)?;
             let memory_size = usize::try_from(tls.memory_size).map_err(|_| Error::InvalidImage)?;
-            let alignment = usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?;
-            if file_size > initializer.len() || offset.checked_add(file_size).is_none_or(|end| end > image.len()) {
+            let alignment =
+                usize::try_from(tls.alignment.max(1)).map_err(|_| Error::InvalidImage)?;
+            if file_size > initializer.len()
+                || offset
+                    .checked_add(file_size)
+                    .is_none_or(|end| end > image.len())
+            {
                 return Err(Error::InvalidImage);
             }
             initializer[..file_size].copy_from_slice(&image[offset..offset + file_size]);
@@ -130,12 +160,25 @@ impl RuntimeModules {
         } else {
             (0, 0, 1)
         };
-        Ok(PreparedModule { plan, initializer, initializer_len, memory_size, alignment })
+        Ok(PreparedModule {
+            plan,
+            initializer,
+            initializer_len,
+            memory_size,
+            alignment,
+        })
     }
 
     /// Publish a previously prepared image. Failure leaves it unpublished.
-    pub fn commit_prepared(&mut self, prepared: PreparedModule) -> Result<(ModuleId, ImagePlan), Error> {
-        let id = self.load(&prepared.initializer[..prepared.initializer_len], prepared.memory_size, prepared.alignment)?;
+    pub fn commit_prepared(
+        &mut self,
+        prepared: PreparedModule,
+    ) -> Result<(ModuleId, ImagePlan), Error> {
+        let id = self.load(
+            &prepared.initializer[..prepared.initializer_len],
+            prepared.memory_size,
+            prepared.alignment,
+        )?;
         Ok((id, prepared.plan))
     }
 
@@ -164,7 +207,11 @@ impl RuntimeModules {
 
     /// Unload only after all namespace references have been released.
     pub fn unload(&mut self, id: ModuleId) -> Result<(), Error> {
-        let slot = self.pairs.iter().position(|pair| pair.is_some_and(|pair| pair.namespace == id)).ok_or(Error::Stale)?;
+        let slot = self
+            .pairs
+            .iter()
+            .position(|pair| pair.is_some_and(|pair| pair.namespace == id))
+            .ok_or(Error::Stale)?;
         self.namespace.unload(id).map_err(|error| match error {
             NamespaceError::StillReferenced => Error::StillReferenced,
             other => Error::Namespace(other),
@@ -174,25 +221,46 @@ impl RuntimeModules {
     }
 
     /// Resolve a module-relative TLS address in one thread's DTV.
-    pub fn tls_addr<'a>(&self, dtv: &'a mut Dtv, id: ModuleId, offset: usize) -> Result<&'a mut u8, Error> {
-        let pair = self.pairs.iter().flatten().find(|pair| pair.namespace == id).ok_or(Error::Stale)?;
-        dtv.get_addr(&self.tls, pair.tls, offset).map_err(Error::Tls)
+    pub fn tls_addr<'a>(
+        &self,
+        dtv: &'a mut Dtv,
+        id: ModuleId,
+        offset: usize,
+    ) -> Result<&'a mut u8, Error> {
+        let pair = self
+            .pairs
+            .iter()
+            .flatten()
+            .find(|pair| pair.namespace == id)
+            .ok_or(Error::Stale)?;
+        dtv.get_addr(&self.tls, pair.tls, offset)
+            .map_err(Error::Tls)
     }
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+    Some(u16::from_le_bytes(
+        bytes.get(offset..offset + 2)?.try_into().ok()?,
+    ))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(bytes.get(offset..offset + 8)?.try_into().ok()?))
+    Some(u64::from_le_bytes(
+        bytes.get(offset..offset + 8)?.try_into().ok()?,
+    ))
 }
 
-impl Default for RuntimeModules { fn default() -> Self { Self::new() } }
+impl Default for RuntimeModules {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -243,13 +311,22 @@ mod tests {
     #[test]
     fn admits_non_tls_elf_as_a_lifetime_managed_module() {
         let mut image = vec![0u8; 0x120];
-        image[..4].copy_from_slice(b"\x7fELF"); image[4] = 2; image[5] = 1;
-        image[24..32].copy_from_slice(&0x1000u64.to_le_bytes()); image[32..40].copy_from_slice(&64u64.to_le_bytes());
-        image[54..56].copy_from_slice(&56u16.to_le_bytes()); image[56..58].copy_from_slice(&1u16.to_le_bytes());
-        image[64..68].copy_from_slice(&1u32.to_le_bytes()); image[72..80].copy_from_slice(&0x100u64.to_le_bytes()); image[80..88].copy_from_slice(&0x1000u64.to_le_bytes()); image[96..104].copy_from_slice(&4u64.to_le_bytes()); image[104..112].copy_from_slice(&0x100u64.to_le_bytes());
+        image[..4].copy_from_slice(b"\x7fELF");
+        image[4] = 2;
+        image[5] = 1;
+        image[24..32].copy_from_slice(&0x1000u64.to_le_bytes());
+        image[32..40].copy_from_slice(&64u64.to_le_bytes());
+        image[54..56].copy_from_slice(&56u16.to_le_bytes());
+        image[56..58].copy_from_slice(&1u16.to_le_bytes());
+        image[64..68].copy_from_slice(&1u32.to_le_bytes());
+        image[72..80].copy_from_slice(&0x100u64.to_le_bytes());
+        image[80..88].copy_from_slice(&0x1000u64.to_le_bytes());
+        image[96..104].copy_from_slice(&4u64.to_le_bytes());
+        image[104..112].copy_from_slice(&0x100u64.to_le_bytes());
         let mut modules = RuntimeModules::new();
         let (id, plan) = modules.load_elf_image(&image, 0x4000).unwrap();
-        assert_eq!(plan.entry, 0x5000); assert!(plan.tls.is_none());
+        assert_eq!(plan.entry, 0x5000);
+        assert!(plan.tls.is_none());
         assert!(modules.release(id).unwrap());
         modules.unload(id).unwrap();
     }

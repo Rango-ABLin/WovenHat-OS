@@ -270,7 +270,11 @@ pub fn write_master(id: PtyId, buffer: &[u8]) -> Result<usize, Error> {
         }
         if canonical && byte != b'\n' {
             if pty.line_len == LINE_SIZE {
-                return if count == 0 { Err(Error::Full) } else { Ok(count) };
+                return if count == 0 {
+                    Err(Error::Full)
+                } else {
+                    Ok(count)
+                };
             }
             pty.line[pty.line_len] = byte;
             pty.line_len += 1;
@@ -331,7 +335,9 @@ pub fn self_test() -> bool {
     let ok = first && empty && newline && line && echo_read && output && echoed;
     close_slave(slave);
     close_master(master);
-    let Ok(hangup_master) = create() else { return false };
+    let Ok(hangup_master) = create() else {
+        return false;
+    };
     let Ok(hangup_slave) = open_slave(hangup_master.index) else {
         close_master(hangup_master);
         return false;

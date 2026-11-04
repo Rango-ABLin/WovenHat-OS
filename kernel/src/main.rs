@@ -116,30 +116,35 @@ mod paging;
 mod panic;
 mod partition;
 // Public kernel instrumentation API; does not expose userspace authority.
+mod agent_coordination;
+mod bounded_capacity_analyzer;
+mod compiler_fuzzing;
 pub mod debug_dump;
 pub mod debug_serial;
-pub mod gdb_stub;
-pub mod gdb_debugger;
-pub mod gdb_session;
-pub mod gdb_trap;
-pub mod gdb_entry;
-pub mod gdb_owner;
-pub mod gdb_frame;
+mod deterministic_fault_injection;
+mod documentation_generator;
 pub mod gdb_binding;
-pub mod gdb_transport;
+pub mod gdb_debugger;
+pub mod gdb_entry;
+pub mod gdb_frame;
 #[cfg(feature = "wovendev-live")]
 pub mod gdb_live;
+pub mod gdb_owner;
 pub mod gdb_scheduler;
-#[cfg(feature = "wovendev")]
-pub mod wovendev;
+pub mod gdb_session;
+pub mod gdb_stub;
+pub mod gdb_transport;
+pub mod gdb_trap;
 pub mod log_filter;
 pub mod log_ring;
-pub mod profiler;
+mod memory_safety_audit;
 mod permission;
 mod pic;
 mod pipe;
-mod pty;
 mod power;
+pub mod profiler;
+mod pty;
+mod qemu_perf_regression;
 mod rtc;
 mod secret_vault;
 #[cfg(feature = "secure-boot")]
@@ -149,20 +154,15 @@ mod serial;
 mod service_supervisor;
 mod session;
 mod shell;
-mod structured_logging;
-mod telemetry_hooks;
-mod memory_safety_audit;
-mod bounded_capacity_analyzer;
-mod deterministic_fault_injection;
-mod documentation_generator;
-mod qemu_perf_regression;
-mod compiler_fuzzing;
-mod agent_coordination;
 mod signed_app;
 mod smp;
 #[cfg(feature = "stage12-4-test")]
 mod snapshots;
 mod storage;
+mod structured_logging;
+mod telemetry_hooks;
+#[cfg(feature = "wovendev")]
+pub mod wovendev;
 // Stage 12.3 acceptance exercises the encrypted-mount path that lives here, so
 // this module is required by both the 12.3 and 12.5 gates. The features
 // themselves must not chain: each Stage 12 self-test block ends the boot, so
@@ -206,8 +206,8 @@ mod terminal;
 mod thread;
 mod timer;
 // Public kernel instrumentation API; does not expose userspace authority.
-pub mod tracing;
 mod tpm2;
+pub mod tracing;
 #[allow(dead_code)]
 mod ttf;
 #[cfg(any(feature = "qemu-test", feature = "system-apps"))]
@@ -3983,7 +3983,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[S02.C] freestanding ELF load, exit, teardown: PASSED"));
+        serial::write_line(format_args!(
+            "[S02.C] freestanding ELF load, exit, teardown: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "musl-bootstrap-test")]
@@ -5393,8 +5395,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         {
             let report = drivers::bring_up();
             if !report.drivers.iter().any(|driver| {
-                driver.name == "xhci0"
-                    && matches!(driver.outcome, drivers::Outcome::Ready(_))
+                driver.name == "xhci0" && matches!(driver.outcome, drivers::Outcome::Ready(_))
             }) {
                 serial::write_line(format_args!("[S03.KEYBOARD] USB HID setup: FAILED"));
                 qemu_test_exit_failure();
@@ -5457,7 +5458,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Show how many records emit() has pushed to the ring during boot
         // so the acceptance log confirms end-to-end integration.
         let ring_count = log_ring::len();
-        serial::write_line(format_args!("[S32.5] log ring: PASSED ring_count={}", ring_count));
+        serial::write_line(format_args!(
+            "[S32.5] log ring: PASSED ring_count={}",
+            ring_count
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage32-6-test")]
@@ -5472,7 +5476,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         // Exercise the full dump path; the acceptance log should show the
         // crash context and ring entries.
-        debug_dump::emit_dump(0x0000_ffff_dead_c0de, 0xffff_8000_0010_0000, 0x0000_0000_bad0_0000);
+        debug_dump::emit_dump(
+            0x0000_ffff_dead_c0de,
+            0xffff_8000_0010_0000,
+            0x0000_0000_bad0_0000,
+        );
         serial::write_line(format_args!("[S32.6] debug dump: PASSED"));
         qemu_test_exit_success();
     }
@@ -5485,12 +5493,25 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // Demonstrate the filter in action against the ring: set min = Info,
         // emit Debug (dropped), emit Info (passes), verify ring count = 1.
         log_filter::set_min_level(diagnostics::Level::Info);
-        diagnostics::emit(diagnostics::Level::Debug, "filter_test", "should_be_dropped", &[]);
-        diagnostics::emit(diagnostics::Level::Info,  "filter_test", "should_appear",     &[]);
+        diagnostics::emit(
+            diagnostics::Level::Debug,
+            "filter_test",
+            "should_be_dropped",
+            &[],
+        );
+        diagnostics::emit(
+            diagnostics::Level::Info,
+            "filter_test",
+            "should_appear",
+            &[],
+        );
         let ring_count = log_ring::len();
         log_filter::set_min_level(diagnostics::Level::Debug); // restore default
         if ring_count != 1 {
-            serial::write_line(format_args!("[S32.7] log filter: FAILED ring_count={}", ring_count));
+            serial::write_line(format_args!(
+                "[S32.7] log filter: FAILED ring_count={}",
+                ring_count
+            ));
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S32.7] log filter: PASSED"));
@@ -6606,15 +6627,19 @@ fn run_compiler_loader_gate() {
 #[cfg(feature = "stage11-compiler-test")]
 #[inline(never)]
 fn run_compiler_fuzzing_campaign() {
-    use compiler_fuzzing::{FuzzingCampaign, FuzzTestGenerator};
+    use compiler_fuzzing::{FuzzTestGenerator, FuzzingCampaign};
 
     serial::write_line(format_args!("[S11.FUZZ] Campaign Framework: Initializing"));
-    serial::write_line(format_args!("[S11.FUZZ] Target: {} test cases across 5 strategies", 
-        FuzzTestGenerator::total_test_count()));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Target: {} test cases across 5 strategies",
+        FuzzTestGenerator::total_test_count()
+    ));
 
     let mut campaign = FuzzingCampaign::new(0xdead_beef_u64);
-    
-    serial::write_line(format_args!("[S11.FUZZ] Strategy 1: Structure Variation (250 tests)"));
+
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Strategy 1: Structure Variation (250 tests)"
+    ));
     if !campaign.run_structure_variation_campaign() {
         serial::write_line(format_args!("[S11.FUZZ] Structure Variation: FAILED"));
         qemu_test_exit_failure();
@@ -6624,7 +6649,9 @@ fn run_compiler_fuzzing_campaign() {
         campaign.engine.tests_run
     ));
 
-    serial::write_line(format_args!("[S11.FUZZ] Strategy 2: Type Combinations (250 tests)"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Strategy 2: Type Combinations (250 tests)"
+    ));
     if !campaign.run_type_combination_campaign() {
         serial::write_line(format_args!("[S11.FUZZ] Type Combinations: FAILED"));
         qemu_test_exit_failure();
@@ -6634,7 +6661,9 @@ fn run_compiler_fuzzing_campaign() {
         campaign.engine.tests_run
     ));
 
-    serial::write_line(format_args!("[S11.FUZZ] Strategy 3: Unsafe Block Patterns (250 tests)"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Strategy 3: Unsafe Block Patterns (250 tests)"
+    ));
     if !campaign.run_unsafe_block_campaign() {
         serial::write_line(format_args!("[S11.FUZZ] Unsafe Block Patterns: FAILED"));
         qemu_test_exit_failure();
@@ -6644,7 +6673,9 @@ fn run_compiler_fuzzing_campaign() {
         campaign.engine.tests_run
     ));
 
-    serial::write_line(format_args!("[S11.FUZZ] Strategy 4: Attribute Variations (250 tests)"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Strategy 4: Attribute Variations (250 tests)"
+    ));
     if !campaign.run_attribute_variation_campaign() {
         serial::write_line(format_args!("[S11.FUZZ] Attribute Variations: FAILED"));
         qemu_test_exit_failure();
@@ -6654,7 +6685,9 @@ fn run_compiler_fuzzing_campaign() {
         campaign.engine.tests_run
     ));
 
-    serial::write_line(format_args!("[S11.FUZZ] Strategy 5: Edge Case Patterns (250 tests)"));
+    serial::write_line(format_args!(
+        "[S11.FUZZ] Strategy 5: Edge Case Patterns (250 tests)"
+    ));
     if !campaign.run_edge_case_campaign() {
         serial::write_line(format_args!("[S11.FUZZ] Edge Case Patterns: FAILED"));
         qemu_test_exit_failure();
@@ -6898,10 +6931,8 @@ const SYSTEM_WALLPAPER_MANIFEST: &[u8] = include_bytes!(concat!(
 ));
 #[cfg(feature = "system-apps")]
 const SYSTEM_WALLPAPER_SHA256: [u8; 32] = [
-    0x92, 0x40, 0x01, 0xb6, 0x6b, 0x65, 0x16, 0xac,
-    0x8d, 0x9d, 0x8c, 0xba, 0x3c, 0x2f, 0xc3, 0x1b,
-    0x47, 0xe2, 0x05, 0xb9, 0xb0, 0x67, 0x6f, 0x90,
-    0x8c, 0xda, 0x21, 0xdf, 0x31, 0x60, 0xe4, 0x4b,
+    0x92, 0x40, 0x01, 0xb6, 0x6b, 0x65, 0x16, 0xac, 0x8d, 0x9d, 0x8c, 0xba, 0x3c, 0x2f, 0xc3, 0x1b,
+    0x47, 0xe2, 0x05, 0xb9, 0xb0, 0x67, 0x6f, 0x90, 0x8c, 0xda, 0x21, 0xdf, 0x31, 0x60, 0xe4, 0x4b,
 ];
 // Graphics-modernization Phase 3 (typography): stage the already-bundled
 // Noto Sans TTF (kernel/src/ttf.rs's own `bundled_face()` already embeds
@@ -6924,10 +6955,8 @@ const SYSTEM_FONT_MANIFEST: &[u8] = include_bytes!(concat!(
 ));
 #[cfg(feature = "system-apps")]
 const SYSTEM_FONT_SHA256: [u8; 32] = [
-    0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c,
-    0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
-    0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50,
-    0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
+    0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c, 0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
+    0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50, 0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
 ];
 
 #[cfg(any(
@@ -8108,10 +8137,9 @@ fn start_production_system_services() -> bool {
         task::yield_now();
     }
 
-    let Some(program) = userspace::load_elf_with_argv_verified(
-        SEARCH_SERVICE_IMAGE,
-        &["/bin/woven-search"],
-    ) else {
+    let Some(program) =
+        userspace::load_elf_with_argv_verified(SEARCH_SERVICE_IMAGE, &["/bin/woven-search"])
+    else {
         serial::write_line(format_args!("[SERVICES] woven-search load failed"));
         return false;
     };
@@ -8321,7 +8349,9 @@ fn install_production_system_apps() -> bool {
     let digest: [u8; 32] = Sha256::digest(SYSTEM_WALLPAPER).into();
     if !valid_wallpaper
         || digest != SYSTEM_WALLPAPER_SHA256
-        || !SYSTEM_WALLPAPER_MANIFEST.windows(7).any(|window| window == b"CC0-1.0")
+        || !SYSTEM_WALLPAPER_MANIFEST
+            .windows(7)
+            .any(|window| window == b"CC0-1.0")
         || !SYSTEM_WALLPAPER_MANIFEST
             .windows(24)
             .any(|window| window == b"wovenhat-gradient-160x90")
@@ -8333,7 +8363,9 @@ fn install_production_system_apps() -> bool {
     if SYSTEM_FONT.len() < 4
         || &SYSTEM_FONT[..4] != b"\x00\x01\x00\x00"
         || font_digest != SYSTEM_FONT_SHA256
-        || !SYSTEM_FONT_MANIFEST.windows(7).any(|window| window == b"OFL-1.1")
+        || !SYSTEM_FONT_MANIFEST
+            .windows(7)
+            .any(|window| window == b"OFL-1.1")
         || !SYSTEM_FONT_MANIFEST
             .windows(16)
             .any(|window| window == b"notosans-regular")
@@ -8420,9 +8452,7 @@ fn install_production_system_apps() -> bool {
         }
         catalogs += 1;
     }
-    if vfs::create_read_only("/share/wallpapers/wovenhat-gradient.bmp", SYSTEM_WALLPAPER)
-        .is_err()
-    {
+    if vfs::create_read_only("/share/wallpapers/wovenhat-gradient.bmp", SYSTEM_WALLPAPER).is_err() {
         for rollback in apps {
             let _ = vfs::remove(rollback.catalog_path);
             let _ = vfs::remove(rollback.binary_path);
@@ -8441,11 +8471,7 @@ fn install_production_system_apps() -> bool {
         }
         return false;
     }
-    if vfs::create_read_only(
-        "/share/wallpapers/manifest.toml",
-        SYSTEM_WALLPAPER_MANIFEST,
-    )
-    .is_err()
+    if vfs::create_read_only("/share/wallpapers/manifest.toml", SYSTEM_WALLPAPER_MANIFEST).is_err()
     {
         let _ = vfs::remove("/share/wallpapers/wovenhat-gradient.bmp");
         for rollback in apps {
@@ -9463,7 +9489,8 @@ fn stage20_14b_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -9676,8 +9703,7 @@ fn stage20_15_self_test() -> bool {
     }
 
     let settings = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
-        && (vfs::stat("/etc/wovenhat").is_ok()
-            || vfs::mkdir("/etc/wovenhat").is_ok())
+        && (vfs::stat("/etc/wovenhat").is_ok() || vfs::mkdir("/etc/wovenhat").is_ok())
         && vfs::create_read_only(
             "/etc/wovenhat/settings.json",
             br#"{"schema":"stage20-15-test","high_contrast":true}"#,
@@ -10478,13 +10504,9 @@ fn stage20_13_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
-
-
-
 
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
@@ -10515,7 +10537,8 @@ fn stage20_13_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -11005,9 +11028,8 @@ fn stage20_12_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
     let middle = height / 2;
-    let dim = move |x: i32, y: i32| {
-        blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
-    };
+    let dim =
+        move |x: i32, y: i32| blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160);
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
         let mut mask = Surface::new(width as usize, 7);
@@ -11469,9 +11491,8 @@ fn stage20_11_self_test() -> bool {
 
     // The lock screen as the kernel renders it: dimmed wallpaper, with
     // "Locked", the time, the prompt and the dots centred on the middle row.
-    let dim = move |x: i32, y: i32| {
-        blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160)
-    };
+    let dim =
+        move |x: i32, y: i32| blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160);
     let middle = height / 2;
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
@@ -12005,7 +12026,10 @@ fn stage20_10_self_test() -> bool {
 
     let (mut px, mut py) = (width / 2, height / 2);
     let button_clicked = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    if !step("the Quick Settings button receives the click", button_clicked) {
+    if !step(
+        "the Quick Settings button receives the click",
+        button_clicked,
+    ) {
         return false;
     }
     let opened = until(1000, || {
@@ -12060,7 +12084,10 @@ fn stage20_10_self_test() -> bool {
             )
         });
     (px, py) = (rx, ry);
-    if !step("Reduced Motion toggles on through Quick Settings", reduced_motion) {
+    if !step(
+        "Reduced Motion toggles on through Quick Settings",
+        reduced_motion,
+    ) {
         return false;
     }
 
@@ -12639,38 +12666,79 @@ fn stage20_18_self_test() -> bool {
     // visible border/text samples in the independent expected image.
     let wallpaper = |x: i32, y: i32| {
         let span = (height - 1).max(1);
-        let gradient = blend_pixel(rgb(16, 78, 82), rgb(11, 29, 58),
-            (y.clamp(0, span) * 255 / span) as u8);
-        let tint = if (x / 96 + y / 96) % 2 == 0 { rgb(255, 255, 255) } else { 0 };
+        let gradient = blend_pixel(
+            rgb(16, 78, 82),
+            rgb(11, 29, 58),
+            (y.clamp(0, span) * 255 / span) as u8,
+        );
+        let tint = if (x / 96 + y / 96) % 2 == 0 {
+            rgb(255, 255, 255)
+        } else {
+            0
+        };
         let woven = blend_pixel(tint, gradient, 12);
-        if x % 96 == 0 || y % 96 == 0 { blend_pixel(rgb(255, 255, 255), woven, 10) } else { woven }
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(rgb(255, 255, 255), woven, 10)
+        } else {
+            woven
+        }
     };
     let (toast_x, toast_y) = (width - 188, 8);
     let mut toast = Surface::new(180, 22);
     for y in 0..22 {
         for x in 0..180 {
-            toast.set_pixel(x, y, blend_pixel(rgb(28, 32, 44), wallpaper(toast_x + x, toast_y + y), 216));
+            toast.set_pixel(
+                x,
+                y,
+                blend_pixel(rgb(28, 32, 44), wallpaper(toast_x + x, toast_y + y), 216),
+            );
         }
     }
     toast.stroke_rect(toast.bounds(), rgb(76, 190, 188));
     toast.draw_text(6, 8, "3D toast ready", rgb(255, 255, 255));
-    let expected_toast = |x: i32, y: i32| expected_card_3d(
-        x, y, toast_x, toast_y, 180, 22, 30 << 16,
-        |lx, ly| toast.pixel(lx, ly), wallpaper,
-    );
-    let visible = (toast_y..toast_y + 22).flat_map(|y| (toast_x..toast_x + 180).map(move |x| (x, y)))
-        .filter(|&(x, y)| expected_toast(x, y) == rgb(255, 255, 255)).count();
-    if !step("3D notification fixture contains visible text", visible >= 10) { return false; }
+    let expected_toast = |x: i32, y: i32| {
+        expected_card_3d(
+            x,
+            y,
+            toast_x,
+            toast_y,
+            180,
+            22,
+            30 << 16,
+            |lx, ly| toast.pixel(lx, ly),
+            wallpaper,
+        )
+    };
+    let visible = (toast_y..toast_y + 22)
+        .flat_map(|y| (toast_x..toast_x + 180).map(move |x| (x, y)))
+        .filter(|&(x, y)| expected_toast(x, y) == rgb(255, 255, 255))
+        .count();
+    if !step(
+        "3D notification fixture contains visible text",
+        visible >= 10,
+    ) {
+        return false;
+    }
     let sent = ipc::send(alpha.as_u64(), shell.as_u64(), b"NOTE3D toast ready").is_ok();
-    let rendered = sent && until(1000, || {
-        (toast_y..toast_y + 22).all(|y| (toast_x..toast_x + 180).all(|x| {
-            compositor::pixel(x, y) == Ok(expected_toast(x, y))
-        }))
-    });
-    if !rendered { report_graphics_mismatch("3D toast", toast_x, toast_y, 180, 22, expected_toast); }
-    if !step("3D notification border, text and background match every pixel", rendered) { return false; }
+    let rendered = sent
+        && until(1000, || {
+            (toast_y..toast_y + 22).all(|y| {
+                (toast_x..toast_x + 180)
+                    .all(|x| compositor::pixel(x, y) == Ok(expected_toast(x, y)))
+            })
+        });
+    if !rendered {
+        report_graphics_mismatch("3D toast", toast_x, toast_y, 180, 22, expected_toast);
+    }
+    if !step(
+        "3D notification border, text and background match every pixel",
+        rendered,
+    ) {
+        return false;
+    }
     if task::kill_process(alpha.as_u64(), 9).is_err()
-        || !until(1000, || task::process_exited(alpha)) {
+        || !until(1000, || task::process_exited(alpha))
+    {
         return step("notification client killed", false);
     }
     let _ = task::wait_process(alpha.as_u64());
@@ -12751,13 +12819,9 @@ fn stage20_9_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
-
-
-
 
     fn region(
         x0: i32,
@@ -12795,7 +12859,8 @@ fn stage20_9_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -12848,11 +12913,9 @@ fn stage20_9_self_test() -> bool {
     let toast = overlay((180, 22), &|surface| {
         surface.draw_text(6, 8, "Battery 80%", WHITE);
     });
-    let toast_expected = |x: i32, y: i32| {
-        match toast.pixel(x - (width - 188), y - 8) {
-            Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        }
+    let toast_expected = |x: i32, y: i32| match toast.pixel(x - (width - 188), y - 8) {
+        Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+        Some(color) => color,
     };
     if !step(
         "the toast shows the latest notification",
@@ -12912,9 +12975,12 @@ fn stage20_9_self_test() -> bool {
         })
     };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered = clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
+    let center_rendered =
+        clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
     let badge_removed = center_rendered
-        && until(500, || compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT));
+        && until(500, || {
+            compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT)
+        });
     let opened = badge_removed;
     if !step(
         "clicking the clock opens the center, newest first, and clears the badge",
@@ -12934,7 +13000,9 @@ fn stage20_9_self_test() -> bool {
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL));
+        && until(1000, || {
+            compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL)
+        });
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
@@ -13017,13 +13085,9 @@ fn stage20_8_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
-
-
-
 
     fn region(
         x0: i32,
@@ -13078,7 +13142,8 @@ fn stage20_8_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -13673,13 +13738,9 @@ fn stage20_6_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
-
-
-
 
     fn region(
         x0: i32,
@@ -13725,10 +13786,8 @@ fn stage20_6_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(
-        WOVEN_SHELL_IMAGE,
-        &["/bin/woven-shell", "--no-3d"],
-    )
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -13776,7 +13835,9 @@ fn stage20_6_self_test() -> bool {
     let toast = until(1000, || {
         region(toast_x, toast_y, 180, 22, |x, y| {
             match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, expected_wallpaper(x, y, width, height), 216),
+                Some(UNSET) | None => {
+                    blend_pixel(TOAST_FILL, expected_wallpaper(x, y, width, height), 216)
+                }
                 Some(pixel) => pixel,
             }
         })
@@ -13854,13 +13915,19 @@ fn stage20_6_self_test() -> bool {
     let panel = mouse::keyboard_loopback(0x3b)
         && until(1000, || {
             compositor::between_frames(|pixel| {
-                (panel_y..panel_y + panel_height).all(|y| {
-                    (145..164).all(|x| pixel(x, y) == Some(panel_pixel(x, y)))
-                })
+                (panel_y..panel_y + panel_height)
+                    .all(|y| (145..164).all(|x| pixel(x, y) == Some(panel_pixel(x, y))))
             }) == Some(true)
         });
     if !panel {
-        report_graphics_mismatch("translucent launcher strip", 145, panel_y, 19, panel_height, panel_pixel);
+        report_graphics_mismatch(
+            "translucent launcher strip",
+            145,
+            panel_y,
+            19,
+            panel_height,
+            panel_pixel,
+        );
     }
     if !step(
         "the launcher panel is translucent over a window and its shadow",
@@ -14419,7 +14486,6 @@ fn stage20_4_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(_x: i32, _y: i32, _width: i32, height: i32) -> u32 {
         // WovenShell's production default is the accepted flat software
         // renderer; projected wallpaper is covered by dedicated 3D gates.
@@ -14511,7 +14577,8 @@ fn stage20_4_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -14592,7 +14659,9 @@ fn stage20_4_self_test() -> bool {
             })
         });
     let old = body
-        && until(500, || compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height)));
+        && until(500, || {
+            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
+        });
     let wide_pixel = old && until(500, || compositor::pixel(100, 100) == Ok(GREEN));
     let moved = red && frame && body && old && wide_pixel;
     if !step(
@@ -14702,7 +14771,6 @@ fn stage20_3_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
@@ -14771,7 +14839,8 @@ fn stage20_3_self_test() -> bool {
         .with(capability::Capability::Ipc)
         .with(capability::Capability::FileRead)
         .with(capability::Capability::ProcessCreate);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -14796,18 +14865,60 @@ fn stage20_3_self_test() -> bool {
     fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
         let fill = rgb(74, 88, 112);
         let ink = rgb(220, 230, 242);
-        surface.fill_rect(Rect::new(x + 1, y + 2, size as usize, size as usize), rgb(0, 0, 0));
+        surface.fill_rect(
+            Rect::new(x + 1, y + 2, size as usize, size as usize),
+            rgb(0, 0, 0),
+        );
         surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
         surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
-        if selected { surface.stroke_rect(Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize), ACCENT); }
+        if selected {
+            surface.stroke_rect(
+                Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize),
+                ACCENT,
+            );
+        }
         let span = (size / 2).max(4);
-        surface.fill_rect(Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2), ink);
-        surface.fill_rect(Rect::new(x + size / 4 + 2, y + size / 3 + 6, (span - 4).max(0) as usize, 2), ink);
-        const MASK: [&[u8; 8]; 8] = [b"..####..", b".######.", b"########", b"###..###", b"##....##", b"#......#", b"########", b"........"];
-        let color = if selected { rgb(110, 235, 235) } else { rgb(225, 235, 250) };
+        surface.fill_rect(
+            Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2),
+            ink,
+        );
+        surface.fill_rect(
+            Rect::new(
+                x + size / 4 + 2,
+                y + size / 3 + 6,
+                (span - 4).max(0) as usize,
+                2,
+            ),
+            ink,
+        );
+        const MASK: [&[u8; 8]; 8] = [
+            b"..####..",
+            b".######.",
+            b"########",
+            b"###..###",
+            b"##....##",
+            b"#......#",
+            b"########",
+            b"........",
+        ];
+        let color = if selected {
+            rgb(110, 235, 235)
+        } else {
+            rgb(225, 235, 250)
+        };
         for (row, line) in MASK.iter().enumerate() {
             for (column, bit) in line.iter().enumerate() {
-                if *bit == b'#' { surface.fill_rect(Rect::new(x + (size - 8) / 2 + column as i32, y + (size - 8) / 2 + row as i32, 1, 1), color); }
+                if *bit == b'#' {
+                    surface.fill_rect(
+                        Rect::new(
+                            x + (size - 8) / 2 + column as i32,
+                            y + (size - 8) / 2 + row as i32,
+                            1,
+                            1,
+                        ),
+                        color,
+                    );
+                }
             }
         }
     }
@@ -14856,7 +14967,9 @@ fn stage20_3_self_test() -> bool {
         };
         // Every pixel of the flat panel, including icon/selection/border.
         let matches = until(500, || region(4, y, 160, h, sample));
-        if !matches { report_graphics_mismatch("launcher", 4, y, 160, h, sample); }
+        if !matches {
+            report_graphics_mismatch("launcher", 4, y, 160, h, sample);
+        }
         matches
     };
     let closed = || {
@@ -14942,12 +15055,16 @@ fn stage20_3_self_test() -> bool {
         expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
         expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
         expected.draw_text(6, 8, "Could not start Gamma", WHITE);
-        until(1000, || region(x0, y0, 180, 22, |x, y| {
-            match expected.pixel(x - x0, y - y0) {
-                Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        }))
+        until(1000, || {
+            region(x0, y0, 180, 22, |x, y| {
+                match expected.pixel(x - x0, y - y0) {
+                    Some(UNSET) | None => {
+                        blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216)
+                    }
+                    Some(color) => color,
+                }
+            })
+        })
     };
     let failed = keys(&[0x3b, 0x22])
         && panel(&["Gamma"], "g", 0)
@@ -15043,7 +15160,6 @@ fn stage20_2_self_test() -> bool {
         }
     }
 
-
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
         wallpaper(x, y, height)
     }
@@ -15124,7 +15240,8 @@ fn stage20_2_self_test() -> bool {
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
         .with(capability::Capability::Ipc);
-    let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
+    let Some(program) =
+        userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
         return step("shell image loads", false);
     };
@@ -15165,10 +15282,21 @@ fn stage20_2_self_test() -> bool {
     let alpha_mask = text_mask(80, 16, 4, 5, "Alpha");
     let beta_mask = text_mask(80, 16, 4, 5, "Beta");
     let entry_sample = |entries: &[TaskbarEntryMask3D], x: i32, y: i32| -> bool {
-        compositor::pixel(x, y) == Ok(flat_taskbar_3d(
-            x, y, width, top, &button_mask, &ws_digit_masks, 0,
-            &qs_mask, false, entries, None, |x, y| wallpaper(x, y, height),
-        ))
+        compositor::pixel(x, y)
+            == Ok(flat_taskbar_3d(
+                x,
+                y,
+                width,
+                top,
+                &button_mask,
+                &ws_digit_masks,
+                0,
+                &qs_mask,
+                false,
+                entries,
+                None,
+                |x, y| wallpaper(x, y, height),
+            ))
     };
     let entry_region = |entries: &[TaskbarEntryMask3D], x0: i32, y0: i32, w: i32, h: i32| -> bool {
         (y0..y0 + h).all(|y| (x0..x0 + w).all(|x| entry_sample(entries, x, y)))
@@ -15214,19 +15342,18 @@ fn stage20_2_self_test() -> bool {
     toast_mask.fill_rect(toast_mask.bounds(), UNSET);
     toast_mask.stroke_rect(toast_mask.bounds(), rgb(76, 190, 188));
     toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
-    let toast = until(500, || region(toast_x, toast_y, 180, 22, |x, y| {
-        match toast_mask.pixel(x - toast_x, y - toast_y) {
-            Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
-            Some(color) => color,
-        }
-    }));
+    let toast = until(500, || {
+        region(toast_x, toast_y, 180, 22, |x, y| {
+            match toast_mask.pixel(x - toast_x, y - toast_y) {
+                Some(UNSET) | None => blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216),
+                Some(color) => color,
+            }
+        })
+    });
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
         || !step("tray icon shown", tray)
-        || !step(
-            "notification toast border, text and translucency",
-            toast,
-        )
+        || !step("notification toast border, text and translucency", toast)
     {
         return false;
     }
@@ -15661,9 +15788,18 @@ fn flat_taskbar_3d(
 }
 
 /// Report the first exact-pixel mismatch after an acceptance wait fails.
-#[cfg(any(feature = "stage20-3-test", feature = "stage20-6-test", feature = "stage20-9-test", feature = "stage20-18-test"))]
+#[cfg(any(
+    feature = "stage20-3-test",
+    feature = "stage20-6-test",
+    feature = "stage20-9-test",
+    feature = "stage20-18-test"
+))]
 fn report_graphics_mismatch(
-    label: &str, x0: i32, y0: i32, width: i32, height: i32,
+    label: &str,
+    x0: i32,
+    y0: i32,
+    width: i32,
+    height: i32,
     expected: impl Fn(i32, i32) -> u32,
 ) {
     for y in y0..y0 + height {
@@ -15671,7 +15807,10 @@ fn report_graphics_mismatch(
             let actual = compositor::pixel(x, y);
             let expected = expected(x, y);
             if actual != Ok(expected) {
-                serial::write_line(format_args!("[GFX] {} mismatch x={} y={} expected={:#08x} actual={:?}", label, x, y, expected, actual));
+                serial::write_line(format_args!(
+                    "[GFX] {} mismatch x={} y={} expected={:#08x} actual={:?}",
+                    label, x, y, expected, actual
+                ));
                 return;
             }
         }

@@ -204,8 +204,7 @@ fn xattr_rebuild(
     let existing_count = read_u16(sector, 0) as usize;
     let mut read_at = XATTR_BLOCK_HEADER;
     for _ in 0..existing_count {
-        let (entry_name, value, next) =
-            xattr_entry_at(sector, read_at).ok_or(Error::Corrupt)?;
+        let (entry_name, value, next) = xattr_entry_at(sector, read_at).ok_or(Error::Corrupt)?;
         if entry_name == name {
             replaced = true;
         } else {
@@ -1459,7 +1458,13 @@ impl<D: BlockDevice> Volume<D> {
     /// the rebuilt xattr block and the inode's pointer to it land together or
     /// not at all, exactly like `mkdir`'s directory block + inode pointer.
     #[cfg(any(test, feature = "stage12-2-xattr-test"))]
-    pub fn set_xattr(&mut self, inode: u64, name: &str, value: &[u8], now: u64) -> Result<(), Error> {
+    pub fn set_xattr(
+        &mut self,
+        inode: u64,
+        name: &str,
+        value: &[u8],
+        now: u64,
+    ) -> Result<(), Error> {
         Self::valid_xattr_name(name)?;
         if value.len() > MAX_XATTR_VALUE {
             return Err(Error::TooLarge);
@@ -2086,7 +2091,9 @@ pub fn xattr_self_test() -> bool {
     {
         return false;
     }
-    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 2: empty-state checks"));
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 2: empty-state checks"
+    ));
 
     // Set, get back, overwrite with a different length, get the new value.
     if mounted.set_xattr(file, "user.note", b"draft", 12).is_err() {
@@ -2095,11 +2102,13 @@ pub fn xattr_self_test() -> bool {
     if mounted.get_xattr(file, "user.note", &mut buf) != Ok(5) || &buf[..5] != b"draft" {
         return false;
     }
-    if mounted.set_xattr(file, "user.note", b"final version", 13).is_err() {
+    if mounted
+        .set_xattr(file, "user.note", b"final version", 13)
+        .is_err()
+    {
         return false;
     }
-    if mounted.get_xattr(file, "user.note", &mut buf) != Ok(13) || &buf[..13] != b"final version"
-    {
+    if mounted.get_xattr(file, "user.note", &mut buf) != Ok(13) || &buf[..13] != b"final version" {
         return false;
     }
     if mounted.check().is_err() {
@@ -2164,23 +2173,33 @@ pub fn xattr_self_test() -> bool {
     if node.xattr_block != 0 {
         return false;
     }
-    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 6: remove_xattr frees block"));
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 6: remove_xattr frees block"
+    ));
 
     // Removing the file's directory entry must also free a still-attached
     // xattr block, not leak it.
-    if mounted.set_xattr(file, "user.note", b"leftover", 18).is_err() {
+    if mounted
+        .set_xattr(file, "user.note", b"leftover", 18)
+        .is_err()
+    {
         return false;
     }
     if mounted.unlink(1, "report.bin", 19).is_err() || mounted.check().is_err() {
         return false;
     }
-    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 7: unlink frees xattr block"));
+    crate::serial::write_line(format_args!(
+        "[S12.2 XATTR] checkpoint 7: unlink frees xattr block"
+    ));
 
     // Contents must survive an unmount/remount cycle.
     let Ok(persisted) = mounted.create(1, "persisted.bin", 0o644, 20) else {
         return false;
     };
-    if mounted.set_xattr(persisted, "user.note", b"kept", 21).is_err() {
+    if mounted
+        .set_xattr(persisted, "user.note", b"kept", 21)
+        .is_err()
+    {
         return false;
     }
     let populated = mounted.into_device();
@@ -2190,9 +2209,7 @@ pub fn xattr_self_test() -> bool {
     if remounted.get_xattr(persisted, "user.note", &mut buf) != Ok(4) || &buf[..4] != b"kept" {
         return false;
     }
-    crate::serial::write_line(format_args!(
-        "[S12.2 XATTR] checkpoint 8: survives remount"
-    ));
+    crate::serial::write_line(format_args!("[S12.2 XATTR] checkpoint 8: survives remount"));
 
     // Crash recovery for set_xattr: the file (with no existing attribute) is
     // created and durably committed first, so only `set_xattr`'s own writes
@@ -2360,8 +2377,7 @@ pub fn with_root_volume<R>(
         }
         let partitions = crate::gpt::fat_partitions(&mut disk).ok()?;
         let partition = partitions.into_iter().find(|partition| {
-            let Ok(mut view) = crate::partition::PartitionDevice::new(&mut disk, *partition)
-            else {
+            let Ok(mut view) = crate::partition::PartitionDevice::new(&mut disk, *partition) else {
                 return false;
             };
             Volume::probe(&mut view).is_ok()

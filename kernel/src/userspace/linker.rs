@@ -299,7 +299,13 @@ impl Pending {
         tls_plan: Option<&TlsPlan>,
     ) -> Option<()> {
         validate_relocation_plan(images)?;
-        relocate_linked_images(images, scope, self.space.paging(), &mut self.space, tls_plan)
+        relocate_linked_images(
+            images,
+            scope,
+            self.space.paging(),
+            &mut self.space,
+            tls_plan,
+        )
     }
 }
 
@@ -334,7 +340,11 @@ impl ModulePlan {
     pub(super) fn new(bytes: Vec<u8>, slot: usize, bias: u64) -> Option<Self> {
         {
             let image = elf::parse_shared(&bytes).ok()?.relocated(bias)?;
-            let link = LinkImage { name: None, bytes: Cow::Borrowed(&bytes), image };
+            let link = LinkImage {
+                name: None,
+                bytes: Cow::Borrowed(&bytes),
+                image,
+            };
             validate_relocation_plan(core::slice::from_ref(&link))?;
         }
         let image = elf::parse_shared(&bytes).ok()?.relocated(bias)?;
@@ -347,7 +357,13 @@ impl ModulePlan {
         if mapping_size == 0 {
             return None;
         }
-        Some(Self { bytes, image, slot, mapping_start, mapping_size })
+        Some(Self {
+            bytes,
+            image,
+            slot,
+            mapping_start,
+            mapping_size,
+        })
     }
 }
 
@@ -402,9 +418,9 @@ impl<'a> StagedSegments<'a> {
     /// Returns the new generation number, or `None` if the slot is already live
     /// or the mapping size is zero.
     pub(super) fn commit(mut self) -> Option<u32> {
-        let generation = self
-            .space
-            .publish_dynamic_module(self.slot, self.mapping_start, self.mapping_size)?;
+        let generation =
+            self.space
+                .publish_dynamic_module(self.slot, self.mapping_start, self.mapping_size)?;
         self.committed = true;
         Some(generation)
     }
@@ -460,15 +476,37 @@ pub(super) fn stage_module_segments<'a>(
 /// relocation stream; `Pending` still owns rollback for mapping failures.
 fn validate_relocation_plan(images: &[LinkImage<'_>]) -> Option<()> {
     for linked in images {
-        let Some(dynamic) = linked.image.dynamic() else { continue };
+        let Some(dynamic) = linked.image.dynamic() else {
+            continue;
+        };
         for (offset, size, entry_size) in [
-            (dynamic.rela_file_offset, dynamic.rela_size, dynamic.rela_entry_size),
-            (dynamic.plt_rela_file_offset, dynamic.plt_rela_size, elf::RELA_ENTRY_SIZE),
-            (dynamic.rel_file_offset, dynamic.rel_size, dynamic.rel_entry_size),
-            (dynamic.plt_rel_file_offset, dynamic.plt_rel_size, dynamic.plt_rel_entry_size),
+            (
+                dynamic.rela_file_offset,
+                dynamic.rela_size,
+                dynamic.rela_entry_size,
+            ),
+            (
+                dynamic.plt_rela_file_offset,
+                dynamic.plt_rela_size,
+                elf::RELA_ENTRY_SIZE,
+            ),
+            (
+                dynamic.rel_file_offset,
+                dynamic.rel_size,
+                dynamic.rel_entry_size,
+            ),
+            (
+                dynamic.plt_rel_file_offset,
+                dynamic.plt_rel_size,
+                dynamic.plt_rel_entry_size,
+            ),
         ] {
-            if size == 0 { continue; }
-            if entry_size == 0 || size % entry_size != 0 { return None; }
+            if size == 0 {
+                continue;
+            }
+            if entry_size == 0 || size % entry_size != 0 {
+                return None;
+            }
             let end = offset.checked_add(size)?;
             let bytes = linked.bytes.get(offset..end)?;
             for entry in bytes.chunks_exact(entry_size) {
@@ -485,7 +523,9 @@ fn validate_relocation_plan(images: &[LinkImage<'_>]) -> Option<()> {
                         | elf::R_X86_64_TPOFF64
                         | elf::R_X86_64_GOTTPOFF
                         | elf::R_X86_64_TPOFF32
-                ) { return None; }
+                ) {
+                    return None;
+                }
             }
         }
     }
@@ -504,7 +544,9 @@ fn map_linked_segments(
     let mmap_end = mmap_base.checked_add(MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE)?;
     for (index, linked) in images.iter().enumerate() {
         for segment in linked.image.segments() {
-            let end = segment.mapping_start.checked_add(segment.mapping_size as u64)?;
+            let end = segment
+                .mapping_start
+                .checked_add(segment.mapping_size as u64)?;
             if segment.mapping_start < USER_REGION_START
                 || (index == 0 && end > stack_guard)
                 || (segment.mapping_start < mmap_end && mmap_base < end)
@@ -569,10 +611,7 @@ fn relocate_linked_images(
     Some(())
 }
 
-fn protect_linked_images(
-    images: &[LinkImage<'_>],
-    page_table: paging::AddressSpace,
-) -> Option<()> {
+fn protect_linked_images(images: &[LinkImage<'_>], page_table: paging::AddressSpace) -> Option<()> {
     for linked in images {
         for segment in linked.image.segments() {
             paging::protect_user_range_in_inactive(
@@ -641,7 +680,9 @@ fn map_initial_tls(
         pending.template_mapped = Some((template_start, template_size));
         paging::zero_user_range_in(page_table, template_start, template_size).ok()?;
         for (index, image) in images.iter().enumerate() {
-            let Some(tls) = image.image.tls() else { continue };
+            let Some(tls) = image.image.tls() else {
+                continue;
+            };
             let image_offset = tls_image_offset(images, index)?;
             copy_tls_bytes(
                 page_table,
@@ -650,11 +691,16 @@ fn map_initial_tls(
                 tls.file_size,
             )?;
         }
-        paging::protect_user_range_in_inactive(page_table, template_start, template_size, false, false)
-            .ok()?;
-    }
-    paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false)
+        paging::protect_user_range_in_inactive(
+            page_table,
+            template_start,
+            template_size,
+            false,
+            false,
+        )
         .ok()?;
+    }
+    paging::map_user_range_in_inactive(page_table, start, layout.mapping_size, true, false).ok()?;
     let initial = InitialTls {
         start,
         layout,
@@ -662,13 +708,18 @@ fn map_initial_tls(
         template_size,
         module_tpoff: core::array::from_fn(|index| tls_tpoff(images, index, &plan).unwrap_or(0)),
         module_valid: core::array::from_fn(|index| {
-            images.get(index).and_then(|image| image.image.tls()).is_some()
+            images
+                .get(index)
+                .and_then(|image| image.image.tls())
+                .is_some()
         }),
     };
     pending.space.tls = Some(initial);
     let tls_base = initialize_tls(page_table, start, initial)?;
     for (index, image) in images.iter().enumerate() {
-        let Some(tls) = image.image.tls() else { continue };
+        let Some(tls) = image.image.tls() else {
+            continue;
+        };
         pending.space.publish_dynamic_module(
             index,
             tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
@@ -684,12 +735,16 @@ fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
     let mut fini = Vec::new();
     for image in images {
         let lifecycle = image.image.lifecycle();
-        if init.len() + lifecycle.init_count > capacity { return None; }
+        if init.len() + lifecycle.init_count > capacity {
+            return None;
+        }
         init.extend_from_slice(&lifecycle.init[..lifecycle.init_count]);
     }
     for image in images.iter().rev() {
         let lifecycle = image.image.lifecycle();
-        if fini.len() + lifecycle.fini_count > capacity { return None; }
+        if fini.len() + lifecycle.fini_count > capacity {
+            return None;
+        }
         fini.extend_from_slice(&lifecycle.fini[..lifecycle.fini_count]);
     }
     Some((init, fini))
@@ -699,7 +754,9 @@ fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);
     for image in &images[1..] {
-        scope.add_dependency(image.name.as_deref()?, &image.image, &image.bytes).ok()?;
+        scope
+            .add_dependency(image.name.as_deref()?, &image.image, &image.bytes)
+            .ok()?;
     }
     scope.validate_dependencies().ok()?;
     Some(scope)

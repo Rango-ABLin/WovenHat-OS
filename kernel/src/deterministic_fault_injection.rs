@@ -77,7 +77,10 @@ impl DeterministicFaultInjector {
     }
 
     pub fn next_random(&mut self) -> u32 {
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.rng_state >> 33) as u32
     }
 
@@ -122,7 +125,7 @@ impl FaultInjectionStats {
             total_faults_triggered: injector.injection_count,
             faults_by_kind: [0; 8],
         };
-        
+
         for fault in injector.faults[..injector.fault_count].iter() {
             if !fault.enabled {
                 continue;
@@ -138,15 +141,14 @@ impl FaultInjectionStats {
                 FaultKind::DeadlineExceeded => stats.faults_by_kind[7] += 1,
             }
         }
-        
+
         stats
     }
 
     pub fn print_summary(&self) {
         crate::serial::write_line(format_args!(
             "[FI] Registered: {}, Triggered: {}",
-            self.total_faults_registered,
-            self.total_faults_triggered
+            self.total_faults_registered, self.total_faults_triggered
         ));
     }
 }
@@ -179,7 +181,8 @@ impl FaultInjectionTestCase {
 
     pub fn run(&self, injector: &mut DeterministicFaultInjector) -> Result<(), &'static str> {
         for (fault_id, trigger_at) in self.faults[..self.fault_count].iter() {
-            injector.enable_fault(*fault_id, *trigger_at)
+            injector
+                .enable_fault(*fault_id, *trigger_at)
                 .map_err(|_| "Failed to enable fault")?;
         }
         Ok(())
@@ -206,7 +209,8 @@ impl FaultCoverage {
     pub fn record_recovery(&mut self) {
         self.faults_recovered += 1;
         if self.faults_triggered > 0 {
-            self.recovery_rate = (self.faults_recovered as u64 * 100 / self.faults_triggered as u64) as u32;
+            self.recovery_rate =
+                (self.faults_recovered as u64 * 100 / self.faults_triggered as u64) as u32;
         }
     }
 
@@ -217,10 +221,7 @@ impl FaultCoverage {
     pub fn print_report(&self) {
         crate::serial::write_line(format_args!(
             "[FI-COVERAGE] Triggered: {}, Recovered: {}, Fatal: {}, Rate: {}%",
-            self.faults_triggered,
-            self.faults_recovered,
-            self.faults_fatal,
-            self.recovery_rate
+            self.faults_triggered, self.faults_recovered, self.faults_fatal, self.recovery_rate
         ));
     }
 }
@@ -233,12 +234,7 @@ pub struct FaultInjectionScenario {
 }
 
 impl FaultInjectionScenario {
-    pub const fn new(
-        id: u32,
-        subsys: &'static str,
-        kind: FaultKind,
-        timing: u32,
-    ) -> Self {
+    pub const fn new(id: u32, subsys: &'static str, kind: FaultKind, timing: u32) -> Self {
         FaultInjectionScenario {
             scenario_id: id,
             target_subsystem: subsys,
@@ -267,7 +263,9 @@ mod tests {
     #[test]
     fn test_register_fault() {
         let mut inj = DeterministicFaultInjector::new(12345);
-        let id = inj.register_fault_point(FaultKind::AllocationFailure).unwrap();
+        let id = inj
+            .register_fault_point(FaultKind::AllocationFailure)
+            .unwrap();
         assert_eq!(id, 0);
     }
 
@@ -281,9 +279,11 @@ mod tests {
     #[test]
     fn test_injection() {
         let mut inj = DeterministicFaultInjector::new(12345);
-        let id = inj.register_fault_point(FaultKind::AllocationFailure).unwrap();
+        let id = inj
+            .register_fault_point(FaultKind::AllocationFailure)
+            .unwrap();
         inj.enable_fault(id, 1).unwrap();
-        
+
         assert!(inj.should_inject(id));
         assert_eq!(inj.total_injections(), 1);
     }

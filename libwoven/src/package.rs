@@ -164,7 +164,7 @@ fn read_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, HEADER_LEN, MAGIC, VERSION, parse};
+    use super::{parse, Error, HEADER_LEN, MAGIC, VERSION};
 
     fn valid_package() -> Vec<u8> {
         let manifest = [

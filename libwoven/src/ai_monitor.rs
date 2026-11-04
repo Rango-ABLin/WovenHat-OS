@@ -91,7 +91,7 @@ impl Default for Monitor {
 
 #[cfg(test)]
 mod tests {
-    use super::{Monitor, Severity, explain};
+    use super::{explain, Monitor, Severity};
     use crate::security::{AuditAction, AuditEvent};
 
     fn event(action: AuditAction, allowed: bool) -> AuditEvent {

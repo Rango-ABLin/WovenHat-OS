@@ -4,7 +4,7 @@
 //! must authenticate the WPKG envelope before converting its manifest into an
 //! install request. Persistent WovenFS publication remains above this core.
 
-use crate::package::{MAX_DEPENDENCIES, MAX_NAME_BYTES, Manifest};
+use crate::package::{Manifest, MAX_DEPENDENCIES, MAX_NAME_BYTES};
 
 pub const MAX_INSTALLED: usize = 32;
 pub const RECORD_MAGIC: [u8; 4] = *b"WSTC";

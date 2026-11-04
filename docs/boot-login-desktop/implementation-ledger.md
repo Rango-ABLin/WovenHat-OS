@@ -43,3 +43,15 @@ no-overwrite behavior. Host tests check the generated on-disk record against
 a fixed known answer and verify an existing destination survives untouched.
 Both tests pass. No production provisioning, credential migration, entropy,
 authentication/session authority or actual login acceptance is claimed.
+
+## BLD-A3 workspace formatting
+
+Status: IMPLEMENTED — UNVERIFIED (runtime). Branch: chore/boot-login-format.
+Prepared in an isolated worktree at b75b9366 while the original Windows
+chain runs. A plain cargo fmt followed by --check exposed conflicting import
+ordering for shared block.rs compiled under editions 2021 and 2024. Explicit
+workspace style_edition=2021 resolves that non-idempotence without disabling
+any formatter rule. Cargo fmt --all followed by two --check runs passes.
+The uniform style also normalizes imports in existing edition-2024 files;
+all source edits are formatter output. Runtime build/lints/tests and integration
+remain pending. No assertion, feature guard, capability or timeout is changed.

@@ -76,8 +76,7 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
         argv[argc + 1] = "--reduced-motion";
         argc += 2;
     }
-    let program = crate::userspace::load_elf_with_argv(image, &argv[..argc])
-        .ok_or(Error::Image)?;
+    let program = crate::userspace::load_elf_with_argv(image, &argv[..argc]).ok_or(Error::Image)?;
     let (pid, _, _) = crate::task::spawn_user_system_service("woven-shell", program, CAPABILITIES)
         .map_err(|_| Error::Spawn)?;
     CONSOLE.store(false, Ordering::Release);

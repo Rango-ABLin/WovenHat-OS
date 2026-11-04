@@ -10,7 +10,7 @@ mod bar;
 #[path = "../kernel/src/hal/pci/resource.rs"]
 mod resource;
 
-use assignment::{Apertures, Error, Plan, Request, release_all};
+use assignment::{release_all, Apertures, Error, Plan, Request};
 use bar::{Kind, Probe};
 use resource::Range;
 
@@ -106,13 +106,12 @@ fn failure_rolls_back_every_resource_domain() {
             probe: Some(probe(Kind::Memory32, 0x1000)),
         })
         .unwrap();
-        assert!(
-            plan.reserve(Request {
+        assert!(plan
+            .reserve(Request {
                 index: 2,
                 probe: Some(probe(Kind::Memory64, 0x2000))
             })
-            .is_err()
-        );
+            .is_err());
     }
     assert_eq!(apertures.io.active(), 0);
     assert_eq!(apertures.mmio32.active(), 0);

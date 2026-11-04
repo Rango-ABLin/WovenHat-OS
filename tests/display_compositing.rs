@@ -15,7 +15,7 @@ mod display;
 mod font;
 
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
-use display::{Damage, MAX_DAMAGE_RECTS, Rect, Surface, blend_pixel, present, present_scaled, rgb};
+use display::{blend_pixel, present, present_scaled, rgb, Damage, Rect, Surface, MAX_DAMAGE_RECTS};
 
 const WHITE: u32 = rgb(255, 255, 255);
 const RED: u32 = rgb(255, 0, 0);

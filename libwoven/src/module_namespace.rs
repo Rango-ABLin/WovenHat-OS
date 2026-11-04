@@ -32,7 +32,11 @@ struct Module {
 }
 
 impl Module {
-    const EMPTY: Self = Self { generation: 1, live: false, references: 0 };
+    const EMPTY: Self = Self {
+        generation: 1,
+        live: false,
+        references: 0,
+    };
 }
 
 #[derive(Clone, Copy)]
@@ -45,7 +49,10 @@ struct Symbol {
 
 impl Symbol {
     const EMPTY: Self = Self {
-        module: ModuleId { slot: 0, generation: 0 },
+        module: ModuleId {
+            slot: 0,
+            generation: 0,
+        },
         length: 0,
         name: [0; MAX_NAME],
         address: 0,
@@ -59,7 +66,10 @@ pub struct Namespace {
 
 impl Namespace {
     pub const fn new() -> Self {
-        Self { modules: [Module::EMPTY; MAX_MODULES], symbols: [None; MAX_SYMBOLS] }
+        Self {
+            modules: [Module::EMPTY; MAX_MODULES],
+            symbols: [None; MAX_SYMBOLS],
+        }
     }
 
     fn valid(&self, id: ModuleId) -> bool {
@@ -77,11 +87,17 @@ impl Namespace {
             .ok_or(Error::Capacity)?;
         module.live = true;
         module.references = 1;
-        Ok(ModuleId { slot: slot as u8, generation: module.generation })
+        Ok(ModuleId {
+            slot: slot as u8,
+            generation: module.generation,
+        })
     }
 
     pub fn retain(&mut self, id: ModuleId) -> Result<(), Error> {
-        let module = self.modules.get_mut(id.slot as usize).ok_or(Error::Invalid)?;
+        let module = self
+            .modules
+            .get_mut(id.slot as usize)
+            .ok_or(Error::Invalid)?;
         if !module.live || module.generation != id.generation {
             return Err(Error::Invalid);
         }
@@ -91,7 +107,10 @@ impl Namespace {
 
     /// Drop one reference. Returns true when the module became unloadable.
     pub fn release(&mut self, id: ModuleId) -> Result<bool, Error> {
-        let module = self.modules.get_mut(id.slot as usize).ok_or(Error::Invalid)?;
+        let module = self
+            .modules
+            .get_mut(id.slot as usize)
+            .ok_or(Error::Invalid)?;
         if !module.live || module.generation != id.generation || module.references == 0 {
             return Err(Error::Invalid);
         }
@@ -101,7 +120,10 @@ impl Namespace {
 
     /// Retire a zero-reference module and invalidate all its symbols.
     pub fn unload(&mut self, id: ModuleId) -> Result<(), Error> {
-        let module = self.modules.get_mut(id.slot as usize).ok_or(Error::Invalid)?;
+        let module = self
+            .modules
+            .get_mut(id.slot as usize)
+            .ok_or(Error::Invalid)?;
         if !module.live || module.generation != id.generation {
             return Err(Error::Invalid);
         }
@@ -125,10 +147,19 @@ impl Namespace {
         if name.is_empty() || name.len() > MAX_NAME {
             return Err(Error::NameTooLong);
         }
-        if self.symbols.iter().flatten().any(|symbol| symbol.name[..symbol.length as usize] == *name) {
+        if self
+            .symbols
+            .iter()
+            .flatten()
+            .any(|symbol| symbol.name[..symbol.length as usize] == *name)
+        {
             return Err(Error::Duplicate);
         }
-        let slot = self.symbols.iter().position(Option::is_none).ok_or(Error::Capacity)?;
+        let slot = self
+            .symbols
+            .iter()
+            .position(Option::is_none)
+            .ok_or(Error::Capacity)?;
         let mut symbol = Symbol::EMPTY;
         symbol.module = id;
         symbol.length = name.len() as u8;
@@ -142,14 +173,18 @@ impl Namespace {
         self.symbols
             .iter()
             .flatten()
-            .find(|symbol| symbol.name[..symbol.length as usize] == *name && self.valid(symbol.module))
+            .find(|symbol| {
+                symbol.name[..symbol.length as usize] == *name && self.valid(symbol.module)
+            })
             .map(|symbol| (symbol.module, symbol.address))
             .ok_or(Error::NotFound)
     }
 }
 
 impl Default for Namespace {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -174,7 +209,9 @@ mod tests {
     fn references_gate_unload_and_capacity_is_bounded() {
         let mut namespace = Namespace::new();
         let mut ids = [None; MAX_MODULES];
-        for id in &mut ids { *id = Some(namespace.load().unwrap()); }
+        for id in &mut ids {
+            *id = Some(namespace.load().unwrap());
+        }
         assert_eq!(namespace.load(), Err(Error::Capacity));
         let id = ids[0].unwrap();
         namespace.retain(id).unwrap();

@@ -88,7 +88,10 @@ impl CompilerFuzzingEngine {
     }
 
     pub fn next_random(&mut self) -> u32 {
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.rng_state >> 33) as u32
     }
 
@@ -157,12 +160,7 @@ pub struct CrashReport {
 }
 
 impl CrashReport {
-    pub const fn new(
-        id: u32,
-        seed: u64,
-        crash_type: &'static str,
-        version: &'static str,
-    ) -> Self {
+    pub const fn new(id: u32, seed: u64, crash_type: &'static str, version: &'static str) -> Self {
         CrashReport {
             crash_id: id,
             seed,
@@ -290,7 +288,7 @@ mod tests {
     fn test_minimizer() {
         let mut min = TestCaseMinimizer::new(1000);
         min.record_minimization(500);
-        
+
         assert!(min.successfully_minimized());
         assert_eq!(min.reduction_percent, 50);
     }
@@ -365,76 +363,91 @@ impl FuzzingCampaign {
 
     pub fn run_structure_variation_campaign(&mut self) -> bool {
         let test_count = FuzzTestGenerator::generate_structure_variation_tests();
-        
+
         for i in 0..test_count {
             let seed_value = self.campaign_seed.wrapping_add(i as u64);
-            let _test = CompilerFuzzTest::new(i, FuzzingSeed::new(seed_value, FuzzingStrategy::StructureVariation, 5));
-            
+            let _test = CompilerFuzzTest::new(
+                i,
+                FuzzingSeed::new(seed_value, FuzzingStrategy::StructureVariation, 5),
+            );
+
             let result = CompilationResult::Success;
             self.engine.record_test(result);
             self.coverage.syntax_variants_tried += 1;
         }
-        
+
         self.engine.tests_run > 0
     }
 
     pub fn run_type_combination_campaign(&mut self) -> bool {
         let test_count = FuzzTestGenerator::generate_type_combination_tests();
-        
+
         for i in 0..test_count {
             let seed_value = self.campaign_seed.wrapping_add(250).wrapping_add(i as u64);
-            let _test = CompilerFuzzTest::new(i, FuzzingSeed::new(seed_value, FuzzingStrategy::TypeCombinations, 5));
-            
+            let _test = CompilerFuzzTest::new(
+                i,
+                FuzzingSeed::new(seed_value, FuzzingStrategy::TypeCombinations, 5),
+            );
+
             let result = CompilationResult::Success;
             self.engine.record_test(result);
             self.coverage.type_combinations_tried += 1;
         }
-        
+
         self.engine.tests_run > 250
     }
 
     pub fn run_unsafe_block_campaign(&mut self) -> bool {
         let test_count = FuzzTestGenerator::generate_unsafe_block_tests();
-        
+
         for i in 0..test_count {
             let seed_value = self.campaign_seed.wrapping_add(500).wrapping_add(i as u64);
-            let _test = CompilerFuzzTest::new(i, FuzzingSeed::new(seed_value, FuzzingStrategy::UnsafeBlockPatterns, 5));
-            
+            let _test = CompilerFuzzTest::new(
+                i,
+                FuzzingSeed::new(seed_value, FuzzingStrategy::UnsafeBlockPatterns, 5),
+            );
+
             let result = CompilationResult::Success;
             self.engine.record_test(result);
             self.coverage.unsafe_patterns_tried += 1;
         }
-        
+
         self.engine.tests_run > 500
     }
 
     pub fn run_attribute_variation_campaign(&mut self) -> bool {
         let test_count = FuzzTestGenerator::generate_attribute_variation_tests();
-        
+
         for i in 0..test_count {
             let seed_value = self.campaign_seed.wrapping_add(750).wrapping_add(i as u64);
-            let _test = CompilerFuzzTest::new(i, FuzzingSeed::new(seed_value, FuzzingStrategy::AttributeVariations, 5));
-            
+            let _test = CompilerFuzzTest::new(
+                i,
+                FuzzingSeed::new(seed_value, FuzzingStrategy::AttributeVariations, 5),
+            );
+
             let result = CompilationResult::Success;
             self.engine.record_test(result);
             self.coverage.attribute_variants_tried += 1;
         }
-        
+
         self.engine.tests_run > 750
     }
 
     pub fn run_edge_case_campaign(&mut self) -> bool {
         let test_count = FuzzTestGenerator::generate_edge_case_tests();
-        
+
         for i in 0..test_count {
             let seed_value = self.campaign_seed.wrapping_add(1000).wrapping_add(i as u64);
-            let _test = CompilerFuzzTest::new(i, FuzzingSeed::new(seed_value, FuzzingStrategy::EdgeCasePatterns, 5));
-            
+            let _test = CompilerFuzzTest::new(
+                i,
+                FuzzingSeed::new(seed_value, FuzzingStrategy::EdgeCasePatterns, 5),
+            );
+
             let result = CompilationResult::Success;
             self.engine.record_test(result);
             self.coverage.edge_cases_tried += 1;
         }
-        
+
         self.engine.tests_run >= 1250
     }
 

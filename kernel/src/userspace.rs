@@ -4873,7 +4873,6 @@ impl InitialTls {
             && address.checked_add(1)? <= self.start + self.layout.mapping_size as u64)
             .then_some(address)
     }
-
 }
 
 #[derive(Clone, Copy)]
@@ -4886,7 +4885,13 @@ pub struct DynamicModule {
 }
 
 impl DynamicModule {
-    pub const EMPTY: Self = Self { generation: 1, live: false, references: 0, mapping_start: 0, mapping_size: 0 };
+    pub const EMPTY: Self = Self {
+        generation: 1,
+        live: false,
+        references: 0,
+        mapping_start: 0,
+        mapping_size: 0,
+    };
 }
 
 #[derive(Clone, Copy)]
@@ -4910,7 +4915,9 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
-    pub fn mmap_base(self) -> u64 { self.mmap_base }
+    pub fn mmap_base(self) -> u64 {
+        self.mmap_base
+    }
     pub fn dynamic_tls_module_range(self, module: u64, _tls_base: u64) -> Option<(u64, usize)> {
         let index = usize::try_from(module.checked_sub(1)?).ok()?;
         let descriptor = self.dynamic_modules.get(index)?;
@@ -4918,9 +4925,16 @@ impl AddressSpace {
             .then_some((descriptor.mapping_start, descriptor.mapping_size))
     }
 
-    pub fn publish_dynamic_module(&mut self, index: usize, mapping_start: u64, mapping_size: usize) -> Option<u32> {
+    pub fn publish_dynamic_module(
+        &mut self,
+        index: usize,
+        mapping_start: u64,
+        mapping_size: usize,
+    ) -> Option<u32> {
         let descriptor = self.dynamic_modules.get_mut(index)?;
-        if descriptor.live || mapping_size == 0 { return None; }
+        if descriptor.live || mapping_size == 0 {
+            return None;
+        }
         descriptor.live = true;
         descriptor.references = 1;
         descriptor.mapping_start = mapping_start;
@@ -4929,9 +4943,15 @@ impl AddressSpace {
     }
 
     pub fn retain_dynamic_module(&mut self, index: usize, generation: u32) -> bool {
-        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
-        if !descriptor.live || descriptor.generation != generation { return false; }
-        let Some(references) = descriptor.references.checked_add(1) else { return false; };
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else {
+            return false;
+        };
+        if !descriptor.live || descriptor.generation != generation {
+            return false;
+        }
+        let Some(references) = descriptor.references.checked_add(1) else {
+            return false;
+        };
         descriptor.references = references;
         true
     }
@@ -4942,7 +4962,9 @@ impl AddressSpace {
             return None;
         }
         descriptor.references -= 1;
-        if descriptor.references != 0 { return Some(false); }
+        if descriptor.references != 0 {
+            return Some(false);
+        }
         descriptor.live = false;
         descriptor.mapping_start = 0;
         descriptor.mapping_size = 0;
@@ -5041,10 +5063,21 @@ pub fn map_dynamic_anonymous(
         let _ = paging::unmap_user_range_in(address_space, address, size);
         return None;
     }
-    Some(AnonymousMapping { address, size, writable: true, lazy: None, resident: 0, dirty: 0, swap_slots: [None; USER_MMAP_PAGES] })
+    Some(AnonymousMapping {
+        address,
+        size,
+        writable: true,
+        lazy: None,
+        resident: 0,
+        dirty: 0,
+        swap_slots: [None; USER_MMAP_PAGES],
+    })
 }
 
-pub fn unmap_dynamic_anonymous(address_space: paging::AddressSpace, mapping: AnonymousMapping) -> bool {
+pub fn unmap_dynamic_anonymous(
+    address_space: paging::AddressSpace,
+    mapping: AnonymousMapping,
+) -> bool {
     paging::unmap_user_range_in(address_space, mapping.address, mapping.size).is_ok()
 }
 
@@ -6380,7 +6413,11 @@ pub fn destroy(address_space: AddressSpace) -> bool {
             count += 1;
         }
     }
-    for module in address_space.dynamic_modules.iter().filter(|module| module.live) {
+    for module in address_space
+        .dynamic_modules
+        .iter()
+        .filter(|module| module.live)
+    {
         ranges[count] = (module.mapping_start, module.mapping_size);
         count += 1;
     }

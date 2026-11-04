@@ -9,7 +9,7 @@
 #[path = "../kernel/src/diagnostics.rs"]
 mod diagnostics;
 
-use diagnostics::{Field, Level, TRUNCATION_MARKER, Value, format_record};
+use diagnostics::{format_record, Field, Level, Value, TRUNCATION_MARKER};
 
 mod serial {
     use std::cell::RefCell;

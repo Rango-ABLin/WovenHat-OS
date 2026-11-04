@@ -20,7 +20,7 @@ mod block;
 mod wfs;
 
 use block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
-use wfs::{Error, MAX_FILE_SIZE, Volume};
+use wfs::{Error, Volume, MAX_FILE_SIZE};
 
 const SECTORS: usize = 192;
 const INODES: u32 = 32;
@@ -164,9 +164,7 @@ fn format_produces_a_consistent_mountable_volume() {
 fn full_data_region_rejects_write_without_partial_commit() {
     let disk = formatted_small();
     let mut volume = mount_consistent(&disk, "small-volume setup");
-    let first = volume
-        .create(1, "first.bin", 0o644, 1)
-        .expect("first file");
+    let first = volume.create(1, "first.bin", 0o644, 1).expect("first file");
     let first_payload = vec![0x31_u8; SECTOR_SIZE * 7];
     volume
         .write_file(first, &first_payload, 2)
@@ -498,7 +496,10 @@ fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
     let replay_probe = pending.fork(None);
     Volume::mount(replay_probe.clone()).expect("uninterrupted recovery");
     let replay_writes = replay_probe.writes();
-    assert!(replay_writes > 1, "expected home writes and journal retirement");
+    assert!(
+        replay_writes > 1,
+        "expected home writes and journal retirement"
+    );
 
     for cut in 0..=replay_writes {
         let interrupted = pending.fork(Some(cut));
@@ -517,7 +518,9 @@ fn interrupted_recovery_replays_committed_data_at_every_write_boundary() {
         let settled = interrupted.fork(None);
         let mut recovered = mount_consistent(&settled, &format!("replay cut at {cut}"));
         let mut output = vec![0u8; MAX_FILE_SIZE];
-        let count = recovered.read_file(inode, &mut output).expect("recovered read");
+        let count = recovered
+            .read_file(inode, &mut output)
+            .expect("recovered read");
         assert_eq!(
             &output[..count],
             &payload[..],
@@ -543,12 +546,18 @@ fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
     let payload: Vec<u8> = (0..1536u32).map(|n| (n % 239) as u8).collect();
     {
         let mut volume = Volume::mount(disk.clone()).expect("initial mount");
-        volume.mkdir_path("/docs", 0o755, 1).expect("create directory");
-        volume.mkdir_path("/docs/archive", 0o755, 2).expect("create nested directory");
+        volume
+            .mkdir_path("/docs", 0o755, 1)
+            .expect("create directory");
+        volume
+            .mkdir_path("/docs/archive", 0o755, 2)
+            .expect("create nested directory");
         let inode = volume
             .create_path("/docs/archive/record.bin", 0o644, 3)
             .expect("create nested file");
-        volume.write_file(inode, &payload, 4).expect("write contents");
+        volume
+            .write_file(inode, &payload, 4)
+            .expect("write contents");
     }
 
     for cycle in 0..5 {
@@ -557,7 +566,9 @@ fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
             .resolve_path("/docs/archive/record.bin")
             .expect("persistent nested path");
         let mut output = vec![0u8; MAX_FILE_SIZE];
-        let len = volume.read_file(inode, &mut output).expect("persistent contents");
+        let len = volume
+            .read_file(inode, &mut output)
+            .expect("persistent contents");
         assert_eq!(&output[..len], &payload[..], "remount cycle {cycle}");
     }
 
@@ -573,11 +584,17 @@ fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
             volume.resolve_path("/docs/archive/record.bin"),
             Err(Error::NotFound)
         );
-        let inode = volume.resolve_path("/docs/archive/renamed.bin").expect("renamed file");
+        let inode = volume
+            .resolve_path("/docs/archive/renamed.bin")
+            .expect("renamed file");
         let mut output = vec![0u8; MAX_FILE_SIZE];
-        let len = volume.read_file(inode, &mut output).expect("renamed contents");
+        let len = volume
+            .read_file(inode, &mut output)
+            .expect("renamed contents");
         assert_eq!(&output[..len], &payload[..]);
-        volume.unlink_path("/docs/archive/renamed.bin", 6).expect("unlink");
+        volume
+            .unlink_path("/docs/archive/renamed.bin", 6)
+            .expect("unlink");
     }
     {
         let mut volume = mount_consistent(&disk, "after unlink");
@@ -585,7 +602,9 @@ fn nested_namespace_and_file_contents_persist_across_repeated_remounts() {
             volume.resolve_path("/docs/archive/renamed.bin"),
             Err(Error::NotFound)
         );
-        volume.unlink_path("/docs/archive", 7).expect("remove empty directory");
+        volume
+            .unlink_path("/docs/archive", 7)
+            .expect("remove empty directory");
     }
     let mut volume = mount_consistent(&disk, "final remount");
     assert_eq!(volume.resolve_path("/docs/archive"), Err(Error::NotFound));
@@ -796,7 +815,10 @@ fn set_xattr_is_atomic_across_every_crash_point() {
             .set_xattr(inode, "user.note", b"value", 2)
             .expect("set");
     });
-    assert!(writes > 1, "expected a multi-sector operation, got {writes}");
+    assert!(
+        writes > 1,
+        "expected a multi-sector operation, got {writes}"
+    );
 
     for cut in 0..=writes {
         let crashing = base.fork(Some(cut));
@@ -831,7 +853,10 @@ fn remove_xattr_is_atomic_across_every_crash_point() {
     let writes = write_count(&base, |volume| {
         volume.remove_xattr(inode, "user.note", 3).expect("remove");
     });
-    assert!(writes > 1, "expected a multi-sector operation, got {writes}");
+    assert!(
+        writes > 1,
+        "expected a multi-sector operation, got {writes}"
+    );
 
     for cut in 0..=writes {
         let crashing = base.fork(Some(cut));

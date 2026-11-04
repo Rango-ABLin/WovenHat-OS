@@ -62,7 +62,8 @@ impl PerformanceBaseline {
     }
 
     pub fn check_regression(&self, current_value: u64, tolerance_percent: u32) -> bool {
-        let max_allowed = self.baseline_value + (self.baseline_value * tolerance_percent as u64 / 100);
+        let max_allowed =
+            self.baseline_value + (self.baseline_value * tolerance_percent as u64 / 100);
         current_value > max_allowed
     }
 
@@ -243,11 +244,7 @@ pub struct RegressionThreshold {
 }
 
 impl RegressionThreshold {
-    pub const fn new(
-        name: &'static str,
-        alert: u32,
-        fail: u32,
-    ) -> Self {
+    pub const fn new(name: &'static str, alert: u32, fail: u32) -> Self {
         RegressionThreshold {
             metric_name: name,
             alert_threshold: alert,
@@ -287,7 +284,7 @@ mod tests {
     fn test_regression_detection() {
         let base = PerformanceBaseline::new("test", 1000, "ms", 0);
         assert!(!base.check_regression(1050, 10)); // Within tolerance
-        assert!(base.check_regression(1150, 10));  // Over tolerance
+        assert!(base.check_regression(1150, 10)); // Over tolerance
     }
 
     #[test]
@@ -303,7 +300,7 @@ mod tests {
         trend.add_sample(100);
         trend.add_sample(110);
         trend.add_sample(120);
-        
+
         assert_eq!(trend.average(), 110);
         assert_eq!(trend.maximum(), 120);
         assert_eq!(trend.minimum(), 100);
@@ -313,7 +310,7 @@ mod tests {
     #[test]
     fn test_threshold() {
         let thresh = RegressionThreshold::new("latency", 5, 15);
-        
+
         assert_eq!(thresh.evaluate(2), ThresholdStatus::Pass);
         assert_eq!(thresh.evaluate(10), ThresholdStatus::Alert);
         assert_eq!(thresh.evaluate(20), ThresholdStatus::Failed);

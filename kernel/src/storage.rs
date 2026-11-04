@@ -266,9 +266,7 @@ pub fn mount_ata_root() -> MountStatus {
     status
 }
 
-fn wovenfs_partition(
-    device: &mut impl crate::block::BlockDevice,
-) -> Option<partition::Partition> {
+fn wovenfs_partition(device: &mut impl crate::block::BlockDevice) -> Option<partition::Partition> {
     let partitions = match gpt::fat_partitions(device) {
         Ok(partitions) => partitions,
         Err(_) => {
@@ -1453,13 +1451,14 @@ pub fn ensure_path(path: &str) -> Result<(), EnsureError> {
     }
 
     if mnt_wovenfs() {
-        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks())
-            .map_err(|error| match error {
+        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks()).map_err(
+            |error| match error {
                 crate::wfs::Error::NotFound => EnsureError::NotFound,
                 crate::wfs::Error::NotADirectory => EnsureError::InvalidPath,
                 crate::wfs::Error::InvalidName => EnsureError::InvalidPath,
                 _ => EnsureError::Failed,
-            });
+            },
+        );
     }
 
     if let Ok(stat) = vfs::stat(path) {
@@ -3286,8 +3285,7 @@ pub fn installed_wovenfs_self_test() -> bool {
         return false;
     }
     let mut readback = [0u8; DATA.len()];
-    let persisted = read_disk_file(PATH, 0, &mut readback) == Ok(DATA.len())
-        && readback == DATA;
+    let persisted = read_disk_file(PATH, 0, &mut readback) == Ok(DATA.len()) && readback == DATA;
     let space = df_mnt().is_ok();
     let consistent = matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches);
     let removed = delete_path(PATH).is_ok();
@@ -3369,8 +3367,7 @@ pub fn fscheck_mnt() -> Result<fat32::CheckReport, SpaceError> {
         return Ok(fat32::CheckReport {
             files: report.files,
             directories: report.directories,
-            total_clusters: u32::try_from(report.total_blocks)
-                .map_err(|_| SpaceError::Failed)?,
+            total_clusters: u32::try_from(report.total_blocks).map_err(|_| SpaceError::Failed)?,
             free_clusters: u32::try_from(report.free_blocks).map_err(|_| SpaceError::Failed)?,
             fs_info_free_count: None,
             fs_info_matches: true,

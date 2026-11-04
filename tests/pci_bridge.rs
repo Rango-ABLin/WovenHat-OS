@@ -1,7 +1,7 @@
 #[path = "../kernel/src/hal/pci/bridge.rs"]
 mod bridge;
 
-use bridge::{Error, Window, encode_io, encode_memory, encode_prefetch};
+use bridge::{encode_io, encode_memory, encode_prefetch, Error, Window};
 
 #[test]
 fn encodes_32_bit_io_window() {

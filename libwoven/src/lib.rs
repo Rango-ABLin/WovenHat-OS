@@ -138,22 +138,22 @@ pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
 pub mod browser;
-pub mod javascript;
 pub mod codecs;
+pub mod dynamic_tls;
+pub mod elf_loader;
 pub mod i18n;
 pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
+pub mod javascript;
 pub mod media;
-pub mod dynamic_tls;
-pub mod elf_loader;
 pub mod module_namespace;
-pub mod runtime_modules;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
-pub mod semantic_search;
+pub mod runtime_modules;
 pub mod search_ipc;
+pub mod semantic_search;
 pub mod store;
 pub mod ui;
 pub mod update_ipc;
@@ -2657,7 +2657,11 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
                     cursor += 1;
-                    if flag & 0x10 != 0 { value } else { -value }
+                    if flag & 0x10 != 0 {
+                        value
+                    } else {
+                        -value
+                    }
                 } else if flag & 0x10 != 0 {
                     0
                 } else {
@@ -2682,7 +2686,11 @@ pub mod graphics {
                             .ok_or(TrueTypeError::BadTableDirectory)?,
                     );
                     cursor += 1;
-                    if flag & 0x20 != 0 { value } else { -value }
+                    if flag & 0x20 != 0 {
+                        value
+                    } else {
+                        -value
+                    }
                 } else if flag & 0x20 != 0 {
                     0
                 } else {
@@ -7149,13 +7157,9 @@ pub mod graphics {
         }
 
         let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
-        let Some(mut canvas) = super::Canvas::new(
-            &mut pixels,
-            0,
-            0,
-            GLYPH_CACHE_WIDTH,
-            GLYPH_CACHE_HEIGHT,
-        ) else {
+        let Some(mut canvas) =
+            super::Canvas::new(&mut pixels, 0, 0, GLYPH_CACHE_WIDTH, GLYPH_CACHE_HEIGHT)
+        else {
             return false;
         };
         let ascent = i32::from(scale) * 4 / 5;
@@ -7182,8 +7186,8 @@ pub mod graphics {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            let slot = RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed)
-                % GLYPH_CACHE_CAPACITY;
+            let slot =
+                RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed) % GLYPH_CACHE_CAPACITY;
             // SAFETY: busy is held exclusively for this access.
             unsafe {
                 (*RASTER_GLYPH_CACHE.entries.get())[slot] = RasterGlyphCacheEntry {
@@ -7221,9 +7225,8 @@ pub mod graphics {
                 return None;
             };
             // SAFETY: the mapping remains valid until process teardown.
-            let face = unsafe {
-                core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face)
-            };
+            let face =
+                unsafe { core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face) };
             unsafe {
                 *SYSTEM_FACE_CACHE.face.get() = Some(face);
             }
@@ -11047,7 +11050,13 @@ pub mod graphics {
         /// interpolated by row instead of constant, so chrome like the
         /// Start button can carry the same top-lit look as the window
         /// title bars without a separate flat-vs-gradient special case.
-        pub fn rounded_rect_gradient(&mut self, rect: Rect, radius: usize, top: Color, bottom: Color) {
+        pub fn rounded_rect_gradient(
+            &mut self,
+            rect: Rect,
+            radius: usize,
+            top: Color,
+            bottom: Color,
+        ) {
             if rect.is_empty() {
                 return;
             }
@@ -12887,7 +12896,11 @@ pub mod syscall {
     ///
     /// # Safety
     /// `initializer` must point to readable WovenHat userspace memory.
-    pub unsafe fn dynamic_tls_validate(initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+    pub unsafe fn dynamic_tls_validate(
+        initializer: u64,
+        initializer_len: u64,
+        memory_size: u64,
+    ) -> u64 {
         let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
         unsafe { invoke(148, initializer, packed, 0) }
     }
@@ -12897,11 +12910,15 @@ pub mod syscall {
     /// # Safety
     /// The caller must own the dynamic-module transaction and provide readable
     /// userspace initializer memory.
-    pub unsafe fn dynamic_tls_map_all(module: u64, initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+    pub unsafe fn dynamic_tls_map_all(
+        module: u64,
+        initializer: u64,
+        initializer_len: u64,
+        memory_size: u64,
+    ) -> u64 {
         let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
         unsafe { invoke(149, module, initializer, packed) }
     }
-
 
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
@@ -14060,14 +14077,10 @@ impl<'a> Canvas<'a> {
         let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
             return;
         };
-        let source_column = column.saturating_add(
-            usize::try_from(i128::from(self.x) - i128::from(x))
-                .unwrap_or(0),
-        );
-        let source_row = row.saturating_add(
-            usize::try_from(i128::from(self.y) - i128::from(y))
-                .unwrap_or(0),
-        );
+        let source_column =
+            column.saturating_add(usize::try_from(i128::from(self.x) - i128::from(x)).unwrap_or(0));
+        let source_row =
+            row.saturating_add(usize::try_from(i128::from(self.y) - i128::from(y)).unwrap_or(0));
         for mask_row in 0..rows {
             let mask_start = (source_row + mask_row) * width + source_column;
             let target_start = (row + mask_row) * self.width + column;
@@ -14113,7 +14126,10 @@ impl<'a> Canvas<'a> {
             };
             for row in 0..glyph.len() as i32 {
                 for column in 0..font::WIDTH as i32 {
-                    let (px, py) = (cursor_x.saturating_add(column), cursor_y.saturating_add(row));
+                    let (px, py) = (
+                        cursor_x.saturating_add(column),
+                        cursor_y.saturating_add(row),
+                    );
                     if bit_at(row, column) {
                         self.set(px, py, color);
                         continue;
@@ -14166,11 +14182,8 @@ impl<'a> Canvas<'a> {
         scale: u16,
     ) {
         let (mut cursor_x, mut cursor_y) = (x, y);
-        let unpacked = crate::graphics::Color::rgb(
-            (color >> 16) as u8,
-            (color >> 8) as u8,
-            color as u8,
-        );
+        let unpacked =
+            crate::graphics::Color::rgb((color >> 16) as u8, (color >> 8) as u8, color as u8);
         for character in text.chars() {
             if character == '\n' {
                 cursor_x = x;
@@ -15443,8 +15456,15 @@ pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, Error> {
     if key.is_empty() || key.len() >= 96 || out.is_empty() || out.len() > 96 {
         return Err(Error::Failed);
     }
-    check(unsafe { syscall::invoke(syscall::ENV_GET, key.as_ptr() as u64, key.len() as u64, out.as_mut_ptr() as u64) })
-        .map(|length| length as usize)
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_GET,
+            key.as_ptr() as u64,
+            key.len() as u64,
+            out.as_mut_ptr() as u64,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Set one bounded environment value.
@@ -15453,7 +15473,15 @@ pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), Error> {
         return Err(Error::Failed);
     }
     let packed = key.len() as u64 | ((value.len() as u64) << 32);
-    check(unsafe { syscall::invoke(syscall::ENV_SET, key.as_ptr() as u64, packed, value.as_ptr() as u64) }).map(|_| ())
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_SET,
+            key.as_ptr() as u64,
+            packed,
+            value.as_ptr() as u64,
+        )
+    })
+    .map(|_| ())
 }
 
 /// Return the number of inherited environment entries.
@@ -15466,8 +15494,15 @@ pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, Error> {
     if out.is_empty() || out.len() > 96 {
         return Err(Error::Failed);
     }
-    check(unsafe { syscall::invoke(syscall::ENV_ENTRY, index as u64, out.as_mut_ptr() as u64, out.len() as u64) })
-        .map(|length| length as usize)
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_ENTRY,
+            index as u64,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Wait for a child process, returning its zero-extended 32-bit exit payload.
@@ -16038,7 +16073,10 @@ mod tests {
             Transform::rotate(-90),
             Transform::new(0, 1 << 16, -(1 << 16), 0, 0, 0)
         );
-        assert_eq!(Transform::rotate(180), Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0));
+        assert_eq!(
+            Transform::rotate(180),
+            Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0)
+        );
 
         let diagonal = Transform::rotate(45);
         assert!(diagonal.xx > 46_000 && diagonal.xx < 47_000);
@@ -18968,11 +19006,9 @@ mod tests {
             let mut canvas = Canvas::new(&mut pixels, 0, 0, 5, 5).unwrap();
             assert!(Renderer::new(&mut canvas).fill_path_antialiased(&path, Color::WHITE));
         }
-        assert!(
-            pixels
-                .iter()
-                .any(|pixel| *pixel != Color::BLACK.packed() && *pixel != Color::WHITE.packed())
-        );
+        assert!(pixels
+            .iter()
+            .any(|pixel| *pixel != Color::BLACK.packed() && *pixel != Color::WHITE.packed()));
     }
 
     #[test]
@@ -19363,7 +19399,7 @@ mod tests {
 
     #[test]
     fn tiling_covers_the_area_exactly_without_overlap() {
-        use layout::{Frame, MAX_TILES, tile};
+        use layout::{tile, Frame, MAX_TILES};
         let area = Frame::new(0, 0, 640, 376);
         assert_eq!(tile(0, area).1, 0);
         assert_eq!(tile(1, area).0[0], area, "one window takes everything");
@@ -19398,7 +19434,7 @@ mod tests {
 
     #[test]
     fn halves_split_the_area() {
-        use layout::{Frame, half};
+        use layout::{half, Frame};
         let area = Frame::new(0, 0, 641, 376);
         assert_eq!(half(area, false), Frame::new(0, 0, 320, 376));
         assert_eq!(half(area, true), Frame::new(320, 0, 321, 376));

@@ -862,8 +862,8 @@ pub fn decode_gif_rgba(bytes: &[u8], output: &mut [u32]) -> Result<ImageMetadata
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetManifest, ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, WavError,
-        decode_bmp_rgba, decode_gif_rgba, parse_image_header, parse_wav_pcm,
+        decode_bmp_rgba, decode_gif_rgba, parse_image_header, parse_wav_pcm, AssetManifest,
+        ImageError, ImageFormat, ThumbnailCache, WallpaperCatalog, WavError,
     };
 
     #[test]

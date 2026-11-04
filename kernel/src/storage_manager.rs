@@ -19,7 +19,10 @@ pub struct DiskInfo {
 
 /// Discover the first supported filesystem partition without retaining a
 /// device borrow. MBR FAT32 is preferred, then the existing GPT FAT finder.
-pub fn inspect_device(device: &mut impl crate::block::BlockDevice, removable: bool) -> Option<DiskInfo> {
+pub fn inspect_device(
+    device: &mut impl crate::block::BlockDevice,
+    removable: bool,
+) -> Option<DiskInfo> {
     let partition = crate::partition::find_fat32(device)
         .ok()
         .flatten()
@@ -38,9 +41,7 @@ pub fn inspect_device(device: &mut impl crate::block::BlockDevice, removable: bo
 /// probe only: role selection, mounting, and write authority remain separate
 /// steps until the system-volume migration is accepted.
 #[cfg(feature = "stage12-5-test")]
-pub fn inspect_system_device(
-    device: &mut impl crate::block::BlockDevice,
-) -> Option<DiskInfo> {
+pub fn inspect_system_device(device: &mut impl crate::block::BlockDevice) -> Option<DiskInfo> {
     if device.sector_count() < 16 || crate::wfs::Volume::probe(device).is_err() {
         return None;
     }
@@ -275,14 +276,13 @@ pub fn structural_self_test() -> bool {
         && unmount(id)
 }
 
-
 // Mount Registry Integration - Stage 12.5
 
 /// Mount point with filesystem metadata and access tracking
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct MountPoint {
     pub mount_id: u64,
-    pub mount_path: u32,  // Path name hash
+    pub mount_path: u32, // Path name hash
     pub disk_info: DiskInfo,
     pub active: bool,
     pub access_count: u32,
@@ -299,16 +299,17 @@ pub fn discover_and_register(
 ) -> Option<MountPoint> {
     // Discover filesystem on device
     let info = inspect_device(device, removable)?;
-    
+
     // Mount in storage manager
     let mount_id = mount(info.start_lba, info.partition_sectors, removable)?;
-    
+
     // Register in mount point registry
-    let path_hash = (crate::fat32::metadata_path_hash(mount_path) as u32) ^ (mount_path.len() as u32);
-    
+    let path_hash =
+        (crate::fat32::metadata_path_hash(mount_path) as u32) ^ (mount_path.len() as u32);
+
     let mut registry = MOUNT_REGISTRY.lock();
     let slot = registry.iter_mut().position(|x| x.is_none())?;
-    
+
     let mount_point = MountPoint {
         mount_id,
         mount_path: path_hash,
@@ -316,7 +317,7 @@ pub fn discover_and_register(
         active: true,
         access_count: 0,
     };
-    
+
     registry[slot] = Some(mount_point);
     Some(mount_point)
 }
@@ -324,7 +325,8 @@ pub fn discover_and_register(
 /// Query a mount point by ID
 pub fn query_mount(mount_id: u64) -> Option<MountPoint> {
     let registry = MOUNT_REGISTRY.lock();
-    registry.iter()
+    registry
+        .iter()
         .flatten()
         .find(|mp| mp.mount_id == mount_id)
         .copied()
@@ -339,9 +341,11 @@ pub fn list_mounts() -> [Option<MountPoint>; 8] {
 /// Record filesystem access
 pub fn record_access(mount_id: u64) -> bool {
     let mut registry = MOUNT_REGISTRY.lock();
-    if let Some(mp) = registry.iter_mut()
+    if let Some(mp) = registry
+        .iter_mut()
         .flatten()
-        .find(|mp| mp.mount_id == mount_id) {
+        .find(|mp| mp.mount_id == mount_id)
+    {
         mp.access_count = mp.access_count.saturating_add(1);
         true
     } else {
@@ -355,11 +359,13 @@ pub fn deregister_and_unmount(mount_id: u64) -> bool {
     if !unmount(mount_id) {
         return false;
     }
-    
+
     // Remove from registry
     let mut registry = MOUNT_REGISTRY.lock();
-    if let Some(slot) = registry.iter_mut()
-        .position(|x| x.is_some_and(|mp| mp.mount_id == mount_id)) {
+    if let Some(slot) = registry
+        .iter_mut()
+        .position(|x| x.is_some_and(|mp| mp.mount_id == mount_id))
+    {
         registry[slot] = None;
         true
     } else {
@@ -371,10 +377,7 @@ pub fn deregister_and_unmount(mount_id: u64) -> bool {
 pub fn registry_stats() -> (usize, u32) {
     let registry = MOUNT_REGISTRY.lock();
     let active_count = registry.iter().flatten().count();
-    let total_accesses: u32 = registry.iter()
-        .flatten()
-        .map(|mp| mp.access_count)
-        .sum();
+    let total_accesses: u32 = registry.iter().flatten().map(|mp| mp.access_count).sum();
     (active_count, total_accesses)
 }
 
@@ -391,12 +394,12 @@ pub fn mount_registry_self_test() -> bool {
     if crate::block::BlockDevice::write_sector(&mut disk, 0, &mbr).is_err() {
         return false;
     }
-    
+
     // Discover and register
     let Some(mp1) = discover_and_register(&mut disk, "/mnt/data", true) else {
         return false;
     };
-    
+
     // Query should return the same mount point
     let Some(queried) = query_mount(mp1.mount_id) else {
         return false;
@@ -404,7 +407,7 @@ pub fn mount_registry_self_test() -> bool {
     if queried.mount_id != mp1.mount_id || !queried.disk_info.removable {
         return false;
     }
-    
+
     // Record accesses
     if !record_access(mp1.mount_id) {
         return false;
@@ -412,24 +415,24 @@ pub fn mount_registry_self_test() -> bool {
     if !record_access(mp1.mount_id) {
         return false;
     }
-    
+
     // Check stats
     let (active, total_accesses) = registry_stats();
     if active != 1 || total_accesses != 2 {
         return false;
     }
-    
+
     // List mounts should show one active
     let mounts = list_mounts();
     if mounts[0].is_none() || mounts[1].is_some() {
         return false;
     }
-    
+
     // Deregister and unmount
     if !deregister_and_unmount(mp1.mount_id) {
         return false;
     }
-    
+
     // Stats should show zero active mounts
     let (active, _) = registry_stats();
     active == 0 && query_mount(mp1.mount_id).is_none()

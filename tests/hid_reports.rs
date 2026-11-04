@@ -176,21 +176,17 @@ fn pen_reports_position_pressure_and_contact() {
         }]
     );
     // Out of range: nothing.
-    assert!(
-        decode(
-            &mut decoder,
-            &[0x02, 0x00, 0x00, 0x40, 0x00, 0x20, 0x00, 0x00]
-        )
-        .is_empty()
-    );
+    assert!(decode(
+        &mut decoder,
+        &[0x02, 0x00, 0x00, 0x40, 0x00, 0x20, 0x00, 0x00]
+    )
+    .is_empty());
     // Another report ID is not this device's pen report.
-    assert!(
-        decode(
-            &mut decoder,
-            &[0x03, 0x21, 0x00, 0x40, 0x00, 0x20, 0xff, 0x01]
-        )
-        .is_empty()
-    );
+    assert!(decode(
+        &mut decoder,
+        &[0x03, 0x21, 0x00, 0x40, 0x00, 0x20, 0xff, 0x01]
+    )
+    .is_empty());
 }
 
 /// A two-contact touch screen (report ID 1): per contact, tip switch,
@@ -292,10 +288,8 @@ fn malformed_and_unsupported_descriptors_are_refused() {
     );
     // Report size 0 is malformed.
     assert_eq!(
-        hid::parse(&[
-            0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x75, 0x00, 0x95, 0x01, 0x81, 0x02, 0xc0
-        ])
-        .unwrap_err(),
+        hid::parse(&[0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x75, 0x00, 0x95, 0x01, 0x81, 0x02, 0xc0])
+            .unwrap_err(),
         hid::Error::Malformed
     );
     // A report shorter than its fields decodes what it can and never panics.

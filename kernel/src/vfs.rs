@@ -267,8 +267,8 @@ impl Registry {
         node.mode = 0o444;
         node.kind = NodeKind::File;
         node.occupied = true;
-        let credentials = crate::task::current_credentials_if_running()
-            .unwrap_or(crate::task::Credentials::ROOT);
+        let credentials =
+            crate::task::current_credentials_if_running().unwrap_or(crate::task::Credentials::ROOT);
         node.uid = credentials.uid;
         node.gid = credentials.gid;
         Ok(slot)

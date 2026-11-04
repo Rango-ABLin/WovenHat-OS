@@ -146,7 +146,7 @@ impl Default for Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, ActionKind, Error, MAX_ACTIONS, Plan};
+    use super::{Action, ActionKind, Error, Plan, MAX_ACTIONS};
     use crate::Permission;
 
     #[test]
@@ -159,10 +159,9 @@ mod tests {
             plan.authorize(index, &[Permission::FilesystemWrite], false),
             Err(Error::ConfirmationRequired)
         );
-        assert!(
-            plan.authorize(index, &[Permission::FilesystemWrite], true)
-                .is_ok()
-        );
+        assert!(plan
+            .authorize(index, &[Permission::FilesystemWrite], true)
+            .is_ok());
         assert_eq!(
             plan.authorize(index, &[Permission::FilesystemRead], true),
             Err(Error::PermissionDenied)

@@ -612,11 +612,9 @@ fn weak_exports_are_fallbacks_and_undefined_weak_imports_resolve_to_zero() {
     let strong_bytes = fixture(&[]);
     let strong = image(&strong_bytes);
     let mut scope = elf::SymbolScope::new(&weak, &weak_bytes);
-    assert!(
-        scope
-            .add_dependency(b"a.so", &strong, &strong_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"a.so", &strong, &strong_bytes)
+        .is_ok());
     assert_eq!(scope.resolve(b"export"), Some(BASE + 0x20));
 
     let mut undefined_bytes = fixture(&[]);
@@ -646,11 +644,9 @@ fn versioned_definitions_and_requirements_resolve_by_name() {
     let requirement = elf::parse(&requirement_bytes)
         .unwrap_or_else(|error| panic!("requirement fixture: {error:?}"));
     let mut scope = elf::SymbolScope::new(&requirement, &requirement_bytes);
-    assert!(
-        scope
-            .add_dependency(b"a.so", &definition, &definition_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"a.so", &definition, &definition_bytes)
+        .is_ok());
     assert_eq!(
         requirement.relocation_symbol_value(&requirement_bytes, 1, &scope),
         Some(BASE + 0x20)
@@ -682,30 +678,22 @@ fn dependency_order_and_duplicate_needed_are_checked() {
     let library_bytes = fixture(&[]);
     let library = image(&library_bytes);
     let mut scope = elf::SymbolScope::new(&main, &main_bytes);
-    assert!(
-        scope
-            .add_dependency(b"b.so", &library, &library_bytes)
-            .is_ok()
-    );
-    assert!(
-        scope
-            .add_dependency(b"a.so", &library, &library_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"b.so", &library, &library_bytes)
+        .is_ok());
+    assert!(scope
+        .add_dependency(b"a.so", &library, &library_bytes)
+        .is_ok());
     assert!(scope.validate_dependencies().is_err());
     let duplicate_bytes = fixture(&[8, 8]);
     let duplicate = image(&duplicate_bytes);
     let mut scope = elf::SymbolScope::new(&duplicate, &duplicate_bytes);
-    assert!(
-        scope
-            .add_dependency(b"a.so", &library, &library_bytes)
-            .is_ok()
-    );
-    assert!(
-        scope
-            .add_dependency(b"b.so", &library, &library_bytes)
-            .is_ok()
-    );
+    assert!(scope
+        .add_dependency(b"a.so", &library, &library_bytes)
+        .is_ok());
+    assert!(scope
+        .add_dependency(b"b.so", &library, &library_bytes)
+        .is_ok());
     assert!(scope.validate_dependencies().is_err());
 }
 

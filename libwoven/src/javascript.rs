@@ -380,7 +380,7 @@ pub fn eval<'source, const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, Runtime, Value, eval};
+    use super::{eval, Error, Runtime, Value};
 
     #[test]
     fn evaluates_bounded_script_and_preserves_bindings() {
