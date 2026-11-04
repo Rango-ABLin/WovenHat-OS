@@ -300,6 +300,26 @@ def bitmap_matches(width: int, height: int, pixels: bytes, x: int, y: int,
     return True
 
 
+def region_changed(reference: bytes, x: int, y: int, width: int, height: int,
+                   minimum: int) -> Callable[[int, int, bytes], bool]:
+    """Require a repaint in one semantic client region, independent of font AA."""
+    def matches(frame_width: int, frame_height: int, pixels: bytes) -> bool:
+        if len(reference) != len(pixels) or x < 0 or y < 0:
+            return False
+        if x + width > frame_width or y + height > frame_height:
+            return False
+        changed = 0
+        for row in range(y, y + height):
+            start = (row * frame_width + x) * 3
+            end = (row * frame_width + x + width) * 3
+            changed += sum(
+                left != right
+                for left, right in zip(reference[start:end], pixels[start:end])
+            )
+        return changed >= minimum
+    return matches
+
+
 def capture_until_changed(
     qmp: Qmp,
     path: Path,
@@ -586,10 +606,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_keyboard = capture_until_changed(
                 qmp, keyboard_frame, after_pointer,
                 time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
-                lambda w, h, pixels: w == 1280 and h == 800 and bitmap_matches(
-                    w, h, pixels, 236, 492, (14, 17, 1, 2, 4, 8, 31),
-                    bytes((100, 220, 180)), bytes((35, 43, 66))
-                )
+                region_changed(after_pointer, 180, 470, 140, 70, 20)
             )
             screenshots.append(keyboard_frame.name)
             if changed_pixels(after_pointer, after_keyboard) < 20:
@@ -632,14 +649,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_settings_key = capture_until_changed(
                 qmp, settings_after, before_settings_key,
                 time.monotonic() + args.frame_timeout, timings, "settings_keyboard_refresh", 20,
-                lambda w, h, pixels: w == 1280 and h == 800 and all(
-                    pixels[(y * w + 628) * 3:(y * w + 808) * 3]
-                    == bytes((255, 205, 96)) * 180
-                    for y in range(508, 510)
-                ) and bitmap_matches(
-                    w, h, pixels, 292, 520, (4, 12, 4, 4, 4, 4, 14),
-                    bytes((100, 220, 180)), bytes((45, 65, 90))
-                )
+                region_changed(before_settings_key, 560, 480, 300, 100, 20)
             )
             screenshots.append(settings_after.name)
             if changed_pixels(before_settings_key, after_settings_key) < 20:

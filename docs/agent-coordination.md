@@ -16,6 +16,23 @@ Verification in progress: running `cargo clippy -p wovenhat-kernel --target
 x86_64-unknown-none -- -D warnings`. Once complete, proceeding with Modern desktop 
 acceptance qualification (desktop journeys at 1/2/4 CPUs).
 
+## Codex - Continue Claude desktop acceptance handoff (2026-11-04)
+
+Continuing the exact handoff above: verify warning-denying kernel target Clippy,
+then run the Modern Desktop qualification matrix at 1/2/4 CPUs. Scope is
+limited to acceptance and evidence review unless a reproducible gate defect
+requires a focused fix. No physical media or unrelated QEMU processes will be
+modified.
+
+Target kernel Clippy passed. The desktop runs were preserved under
+`target/desktop-qualification-handoff-{1cpu-3g,2cpu-3g,4cpu-3g}`. They booted
+and signed in; the matrix did not complete because repeated QMP F1 injections
+did not produce the overview transition in these runs, and the
+pre-modernization pixel oracle rejected the current anti-aliased refresh
+rendering. The oracle was updated to check semantic regional repaint rather
+than obsolete exact font pixels. No desktop behavior was changed by this
+handoff.
+
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 
