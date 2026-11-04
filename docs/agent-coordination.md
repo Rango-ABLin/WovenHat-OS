@@ -1,3 +1,11 @@
+## Codex - S12 bounded clipboard and file-chooser SDK surfaces (2026-11-04)
+
+Added host-tested fixed-capacity `libwoven::clipboard::TextClipboard` and
+`libwoven::file_dialog::FileDialog` models. Clipboard mutation is bounded
+UTF-8 with generation tracking; file chooser entries have opaque IDs, bounded
+names, deterministic wraparound navigation, and explicit close. No service
+transport, permission bypass, path opening, or full S12 claim is made.
+
 ## Codex - S12 bounded accessibility wire contract (2026-11-04)
 
 Added and host-tested allocation-free `WAX1` tree snapshots and `WAA1` focus

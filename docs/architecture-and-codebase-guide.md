@@ -4335,6 +4335,18 @@ references or process-local addresses. These records are a stable handoff
 foundation, not a claim that a screen-reader service or accessibility device
 has been integrated.
 
+`libwoven::clipboard::TextClipboard` is the bounded text-side SDK model. It
+accepts only non-empty UTF-8 up to 4096 bytes, clears stale bytes on replace,
+tracks a monotonic generation, and rejects invalid or oversized input without
+partial mutation. Transport, capability checks, and cross-process ownership
+remain service responsibilities.
+
+`libwoven::file_dialog::FileDialog` is the bounded chooser state machine. It
+stores at most 64 provider-supplied opaque entries with bounded UTF-8 names,
+provides deterministic wraparound selection, and closes explicitly. It never
+opens paths or grants filesystem authority; the provider and permission layer
+must perform those operations.
+
 ## Stage 28 disposable file-backed installation executor
 
 `scripts/execute-file-install.py` is deliberately outside the production

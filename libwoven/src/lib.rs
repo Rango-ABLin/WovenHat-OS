@@ -132,6 +132,8 @@ pub mod terminal {
 }
 pub mod abi;
 pub mod accessibility;
+pub mod clipboard;
+pub mod file_dialog;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;

@@ -1,5 +1,14 @@
 # Stage status
 
+## S12 bounded clipboard and file-chooser SDK surfaces - 2026-11-04 - ACCEPTED (SOFTWARE FOUNDATION)
+
+Added host-tested `libwoven::clipboard::TextClipboard` and
+`libwoven::file_dialog::FileDialog`. Both are fixed-capacity and fail closed:
+clipboard text is bounded UTF-8 with mutation generations, while chooser
+entries use opaque IDs, bounded names, and deterministic keyboard navigation.
+Service transport, permission enforcement, provider-backed filesystem access,
+and full S12 desktop integration remain open.
+
 ## S12 bounded accessibility wire contract - 2026-11-04 - ACCEPTED (SOFTWARE FOUNDATION)
 
 Added host-tested, allocation-free `WAX1` accessibility-tree snapshots and
