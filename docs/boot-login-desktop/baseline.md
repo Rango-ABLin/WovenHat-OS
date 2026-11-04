@@ -10,6 +10,14 @@ runtime source matches d21807ba. New evidence:
 `audit-artifacts/acceptance-20261104-190707-667/`. The older run below was
 deliberately interrupted and cannot qualify current source.
 
+Current frozen runtime revision: a980619e, incorporating baseline repairs,
+the disposable fixture correction, and consistent workspace formatting.
+The active serialized run is acceptance-20261104-192520-691 with
+CARGO_NET_OFFLINE=true. The preceding attempt stopped at a bootloader build
+before 2-CPU iteration 20 after worktree Cargo checks collided with shared
+artifacts. No concurrent Cargo operation will run during this fresh chain.
+See test-results.md for exact attempt outcomes and preserved failure paths.
+
 | Item | Observed value |
 |---|---|
 | Repository | https://github.com/Rango-ABLin/WovenHat-OS.git |

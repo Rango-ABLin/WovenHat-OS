@@ -8878,3 +8878,27 @@ fixture's verifier; preserve no-overwrite behavior, filesystem layout, account
 identity and existing public fixture credentials. Add generated-image and
 no-overwrite host coverage. Do not claim real login from host fixture coverage.
 The ongoing Windows chain remains the only runtime acceptance chain.
+
+## Codex - BLD-A3 isolated formatting gate (2026-11-04)
+
+Claim a formatter-only pass over the 41 files identified by cargo fmt --check.
+Use isolated audit-artifacts/boot-login-format-worktree, branch
+chore/boot-login-format, based on b75b9366. This does not edit the source used
+by the running acceptance chain. No behavior, assertion, timeout, capability,
+or feature-gate changes authorized by this claim. Review the formatter diff
+and run format check before integrating; keep runtime qualification provenance
+separate until the formatted source is verified. Other agents must not merge
+competing formatting over these files during this bounded unit.
+
+## Codex - BLD Phase A baseline accepted (2026-11-04)
+
+Runtime a980619e passed full RUN-STAGE10.7.ps1 with approved networking,
+including all 60 memory repetitions and 1/2/4-CPU network/async gates. All
+Stage12.1–12.5 matrices and final affected feature lints also pass. Evidence:
+audit-artifacts/acceptance-20261104-194935-034/ and
+boot-login-baseline-repair-20261104/final-stage12-matrix.log. Diagnostics,
+probe and fixture repairs plus formatting are accepted as bounded baseline
+units. The complete boot/login/desktop milestone is not accepted. Next is
+Phase B1 malformed boot configuration rejection; no registry-cache edits.
+The earlier cross-worktree Cargo collision is retained as a failed attempt;
+all future build/acceptance work must be serialized even across worktrees.

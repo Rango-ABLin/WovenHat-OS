@@ -16,9 +16,14 @@ Status: IN PROGRESS.
    BLD-A1 repairs now pass focused host tests and default/Stage12.5/Stage15.2
    target lints; full rerun is pending. Original failure retained at
    audit-artifacts/acceptance-20261104-190707-667/.
-7. Workspace formatting fails on inherited code (417 diff hunks); report is
+7. Original workspace formatting failed on inherited code (417 diff hunks); report is
    audit-artifacts/boot-login-baseline-repair-20261104/workspace-format.log.
-   A repository-wide format pass must coordinate the affected owners before
-   claiming the new directive's formatting/CI gate complete.
+   BLD-A3 now resolves this in a980619e with one explicit mixed-edition style.
+   Formatting and host Clippy pass; the integrated full runtime gate is pending.
+8. Actual virtual-trust preflight exits 2: swtpm is unavailable, and a signed
+   disk image/development key/certificate have not been supplied. Evidence:
+   audit-artifacts/boot-login-baseline-repair-20261104/virtual-trust-preflight.json.
+   The preflight used installed CODE and VARS files and requested no QEMU run;
+   it cannot qualify a trust chain or certify matching key enrollment.
 
 These are prerequisites/findings, not claims that all feasible work is blocked.

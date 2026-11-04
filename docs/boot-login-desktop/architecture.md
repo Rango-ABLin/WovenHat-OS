@@ -1,14 +1,15 @@
 # Boot, login and desktop architecture
 
-Status: IN PROGRESS. Source audit at `70b49c74215d7aecc0469ba7d677458ccaf7c10a`, 2026-11-04.
+Status: COMPLETE (Phase A inventory only), 2026-11-04. Initial source audit
+at 70b49c74; reconciled integration and accepted runtime baseline a980619e.
 
 Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
 review found no changes since the initial audit in session.rs, accounts.rs,
 identity_runtime.rs, entropy.rs, secure_boot.rs or root build.rs. Startup
 main.rs now tolerates absent GOP framebuffer for later GPU attachment, and
 storage routing supports WovenFS as the system filesystem. The integration
-ledger reports graphics and Windows gate acceptance; this unit's new baseline
-still runs independently. Historical modernization-open claims below describe
+ledger reports graphics acceptance; this unit's new Windows baseline passed
+independently. Historical modernization-open claims below describe
 the initial local revision and are superseded by the integration ledger.
 
 The host executable in `src/main.rs` prints the generated image path. It is
@@ -18,8 +19,8 @@ artifact and calls `bootloader::UefiBoot::create_disk_image`. The patched
 `bootloader-x86_64-uefi` crate for `x86_64-unknown-uefi`; this checkout does
 not contain that crate's UEFI entry implementation. The host wrapper
 `vendor/bootloader/src/uefi/mod.rs` must not be mistaken for firmware code.
-Firmware ExitBootServices and image-validation behavior still require inspection
-of the resolved dependency and executable negative tests.
+The resolved dependency was inspected; executable negative boot tests remain
+Phase B work.
 
 The resolved local dependency is `bootloader-x86_64-uefi-0.11.17`, under
 `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/`. Its `src/main.rs`
@@ -65,5 +66,6 @@ Display acquisition is waited on for 500 ticks; a still-live shell retains
 ownership even when that wait expires. Failure/fallback paths create the
 embedded init and expose the diagnostic shell; they need policy review.
 
-Phase A remains open pending baseline completion, full startup/security trace,
-and unresolved dependency inspection. Later phase gates are not promoted.
+Phase A's inventory and baseline gate is closed. The prescribed Windows chain,
+Stage12.1–12.5 matrices and affected feature lints passed. Security findings
+remain open requirements for later phases, not accepted production behavior.

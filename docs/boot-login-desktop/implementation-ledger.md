@@ -2,7 +2,7 @@
 
 ## BLD-A
 
-Status: IN PROGRESS. Agent: Codex. Branch: test/boot-login-baseline.
+Status: COMPLETE (Phase A). Agent: Codex. Branch: test/boot-login-baseline.
 Initial base: 70b49c74215d7aecc0469ba7d677458ccaf7c10a.
 Current integration: d21807ba, merged locally as aeb9d40a. Checkpoint fb7e8c2
 contains the initial audit, not accepted runtime implementation.
@@ -19,7 +19,7 @@ taskbar/no-top-bar requirement and paused WovenWeb scope govern this work.
 
 ## BLD-A1 baseline repair
 
-Status: IN PROGRESS. Agent: Codex. Base integration: d21807ba.
+Status: COMPLETE (bounded baseline repair). Agent: Codex. Base integration: d21807ba.
 Owned files: tests/diagnostics.rs and only Volume::probe in kernel/src/wfs.rs.
 The current baseline failed before QEMU on missing serial test dependency and
 a nested-if warning. Added a thread-local recording serial double and exact
@@ -29,8 +29,9 @@ changing sector reads, superblock ranking or returned errors. No new kernel
 object, lock, unsafe code, syscall, asynchronous pointer or capability exists.
 Tests: diagnostics 10/10, WovenFS crash 20/20, host all-targets Clippy pass.
 Default/Stage12.5/Stage15.2 target Clippy also pass with warnings denied.
-Next: complete preservation gate. No phase acceptance yet. Workspace format
-check exposes inherited formatting debt, retained separately from this repair.
+Final runtime a980619e passes full Windows preservation and Stage12.1–12.5
+QEMU matrices on 1/2/4 CPUs. Original formatting failure is retained; BLD-A3
+resolves it. This is baseline repair acceptance, not a production OS claim.
 
 ## BLD-A2 persistent-account fixture
 
@@ -46,12 +47,14 @@ authentication/session authority or actual login acceptance is claimed.
 
 ## BLD-A3 workspace formatting
 
-Status: IMPLEMENTED — UNVERIFIED (runtime). Branch: chore/boot-login-format.
+Status: COMPLETE (formatting baseline). Branch: chore/boot-login-format.
 Prepared in an isolated worktree at b75b9366 while the original Windows
 chain runs. A plain cargo fmt followed by --check exposed conflicting import
 ordering for shared block.rs compiled under editions 2021 and 2024. Explicit
 workspace style_edition=2021 resolves that non-idempotence without disabling
 any formatter rule. Cargo fmt --all followed by two --check runs passes.
 The uniform style also normalizes imports in existing edition-2024 files;
-all source edits are formatter output. Runtime build/lints/tests and integration
-remain pending. No assertion, feature guard, capability or timeout is changed.
+all source edits are formatter output. Formatted host all-targets Clippy passed
+offline. Integrated as a980619e; the serialized network-enabled Windows
+acceptance-20261104-194935-034 run and the Stage12 matrix pass. No assertion,
+feature guard, capability or timeout is changed.

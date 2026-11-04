@@ -1,10 +1,11 @@
 # Acceptance matrix
 
-Status: IN PROGRESS. None of the new directive's phases is COMPLETE.
+Status: IN PROGRESS. Phase A is COMPLETE at runtime revision a980619e;
+later phases are not accepted.
 
 | Gate | Required evidence | Current status |
 |---|---|---|
-| A: baseline/architecture | source inventory, existing tests, startup/security trace | IN PROGRESS |
+| A: baseline/architecture | source inventory, existing tests, startup/security trace | COMPLETE |
 | B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | NOT STARTED |
 | C: init/readiness | essential dependencies and bounded failure recovery | NOT STARTED |
 | D: splash | framebuffer captures and ownership transition | NOT STARTED |

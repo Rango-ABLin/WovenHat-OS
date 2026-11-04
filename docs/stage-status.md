@@ -1,15 +1,21 @@
 # Stage status
 
-## Boot/login/desktop directive baseline - 2026-11-04 - IN PROGRESS
+## Boot/login/desktop Phase A baseline - 2026-11-04 - COMPLETE
 
 Codex is auditing the existing startup path on `test/boot-login-baseline`,
 initial base `70b49c74`, reconciled with integration `d21807ba` in local merge
 `aeb9d40a`. The stale-revision baseline was interrupted and its logs retained;
 the current-integration Windows baseline failed before QEMU on two host
 Clippy defects (diagnostics serial test dependency and WovenFS probe style).
-Focused repairs pass diagnostics 10/10, WovenFS crash 20/20 and host all-targets
-Clippy; target checks and full rerun remain open. No stage acceptance is
-claimed. Source inventory, security findings and evidence are
+Repairs 6b4cf263, b75b9366 and a980619e pass diagnostics 10/10, WovenFS crash
+20/20, 208 Python host tests (six skips), formatting, warning-denying host and
+affected-feature target Clippy, full Windows preservation including 60 memory
+repetitions and 1/2/4-CPU Stage10.7, and Stage12.1–12.5 QEMU on 1/2/4 CPUs.
+Windows evidence is acceptance-20261104-194935-034. Its DNS gate required
+approved host networking; the unchanged focused gate confirmed the restricted
+sandbox caused the previous DNS timeout. Baseline failures remain preserved.
+Only Phase A is accepted; the full startup milestone is not complete.
+Source inventory, security findings and evidence are
 recorded in `docs/boot-login-desktop/`. Preserve the integration revision's
 graphics acceptance and WovenFS migration; later directive phases are not promoted.
 

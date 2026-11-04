@@ -2,6 +2,14 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
+Boot/login/desktop directive — Phase A baseline accepted (2026-11-04)
+Runtime a980619e passes the prescribed Windows preservation gate, including
+60 memory/boot repetitions and Stage10.7 on 1/2/4 CPUs, plus Stage12.1–12.5
+QEMU matrices. Baseline host compilation, fixture KDF and mixed-edition
+formatting repairs are documented in docs/boot-login-desktop/. This closes
+inventory/baseline only. Next: Phase B boot failure/configuration qualification;
+no WovenInit/login/session/release completion is claimed.
+
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
 shared by the identity authority and durable account record, the old PIN is
