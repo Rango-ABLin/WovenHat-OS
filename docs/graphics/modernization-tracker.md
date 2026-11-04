@@ -146,6 +146,11 @@ Typography's former per-process font-capacity blocker is also closed: the
 existing read-only lazy file mapping now supplies the staged TTF without a
 607 KiB ELF buffer, and the sign-in label is the first production TTF call
 site with bitmap fallback.
+An attempted immediate migration of all 119 GUI text call sites was rejected
+after real QEMU testing: full-outline rendering made the 2-CPU Files launch
+miss its existing 20s IPC bound. The reusable `Canvas::draw_text_system`
+primitive is retained, while broad migration now requires bounded glyph
+outline/raster caching to avoid repeating expensive TTF work per label.
 
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
@@ -228,6 +233,17 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 
 ## Session log (append a dated entry every time you stop; newest first)
 
+### 2026-11-04 (session: TTF migration performance gate)
+
+Introduced the reusable `Canvas::draw_text_system` API and experimentally
+routed all 119 GUI text call sites through the lazy TTF mapping. The 1-CPU
+journey booted, but the 2-CPU run showed repeated full-outline rasterization
+making the Files launch miss the existing 20-second IPC bound. The broad
+substitution was reverted before commit; the mapped shell sign-in call site
+and reusable API remain, with the failed evidence preserved at
+`audit-artifacts/desktop-qualification-1793797789143284900/`. This is a
+performance defect requiring glyph caching, not a reason to weaken the gate.
+
 ### 2026-11-04 (session: shared lazy font mapping)
 
 Replaced the unsafe per-process large static font-buffer approach with
@@ -243,7 +259,7 @@ workspace all-targets Clippy, 212 `libwoven` tests, and the complete real
 `audit-artifacts/desktop-qualification-1793796867299834900/`, and
 `audit-artifacts/desktop-qualification-1793796978626218100/`. The remaining
 typography work is migrating the other production text call sites and
-validating their layout/visual references.
+validating their layout/visual references after glyph-cache optimization.
 
 ### 2026-11-04 (session: GPU-path 1/2/4 CPU acceptance)
 

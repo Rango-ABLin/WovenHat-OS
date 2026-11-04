@@ -8768,3 +8768,11 @@ demand-paged `mmap_file_lazy` ABI. WovenShell's sign-in label now renders via
 `TrueTypeFace` with bitmap fallback. The full VirtIO-GPU qualification passed
 on 1/2/4 CPUs; remaining typography work is the broader call-site migration
 and reference validation.
+
+## Codex - Graphics modernization TTF migration performance gate (2026-11-04)
+
+The reusable `Canvas::draw_text_system` primitive is retained, but the
+experimental full migration of 119 GUI text call sites was reverted after a
+real 2-CPU QEMU run missed the existing Files IPC bound due to repeated full
+TTF outline rasterization. The mapped shell sign-in call site remains
+accepted; glyph outline/raster caching is the next typography increment.

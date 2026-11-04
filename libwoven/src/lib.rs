@@ -13975,6 +13975,22 @@ impl<'a> Canvas<'a> {
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
         }
     }
+
+    /// Draw through the staged system TrueType face when available, falling
+    /// back to the bounded bitmap font if the optional VFS asset is absent.
+    /// The fixed-cell advance remains identical to [`Self::draw_text`], so
+    /// existing layout calculations stay stable while production GUI text
+    /// gains antialiased glyphs.
+    pub fn draw_text_system(&mut self, x: i32, y: i32, text: &str, color: u32) {
+        if let Some(face) = crate::graphics::load_system_font_mapping()
+            .ok()
+            .and_then(|bytes| crate::graphics::TrueTypeFace::from_bytes(bytes).ok())
+        {
+            self.draw_text_ttf(x, y, text, color, &face, 12);
+        } else {
+            self.draw_text(x, y, text, color);
+        }
+    }
 }
 
 /// A calendar date and time of day from the hardware clock, UTC.
