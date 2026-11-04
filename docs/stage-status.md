@@ -15,6 +15,15 @@ current ABI, so those two measurements remain explicitly unclaimed rather
 than inferred from host QEMU process data. Physical/native qualification is
 also correctly reported as not tested by the read-only host gate.
 
+## S03 terminal-input/job-control qualification - 2026-11-04 - SOFTWARE GATE PASSED
+
+The previously open headless USB-HID keyboard-injection boundary now passes on
+1/2/4 CPUs. QEMU's xHCI keyboard path injects Ctrl-C into the foreground
+terminal group and the Ring-3 probe verifies SIGINT termination with status
+130. Evidence is retained in `target/s03-keyboard-injection-{1,2,4}cpu/`.
+This closes the documented S03 software/QEMU gap; physical HID qualification
+and broader POSIX compatibility remain separate release boundaries.
+
 ## WovenFS migration completion note — 2026-11-04
 
 The bounded system-filesystem increment is complete: WovenFS-backed `df` and

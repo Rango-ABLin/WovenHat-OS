@@ -8839,3 +8839,11 @@ harness compilation passed. Full host `cargo test --workspace --all-targets`
 still encounters the repository's freestanding kernel assembly (`.previous`)
 directive when Rust attempts to build that target on Windows; this remains an
 explicit host-toolchain limitation, not a suppressed test.
+
+## Codex - S03 terminal input release validation (2026-11-04)
+
+The dedicated headless QMP/xHCI keyboard gate now passes on 1/2/4 CPUs,
+including Ctrl-C delivery to the foreground process group and status-130
+termination. Evidence is under `target/s03-keyboard-injection-{1,2,4}cpu/`.
+This closes the bounded S03 software/QEMU gap; full POSIX compatibility and
+physical HID certification remain outside the gate.
