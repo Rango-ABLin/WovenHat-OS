@@ -5332,3 +5332,70 @@ fn unlink_refuses_an_entry_whose_inode_field_names_a_free_inode() {
         .unlink(1, "a.txt", 2)
         .expect("unlink must succeed on the unpatched image");
 }
+
+/// `write_file` must return `Err(Error::TooLarge)` when the supplied data
+/// length exceeds `MAX_FILE_SIZE`.
+///
+/// `write_file` delegates directly to `stage_write` (wfs.rs line 1160):
+///
+/// ```ignore
+/// if data.len() > MAX_FILE_SIZE {
+///     return Err(Error::TooLarge);
+/// }
+/// ```
+///
+/// `create_file` has an independent identical guard at line 1074 that fires
+/// before `stage_create` or `stage_write` are called, so
+/// `create_file_refuses_oversized_data` does not exercise this check on the
+/// `write_file` path.  Without the guard in `stage_write`, a caller could
+/// overwrite a file with more bytes than the eight-entry `direct` array can
+/// address, writing past `DIRECT_BLOCKS` and causing an out-of-bounds panic.
+#[test]
+fn write_file_refuses_oversized_data() {
+    let base = formatted();
+
+    // Create a small file so there is a valid inode to write to.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt")
+    };
+
+    // Snapshot the image after the create, before the refused write.
+    let before = base.sectors();
+
+    // Attempt to write MAX_FILE_SIZE + 1 bytes: one byte over the limit.
+    let oversized = vec![0xabu8; MAX_FILE_SIZE + 1];
+    assert_eq!(
+        Volume::mount(base.clone())
+            .expect("mount")
+            .write_file(file_inode, &oversized, 2),
+        Err(Error::TooLarge),
+        "write_file must refuse data larger than MAX_FILE_SIZE"
+    );
+
+    // The refused write must not have modified the image.
+    assert!(
+        base.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+
+    // Control: writing exactly MAX_FILE_SIZE bytes succeeds and reads back.
+    let exact = vec![0xbcu8; MAX_FILE_SIZE];
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        assert_eq!(
+            volume.write_file(file_inode, &exact, 3),
+            Ok(()),
+            "write_file must accept exactly MAX_FILE_SIZE bytes"
+        );
+        let mut out = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            volume.read_file(file_inode, &mut out),
+            Ok(MAX_FILE_SIZE),
+            "the max-size file must be readable after write_file"
+        );
+        assert_eq!(&out, &exact, "content must match what was written");
+    }
+}
