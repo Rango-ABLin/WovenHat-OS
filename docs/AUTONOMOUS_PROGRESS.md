@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that create refuses when all inodes are exhausted
+
+Branch: `auto/wovenhat-development` (base `f4b6ba3e`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` (wfs.rs line 1115) calls:
+
+```rust
+let number = self.allocate_inode(txn)?;
+```
+
+`allocate_inode` scans inode slots `2..=inode_count`.  When every slot in
+that range is already occupied it returns `Err(Error::NoSpace)`.  At that
+point no sector has been written (the scan is read-only), so the volume is
+completely unmodified.
+
+The existing test `create_file_out_of_space_leaves_no_file` exercises a
+different `Err(NoSpace)` path: data blocks exhausted during `stage_write`
+(via `allocate_block`).  No prior test targeted inode-table exhaustion
+specifically.  Without the `allocate_inode` guard a volume that reuses inode
+numbers (or whose inode table was not fully allocated) could assign the same
+inode to two files, corrupting the directory and data.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_refuses_when_all_inodes_are_exhausted`:
+
+- Creates a `CrashDisk::blank()` (192-sector) device and formats it with
+  `inode_count = 2` (inode 1 = root directory, inode 2 = the only file
+  slot).  192 sectors is large enough that data blocks and directory slots
+  are not the constraint.
+- Uses `create_file` to consume inode 2 (`first.txt`, "hello").
+- Snapshots the image before any refused call.
+- Asserts `create(1, "second.txt", 0o644, 2)` returns `Err(Error::NoSpace)`.
+- Asserts the image is unmodified.
+- Asserts `create_file(1, "third.bin", 0o644, b"data", 2)` also returns
+  `Err(Error::NoSpace)` and also leaves the image unmodified.
+- Controls: `first.txt` still resolves to inode 2, reads back "hello", and
+  `volume.check()` confirms the volume is consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **101 passed / 0 failed** (was 100; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Uses `inode_count = 2` to minimise setup.  Any inode count where all slots
+  are occupied triggers the same guard; the two-inode case is the smallest
+  reproducible scenario.
+- `allocate_inode` is a read-only scan and writes nothing before returning
+  `Err(NoSpace)`, so the image-unmodified assertion is authoritative.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-04 — WovenFS: test that write_file refuses data larger than MAX_FILE_SIZE
 
 Branch: `auto/wovenhat-development` (base `d67a7075`). Working tree was clean.
