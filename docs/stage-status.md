@@ -24,6 +24,13 @@ terminal group and the Ring-3 probe verifies SIGINT termination with status
 This closes the documented S03 software/QEMU gap; physical HID qualification
 and broader POSIX compatibility remain separate release boundaries.
 
+## Stage 13.15 WovenAudio release revalidation - 2026-11-04 - BOUNDED GATE PASSED
+
+The QEMU WovenAudio playback waveform gate passes on 1/2/4 CPUs with exit 33;
+fresh evidence is retained in `audit-artifacts/stage13.15-{1,2,4}cpu-*`. This
+confirms the emulated playback path only. Audio capture/mixing breadth,
+native-device behavior, and physical audio qualification remain open.
+
 ## WovenFS migration completion note — 2026-11-04
 
 The bounded system-filesystem increment is complete: WovenFS-backed `df` and

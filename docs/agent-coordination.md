@@ -8847,3 +8847,10 @@ including Ctrl-C delivery to the foreground process group and status-130
 termination. Evidence is under `target/s03-keyboard-injection-{1,2,4}cpu/`.
 This closes the bounded S03 software/QEMU gap; full POSIX compatibility and
 physical HID certification remain outside the gate.
+
+## Codex - WovenAudio playback release revalidation (2026-11-04)
+
+The Stage 13.15 QEMU playback waveform gate passed on 1/2/4 CPUs with exit
+33. Evidence is under `audit-artifacts/stage13.15-{1,2,4}cpu-*`. This is an
+emulated playback result; audio capture/mixing breadth and native/physical
+audio qualification remain open.
