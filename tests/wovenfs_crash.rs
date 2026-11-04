@@ -4960,3 +4960,54 @@ fn unlink_refuses_a_file_that_shares_a_data_block_with_another_file() {
     volume.unlink(1, "a.bin", 2).expect("control: unlink must succeed");
     mount_consistent(&ctrl, "after a valid unlink");
 }
+
+/// `create_file` (wfs.rs line 1074) contains an early-exit guard:
+///
+/// ```text
+/// if data.len() > MAX_FILE_SIZE {
+///     return Err(Error::TooLarge);
+/// }
+/// ```
+///
+/// This guard fires before `stage_create` is called, so no inode is allocated
+/// and no sector is written.  The only existing `TooLarge` test
+/// (`a_file_larger_than_the_direct_block_limit_is_refused`) exercises the guard
+/// inside `stage_write` via `write_file`, not the earlier guard in `create_file`.
+///
+/// Without this guard a caller supplying `MAX_FILE_SIZE + 1` bytes would
+/// proceed into `stage_create`, allocating an inode and directory entry, and
+/// then fail in `stage_write` with `Err(TooLarge)` — leaving an empty inode
+/// and a dangling directory entry behind.  The guard ensures the refusal is
+/// atomic with no visible side effects.
+#[test]
+fn create_file_refuses_oversized_data() {
+    let base = formatted();
+    let before = base.sectors();
+
+    // MAX_FILE_SIZE + 1 bytes: one byte over the limit.
+    let oversized = vec![0xabu8; MAX_FILE_SIZE + 1];
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+    assert_eq!(
+        volume.create_file(1, "big.bin", 0o644, &oversized, 1),
+        Err(Error::TooLarge),
+        "create_file must refuse data larger than MAX_FILE_SIZE"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // Control: exactly MAX_FILE_SIZE bytes succeeds.
+    let exact = vec![0xbcu8; MAX_FILE_SIZE];
+    let inode = volume
+        .create_file(1, "exact.bin", 0o644, &exact, 2)
+        .expect("create_file must accept exactly MAX_FILE_SIZE bytes");
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(inode, &mut out),
+        Ok(MAX_FILE_SIZE),
+        "the exact-size file must be readable"
+    );
+    assert_eq!(&out, &exact, "content must match what was written");
+    mount_consistent(&base, "after a valid create_file");
+}

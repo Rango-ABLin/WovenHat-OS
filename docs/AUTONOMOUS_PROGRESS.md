@@ -1,5 +1,64 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that create_file refuses oversized data
+
+Branch: `auto/wovenhat-development` (base `5668d4d3`). Working tree was clean.
+
+### Defect / gap
+
+`create_file` (wfs.rs line 1074) has an early-return guard:
+
+```rust
+if data.len() > MAX_FILE_SIZE {
+    return Err(Error::TooLarge);
+}
+```
+
+This fires before `stage_create` is called, so no inode is allocated and no
+sector is written.  The only existing `TooLarge` test
+(`a_file_larger_than_the_direct_block_limit_is_refused`) exercises the guard
+inside `stage_write` via `write_file`; the earlier guard in `create_file` itself
+had no dedicated test.
+
+Without this guard a caller supplying `MAX_FILE_SIZE + 1` bytes would proceed
+into `stage_create`, allocating an inode and directory entry, then fail in
+`stage_write` with `Err(TooLarge)` — leaving an empty inode and a dangling
+directory entry behind.  The guard ensures the refusal is atomic with no visible
+side effects.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `create_file_refuses_oversized_data`:
+
+- Calls `formatted()` to get a fresh volume, snapshots the image.
+- Asserts `create_file(1, "big.bin", 0o644, &oversized, 1)` with
+  `MAX_FILE_SIZE + 1` bytes returns `Err(Error::TooLarge)`.
+- Asserts the image was not modified by the refused call.
+- Control: `create_file(1, "exact.bin", 0o644, &exact, 2)` with exactly
+  `MAX_FILE_SIZE` bytes succeeds; `read_file` returns the correct content and
+  `mount_consistent` confirms the volume is intact.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **94 passed / 0 failed** (was 93; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test uses `MAX_FILE_SIZE + 1` as the refused size and `MAX_FILE_SIZE` as
+  the accepted boundary.  The guard is a strict `>` comparison, so both
+  boundaries are exercised.
+- No production code changed — the guard already existed in `create_file`; only
+  the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that unlink refuses a file that shares a data block with another file
 
 Branch: `auto/wovenhat-development` (base `a3839ac4`). Working tree was clean.
