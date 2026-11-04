@@ -4,6 +4,7 @@ use crate::irq_lock::IrqMutex as Mutex;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FilesystemKind {
     Fat32,
+    WovenFs,
     Unknown,
 }
 
@@ -29,6 +30,26 @@ pub fn inspect_device(device: &mut impl crate::block::BlockDevice, removable: bo
         partition_sectors: partition.sectors,
         filesystem: FilesystemKind::Fat32,
         removable,
+    })
+}
+
+/// Inspect the non-removable system-volume candidate without changing the
+/// established FAT32/removable discovery contract. This is deliberately a
+/// probe only: role selection, mounting, and write authority remain separate
+/// steps until the system-volume migration is accepted.
+#[cfg(feature = "stage12-5-test")]
+pub fn inspect_system_device(
+    device: &mut impl crate::block::BlockDevice,
+) -> Option<DiskInfo> {
+    if device.sector_count() < 16 || crate::wfs::Volume::probe(&mut *device).is_err() {
+        return None;
+    }
+    Some(DiskInfo {
+        sectors: device.sector_count(),
+        start_lba: 0,
+        partition_sectors: device.sector_count(),
+        filesystem: FilesystemKind::WovenFs,
+        removable: false,
     })
 }
 

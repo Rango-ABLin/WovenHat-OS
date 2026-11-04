@@ -12173,6 +12173,15 @@ pub mod syscall {
     pub const GETPPID: u64 = 25;
     pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
+    /// Map an open file's contents read-only and demand-paged (no write
+    /// permission required, unlike `MMAP_FILE_SHARED`, whose kernel-side
+    /// permission check requires write access -- not a fit for a read-only
+    /// VFS node like a bundled font. Pages are loaded from the file lazily
+    /// as touched rather than copied eagerly into a static buffer, so this
+    /// avoids inflating the caller's own ELF data segment the way a large
+    /// `static` buffer does (see docs/graphics/modernization-tracker.md's
+    /// Phase 3 entries, 2026-11-04, for why that matters).
+    pub const MMAP_FILE_LAZY: u64 = 60;
     pub const UNLINK: u64 = 28;
     pub const SLEEP: u64 = 29;
     pub const RENAME: u64 = 30;
@@ -12367,6 +12376,20 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn lseek(descriptor: u64, offset: u64) -> u64 {
         unsafe { invoke(LSEEK, descriptor, offset, 0) }
+    }
+
+    /// Map `length` bytes of `descriptor`'s content starting at `offset`,
+    /// read-only, demand-paged. Returns the mapping's base address.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace; `descriptor` must stay open
+    /// for the mapping's lifetime (closing it does not itself invalidate
+    /// an established mapping, matching this codebase's `LazyFile`, which
+    /// captures its own file reference at mapping time, but this is kept
+    /// open regardless for the caller's own clarity rather than relying on
+    /// that).
+    pub unsafe fn mmap_file_lazy(descriptor: u64, length: u64, offset: u64) -> u64 {
+        unsafe { invoke(MMAP_FILE_LAZY, descriptor, length, offset) }
     }
 
     /// # Safety
@@ -14778,6 +14801,16 @@ pub fn open(path: &str) -> Result<u64, Error> {
 pub fn close(descriptor: u64) -> Result<(), Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// Map `length` bytes of `descriptor`'s content starting at `offset`,
+/// read-only and demand-paged, returning the mapping's base address.
+/// `length` must be a positive multiple of 4096; round a file's real size
+/// up to the next page if needed (reading past the real end of file within
+/// the final page is defined to return zero bytes there, not an error).
+pub fn mmap_file_lazy(descriptor: u64, length: u64, offset: u64) -> Result<u64, Error> {
+    // SAFETY: integer-only call; the descriptor is the caller's to manage.
+    check(unsafe { syscall::mmap_file_lazy(descriptor, length, offset) })
 }
 
 /// Move a descriptor's read/write offset to an absolute byte position.

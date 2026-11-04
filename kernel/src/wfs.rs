@@ -749,6 +749,15 @@ impl<D: BlockDevice> Volume<D> {
         Ok(volume)
     }
 
+    /// Probe a device without changing it. A valid superblock and replayable
+    /// journal are required; callers must still run the role/partition policy
+    /// before treating this as the system volume.
+    #[cfg(feature = "stage12-5-test")]
+    pub fn probe(device: D) -> Result<(), Error> {
+        let _ = Self::mount(device)?;
+        Ok(())
+    }
+
     #[cfg(any(
         test,
         feature = "stage15-1-test",

@@ -8566,3 +8566,19 @@ of which needs a written threat review per AGENTS.md before
 implementation. No phase work beyond the audit has started yet; the next
 session should start at Phase 1/6's virtio-gpu-device wiring.
 
+## Codex - WovenFS system-filesystem migration claim (2026-11-04)
+
+The user explicitly redirected priority from the still-open graphics
+modernization work to the WovenFS/FAT32 system-filesystem migration. Codex
+claims the filesystem/storage integration paths and migration documentation
+for this focused task: `kernel/src/wfs.rs`, `kernel/src/storage.rs`,
+`kernel/src/storage_manager.rs`, `kernel/src/vfs.rs`, `kernel/src/main.rs`,
+the relevant installer/provisioning scripts and app/service callers, and
+`docs/filesystem/wovenfs-system-migration-tracker.md`. FAT32 remains owned
+for the EFI/removable roles and must not be removed. The existing accepted
+Stage 12.2/12.4 entries are immutable for this task. No physical-disk
+formatting or writes are authorized. Initial work is audit and bounded
+planning; source implementation starts only after the defect inventory is
+recorded in the migration tracker. Existing graphics claims remain intact
+for their claimed files unless an overlap is explicitly coordinated.
+
