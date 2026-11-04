@@ -4908,3 +4908,55 @@ fn write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free() {
         "a refused write_file must not modify the image"
     );
 }
+
+/// `unlink` calls `self.refuse_shared_blocks(&txn, entry.inode, &node.direct)` before
+/// freeing any block.  If a second live inode names the same data block as the file
+/// being unlinked, freeing that block would destroy the second file's data and leave its
+/// inode pointing at a block the allocator may reassign.  The guard fires before the
+/// directory entry is cleared or the bitmap is modified, so the refused unlink leaves no
+/// trace on disk.
+///
+/// `an_inode_naming_one_block_twice_is_refused` covers the intra-inode case where
+/// `checked_inode` fires first.  `a_directory_block_named_by_a_file_is_not_rewritten`
+/// covers the unlink path when the directory block is shared (via `stage_dir_entry`).
+/// This test covers the remaining cross-inode path: two distinct file inodes naming the
+/// same data block, with `unlink`'s own `refuse_shared_blocks` as the barrier.
+#[test]
+fn unlink_refuses_a_file_that_shares_a_data_block_with_another_file() {
+    let (base, a_inode, b_inode) = two_one_block_files();
+
+    // Record the data blocks allocated to a.bin and b.bin.
+    let a_block = read_inode_direct0(&base, a_inode);
+    let b_block = read_inode_direct0(&base, b_inode);
+    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+
+    // Fork and redirect b_inode's direct[0] to a_block.  After this both
+    // a.bin and b.bin name a_block.  b_block is orphaned in the bitmap but
+    // unlink() does not call check(), so the orphan does not interfere.
+    let image = base.fork(None);
+    redirect_inode_block(&image, b_inode, 0, a_block);
+
+    // Snapshot: the refused unlink must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // refuse_shared_blocks(txn, a_inode, &[a_block, 0, ...]) finds b_inode
+    // also naming a_block → Err(Corrupt) before any free or entry clear.
+    assert_eq!(
+        volume.unlink(1, "a.bin", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse when another inode shares the file's data block"
+    );
+
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched image, unlink of a.bin succeeds.
+    let ctrl = base.fork(None);
+    let mut volume = Volume::mount(ctrl.clone()).expect("mount");
+    volume.unlink(1, "a.bin", 2).expect("control: unlink must succeed");
+    mount_consistent(&ctrl, "after a valid unlink");
+}

@@ -1,5 +1,72 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that unlink refuses a file that shares a data block with another file
+
+Branch: `auto/wovenhat-development` (base `a3839ac4`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1291) calls `self.refuse_shared_blocks(&txn, entry.inode,
+&node.direct)?` before freeing any block.  If a second live file inode names the same
+data block as the file being unlinked, freeing that block would destroy the second
+file's data and leave its inode pointing at a block the allocator may reassign.
+
+Three related tests cover nearby paths but not this one:
+
+- `an_inode_naming_one_block_twice_is_refused` — covers `unlink` refusing for
+  intra-inode block aliasing (both pointers in the same inode), but there
+  `checked_inode` fires first, before `refuse_shared_blocks` is reached.
+- `a_directory_block_named_by_a_file_is_not_rewritten` — covers `unlink` refusing when
+  the **directory block** is shared with a file inode, but that fires via `stage_dir_entry`
+  (which calls `refuse_shared_blocks` with the directory block), not via the `unlink`-level
+  `refuse_shared_blocks` call on the target file's data blocks.
+- `check_refuses_two_file_inodes_naming_the_same_block` — covers `check()` detecting the
+  cross-inode aliasing, not the `unlink` runtime path.
+
+No test exercised the scenario where two distinct file inodes share a data block and
+`unlink` is attempted on one of them, which would fire `unlink`'s own
+`refuse_shared_blocks` call before any disk write.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_a_file_that_shares_a_data_block_with_another_file`:
+
+- Calls `two_one_block_files()` to get a volume with `a.bin` (inode a, block a_block)
+  and `b.bin` (inode b, block b_block); asserts the two blocks are distinct.
+- Forks the image and calls `redirect_inode_block(&image, b_inode, 0, a_block)` so
+  that b_inode's `direct[0]` now points at a_block (the same block as a.bin).
+- Snapshots the image before the refused call.
+- Asserts `unlink(1, "a.bin", 2)` returns `Err(Error::Corrupt)`:
+  `refuse_shared_blocks(txn, a_inode, [a_block, ...])` finds b_inode also naming
+  a_block → `Err(Corrupt)` before the bitmap or directory entry is touched.
+- Asserts the image was not modified by the refused unlink.
+- Control: on the unpatched base image, `unlink(1, "a.bin", 2)` succeeds and
+  `mount_consistent` confirms the resulting volume is internally consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **93 passed / 0 failed** (was 92; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test redirects only `direct[0]` of b.bin to `a_block`.  A file with two data
+  blocks where `direct[1]` aliases another file's block would fire the same guard on
+  the second iteration; the single-block case is sufficient to prove the guard fires.
+- b_block is orphaned in the bitmap after the redirect, but `unlink` does not call
+  `check()`, so the orphan does not interfere with the test.
+- No production code changed — the guard already existed in `unlink`; only the missing
+  cross-inode test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that create refuses when the directory block is full
 
 Branch: `auto/wovenhat-development` (base `deb95ef9`). Working tree was clean.
