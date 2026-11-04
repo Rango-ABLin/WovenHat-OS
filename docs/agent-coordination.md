@@ -8804,3 +8804,11 @@ active state, centered clock, workspace switcher, notification badge, and
 Quick Settings menu affordance. Taskbar entries focus their window on click.
 Removed stale Activities/top-bar/legacy-taskbar source terminology and kept
 the accepted launcher overview as the only full-screen launcher path.
+
+## Codex - VirtIO desktop release validation (2026-11-04)
+
+The updated desktop passed the real VirtIO-GPU keyboard/pointer/window journey
+on 1/2/4 WHPX CPUs. Phase 7 evidence now separates idle zero-tick polls from
+active repaint samples and reports active distribution statistics. Guest CPU
+and memory remain unavailable through the current ABI and are not inferred
+from host QEMU metrics.

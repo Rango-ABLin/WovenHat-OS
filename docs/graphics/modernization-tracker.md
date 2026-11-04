@@ -1246,3 +1246,18 @@ focus the corresponding window. The old Activities-only label, placeholder
 equals glyph, and split legacy/top-bar rendering terminology were removed;
 the updated taskbar is the only rendered path. Shell target Clippy passes
 with warnings denied.
+
+## Codex - VirtIO desktop release validation (2026-11-04)
+
+The current taskbar/launcher source passed the real VirtIO-GPU desktop,
+keyboard, pointer, window, and repaint journey on 1, 2, and 4 WHPX CPUs.
+Evidence directories:
+
+- `audit-artifacts/desktop-qualification-1793807590890825900/` (1 CPU)
+- `audit-artifacts/desktop-qualification-1793807697554472700/` (2 CPUs)
+- `audit-artifacts/desktop-qualification-1793807811463784800/` (4 CPUs)
+
+The Phase 7 report now separates zero-tick idle polls from active repaint
+samples and reports active min/median/p95/max values. Guest CPU and memory
+remain explicitly unavailable through the current ABI; no host measurement is
+misreported as a guest result.

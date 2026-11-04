@@ -823,6 +823,7 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         int(value)
         for value in re.findall(r"woven-shell: interactive recompose ticks=(\d+)", text)
     ]
+    active_recomposes = [value for value in recomposes if value > 0]
     search_latencies = [
         int(value)
         for value in re.findall(r"woven-shell: search latency ticks=(\d+)", text)
@@ -830,8 +831,11 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
         "tick_rate_hz": 100,
         "recompose_samples": len(recomposes),
+        "idle_recompose_samples": len(recomposes) - len(active_recomposes),
+        "active_recompose_samples": len(active_recomposes),
         "recompose_ticks": recomposes,
         "recompose_ms": [round(value * 10.0, 3) for value in recomposes],
+        "active_recompose_ms": [round(value * 10.0, 3) for value in active_recomposes],
         "search_latency_samples": len(search_latencies),
         "search_latency_ticks": search_latencies,
         "measurement_limits": {
@@ -841,10 +845,10 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
             "host_qemu_cpu_memory": "not used as a guest performance claim",
         },
     }
-    if recomposes:
-        ordered = sorted(recomposes)
+    if active_recomposes:
+        ordered = sorted(active_recomposes)
         p95_index = min(len(ordered) - 1, max(0, (len(ordered) * 95 + 99) // 100 - 1))
-        result["recompose_summary_ms"] = {
+        result["active_recompose_summary_ms"] = {
             "min": round(min(ordered) * 10.0, 3),
             "median": round(statistics.median(ordered) * 10.0, 3),
             "p95": round(ordered[p95_index] * 10.0, 3),
