@@ -1,6 +1,8 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
-**Status: AUDIT RECORDED, implementation not yet started (2026-11-04).**
+**Status: PARTIAL, NOT ACCEPTED (2026-11-04).** Phase 0 audit is recorded
+and the first non-destructive probe increment is implemented; production
+system-volume routing has not started.
 The user explicitly authorized switching priority from the still-open graphics
 modernization work to this migration. The graphics sequencing sentence below
 is superseded for this task only; the graphics claim and files remain intact.
@@ -237,5 +239,12 @@ repository instructions, stage/architecture/coordination documents, Stage
 12.2/12.4/12.5 and Stage 15/15.2 records, and the graphics tracker. Working
 tree was clean. Claimed the filesystem/storage paths in
 `docs/agent-coordination.md` and recorded the Phase 0 defect inventory and
-bounded plan above. No implementation source has been changed and no
-physical device has been opened or modified.
+bounded plan above before source implementation. No physical device has been
+opened or modified.
+
+The first probe increment was then implemented and verified. It adds
+`wfs::Volume::probe` and the Stage 12.5-only
+`storage_manager::inspect_system_device` API; existing FAT32 discovery and
+all accepted filesystem behavior remain unchanged. Host/target lint, the
+20-test crash suite, and the Stage 12.1–12.5 QEMU chain passed. The migration
+remains partial and not accepted.

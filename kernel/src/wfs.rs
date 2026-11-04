@@ -753,9 +753,18 @@ impl<D: BlockDevice> Volume<D> {
     /// journal are required; callers must still run the role/partition policy
     /// before treating this as the system volume.
     #[cfg(feature = "stage12-5-test")]
-    pub fn probe(device: D) -> Result<(), Error> {
-        let _ = Self::mount(device)?;
-        Ok(())
+    pub fn probe(device: &mut D) -> Result<(), Error> {
+        let mut best = None;
+        for slot in 0..2u64 {
+            let mut sector = [0u8; SECTOR_SIZE];
+            device.read_sector(slot, &mut sector)?;
+            if let Some(candidate) = SuperBlock::decode(&sector) {
+                if best.is_none_or(|current: SuperBlock| candidate.sequence > current.sequence) {
+                    best = Some(candidate);
+                }
+            }
+        }
+        best.map(|_| ()).ok_or(Error::Corrupt)
     }
 
     #[cfg(any(

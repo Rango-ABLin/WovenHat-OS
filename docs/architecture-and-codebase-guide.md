@@ -2835,6 +2835,18 @@ tracking; `Volume::check()` applies the same complete-tree integrity boundary.
 Mounted system policy and physical flash qualification remain open. See the Stage 15
 write-through audit.
 
+## WovenFS system-volume migration probe increment (2026-11-04)
+
+The migration now has a non-destructive native probe boundary. `wfs::Volume::probe`
+reads and validates both superblock slots without replaying journals or writing,
+and requires a valid WovenFS superblock before returning success. The
+Stage 12.5 storage-manager build exposes `inspect_system_device`, which reports
+a typed `FilesystemKind::WovenFs` candidate without changing the established
+FAT32 `inspect_device` path used for removable media. This is selection evidence
+only: production `/mnt` still mounts through the FAT32 path until partition-role
+selection, WovenFS generic VFS write-through, provisioning, and their acceptance
+gates are complete.
+
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 
 ASLR geometry correction (2026-10-20): the graph-loader keeps the independent

@@ -41,7 +41,7 @@ pub fn inspect_device(device: &mut impl crate::block::BlockDevice, removable: bo
 pub fn inspect_system_device(
     device: &mut impl crate::block::BlockDevice,
 ) -> Option<DiskInfo> {
-    if device.sector_count() < 16 || crate::wfs::Volume::probe(&mut *device).is_err() {
+    if device.sector_count() < 16 || crate::wfs::Volume::probe(device).is_err() {
         return None;
     }
     Some(DiskInfo {
