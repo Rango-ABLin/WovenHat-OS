@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 10.7 regression after S12 input ABI change - 2026-11-04 - PASSED (SOFTWARE)
+
+The mandated `RUN-STAGE10.7.ps1` gate passed again after the Escape input ABI
+and keyboard-only desktop changes: host regressions, warning-denying host and
+kernel Clippy, workspace tests, 1-CPU x10 memory closure, 2-CPU x30 memory
+closure, 4-CPU x20 memory closure, 1/2/4-CPU networking, and isolated
+Stages 10.4/10.5/10.6/10.7 all passed. The read-only trust/physical preflight
+still reports `NOT_QUALIFIED` for missing OVMF VARS, swtpm, disk image, and
+development signing inputs.
+
 ## S12 keyboard-only desktop workflow - 2026-11-04 - ACCEPTED (SOFTWARE BOUNDARY)
 
 Added Escape end-to-end through PS/2 set-1, USB HID boot keyboard, the stable

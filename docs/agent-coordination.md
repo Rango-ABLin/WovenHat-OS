@@ -21,6 +21,15 @@ evaluation, and Escape close/reap, with no pointer events injected. Evidence
 is retained in the timestamped desktop-qualification artifacts. Physical
 keyboard and screen-reader qualification remain open.
 
+## Codex - Stage 10.7 regression after S12 input ABI change (2026-11-04)
+
+The mandated `RUN-STAGE10.7.ps1` chain passed again after the Escape input and
+keyboard-only changes: host regressions, warning-denying host/kernel Clippy,
+workspace tests, 1/2/4-CPU memory closure (10/30/20 runs), networking, and
+isolated 10.4/10.5/10.6/10.7 QEMU boots. The read-only trust/physical
+preflight remains `NOT_QUALIFIED` because the required external OVMF VARS,
+swtpm, disk image, and development signing inputs are absent.
+
 Diagnosed and fixed critical kernel build failure that blocked Modern desktop 
 implementation acceptance testing. Root cause: `ovmf-prebuilt` (a UEFI firmware 
 download utility) was incorrectly declared in `[dependencies]` instead of 
