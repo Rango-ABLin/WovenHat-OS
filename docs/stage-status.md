@@ -1,5 +1,20 @@
 # Stage status
 
+## Graphics typography and final release qualification - 2026-11-04 - ACCEPTED
+
+All 119 GUI text call sites now use the bounded system-text primitive with
+parsed-face caching, a 64-entry alpha glyph raster cache, and a single-pass
+mask compositor; bitmap fallback remains available. Real VirtIO-GPU desktop
+qualification passed on 1/2/4 WHPX CPUs. The required RUN-STAGE10.7.ps1 gate
+also passed completely, including host regressions, Clippy, tests, 1/2/4-CPU
+memory and networking matrices, and Stage 10.7 async TCP.
+
+Phase 7 evidence now records repaint/search distributions and the existing
+input-to-captured-frame proxy. Guest CPU and memory are not exposed by the
+current ABI, so those two measurements remain explicitly unclaimed rather
+than inferred from host QEMU process data. Physical/native qualification is
+also correctly reported as not tested by the read-only host gate.
+
 ## WovenFS migration completion note — 2026-11-04
 
 The bounded system-filesystem increment is complete: WovenFS-backed `df` and
