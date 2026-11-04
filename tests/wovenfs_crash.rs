@@ -5184,3 +5184,56 @@ fn unlink_refuses_an_entry_naming_an_out_of_range_inode() {
         .unlink(1, "a.txt", 2)
         .expect("unlink must succeed on the unpatched image");
 }
+
+#[test]
+fn unlink_refuses_an_entry_whose_inode_field_is_named_by_another_entry() {
+    let (base, block, index) = two_file_root();
+
+    // Find b.txt's inode so we can patch a.txt's directory entry to share it.
+    // This makes two directory entries name the same inode, triggering the
+    // count-!=1 arm of the unlink guard.  b_inode != dir_inode (1) and
+    // b_inode <= inode_count (32), so arm-1 (self-inode) and arm-2
+    // (out-of-range) do not fire; arm-3 fires because the filter yields 2.
+    let b_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount base");
+        volume.lookup(1, "b.txt").expect("b.txt").inode
+    };
+
+    // Patch a.txt's directory entry inode field (bytes 0–7) to b.txt's inode.
+    // Directory blocks carry no checksum, so the patch takes effect immediately.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &b_inode.to_le_bytes());
+
+    // Snapshot: a refused unlink must not write anything.
+    let before = image.sectors();
+
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must return Corrupt when the entry's inode is shared by another entry"
+    );
+
+    // The image must be unchanged.
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: b.txt still resolves on the patched image.
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "b.txt")
+            .map(|e| e.inode),
+        Ok(b_inode),
+        "b.txt must still resolve on the patched image"
+    );
+
+    // Control: on the unpatched base image, unlink(a.txt) succeeds.
+    Volume::mount(base)
+        .expect("mount")
+        .unlink(1, "a.txt", 2)
+        .expect("unlink must succeed on the unpatched image");
+}
