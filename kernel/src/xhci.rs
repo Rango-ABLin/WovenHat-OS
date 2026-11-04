@@ -2321,6 +2321,7 @@ fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
         0x28 => return Some(Key::Enter),
         0x2a => return Some(Key::Backspace),
         0x2b => return Some(Key::Tab),
+        0x29 => return Some(Key::Escape),
         0x2c => b' ',
         0x2d..=0x38 => {
             let index = usize::from(usage - 0x2d);
@@ -2968,6 +2969,7 @@ pub fn input_self_test() -> bool {
         Key::Char('1'),
         Key::Char('A'),
         Key::Enter,
+        Key::Escape,
     ];
     let mut keys = Vec::new();
     let mut motion = (0i32, 0i32);
@@ -3016,7 +3018,7 @@ pub fn input_self_test() -> bool {
     // between them instead of polling.
     let event_driven = step(
         "delivered by device interrupts; the worker sleeps between them",
-        irqs > 0 && reports >= 5 && passes <= irqs + 2,
+        irqs > 0 && reports >= 6 && passes <= irqs + 2,
     );
     keys_ok && mouse_ok && event_driven
 }
@@ -3276,6 +3278,8 @@ pub fn self_test() -> bool {
             .map(|entry| entry.protocol == USB_PROTOCOL_KEYBOARD && entry.endpoint_address == 0x81)
             == Some(true)
         && decode_boot_keyboard([0, 0, 4, 0, 0, 0, 0, 0]) == Some(4)
+        && keyboard_presses([0, 0, 0x29, 0, 0, 0, 0, 0], &mut [0; 6])[0]
+            == Some(Key::Escape)
         && mouse_path
         && mouse_release
 }

@@ -1,5 +1,17 @@
 # Stage status
 
+## S12 keyboard-only desktop workflow - 2026-11-04 - ACCEPTED (SOFTWARE BOUNDARY)
+
+Added Escape end-to-end through PS/2 set-1, USB HID boot keyboard, the stable
+input-poll ABI, and `libwoven`. WovenShell now sends the existing owner-driven
+`WCLS` request to the focused application when Escape is pressed. The real
+QEMU keyboard-only workflow passed on 1/2/4 CPUs: sign-in, F1 launcher,
+keyboard-only Calculator launch, expression input/evaluation, and Escape
+close/reap, with no pointer events injected. Evidence is retained in the
+timestamped `audit-artifacts/desktop-qualification-*` directories. This is
+software/QEMU evidence; physical keyboard and full accessibility/screen-reader
+qualification remain separate.
+
 ## Graphics Phase 6/7 qualification update - 2026-11-04 - BOUNDED PASS / RELEASE OPEN
 
 Stage 20.14 conventional VirtIO-GPU two-head output passed pixel-for-pixel on

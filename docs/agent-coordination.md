@@ -11,6 +11,16 @@ target and host all-target warning-denying Clippy passed. The full interactive
 journey after this instrumentation was started but not completed in this
 session, so no full-journey release claim is made from this change.
 
+## Codex - S12 keyboard-only desktop workflow (2026-11-04)
+
+Added Escape through PS/2 set-1, USB HID boot keyboard, the stable input-poll
+ABI and libwoven; WovenShell uses it to send the existing owner-driven WCLS
+close request to the focused window. The real keyboard-only desktop workflow
+passed on 1/2/4 CPUs: sign-in, F1 launcher, Calculator launch, expression
+evaluation, and Escape close/reap, with no pointer events injected. Evidence
+is retained in the timestamped desktop-qualification artifacts. Physical
+keyboard and screen-reader qualification remain open.
+
 Diagnosed and fixed critical kernel build failure that blocked Modern desktop 
 implementation acceptance testing. Root cause: `ovmf-prebuilt` (a UEFI firmware 
 download utility) was incorrectly declared in `[dependencies]` instead of 

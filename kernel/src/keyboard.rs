@@ -129,6 +129,7 @@ impl Keyboard {
             0x1C => Some(Key::Enter),
             0x0E => Some(Key::Backspace),
             0x0F => Some(Key::Tab),
+            0x01 => Some(Key::Escape),
             0x3B => Some(Key::F1),
             0x3C => Some(Key::F2),
             0x3D => Some(Key::F3),
@@ -186,6 +187,9 @@ pub fn self_test() -> bool {
         && keyboard
             .decode(0x1c)
             .is_some_and(|key| matches!(key, Key::Enter))
+        && keyboard
+            .decode(0x01)
+            .is_some_and(|key| matches!(key, Key::Escape))
         && keyboard.decode(0x1d).is_none()
         && keyboard
             .decode(0x2e)

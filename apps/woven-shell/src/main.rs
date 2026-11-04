@@ -1026,6 +1026,7 @@ impl Desktop {
                     self.selected = (self.selected + 1) % count;
                 }
             }
+            Key::Escape => return before.union(self.toggle_launcher()),
             Key::Enter => {
                 let (found, count) = self.filtered();
                 if self.selected < count {
@@ -3388,6 +3389,14 @@ impl Desktop {
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            InputEvent::Key(Key::Escape) => {
+                self.cancel_pointer_gesture();
+                let Some(slot) = self.focused() else { return empty };
+                let Some(window) = self.windows[slot] else { return empty };
+                let _ = libwoven::message_send(window.owner, b"WCLS");
+                log(&[b"woven-shell: keyboard close requested"]);
+                empty
+            }
             // Tab is shell-owned outside the sign-in/launcher paths. Cycle
             // the bounded workspace stack without requiring a pointer.
             InputEvent::Key(Key::Tab) => {

@@ -38,6 +38,7 @@ pub enum Key {
     Enter,
     Backspace,
     Tab,
+    Escape,
     F1,
     F2,
     F3,
@@ -401,7 +402,9 @@ pub fn read_bytes(buffer: &mut [u8]) -> usize {
             Key::Enter => b'\n',
             Key::Backspace => 8,
             Key::Tab => b'\t',
-            Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::F12 | Key::Char(_) => continue,
+            Key::Escape | Key::F1 | Key::F2 | Key::F3 | Key::F4 | Key::F12 | Key::Char(_) => {
+                continue
+            }
         };
         let termios = crate::terminal::termios();
         if byte == termios.control_chars[0] {

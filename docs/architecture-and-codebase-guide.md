@@ -2753,6 +2753,15 @@ one interrupt-IN transfer armed.
 USB input reaches the same queue as PS/2, so the kernel shell, `/bin/sh`
 and the desktop all receive it.
 
+**Keyboard-only dismissal.** Escape is a first-class bounded key in both
+the PS/2 set-1 decoder (`0x01`) and USB HID boot-keyboard usage (`0x29`). It
+has its own stable input-poll kind (16), is decoded by `libwoven`, and is
+owned by WovenShell outside the lock screen/launcher: Escape sends the
+existing `WCLS` close request to the focused window. The close remains
+owner-driven, so the shell does not reclaim a client surface or bypass the
+normal reaping path. This supports a complete keyboard-only launch/use/close
+workflow without inventing a second window-lifetime protocol.
+
 **Two fixes found by this stage.**
 - **MSI-X never delivered.** `msix::enable_owned` enabled the function with
   Function Mask asserted and never cleared it. Function Mask masks every

@@ -7,7 +7,7 @@ added handler, which is the USB keyboard and mouse (added after the chipset's
 PS/2 devices); the kernel also requires USB reports and device interrupts,
 so input that took the PS/2 path would fail the gate:
 
-  keys   w, h, 1, shift+a, Enter        -> 'w' 'h' '1' 'A' Enter
+  keys   w, h, 1, shift+a, Enter, Escape -> 'w' 'h' '1' 'A' Enter Escape
   mouse  right 40, down 25, left click  -> motion (40, 25), press, release
 
 The kernel checks the events arrived exactly and through device interrupts.
@@ -94,6 +94,10 @@ def inject(qmp):
     qmp.events('kbd0', [key('ret', True)])
     time.sleep(0.15)
     qmp.events('kbd0', [key('ret', False)])
+    time.sleep(0.15)
+    qmp.events('kbd0', [key('esc', True)])
+    time.sleep(0.15)
+    qmp.events('kbd0', [key('esc', False)])
     time.sleep(0.15)
     qmp.events('mouse0', [{'type': 'rel', 'data': {'axis': 'x', 'value': 40}},
                           {'type': 'rel', 'data': {'axis': 'y', 'value': 25}}])
