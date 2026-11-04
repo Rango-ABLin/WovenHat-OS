@@ -23,6 +23,13 @@ agent_coordination.rs. No bulk unrelated reformat or suppression was applied.
 The full Windows gate rerun after repairs is
 `audit-artifacts/acceptance-20261104-191149-393/`; result pending.
 
+BLD-A2: initial disposable-image audit found stored_matches_current_kdf=false
+in account-fixture-audit.json. After correcting the generator, both host
+fixture tests pass; final output is account-fixture-tests-final.log in the
+repair evidence directory. These tests were added after the current Windows
+chain's initial Python discovery; their explicit focused run supplements that
+chain and is not misreported as part of its original 206-test discovery.
+
 Prescribed Windows baseline started on untouched runtime source at base
 70b49c74215d7aecc0469ba7d677458ccaf7c10a. Evidence:
 `audit-artifacts/acceptance-20261104-185726-462/acceptance-output.txt` and

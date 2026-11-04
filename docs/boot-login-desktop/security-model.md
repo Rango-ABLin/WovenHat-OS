@@ -50,3 +50,8 @@ capabilities (`shell::authorize`), not an authenticated desktop session.
 The event loop routes keyboard input to it when the desktop is not presenting,
 including after compositor process failure. This is a concrete recovery-policy
 integration point, not a secure text-login implementation.
+
+The historical persistent-account fixture was still writing a single-SHA256
+verifier incompatible with the current KDF. BLD-A2 corrects this disposable
+test-media generator only. Its fixed, public fixture credentials are not a
+production account-creation path or evidence of secure entropy/provisioning.

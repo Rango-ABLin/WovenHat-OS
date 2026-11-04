@@ -8868,3 +8868,13 @@ Use a recording host serial double with a real panic emission assertion; use
 edition-compatible let-else in probe. No warnings/assertions suppressed, no
 ABI or filesystem semantics changed. Full baseline must rerun after focused
 host tests and lints. Original failure: acceptance-20261104-190707-667.
+
+## Codex - BLD-A2 persistent account fixture repair (2026-11-04)
+
+Claim scripts/create-account-fixture.py and new tests/test_account_fixture.py.
+Disposable-image audit confirms the historical fixture writes SHA256(salt||PIN),
+which does not match current PBKDF2-HMAC-SHA256/100000. Fix only the test
+fixture's verifier; preserve no-overwrite behavior, filesystem layout, account
+identity and existing public fixture credentials. Add generated-image and
+no-overwrite host coverage. Do not claim real login from host fixture coverage.
+The ongoing Windows chain remains the only runtime acceptance chain.

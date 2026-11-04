@@ -31,3 +31,15 @@ Tests: diagnostics 10/10, WovenFS crash 20/20, host all-targets Clippy pass.
 Default/Stage12.5/Stage15.2 target Clippy also pass with warnings denied.
 Next: complete preservation gate. No phase acceptance yet. Workspace format
 check exposes inherited formatting debt, retained separately from this repair.
+
+## BLD-A2 persistent-account fixture
+
+Status: TESTED — PASS (host fixture gate only). Agent: Codex.
+Owned files: scripts/create-account-fixture.py; tests/test_account_fixture.py.
+Disposable-image audit reproduced the obsolete SHA256(salt || PIN) record.
+The generator now uses the production contract's PBKDF2-HMAC-SHA256 at
+100000 iterations, preserving the existing public test identity/salt/PIN and
+no-overwrite behavior. Host tests check the generated on-disk record against
+a fixed known answer and verify an existing destination survives untouched.
+Both tests pass. No production provisioning, credential migration, entropy,
+authentication/session authority or actual login acceptance is claimed.

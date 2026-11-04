@@ -29,6 +29,7 @@ Status: IN PROGRESS. Paths below were discovered in this checkout.
 | Windows preservation gate | RUN-STAGE10.7.ps1; run-stage10-7-acceptance.ps1 |
 | Desktop framebuffer journey | scripts/test-desktop-qualification.py |
 | Session QEMU harness | scripts/test-stage20-15-session.py |
+| Persistent account test-media generator | scripts/create-account-fixture.py; tests/test_account_fixture.py |
 | Repeated boots | scripts/test-stage31-repeated-boots.py |
 | CI | .github/workflows/kernel.yml; wovenhat-windows-acceptance.yml; hardware-qualification.yml; wovenhat-runner-test.yml |
 
