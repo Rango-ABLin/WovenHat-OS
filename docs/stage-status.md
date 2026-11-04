@@ -3,21 +3,22 @@
 ## WovenFS system-filesystem migration — 2026-11-04 — PARTIAL, NOT ACCEPTED
 
 The user explicitly redirected priority to this migration. Phase 0 audit and
-the first bounded implementation increment are complete: native WovenFS now
-has a non-destructive `Volume::probe`, and the Stage 12.5 storage-manager
-configuration exposes `inspect_system_device` as a typed `FilesystemKind::WovenFs`
-candidate. Existing FAT32 discovery, `/mnt` boot mounting, removable-media
-behavior, and accepted Stage 12.2/12.4 status text are unchanged. No physical
-device was opened or modified.
+the first bounded production increment are complete: native WovenFS now has a
+non-destructive `Volume::probe`; root mounting probes WovenFS before FAT32 and
+supports a selected GPT partition; `/mnt` native write-through and teardown
+are wired; and the disposable installer can format and verify WovenFS. The
+Stage 12.5 typed `FilesystemKind::WovenFs` probe remains additive. Existing
+FAT32 discovery/fallback, removable-media behavior, and accepted Stage
+12.2/12.4 status text are unchanged. No physical device was opened or
+modified.
 
 Verification: host all-targets Clippy, Stage 12.5 target Clippy, and Stage 15.2
 target Clippy pass with warnings denied; `tests/wovenfs_crash.rs` passes 20/20;
 the Stage 12.1–12.5 QEMU chain passes at 1/2/4 CPUs. A full workspace test
-run had one transient unrelated thread-registry failure; rerunning that exact
-test passed. This is not migration acceptance: `/mnt` still uses FAT32, the
-installer still cannot execute a WovenFS plan, and system-volume partition
-selection, generic VFS write-through, provisioning, recovery, and installed
-WovenFS boot qualification remain open. See
+run passed. This is not migration acceptance: FAT32-specific `df`/`fscheck`
+and all service persistence callers have not yet been fully made backend
+neutral, and installed WovenFS boot qualification plus physical
+power-loss/removable-hardware limits remain open. See
 `docs/filesystem/wovenfs-system-migration-tracker.md`.
 
 ## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul + asset pass) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, FIRST ASSET PASS DONE

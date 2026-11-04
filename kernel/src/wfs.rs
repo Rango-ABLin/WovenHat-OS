@@ -381,13 +381,6 @@ impl DirEntry {
             && &self.name[..name.len()] == name.as_bytes()
     }
 
-    #[cfg(any(
-        test,
-        feature = "stage15-1-test",
-        feature = "stage15-2-test",
-        feature = "stage21-6-test",
-        feature = "stage12-2-xattr-test"
-    ))]
     pub fn name_str(&self) -> &str {
         let len = usize::from(self.name_len).min(MAX_NAME);
         core::str::from_utf8(&self.name[..len]).unwrap_or("")
@@ -749,10 +742,10 @@ impl<D: BlockDevice> Volume<D> {
         Ok(volume)
     }
 
-    /// Probe a device without changing it. A valid superblock and replayable
-    /// journal are required; callers must still run the role/partition policy
+    /// Probe a device without changing it. A valid superblock is required;
+    /// callers must still run the role/partition policy
     /// before treating this as the system volume.
-    #[cfg(feature = "stage12-5-test")]
+    #[cfg(not(test))]
     pub fn probe(device: &mut D) -> Result<(), Error> {
         let mut best = None;
         for slot in 0..2u64 {
@@ -767,12 +760,6 @@ impl<D: BlockDevice> Volume<D> {
         best.map(|_| ()).ok_or(Error::Corrupt)
     }
 
-    #[cfg(any(
-        test,
-        feature = "stage15-1-test",
-        feature = "stage15-2-test",
-        feature = "stage24-3-test"
-    ))]
     pub const fn super_block(&self) -> &SuperBlock {
         &self.super_block
     }
@@ -1121,7 +1108,6 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Entries of a directory, free slots included as `inode == 0`.
-    #[cfg(any(test, feature = "stage15-1-test", feature = "stage15-2-test"))]
     pub fn read_dir(&mut self, dir_inode: u64) -> Result<DirectoryView, Error> {
         let txn = Transaction::new();
         let dir = self.inode(dir_inode)?;
@@ -1589,12 +1575,6 @@ impl<D: BlockDevice> Volume<D> {
     /// Verify internal consistency: every block referenced by a live inode is
     /// marked allocated, every directory entry names a live inode, and no two
     /// inodes claim the same block.
-    #[cfg(any(
-        test,
-        feature = "stage15-1-test",
-        feature = "stage15-2-test",
-        feature = "stage12-2-xattr-test"
-    ))]
     pub fn check(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let txn = Transaction::new();
@@ -2278,11 +2258,11 @@ pub fn xattr_self_test() -> bool {
 // ------------------------------------------------------- real device mount
 
 /// VFS mount point for the native filesystem.
-#[cfg(feature = "stage15-2-test")]
+#[allow(dead_code)]
 pub const MOUNT_POINT: &str = "/wfs";
 
 /// Outcome of probing and mounting the ATA primary master as WovenFS.
-#[cfg(feature = "stage15-2-test")]
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountOutcome {
     /// No ATA primary master is present.
@@ -2297,7 +2277,8 @@ pub enum MountOutcome {
 
 // WovenFS mutations are read-modify-write transactions. Serialize the whole
 // mounted operation so concurrent tasks cannot commit lost updates. Rank 5
-// remains below the ATA device lock (rank 10).
+// remains below the block-device lock (rank 10) for the established native
+// operation path.
 #[cfg(not(test))]
 static MUTATION: crate::irq_lock::PreemptMutex<()> =
     crate::irq_lock::PreemptMutex::with_rank((), 5);
@@ -2330,7 +2311,10 @@ pub fn with_ata_volume<R>(
 /// the path reaches the on-disk resolver.
 #[cfg(not(test))]
 fn checked_vfs_path(path: &str) -> Result<alloc::string::String, Error> {
-    let relative = path.strip_prefix("/wfs/").ok_or(Error::InvalidName)?;
+    let relative = path
+        .strip_prefix("/wfs/")
+        .or_else(|| path.strip_prefix("/mnt/"))
+        .ok_or(Error::InvalidName)?;
     if relative.is_empty() || relative.len() + 1 > crate::config::MAX_PATH_SIZE {
         return Err(Error::InvalidName);
     }
@@ -2459,17 +2443,7 @@ pub fn write_vfs_path_durable(
 
 /// Read an internal service file directly from native WovenFS, with the
 /// filesystem checksum and inode bounds checked by the mount path.
-#[cfg(all(
-    not(test),
-    any(
-        feature = "stage15-2-test",
-        feature = "stage27-2-test",
-        feature = "stage21-6-test",
-        feature = "stage24-3-test",
-        feature = "stage22-5-test",
-        feature = "system-apps"
-    )
-))]
+#[cfg(not(test))]
 pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error> {
     let _mutation = MUTATION.lock();
     let native = checked_vfs_path(path)?;
@@ -2529,13 +2503,11 @@ pub fn rename_vfs_path(_old: &str, _new: &str, _now: u64) -> Result<(), Error> {
     Err(Error::Device)
 }
 
-#[cfg(feature = "stage15-2-test")]
 const MAX_WFS_IMPORT_DEPTH: usize = 16;
 
-#[cfg(feature = "stage15-2-test")]
 const MAX_WFS_IMPORT_INODES: usize = 256;
 
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
 fn append_import_path<'a>(
     parent: &str,
     name: &str,
@@ -2555,7 +2527,7 @@ fn append_import_path<'a>(
     core::str::from_utf8(&output[..needed]).map_err(|_| ())
 }
 
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
 fn import_wfs_directory<D: crate::block::BlockDevice>(
     volume: &mut Volume<D>,
     inode: u64,
@@ -2785,18 +2757,33 @@ pub fn format_ata(inode_count: u32) -> bool {
 /// Files are imported read-only. Write-back from the VFS into WovenFS is a
 /// later stage; until it exists, presenting these as writable would imply a
 /// durability path that is not there.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
+#[allow(dead_code)]
 pub fn mount_ata_into_vfs() -> MountOutcome {
-    let _mutation = MUTATION.lock();
+    crate::ata::with_primary_master(|disk| mount_device_into_vfs(disk, MOUNT_POINT))
+        .unwrap_or(MountOutcome::NoDevice)
+}
+
+/// Mount an explicitly selected WovenFS device view into a VFS namespace.
+/// The caller owns device-role selection; this function only validates,
+/// checks, imports, and publishes the supplied native volume.
+#[cfg(not(test))]
+pub fn mount_device_into_vfs<D: crate::block::BlockDevice>(
+    device: D,
+    mount_path: &str,
+) -> MountOutcome {
     VFS_MOUNTED.store(false, Ordering::Release);
     // Invalidate every cached child before importing the new volume.  This is
     // essential when the same mount point is reused after a failed or stale
     // remount; an existing VFS name must never mask current disk contents.
-    if crate::vfs::unpublish_children(MOUNT_POINT).is_err() {
+    if mount_path != "/wfs" && mount_path != "/mnt" {
         return MountOutcome::Failed;
     }
-    let Some(result) = crate::ata::with_primary_master(|disk| {
-        let mut volume = match Volume::mount(disk) {
+    if crate::vfs::unpublish_children(mount_path).is_err() {
+        return MountOutcome::Failed;
+    }
+    let result = {
+        let mut volume = match Volume::mount(device) {
             Ok(volume) => volume,
             Err(Error::Corrupt) => return MountOutcome::NotWovenFs,
             Err(_) => return MountOutcome::Failed,
@@ -2805,7 +2792,7 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
             return MountOutcome::Failed;
         }
         let root = volume.super_block().root_inode;
-        match crate::vfs::mkdir(MOUNT_POINT) {
+        match crate::vfs::mkdir(mount_path) {
             Ok(()) | Err(crate::vfs::Error::AlreadyExists) => {}
             Err(_) => return MountOutcome::Failed,
         }
@@ -2816,7 +2803,7 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
         if import_wfs_directory(
             &mut volume,
             root,
-            MOUNT_POINT,
+            mount_path,
             0,
             &mut visited,
             &mut visited_len,
@@ -2829,8 +2816,6 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
         }
         VFS_MOUNTED.store(true, Ordering::Release);
         MountOutcome::Mounted(imported)
-    }) else {
-        return MountOutcome::NoDevice;
     };
     result
 }
@@ -2838,11 +2823,17 @@ pub fn mount_ata_into_vfs() -> MountOutcome {
 /// Unpublish the native WovenFS namespace and invalidate all open child
 /// descriptions.  The disk is not modified; a later mount replays its
 /// journal and republishes a fresh namespace.
-#[cfg(feature = "stage15-2-test")]
+#[cfg(not(test))]
+#[allow(dead_code)]
 pub fn unmount_vfs() -> Result<usize, Error> {
+    unmount_vfs_at(MOUNT_POINT)
+}
+
+#[cfg(not(test))]
+pub fn unmount_vfs_at(mount_path: &str) -> Result<usize, Error> {
     let _mutation = MUTATION.lock();
     VFS_MOUNTED.store(false, Ordering::Release);
-    crate::vfs::unpublish_children(MOUNT_POINT).map_err(|_| Error::Device)
+    crate::vfs::unpublish_children(mount_path).map_err(|_| Error::Device)
 }
 
 /// Report whether the `/wfs` namespace is currently published for syscall

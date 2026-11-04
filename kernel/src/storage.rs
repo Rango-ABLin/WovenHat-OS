@@ -53,6 +53,9 @@ static MNT_STATUS: AtomicU8 = AtomicU8::new(MOUNT_UNKNOWN);
 static MNT_DIRTY: AtomicBool = AtomicBool::new(false);
 static MNT_IMPORTED: AtomicUsize = AtomicUsize::new(0);
 static MNT_SYNCS: AtomicU64 = AtomicU64::new(0);
+const BACKEND_FAT32: u8 = 0;
+const BACKEND_WOVENFS: u8 = 1;
+static MNT_BACKEND: AtomicU8 = AtomicU8::new(BACKEND_FAT32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountLifecycleStatus {
@@ -142,6 +145,10 @@ pub fn mnt_mounted() -> bool {
     MNT_STATUS.load(Ordering::Acquire) == MOUNT_MOUNTED
 }
 
+pub fn mnt_wovenfs() -> bool {
+    mnt_mounted() && MNT_BACKEND.load(Ordering::Acquire) == BACKEND_WOVENFS
+}
+
 pub fn mark_mnt_dirty() {
     if mnt_mounted() {
         MNT_DIRTY.store(true, Ordering::Release);
@@ -194,6 +201,12 @@ pub fn mount_ata_root() -> MountStatus {
     // mounting, so a foreign disk is imported read-only and never written.
     let owned = block_io::with_root(|disk| {
         let mut disk = disk;
+        if crate::wfs::Volume::probe(&mut disk).is_ok() {
+            return Some(*b"WOVENHATWFS");
+        }
+        if wovenfs_partition(&mut disk).is_some() {
+            return Some(*b"WOVENHATWFS");
+        }
         fat32_label(&mut disk)
     })
     .flatten()
@@ -203,9 +216,36 @@ pub fn mount_ata_root() -> MountStatus {
         // A sized handle for the generic mount helpers.
         let mut disk = disk;
         let disk = &mut disk;
+        if crate::wfs::Volume::probe(disk).is_ok() {
+            return match crate::wfs::mount_device_into_vfs(disk, "/mnt") {
+                crate::wfs::MountOutcome::Mounted(count) => {
+                    MNT_BACKEND.store(BACKEND_WOVENFS, Ordering::Release);
+                    MountStatus::Mounted(count)
+                }
+                crate::wfs::MountOutcome::NoDevice => MountStatus::NoDevice,
+                crate::wfs::MountOutcome::NotWovenFs
+                | crate::wfs::MountOutcome::Failed => MountStatus::Failed,
+            };
+        }
+        if let Some(partition) = wovenfs_partition(disk) {
+            let mut view = match partition::PartitionDevice::new(disk, partition) {
+                Ok(view) => view,
+                Err(_) => return MountStatus::Failed,
+            };
+            return match crate::wfs::mount_device_into_vfs(&mut view, "/mnt") {
+                crate::wfs::MountOutcome::Mounted(count) => {
+                    MNT_BACKEND.store(BACKEND_WOVENFS, Ordering::Release);
+                    MountStatus::Mounted(count)
+                }
+                crate::wfs::MountOutcome::NoDevice => MountStatus::NoDevice,
+                crate::wfs::MountOutcome::NotWovenFs
+                | crate::wfs::MountOutcome::Failed => MountStatus::Failed,
+            };
+        }
         let direct = mount_device(disk);
         if direct != MountStatus::NotFat32 {
             if matches!(direct, MountStatus::Mounted(_)) {
+                MNT_BACKEND.store(BACKEND_FAT32, Ordering::Release);
                 configure_direct_swap(disk);
             }
             return direct;
@@ -214,6 +254,7 @@ pub fn mount_ata_root() -> MountStatus {
             Ok(Some(partition)) => {
                 let status = mount_partition(disk, partition);
                 if matches!(status, MountStatus::Mounted(_)) {
+                    MNT_BACKEND.store(BACKEND_FAT32, Ordering::Release);
                     configure_partition_swap(disk, partition);
                 }
                 status
@@ -222,6 +263,7 @@ pub fn mount_ata_root() -> MountStatus {
                 Ok(Some(partition)) => {
                     let status = mount_partition(disk, partition);
                     if matches!(status, MountStatus::Mounted(_)) {
+                        MNT_BACKEND.store(BACKEND_FAT32, Ordering::Release);
                         configure_partition_swap(disk, partition);
                     }
                     status
@@ -233,8 +275,23 @@ pub fn mount_ata_root() -> MountStatus {
         }
     })
     .unwrap_or(MountStatus::NoDevice);
+    if !matches!(status, MountStatus::Mounted(_)) {
+        MNT_BACKEND.store(BACKEND_FAT32, Ordering::Release);
+    }
     record_mount_status(status);
     status
+}
+
+fn wovenfs_partition(
+    device: &mut impl crate::block::BlockDevice,
+) -> Option<partition::Partition> {
+    let partitions = gpt::fat_partitions(device).ok()?;
+    partitions.into_iter().find(|partition| {
+        let Ok(mut view) = partition::PartitionDevice::new(device, *partition) else {
+            return false;
+        };
+        crate::wfs::Volume::probe(&mut view).is_ok()
+    })
 }
 
 /// The boot-sector label of the FAT32 volume the mount finds on `device`:
@@ -1394,6 +1451,16 @@ pub fn ensure_path(path: &str) -> Result<(), EnsureError> {
         };
     }
 
+    if mnt_wovenfs() {
+        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks())
+            .map_err(|error| match error {
+                crate::wfs::Error::NotFound => EnsureError::NotFound,
+                crate::wfs::Error::NotADirectory => EnsureError::InvalidPath,
+                crate::wfs::Error::InvalidName => EnsureError::InvalidPath,
+                _ => EnsureError::Failed,
+            });
+    }
+
     if let Ok(stat) = vfs::stat(path) {
         if stat.kind != vfs::NodeKind::Directory {
             return Ok(());
@@ -2242,6 +2309,13 @@ pub fn persist_paths_atomic(paths: &[(&str, &[u8])]) -> Result<(), PersistError>
 /// Multi-component paths are supported. Missing FAT32 directories are created
 /// automatically; components use the bounded FAT32 long-name rules.
 pub fn persist_path(path: &str) -> Result<(), PersistError> {
+    if mnt_wovenfs() {
+        if !path.starts_with("/mnt/") || path.len() == 5 {
+            return Err(PersistError::NotSupported);
+        }
+        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks())
+            .map_err(|_| PersistError::Failed);
+    }
     // Retire any same-boot intents left by an abandoned persist. The count is
     // advisory: this tracker lives in RAM, so it says nothing about a previous
     // boot. Crash recovery is the on-volume WDJ journal, replayed during mount
@@ -2696,6 +2770,10 @@ fn persist_on_cached_device(
 
 /// Persist a VFS directory under `/mnt/`, creating missing FAT32 components.
 pub fn persist_directory(path: &str) -> Result<(), PersistError> {
+    if mnt_wovenfs() {
+        return crate::wfs::mkdir_vfs_path(path, crate::timer::ticks())
+            .map_err(|_| PersistError::Failed);
+    }
     if path == "/mnt" {
         return if mnt_mounted() {
             Ok(())
@@ -2768,6 +2846,10 @@ pub fn delete_path(path: &str) -> Result<(), MutationError> {
     }
     if !mnt_mounted() {
         return Err(unavailable_mutation_error());
+    }
+    if mnt_wovenfs() {
+        return crate::wfs::unlink_vfs_path(path, crate::timer::ticks())
+            .map_err(|_| MutationError::Failed);
     }
     let relative = &path[5..];
     validate_fat_relative(relative)?;
@@ -2917,6 +2999,10 @@ pub fn rename_path(old: &str, new: &str) -> Result<(), MutationError> {
     }
     if !mnt_mounted() {
         return Err(unavailable_mutation_error());
+    }
+    if mnt_wovenfs() {
+        return crate::wfs::rename_vfs_path(old, new, crate::timer::ticks())
+            .map_err(|_| MutationError::Failed);
     }
     let old_relative = &old[5..];
     let new_relative = &new[5..];
@@ -3171,6 +3257,13 @@ pub fn unmount_mnt() -> Result<(), MountControlError> {
     }
     sync_all_mounted().map_err(|_| MountControlError::SyncFailed)?;
     FILE_PAGES.lock().invalidate();
+    if mnt_wovenfs() {
+        crate::wfs::unmount_vfs_at("/mnt").map_err(|_| MountControlError::Failed)?;
+        MNT_STATUS.store(MOUNT_UNMOUNTED, Ordering::Release);
+        MNT_IMPORTED.store(0, Ordering::Release);
+        mark_mnt_clean();
+        return Ok(());
+    }
     if !block_io::primary_ata_present() {
         record_mount_status(MountStatus::NoDevice);
         return Err(MountControlError::NoDevice);
@@ -3326,6 +3419,17 @@ pub fn read_disk_file(
 ) -> Result<usize, crate::block::Error> {
     if !mnt_mounted() {
         return Err(crate::block::Error::DeviceFault);
+    }
+    if mnt_wovenfs() {
+        let mut data = alloc::vec![0u8; crate::wfs::MAX_FILE_SIZE];
+        let length = crate::wfs::read_vfs_path_durable(path, &mut data)
+            .map_err(|_| crate::block::Error::DeviceFault)?;
+        if offset >= length {
+            return Ok(0);
+        }
+        let count = output.len().min(length - offset);
+        output[..count].copy_from_slice(&data[offset..offset + count]);
+        return Ok(count);
     }
     let relative = path
         .strip_prefix("/mnt/")

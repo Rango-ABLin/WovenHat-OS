@@ -1605,7 +1605,6 @@ where
 /// unmount: disk-backed paths must never survive a remount and accidentally
 /// read from a different volume generation.  The mount owner is responsible
 /// for serializing this operation with backend I/O.
-#[cfg(feature = "stage15-2-test")]
 pub fn unpublish_children(prefix: &str) -> Result<usize, Error> {
     validate_absolute_path(prefix)?;
     let mut registry = REGISTRY.lock();

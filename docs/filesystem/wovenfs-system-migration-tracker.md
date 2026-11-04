@@ -1,8 +1,9 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
 **Status: PARTIAL, NOT ACCEPTED (2026-11-04).** Phase 0 audit is recorded
-and the first non-destructive probe increment is implemented; production
-system-volume routing has not started.
+and the first production-routing/provisioning increment is implemented and
+verified on disposable media; installed-image boot qualification and the full
+storage-neutral service audit remain open.
 The user explicitly authorized switching priority from the still-open graphics
 modernization work to this migration. The graphics sequencing sentence below
 is superseded for this task only; the graphics claim and files remain intact.
@@ -222,6 +223,33 @@ The first implementation increment is intentionally limited to role-aware
 selection and a mount-path boundary. It must not silently format, fall back
 to an empty WovenFS, alter accepted Stage 12.2/12.4 text, or claim full
 migration.
+
+## Resume log — 2026-11-04 — routing/provisioning increment
+
+Implemented and verified in the working tree:
+
+- `mount_ata_root` probes WovenFS before FAT32 and probes validated GPT
+  EFI/basic-data entries for a WovenFS system partition. FAT32 fallback is
+  unchanged for ESP/removable paths; no physical device was opened.
+- `/mnt` can publish a selected WovenFS volume. Task writes, mkdir, unlink,
+  rename, ensure/read, unmount, and stale VFS child invalidation route through
+  the native transaction path. The lock-order panic found by QEMU was fixed
+  and re-run successfully.
+- The disposable installer accepts `filesystem: wovenfs`, formats the data
+  region with the exact WovenFS v1 superblock/bitmap/inode/root layout,
+  embeds settings, verifies determinism, and preserves rollback behavior.
+
+Evidence completed: installer WovenFS round-trip tests; `cargo test --test
+wovenfs_crash` 20/20; workspace tests; warning-denying target and host
+Clippy; Stage 12.1–12.5 QEMU at 1/2/4 CPUs; WovenFS device harness at 1/2/4
+CPUs. Evidence paths are the fresh `audit-artifacts/stage12.*` directories and
+`target/wovenfs-device-scratch-{1,2,4}cpu-*` directories from 2026-11-04.
+
+Still not accepted: no physical writes were authorized, no destructive
+physical qualification was run, no installed WovenFS system image was booted
+through the full installer-to-boot path, and FAT32-specific `df`/`fscheck`
+and all service persistence callers have not yet been fully made backend
+neutral. The migration remains partial until those gates are closed.
 
 ## Resume log (append a dated entry every time you stop)
 
