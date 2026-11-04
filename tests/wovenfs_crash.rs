@@ -5399,3 +5399,70 @@ fn write_file_refuses_oversized_data() {
         assert_eq!(&out, &exact, "content must match what was written");
     }
 }
+
+/// `stage_create` calls `allocate_inode`, which scans inode numbers
+/// `2..=inode_count`.  When every slot in that range is already used,
+/// the scan exhausts without finding a free inode and returns
+/// `Err(Error::NoSpace)`.
+///
+/// The existing `create_file_out_of_space_leaves_no_file` test covers the
+/// case where data blocks run out during `stage_write`.  This test covers the
+/// distinct case where the inode table itself is exhausted before any block
+/// is written, so the volume is left completely unmodified.
+///
+/// Setup: format with `inode_count = 2`.  Inode 1 is the root directory;
+/// inode 2 is the only file slot.  After `create_file` uses inode 2, a
+/// second `create` and a second `create_file` both hit
+/// `allocate_inode` → `Err(NoSpace)` without touching any sector.
+#[test]
+fn create_refuses_when_all_inodes_are_exhausted() {
+    // 192-sector device is large enough for the journal (34 sectors), bitmap
+    // (1 sector), and inode table (1 sector for 2 inodes), leaving data
+    // blocks available so the refusal is definitely from inode exhaustion.
+    let disk = CrashDisk::blank();
+    Volume::format(disk.clone(), 2).expect("format with 2 inodes");
+
+    // Use the only available file inode (inode 2).
+    let file_inode = {
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        volume
+            .create_file(1, "first.txt", 0o644, b"hello", 1)
+            .expect("first create_file")
+    };
+    assert_eq!(file_inode, 2, "first file must use inode 2");
+
+    // Both inodes are now occupied: inode 1 (root dir) and inode 2 (first.txt).
+    let snapshot = disk.sectors();
+
+    let mut volume = Volume::mount(disk.clone()).expect("mount");
+
+    // create must refuse — allocate_inode scans 2..=2, finds inode 2 used.
+    assert_eq!(
+        volume.create(1, "second.txt", 0o644, 2),
+        Err(Error::NoSpace),
+        "create must refuse when all inodes are exhausted"
+    );
+    assert!(
+        disk.sectors() == snapshot,
+        "refused create must not modify the image"
+    );
+
+    // create_file takes the same path; it also hits allocate_inode via stage_create.
+    assert_eq!(
+        volume.create_file(1, "third.bin", 0o644, b"data", 2),
+        Err(Error::NoSpace),
+        "create_file must also refuse when all inodes are exhausted"
+    );
+    assert!(
+        disk.sectors() == snapshot,
+        "refused create_file must not modify the image"
+    );
+
+    // Control: first.txt is still present and readable.
+    let entry = volume.lookup(1, "first.txt").expect("lookup first.txt");
+    assert_eq!(entry.inode, 2);
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    let len = volume.read_file(2, &mut out).expect("read first.txt");
+    assert_eq!(&out[..len], b"hello");
+    volume.check().expect("volume consistent after refused creates");
+}
