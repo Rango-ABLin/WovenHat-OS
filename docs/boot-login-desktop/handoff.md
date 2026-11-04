@@ -14,13 +14,18 @@ restriction diagnoses remain preserved. No ABI, capability, unsafe code or
 new kernel object was added. No release, physical-media or firmware operation
 was performed. No complete boot/login/desktop milestone is claimed.
 
-Exact next unit: Phase B1, reject malformed/trailing-data boot configuration
-before kernel handoff, using the existing version-matched UEFI implementation.
-Cache source was compared against its package archive; provenance is retained.
-Claim vendor/bootloader build integration and the UEFI/config test paths before
-editing. Do not modify the Cargo registry cache. Preserve accepted BootInfo,
-valid legacy boot configuration and all successful boot behavior. Full versioned
-boot policy and trust-chain qualification remain separate requirements.
+Current branch: feature/boot-failure-validation, based on 51dd9061. B1 runtime
+aaeaaf8f is accepted: 27 UEFI configuration cases, signed-handoff 1/2/4 CPUs,
+and full Windows preservation audit-artifacts/acceptance-20261104-205802-369/.
+
+Active unit: B2 bounded kernel-image checks before handoff. The new safe Rust
+validator checks raw file size, ELF64 x86_64 little-endian headers, program and
+section table ranges, load segment bounds/alignment, executable entry, and the
+embedded bootloader contract. UEFI uses the existing common mapper and BootInfo.
+This is structural validation, not image authentication or a complete ELF
+security audit. Host tests and root/UEFI warning-denying Clippy pass; runtime
+matrix and full preservation remain pending. Evidence is being retained in
+audit-artifacts/boot-image-b2/. Do not mark B2 or full Phase B accepted yet.
 
 Only one Cargo/acceptance chain may run at once: separate worktrees still share
-build artifacts. No runtime chain is active at this Phase A checkpoint.
+build artifacts. Preserve every historical artifact and unrelated worktree.

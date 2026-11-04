@@ -41,12 +41,21 @@ preferences and the BootInfo/mapper contract are preserved.
 
 Disk and TFTP file-size metadata is checked before allocating/reading a
 configuration payload, including empty files, so the parser limit is also a
-preallocation bound. Kernel/ramdisk file handling retains its existing policy.
+preallocation bound. B2 adds preallocation kernel bounds and fallible ELF/boot-contract inspection;
+ramdisk handling retains its existing policy.
 Two upstream lint cleanups remove an unnecessary pointer `mut` and a redundant
 formatting borrow. Runtime dependency versions/checksums remain identical to
-the original UEFI lockfile; only the direct Serde dependency edge is added.
+the original UEFI lockfile; only direct Serde and xmas-elf dependency edges are added.
 
 The local installer uses one isolated target directory and `--force` within
 OUT_DIR so edited runtime code cannot silently reuse the registry binary.
 It watches a local common directory only if one exists; common code remains
 the locked registry dependency. No new hand-written unsafe code is introduced.
+
+
+B2 (under qualification) constructs the same public common::Kernel fields
+from a bounded validated payload instead of calling its infallible parse helper.
+The common mapper, handoff, signature measurement and BootInfo remain unchanged.
+Missing kernels retain disk-to-TFTP fallback and then stop explicitly. Image
+structure validation is not a signature or trust policy. See
+`docs/boot-login-desktop/boot-image-validation.md` for scope and remaining gates.

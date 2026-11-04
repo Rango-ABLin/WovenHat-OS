@@ -26,6 +26,12 @@ CASES = {
     "unsupported": "UnsupportedVersion",
     "unknown": "Malformed",
     "oversized": "TooLarge",
+    "kernel-empty": "Empty",
+    "kernel-missing": "Missing",
+    "kernel-truncated": "InvalidElfOrContract",
+    "kernel-corrupt": "InvalidElfOrContract",
+    "kernel-wrong-arch": "InvalidElfOrContract",
+    "kernel-bad-table": "InvalidElfOrContract",
 }
 STOP = "[WBOOT] boot stopped: invalid boot configuration"
 BOOTLOADER_SOURCES = (
@@ -33,7 +39,16 @@ BOOTLOADER_SOURCES = (
     "vendor/bootloader/uefi/Cargo.toml", "vendor/bootloader/uefi/Cargo.lock",
     "vendor/bootloader/uefi/src/main.rs", "vendor/bootloader/uefi/src/config.rs",
     "vendor/bootloader/uefi/src/memory_descriptor.rs",
+    "vendor/bootloader/uefi/src/image.rs",
 )
+
+
+def failure_subject(name):
+    return "kernel image" if name.startswith("kernel-") else "boot configuration"
+
+
+def stop_marker(name):
+    return f"[WBOOT] boot stopped: invalid {failure_subject(name)}"
 
 
 def outcome_errors(name, returncode, log, cpus):
@@ -43,7 +58,7 @@ def outcome_errors(name, returncode, log, cpus):
             "[BOOT] ALL VALIDATIONS PASSED", f"[SMP] online={cpus} expected={cpus}",
         ])
     errors = []
-    if f"[WBOOT] invalid boot configuration: {reason}" not in log or STOP not in log:
+    if f"[WBOOT] invalid {failure_subject(name)}: {reason}" not in log or stop_marker(name) not in log:
         errors.append("missing exact configuration rejection/stop markers")
     if "exiting boot services" in log.lower() or "[BOOT]" in log:
         errors.append("rejected configuration continued to boot handoff")
@@ -158,7 +173,7 @@ def run_case(name, image, qemu, firmware, cpus, timeout, output):
             deadline = time.monotonic() + timeout
             while True:
                 log = serial.read_text(errors="replace")
-                if process.poll() is not None or (CASES[name] is not None and STOP in log):
+                if process.poll() is not None or (CASES[name] is not None and stop_marker(name) in log):
                     break
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f"{name}: timed out; evidence {output}")

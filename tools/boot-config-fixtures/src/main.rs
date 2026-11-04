@@ -42,6 +42,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     oversized.set_file_contents("boot.json".into(), vec![b' '; 4097]);
     oversized.create_uefi_image(&output.join("oversized.img"))?;
     println!("Created oversized.img");
+    let mut wrong_arch = bytes[..64].to_vec();
+    wrong_arch[18..20].copy_from_slice(&183u16.to_le_bytes());
+    let mut bad_table = bytes[..64].to_vec();
+    bad_table[32..40].copy_from_slice(&u64::MAX.to_le_bytes());
+    for (name, payload) in [
+        ("kernel-empty", Vec::new()),
+        ("kernel-truncated", bytes[..32].to_vec()),
+        ("kernel-corrupt", vec![0xff; 64]),
+        ("kernel-wrong-arch", wrong_arch),
+        ("kernel-bad-table", bad_table),
+    ] {
+        let mut builder = bootloader::DiskImageBuilder::empty();
+        builder.set_file_contents("kernel-x86_64".into(), payload);
+        builder.create_uefi_image(&output.join(format!("{name}.img")))?;
+        println!("Created {name}.img");
+    }
+    bootloader::DiskImageBuilder::empty().create_uefi_image(&output.join("kernel-missing.img"))?;
+
     Ok(())
 }
 

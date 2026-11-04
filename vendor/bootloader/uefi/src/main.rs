@@ -33,28 +33,36 @@ use x86_64::{
 };
 
 mod config;
+mod image;
 mod memory_descriptor;
+
+#[derive(Clone, Copy)]
+enum FileRole {
+    Kernel,
+    Configuration,
+    Ramdisk,
+}
 
 struct BootFile {
     disk: &'static CStr16,
     tftp: &'static CStr8,
-    configuration: bool,
+    role: FileRole,
 }
 
 const KERNEL_FILE: BootFile = BootFile {
     disk: cstr16!("kernel-x86_64"),
     tftp: cstr8!("kernel-x86_64"),
-    configuration: false,
+    role: FileRole::Kernel,
 };
 const CONFIG_FILE: BootFile = BootFile {
     disk: cstr16!("boot.json"),
     tftp: cstr8!("boot.json"),
-    configuration: true,
+    role: FileRole::Configuration,
 };
 const RAMDISK_FILE: BootFile = BootFile {
     disk: cstr16!("ramdisk"),
     tftp: cstr8!("ramdisk"),
-    configuration: false,
+    role: FileRole::Ramdisk,
 };
 
 #[entry]
@@ -67,7 +75,7 @@ fn main() -> Status {
         boot_mode = BootMode::Tftp;
         kernel = load_kernel(boot_mode);
     }
-    let kernel = kernel.expect("Failed to load kernel");
+    let kernel = kernel.unwrap_or_else(|| reject_kernel("Missing"));
 
     let config_file = load_config_file(boot_mode);
     let mut error_loading_config = None;
@@ -181,12 +189,31 @@ fn reject_configuration(error: config::Error) -> ! {
     );
 }
 
-fn check_configuration_size(size: usize, configuration: bool) {
-    if !configuration {
-        return;
-    }
-    if let Err(error) = config::validate_size(size) {
-        reject_configuration(error);
+fn reject_kernel(error: &str) -> ! {
+    log::error!("[WBOOT] invalid kernel image: {}", error);
+    panic!(
+        "[WBOOT] invalid kernel image: {}\n[WBOOT] boot stopped: invalid kernel image",
+        error
+    );
+}
+
+fn check_file_size(size: usize, role: FileRole) {
+    match role {
+        FileRole::Configuration => {
+            if let Err(error) = config::validate_size(size) {
+                reject_configuration(error);
+            }
+        }
+        FileRole::Kernel => {
+            if let Err(error) = image::validate_size(size) {
+                reject_kernel(match error {
+                    image::Error::Empty => "Empty",
+                    image::Error::TooLarge => "TooLarge",
+                    _ => unreachable!(),
+                });
+            }
+        }
+        FileRole::Ramdisk => {}
     }
 }
 
@@ -200,7 +227,18 @@ fn load_config_file(boot_mode: BootMode) -> Option<&'static mut [u8]> {
 
 fn load_kernel(boot_mode: BootMode) -> Option<Kernel<'static>> {
     let kernel_slice = load_file_from_boot_method(&KERNEL_FILE, boot_mode)?;
-    Some(Kernel::parse(kernel_slice))
+    let config = image::validate(kernel_slice).unwrap_or_else(|error| {
+        log::error!("[WBOOT] kernel validation detail: {:?}", error);
+        reject_kernel("InvalidElfOrContract")
+    });
+    let elf = xmas_elf::ElfFile::new(kernel_slice)
+        .unwrap_or_else(|_| reject_kernel("InvalidElfOrContract"));
+    Some(Kernel {
+        elf,
+        config,
+        start_address: kernel_slice.as_ptr(),
+        len: kernel_slice.len(),
+    })
 }
 
 fn load_file_from_boot_method(
@@ -208,12 +246,12 @@ fn load_file_from_boot_method(
     boot_mode: BootMode,
 ) -> Option<&'static mut [u8]> {
     match boot_mode {
-        BootMode::Disk => load_file_from_disk(filename.disk, filename.configuration),
-        BootMode::Tftp => load_file_from_tftp_boot_server(filename.tftp, filename.configuration),
+        BootMode::Disk => load_file_from_disk(filename.disk, filename.role),
+        BootMode::Tftp => load_file_from_tftp_boot_server(filename.tftp, filename.role),
     }
 }
 
-fn load_file_from_disk(name: &CStr16, configuration: bool) -> Option<&'static mut [u8]> {
+fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8]> {
     let mut file_system = boot::get_image_file_system(boot::image_handle()).ok()?;
 
     let mut root = file_system.open_volume().unwrap();
@@ -228,7 +266,7 @@ fn load_file_from_disk(name: &CStr16, configuration: bool) -> Option<&'static mu
     let mut buf = [0; 500];
     let file_info: &mut FileInfo = file.get_info(&mut buf).unwrap();
     let file_size = usize::try_from(file_info.file_size()).unwrap();
-    check_configuration_size(file_size, configuration);
+    check_file_size(file_size, role);
 
     let file_slice = allocate_loader_data(file_size);
     file.read(file_slice).unwrap();
@@ -237,7 +275,7 @@ fn load_file_from_disk(name: &CStr16, configuration: bool) -> Option<&'static mu
 }
 
 /// Try to load a kernel from a TFTP boot server.
-fn load_file_from_tftp_boot_server(name: &CStr8, configuration: bool) -> Option<&'static mut [u8]> {
+fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'static mut [u8]> {
     let mut base_code = open_pxe_base_code()?;
 
     // Find the TFTP boot server.
@@ -248,7 +286,7 @@ fn load_file_from_tftp_boot_server(name: &CStr8, configuration: bool) -> Option<
     // Determine the kernel file size.
     let file_size = base_code.tftp_get_file_size(&server_ip.into(), name).ok()?;
     let kernel_size = usize::try_from(file_size).expect("The file size should fit into usize");
-    check_configuration_size(kernel_size, configuration);
+    check_file_size(kernel_size, role);
 
     // Allocate some memory for the kernel file.
     let slice = allocate_loader_data(kernel_size);

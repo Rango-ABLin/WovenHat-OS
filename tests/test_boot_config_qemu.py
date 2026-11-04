@@ -15,6 +15,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BootConfigGateTests(unittest.TestCase):
+    def test_kernel_failure_requires_its_own_markers(self):
+        log = "[WBOOT] invalid kernel image: Empty\n[WBOOT] boot stopped: invalid kernel image"
+        self.assertEqual(MODULE.outcome_errors("kernel-empty", None, log, 1), [])
+        self.assertTrue(MODULE.outcome_errors("kernel-missing", None, log, 1))
+        self.assertTrue(MODULE.outcome_errors("kernel-empty", 33, log, 1))
+        self.assertTrue(MODULE.outcome_errors("kernel-empty", None, log + "\n[BOOT]", 1))
+        self.assertTrue(MODULE.outcome_errors("kernel-empty", None, log.replace("kernel image", "boot configuration"), 1))
+
     def test_positive_requires_exit_and_kernel_marker(self):
         log = "[BOOT] ALL VALIDATIONS PASSED\n[SMP] online=1 expected=1 LAPIC/IOAPIC enabled"
         self.assertEqual(MODULE.outcome_errors("default", 33, log, 1), [])

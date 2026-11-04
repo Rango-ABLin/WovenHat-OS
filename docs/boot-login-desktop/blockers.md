@@ -1,7 +1,7 @@
 # Blockers and remaining prerequisites
 
-Status: IN PROGRESS. Phase A is accepted. Phase B1 has passed focused host and
-initial QEMU checks; final matrix/preservation is pending. Later phases remain
+Status: IN PROGRESS. Phase A is accepted. Phase B1 is accepted after its final matrix and full preservation gate.
+Phase B2 kernel-image boundary validation is in progress. Later phases remain
 behind the Phase B gate. This file does not claim all feasible software work
 has been completed.
 

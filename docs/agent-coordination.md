@@ -8934,3 +8934,15 @@ root/UEFI/producer Clippy pass. No runtime ABI, capability or hand-written
 unsafe change. Only the bounded configuration unit is accepted, not full
 Phase B or release readiness. Next: B2 kernel-image failure validation under
 the existing UEFI claim. Continue serialized Cargo and QEMU operations.
+
+## Codex - BLD-B2 kernel image failure boundary (2026-11-04)
+
+Branch feature/boot-failure-validation, base 51dd9061; B1 runtime aaeaaf8f is
+accepted. Claim vendor/bootloader/uefi/src/main.rs and new image.rs, UEFI
+manifest/lock direct dependency edge, tests/boot_image.rs, the existing B1
+fixture producer/harness and host oracle tests, and startup audit documents.
+Scope: preallocation kernel size checks, fallible bounded ELF/boot-contract
+validation and explicit failure markers; reuse the existing upstream mapper
+and BootInfo. No new unsafe code, kernel object, capability or signature
+scheme. Preserve standard x86_64 ET_EXEC/ET_DYN kernels and config behavior.
+All builds and runtime acceptance remain serialized. Full Phase B remains open.

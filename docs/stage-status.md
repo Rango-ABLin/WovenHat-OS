@@ -12737,3 +12737,10 @@ the timestamped `audit-artifacts/stage13.*cpu-*` directories, including the
 current sweep at source tip. This is deterministic QEMU/software acceptance;
 physical hardware, radio interoperability, and certification remain separate.
 
+
+## Boot/login/desktop B2 kernel-image boundary ? IN PROGRESS (2026-11-04)
+
+B1 remains accepted at aaeaaf8f. B2 has passing host structural validation
+tests and root/UEFI warning-denying Clippy; runtime and full preservation
+are pending. No later phase or complete boot/login/desktop gate is accepted.
+See docs/boot-login-desktop/boot-image-validation.md.
