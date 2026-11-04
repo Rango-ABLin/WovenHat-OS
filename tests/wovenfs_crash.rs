@@ -4659,6 +4659,53 @@ fn read_file_refuses_a_file_with_a_mismatched_data_checksum() {
     );
 }
 
+/// `unlink` (wfs.rs line 1271) checks `entry.inode == dir_inode` and returns
+/// `Err(Error::Corrupt)` when the directory entry names the directory inode
+/// itself.
+///
+/// `stage_create` always allocates inode numbers ≥ 2 for files; inode 1 is the
+/// root directory and is never handed to `stage_create`.  A crafted directory
+/// entry that names inode 1 would cause `unlink` to free the root directory's
+/// own data block and zero out the root inode — destroying every file and
+/// making the volume unmountable.  The guard short-circuits the entire unlink
+/// path before any inode is loaded, so it fires regardless of the inode
+/// content.
+///
+/// Unlike `unlink_refuses_an_entry_naming_a_directory_kind_inode`, which
+/// patches a file inode's `kind` field to `KIND_DIR`, this test patches only
+/// the entry's `inode` field (bytes 0..8) from 2 to 1 while leaving the inode
+/// table intact.  Directory blocks carry no checksum, so the patch takes
+/// effect immediately with no re-sealing.
+#[test]
+fn unlink_refuses_an_entry_whose_inode_field_names_the_directory() {
+    let (base, block, index) = two_file_root();
+
+    // Patch a.txt's directory entry: replace the 8-byte inode field (bytes 0..8)
+    // with the root directory inode number (1 == dir_inode).  The name bytes
+    // are untouched, so entry.matches("a.txt") still returns true and unlink
+    // finds the entry — only to have the entry.inode == dir_inode guard fire.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &1u64.to_le_bytes());
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+    assert_eq!(
+        volume.unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse an entry whose inode field names the directory itself"
+    );
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched image (a.txt names inode 2), unlink succeeds.
+    Volume::mount(base.clone())
+        .expect("mount control")
+        .unlink(1, "a.txt", 2)
+        .expect("unlink must succeed when the entry names a valid file inode");
+}
+
 /// `unlink` (wfs.rs line 1288) checks `node.kind != KIND_FILE` and returns
 /// `Err(Error::Corrupt)` when the directory entry's target inode carries
 /// `kind == KIND_DIR` rather than `KIND_FILE`.

@@ -1,5 +1,66 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field names the directory
+
+Branch: `auto/wovenhat-development` (base `720f7b05`). Working tree had one
+unvalidated change (`tests/wovenfs_crash.rs`); resumed and validated it.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1271) checks `entry.inode == dir_inode` and returns
+`Err(Error::Corrupt)` when the directory entry names the directory inode itself.
+
+`stage_create` always allocates inode numbers ≥ 2 for files; inode 1 is the
+root directory and is never handed to `stage_create`.  A crafted directory entry
+that names inode 1 would cause `unlink` to free the root directory's own data
+block and zero out the root inode — destroying every file and making the volume
+unmountable.  The guard short-circuits the entire unlink path before any inode
+is loaded, so it fires regardless of the inode content.
+
+The existing test `unlink_refuses_an_entry_naming_a_directory_kind_inode` patches
+a file inode's `kind` field to `KIND_DIR`; it does not exercise this earlier guard
+that fires when the entry's `inode` field itself equals `dir_inode`.  No prior test
+patched only the entry's inode pointer to point at the directory.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_an_entry_whose_inode_field_names_the_directory`:
+
+- Calls `two_file_root()` to get a volume with `a.txt` and `b.txt`, the
+  directory block, and `a.txt`'s entry index.
+- Forks the image and calls `patch_dir_entry(&image, block, index, 0,
+  &1u64.to_le_bytes())` to overwrite bytes 0–7 of a.txt's directory entry with
+  the value `1` (the root directory inode number).  Directory blocks carry no
+  checksum, so the patch takes effect immediately with no re-sealing.
+- Snapshots the image before the refused call.
+- Asserts `volume.unlink(1, "a.txt", 2)` returns `Err(Error::Corrupt)`:
+  `unlink` finds the entry by name, then detects `entry.inode == dir_inode`
+  and returns before loading the inode or modifying any sector.
+- Asserts the image was not modified by the refused unlink.
+- Control: on the unpatched image, `unlink(1, "a.txt", 2)` succeeds.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **96 passed / 0 failed** (was 95; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test patches only the entry's `inode` field (bytes 0–7) to point at
+  `dir_inode`.  Any entry whose `inode == dir_inode` fires the same guard;
+  the single-entry case is sufficient.
+- No production code changed — the guard already existed in `unlink`; only the
+  missing runtime test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that read_file refuses a file inode with size above MAX_FILE_SIZE
 
 Branch: `auto/wovenhat-development` (base `993ab736`). Working tree was clean.
