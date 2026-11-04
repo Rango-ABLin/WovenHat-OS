@@ -2,6 +2,27 @@
 
 Status: IN PROGRESS.
 
+Current baseline: aeb9d40a (runtime d21807ba), evidence
+`audit-artifacts/acceptance-20261104-190707-667/`. TESTED — FAIL at host
+all-targets Clippy, before runtime QEMU. Missing serial double in the
+diagnostics integration crate and collapsible-if in Volume::probe were
+introduced by integration history, before this assignment's runtime edits.
+Both are repaired without weakening assertions or suppressing warnings.
+Focused diagnostics tests passed 10/10, including actual panic serial emission;
+WovenFS crash tests passed 20/20; host all-targets Clippy passed. Kernel feature
+checks and full baseline rerun remain required. Target lint logs are retained
+in `audit-artifacts/boot-login-baseline-repair-20261104/`. All results
+below belong to the initial stale local revision unless explicitly stated.
+
+BLD-A1 target Clippy passed with warnings denied for default, stage12-5-test
+and stage15-2-test. Diagnostics test formatting passed after import ordering;
+checking it recursively also exposed inherited formatting in diagnostics.rs.
+Workspace `cargo fmt --all -- --check` is TESTED — FAIL, with 417 diff hunks
+in the retained workspace-format.log, beginning at kernel/build.rs and
+agent_coordination.rs. No bulk unrelated reformat or suppression was applied.
+The full Windows gate rerun after repairs is
+`audit-artifacts/acceptance-20261104-191149-393/`; result pending.
+
 Prescribed Windows baseline started on untouched runtime source at base
 70b49c74215d7aecc0469ba7d677458ccaf7c10a. Evidence:
 `audit-artifacts/acceptance-20261104-185726-462/acceptance-output.txt` and

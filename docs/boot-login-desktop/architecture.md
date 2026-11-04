@@ -2,6 +2,15 @@
 
 Status: IN PROGRESS. Source audit at `70b49c74215d7aecc0469ba7d677458ccaf7c10a`, 2026-11-04.
 
+Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
+review found no changes since the initial audit in session.rs, accounts.rs,
+identity_runtime.rs, entropy.rs, secure_boot.rs or root build.rs. Startup
+main.rs now tolerates absent GOP framebuffer for later GPU attachment, and
+storage routing supports WovenFS as the system filesystem. The integration
+ledger reports graphics and Windows gate acceptance; this unit's new baseline
+still runs independently. Historical modernization-open claims below describe
+the initial local revision and are superseded by the integration ledger.
+
 The host executable in `src/main.rs` prints the generated image path. It is
 not the operating system. Root `build.rs` obtains the freestanding kernel
 artifact and calls `bootloader::UefiBoot::create_disk_image`. The patched

@@ -32,7 +32,10 @@ Status: IN PROGRESS. Paths below were discovered in this checkout.
 | Repeated boots | scripts/test-stage31-repeated-boots.py |
 | CI | .github/workflows/kernel.yml; wovenhat-windows-acceptance.yml; hardware-qualification.yml; wovenhat-runner-test.yml |
 
-FAT32 remains the primary system filesystem. WovenFS is secondary; do not
-interpret this directive as authorization to migrate boot/accounts to WovenFS.
-WovenWeb remains paused. Detailed interrupt/timer, device, shutdown, and
-first-run provisioning traces remain outstanding.
+Integration revision d21807ba supersedes the old filesystem decision: the
+recorded 2026-11-03 user instruction makes WovenFS the system filesystem and
+keeps FAT32 for EFI/removable media. The installed-image software gate is
+reported passing at 1/2/4 CPUs in the filesystem migration tracker. Preserve
+that integration; do not restore the old primary-FAT32 policy. WovenWeb
+remains paused. Detailed shutdown and first-run provisioning traces remain
+outstanding.

@@ -3,12 +3,15 @@
 ## Boot/login/desktop directive baseline - 2026-11-04 - IN PROGRESS
 
 Codex is auditing the existing startup path on `test/boot-login-baseline`,
-base `70b49c74`. The required Windows baseline is running; build, host/kernel
-warning-denying Clippy and host tests have passed their initial steps, but
-the full preservation chain has not completed. No runtime change or stage
-acceptance is claimed. Source inventory, security findings and evidence are
-recorded in `docs/boot-login-desktop/`. Existing modernization acceptance
-remains open; later directive phases are not promoted.
+initial base `70b49c74`, reconciled with integration `d21807ba` in local merge
+`aeb9d40a`. The stale-revision baseline was interrupted and its logs retained;
+the current-integration Windows baseline failed before QEMU on two host
+Clippy defects (diagnostics serial test dependency and WovenFS probe style).
+Focused repairs pass diagnostics 10/10, WovenFS crash 20/20 and host all-targets
+Clippy; target checks and full rerun remain open. No stage acceptance is
+claimed. Source inventory, security findings and evidence are
+recorded in `docs/boot-login-desktop/`. Preserve the integration revision's
+graphics acceptance and WovenFS migration; later directive phases are not promoted.
 
 ## Graphics typography and final release qualification - 2026-11-04 - ACCEPTED
 

@@ -17,4 +17,5 @@ launch policy, service/desktop crash handling, and durable account publication
 before treating these edges as a secure end-to-end acceptance result.
 
 Order: finish Phase A baseline; evaluate Phase B boot handoff; then readiness
-and init. Existing modernization acceptance remains open and must be preserved.
+and init. Preserve integration d21807ba's recorded graphics acceptance and
+WovenFS system-root migration; the initial local modernization status was stale.

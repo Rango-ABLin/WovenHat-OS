@@ -8221,6 +8221,14 @@ before proposing separate WovenInit/WovenLogin processes. Preserve the open
 modern-desktop gate and all historical evidence. One acceptance chain only.
 Next: prescribed Windows baseline, source inventory and security trace.
 
+BLD-A revision correction: fetched origin/master on 2026-11-04; the initial
+checkout was 148 commits behind. Audit checkpoint fb7e8c2 and local integration
+merge aeb9d40a preserve origin/master d21807ba plus both agents' documentation.
+Old-revision baseline was deliberately interrupted with logs retained. Fresh
+baseline is audit-artifacts/acceptance-20261104-190707-667. Preserve current
+graphics acceptance and WovenFS system-root migration. Runtime source remains
+unmodified by BLD-A. Directive archived at docs/boot-login-desktop/directive.md.
+
 ## Claude Code - Windows 11 Desktop Assignment to Codex (2026-11-02)
 
 Created comprehensive specification for a Windows 11-inspired desktop environment 
@@ -8849,3 +8857,14 @@ harness compilation passed. Full host `cargo test --workspace --all-targets`
 still encounters the repository's freestanding kernel assembly (`.previous`)
 directive when Rust attempts to build that target on Windows; this remains an
 explicit host-toolchain limitation, not a suppressed test.
+
+## Codex - BLD-A baseline compilation repair (2026-11-04)
+
+Current integration d21807ba fails the prescribed baseline at host all-targets
+Clippy: tests/diagnostics.rs lacks the serial dependency newly called by
+emit_panic_dump, and Volume::probe has a collapsible nested if. Claiming only
+tests/diagnostics.rs and kernel/src/wfs.rs::Volume::probe for a focused repair.
+Use a recording host serial double with a real panic emission assertion; use
+edition-compatible let-else in probe. No warnings/assertions suppressed, no
+ABI or filesystem semantics changed. Full baseline must rerun after focused
+host tests and lints. Original failure: acceptance-20261104-190707-667.

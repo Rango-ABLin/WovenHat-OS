@@ -2,6 +2,14 @@
 
 Status: IN PROGRESS. No implementation code changed before baseline execution.
 
+Revision reconciliation: initial local origin/master was stale. Fetch on
+2026-11-04 found 148 additional commits through d21807ba. Audit checkpoint
+fb7e8c2 was merged with that integration revision as aeb9d40a, preserving both
+agents' documentation. A new Windows baseline is running at aeb9d40a;
+runtime source matches d21807ba. New evidence:
+`audit-artifacts/acceptance-20261104-190707-667/`. The older run below was
+deliberately interrupted and cannot qualify current source.
+
 | Item | Observed value |
 |---|---|
 | Repository | https://github.com/Rango-ABLin/WovenHat-OS.git |
