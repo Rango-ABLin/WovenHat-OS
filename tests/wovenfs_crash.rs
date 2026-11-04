@@ -4658,3 +4658,59 @@ fn read_file_refuses_a_file_with_a_mismatched_data_checksum() {
         "a refused read_file must not modify the image"
     );
 }
+
+/// `unlink` (wfs.rs line 1288) checks `node.kind != KIND_FILE` and returns
+/// `Err(Error::Corrupt)` when the directory entry's target inode carries
+/// `kind == KIND_DIR` rather than `KIND_FILE`.
+///
+/// `stage_create` always writes `kind = KIND_FILE`; the only `KIND_DIR` inode
+/// the filesystem produces is the root (inode 1, written by `format`).  A
+/// directory entry pointing to any `KIND_DIR` inode is therefore corrupt.  If
+/// `unlink` proceeded, it would free that inode's blocks and zero it out —
+/// for the root inode that destroys every directory entry and all file data.
+///
+/// The earlier `entry.inode == dir_inode` guard does not fire here: the entry
+/// names inode 2 (a file slot patched to KIND_DIR) while `dir_inode` is 1 (the
+/// root).  The check at line 1288 covers three arms on one `if`:
+/// `!node.is_used()` (tested by
+/// `unlink_refuses_an_entry_that_does_not_name_one_live_file`),
+/// `node.links != 1` (tested by
+/// `unlink_refuses_a_file_whose_link_count_is_not_one`), and
+/// `node.kind != KIND_FILE` (tested here for the first time).
+#[test]
+fn unlink_refuses_an_entry_naming_a_directory_kind_inode() {
+    use wfs::KIND_DIR;
+
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.create(1, "a.txt", 0o644, 1).expect("create a.txt")
+    };
+
+    // Fork and patch file_inode's kind field from KIND_FILE (1) to KIND_DIR (2),
+    // re-sealing the structural checksum so the inode passes inode_validate on
+    // load.  The entry still names file_inode (2), which differs from dir_inode
+    // (1), so the entry.inode == dir_inode guard does not fire first.
+    let image = base.fork(None);
+    reseal_inode_kind(&image, file_inode, KIND_DIR);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+    assert_eq!(
+        volume.unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse an entry whose target inode has kind DIR"
+    );
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched base image (kind == KIND_FILE), unlink succeeds
+    // and leaves the volume consistent.
+    Volume::mount(base.clone())
+        .expect("mount control")
+        .unlink(1, "a.txt", 2)
+        .expect("unlink must succeed on a KIND_FILE inode");
+    mount_consistent(&base, "after a valid unlink");
+}

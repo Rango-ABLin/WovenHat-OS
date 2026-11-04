@@ -1,5 +1,75 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that unlink refuses an entry naming a directory-kind inode
+
+Branch: `auto/wovenhat-development` (base `5677dd39`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1288) contains a three-arm guard:
+
+```rust
+if !node.is_used() || node.kind != KIND_FILE || node.links != 1 {
+    return Err(Error::Corrupt);
+}
+```
+
+The three arms prevent:
+- `!node.is_used()`: freeing an already-freed inode
+- `node.kind != KIND_FILE`: freeing a directory inode's blocks via the unlink path
+- `node.links != 1`: freeing an inode that might still be reachable under another name
+
+Dedicated tests existed for arms 1 and 3:
+- `unlink_refuses_an_entry_that_does_not_name_one_live_file` covers `!node.is_used()`
+- `unlink_refuses_a_file_whose_link_count_is_not_one` covers `node.links != 1`
+
+The middle arm `node.kind != KIND_FILE` had no dedicated test.  Without that
+guard, calling `unlink` on a directory entry that pointed to a KIND_DIR inode
+(e.g. the root, inode 1) would free the directory's data blocks and zero the
+inode, destroying every entry in the directory.  The earlier
+`entry.inode == dir_inode` guard prevents the exact self-removal case where
+the entry names `dir_inode` itself, but a different KIND_DIR inode (produced by
+direct image manipulation) would bypass that check and reach `node.kind != KIND_FILE`.
+
+The sibling test `check_refuses_a_directory_entry_naming_a_directory_inode`
+covers `check()` for this scenario but does not call `unlink`.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_an_entry_naming_a_directory_kind_inode`:
+
+- Calls `formatted()` and creates `a.txt` via `create`, recording its inode (2).
+- Forks the image and uses the existing `reseal_inode_kind` helper to patch
+  inode 2's kind field from KIND_FILE (1) to KIND_DIR (2), re-sealing the
+  structural FNV-1a checksum so the inode passes `inode_validate` on load.
+- Snapshots the image before the refused call.
+- Asserts `unlink(1, "a.txt", 2)` returns `Err(Error::Corrupt)`.
+- Asserts the image was not modified by the refused unlink.
+- Control: on the unpatched base image (kind == KIND_FILE), `unlink` succeeds
+  and `mount_consistent` confirms the resulting volume is internally consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **89 passed / 0 failed** (was 88; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- This completes the three-arm coverage for the guard at wfs.rs:1288: all three
+  conditions (`!node.is_used()`, `node.kind != KIND_FILE`, `node.links != 1`)
+  now have dedicated tests.
+- No production code changed — the guard already existed; only the missing test
+  was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that create refuses a file inode as directory
 
 Branch: `auto/wovenhat-development` (base `b0c49fbc`). Working tree was clean.
