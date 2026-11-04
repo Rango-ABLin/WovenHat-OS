@@ -222,6 +222,7 @@ impl Registry {
     /// enough (2) that an O(slots * nodes) scan is negligible and this
     /// avoids a second piece of state that could drift out of sync with
     /// the nodes themselves.
+    #[cfg(feature = "system-apps")]
     fn insert_large(&mut self, path: &str, data: &[u8]) -> Result<usize, Error> {
         validate_absolute_path(path)?;
         if data.len() > LARGE_ASSET_CAPACITY {
@@ -870,6 +871,7 @@ pub fn create_read_only(path: &str, data: &[u8]) -> Result<(), Error> {
 /// exist system-wide -- see `Node::large`'s doc comment). Reads through
 /// the normal `open`/`read_all`/syscall path exactly like any other VFS
 /// file; only the backing storage differs.
+#[cfg(feature = "system-apps")]
 pub fn create_read_only_large(path: &str, data: &[u8]) -> Result<(), Error> {
     REGISTRY.lock().insert_large(path, data).map(|_| ())
 }
