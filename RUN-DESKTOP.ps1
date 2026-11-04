@@ -8,7 +8,7 @@ param(
     # (which calls virtio_gpu::Gpu::probe() in the production, non-test-gated
     # path) has a real device to find. The GTK tabs expose the live GPU head
     # while VGA remains available for the UEFI boot console.
-    [ValidateSet('std', 'virtio-gpu')][string]$Display = 'virtio-gpu',
+    [ValidateSet('std', 'virtio-gpu', 'virtio-gpu-only')][string]$Display = 'virtio-gpu-only',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -44,14 +44,10 @@ image = desktop.build_hardware_demo(out)
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     $accelOption = if ($Accelerator -eq 'whpx') { 'whpx' } else { 'tcg,thread=multi,tb-size=256' }
-    # The UEFI bootloader (the uefi crate's GOP console protocol) needs a
-    # GOP-capable boot framebuffer to hand off before the kernel starts, or
-    # it panics (confirmed: 'std' VGA replaced outright with 'none' + a
-    # virtio-gpu-pci device panics at uefi::proto::console::gop during
-    # boot). So 'virtio-gpu' mode keeps '-vga std' for boot and *adds* a
-    # second, independent virtio-gpu-pci device the kernel's own PCI probe
-    # (compositor::attach_gpu_outputs -> virtio_gpu::Gpu::probe) can find
-    # and drive after boot, rather than replacing the boot display device.
+    # 'virtio-gpu' keeps '-vga std' for the UEFI GOP boot console and adds a
+    # second, independent virtio-gpu-pci device. 'virtio-gpu-only' uses
+    # virtio-vga, whose UEFI GOP is pixel-backed while still exposing the
+    # VirtIO-GPU transport to compositor::attach_gpu_outputs().
     # id=gpu0 lets a QMP `screendump` target this device specifically via
     # device='gpu0', head=0 (confirmed necessary: screendump with no
     # device/head targets the default/-vga std console, not this one, even
@@ -63,6 +59,8 @@ image = desktop.build_hardware_demo(out)
         # tabs so an interactive user can switch from the stale VGA console to
         # the live virtio-gpu head. QMP still targets it explicitly as gpu0.
         @('-display', 'gtk,show-tabs=on', '-vga', 'std', '-device', 'virtio-gpu-pci,id=gpu0')
+    } elseif ($Display -eq 'virtio-gpu-only') {
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0')
     } else {
         @('-vga', 'std')
     }

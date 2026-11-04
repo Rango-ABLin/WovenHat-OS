@@ -367,17 +367,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     };
     let boot_info_address = boot_info as *const BootInfo as u64;
 
-    let framebuffer = match &mut boot_info.framebuffer {
-        Optional::Some(framebuffer) => framebuffer,
-        Optional::None => halt(),
+    let info = match &mut boot_info.framebuffer {
+        Optional::Some(framebuffer) => {
+            let info = framebuffer.info();
+            let buffer = framebuffer.buffer_mut();
+            terminal::init(buffer, info);
+            Some(info)
+        }
+        Optional::None => {
+            // A UEFI machine may have no GOP framebuffer when the launcher
+            // intentionally supplies only a VirtIO-GPU. Keep boot alive so
+            // compositor::attach_gpu_outputs() can establish the first
+            // display instead of halting before PCI discovery.
+            terminal::init_without_framebuffer();
+            None
+        }
     };
-
-    let info = framebuffer.info();
-    let buffer = framebuffer.buffer_mut();
-    let framebuffer_address = buffer.as_ptr() as u64;
+    let framebuffer_address = boot_info
+        .framebuffer
+        .as_ref()
+        .map(|framebuffer| framebuffer.buffer().as_ptr() as u64)
+        .unwrap_or(0);
     let stack_probe = &info as *const _ as u64;
 
-    terminal::init(buffer, info);
     let mut console = Console::new(info, 40, 40, 2);
 
     #[cfg(feature = "system-apps")]

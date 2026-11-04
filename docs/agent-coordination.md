@@ -107,6 +107,16 @@ WovenShell startup, and repeated interactive recomposes; QMP closed the
 session cleanly. A GPU-only `-vga none` boot remains unsupported because the
 UEFI GOP handoff panics, so that mode is not enabled.
 
+## Codex - Graphics modernization GPU-only UEFI handoff fixed (2026-11-04)
+
+The BLT-only GOP panic was fixed without patching the bootloader: the kernel
+now accepts `boot_info.framebuffer == None` and continues to VirtIO-GPU
+discovery, while the launcher uses `virtio-vga` for the GPU-only mode so UEFI
+still supplies a pixel-backed framebuffer. A fresh boot reached the VirtIO
+display, WovenShell startup, and Ada sign-in at 1 GiB guest memory. The
+GPU-only mode is now the interactive launcher default; `std` and the
+two-device `virtio-gpu` path remain explicit fallbacks.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:

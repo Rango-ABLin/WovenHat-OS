@@ -225,6 +225,18 @@ allocation was introduced. Validation: `cargo test --manifest-path
 libwoven/Cargo.toml --lib` (212 passed) and `cargo clippy -p libwoven --lib
 -- -D warnings` (passed). This is committed with the rotation change.
 
+### 2026-11-04 (session: GPU-only UEFI handoff fixed)
+
+The failed `-vga none` attempt isolated the bootloader panic to QEMU's
+VirtIO-GPU BLT-only UEFI GOP mode. The kernel was changed to tolerate a
+missing boot framebuffer and continue to PCI display discovery. The launcher
+now uses QEMU `virtio-vga` for `virtio-gpu-only`: UEFI reports a real
+pixel-backed 1280x800 BGR framebuffer while the kernel detects and drives the
+VirtIO-GPU head. A fresh boot reached `[DISPLAY] virtio-gpu mode head=0
+640x480`, started WovenShell, and signed in as Ada. `virtio-gpu-only` is now
+the launcher default; `std` and two-device `virtio-gpu` remain explicit
+fallbacks. Evidence: `target/desktop-interactive-20261104-133410-048`.
+
 ### 2026-11-04 (session: Phase 1 GPU tab default)
 
 Promoted the already-verified two-device interactive mode to the default in
