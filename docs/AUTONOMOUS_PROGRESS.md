@@ -1,5 +1,83 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field is out of range
+
+Branch: `auto/wovenhat-development` (base `96f82a55`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1272) has a three-arm guard:
+
+```rust
+if entry.inode == dir_inode
+    || entry.inode > u64::from(self.super_block.inode_count)
+    || view.entries.iter().filter(|other| other.inode == entry.inode).count() != 1
+{
+    return Err(Error::Corrupt);
+}
+```
+
+The second arm (`entry.inode > inode_count`) fires when a directory entry's inode
+field names a slot beyond the end of the inode table.  Without it,
+`self.inode_staged(&txn, entry.inode)?` propagates `Err(Error::NotFound)` (the
+return value of `inode()` for any number greater than `inode_count`), making a
+corrupt directory entry appear as a missing file rather than a filesystem-level
+corruption.
+
+The parallel guard in `lookup()` at wfs.rs:978 is covered by
+`lookup_refuses_an_entry_naming_an_out_of_range_inode`.  The first arm of the
+unlink guard (`entry.inode == dir_inode`) is covered by
+`unlink_refuses_an_entry_whose_inode_field_names_the_directory`.  But the second
+arm had no dedicated test for the `unlink` path: the broader test
+`unlink_refuses_an_entry_that_does_not_name_one_live_file` includes an "inode past
+the table" case but bundles all four arms together rather than isolating arm 2.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_an_entry_naming_an_out_of_range_inode`:
+
+- Calls `two_file_root()` to get a volume with `a.txt` and `b.txt`, the
+  directory block, and `a.txt`'s entry index.
+- Forks the image and calls `patch_dir_entry(&image, block, index, 0,
+  &(u64::from(INODES) + 1).to_le_bytes())` to overwrite bytes 0–7 of a.txt's
+  directory entry with `33` (one past the inode table bound of 32).  Directory
+  blocks carry no checksum, so the patch takes effect immediately with no
+  re-sealing.
+- Snapshots the image before the refused call.
+- Asserts `volume.unlink(1, "a.txt", 2)` returns `Err(Error::Corrupt)` (not
+  `Err(Error::NotFound)`): the second arm of the guard fires before
+  `inode_staged` is reached.
+- Asserts the image was not modified by the refused unlink.
+- Controls: `b.txt` still resolves on the patched image; on the unpatched base
+  image, `unlink(1, "a.txt", 2)` succeeds.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **97 passed / 0 failed** (was 96; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test patches the inode field to `INODES + 1 = 33`.  Any value greater than
+  `inode_count` (32) would trigger the same guard; the adjacent boundary is
+  sufficient.
+- The first arm (`entry.inode == dir_inode`) does not fire because 33 ≠ 1.  The
+  third arm (duplicate-count check) does not fire because no other entry names 33,
+  so the filter yields exactly one match.  The second arm is exercised in isolation.
+- No production code changed — the guard already existed in `unlink`; only the
+  missing dedicated test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
+
 ## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field names the directory
 
 Branch: `auto/wovenhat-development` (base `720f7b05`). Working tree had one

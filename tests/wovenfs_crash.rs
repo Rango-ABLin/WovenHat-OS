@@ -5115,3 +5115,72 @@ fn read_file_refuses_a_file_inode_with_size_above_max_file_size() {
         "a refused read_file must not modify the image"
     );
 }
+
+/// `unlink` (wfs.rs line 1272) checks
+/// `entry.inode > u64::from(self.super_block.inode_count)` and returns
+/// `Err(Error::Corrupt)` when the directory entry's inode field names a
+/// slot past the end of the inode table.
+///
+/// Without this guard, `self.inode_staged(&txn, entry.inode)?` would
+/// propagate `Err(Error::NotFound)` for any number greater than
+/// `inode_count` (the return value of `inode()` for out-of-range
+/// arguments), making a corrupt directory entry appear as a missing file
+/// rather than a filesystem-level corruption.
+///
+/// The first arm of the same `||` chain (`entry.inode == dir_inode`)
+/// does not fire here: the patched value (`INODES + 1 = 33`) is not equal
+/// to `dir_inode` (1).  The third arm (duplicate-inode count check) also
+/// does not fire: no other entry names 33, so the filter yields exactly
+/// one match — the patched entry itself.  The second arm therefore fires
+/// in isolation.
+///
+/// The parallel guard in `lookup()` is tested by
+/// `lookup_refuses_an_entry_naming_an_out_of_range_inode`.
+#[test]
+fn unlink_refuses_an_entry_naming_an_out_of_range_inode() {
+    let (base, block, index) = two_file_root();
+
+    // Patch a.txt's directory entry inode field (bytes 0–7) to inode_count + 1,
+    // which is one past the last valid inode slot.  Directory blocks carry no
+    // checksum, so the patch takes effect immediately with no re-sealing.
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+
+    // Snapshot: unlink must not write anything.
+    let before = image.sectors();
+
+    // unlink must return Corrupt, not NotFound.
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must return Corrupt for a directory entry with an out-of-range inode"
+    );
+
+    // The image must be unchanged.
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: b.txt is unmodified and still resolves on the patched image.
+    let b_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount base");
+        volume.lookup(1, "b.txt").expect("b.txt").inode
+    };
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "b.txt")
+            .map(|e| e.inode),
+        Ok(b_inode),
+        "b.txt must still resolve on the patched image"
+    );
+
+    // Control: on the unpatched base image, unlink(a.txt) succeeds.
+    Volume::mount(base)
+        .expect("mount")
+        .unlink(1, "a.txt", 2)
+        .expect("unlink must succeed on the unpatched image");
+}
