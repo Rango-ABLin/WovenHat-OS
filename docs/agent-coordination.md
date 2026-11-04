@@ -26,12 +26,14 @@ modified.
 
 Target kernel Clippy passed. The desktop runs were preserved under
 `target/desktop-qualification-handoff-{1cpu-3g,2cpu-3g,4cpu-3g}`. They booted
-and signed in; the matrix did not complete because repeated QMP F1 injections
-did not produce the overview transition in these runs, and the
-pre-modernization pixel oracle rejected the current anti-aliased refresh
-rendering. The oracle was updated to check semantic regional repaint rather
-than obsolete exact font pixels. No desktop behavior was changed by this
-handoff.
+and signed in. A diagnostic 2-CPU rerun under
+`target/desktop-qualification-f1-diagnostic` completed the full desktop
+journey, including F1, Files, Settings, Terminal, keyboard/mouse input, and
+window close. It exceeded the standard timing limits because this host cannot
+provide the harness's 4 GiB minimum guest budget; the run used 3 GiB. The
+pre-modernization pixel oracle was updated to check semantic regional repaint
+rather than obsolete exact font pixels. No desktop behavior was changed by
+this handoff.
 
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
