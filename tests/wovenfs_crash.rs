@@ -4298,6 +4298,44 @@ fn unlink_refuses_a_file_inode_as_directory() {
         .expect("unlink via the correct directory inode must succeed");
 }
 
+/// `create` checks `dir.kind != KIND_DIR` (wfs.rs:1097) before staging a new
+/// inode or directory entry.  Without the guard, `dir_entries` would walk the
+/// file's data blocks as if they were directory entries and attempt to write a
+/// new entry there, corrupting both the file's data and the inode table.
+#[test]
+fn create_refuses_a_file_inode_as_directory() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"hello", 1)
+            .expect("create hello.txt")
+    };
+
+    let image = base.fork(None);
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+
+    // Passing a file inode as the directory argument must be refused.
+    assert_eq!(
+        volume.create(file_inode, "nested.txt", 0o644, 2),
+        Err(Error::NotADirectory),
+        "create with a file inode as dir_inode must return NotADirectory"
+    );
+
+    // The refused create must not have modified the image.
+    assert!(
+        image.sectors() == before,
+        "a refused create must not modify the image"
+    );
+
+    // Control: create through the real root directory (KIND_DIR) succeeds.
+    volume
+        .create(1, "nested.txt", 0o644, 2)
+        .expect("create via the correct directory inode must succeed");
+}
+
 /// `read_file` returns `Err(Error::Corrupt)` when the loop finds
 /// `direct[slot] == 0` while `copied < size` (wfs.rs line 1232).
 ///

@@ -1,5 +1,58 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that create refuses a file inode as directory
+
+Branch: `auto/wovenhat-development` (base `b0c49fbc`). Working tree was clean.
+
+### Defect / gap
+
+`create` (via `stage_create`, wfs.rs line 1097) checks `dir.kind != KIND_DIR`
+and returns `Err(Error::NotADirectory)` when the caller passes a file inode as
+the directory argument.  Without this guard, `dir_entries` would walk the file's
+data blocks interpreting each 64-byte chunk as a `DirEntry`, and the subsequent
+write of the new entry there would corrupt the file's data blocks and potentially
+overwrite inode table entries.
+
+The sibling guards on `lookup`, `read_dir` and `unlink` each received dedicated
+tests in earlier sessions (`lookup_refuses_a_file_inode_as_directory`,
+`read_dir_refuses_a_file_inode_as_directory`,
+`unlink_refuses_a_file_inode_as_directory`).  `create`'s guard was exercised on
+the same code path but had no dedicated test of its own.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `create_refuses_a_file_inode_as_directory`:
+
+- Calls `formatted()` and creates `hello.txt` with `create_file` (5 bytes),
+  recording its inode (`file_inode`).
+- Forks the image and snapshots the sector state before the refused call.
+- Asserts `create(file_inode, "nested.txt", 0o644, 2)` returns
+  `Err(Error::NotADirectory)`.
+- Asserts the image was not modified by the refused create.
+- Control: `create(1, "nested.txt", 0o644, 2)` through the actual root
+  directory inode (KIND_DIR) succeeds.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **88 passed / 0 failed** (was 87; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The `create` case completes the set of four directory-operation guards
+  that were each missing a dedicated test: `lookup`, `read_dir`, `unlink` and
+  now `create` are all covered.
+- No production code changed — the guard already existed in `stage_create`;
+  only the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-10-30 — WovenFS: test that read_file refuses a file with a mismatched data checksum
 
 Branch: `auto/wovenhat-development` (base `7e46007e`). Working tree was clean.
