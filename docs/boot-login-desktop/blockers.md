@@ -1,7 +1,8 @@
 # Blockers and remaining prerequisites
 
 Status: IN PROGRESS. Phase A is accepted. Phase B1 is accepted after its final matrix and full preservation gate.
-Phase B2 kernel-image boundary validation is in progress. Later phases remain
+Bounded B2 kernel-image validation is accepted at 72be85aa. Full Phase B
+remains open for remaining boot policy and failure/trust qualification. Later phases remain
 behind the Phase B gate. This file does not claim all feasible software work
 has been completed.
 

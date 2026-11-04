@@ -12738,9 +12738,11 @@ current sweep at source tip. This is deterministic QEMU/software acceptance;
 physical hardware, radio interoperability, and certification remain separate.
 
 
-## Boot/login/desktop B2 kernel-image boundary ? IN PROGRESS (2026-11-04)
+## Boot/login/desktop B2 kernel-image boundary - BOUNDED UNIT ACCEPTED (2026-11-04)
 
 B1 remains accepted at aaeaaf8f. B2 has passing host structural validation
-tests and root/UEFI warning-denying Clippy; runtime and full preservation
-are pending. No later phase or complete boot/login/desktop gate is accepted.
+tests and root/UEFI warning-denying Clippy. Runtime 72be85aa passes all 45
+UEFI cases, software signed-handoff and full Windows preservation at 1/2/4
+CPUs: audit-artifacts/boot-image-b2/ and acceptance-20261104-214457-697/.
+No later phase or complete boot/login/desktop gate is accepted.
 See docs/boot-login-desktop/boot-image-validation.md.

@@ -18,14 +18,17 @@ Current branch: feature/boot-failure-validation, based on 51dd9061. B1 runtime
 aaeaaf8f is accepted: 27 UEFI configuration cases, signed-handoff 1/2/4 CPUs,
 and full Windows preservation audit-artifacts/acceptance-20261104-205802-369/.
 
-Active unit: B2 bounded kernel-image checks before handoff. The new safe Rust
+Accepted unit: B2 bounded kernel-image checks before handoff at 72be85aa. The new safe Rust
 validator checks raw file size, ELF64 x86_64 little-endian headers, program and
 section table ranges, load segment bounds/alignment, executable entry, and the
 embedded bootloader contract. UEFI uses the existing common mapper and BootInfo.
 This is structural validation, not image authentication or a complete ELF
-security audit. Host tests and root/UEFI warning-denying Clippy pass; runtime
-matrix and full preservation remain pending. Evidence is being retained in
-audit-artifacts/boot-image-b2/. Do not mark B2 or full Phase B accepted yet.
+security audit. Host tests and root/UEFI warning-denying Clippy pass; all 45 runtime
+matrix cases, full Windows preservation and signed-handoff at 1/2/4 CPUs pass.
+Evidence: audit-artifacts/boot-image-b2/ and acceptance-20261104-214457-697/.
+Only bounded B2 is accepted. Full Phase B remains open: remaining boot policy,
+I/O/allocation/graphics/ExitBootServices failure qualification and trust gates.
+Next unit: explicit firmware I/O/resource failure reporting using existing APIs.
 
 Only one Cargo/acceptance chain may run at once: separate worktrees still share
 build artifacts. Preserve every historical artifact and unrelated worktree.

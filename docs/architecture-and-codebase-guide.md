@@ -12,7 +12,7 @@ under `vendor/bootloader/uefi`; the host UefiBoot wrapper is separate.
 Its new configuration parser rejects invalid policy before ExitBootServices,
 including a preallocation size check. See the boot-configuration audit for
 supported fields, compatibility and qualification limits.
-B2 structural kernel-image validation is under qualification; see
+Bounded B2 structural kernel-image validation is accepted at 72be85aa; see
 `docs/boot-login-desktop/boot-image-validation.md`. It preserves the common
 mapper and BootInfo and does not establish image authenticity.
 See `docs/boot-login-desktop/architecture.md` and `security-model.md` for

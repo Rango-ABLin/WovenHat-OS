@@ -1,4 +1,4 @@
-# B2 kernel-image boundary (in progress)
+# B2 kernel-image boundary (bounded unit accepted)
 
 B1 remains accepted at aaeaaf8f. B2 adds a 256 MiB raw kernel file bound before
 allocation (the accepted debug ELF is approximately 67 MiB), rejects empty
@@ -29,11 +29,15 @@ Negative oracles require explicit kernel failure/stop markers, a live stopped
 guest and no ExitBootServices or kernel marker. Source/image hashes and serial,
 QEMU command and framebuffer evidence are preserved by the existing harness.
 
-Status: all 15 actual UEFI cases pass on one CPU; evidence:
-`audit-artifacts/boot-config-1cpu-1793821233234070200/`. Missing-kernel firmware
-framebuffer capture was visually inspected and shows explicit invalid-image
-and boot-stopped messages. Two/four CPU and full preservation gates are pending.
+Status: all 45 actual UEFI cases pass on 1/2/4 CPUs at runtime 72be85aa;
+evidence is listed in test-results.md and audit-artifacts/boot-image-b2/.
+Missing-kernel firmware framebuffer capture was visually inspected and shows
+explicit invalid-image and boot-stopped messages. Full Windows preservation
+passes in audit-artifacts/acceptance-20261104-214457-697/ (214 Python tests,
+six skips, host Rust tests, lint/build checks, 60 memory boots, networking and
+isolated Stage10.4-10.7 at 1/2/4 CPUs). Stage15.5 signed-handoff and its kernel
+feature Clippy pass; evidence is in boot-image-b2/signed-handoff-{1,2,4}cpu/.
 Root/UEFI/fixture-builder warning-denying Clippy and format checks pass; all
 8 Rust parser tests and 6 Python harness tests pass. Package version/checksum
 sets are unchanged (audit-artifacts/boot-image-b2/pinned-dependency-audit.json).
-No B2 acceptance is claimed.
+The bounded B2 unit is accepted; full Phase B remains open.

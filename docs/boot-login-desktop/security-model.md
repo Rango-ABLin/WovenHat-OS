@@ -55,3 +55,12 @@ The historical persistent-account fixture was still writing a single-SHA256
 verifier incompatible with the current KDF. BLD-A2 corrects this disposable
 test-media generator only. Its fixed, public fixture credentials are not a
 production account-creation path or evidence of secure entropy/provisioning.
+
+
+B2 adds bounded structural kernel inspection before the upstream common mapper.
+It rejects selected malformed ELF and embedded boot-contract inputs and caps
+raw file allocation. It does not authenticate image origin or validate every
+relocation, mapping or runtime semantic. A structurally valid malicious kernel
+is not rendered safe by these checks. Existing software signed-handoff and
+firmware Secure Boot qualification remain separate gates; no trust anchor or
+production key is added. No kernel capabilities or identity behavior change.

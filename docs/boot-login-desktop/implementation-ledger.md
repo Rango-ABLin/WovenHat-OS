@@ -77,3 +77,22 @@ retained. The next 1-CPU run passes all nine cases. Malformed and oversized
 framebuffer captures were visually checked. Final source-bound 1/2/4-CPU
 matrix passes all 27 cases. Stage15.5 signed-handoff and the complete Windows
 preservation chain pass on 1/2/4 CPUs. Full Phase B is not accepted.
+
+
+## BLD-B2 bounded kernel image inspection
+
+Status: TESTED - PASS (bounded unit). Runtime 72be85aa,
+branch feature/boot-failure-validation. Pure safe Rust inspection precedes the
+unchanged common mapper; disk/TFTP size checks precede allocation. Missing
+kernel fallback then explicit rejection is preserved. No authority, kernel
+object, ABI or hand-written unsafe change. Scope and limitations are recorded
+in boot-image-validation.md, including dynamic relocation and trust exclusions.
+
+All 45 actual UEFI cases pass on 1/2/4 CPUs using the same prepared source/image
+hashes. Host 8 parser tests, 6 Python oracle tests, root/UEFI/producer Clippy and
+format checks pass. Initial fixture-string length and Clippy defects were fixed
+without suppressing checks; notes retained under audit-artifacts/boot-image-b2/.
+Full Windows acceptance passes under acceptance-20261104-214457-697/:
+214 Python tests (six skips), host Rust tests, lint/build, 60 memory repetitions,
+network and isolated TCP 1/2/4 CPUs. Stage15.5 signed-handoff 1/2/4 and feature
+Clippy pass. B2 is accepted; full Phase B remains open.

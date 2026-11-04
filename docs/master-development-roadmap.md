@@ -1955,3 +1955,11 @@ source/evidence provenance, stronger completed-frame pixel assertions,
 close-time repaint recovery, and validation limits. This closes software
 desktop acceptance, not native GPU/HID, accelerated 3D, GFX-08, the whole
 graphics mandate or the full historical Windows acceptance chain.
+
+
+Boot/login/desktop B2 bounded kernel image validation accepted (2026-11-04)
+Runtime 72be85aa passes all 45 UEFI positive/rejection cases on 1/2/4 CPUs,
+software signed-handoff and full Windows preservation (60 memory repetitions,
+network and isolated Stage10.4-10.7). Host tests and warning-denying Clippy pass.
+No mapper/BootInfo/authority change. Full Phase B remains open for remaining
+boot policy and I/O/resource/graphics/firmware failure and trust qualification.

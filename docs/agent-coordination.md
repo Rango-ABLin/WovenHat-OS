@@ -8946,3 +8946,16 @@ validation and explicit failure markers; reuse the existing upstream mapper
 and BootInfo. No new unsafe code, kernel object, capability or signature
 scheme. Preserve standard x86_64 ET_EXEC/ET_DYN kernels and config behavior.
 All builds and runtime acceptance remain serialized. Full Phase B remains open.
+
+
+## Codex - BLD-B2 accepted (2026-11-04)
+
+Runtime 72be85aa: all 45 source-bound UEFI cases pass at 1/2/4 CPUs. Full
+Windows preservation passes in acceptance-20261104-214457-697/, including 214
+Python tests (six skips), host Rust tests, build/lints, 60 memory repetitions,
+network and isolated Stage10.4-10.7. Stage15.5 signed-handoff 1/2/4 and feature
+Clippy pass. Logs/frame captures/provenance remain under boot-image-b2/ and
+listed timestamped case directories. Only the bounded B2 structural unit is
+accepted; full Phase B and firmware Secure Boot qualification remain open.
+No Cargo or QEMU chain is active at this checkpoint. Next: existing firmware
+I/O/resource failure diagnostics; preserve current mapper/ABI/authority.

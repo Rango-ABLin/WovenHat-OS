@@ -93,3 +93,21 @@ standalone UEFI target and fixture-builder Clippy pass. No warning or assertion
 was suppressed. The original trailing-data mismatch and initial upstream lint
 failures remain retained. This does not accept full Phase B or authenticated
 firmware boot. Next: missing/corrupt/unsupported kernel-image failure handling.
+
+
+## B2 accepted bounded unit at 72be85aa
+
+All 45 source-bound configuration/kernel image cases pass on 1/2/4 CPUs:
+- audit-artifacts/boot-config-1cpu-1793821233234070200/
+- audit-artifacts/boot-config-2cpu-1793821318621793500/
+- audit-artifacts/boot-config-4cpu-1793821396550297200/
+
+The first two runs began before the checkpoint commit; their source hashes
+match the checkpoint's normalized runtime sources. Logs are copied in
+boot-image-b2/{1,2,4}cpu.log. Missing-kernel framebuffer was visually inspected.
+Host tests, Clippy and formatting pass as recorded in qualification-commands.json.
+Full Windows preservation passes: acceptance-20261104-214457-697/ (exit 0),
+214 Python tests, six skips, host Rust tests, build/lints, 60 memory boots,
+network and isolated Stage10.4-10.7 on 1/2/4 CPUs. Stage15.5 software signed
+handoff and its kernel feature Clippy pass; boot-image-b2/ retains the logs.
+Full Phase B and firmware Secure Boot qualification remain open.

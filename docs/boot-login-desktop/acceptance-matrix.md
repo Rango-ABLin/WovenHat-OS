@@ -6,7 +6,7 @@ later phases are not accepted.
 | Gate | Required evidence | Current status |
 |---|---|---|
 | A: baseline/architecture | source inventory, existing tests, startup/security trace | COMPLETE |
-| B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | IN PROGRESS (B1 strict configuration) |
+| B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | IN PROGRESS (B1/B2 accepted bounded units; remaining boot policy/failure/trust work open) |
 | C: init/readiness | essential dependencies and bounded failure recovery | NOT STARTED |
 | D: splash | framebuffer captures and ownership transition | NOT STARTED |
 | E: authentication | entropy, protected storage, wrong credentials, rate limits, first run | NOT STARTED |
