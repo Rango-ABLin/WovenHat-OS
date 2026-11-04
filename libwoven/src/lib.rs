@@ -12157,6 +12157,7 @@ pub mod syscall {
     pub const WRITE: u64 = 1;
     pub const FILE_WRITE: u64 = 10;
     pub const OPEN: u64 = 2;
+    pub const OPEN_ACCESS: u64 = 254;
     pub const EXIT: u64 = 3;
     pub const GETPID: u64 = 4;
     pub const WAITPID: u64 = 5;
@@ -12166,6 +12167,9 @@ pub mod syscall {
     pub const GETGID: u64 = 14;
     pub const EXEC: u64 = 15;
     pub const FORK: u64 = 16;
+    pub const DUP: u64 = 22;
+    pub const PIPE: u64 = 23;
+    pub const DUP2: u64 = 24;
     pub const STAT: u64 = 17;
     pub const MKDIR: u64 = 19;
     pub const CHDIR: u64 = 20;
@@ -12195,7 +12199,9 @@ pub mod syscall {
     pub const SETSID: u64 = 245;
     pub const EXEC_COMMAND: u64 = 50;
     pub const ENV_GET: u64 = 51;
+    pub const ENV_SET: u64 = 52;
     pub const ENV_COUNT: u64 = 53;
+    pub const ENV_ENTRY: u64 = 54;
     pub const SPAWN_COMMAND: u64 = 57;
     pub const READDIR: u64 = 18;
     pub const NOTIFICATION_POLL: u64 = 95;
@@ -12364,12 +12370,45 @@ pub mod syscall {
         unsafe { invoke(OPEN, path as u64, path_len as u64, flags) }
     }
 
+    /// Open with access bits: 1=read, 2=write, 4=create.
+    ///
+    /// # Safety
+    /// `path` must be readable for `path_len` bytes.
+    pub unsafe fn open_access(path: *const u8, path_len: usize, access: u64) -> u64 {
+        unsafe { invoke(OPEN_ACCESS, path as u64, path_len as u64, access) }
+    }
+
     /// Release a descriptor.
     ///
     /// # Safety
     /// Must be called from WovenHat userspace.
     pub unsafe fn close(descriptor: u64) -> u64 {
         unsafe { invoke(CLOSE, descriptor, 0, 0) }
+    }
+
+    /// Duplicate a descriptor into a new descriptor.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dup(descriptor: u64) -> u64 {
+        unsafe { invoke(DUP, descriptor, 0, 0) }
+    }
+
+    /// Duplicate `old` into exactly `new`.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn dup2(old: u64, new: u64) -> u64 {
+        unsafe { invoke(DUP2, old, new, 0) }
+    }
+
+    /// Create a read/write pipe, packed as read descriptor in the low half
+    /// and write descriptor in the high half.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn pipe() -> u64 {
+        unsafe { invoke(PIPE, 0, 0, 0) }
     }
 
     /// # Safety
@@ -12396,6 +12435,15 @@ pub mod syscall {
     /// Must be called from WovenHat userspace.
     pub unsafe fn getpid() -> u64 {
         unsafe { invoke(GETPID, 0, 0, 0) }
+    }
+
+    /// Fork the current process. The child resumes with a zero return value;
+    /// the parent receives the child's process identifier.
+    ///
+    /// # Safety
+    /// Must be called from WovenHat userspace.
+    pub unsafe fn fork() -> u64 {
+        unsafe { invoke(FORK, 0, 0, 0) }
     }
 
     /// # Safety
@@ -14797,10 +14845,34 @@ pub fn open(path: &str) -> Result<u64, Error> {
     check(unsafe { syscall::open(path.as_ptr(), path.len(), 0) })
 }
 
+/// Open a path with bounded access bits: 1=read, 2=write, 4=create.
+pub fn open_access(path: &str, access: u64) -> Result<u64, Error> {
+    if access & !7 != 0 || access & 3 == 0 || (access & 4 != 0 && access & 2 == 0) {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::open_access(path.as_ptr(), path.len(), access) })
+}
+
 /// Close a descriptor.
 pub fn close(descriptor: u64) -> Result<(), Error> {
     // SAFETY: integer-only call.
     check(unsafe { syscall::close(descriptor) }).map(|_| ())
+}
+
+/// Duplicate a descriptor, returning the new descriptor.
+pub fn dup(descriptor: u64) -> Result<u64, Error> {
+    check(unsafe { syscall::dup(descriptor) })
+}
+
+/// Duplicate `old` into exactly `new`.
+pub fn dup2(old: u64, new: u64) -> Result<(), Error> {
+    check(unsafe { syscall::dup2(old, new) }).map(|_| ())
+}
+
+/// Create a pipe and return `(read_descriptor, write_descriptor)`.
+pub fn pipe() -> Result<(u64, u64), Error> {
+    let packed = check(unsafe { syscall::pipe() })?;
+    Ok((packed & 0xffff_ffff, packed >> 32))
 }
 
 /// Map `length` bytes of `descriptor`'s content starting at `offset`,
@@ -15027,6 +15099,48 @@ pub fn spawn(command: &str) -> Result<process::Id, Error> {
     // SAFETY: a str is readable for its own length.
     let result = unsafe { syscall::spawn(command.as_ptr(), command.len()) };
     check(result).map(process::Id)
+}
+
+/// Fork the current process. The child receives id zero.
+pub fn fork() -> Result<process::Id, Error> {
+    check(unsafe { syscall::fork() }).map(process::Id)
+}
+
+/// Replace the current image from a command line. Success never returns.
+pub fn exec(command: &str) -> Result<(), Error> {
+    check(unsafe { syscall::exec(command.as_ptr(), command.len()) }).map(|_| ())
+}
+
+/// Read one bounded environment value into `out`, returning its length.
+pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+    if key.is_empty() || key.len() >= 96 || out.is_empty() || out.len() > 96 {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::invoke(syscall::ENV_GET, key.as_ptr() as u64, key.len() as u64, out.as_mut_ptr() as u64) })
+        .map(|length| length as usize)
+}
+
+/// Set one bounded environment value.
+pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), Error> {
+    if key.is_empty() || key.len() >= 96 || value.len() >= 96 {
+        return Err(Error::Failed);
+    }
+    let packed = key.len() as u64 | ((value.len() as u64) << 32);
+    check(unsafe { syscall::invoke(syscall::ENV_SET, key.as_ptr() as u64, packed, value.as_ptr() as u64) }).map(|_| ())
+}
+
+/// Return the number of inherited environment entries.
+pub fn env_count() -> Result<usize, Error> {
+    check(unsafe { syscall::invoke(syscall::ENV_COUNT, 0, 0, 0) }).map(|count| count as usize)
+}
+
+/// Read one `KEY=VALUE` environment entry into `out`.
+pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, Error> {
+    if out.is_empty() || out.len() > 96 {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::invoke(syscall::ENV_ENTRY, index as u64, out.as_mut_ptr() as u64, out.len() as u64) })
+        .map(|length| length as usize)
 }
 
 /// Wait for a child process, returning its zero-extended 32-bit exit payload.

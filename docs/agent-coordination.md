@@ -46,6 +46,18 @@ job control remain outside this slice. Terminal parser tests, target
 warnings-denying Clippy, target check, and the 1-CPU Ring-3 terminal QEMU gate
 pass; evidence is `audit-artifacts/woven-terminal-1cpu`.
 
+## Codex - WovenTerminal bounded shell features (2026-11-04)
+
+Implemented the requested bounded shell slice on top of the accepted process,
+descriptor, environment, PTY, and process-group ABI: quote/backslash-aware
+parsing, `$NAME`/`${NAME}` expansion, pipelines, input/output/stderr
+redirection with append, background jobs, `jobs`, `fg %N`, and interactive
+session/foreground-group setup. Added `libwoven` wrappers for fork, pipe,
+dup/dup2, open-access, exec, and environment access. Kernel command execution
+now removes quotes/escapes before constructing argv. Parser tests and
+warning-denying target Clippy/check pass; QEMU feature acceptance remains the
+next prerequisite and must be run before calling this slice fully accepted.
+
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 
