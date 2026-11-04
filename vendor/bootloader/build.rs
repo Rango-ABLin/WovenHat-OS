@@ -73,8 +73,13 @@ fn build_uefi_bootloader() -> PathBuf {
         // local build
         cmd.arg("--path").arg("uefi");
         println!("cargo:rerun-if-changed=uefi");
-        println!("cargo:rerun-if-changed=common");
-        cmd.arg("--target-dir").arg("target/uefi_target");
+        if Path::new("common").exists() {
+            println!("cargo:rerun-if-changed=common");
+        }
+        // Reinstall local runtime edits even when the upstream version is
+        // already installed in this build's OUT_DIR. The isolated target
+        // directory is supplied once below for both source modes.
+        cmd.arg("--force");
     } else {
         cmd.arg("--version").arg(BOOTLOADER_VERSION);
     }

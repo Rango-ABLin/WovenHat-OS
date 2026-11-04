@@ -58,3 +58,20 @@ all source edits are formatter output. Formatted host all-targets Clippy passed
 offline. Integrated as a980619e; the serialized network-enabled Windows
 acceptance-20261104-194935-034 run and the Stage12 matrix pass. No assertion,
 feature guard, capability or timeout is changed.
+
+## BLD-B1 strict boot configuration
+
+Status: IN PROGRESS. Branch: feature/boot-config-rejection. Base: 224def05.
+Owned files are recorded in agent-coordination.md. The version-matched UEFI
+runtime is retained locally; configuration is checked before allocation and
+parsed without heap allocation. Invalid policy terminates before handoff.
+Valid legacy settings and version 1 remain supported. No kernel ABI, object,
+capability or hand-written unsafe block is added. Firmware dependency versions
+and checksums match the original package lock; provenance is retained.
+
+Five actual-source parser tests, five host gate/provenance regressions, host
+all-targets Clippy, UEFI-target Clippy and fixture-builder Clippy pass. An
+initial QEMU case exposed a trailing-data error-class mismatch; fixed and
+retained. The next 1-CPU run passes all nine cases. Malformed and oversized
+framebuffer captures were visually checked. Final source-bound 1/2/4-CPU
+matrix and preservation gates are pending. Full Phase B is not accepted.

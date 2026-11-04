@@ -6,6 +6,8 @@ Status: IN PROGRESS. Paths below were discovered in this checkout.
 |---|---|
 | Image construction | build.rs; vendor/bootloader/src/uefi/mod.rs |
 | Firmware dependency build | vendor/bootloader/build.rs |
+| B1 retained firmware entry and bounded policy parser | vendor/bootloader/uefi/src/main.rs; vendor/bootloader/uefi/src/config.rs |
+| Disposable boot policy image producer and QEMU gate | tools/boot-config-fixtures; scripts/test-boot-config-qemu.py |
 | Kernel BootInfo entry and orchestration | kernel/src/main.rs, kernel_main |
 | Physical / virtual memory | kernel/src/memory.rs; kernel/src/paging.rs |
 | CPU descriptors and interrupts | kernel/src/gdt.rs; kernel/src/interrupts.rs |

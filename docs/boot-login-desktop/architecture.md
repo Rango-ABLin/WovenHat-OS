@@ -15,9 +15,11 @@ the initial local revision and are superseded by the integration ledger.
 The host executable in `src/main.rs` prints the generated image path. It is
 not the operating system. Root `build.rs` obtains the freestanding kernel
 artifact and calls `bootloader::UefiBoot::create_disk_image`. The patched
-`vendor/bootloader/build.rs` installs the version-matched
-`bootloader-x86_64-uefi` crate for `x86_64-unknown-uefi`; this checkout does
-not contain that crate's UEFI entry implementation. The host wrapper
+`vendor/bootloader/build.rs` initially installed the version-matched registry
+`bootloader-x86_64-uefi` crate for `x86_64-unknown-uefi`. B1 now retains that
+runtime under `vendor/bootloader/uefi`, with bounded strict configuration
+rejection. Its mapping/BootInfo/dependency-version contracts are preserved;
+full Phase B qualification remains open. The host wrapper
 `vendor/bootloader/src/uefi/mod.rs` must not be mistaken for firmware code.
 The resolved dependency was inspected; executable negative boot tests remain
 Phase B work.

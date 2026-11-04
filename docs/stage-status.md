@@ -1,5 +1,16 @@
 # Stage status
 
+## Boot/login/desktop B1 configuration - 2026-11-04 - IN PROGRESS
+
+The existing 0.11.17 UEFI runtime is retained under vendor/bootloader/uefi;
+new strict parsing and preallocation checks reject malformed, empty, trailing,
+oversized, unknown and unsupported-version policy before kernel handoff.
+Valid legacy settings/version 1 remain supported. Host parser/gate tests and
+host/UEFI/producer Clippy pass; an initial 1-CPU nine-case QEMU run passes,
+with failure screens visually inspected. Final source-bound 1/2/4 matrices
+and preservation remain pending. Full boot policy, Secure Boot, init/login
+and release readiness are not claimed. See docs/boot-login-desktop/.
+
 ## Boot/login/desktop Phase A baseline - 2026-11-04 - COMPLETE
 
 Codex is auditing the existing startup path on `test/boot-login-baseline`,

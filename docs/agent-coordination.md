@@ -8910,3 +8910,17 @@ existing identity_op in the shadow regression's pixels[1 * 4 + 1]. Claiming
 only that test expression in libwoven/src/lib.rs; replace with pixels[5], the
 same exact pixel, and preserve every assertion. Runtime code is unchanged.
 No bootloader Phase B edit starts until this supplemental check passes.
+
+## Codex - BLD-B1 boot configuration rejection (2026-11-04)
+
+Phase A is closed at 224def05 (runtime a980619e). Branch:
+feature/boot-config-rejection. Claim vendor/bootloader/build.rs,
+vendor/bootloader/uefi/* (new, version-matched upstream runtime), root test
+only dependency declarations/lock, tests/boot_config.rs, new disposable boot
+configuration fixture builder and QEMU harness, and docs/boot-login-desktop/*.
+Scope: bounded strict parsing of existing boot settings plus version 1,
+reject malformed/unknown/trailing/oversized config before ExitBootServices;
+preserve accepted valid legacy settings and BootInfo. Do not edit registry
+cache, replace mapper/scheduler, add capabilities, or claim full Phase B.
+Build and acceptance remain serialized. Original crate source/archive match
+and SHA-256 are retained in the Phase A firmware provenance artifact.
