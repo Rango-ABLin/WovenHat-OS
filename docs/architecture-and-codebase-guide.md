@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Boot/login/desktop source audit (2026-11-04, in progress)
+
+The existing production path starts the embedded WovenShell through
+`kernel/src/session.rs`; the shell currently combines sign-in and desktop UI.
+Kernel `identity_runtime` owns credential/session authorization. Existing
+`console::show_splash_frame` renders boot progress; the `/init` fallback is an
+embedded stub, and the bounded kernel service supervisor does not supervise
+the desktop. The resolved firmware entry is external
+`bootloader-x86_64-uefi` 0.11.17, not the local host UefiBoot wrapper.
+See `docs/boot-login-desktop/architecture.md` and `security-model.md` for
+actual source edges, audit gaps, and acceptance limits. No replacement stack
+or completed startup/security milestone is claimed by this audit.
+
 ## POSIX static-libc bootstrap (2026-10-28)
 
 The POSIX port uses pinned upstream musl 1.2.6 and keeps WovenHat adaptation

@@ -1,5 +1,15 @@
 # Stage status
 
+## Boot/login/desktop directive baseline - 2026-11-04 - IN PROGRESS
+
+Codex is auditing the existing startup path on `test/boot-login-baseline`,
+base `70b49c74`. The required Windows baseline is running; build, host/kernel
+warning-denying Clippy and host tests have passed their initial steps, but
+the full preservation chain has not completed. No runtime change or stage
+acceptance is claimed. Source inventory, security findings and evidence are
+recorded in `docs/boot-login-desktop/`. Existing modernization acceptance
+remains open; later directive phases are not promoted.
+
 ## Modern desktop implementation - 2026-10-29 - IMPLEMENTING / NOT ACCEPTED
 
 The full appearance/features proposal is authorized. Work resumes at the open

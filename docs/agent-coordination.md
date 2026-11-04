@@ -8077,3 +8077,13 @@ from b5a2e571^ after the prescribed full Windows gate failed on a missing
 runner. Root owns serial validation under
 `audit-artifacts/modern-desktop-20261029-083456/`; do not start another chain.
 Earlier static app results preceding the repaint fix need final-source reruns.
+
+## Codex - boot/login/desktop directive baseline (2026-11-04)
+
+Task BLD-A: IN PROGRESS. Base 70b49c74; branch test/boot-login-baseline.
+Owned scope: docs/boot-login-desktop/* and this coordination entry; baseline
+execution only. No implementation ownership claimed over kernel, bootloader,
+apps, or shared acceptance scripts. Inspect existing session/identity paths
+before proposing separate WovenInit/WovenLogin processes. Preserve the open
+modern-desktop gate and all historical evidence. One acceptance chain only.
+Next: prescribed Windows baseline, source inventory and security trace.
