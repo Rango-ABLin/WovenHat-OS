@@ -1,5 +1,15 @@
 # Stage status
 
+## S12 bounded accessibility wire contract - 2026-11-04 - ACCEPTED (SOFTWARE FOUNDATION)
+
+Added host-tested, allocation-free `WAX1` accessibility-tree snapshots and
+`WAA1` focus announcements to `libwoven`. Records are versioned, fixed-shape,
+bounded, pointer-free, and require caller-owned output storage. The contract
+is now suitable for a later screen-reader service boundary. Desktop-wide
+service delivery, translated/shaped text coverage, clipboard/file-dialog
+breadth, and physical assistive-device qualification remain open; this does
+not close the full S12 release gate.
+
 ## Stage 10.7 regression after S12 input ABI change - 2026-11-04 - PASSED (SOFTWARE)
 
 The mandated `RUN-STAGE10.7.ps1` gate passed again after the Escape input ABI

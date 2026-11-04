@@ -9,6 +9,13 @@
 pub const MAX_NODES: usize = 128;
 pub const MAX_LABEL_BYTES: usize = 96;
 pub const MAX_CAPTIONS: usize = 8;
+pub const SNAPSHOT_HEADER_BYTES: usize = 10;
+pub const SNAPSHOT_NODE_BYTES: usize = 2 + 2 + 1 + 1 + 4 + 4 + 4 + 4 + 1 + MAX_LABEL_BYTES;
+pub const MAX_SNAPSHOT_BYTES: usize = SNAPSHOT_HEADER_BYTES + MAX_NODES * SNAPSHOT_NODE_BYTES;
+pub const ANNOUNCEMENT_BYTES: usize = 4 + 2 + 1 + 1 + MAX_LABEL_BYTES;
+
+const SNAPSHOT_MAGIC: &[u8; 4] = b"WAX1";
+const ANNOUNCEMENT_MAGIC: &[u8; 4] = b"WAA1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeId(pub u16);
@@ -106,6 +113,11 @@ pub enum TreeError {
     InvalidParent,
     InvalidLabel,
     LabelTooLong,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EncodeError {
+    OutputTooSmall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,6 +223,43 @@ impl Tree {
         self.focus_relative(-1)
     }
 
+    /// Encode the current semantic tree into a versioned, pointer-free wire
+    /// record for a screen-reader or accessibility service. Every node uses a
+    /// fixed-size record, so the required capacity is deterministic and no
+    /// partial record is published when the caller's buffer is too small.
+    pub fn encode(&self, output: &mut [u8]) -> Result<usize, EncodeError> {
+        if output.len() < SNAPSHOT_HEADER_BYTES {
+            return Err(EncodeError::OutputTooSmall);
+        }
+        let required = SNAPSHOT_HEADER_BYTES
+            .checked_add(self.count.saturating_mul(SNAPSHOT_NODE_BYTES))
+            .ok_or(EncodeError::OutputTooSmall)?;
+        if output.len() < required {
+            return Err(EncodeError::OutputTooSmall);
+        }
+        output[..required].fill(0);
+        output[..4].copy_from_slice(SNAPSHOT_MAGIC);
+        output[4] = 1;
+        output[6..8].copy_from_slice(&(self.count as u16).to_le_bytes());
+        output[8..10].copy_from_slice(&self.focus.map_or(u16::MAX, |id| id.0).to_le_bytes());
+        let mut cursor = SNAPSHOT_HEADER_BYTES;
+        for node in self.nodes.iter().flatten() {
+            output[cursor..cursor + 2].copy_from_slice(&node.id.0.to_le_bytes());
+            output[cursor + 2..cursor + 4]
+                .copy_from_slice(&node.parent.map_or(u16::MAX, |id| id.0).to_le_bytes());
+            output[cursor + 4] = node.role as u8;
+            output[cursor + 5] = u8::from(node.focusable) | (u8::from(node.enabled) << 1);
+            output[cursor + 6..cursor + 10].copy_from_slice(&node.bounds.x.to_le_bytes());
+            output[cursor + 10..cursor + 14].copy_from_slice(&node.bounds.y.to_le_bytes());
+            output[cursor + 14..cursor + 18].copy_from_slice(&node.bounds.width.to_le_bytes());
+            output[cursor + 18..cursor + 22].copy_from_slice(&node.bounds.height.to_le_bytes());
+            output[cursor + 22] = node.label_len;
+            output[cursor + 23..cursor + 23 + MAX_LABEL_BYTES].copy_from_slice(&node.label);
+            cursor += SNAPSHOT_NODE_BYTES;
+        }
+        Ok(required)
+    }
+
     fn focus_relative(&mut self, direction: isize) -> Option<NodeId> {
         if self.count == 0 {
             return None;
@@ -263,6 +312,21 @@ pub struct Announcement {
 impl Announcement {
     pub fn text(&self) -> &str {
         core::str::from_utf8(&self.label[..self.label_len as usize]).unwrap_or("")
+    }
+
+    /// Encode one focus announcement for a screen-reader service without
+    /// borrowing or exposing the tree's storage.
+    pub fn encode(&self, output: &mut [u8]) -> Result<usize, EncodeError> {
+        if output.len() < ANNOUNCEMENT_BYTES {
+            return Err(EncodeError::OutputTooSmall);
+        }
+        output[..ANNOUNCEMENT_BYTES].fill(0);
+        output[..4].copy_from_slice(ANNOUNCEMENT_MAGIC);
+        output[4..6].copy_from_slice(&self.node.0.to_le_bytes());
+        output[6] = self.role as u8;
+        output[7] = self.label_len;
+        output[8..8 + MAX_LABEL_BYTES].copy_from_slice(&self.label);
+        Ok(ANNOUNCEMENT_BYTES)
     }
 }
 
@@ -596,6 +660,59 @@ mod tests {
             .unwrap();
         assert_eq!(tree.focused(), Some(active));
         assert!(!tree.set_focus(disabled));
+    }
+
+    #[test]
+    fn semantic_snapshot_is_versioned_bounded_and_pointer_free() {
+        let mut tree = Tree::new();
+        let root = tree
+            .insert(
+                None,
+                Role::Window,
+                Rect::new(-4, 8, 100, 40),
+                "Main",
+                false,
+                true,
+            )
+            .unwrap();
+        let button = tree
+            .insert(
+                Some(root),
+                Role::Button,
+                Rect::new(2, 3, 20, 10),
+                "Open",
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(tree.focused(), Some(button));
+        let mut encoded = [0u8; MAX_SNAPSHOT_BYTES];
+        let length = tree.encode(&mut encoded).unwrap();
+        assert_eq!(length, SNAPSHOT_HEADER_BYTES + 2 * SNAPSHOT_NODE_BYTES);
+        assert_eq!(&encoded[..4], b"WAX1");
+        assert_eq!(encoded[4], 1);
+        assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 2);
+        assert_eq!(u16::from_le_bytes([encoded[8], encoded[9]]), button.0);
+        let label_offset = SNAPSHOT_HEADER_BYTES + 23;
+        assert_eq!(&encoded[label_offset..label_offset + 4], b"Main");
+        assert_eq!(
+            tree.encode(&mut encoded[..SNAPSHOT_HEADER_BYTES + SNAPSHOT_NODE_BYTES]),
+            Err(EncodeError::OutputTooSmall)
+        );
+    }
+
+    #[test]
+    fn focus_announcement_has_stable_wire_shape() {
+        let mut tree = Tree::new();
+        tree.insert(None, Role::Button, Rect::default(), "Open", true, true)
+            .unwrap();
+        let announcement = announce_focus(&tree).unwrap();
+        let mut encoded = [0u8; ANNOUNCEMENT_BYTES];
+        assert_eq!(announcement.encode(&mut encoded).unwrap(), ANNOUNCEMENT_BYTES);
+        assert_eq!(&encoded[..4], b"WAA1");
+        assert_eq!(encoded[6], Role::Button as u8);
+        assert_eq!(encoded[7], 4);
+        assert_eq!(&encoded[8..12], b"Open");
     }
 
     #[test]

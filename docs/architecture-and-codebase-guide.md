@@ -4326,6 +4326,15 @@ reduced-motion duration policy, display scale, and magnification clamps.
 Locale, translations, shaping, compositor integration, and device-specific
 assistive technology remain separate prerequisites.
 
+The model also exposes a pointer-free, allocation-free wire boundary for a
+future accessibility service. `Tree::encode` emits versioned `WAX1` snapshots
+with fixed-size node records and bounded labels; `Announcement::encode` emits
+versioned `WAA1` focus announcements. Both APIs require caller-owned storage,
+return the exact encoded length, reject undersized buffers, and contain no
+references or process-local addresses. These records are a stable handoff
+foundation, not a claim that a screen-reader service or accessibility device
+has been integrated.
+
 ## Stage 28 disposable file-backed installation executor
 
 `scripts/execute-file-install.py` is deliberately outside the production

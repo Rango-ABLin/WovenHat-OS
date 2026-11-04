@@ -1,3 +1,10 @@
+## Codex - S12 bounded accessibility wire contract (2026-11-04)
+
+Added and host-tested allocation-free `WAX1` tree snapshots and `WAA1` focus
+announcements in `libwoven::accessibility`. The records use fixed-size bounded
+fields, caller-owned output buffers, version/magic headers, and no pointers or
+process-local addresses. This is a software handoff foundation only; the
+screen-reader service integration and full S12 qualification remain open.
 
 ## Codex - Graphics Phase 6/7 evidence and instrumentation (2026-11-04)
 
