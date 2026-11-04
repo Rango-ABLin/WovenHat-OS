@@ -35,6 +35,17 @@ pre-modernization pixel oracle was updated to check semantic regional repaint
 rather than obsolete exact font pixels. No desktop behavior was changed by
 this handoff.
 
+## Codex - WovenTerminal simple-command execution (2026-11-04)
+
+Extended WovenTerminal's bounded parser with arbitrary ASCII command lines for
+the existing `spawn` ABI. Commands resolve under `/bin` unless an explicit
+path is supplied, receive whitespace-delimited arguments, and are waited to a
+terminal exit status. The GUI and `--interactive` paths share this executor.
+Pipes, redirection, quoting, environment expansion, background jobs, and PTY
+job control remain outside this slice. Terminal parser tests, target
+warnings-denying Clippy, target check, and the 1-CPU Ring-3 terminal QEMU gate
+pass; evidence is `audit-artifacts/woven-terminal-1cpu`.
+
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 

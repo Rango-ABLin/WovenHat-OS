@@ -8,6 +8,7 @@ pub enum Command<'a> {
     List(&'a [u8]),
     Cat(&'a [u8]),
     Calc(&'a [u8]),
+    External(&'a [u8]),
     Quit,
     Invalid,
 }
@@ -34,7 +35,11 @@ pub fn parse(input: &[u8]) -> Command<'_> {
     if let Some(argument) = after(input, b"calc") {
         return Command::Calc(argument);
     }
-    Command::Invalid
+    if input.is_ascii() {
+        Command::External(input)
+    } else {
+        Command::Invalid
+    }
 }
 
 fn trim(input: &[u8]) -> &[u8] {
@@ -71,8 +76,8 @@ mod tests {
 
     #[test]
     fn refuses_ambiguous_or_overlong_commands() {
-        assert_eq!(parse(b"lss /mnt"), Command::Invalid);
-        assert_eq!(parse(b"cat"), Command::Invalid);
+        assert_eq!(parse(b"lss /mnt"), Command::External(b"lss /mnt"));
+        assert_eq!(parse(b"cat"), Command::External(b"cat"));
         assert_eq!(parse(&[b'x'; 129]), Command::Invalid);
     }
 }

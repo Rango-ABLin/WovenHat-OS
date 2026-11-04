@@ -69,7 +69,7 @@ fn interactive() -> ! {
 pub(crate) fn run(command: Command<'_>) -> u64 {
     match command {
         Command::Help => {
-            let _ = libwoven::print("WovenTerminal commands: help, ls PATH, cat PATH, calc EXPR, exit\n");
+            let _ = libwoven::print("WovenTerminal commands: help, ls PATH, cat PATH, calc EXPR, or any /bin command with arguments; exit\n");
             0
         }
         Command::Quit => 0,
@@ -86,6 +86,26 @@ pub(crate) fn run(command: Command<'_>) -> u64 {
                 2
             }
         },
+        Command::External(command) => {
+            let Ok(command) = core::str::from_utf8(command) else {
+                let _ = libwoven::print("WovenTerminal: command is not ASCII\n");
+                return 2;
+            };
+            let Ok(child) = libwoven::spawn(command) else {
+                let _ = libwoven::print("WovenTerminal: command could not start\n");
+                return 127;
+            };
+            loop {
+                match libwoven::wait(child) {
+                    Ok(status) => return status,
+                    Err(libwoven::Error::WouldBlock) => libwoven::yield_now(),
+                    Err(_) => {
+                        let _ = libwoven::print("WovenTerminal: command wait failed\n");
+                        return 126;
+                    }
+                }
+            }
+        }
         Command::List(path) => list(path),
         Command::Cat(path) => cat(path),
         Command::Invalid => {
