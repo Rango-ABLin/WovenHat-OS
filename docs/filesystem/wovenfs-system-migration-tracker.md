@@ -14,10 +14,20 @@ Physical power-loss/removable-hardware qualification remains a separate
 release gate. The WovenFS batch branch commits bounded entries independently;
 the existing FAT32 multi-entry journal transaction is unchanged.
 
-**Status: PARTIAL, NOT ACCEPTED (2026-11-04).** Phase 0 audit is recorded
-and the first production-routing/provisioning increment is implemented and
-verified on disposable media; installed-image boot qualification and the full
-storage-neutral service audit remain open.
+**Status: SOFTWARE GATE PASSED, PHYSICAL QUALIFICATION OPEN (2026-11-04).**
+The production-routing/provisioning increment and installed-image boot
+qualification are verified on disposable media. The remaining filesystem
+limits are physical power-loss/removable-hardware evidence and any future
+storage-neutral service expansion beyond the callers audited below.
+
+The installed-image harness was also found to request only 2 GiB while the
+current kernel's supported boot contract requires at least 4 GiB usable after
+firmware reservations. The harness is being corrected to use the established
+5 GiB configured profile before the installed-image gate is requalified.
+It also now selects the dedicated `installed-wovenfs-test` feature
+automatically for `--filesystem wovenfs` and requires the guest's
+`[INSTALLED WOVENFS] df/fscheck/persistence: PASSED` marker, rather than
+accepting only generic boot completion.
 The user explicitly authorized switching priority from the still-open graphics
 modernization work to this migration. The graphics sequencing sentence below
 is superseded for this task only; the graphics claim and files remain intact.
@@ -288,3 +298,21 @@ The first probe increment was then implemented and verified. It adds
 all accepted filesystem behavior remain unchanged. Host/target lint, the
 20-test crash suite, and the Stage 12.1–12.5 QEMU chain passed. The migration
 remains partial and not accepted.
+
+### 2026-11-04 — installed-image gate completed
+
+The installed-image harness was corrected to use the supported 5 GiB guest
+profile, select `installed-wovenfs-test` automatically for WovenFS images,
+and require the filesystem-specific `df/fscheck/persistence` marker. The
+disposable installed WovenFS image passed UEFI boot, kernel validation,
+filesystem qualification, and QEMU debug exit on 1/2/4 CPUs. Evidence:
+`target/installed-disk-release-20261104T160318Z/`. No physical device was
+accessed; power-loss and removable-hardware qualification remain open.
+
+### 2026-11-04 — FAT32 and WovenFS release validation refreshed
+
+The complete FAT32 storage/boot suite passed on 1/2/4 CPUs using the supported
+5 GiB QEMU profile, including live rename/delete/growth and recovery injection.
+The disposable WovenFS device suite passed on 1/2/4 CPUs, including format,
+durable writes across remount, VFS publication/isolation, invalidation, denied
+writes, unlink, and remount verification. No physical device was accessed.

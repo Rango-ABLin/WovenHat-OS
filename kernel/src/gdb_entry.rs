@@ -23,9 +23,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "gdb-entry")]
 use core::arch::global_asm;
 
-#[cfg(feature = "gdb-entry")]
+#[cfg(any(test, feature = "gdb-entry"))]
 use crate::gdb_owner::{AttachmentToken, Owner};
-#[cfg(feature = "gdb-entry")]
+#[cfg(any(test, feature = "gdb-entry"))]
 use crate::irq_lock::IrqMutex;
 
 use crate::gdb_debugger::RegisterContext;
@@ -193,7 +193,7 @@ static LIVE_KILL_DONE: AtomicBool = AtomicBool::new(false);
 /// Rank 1: always acquired and released standalone, never nested with
 /// `SCHEDULER` (10), `PROCESS_TABLE` (20), or `PAGING` (10)/`COW_TABLE` (30),
 /// so its numeric rank does not interact with that discipline.
-#[cfg(feature = "gdb-entry")]
+#[cfg(any(test, feature = "gdb-entry"))]
 static GDB_OWNER: IrqMutex<(Owner, Option<(AttachmentToken, u64)>)> =
     IrqMutex::with_rank((Owner::new(), None), 1);
 
@@ -225,7 +225,7 @@ fn gdb_owner_acquire() -> Option<AttachmentToken> {
 /// boot self-test runs before a task is marked running, so it uses this same
 /// state transition with a deterministic synthetic identity instead of
 /// weakening the ownership check or depending on scheduler timing.
-#[cfg(feature = "gdb-entry")]
+#[cfg(any(test, feature = "gdb-entry"))]
 fn gdb_owner_acquire_for(task_id: u64) -> Option<AttachmentToken> {
     if task_id == 0 {
         return None;
@@ -247,7 +247,7 @@ fn gdb_owner_acquire_for(task_id: u64) -> Option<AttachmentToken> {
 /// already replaced it (only possible if this module's own bookkeeping were
 /// bypassed, which it never is — kept as a defensive check, not a race this
 /// function needs to win).
-#[cfg(feature = "gdb-entry")]
+#[cfg(any(test, feature = "gdb-entry"))]
 fn gdb_owner_release(token: AttachmentToken) {
     let mut guard = GDB_OWNER.lock();
     let (owner, stored) = &mut *guard;

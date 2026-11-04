@@ -759,7 +759,6 @@ impl<D: BlockDevice> Volume<D> {
     /// Probe a device without changing it. A valid superblock is required;
     /// callers must still run the role/partition policy
     /// before treating this as the system volume.
-    #[cfg(not(test))]
     pub fn probe(device: &mut D) -> Result<(), Error> {
         let mut best = None;
         for slot in 0..2u64 {
@@ -2522,6 +2521,11 @@ pub fn read_vfs_path_durable(path: &str, out: &mut [u8]) -> Result<usize, Error>
     .unwrap_or(Err(Error::Device))
 }
 
+#[cfg(test)]
+pub fn read_vfs_path_durable(_path: &str, _out: &mut [u8]) -> Result<usize, Error> {
+    Err(Error::Device)
+}
+
 #[cfg(not(test))]
 pub fn mkdir_vfs_path(path: &str, now: u64) -> Result<(), Error> {
     let _mutation = MUTATION.lock();
@@ -2888,6 +2892,14 @@ pub fn mount_device_into_vfs<D: crate::block::BlockDevice>(
     result
 }
 
+#[cfg(test)]
+pub fn mount_device_into_vfs<D: crate::block::BlockDevice>(
+    _device: D,
+    _mount_path: &str,
+) -> MountOutcome {
+    MountOutcome::NoDevice
+}
+
 /// Unpublish the native WovenFS namespace and invalidate all open child
 /// descriptions.  The disk is not modified; a later mount replays its
 /// journal and republishes a fresh namespace.
@@ -2902,6 +2914,11 @@ pub fn unmount_vfs_at(mount_path: &str) -> Result<usize, Error> {
     let _mutation = MUTATION.lock();
     VFS_MOUNTED.store(false, Ordering::Release);
     crate::vfs::unpublish_children(mount_path).map_err(|_| Error::Device)
+}
+
+#[cfg(test)]
+pub fn unmount_vfs_at(_mount_path: &str) -> Result<usize, Error> {
+    Err(Error::Device)
 }
 
 /// Report whether the `/wfs` namespace is currently published for syscall

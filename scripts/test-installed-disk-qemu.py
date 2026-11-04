@@ -279,8 +279,12 @@ def build_qemu_command(
         "tcg,tb-size=128",
         "-machine",
         "pc" if filesystem == "wovenfs" else "q35",
+        # The production kernel requires at least 4 GiB usable memory after
+        # firmware reservations.  5 GiB configured is the same supported
+        # profile used by the desktop qualification and leaves that margin
+        # intact for installed-image boot.
         "-m",
-        "2G",
+        "5G",
         "-smp",
         str(cpus),
         "-display",
@@ -332,6 +336,16 @@ def guest_execution_status(exit_code: int, serial_text: str) -> dict[str, object
         "kernel_validation_passed": kernel,
         "guest_debug_exit": debug_exit,
         "qemu_exit_code": exit_code,
+    }
+
+
+def wovenfs_qualification_status(serial_text: str, filesystem: str) -> dict[str, object]:
+    """Require the filesystem-specific installed-image marker when selected."""
+    required = "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+    return {
+        "required": filesystem == "wovenfs",
+        "passed": filesystem != "wovenfs" or required in serial_text,
+        "marker": required if filesystem == "wovenfs" else None,
     }
 
 
@@ -423,6 +437,8 @@ def run_profile(
         completed = None
     serial_text = serial.read_text(encoding="utf-8", errors="replace") if serial.exists() else ""
     status = guest_execution_status(-1 if completed is None else completed.returncode, serial_text)
+    filesystem_status = wovenfs_qualification_status(serial_text, filesystem)
+    status["filesystem_qualification"] = filesystem_status
     result = {
         "cpus": cpus,
         "install": install,
@@ -452,6 +468,11 @@ def run_profile(
             f"{cpus}-CPU installed-disk image did not boot as a guest; missing "
             f"{', '.join(missing)}; serial evidence: {serial}; qemu log: {qemu_log}"
         )
+    elif not filesystem_status["passed"]:
+        result["error"] = (
+            f"{cpus}-CPU installed WovenFS image booted but did not emit the "
+            f"df/fscheck/persistence marker; serial evidence: {serial}"
+        )
     (profile / "result.json").write_text(json_dumps(result), encoding="utf-8")
     return result
 
@@ -476,7 +497,11 @@ def run_gate(
     results = []
     for profile in cpus:
         results.append(run_profile(source_info_path(source_info), qemu, firmware, firmware_vars, output_root, profile, timeout, filesystem))
-    passed = all(bool(item["guest"]["guest_execution"]) for item in results)
+    passed = all(
+        bool(item["guest"]["guest_execution"])
+        and bool(item["guest"]["filesystem_qualification"]["passed"])
+        for item in results
+    )
     result = {
         "schema": "woven-installed-disk-qemu-v1",
         "valid": passed,
@@ -506,7 +531,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         qemu, firmware = resolve_qemu_and_firmware(args.qemu, args.firmware)
-        source = args.kernel_image or build_kernel_image(ROOT, args.feature, args.timeout)
+        feature = args.feature
+        if args.filesystem == "wovenfs" and feature == "stage28-installer-test":
+            feature = "installed-wovenfs-test"
+        source = args.kernel_image or build_kernel_image(ROOT, feature, args.timeout)
         source = validate_source_image(source)["path"]
         source_path = Path(source)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

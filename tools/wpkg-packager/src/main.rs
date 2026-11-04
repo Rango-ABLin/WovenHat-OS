@@ -1,10 +1,17 @@
 use std::{env, fs, path::PathBuf, process};
 
 use ed25519_compact::{KeyPair, Seed};
-use libwoven::package::{HEADER_LEN, MAGIC, VERSION, parse};
 use sha2::{Digest, Sha256};
 
 const DOMAIN: &[u8] = b"WOVENHAT-WPKG-V1";
+const MAGIC: [u8; 4] = *b"WPKG";
+const VERSION: u16 = 1;
+const HEADER_LEN: usize = 4 + 2 + 2 + 4 + 8 + 8 + 64;
+const MAX_MANIFEST_BYTES: usize = 4096;
+const MAX_APPLICATION_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_NAME_BYTES: usize = 48;
+const MAX_DEPENDENCIES: usize = 16;
 const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
@@ -37,10 +44,93 @@ fn parse_hex(value: &str) -> [u8; 32] {
 
 fn valid_name(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= libwoven::package::MAX_NAME_BYTES
+        && value.len() <= MAX_NAME_BYTES
         && value.bytes().all(
             |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'),
         )
+}
+
+fn valid_package(bytes: &[u8]) -> bool {
+    if bytes.len() < HEADER_LEN
+        || bytes[..4] != MAGIC
+        || u16::from_le_bytes([bytes[4], bytes[5]]) != VERSION
+        || usize::from(u16::from_le_bytes([bytes[6], bytes[7]])) != HEADER_LEN
+    {
+        return false;
+    }
+    let manifest_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+    let application_len = u64::from_le_bytes(bytes[12..20].try_into().unwrap());
+    let resources_len = u64::from_le_bytes(bytes[20..28].try_into().unwrap());
+    if manifest_len == 0
+        || manifest_len > MAX_MANIFEST_BYTES
+        || application_len == 0
+        || application_len > MAX_APPLICATION_BYTES
+        || resources_len > MAX_RESOURCE_BYTES
+    {
+        return false;
+    }
+    let manifest_end = match HEADER_LEN.checked_add(manifest_len) {
+        Some(value) => value,
+        None => return false,
+    };
+    let app_end = match manifest_end.checked_add(application_len as usize) {
+        Some(value) => value,
+        None => return false,
+    };
+    let resource_end = match app_end.checked_add(resources_len as usize) {
+        Some(value) => value,
+        None => return false,
+    };
+    if resource_end != bytes.len() {
+        return false;
+    }
+    let manifest = &bytes[HEADER_LEN..manifest_end];
+    let mut cursor = 0usize;
+    let name_len = *manifest.get(cursor).unwrap_or(&0) as usize;
+    cursor += 1;
+    let name_end = match cursor.checked_add(name_len) {
+        Some(value) => value,
+        None => return false,
+    };
+    let name = match manifest.get(cursor..name_end) {
+        Some(value) => value,
+        None => return false,
+    };
+    if name.is_empty()
+        || name.len() > MAX_NAME_BYTES
+        || !name.iter().all(|byte| {
+            matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-')
+        })
+    {
+        return false;
+    }
+    cursor = name_end;
+    if cursor.checked_add(16).is_none() || cursor + 16 > manifest.len() {
+        return false;
+    }
+    cursor += 16;
+    let dependency_count = *manifest.get(cursor).unwrap_or(&u8::MAX) as usize;
+    cursor += 1;
+    if dependency_count > MAX_DEPENDENCIES {
+        return false;
+    }
+    for _ in 0..dependency_count {
+        let length = *manifest.get(cursor).unwrap_or(&u8::MAX) as usize;
+        cursor += 1;
+        let end = match cursor.checked_add(length) {
+            Some(value) => value,
+            None => return false,
+        };
+        let value = match manifest.get(cursor..end) {
+            Some(value) => value,
+            None => return false,
+        };
+        if !valid_name(std::str::from_utf8(value).unwrap_or("")) {
+            return false;
+        }
+        cursor = end;
+    }
+    cursor == manifest.len()
 }
 
 fn main() {
@@ -95,7 +185,7 @@ fn main() {
     let version = version.unwrap_or_else(|| usage());
     if !valid_name(&name)
         || version == 0
-        || dependencies.len() > libwoven::package::MAX_DEPENDENCIES
+        || dependencies.len() > MAX_DEPENDENCIES
         || dependencies.iter().any(|value| !valid_name(value))
     {
         eprintln!("invalid package manifest");
@@ -104,7 +194,7 @@ fn main() {
 
     let application = fs::read(&input).expect("failed to read application ELF");
     if application.is_empty()
-        || application.len() as u64 > libwoven::package::MAX_APPLICATION_BYTES
+        || application.len() as u64 > MAX_APPLICATION_BYTES
         || application.get(..4) != Some(b"\x7fELF")
     {
         eprintln!("input must be a nonempty ELF within the WPKG application limit");
@@ -114,7 +204,7 @@ fn main() {
     for path in resources {
         resource_bytes.extend(fs::read(path).expect("failed to read resource"));
     }
-    if resource_bytes.len() as u64 > libwoven::package::MAX_RESOURCE_BYTES {
+    if resource_bytes.len() as u64 > MAX_RESOURCE_BYTES {
         eprintln!("resources exceed the WPKG limit");
         process::exit(2);
     }
@@ -161,10 +251,7 @@ fn main() {
     let digest: [u8; 32] = signed.finalize().into();
     let signature = key_pair.sk.sign(digest, None);
     package[28..HEADER_LEN].copy_from_slice(signature.as_ref());
-    assert!(
-        parse(&package).is_ok(),
-        "packager emitted an invalid WPKG envelope"
-    );
+    assert!(valid_package(&package), "packager emitted an invalid WPKG envelope");
     fs::write(&output, &package).expect("failed to write WPKG package");
     println!(
         "signed {} -> {} ({} bytes)",

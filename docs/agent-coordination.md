@@ -8812,3 +8812,30 @@ on 1/2/4 WHPX CPUs. Phase 7 evidence now separates idle zero-tick polls from
 active repaint samples and reports active distribution statistics. Guest CPU
 and memory remain unavailable through the current ABI and are not inferred
 from host QEMU metrics.
+
+## Codex - Installed WovenFS image release validation (2026-11-04)
+
+The installed-image harness now selects `installed-wovenfs-test` for a WovenFS
+run, requests the supported 5 GiB guest profile, and requires the filesystem
+qualification marker in addition to UEFI/kernel/debug-exit evidence. The
+disposable installed WovenFS image passed on 1/2/4 CPUs; evidence is under
+`target/installed-disk-release-20261104T160318Z/`. No physical device was
+accessed.
+
+## Codex - Core service and storage release validation (2026-11-04)
+
+Removed the host WPKG packager's dependency on the freestanding `libwoven`
+binary and retained the exact WPKG v1 bounds in a local host validator. The
+package transaction gate passed on 1/2/4 CPUs. Update-service and recovery
+passed on 1/2/4 CPUs. FAT32 storage/complete-boot, WovenFS device durability,
+and WovenSearch service gates passed on 1/2/4 CPUs. The affected harnesses now
+use the supported 5 GiB QEMU profile. Evidence is preserved in the latest
+`audit-artifacts/stage22.5-*`, `stage27.5-*`, `stage27.5-recovery-*`,
+`stage23.5-search-*`, `target/storage-regression-*-release/`, and
+`target/wovenfs-device-scratch-*` directories.
+
+Host WPKG Clippy, `libwoven` tests (212/212), target kernel Clippy, and Python
+harness compilation passed. Full host `cargo test --workspace --all-targets`
+still encounters the repository's freestanding kernel assembly (`.previous`)
+directive when Rust attempts to build that target on Windows; this remains an
+explicit host-toolchain limitation, not a suppressed test.
