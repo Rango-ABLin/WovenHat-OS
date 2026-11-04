@@ -8854,3 +8854,11 @@ The Stage 13.15 QEMU playback waveform gate passed on 1/2/4 CPUs with exit
 33. Evidence is under `audit-artifacts/stage13.15-{1,2,4}cpu-*`. This is an
 emulated playback result; audio capture/mixing breadth and native/physical
 audio qualification remain open.
+
+## Codex - Store and package-service release revalidation (2026-11-04)
+
+WovenStore persistence and WovenPackage service IPC both passed fresh QEMU
+release runs on 1/2/4 CPUs with exit 33. Evidence is under
+`audit-artifacts/stage21.6-{1,2,4}cpu-*` and
+`audit-artifacts/stage22.3-{1,2,4}cpu-*`. These are bounded service gates;
+production trust custody and full store/catalog policy remain separate.

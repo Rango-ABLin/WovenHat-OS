@@ -31,6 +31,14 @@ fresh evidence is retained in `audit-artifacts/stage13.15-{1,2,4}cpu-*`. This
 confirms the emulated playback path only. Audio capture/mixing breadth,
 native-device behavior, and physical audio qualification remain open.
 
+## Stages 21.6/22.3 service revalidation - 2026-11-04 - BOUNDED GATES PASSED
+
+Fresh WovenStore persistence and WovenPackage service IPC runs passed on 1/2/4
+CPUs with QEMU exit 33. Evidence is retained in
+`audit-artifacts/stage21.6-{1,2,4}cpu-*` and
+`audit-artifacts/stage22.3-{1,2,4}cpu-*`. This does not close production trust,
+catalog-policy, or physical qualification gates.
+
 ## WovenFS migration completion note — 2026-11-04
 
 The bounded system-filesystem increment is complete: WovenFS-backed `df` and
