@@ -1,6 +1,6 @@
 # B1 boot configuration rejection
 
-Status: IN PROGRESS. Phase B is not complete.
+Status: TESTED — PASS (B1 bounded unit), runtime aaeaaf8f. Phase B is not complete.
 
 The existing UEFI implementation is vendored at
 `vendor/bootloader/uefi`, with its mapper, BootInfo and runtime dependency
@@ -76,5 +76,8 @@ the failure is retained in `audit-artifacts/boot-config-b1/1cpu.log` and its
 timestamped serial directory. The next 1-CPU run passed all nine cases,
 including empty/oversized preallocation rejection. Captured malformed and
 oversized screens were visually inspected and show explicit boot-stopped
-errors, with no successful splash. Full final-source matrix/preservation
-remains pending.
+errors, with no successful splash. Final source-bound qualification passes
+all 27 cases at 1/2/4 CPUs; evidence is under audit-artifacts/boot-config-b1/
+final-{1,2,4}cpu.log and the recorded timestamped case directories.
+Stage15.5 signed-handoff passes at 1/2/4 CPUs. Full Windows preservation also
+passes at aaeaaf8f in audit-artifacts/acceptance-20261104-205802-369/.

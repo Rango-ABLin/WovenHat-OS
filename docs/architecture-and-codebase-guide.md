@@ -1,6 +1,6 @@
 # WovenHat OS Architecture & Codebase Guide
 
-## Boot/login/desktop source audit (2026-11-04, Phase A accepted; B1 in progress)
+## Boot/login/desktop source audit (2026-11-04, Phase A and bounded B1 accepted)
 
 The existing production path starts the embedded WovenShell through
 `kernel/src/session.rs`; the shell currently combines sign-in and desktop UI.

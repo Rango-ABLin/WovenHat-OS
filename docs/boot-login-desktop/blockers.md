@@ -1,29 +1,52 @@
-# Blockers and prerequisites
+# Blockers and remaining prerequisites
 
-Status: IN PROGRESS.
+Status: IN PROGRESS. Phase A is accepted. Phase B1 has passed focused host and
+initial QEMU checks; final matrix/preservation is pending. Later phases remain
+behind the Phase B gate. This file does not claim all feasible software work
+has been completed.
 
-1. Baseline execution and source/security audit must finish before runtime
-   edits. Current Windows evidence path is in test-results.md.
-2. Firmware implementation is resolved external bootloader-x86_64-uefi 0.11.17,
-   not the local UefiBoot wrapper. Its source was located and traced; config
-   parsing silently defaults after errors and needs a gated rejection change.
-3. Secure production entropy for account provisioning is not established.
-4. No-account startup, credential-record disclosure/replay, diagnostic console
-   and pre-authentication capabilities need negative security qualification.
-5. Native firmware/Secure Boot/TPM/physical media qualification cannot be inferred
-   from QEMU. Do not mutate host media or firmware during software acceptance.
-6. The synchronized baseline failed host all-targets Clippy before QEMU.
-   BLD-A1 repairs now pass focused host tests and default/Stage12.5/Stage15.2
-   target lints; full rerun is pending. Original failure retained at
-   audit-artifacts/acceptance-20261104-190707-667/.
-7. Original workspace formatting failed on inherited code (417 diff hunks); report is
-   audit-artifacts/boot-login-baseline-repair-20261104/workspace-format.log.
-   BLD-A3 now resolves this in a980619e with one explicit mixed-edition style.
-   Formatting and host Clippy pass; the integrated full runtime gate is pending.
-8. Actual virtual-trust preflight exits 2: swtpm is unavailable, and a signed
-   disk image/development key/certificate have not been supplied. Evidence:
-   audit-artifacts/boot-login-baseline-repair-20261104/virtual-trust-preflight.json.
-   The preflight used installed CODE and VARS files and requested no QEMU run;
-   it cannot qualify a trust chain or certify matching key enrollment.
+## External qualification prerequisites
 
-These are prerequisites/findings, not claims that all feasible work is blocked.
+- Actual virtual-trust preflight exited 2: swtpm is unavailable. A signed image,
+  development key/certificate and verified firmware enrollment were not supplied.
+  Installed CODE/VARS were inspected without executing a VM or modifying host
+  firmware. Evidence: audit-artifacts/boot-login-baseline-repair-20261104/
+  virtual-trust-preflight.json. Provisioned signing/trust inputs and a suitable
+  software-TPM environment are required before that gate can run. Do not invent
+  production keys or infer firmware Secure Boot from the software WBOT check.
+- Physical TPM, GPU/input, removable media and real power-loss qualification
+  remain unperformed. No physical device or host firmware was modified.
+
+## Software still required by the directive
+
+- B1 rejects malformed policy, but the supported v1 subset currently covers
+  existing logging/framebuffer settings only. Boot entry/timeout, alternate
+  kernel path, root selection, recovery policy and command-line forwarding are
+  still required. Missing/corrupt/unsupported kernel-image failure qualification
+  and broader boot-information validation remain Phase B work.
+- Kernel readiness and the actual first-userspace WovenInit/service dependency
+  model are not implemented by this unit. The embedded /init stub and existing
+  kernel-side supervisor must not be called a complete WovenInit architecture.
+- Production secure entropy/provisioning is not established: inspect
+  kernel/src/entropy.rs and identity_runtime::{admin_add_user,change_pin}, which
+  still use the documented best-effort random API for account salts.
+- Missing-account startup, publicly readable verifier records/digest replay,
+  pre-authentication capabilities, F12 diagnostics and crash fallback need the
+  negative security qualifications described in security-model.md. Source
+  locations: kernel/src/main.rs::install_persistent_accounts, session.rs,
+  identity_runtime.rs, vfs.rs::create_read_only, libwoven/src/identity.rs::
+  Credential::verify_digest and apps/woven-shell/src/main.rs.
+- Separate login/session readiness, first-run setup, logout/session-owned child
+  cleanup, bounded desktop/display-manager recovery and complete graphical
+  end-to-end/repeated-boot/performance acceptance are not closed.
+
+## Resolved baseline defects / environment requirements
+
+The initial host compile and formatting failures are repaired and retained.
+Phase A full Windows and Stage12.1–12.5 matrices passed at runtime a980619e.
+Host libwoven also passes 212 units and package-specific Clippy after the
+same-pixel test-index cleanup. Network acceptance needs approved host networking:
+restricted execution produced a DNS timeout; the unchanged gate passed outside
+that restriction. Cached Cargo dependencies work with CARGO_NET_OFFLINE=true.
+Only one Cargo/acceptance chain may run, including across worktrees; concurrent
+worktree compilation previously invalidated shared bootloader artifacts.

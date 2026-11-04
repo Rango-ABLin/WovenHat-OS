@@ -10,6 +10,14 @@ formatting repairs are documented in docs/boot-login-desktop/. This closes
 inventory/baseline only. Next: Phase B boot failure/configuration qualification;
 no WovenInit/login/session/release completion is claimed.
 
+Boot/login/desktop B1 strict configuration accepted (2026-11-04)
+Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
+preallocation bounds and valid legacy/version-1 compatibility. All 27 actual
+UEFI cases and existing signed-handoff gates pass at 1/2/4 CPUs; the full
+Windows preservation chain also passes. This is the logging/framebuffer
+configuration subset only. Next: Phase B kernel-image failure qualification;
+the complete Phase B gate and production trust chain remain open.
+
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
 shared by the identity authority and durable account record, the old PIN is

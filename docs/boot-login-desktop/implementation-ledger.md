@@ -61,7 +61,8 @@ feature guard, capability or timeout is changed.
 
 ## BLD-B1 strict boot configuration
 
-Status: IN PROGRESS. Branch: feature/boot-config-rejection. Base: 224def05.
+Status: TESTED — PASS (bounded unit). Branch: feature/boot-config-rejection.
+Base: 224def05. Runtime commit: aaeaaf8f.
 Owned files are recorded in agent-coordination.md. The version-matched UEFI
 runtime is retained locally; configuration is checked before allocation and
 parsed without heap allocation. Invalid policy terminates before handoff.
@@ -74,4 +75,5 @@ all-targets Clippy, UEFI-target Clippy and fixture-builder Clippy pass. An
 initial QEMU case exposed a trailing-data error-class mismatch; fixed and
 retained. The next 1-CPU run passes all nine cases. Malformed and oversized
 framebuffer captures were visually checked. Final source-bound 1/2/4-CPU
-matrix and preservation gates are pending. Full Phase B is not accepted.
+matrix passes all 27 cases. Stage15.5 signed-handoff and the complete Windows
+preservation chain pass on 1/2/4 CPUs. Full Phase B is not accepted.

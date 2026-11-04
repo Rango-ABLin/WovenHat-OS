@@ -8924,3 +8924,13 @@ preserve accepted valid legacy settings and BootInfo. Do not edit registry
 cache, replace mapper/scheduler, add capabilities, or claim full Phase B.
 Build and acceptance remain serialized. Original crate source/archive match
 and SHA-256 are retained in the Phase A firmware provenance artifact.
+
+## Codex - BLD-B1 accepted (2026-11-04)
+
+Runtime aaeaaf8f passes 27 source-bound UEFI configuration cases, Stage15.5
+signed-handoff at 1/2/4 CPUs, and the full Windows preservation gate:
+audit-artifacts/acceptance-20261104-205802-369/. Host parser/oracle tests and
+root/UEFI/producer Clippy pass. No runtime ABI, capability or hand-written
+unsafe change. Only the bounded configuration unit is accepted, not full
+Phase B or release readiness. Next: B2 kernel-image failure validation under
+the existing UEFI claim. Continue serialized Cargo and QEMU operations.

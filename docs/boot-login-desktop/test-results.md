@@ -74,3 +74,22 @@ in the shadow test's pixels[1 * 4 + 1]. Replacing that with pixels[5] preserves
 the exact assertion; repaired Clippy and all 212 tests pass. Only cfg(test)
 code changed after the accepted runtime source; no runtime matrix repetition
 is claimed for that test-only spelling change. Original lint output retained.
+
+## B1 configuration acceptance
+
+Runtime aaeaaf8f: TESTED — PASS for the bounded B1 unit. All 27 real UEFI
+configuration cases passed with the same prepared image/source hashes across
+1/2/4 CPUs. Final case logs: audit-artifacts/boot-config-b1/final-{1,2,4}cpu.log.
+The individual timestamped directories retain commands, source/image/firmware
+provenance, serial/QEMU logs, and rejection framebuffer captures. Malformed
+and oversized failure screens were visually inspected.
+
+Existing Stage15.5 signed-handoff passed on 1/2/4 CPUs. The complete Windows
+preservation run audit-artifacts/acceptance-20261104-205802-369/ exited 0:
+213 Python tests (six skips), Rust host tests, warning-denying host/kernel
+Clippy, 60 memory repetitions, network 1/2/4 and isolated Stage10.4–10.7.
+Five actual-source parser tests and five host oracle/provenance tests pass;
+standalone UEFI target and fixture-builder Clippy pass. No warning or assertion
+was suppressed. The original trailing-data mismatch and initial upstream lint
+failures remain retained. This does not accept full Phase B or authenticated
+firmware boot. Next: missing/corrupt/unsupported kernel-image failure handling.
