@@ -604,6 +604,16 @@ pub mod graphics {
             )
         }
 
+        /// Create a rotation around the origin in whole degrees. The
+        /// coefficients use the same signed 16.16 format as the rest of the
+        /// affine transform and use a bounded integer sine approximation, so
+        /// this remains deterministic and floating-point-free in userspace.
+        pub fn rotate(degrees: i32) -> Self {
+            let sine = sin_degrees(degrees);
+            let cosine = sin_degrees(degrees.saturating_add(90));
+            Self::new(cosine, -sine, sine, cosine, 0, 0)
+        }
+
         fn map(self, x: i32, y: i32) -> (i32, i32) {
             let mapped_x = (i128::from(self.xx) * i128::from(x)
                 + i128::from(self.xy) * i128::from(y)
@@ -620,6 +630,20 @@ pub mod graphics {
                 mapped_y.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32,
             )
         }
+    }
+
+    fn sin_degrees(degrees: i32) -> i32 {
+        let normalized = degrees.rem_euclid(360);
+        let (sign, angle) = if normalized <= 180 {
+            (1i64, i64::from(normalized))
+        } else {
+            (-1i64, i64::from(normalized - 180))
+        };
+        let distance = angle.min(180 - angle);
+        let product = distance * (180 - distance);
+        let numerator = 4 * product * (1 << 16);
+        let denominator = 40_500 - product;
+        (sign * (numerator / denominator)) as i32
     }
 
     /// Metrics for a UTF-8 string after the bounded shared-font fallback has
@@ -15731,6 +15755,27 @@ mod tests {
         }
         assert!(pixels.iter().any(|pixel| *pixel == Color::TITLE.packed()));
         assert_eq!(pixels[35], 0);
+    }
+
+    #[test]
+    fn wovengraphics_transform_rotation_is_fixed_point_and_bounded() {
+        use crate::graphics::Transform;
+
+        assert_eq!(Transform::rotate(0), Transform::IDENTITY);
+        assert_eq!(
+            Transform::rotate(90),
+            Transform::new(0, -(1 << 16), 1 << 16, 0, 0, 0)
+        );
+        assert_eq!(
+            Transform::rotate(-90),
+            Transform::new(0, 1 << 16, -(1 << 16), 0, 0, 0)
+        );
+        assert_eq!(Transform::rotate(180), Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0));
+
+        let diagonal = Transform::rotate(45);
+        assert!(diagonal.xx > 46_000 && diagonal.xx < 47_000);
+        assert_eq!(diagonal.xx, diagonal.yy);
+        assert_eq!(diagonal.xy, -diagonal.yx);
     }
 
     #[test]

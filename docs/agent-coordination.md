@@ -90,6 +90,14 @@ midpoint coverage. `libwoven` host tests: 211 passed; warning-denying Clippy
 passed. The interactive GTK GPU-tab handoff remains the current display
 selection; GPU-default qualification is still open.
 
+## Codex - Graphics modernization Phase 2 affine rotation (2026-11-04)
+
+Added `Transform::rotate(degrees)` using bounded integer sine approximation
+in the existing signed 16.16 affine representation. Cardinal angles are
+exact, diagonal behavior is regression-tested, and no floating-point state or
+allocation was introduced. `libwoven` host tests: 212 passed; warning-denying
+Clippy passed.
+
 ## Codex - Graphics modernization Phase 1 GPU default (2026-11-04)
 
 Promoted `RUN-DESKTOP.ps1`'s verified two-device mode to the default. It

@@ -216,6 +216,15 @@ Validation: `cargo test --manifest-path libwoven/Cargo.toml --lib` (211
 passed) and `cargo clippy -p libwoven --lib -- -D warnings` (passed).
 Commit: this filtering increment.
 
+### 2026-11-04 (session: Phase 2 affine rotation)
+
+Closed the remaining 2D-engine API gap by adding `Transform::rotate(degrees)`
+with a bounded integer sine approximation in signed 16.16 fixed point. Zero,
+90, -90, 180, and 45 degree behavior are covered; no floating-point state or
+allocation was introduced. Validation: `cargo test --manifest-path
+libwoven/Cargo.toml --lib` (212 passed) and `cargo clippy -p libwoven --lib
+-- -D warnings` (passed). This is committed with the rotation change.
+
 ### 2026-11-04 (session: Phase 1 GPU tab default)
 
 Promoted the already-verified two-device interactive mode to the default in
