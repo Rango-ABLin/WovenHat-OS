@@ -174,6 +174,38 @@ User chose VFS staging over a new syscall (no new kernel capability, reuses the 
 | 9 | QA automation | PARTIAL, reference-image comparison now exists | `scripts/test-desktop-qualification.py` (real QEMU, framebuffer capture, retry-until-materially-different) exists and runs at 1/2/4 CPU. **2026-11-03: added `scripts/compare-against-reference.py`** -- a standalone pixel/tolerance comparison tool (reuses `test-desktop-qualification.py`'s own `parse_ppm`/`changed_pixels` rather than duplicating them; accepts PPM or any Pillow-readable format on either side; reports changed-pixel fraction and max per-channel delta; fails on dimension mismatch regardless of tolerance). Self-tested against 5 synthetic fixtures (identical/small-diff-pass/small-diff-fail/large-diff/dimension-mismatch) covering every code path, all correct. First real reference image committed: `docs/graphics/reference-screenshots/sign-in-virtio-gpu-640x480.png` (the sign-in screen, captured through the now-confirmed-working virtio-gpu path). **Not yet done**: this tool is not wired into `test-desktop-qualification.py`'s own journey as an automatic step -- it exists and works standalone, but nothing calls it yet during the normal acceptance run. Next step: decide whether to wire it in (and at what tolerance, for which captured frames) or keep it manual/opt-in; either way, more reference images are needed to cover more than the one sign-in scene before this phase can be called more than "partial." |
 | 10 | Release qualification | NOT STARTED as a single gate | Don't start this until Phases 1-9 above are each at least "PARTIAL with a clear remaining list," per the mandate's own ordering. |
 
+### Qualification addendum (2026-11-04)
+
+The following results supersede stale historical wording in the phase rows
+above; the historical narrative is retained for provenance:
+
+- Phase 1's current interactive launcher uses one `virtio-vga` device with
+  `-vga none`; the live compositor is no longer rendered through a stale
+  secondary VGA device. The plain two-monitor Stage 20.14 gate passed on 1,
+  2, and 4 CPUs, pixel-for-pixel, with evidence retained under
+  `audit-artifacts/stage20.14-{1,2,4}cpu-*`.
+- Phase 2's affine rotation and bilinear projected-surface filtering are
+  implemented and host-tested. This is complete for the software renderer;
+  native accelerated-driver breadth remains a separate external boundary.
+- Phase 5's compositor now skips a lower window only when an opaque higher
+  frame fully contains its footprint, including shadow reach. The input path
+  remains topmost-window-first.
+- Phase 6 VIRGL discovery, context/resource/command lifecycle, and teardown
+  passed on 1, 2, and 4 CPUs. The optional `--capture-virgl-2d` path remains
+  unqualified: this QEMU GL device rejects the conventional 2D scanout mode
+  with `Device(4611)`. The harness failure and QEMU diagnostics are retained;
+  no release claim is made for that optional path.
+- Phase 7 remains partial. Recompose timing is measured, but true
+  input-to-display latency, isolated repaint cost, and sustained animation
+  CPU/memory measurements are still required before a performance release
+  claim.
+- Phase 9's reference comparator is wired into the qualification harness as
+  an opt-in baseline check and persists its result. Additional reference
+  scenes and a complete release baseline set remain open.
+- Phase 10 is not release-qualified while the Phase 7 measurements, external
+  trust/physical prerequisites, independent review, and the open software
+  breadth in `docs/release-qualification/software-gap-inventory.md` remain.
+
 ## Phase 0 audit facts (established 2026-11-03, re-verify if stale)
 
 File inventory (line counts as of commit `41910d73`):

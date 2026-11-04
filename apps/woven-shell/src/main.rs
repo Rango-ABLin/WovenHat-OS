@@ -3888,15 +3888,32 @@ fn main(args: Args) -> ! {
         for &area in dirty.areas() {
             desktop.repaint(&mut painter, area);
         }
+        let repaint_ticks = if timed {
+            libwoven::ticks().saturating_sub(recompose_start)
+        } else {
+            0
+        };
+        let present_start = if timed { libwoven::ticks() } else { 0 };
         if libwoven::compositor_present().is_err() {
             fail(7);
         }
         if timed {
-            let elapsed = libwoven::ticks().saturating_sub(recompose_start);
+            let present_ticks = libwoven::ticks().saturating_sub(present_start);
+            let elapsed = repaint_ticks.saturating_add(present_ticks);
             let mut digits = [0u8; 20];
             log(&[
                 b"woven-shell: interactive recompose ticks=",
                 libwoven::format_u64(elapsed, &mut digits),
+            ]);
+            let mut repaint_digits = [0u8; 20];
+            log(&[
+                b"woven-shell: repaint ticks=",
+                libwoven::format_u64(repaint_ticks, &mut repaint_digits),
+            ]);
+            let mut present_digits = [0u8; 20];
+            log(&[
+                b"woven-shell: present ticks=",
+                libwoven::format_u64(present_ticks, &mut present_digits),
             ]);
         }
     }

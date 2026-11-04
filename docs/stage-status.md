@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics Phase 6/7 qualification update - 2026-11-04 - BOUNDED PASS / RELEASE OPEN
+
+Stage 20.14 conventional VirtIO-GPU two-head output passed pixel-for-pixel on
+1, 2, and 4 CPUs; VIRGL discovery plus context/resource/command lifecycle also
+passed on 1, 2, and 4 CPUs. The optional GL-device conventional 2D capture was
+run and failed closed because this QEMU device returned `Device(4611)` for the
+2D scanout path; its serial and QEMU evidence remain under the corresponding
+`audit-artifacts/stage20.14-*` directory. The shell qualification now records
+separate repaint and present tick distributions in addition to total recompose
+timing. This improves evidence but does not close true input-to-display,
+sustained guest CPU/memory, native GPU, or physical-device qualification.
+
 ## Stage 10.7 full Windows gate revalidation - 2026-11-04 - PASSED (SOFTWARE)
 
 After fixing host all-targets Clippy defects in structured diagnostics and

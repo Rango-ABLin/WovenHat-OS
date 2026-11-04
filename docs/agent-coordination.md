@@ -1,4 +1,16 @@
 
+## Codex - Graphics Phase 6/7 evidence and instrumentation (2026-11-04)
+
+Stage 20.14 conventional two-head VirtIO-GPU output passed pixel-for-pixel on
+1/2/4 CPUs, and VIRGL discovery/context/resource/command lifecycle passed on
+1/2/4 CPUs. The optional GL-device conventional 2D capture remains explicitly
+unqualified because QEMU returned `Device(4611)`; evidence was preserved and
+the harness assertion was not weakened. WovenShell now logs separate repaint
+and present tick samples for every interactive dirty-frame recompose. Kernel
+target and host all-target warning-denying Clippy passed. The full interactive
+journey after this instrumentation was started but not completed in this
+session, so no full-journey release claim is made from this change.
+
 Diagnosed and fixed critical kernel build failure that blocked Modern desktop 
 implementation acceptance testing. Root cause: `ovmf-prebuilt` (a UEFI firmware 
 download utility) was incorrectly declared in `[dependencies]` instead of 

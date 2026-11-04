@@ -824,6 +824,14 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         for value in re.findall(r"woven-shell: interactive recompose ticks=(\d+)", text)
     ]
     active_recomposes = [value for value in recomposes if value > 0]
+    repaints = [
+        int(value)
+        for value in re.findall(r"woven-shell: repaint ticks=(\d+)", text)
+    ]
+    presents = [
+        int(value)
+        for value in re.findall(r"woven-shell: present ticks=(\d+)", text)
+    ]
     search_latencies = [
         int(value)
         for value in re.findall(r"woven-shell: search latency ticks=(\d+)", text)
@@ -838,9 +846,15 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         "active_recompose_ms": [round(value * 10.0, 3) for value in active_recomposes],
         "search_latency_samples": len(search_latencies),
         "search_latency_ticks": search_latencies,
+        "repaint_samples": len(repaints),
+        "repaint_ticks": repaints,
+        "repaint_ms": [round(value * 10.0, 3) for value in repaints],
+        "present_samples": len(presents),
+        "present_ticks": presents,
+        "present_ms": [round(value * 10.0, 3) for value in presents],
         "measurement_limits": {
             "input_to_frame_ms": "host QMP input-to-capture proxy is recorded in timings_ms",
-            "cpu": "not exposed as a guest ABI measurement",
+            "cpu": "not exposed as a guest ABI measurement; host QEMU utilization is not a guest performance claim",
             "guest_memory": "not exposed as a guest ABI measurement",
             "host_qemu_cpu_memory": "not used as a guest performance claim",
         },
@@ -853,6 +867,18 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
             "median": round(statistics.median(ordered) * 10.0, 3),
             "p95": round(ordered[p95_index] * 10.0, 3),
             "max": round(max(ordered) * 10.0, 3),
+        }
+    if repaints:
+        result["repaint_summary_ms"] = {
+            "min": round(min(repaints) * 10.0, 3),
+            "median": round(statistics.median(repaints) * 10.0, 3),
+            "max": round(max(repaints) * 10.0, 3),
+        }
+    if presents:
+        result["present_summary_ms"] = {
+            "min": round(min(presents) * 10.0, 3),
+            "median": round(statistics.median(presents) * 10.0, 3),
+            "max": round(max(presents) * 10.0, 3),
         }
     return result
 
