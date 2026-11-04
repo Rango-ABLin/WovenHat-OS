@@ -61,6 +61,17 @@ next prerequisite and must be run before calling this slice fully accepted.
 # Agent coordination (Claude Code and Codex)
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Stage 10.7 full gate repair and revalidation (2026-11-04)
+
+The full Windows gate initially stopped on two real host all-targets Clippy
+defects: host compilation of diagnostics referenced kernel-only serial output,
+and the WovenFS crash-test probe used a Rust-2024 let-chain in a host-target
+crate. Both were corrected without weakening assertions. The complete gate
+then passed host regressions, Clippy, tests, repeated 1/2/4-CPU memory
+closure, networking, and Stages 10.4-10.7. Trust/physical preflight remains
+explicitly not qualified due to missing OVMF VARS, swtpm, disk image, and
+development signing inputs.
+
 ## Codex - WovenTerminal bounded shell acceptance (2026-11-04)
 
 The previously pending QEMU prerequisite for the bounded shell slice passed

@@ -764,10 +764,13 @@ impl<D: BlockDevice> Volume<D> {
         for slot in 0..2u64 {
             let mut sector = [0u8; SECTOR_SIZE];
             device.read_sector(slot, &mut sector)?;
-            if let Some(candidate) = SuperBlock::decode(&sector) {
-                if best.is_none_or(|current: SuperBlock| candidate.sequence > current.sequence) {
+            match SuperBlock::decode(&sector) {
+                Some(candidate)
+                    if best.is_none_or(|current: SuperBlock| candidate.sequence > current.sequence) =>
+                {
                     best = Some(candidate);
                 }
+                _ => {}
             }
         }
         best.map(|_| ()).ok_or(Error::Corrupt)

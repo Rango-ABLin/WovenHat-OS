@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 10.7 full Windows gate revalidation - 2026-11-04 - PASSED (SOFTWARE)
+
+After fixing host all-targets Clippy defects in structured diagnostics and
+the WovenFS crash-test probe, `RUN-STAGE10.7.ps1` passed completely: host
+regressions, warning-denying host/kernel Clippy, workspace tests, repeated
+1/2/4-CPU memory closure, 1/2/4-CPU networking, and isolated Stages
+10.4-10.7. The read-only physical/trust preflight remains `NOT_QUALIFIED`
+because OVMF VARS, swtpm, a guest disk image, and development signing
+key/certificate were not supplied.
+
 ## WovenTerminal bounded shell acceptance - 2026-11-04 - ACCEPTED (SOFTWARE BOUNDARY)
 
 The bounded command shell now passes its dedicated Ring-3 QEMU acceptance on
