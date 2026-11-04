@@ -73,10 +73,10 @@ fn draw_number(
     digits: &mut [u8; 20],
     theme: Theme,
 ) {
-    canvas.draw_text(x, y, label, theme.text);
+    canvas.draw_text_system(x, y, label, theme.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, theme.accent);
+        canvas.draw_text_system(x + label.len() as i32 * 6, y, text, theme.accent);
     }
 }
 
@@ -185,7 +185,7 @@ fn draw_settings(
         &mut digits,
         shared,
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 80, "Clock (UTC)", accent);
     if let Ok(time) = libwoven::clock() {
         draw_clock(
             canvas,
@@ -196,9 +196,9 @@ fn draw_settings(
             shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 96, "unavailable", text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "Display", accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 136, "Display", accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -228,7 +228,7 @@ fn draw_settings(
             shared,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
     }
     let mut refresh_digits = [0u8; 20];
     draw_number(

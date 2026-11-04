@@ -48,10 +48,10 @@ fn draw_number(
     value: u64,
     digits: &mut [u8; 20],
 ) {
-    canvas.draw_text(x, y, label, THEME.text);
+    canvas.draw_text_system(x, y, label, THEME.text);
     let text = libwoven::format_u64(value, digits);
     if let Ok(text) = core::str::from_utf8(text) {
-        canvas.draw_text(x + label.len() as i32 * 6, y, text, THEME.accent);
+        canvas.draw_text_system(x + label.len() as i32 * 6, y, text, THEME.accent);
     }
 }
 
@@ -120,9 +120,9 @@ fn draw_monitor(
             &mut digits,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 52, "Clock unavailable", THEME.text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 52, "Clock unavailable", THEME.text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Display", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 84, "Display", THEME.accent);
     if let Ok(info) = libwoven::compositor_info() {
         draw_number(
             canvas,
@@ -149,9 +149,9 @@ fn draw_monitor(
             &mut digits,
         );
     } else {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 100, "Display unavailable", THEME.text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 100, "Display unavailable", THEME.text);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 132, "Storage", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 132, "Storage", THEME.accent);
     draw_number(
         canvas,
         PANEL_X + 10,

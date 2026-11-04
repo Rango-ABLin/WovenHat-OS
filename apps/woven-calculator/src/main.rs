@@ -102,22 +102,22 @@ fn draw_gui(
         if active { THEME.accent } else { THEME.surface },
     );
     Label::new(Frame::new(PANEL_X - 2, PANEL_Y, 180, 16), "WovenCalculator").draw(canvas, THEME);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 24, "Expression:", THEME.text);
+    canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 24, "Expression:", THEME.text);
     if expression.is_empty() {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, "Type e.g. 12+3", THEME.accent);
+        canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 40, "Type e.g. 12+3", THEME.accent);
     } else if let Ok(text) = core::str::from_utf8(expression) {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 40, text, THEME.text);
+        canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 40, text, THEME.text);
     }
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 64, "Result:", THEME.accent);
+    canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 64, "Result:", THEME.accent);
     if let Some(value) = result {
         let mut digits = [0u8; 24];
         let result_text = format_signed(value, &mut digits);
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, result_text, THEME.accent);
+        canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 80, result_text, THEME.accent);
     } else {
-        canvas.draw_text(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", THEME.accent);
+        canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 80, "Enter to evaluate", THEME.accent);
     }
     evaluate_button.draw(canvas, THEME);
-    canvas.draw_text(PANEL_X - 2, PANEL_Y + 104, "Enter: evaluate", THEME.text);
+    canvas.draw_text_system(PANEL_X - 2, PANEL_Y + 104, "Enter: evaluate", THEME.text);
     // The desktop owns the cursor; clients draw only control hover state.
 }
 

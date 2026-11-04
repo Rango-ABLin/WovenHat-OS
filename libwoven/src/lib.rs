@@ -363,6 +363,62 @@ pub mod graphics {
     const SYSTEM_FONT_MAPPING_BYTES: u64 = 622_592;
     static SYSTEM_FONT_BASE: AtomicU64 = AtomicU64::new(0);
 
+    // Keeps the fixed userspace image within the established loader-size
+    // budget while covering the hottest repeated UI glyphs.
+    const GLYPH_CACHE_CAPACITY: usize = 64;
+    pub(crate) const GLYPH_CACHE_WIDTH: usize = 24;
+    pub(crate) const GLYPH_CACHE_HEIGHT: usize = 24;
+    pub(crate) const GLYPH_CACHE_PIXELS: usize = GLYPH_CACHE_WIDTH * GLYPH_CACHE_HEIGHT;
+
+    #[derive(Clone, Copy)]
+    struct RasterGlyphCacheEntry {
+        font_id: usize,
+        character: u32,
+        scale: u16,
+        valid: bool,
+        alpha: [u8; GLYPH_CACHE_PIXELS],
+    }
+
+    const EMPTY_RASTER_GLYPH_CACHE_ENTRY: RasterGlyphCacheEntry = RasterGlyphCacheEntry {
+        font_id: 0,
+        character: 0,
+        scale: 0,
+        valid: false,
+        alpha: [0; GLYPH_CACHE_PIXELS],
+    };
+
+    struct RasterGlyphCache {
+        busy: core::sync::atomic::AtomicBool,
+        entries: core::cell::UnsafeCell<[RasterGlyphCacheEntry; GLYPH_CACHE_CAPACITY]>,
+        next: core::sync::atomic::AtomicUsize,
+    }
+
+    // SAFETY: access to entries is serialized by busy. The cache contains no
+    // borrowed data, only bounded glyph coverage bytes and scalar keys.
+    unsafe impl Sync for RasterGlyphCache {}
+
+    static RASTER_GLYPH_CACHE: RasterGlyphCache = RasterGlyphCache {
+        busy: core::sync::atomic::AtomicBool::new(false),
+        entries: core::cell::UnsafeCell::new(
+            [EMPTY_RASTER_GLYPH_CACHE_ENTRY; GLYPH_CACHE_CAPACITY],
+        ),
+        next: core::sync::atomic::AtomicUsize::new(0),
+    };
+
+    struct SystemFaceCache {
+        busy: core::sync::atomic::AtomicBool,
+        face: core::cell::UnsafeCell<Option<TrueTypeFace<'static>>>,
+    }
+
+    // SAFETY: busy serializes the only mutable access; the face borrows the
+    // process-lifetime read-only font mapping and contains no mutable state.
+    unsafe impl Sync for SystemFaceCache {}
+
+    static SYSTEM_FACE_CACHE: SystemFaceCache = SystemFaceCache {
+        busy: core::sync::atomic::AtomicBool::new(false),
+        face: core::cell::UnsafeCell::new(None),
+    };
+
     /// A format-independent sRGB colour used by WovenGraphics.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Color {
@@ -7063,6 +7119,119 @@ pub mod graphics {
         pub const fn table_span(&self) -> (usize, usize) {
             (self.cmap_offset, self.cmap_length)
         }
+    }
+
+    pub(crate) fn cached_glyph(
+        face: &TrueTypeFace<'_>,
+        character: char,
+        scale: u16,
+        output: &mut [u8; GLYPH_CACHE_PIXELS],
+    ) -> bool {
+        let font_id = face.bytes.as_ptr() as usize;
+        if RASTER_GLYPH_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            // SAFETY: busy is held exclusively for this access.
+            let entries = unsafe { &*RASTER_GLYPH_CACHE.entries.get() };
+            if let Some(entry) = entries.iter().find(|entry| {
+                entry.valid
+                    && entry.font_id == font_id
+                    && entry.character == character as u32
+                    && entry.scale == scale
+            }) {
+                output.copy_from_slice(&entry.alpha);
+                RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+                return true;
+            }
+            RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+        }
+
+        let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
+        let Some(mut canvas) = super::Canvas::new(
+            &mut pixels,
+            0,
+            0,
+            GLYPH_CACHE_WIDTH,
+            GLYPH_CACHE_HEIGHT,
+        ) else {
+            return false;
+        };
+        let ascent = i32::from(scale) * 4 / 5;
+        let mut renderer = Renderer::new(&mut canvas);
+        if face
+            .render_glyph(
+                character,
+                Point::new(0, ascent),
+                scale,
+                Color::WHITE,
+                &mut renderer,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        let mut alpha = [0_u8; GLYPH_CACHE_PIXELS];
+        for (index, pixel) in canvas.pixels().iter().copied().enumerate() {
+            alpha[index] = (pixel >> 16) as u8;
+        }
+
+        if RASTER_GLYPH_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            let slot = RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed)
+                % GLYPH_CACHE_CAPACITY;
+            // SAFETY: busy is held exclusively for this access.
+            unsafe {
+                (*RASTER_GLYPH_CACHE.entries.get())[slot] = RasterGlyphCacheEntry {
+                    font_id,
+                    character: character as u32,
+                    scale,
+                    valid: true,
+                    alpha,
+                };
+            }
+            RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
+        }
+        output.copy_from_slice(&alpha);
+        true
+    }
+
+    pub(crate) fn load_system_font_face() -> Option<&'static TrueTypeFace<'static>> {
+        let bytes = load_system_font_mapping().ok()?;
+        if SYSTEM_FACE_CACHE
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            // SAFETY: busy is held exclusively for this access.
+            let cached = unsafe { &*SYSTEM_FACE_CACHE.face.get() };
+            if let Some(face) = cached.as_ref()
+                && face.bytes.as_ptr() == bytes.as_ptr()
+                && face.bytes.len() == bytes.len()
+            {
+                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+                return Some(face);
+            }
+            let Some(face) = TrueTypeFace::from_bytes(bytes).ok() else {
+                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+                return None;
+            };
+            // SAFETY: the mapping remains valid until process teardown.
+            let face = unsafe {
+                core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face)
+            };
+            unsafe {
+                *SYSTEM_FACE_CACHE.face.get() = Some(face);
+            }
+            SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+            // SAFETY: the cache remains initialized for process lifetime.
+            return unsafe { (&*SYSTEM_FACE_CACHE.face.get()).as_ref() };
+        }
+        None
     }
 
     fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -13868,6 +14037,51 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Blend a bounded alpha mask over the canvas in one clipped pass.
+    ///
+    /// The mask is intentionally caller-owned and fixed-size at the glyph
+    /// cache boundary; this keeps cached text rendering allocation-free while
+    /// avoiding one rectangle clip calculation per covered glyph pixel.
+    pub(crate) fn blend_alpha_mask(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+        alpha: &[u8],
+        color: u32,
+    ) {
+        let Some(mask_len) = width.checked_mul(height) else {
+            return;
+        };
+        let Some(alpha) = alpha.get(..mask_len) else {
+            return;
+        };
+        let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
+            return;
+        };
+        let source_column = column.saturating_add(
+            usize::try_from(i128::from(self.x) - i128::from(x))
+                .unwrap_or(0),
+        );
+        let source_row = row.saturating_add(
+            usize::try_from(i128::from(self.y) - i128::from(y))
+                .unwrap_or(0),
+        );
+        for mask_row in 0..rows {
+            let mask_start = (source_row + mask_row) * width + source_column;
+            let target_start = (row + mask_row) * self.width + column;
+            for (target, opacity) in self.pixels[target_start..target_start + columns]
+                .iter_mut()
+                .zip(&alpha[mask_start..mask_start + columns])
+            {
+                if *opacity != 0 {
+                    *target = blend(color, *target, *opacity) & 0x00ff_ffff;
+                }
+            }
+        }
+    }
+
     /// Draw `text` with the kernel's font, top-left at `(x, y)`. Newlines
     /// start a new line at `x`.
     ///
@@ -13951,9 +14165,7 @@ impl<'a> Canvas<'a> {
         face: &crate::graphics::TrueTypeFace<'_>,
         scale: u16,
     ) {
-        let ascent = i32::from(scale) * 4 / 5;
         let (mut cursor_x, mut cursor_y) = (x, y);
-        let mut renderer = crate::graphics::Renderer::new(self);
         let unpacked = crate::graphics::Color::rgb(
             (color >> 16) as u8,
             (color >> 8) as u8,
@@ -13965,13 +14177,27 @@ impl<'a> Canvas<'a> {
                 cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
                 continue;
             }
-            let _ = face.render_glyph(
-                character,
-                crate::graphics::Point::new(cursor_x, cursor_y.saturating_add(ascent)),
-                scale,
-                unpacked,
-                &mut renderer,
-            );
+            let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
+            if crate::graphics::cached_glyph(face, character, scale, &mut alpha) {
+                self.blend_alpha_mask(
+                    cursor_x,
+                    cursor_y,
+                    crate::graphics::GLYPH_CACHE_WIDTH,
+                    crate::graphics::GLYPH_CACHE_HEIGHT,
+                    &alpha,
+                    color,
+                );
+            } else {
+                let ascent = i32::from(scale) * 4 / 5;
+                let mut renderer = crate::graphics::Renderer::new(self);
+                let _ = face.render_glyph(
+                    character,
+                    crate::graphics::Point::new(cursor_x, cursor_y.saturating_add(ascent)),
+                    scale,
+                    unpacked,
+                    &mut renderer,
+                );
+            }
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
         }
     }
@@ -13982,11 +14208,8 @@ impl<'a> Canvas<'a> {
     /// existing layout calculations stay stable while production GUI text
     /// gains antialiased glyphs.
     pub fn draw_text_system(&mut self, x: i32, y: i32, text: &str, color: u32) {
-        if let Some(face) = crate::graphics::load_system_font_mapping()
-            .ok()
-            .and_then(|bytes| crate::graphics::TrueTypeFace::from_bytes(bytes).ok())
-        {
-            self.draw_text_ttf(x, y, text, color, &face, 12);
+        if let Some(face) = crate::graphics::load_system_font_face() {
+            self.draw_text_ttf(x, y, text, color, face, 12);
         } else {
             self.draw_text(x, y, text, color);
         }

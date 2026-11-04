@@ -90,7 +90,7 @@ fn draw_files(
                 }
                 let shown_length = text_length + usize::from(directory && text_length < line.len());
                 let text = core::str::from_utf8(&line[..shown_length]).unwrap_or("?");
-                canvas.draw_text(
+                canvas.draw_text_system(
                     PANEL_X + 6,
                     PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
                     text,
@@ -102,7 +102,7 @@ fn draw_files(
         }
     }
     if shown == 0 {
-        canvas.draw_text(
+        canvas.draw_text_system(
             PANEL_X + 6,
             PANEL_Y + 6 + LINE_HEIGHT,
             "(empty or unavailable)",
@@ -112,8 +112,8 @@ fn draw_files(
     let mut digits = [0u8; 20];
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut digits);
     if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", THEME.text);
-        canvas.draw_text(PANEL_X + 66, PANEL_Y + 194, refresh_text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", THEME.text);
+        canvas.draw_text_system(PANEL_X + 66, PANEL_Y + 194, refresh_text, THEME.accent);
     }
     refresh_button.draw(canvas, THEME);
     if let Some((x, y)) = pointer {

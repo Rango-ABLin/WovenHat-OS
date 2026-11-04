@@ -8776,3 +8776,13 @@ experimental full migration of 119 GUI text call sites was reverted after a
 real 2-CPU QEMU run missed the existing Files IPC bound due to repeated full
 TTF outline rasterization. The mapped shell sign-in call site remains
 accepted; glyph outline/raster caching is the next typography increment.
+
+## Codex - Graphics modernization typography cache and Phase 7 qualification (2026-11-04)
+
+Implemented the bounded parsed-face and 64-entry alpha glyph raster caches,
+the single-pass alpha-mask compositor, and migrated all 119 GUI text call
+sites to the system primitive. VirtIO-GPU qualification passed on 1/2/4 WHPX
+CPUs. Evidence is preserved in the three passing desktop-qualification
+directories recorded in the graphics tracker. The desktop harness now records
+repaint/search summaries and explicitly reports that CPU and guest memory are
+not exposed by the current guest ABI.

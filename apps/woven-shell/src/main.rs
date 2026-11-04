@@ -1217,7 +1217,7 @@ impl Desktop {
             );
             let width = font::text_width(name) as i32;
             let text_x = area.x + ((area.width - width) / 2).max(0);
-            canvas.draw_text(text_x, area.y + 40, name, theme_text());
+            canvas.draw_text_system(text_x, area.y + 40, name, theme_text());
         }
     }
 
@@ -1274,7 +1274,7 @@ impl Desktop {
             color_of(lighten(fill, 24)),
             color_of(fill),
         );
-        canvas.draw_text(
+        canvas.draw_text_system(
             activities.x + ACTIVITIES_PADDING,
             self.text_y(),
             shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL),
@@ -1284,7 +1284,7 @@ impl Desktop {
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = (self.width - font::text_width(text) as i32) / 2;
-        canvas.draw_text(clock_x, self.text_y(), text, theme_text());
+        canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
         // The workspace switcher, left of the system menu button, same as
         // the legacy taskbar (workspace_area is already derived from
@@ -1294,7 +1294,7 @@ impl Desktop {
             let fill = theme_entry(index == self.workspace);
             fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let digit = [b'1' + index as u8];
-            canvas.draw_text(
+            canvas.draw_text_system(
                 area.x + 3,
                 self.text_y(),
                 core::str::from_utf8(&digit).unwrap_or("?"),
@@ -1310,13 +1310,13 @@ impl Desktop {
         fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
         // A plain ASCII glyph stands in for a dedicated menu icon until a
         // later iconography pass (libwoven::icons) adds one.
-        canvas.draw_text(button.x + 5, self.text_y(), "=", theme_text());
+        canvas.draw_text_system(button.x + 5, self.text_y(), "=", theme_text());
 
         if self.unread > 0 {
             let badge = self.badge_area();
             fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
             let digit = [b'0' + self.unread.min(9) as u8];
-            canvas.draw_text(
+            canvas.draw_text_system(
                 badge.x + 3,
                 badge.y + 2,
                 core::str::from_utf8(&digit).unwrap_or("?"),
@@ -1340,7 +1340,7 @@ impl Desktop {
         fill_rounded(canvas, search, CHROME_RADIUS_SMALL, theme_taskbar());
         let query = &self.query[..self.query_length];
         if query.is_empty() {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 search.x + 6,
                 search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
                 catalog.lookup("type_to_search", "Type to search"),
@@ -1350,7 +1350,7 @@ impl Desktop {
             let mut buffer = [0u8; 32];
             let length = label(query, MAX_QUERY, &mut buffer);
             let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text(
+            canvas.draw_text_system(
                 search.x + 6,
                 search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
                 text,
@@ -1379,7 +1379,7 @@ impl Desktop {
             cards
         };
         if entries.iter().all(Option::is_none) {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 overview.x + OVERVIEW_MARGIN,
                 self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
                 catalog.lookup("no_open_windows", "No open windows on this workspace"),
@@ -1398,7 +1398,7 @@ impl Desktop {
                     &mut buffer,
                 );
                 let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-                canvas.draw_text(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
+                canvas.draw_text_system(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
             }
         }
 
@@ -1428,7 +1428,7 @@ impl Desktop {
             );
             let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
             let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
-            canvas.draw_text(
+            canvas.draw_text_system(
                 text_x.max(cell.x),
                 cell.y + DESKTOP_ICON_SIZE + 6,
                 text,
@@ -1520,7 +1520,7 @@ impl Desktop {
             fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, theme_accent());
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
-            canvas.draw_text(
+            canvas.draw_text_system(
                 self.width / 2 - font::text_width(glyph) as i32 / 2,
                 avatar_y - 3,
                 glyph,
@@ -1539,7 +1539,7 @@ impl Desktop {
                     12,
                 );
             } else {
-                canvas.draw_text(centred(text), middle - 52, text, theme_text());
+                canvas.draw_text_system(centred(text), middle - 52, text, theme_text());
             }
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
@@ -1548,7 +1548,7 @@ impl Desktop {
                 }
                 line[2..2 + account.name().len()].copy_from_slice(account.name());
                 let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
-                canvas.draw_text(
+                canvas.draw_text_system(
                     centred(text),
                     middle - 38 + index as i32 * 10,
                     text,
@@ -1557,13 +1557,13 @@ impl Desktop {
             }
         } else if self.mode == LockMode::ChangePin {
             let text = catalog.lookup("change_pin", "Change PIN");
-            canvas.draw_text(centred(text), middle - 34, text, theme_text());
+            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
         } else {
             let text = catalog.lookup("locked", "Locked");
-            canvas.draw_text(centred(text), middle - 34, text, theme_text());
+            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-            canvas.draw_text(centred(clock), middle - 20, clock, theme_text());
+            canvas.draw_text_system(centred(clock), middle - 20, clock, theme_text());
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
             match self.change_pin {
@@ -1581,7 +1581,7 @@ impl Desktop {
                 LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
-        canvas.draw_text(centred(prompt), middle - 4, prompt, theme_text());
+        canvas.draw_text_system(centred(prompt), middle - 4, prompt, theme_text());
         let dots = self.entry_length as i32;
         if dots > 0 {
             let left = (self.width - (dots * 10 - 4)) / 2;
@@ -1943,7 +1943,7 @@ impl Desktop {
         // `blend()` already laid down under this shows through there as a
         // soft drop shadow rather than a visible seam.
         fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        canvas.draw_text(x + 6, y + 5, QS_TITLE, theme_accent());
+        canvas.draw_text_system(x + 6, y + 5, QS_TITLE, theme_accent());
         canvas.fill_rect(
             x + CHROME_RADIUS as i32,
             y + PANEL_ROW,
@@ -1952,7 +1952,7 @@ impl Desktop {
             theme_accent(),
         );
         for (row, text) in self.qs_rows().iter().enumerate() {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + (1 + row as i32) * PANEL_ROW + 4,
                 text,
@@ -2207,9 +2207,9 @@ impl Desktop {
         // panel and the lock screen, instead of a hard-edged square outline
         // with a flat header block.
         fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        canvas.draw_text(x + 6, y + 5, CENTER_TITLE, theme_accent());
+        canvas.draw_text_system(x + 6, y + 5, CENTER_TITLE, theme_accent());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
-        canvas.draw_text(clear_x, y + 5, CENTER_CLEAR, theme_text());
+        canvas.draw_text_system(clear_x, y + 5, CENTER_CLEAR, theme_text());
         canvas.fill_rect(
             x + CHROME_RADIUS as i32,
             y + PANEL_ROW,
@@ -2221,7 +2221,7 @@ impl Desktop {
         for (row, note) in self.notes.iter().flatten().enumerate() {
             any = true;
             let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + (1 + row as i32) * PANEL_ROW + 4,
                 text,
@@ -2229,7 +2229,7 @@ impl Desktop {
             );
         }
         if !any {
-            canvas.draw_text(
+            canvas.draw_text_system(
                 x + 6,
                 y + 1 + PANEL_ROW + 4,
                 "No notifications",
@@ -2420,7 +2420,7 @@ impl Desktop {
         let close = window.close_area();
         if !close.is_empty() {
             fill_rounded(canvas, close, CHROME_RADIUS_SMALL, CLOSE_FILL);
-            canvas.draw_text(close.x + 3, close.y + 2, "x", theme_text());
+            canvas.draw_text_system(close.x + 3, close.y + 2, "x", theme_text());
         }
         let mut buffer = [0u8; 32];
         let reserved = if close.is_empty() {
@@ -2431,7 +2431,7 @@ impl Desktop {
         let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
         let length = label(&window.title[..window.title_length], chars, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-        canvas.draw_text(area.x + 4, area.y + 4, text, theme_text());
+        canvas.draw_text_system(area.x + 4, area.y + 4, text, theme_text());
     }
 
     /// A window's title-bar fill, perspective-projected as a card tilted
@@ -2512,7 +2512,7 @@ impl Desktop {
         // chrome, instead of a hard-edged square outline.
         fill_rounded_blended(canvas, area, CHROME_RADIUS_SMALL, theme_toast(), 235);
         let text = core::str::from_utf8(&toast.text[..toast.length]).unwrap_or("");
-        canvas.draw_text(area.x + 6, area.y + 8, text, theme_text());
+        canvas.draw_text_system(area.x + 6, area.y + 8, text, theme_text());
     }
 
     fn render_toast(&self, toast: &Toast, canvas: &mut Canvas<'_>) {

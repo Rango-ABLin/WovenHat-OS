@@ -23,8 +23,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -804,6 +806,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 pass
         reap_process(process)
     result: dict[str, Any] = {"timings_ms": timings, "screenshots": screenshots, "cpus": args.cpus}
+    result["phase7_metrics"] = phase7_metrics(output / "serial.log")
     if reference_comparison is not None:
         result["reference_comparison"] = reference_comparison
     return result
@@ -811,6 +814,43 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
 
 def write_result(output: Path, result: dict[str, Any]) -> None:
     (output / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def phase7_metrics(serial_path: Path) -> dict[str, Any]:
+    """Summarize compositor repaint evidence without inventing scanout data."""
+    text = serial_path.read_text(encoding="utf-8", errors="replace")
+    recomposes = [
+        int(value)
+        for value in re.findall(r"woven-shell: interactive recompose ticks=(\d+)", text)
+    ]
+    search_latencies = [
+        int(value)
+        for value in re.findall(r"woven-shell: search latency ticks=(\d+)", text)
+    ]
+    result: dict[str, Any] = {
+        "tick_rate_hz": 100,
+        "recompose_samples": len(recomposes),
+        "recompose_ticks": recomposes,
+        "recompose_ms": [round(value * 10.0, 3) for value in recomposes],
+        "search_latency_samples": len(search_latencies),
+        "search_latency_ticks": search_latencies,
+        "measurement_limits": {
+            "input_to_frame_ms": "host QMP input-to-capture proxy is recorded in timings_ms",
+            "cpu": "not exposed as a guest ABI measurement",
+            "guest_memory": "not exposed as a guest ABI measurement",
+            "host_qemu_cpu_memory": "not used as a guest performance claim",
+        },
+    }
+    if recomposes:
+        ordered = sorted(recomposes)
+        p95_index = min(len(ordered) - 1, max(0, (len(ordered) * 95 + 99) // 100 - 1))
+        result["recompose_summary_ms"] = {
+            "min": round(min(ordered) * 10.0, 3),
+            "median": round(statistics.median(ordered) * 10.0, 3),
+            "p95": round(ordered[p95_index] * 10.0, 3),
+            "max": round(max(ordered) * 10.0, 3),
+        }
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1198,3 +1198,27 @@ here rather than re-litigated each session:
   QEMU chain at a time, preserve evidence, stage feature gates, etc.)
   overrides anything in the pasted mandate that would conflict with it.
   AGENTS.md wins.
+
+## Codex - Graphics modernization typography cache and Phase 7 qualification (2026-11-04)
+
+Completed the bounded typography migration. Canvas::draw_text_system now uses
+a process-lifetime parsed system-face cache, a fixed 64-entry 24x24-alpha
+glyph raster cache, and a single clipped alpha-mask blend pass. All 119 GUI
+canvas.draw_text call sites now use the system primitive with the bitmap
+fallback retained for missing font mappings. The cache is kept at 64 entries
+because larger per-image static storage caused the established userspace
+loader budget to reject woven-images.
+
+The real VirtIO-GPU desktop journey passed on 1, 2, and 4 WHPX CPUs after the
+cache optimization. Passing evidence:
+
+- audit-artifacts/desktop-qualification-1793801443148051400/ (1 CPU)
+- audit-artifacts/desktop-qualification-1793801772350178200/ (2 CPUs)
+- audit-artifacts/desktop-qualification-1793801888916447600/ (4 CPUs)
+
+Earlier failures and the 256/128-entry image-loader failures remain
+preserved as evidence; no timing assertion was weakened. The qualification
+harness now emits bounded Phase 7 repaint and search-latency summaries into
+result.json, while explicitly identifying CPU and guest-memory measurements as
+unavailable guest ABIs rather than mislabeling host QEMU metrics as guest
+measurements. Existing timings_ms remains the input-to-captured-frame proxy.

@@ -74,22 +74,22 @@ fn draw_editor(
             ..THEME
         },
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 84, "Files available", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 84, "Files available", THEME.accent);
     let count = entry_count();
     let mut digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 102, "Entries ", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 102, "Entries ", THEME.text);
     let count_text = libwoven::format_u64(count as u64, &mut digits);
     if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", THEME.text);
     let mut refresh_digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
     }
     refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {

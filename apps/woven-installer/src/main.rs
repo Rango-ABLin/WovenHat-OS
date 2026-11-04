@@ -204,13 +204,13 @@ fn render_gui(
     canvas.fill_rect(24, 20, canvas.width().saturating_sub(48), 42, PANEL_DARK);
     Label::new(Frame::new(42, 34, 180, 16), "WovenInstaller").draw(&mut canvas, THEME);
     let (title, detail) = screen_text(state.screen);
-    canvas.draw_text(42, 82, title, THEME.accent);
-    canvas.draw_text(42, 103, detail, MUTED);
+    canvas.draw_text_system(42, 82, title, THEME.accent);
+    canvas.draw_text_system(42, 103, detail, MUTED);
     let target_status = match inventory {
         InventoryStatus::Available => "Target service: available",
         InventoryStatus::Unavailable => "Target service: unavailable",
     };
-    canvas.draw_text(42, 124, target_status, MUTED);
+    canvas.draw_text_system(42, 124, target_status, MUTED);
     draw_field(&mut canvas, 42, 140, "Target", state.target);
     draw_field(&mut canvas, 42, 166, "Plan", state.plan);
     draw_field(&mut canvas, 42, 192, "Settings", state.settings);
@@ -226,7 +226,7 @@ fn render_gui(
             }
             InstallStatus::Failed(_) => "Install failed closed",
         };
-        canvas.draw_text(42, 218, status, MUTED);
+        canvas.draw_text_system(42, 218, status, MUTED);
     }
     let mut close = Button::new(
         Frame::new(
@@ -323,9 +323,9 @@ fn draw_field(canvas: &mut Canvas<'_>, x: i32, y: i32, label: &str, value: &[u8]
     if value.is_empty() {
         return;
     }
-    canvas.draw_text(x, y, label, MUTED);
+    canvas.draw_text_system(x, y, label, MUTED);
     if let Ok(text) = core::str::from_utf8(value) {
-        canvas.draw_text(x + 76, y, text, THEME.text);
+        canvas.draw_text_system(x + 76, y, text, THEME.text);
     }
 }
 

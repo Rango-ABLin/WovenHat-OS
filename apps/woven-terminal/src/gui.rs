@@ -62,20 +62,20 @@ fn draw(
         "WovenTerminal",
     )
     .draw(canvas, THEME);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 38, "> help", THEME.accent);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 78, "ls PATH", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 94, "cat PATH", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 142, ">", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 38, "> help", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 78, "ls PATH", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 94, "cat PATH", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 142, ">", THEME.accent);
     if let Ok(text) = core::str::from_utf8(line) {
-        canvas.draw_text(PANEL_X + 20, PANEL_Y + 142, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 20, PANEL_Y + 142, text, THEME.accent);
     }
     if let Ok(text) = core::str::from_utf8(status) {
-        canvas.draw_text(PANEL_X + 10, PANEL_Y + 158, text, THEME.text);
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 158, text, THEME.text);
     }
     clear.draw(canvas, THEME);
-    canvas.draw_text(
+    canvas.draw_text_system(
         PANEL_X + 10,
         PANEL_Y + 174,
         "Enter: submit  Backspace: edit",

@@ -139,7 +139,7 @@ fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
 
 fn draw_thumbnail(canvas: &mut Canvas<'_>, image: Option<(&[u32], usize, usize)>) {
     let Some((pixels, width, height)) = image else {
-        canvas.draw_text(182, 72, "Wallpaper unavailable", THEME.text);
+        canvas.draw_text_system(182, 72, "Wallpaper unavailable", THEME.text);
         return;
     };
     let x0 = 182i32;
@@ -187,23 +187,23 @@ fn draw_images(
             ..THEME
         },
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 88, "Image files", THEME.accent);
-    canvas.draw_text(182, 54, "Licensed wallpaper", THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 88, "Image files", THEME.accent);
+    canvas.draw_text_system(182, 54, "Licensed wallpaper", THEME.accent);
     draw_thumbnail(canvas, wallpaper);
     let mut digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 106, "Entries ", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 106, "Entries ", THEME.text);
     let count_text = libwoven::format_u64(image_count() as u64, &mut digits);
     if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text(PANEL_X + 58, PANEL_Y + 106, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 106, text, THEME.accent);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 138, "PNG  JPEG  GIF  BMP", THEME.text);
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 160, "CLI: --list PATH", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 138, "PNG  JPEG  GIF  BMP", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 160, "CLI: --list PATH", THEME.text);
     let mut refresh_digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
     }
     refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {

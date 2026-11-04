@@ -79,24 +79,24 @@ fn draw_update(
             ..THEME
         },
     );
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 58, "Candidate packages", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 58, "Candidate packages", THEME.text);
     let mut digits = [0u8; 20];
     let count_text = libwoven::format_u64(update_count() as u64, &mut digits);
     if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text(PANEL_X + 130, PANEL_Y + 58, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 130, PANEL_Y + 58, text, THEME.accent);
     }
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 92, "/updates", THEME.text);
-    canvas.draw_text(
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 92, "/updates", THEME.text);
+    canvas.draw_text_system(
         PANEL_X + 10,
         PANEL_Y + 124,
         "No installation performed",
         THEME.text,
     );
     let mut refresh_digits = [0u8; 20];
-    canvas.draw_text(PANEL_X + 10, PANEL_Y + 148, "Refreshes ", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 148, "Refreshes ", THEME.text);
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text(PANEL_X + 70, PANEL_Y + 148, text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 148, text, THEME.accent);
     }
     refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
