@@ -237,6 +237,14 @@ VirtIO-GPU head. A fresh boot reached `[DISPLAY] virtio-gpu mode head=0
 the launcher default; `std` and two-device `virtio-gpu` remain explicit
 fallbacks. Evidence: `target/desktop-interactive-20261104-133410-048`.
 
+### 2026-11-04 (session: stale VGA removed)
+
+Removed the remaining two-device path from the `virtio-gpu` launcher mode.
+Both VirtIO-GPU modes now emit only `-vga none -device virtio-vga,id=gpu0`
+with one GTK display, so QEMU cannot select a separate stale VGA scanout.
+A fresh default launch recorded exactly those arguments and was booted and
+terminated cleanly after the single-device display path was verified.
+
 ### 2026-11-04 (session: Phase 1 GPU tab default)
 
 Promoted the already-verified two-device interactive mode to the default in

@@ -3,11 +3,9 @@ param(
     [ValidateSet(1, 2, 4)][int]$Cpus = 2,
     [string]$Memory = '5G',
     [ValidateSet('whpx', 'tcg')][string]$Accelerator = 'whpx',
-    # 'virtio-gpu' keeps the long-proven UEFI/GOP framebuffer path and adds a
-    # virtio-gpu-pci device so the kernel's compositor::attach_gpu_outputs()
-    # (which calls virtio_gpu::Gpu::probe() in the production, non-test-gated
-    # path) has a real device to find. The GTK tabs expose the live GPU head
-    # while VGA remains available for the UEFI boot console.
+    # Both VirtIO-GPU modes use one virtio-vga device. It supplies the
+    # UEFI/GOP framebuffer and the kernel's compositor::attach_gpu_outputs()
+    # transport together, so no stale secondary VGA display exists.
     [ValidateSet('std', 'virtio-gpu', 'virtio-gpu-only')][string]$Display = 'virtio-gpu-only',
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 )
@@ -44,21 +42,13 @@ image = desktop.build_hardware_demo(out)
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
     $accelOption = if ($Accelerator -eq 'whpx') { 'whpx' } else { 'tcg,thread=multi,tb-size=256' }
-    # 'virtio-gpu' keeps '-vga std' for the UEFI GOP boot console and adds a
-    # second, independent virtio-gpu-pci device. 'virtio-gpu-only' uses
-    # virtio-vga, whose UEFI GOP is pixel-backed while still exposing the
-    # VirtIO-GPU transport to compositor::attach_gpu_outputs().
+    # The GPU modes deliberately use a single virtio-vga display. The
+    # historical two-device path is not retained because QEMU's default
+    # screendump/window selection could remain on stale VGA output.
     # id=gpu0 lets a QMP `screendump` target this device specifically via
-    # device='gpu0', head=0 (confirmed necessary: screendump with no
-    # device/head targets the default/-vga std console, not this one, even
-    # though the kernel is genuinely presenting to the virtio-gpu scanout).
-    # The interactive GTK window exposes both graphical interfaces as tabs;
-    # select the virtio-gpu tab to watch the live compositor frame.
+    # device='gpu0', head=0 when a device-specific capture is desired.
     $displayArgs = if ($Display -eq 'virtio-gpu') {
-        # Keep VGA as the UEFI GOP boot console, but expose QEMU's GTK display
-        # tabs so an interactive user can switch from the stale VGA console to
-        # the live virtio-gpu head. QMP still targets it explicitly as gpu0.
-        @('-display', 'gtk,show-tabs=on', '-vga', 'std', '-device', 'virtio-gpu-pci,id=gpu0')
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0')
     } elseif ($Display -eq 'virtio-gpu-only') {
         @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0')
     } else {

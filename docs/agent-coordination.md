@@ -117,6 +117,14 @@ display, WovenShell startup, and Ada sign-in at 1 GiB guest memory. The
 GPU-only mode is now the interactive launcher default; `std` and the
 two-device `virtio-gpu` path remain explicit fallbacks.
 
+## Codex - Graphics modernization stale VGA removed (2026-11-04)
+
+Removed the two-device launcher path from `virtio-gpu`. Both VirtIO-GPU
+modes now use only `-vga none -device virtio-vga,id=gpu0` and one GTK display,
+so the interactive window and QMP default cannot remain attached to a stale
+secondary VGA scanout. A fresh default launch recorded the single-device
+arguments and booted through the already-verified VirtIO-GPU desktop path.
+
 ## Claude Code - WovenShell chrome modernization: rounded + gradient fills (2026-10-28)
 
 User reported the GUI "looks like 1998 graphics." Root cause:
