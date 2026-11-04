@@ -22,7 +22,11 @@ def main():
     env = dict(os.environ)
     env.pop("CARGO_BUILD_BUILD_DIR", None)
     env["CARGO_TARGET_DIR"] = str(app / "target")
-    if subprocess.run(["cargo", "build", "--release"], cwd=app, env=env).returncode:
+    if subprocess.run(
+        ["cargo", "build", "--release", "--target", "x86_64-unknown-none"],
+        cwd=app,
+        env=env,
+    ).returncode:
         return 1
     image = app / "target" / "x86_64-unknown-none" / "release" / "wovenhat-terminal"
     package = image.with_suffix(".wapp")

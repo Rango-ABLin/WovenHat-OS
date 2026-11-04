@@ -1,6 +1,7 @@
 use libwoven::layout::Frame;
 use libwoven::ui::{Button, Label, Theme};
 use libwoven::{Canvas, GraphicsSurface, rgb};
+use wovenhat_terminal::{Command, parse};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -123,9 +124,10 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     libwoven::message_send(shell, &response).is_ok()
 }
 
-/// Open a terminal preview through WovenShell. ASCII input, Enter, and
-/// Backspace are accepted through the bounded shell key protocol; the
-/// existing `--interactive` CLI remains available for full command I/O.
+/// Open the interactive terminal through WovenShell. ASCII input, Enter, and
+/// Backspace are accepted through the bounded shell key protocol. Submitted
+/// commands use the same bounded command executor as `--interactive`; their
+/// output is visible on QEMU's serial/monitor console.
 pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
@@ -263,7 +265,17 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
                 match message[4] {
                     1 => {
-                        status = b"Command submitted to terminal preview";
+                        let command = parse(&line[..length]);
+                        if command == Command::Quit {
+                            drop(window);
+                            libwoven::exit(0)
+                        }
+                        let result = crate::run(command);
+                        status = if result == 0 {
+                            b"Command executed; output is on QEMU serial"
+                        } else {
+                            b"Command failed; output is on QEMU serial"
+                        };
                         length = 0;
                     }
                     2 => {

@@ -66,7 +66,7 @@ fn interactive() -> ! {
     }
 }
 
-fn run(command: Command<'_>) -> u64 {
+pub(crate) fn run(command: Command<'_>) -> u64 {
     match command {
         Command::Help => {
             let _ = libwoven::print("WovenTerminal commands: help, ls PATH, cat PATH, calc EXPR, exit\n");
