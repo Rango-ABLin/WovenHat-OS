@@ -1,5 +1,77 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that create refuses when the directory block is full
+
+Branch: `auto/wovenhat-development` (base `deb95ef9`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` (wfs.rs line 1104) scans for a free position only in directory
+blocks whose `direct[slot]` is non-zero:
+
+```rust
+let Some(position) = view
+    .entries
+    .iter()
+    .enumerate()
+    .filter(|(position, _)| dir.direct[position / DIR_ENTRIES_PER_BLOCK] != 0)
+    .find(|(_, entry)| entry.inode == 0)
+    .map(|(position, _)| position)
+else {
+    return Err(Error::NoSpace);
+};
+```
+
+When every slot in every allocated directory block is occupied (`entry.inode != 0`
+for all of them), the iterator finds no position and the `else` branch returns
+`Err(Error::NoSpace)`.
+
+A newly formatted volume has exactly one directory data block (`direct[0]`),
+which holds `DIR_ENTRIES_PER_BLOCK` (= 8) entry slots.  After filling all 8, the
+next `create` or `create_file` hits this guard regardless of how many free inodes
+or data blocks remain.  The guard fires before `allocate_inode` is called, so no
+inode is consumed and the refused operation leaves no trace on disk.
+
+The existing test `create_file_out_of_space_leaves_no_file` covers the
+`allocate_block` `NoSpace` path (data blocks exhausted) but not this path (all
+directory entry slots occupied).  No prior test exercised the scenario where the
+directory block itself is full while inodes and data blocks remain available.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `create_refuses_when_the_directory_block_is_full`:
+
+- Calls `formatted()` to get a fresh volume with one directory block.
+- Fills all `DIR_ENTRIES_PER_BLOCK` (8) slots with `create_file` calls
+  (`f0.txt` through `f7.txt`), each succeeding.
+- Snapshots the image after the 8 successful creates.
+- Asserts `create_file(1, "overflow.txt", ...)` returns `Err(Error::NoSpace)`.
+- Asserts the image was not modified by the refused `create_file`.
+- Asserts `create(1, "also.txt", ...)` also returns `Err(Error::NoSpace)`.
+- Asserts the image was not modified by the refused `create`.
+- Asserts all 8 existing files remain accessible via `lookup`.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **92 passed / 0 failed** (was 91; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test uses a volume that starts with one directory block (8 slots).
+  A volume whose directory had grown to multiple blocks would need all blocks'
+  slots filled; the single-block case is sufficient to prove the guard fires.
+- No production code changed — the guard already existed in `stage_create`;
+  only the missing test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that write_file refuses a file whose existing block the bitmap marks free
 
 Branch: `auto/wovenhat-development` (base `71ae6829`). Working tree was clean.

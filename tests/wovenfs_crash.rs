@@ -4792,6 +4792,67 @@ fn lookup_refuses_an_entry_naming_an_out_of_range_inode() {
     );
 }
 
+/// `stage_create` (wfs.rs line 1104) scans for a free position only in
+/// directory blocks whose `direct[slot]` is non-zero.  When every slot in every
+/// allocated directory block is occupied (`entry.inode != 0` for all of them), the
+/// iterator finds no position and the `else` branch returns `Err(Error::NoSpace)`.
+///
+/// A newly formatted volume has exactly one directory data block (`direct[0]`), which
+/// holds `DIR_ENTRIES_PER_BLOCK` (= 8) entry slots.  After filling all 8, the next
+/// `create` or `create_file` hits this guard regardless of how many free inodes or
+/// data blocks remain.  The guard fires before `allocate_inode` is called, so no
+/// inode is consumed and the refused operation leaves no trace on disk.
+///
+/// This is different from the "data blocks exhausted" path (`allocate_block` returning
+/// `NoSpace`), which is covered by `create_file_out_of_space_leaves_no_file`.
+#[test]
+fn create_refuses_when_the_directory_block_is_full() {
+    let base = formatted();
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // Fill all DIR_ENTRIES_PER_BLOCK (= 8) slots in the single root directory block.
+    for i in 0..wfs::DIR_ENTRIES_PER_BLOCK {
+        let name = format!("f{i}.txt");
+        volume
+            .create_file(1, &name, 0o644, b"hi", 1)
+            .unwrap_or_else(|e| panic!("create file {i}: {e:?}"));
+    }
+
+    // Snapshot: the refused operations below must not modify any sector.
+    let before = base.sectors();
+
+    // The 9th create_file must fail: no free slot in the allocated directory block.
+    assert_eq!(
+        volume.create_file(1, "overflow.txt", 0o644, b"hi", 2),
+        Err(Error::NoSpace),
+        "create_file must refuse when the directory block is full"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // Plain create (no data) also fails: the slot check runs before inode allocation.
+    assert_eq!(
+        volume.create(1, "also.txt", 0o644, 2),
+        Err(Error::NoSpace),
+        "create must refuse when the directory block is full"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused create must not modify the image"
+    );
+
+    // All 8 existing files remain accessible.
+    for i in 0..wfs::DIR_ENTRIES_PER_BLOCK {
+        let name = format!("f{i}.txt");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused creates"
+        );
+    }
+}
+
 /// `stage_write` (wfs.rs line 1179) checks `!bitmap_get(txn, node.direct[slot])?`
 /// and returns `Err(Error::Corrupt)` when an in-place rewrite would target a block
 /// the bitmap marks free.  Without this guard, writing through a stale block pointer
