@@ -5466,3 +5466,76 @@ fn create_refuses_when_all_inodes_are_exhausted() {
     assert_eq!(&out[..len], b"hello");
     volume.check().expect("volume consistent after refused creates");
 }
+
+/// `stage_create` (wfs.rs line 1101) scans `view.entries` for any entry
+/// whose name matches `name` before allocating an inode or writing any sector:
+///
+/// ```ignore
+/// if view.entries.iter().any(|entry| entry.matches(name)) {
+///     return Err(Error::Exists);
+/// }
+/// ```
+///
+/// If this guard fires, `allocate_inode` is never called and no sector is
+/// staged, so the volume is completely unmodified.  Without the guard, a
+/// second `create` with the same name would allocate a fresh inode and write a
+/// directory entry that duplicates the name, leaving two entries pointing at
+/// different inodes under identical names; `lookup` would return whichever
+/// came first, and the second inode would be an orphan that `check()` flags.
+///
+/// The existing bundled test `names_are_validated_and_duplicates_refused`
+/// verifies the error variant but does not snapshot the image before or after
+/// the refused call, so it does not prove atomicity.  This test adds that
+/// guarantee in isolation.
+#[test]
+fn create_refuses_a_duplicate_name() {
+    let base = formatted();
+
+    // Create the original file so the name exists in the directory.
+    let orig_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "hello.txt", 0o644, b"world", 1)
+            .expect("create hello.txt")
+    };
+
+    // Snapshot the image after the create, before any refused call.
+    let snapshot = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // create must refuse — entry matching "hello.txt" already exists.
+    assert_eq!(
+        volume.create(1, "hello.txt", 0o644, 2),
+        Err(Error::Exists),
+        "create must refuse a duplicate name"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create must not modify the image"
+    );
+
+    // create_file takes the same path and must also refuse.
+    assert_eq!(
+        volume.create_file(1, "hello.txt", 0o644, b"other", 2),
+        Err(Error::Exists),
+        "create_file must refuse a duplicate name"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create_file must not modify the image"
+    );
+
+    // Control: the original file is intact and still readable.
+    let entry = volume.lookup(1, "hello.txt").expect("lookup hello.txt");
+    assert_eq!(entry.inode, orig_inode, "original inode must be unchanged");
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    let len = volume.read_file(orig_inode, &mut out).expect("read hello.txt");
+    assert_eq!(&out[..len], b"world", "original content must be intact");
+
+    // Control: a different name still creates successfully.
+    volume
+        .create(1, "other.txt", 0o644, 3)
+        .expect("create other.txt with different name must succeed");
+    volume.check().expect("volume consistent after refused creates");
+}

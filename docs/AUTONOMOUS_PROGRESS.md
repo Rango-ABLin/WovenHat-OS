@@ -1,5 +1,70 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that create refuses a duplicate name
+
+Branch: `auto/wovenhat-development` (base `263818dd`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` (wfs.rs line 1101) scans `view.entries` for a matching name before
+calling `allocate_inode` or staging any sector:
+
+```rust
+if view.entries.iter().any(|entry| entry.matches(name)) {
+    return Err(Error::Exists);
+}
+```
+
+If this guard fires, `allocate_inode` is never called and no sector is staged, so
+the volume is completely unmodified.  Without the guard, a second `create` with the
+same name would allocate a fresh inode and write a directory entry that duplicates
+the name: `lookup` would return whichever came first, and the second inode would be
+an orphan that `check()` flags.
+
+The existing bundled test `names_are_validated_and_duplicates_refused` verifies the
+`Err(Exists)` variant but does not snapshot the image before or after the refused
+call, so it does not prove atomicity.  No prior test exercised the `Exists` guard in
+isolation with an image-unmodified assertion.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `create_refuses_a_duplicate_name`:
+
+- Calls `formatted()` and creates `hello.txt` (5 bytes, `"world"`) via `create_file`,
+  recording its inode (`orig_inode`).
+- Snapshots the image after the create, before any refused call.
+- Asserts `create(1, "hello.txt", 0o644, 2)` returns `Err(Error::Exists)`.
+- Asserts the image is unmodified.
+- Asserts `create_file(1, "hello.txt", 0o644, b"other", 2)` also returns
+  `Err(Error::Exists)` and also leaves the image unmodified.
+- Controls: `lookup(1, "hello.txt")` still returns `orig_inode`; `read_file` returns
+  the original `"world"` content; `create(1, "other.txt", ...)` with a different name
+  succeeds; `check()` confirms the volume is consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **102 passed / 0 failed** (was 101; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires before `allocate_inode` is called, so no inode is consumed and
+  no sector is staged on a refused `Exists` return; the image-unmodified assertion
+  is authoritative.
+- Both `create` and `create_file` go through `stage_create`, so both are verified.
+- The `InvalidName` guard at wfs.rs:1093 (empty name, name with `/`, name too long)
+  is covered only by the existing bundled test; it could be isolated in a future
+  session.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-04 — WovenFS: test that create refuses when all inodes are exhausted
 
 Branch: `auto/wovenhat-development` (base `f4b6ba3e`). Working tree was clean.
