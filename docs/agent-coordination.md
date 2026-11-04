@@ -8902,3 +8902,11 @@ units. The complete boot/login/desktop milestone is not accepted. Next is
 Phase B1 malformed boot configuration rejection; no registry-cache edits.
 The earlier cross-worktree Cargo collision is retained as a failed attempt;
 all future build/acceptance work must be serialized even across worktrees.
+
+## Codex - Phase A supplemental libwoven host lint (2026-11-04)
+
+Package-specific libwoven host tests pass 212/212; all-targets Clippy finds an
+existing identity_op in the shadow regression's pixels[1 * 4 + 1]. Claiming
+only that test expression in libwoven/src/lib.rs; replace with pixels[5], the
+same exact pixel, and preserve every assertion. Runtime code is unchanged.
+No bootloader Phase B edit starts until this supplemental check passes.

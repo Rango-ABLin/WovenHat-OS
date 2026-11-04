@@ -67,3 +67,10 @@ All eight final feature lints (Stage12.1–12.5, Stage15.2, Stage32.1/32.2) pass.
 Stage12.1–12.5 QEMU also passes all 15 cases; final-stage12-matrix.log retains
 individual evidence paths. This does not accept later startup/security phases
 or substitute mocked graphics output for real graphical qualification.
+
+Phase A supplemental package gate: libwoven host units pass 212/212. Its
+package-specific all-targets Clippy initially found an existing identity_op
+in the shadow test's pixels[1 * 4 + 1]. Replacing that with pixels[5] preserves
+the exact assertion; repaired Clippy and all 212 tests pass. Only cfg(test)
+code changed after the accepted runtime source; no runtime matrix repetition
+is claimed for that test-only spelling change. Original lint output retained.

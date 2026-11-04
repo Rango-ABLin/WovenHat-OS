@@ -15726,7 +15726,7 @@ mod tests {
         }
         // (1,1) and (2,2): the square itself, opaque white, unaffected by
         // the shadow drawn under it.
-        assert_eq!(pixels[1 * 4 + 1], Color::WHITE.packed());
+        assert_eq!(pixels[5], Color::WHITE.packed());
         assert_eq!(pixels[2 * 4 + 2], Color::WHITE.packed());
         // (3,3): only the shadow's offset square reaches here, blended
         // black-over-white at half opacity -- neither pure white (no
