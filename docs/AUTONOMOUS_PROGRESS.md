@@ -1,5 +1,77 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that lookup refuses an entry naming an out-of-range inode
+
+Branch: `auto/wovenhat-development` (base `4c8de8d5`). Working tree was clean.
+
+### Defect / gap
+
+`lookup` (wfs.rs lines 978–982) guards:
+
+```rust
+if entry.inode > u64::from(self.super_block.inode_count)
+    || !self.inode(entry.inode)?.is_used()
+{
+    return Err(Error::Corrupt);
+}
+```
+
+The guard has two branches joined by `||`:
+
+1. `entry.inode > inode_count` — out-of-range inode field in directory entry
+2. `!self.inode(entry.inode)?.is_used()` — stale entry pointing at a freed inode
+
+Branch 2 had a dedicated test: `lookup_refuses_a_stale_entry_naming_a_free_inode`.
+Branch 1 had no dedicated test for `lookup()` itself.  The parallel test
+`check_refuses_a_directory_entry_with_inode_number_out_of_range` only exercises
+`check()` for this scenario.
+
+Without branch 1, `self.inode(entry.inode)?` for an out-of-range number returns
+`Err(Error::NotFound)` (the return value of `inode()` for `number > inode_count`),
+propagating the wrong error variant to callers.  A corrupt image with an
+out-of-range directory entry inode would then report `NotFound` rather than
+`Corrupt`, making a filesystem-level corruption appear as a simple missing-file
+condition.  This guard is the only thing that maps the out-of-range case to
+`Corrupt` before `?` propagates `NotFound` upstream.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`lookup_refuses_an_entry_naming_an_out_of_range_inode`:
+
+- Calls `two_file_root()` to create a two-file root directory.
+- Records `a.txt`'s inode number via an unpatched lookup.
+- Forks the image and uses `patch_dir_entry` to overwrite `a.txt`'s inode
+  field with `INODES + 1` (= 33), one past the inode table bound.
+- Snapshots the image before any operation.
+- Asserts `lookup(1, "a.txt")` returns `Err(Error::Corrupt)`, not `Err(Error::NotFound)`.
+- Asserts the image was not modified.
+- Controls:
+  - `b.txt` is unpatched and still resolves on the patched image.
+  - On the unpatched base image, `a.txt` lookup succeeds and returns the
+    original inode.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **90 passed / 0 failed** (was 89; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- This completes the two-branch coverage for the `||` guard at wfs.rs:978–982:
+  both conditions (`entry.inode > inode_count` and `!is_used()`) now have
+  dedicated `lookup` tests.
+- No production code changed — the guard already existed; only the missing test
+  was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that unlink refuses an entry naming a directory-kind inode
 
 Branch: `auto/wovenhat-development` (base `5677dd39`). Working tree was clean.
