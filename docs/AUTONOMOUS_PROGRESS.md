@@ -1,5 +1,63 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that write_file refuses data larger than MAX_FILE_SIZE
+
+Branch: `auto/wovenhat-development` (base `d67a7075`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1160) has a size guard:
+
+```rust
+if data.len() > MAX_FILE_SIZE {
+    return Err(Error::TooLarge);
+}
+```
+
+`create_file` has an independent identical guard at line 1074 that fires
+before `stage_create` or `stage_write` are called, so the existing test
+`create_file_refuses_oversized_data` never reaches `stage_write`'s guard.
+No prior test exercised the `write_file` → `stage_write` path with oversized
+data.  Without the guard in `stage_write`, a caller could overwrite a file
+with more bytes than the eight-entry `direct` array can address, writing past
+`DIRECT_BLOCKS` and causing an out-of-bounds panic.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `write_file_refuses_oversized_data`:
+
+- Calls `formatted()` and creates `a.txt` (5 bytes) via `create_file`,
+  recording its inode.
+- Snapshots the image after the create (before the refused write).
+- Allocates a `vec![0xab; MAX_FILE_SIZE + 1]` buffer (one byte over the
+  limit) and calls `write_file(file_inode, &oversized, 2)`.
+- Asserts the result is `Err(Error::TooLarge)`.
+- Asserts the image is unmodified.
+- Control: `write_file(file_inode, &exact, 3)` with exactly `MAX_FILE_SIZE`
+  bytes returns `Ok(())` and `read_file` returns the correct content.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **100 passed / 0 failed** (was 99; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test uses `MAX_FILE_SIZE + 1`; any value above `MAX_FILE_SIZE` triggers
+  the same guard.
+- The `stage_write` guard is now exercised in isolation via `write_file`; the
+  identical guard in `create_file` at line 1074 continues to be exercised by
+  `create_file_refuses_oversized_data`.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field names a free inode
 
 Branch: `auto/wovenhat-development` (base `6d845147`). Working tree was clean.
