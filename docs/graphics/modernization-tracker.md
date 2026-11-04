@@ -137,7 +137,10 @@ the real qualification as an opt-in sign-in baseline check; its result is
 persisted even when a later journey assertion fails. The interactive
 VirtIO-GPU launcher now requests `1280x800` explicitly on its single
 `virtio-vga` device, and the compositor preserves a usable firmware geometry
-when one is available.
+when one is available. The qualification harness now has an opt-in
+`--display virtio-vga` mode that captures QMP device `gpu0` instead of stale
+VGA output; the full journey passed on 1/2 CPUs and exposed a real 4-CPU
+overview frame-time regression (6.04s versus the 5s limit).
 
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
@@ -219,6 +222,20 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-04 (session: GPU-path qualification harness)
+
+Extended `scripts/test-desktop-qualification.py` with `--display
+virtio-vga`. The mode boots one `virtio-vga,id=gpu0,xres=1280,yres=800`
+device and sends QMP screendumps to `device=gpu0,head=0`, so the automated
+journey now verifies the actual GPU scanout. Real WHPX results: 1 CPU PASS
+at `audit-artifacts/desktop-qualification-1793795353212115500/`; 2 CPU PASS
+at `audit-artifacts/desktop-qualification-1793795454936569800/`; 4 CPU
+reached all interaction stages but failed the existing frame limit with
+`frame_overview_ms=6039.2ms` at
+`audit-artifacts/desktop-qualification-1793795531585869600/`. This is a
+performance defect to address,
+not a relaxed gate.
 
 ### 2026-11-04 (session: Phase 1 VirtIO display geometry)
 

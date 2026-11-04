@@ -163,7 +163,8 @@ def timing_within(timing: dict[str, float], limits: dict[str, float]) -> list[st
 
 class Qmp:
     def __init__(self, port: int, deadline: float, trace: Path | None = None,
-                 process: subprocess.Popen[Any] | None = None):
+                 process: subprocess.Popen[Any] | None = None,
+                 display_device: str | None = None):
         while True:
             try:
                 self.sock = socket.create_connection(("127.0.0.1", port), timeout=2)
@@ -176,6 +177,7 @@ class Qmp:
                 time.sleep(0.1)
         self.file = self.sock.makefile("rwb")
         self.trace = trace
+        self.display_device = display_device
         self._read_reply()
         self.command("qmp_capabilities")
 
@@ -235,7 +237,10 @@ class Qmp:
         ]})
 
     def screendump(self, path: Path) -> None:
-        self.command("screendump", {"filename": str(path.resolve())})
+        arguments: dict[str, Any] = {"filename": str(path.resolve())}
+        if self.display_device is not None:
+            arguments.update({"device": self.display_device, "head": 0})
+        self.command("screendump", arguments)
 
     def close(self) -> None:
         try:
@@ -483,15 +488,20 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
     image = build_hardware_demo(output)
     serial = output / "serial.log"
     qmp_port = free_port()
+    display_args = (
+        ["-display", "none", "-vga", "none", "-device", "virtio-vga,id=gpu0,xres=1280,yres=800"]
+        if args.display == "virtio-vga"
+        else ["-display", "none", "-vga", "std"]
+    )
     command = [
         str(qemu), "-accel", "whpx" if args.accelerator == "whpx" else "tcg,tb-size=128",
         "-machine", "pc", "-m", args.memory,
-        "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
+        "-smp", str(args.cpus), "-serial", f"file:{serial}",
         "-no-reboot", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
         "-drive", f"if=none,id=boot,format=raw,readonly=on,file={image}",
-        "-device", "virtio-blk-pci,drive=boot,bootindex=1", "-vga", "std",
-    ]
+        "-device", "virtio-blk-pci,drive=boot,bootindex=1",
+    ] + display_args
     (output / "qemu-command.json").write_text(json.dumps(command, indent=2) + "\n", encoding="utf-8")
     timings: dict[str, float] = {}
     screenshots: list[str] = []
@@ -502,7 +512,13 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
         with (output / "qemu.log").open("w", encoding="utf-8") as qemu_log:
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             process = subprocess.Popen(command, cwd=ROOT, stdout=qemu_log, stderr=subprocess.STDOUT, creationflags=flags)
-            qmp = Qmp(qmp_port, time.monotonic() + 30, output / "qmp.jsonl", process)
+            qmp = Qmp(
+                qmp_port,
+                time.monotonic() + 30,
+                output / "qmp.jsonl",
+                process,
+                "gpu0" if args.display == "virtio-vga" else None,
+            )
             wait_marker(serial, "[SESSION] WovenShell desktop started", started + args.timeout, process,
                         "desktop_session_startup_ms", timings, started)
             wait_marker(serial, "woven-shell: desktop ready", started + args.timeout, process,
@@ -804,6 +820,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--accelerator", choices=("tcg", "whpx"), default="tcg",
                         help="QEMU accelerator; assertions and timing limits are identical")
+    parser.add_argument(
+        "--display", choices=("std", "virtio-vga"), default="std",
+        help="display path to qualify: legacy VGA or single-head VirtIO-GPU at 1280x800",
+    )
     parser.add_argument("--memory", default="5G", help="guest RAM (default: 5G configured to leave 4 GiB usable after firmware reservations)")
     parser.add_argument("--timeout", type=float, default=180.0)
     # TCG/QEMU startup and PS/2 input can cross 15 seconds on a loaded host;
@@ -844,6 +864,7 @@ def main(argv: list[str] | None = None) -> int:
         "firmware": str(firmware.resolve()),
         "cpus": args.cpus,
         "accelerator": args.accelerator,
+        "display": args.display,
         "physical_hardware_touched": False,
         "reboot_requested": False,
         "output": str(output),

@@ -8743,3 +8743,12 @@ interactive launcher requests `virtio-vga,id=gpu0,xres=1280,yres=800` with
 `-vga none`. A direct WHPX QEMU probe reached the 1280x800 VirtIO display and
 WovenShell desktop. The launcher-level retry was blocked by host guest-memory
 allocation; evidence was preserved and no unrelated QEMU was terminated.
+
+## Codex - Graphics modernization GPU-path qualification (2026-11-04)
+
+Extended the desktop qualification harness with opt-in `--display
+virtio-vga`, targeting QMP screendumps at `gpu0`/head 0 and exercising the
+single 1280x800 VirtIO-GPU path. WHPX journeys passed on 1 and 2 CPUs. The
+4-CPU journey reached all interaction stages but exceeded the existing
+overview frame-time limit; the failure is preserved for the performance
+follow-up and the gate was not weakened.
