@@ -357,6 +357,12 @@ pub mod time {
     pub const TICKS_PER_SECOND: u64 = 100;
 }
 pub mod graphics {
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    const SYSTEM_FONT_BYTES: usize = 621_572;
+    const SYSTEM_FONT_MAPPING_BYTES: u64 = 622_592;
+    static SYSTEM_FONT_BASE: AtomicU64 = AtomicU64::new(0);
+
     /// A format-independent sRGB colour used by WovenGraphics.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct Color {
@@ -12173,13 +12179,36 @@ pub mod graphics {
         ((sum + total / 2) / total).clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
     }
 
-    /// Read the bundled NotoSans TTF staged at boot (graphics-modernization
-    /// Phase 3) into `buffer`, the same `open`/`read_all`/`close` pattern
-    /// `media::load_vfs_asset` uses for the wallpaper BMP. Returns the byte
-    /// count on success; `buffer` must be at least as large as the file
-    /// (currently 621,572 bytes -- size it generously, e.g. 768 KiB, to
-    /// tolerate a future font update without a code change). Parse the
-    /// result with `TrueTypeFace::from_bytes(&buffer[..length])`.
+    /// Map the staged NotoSans TTF read-only and demand-paged. The mapping is
+    /// backed by the VFS file rather than a large per-process static buffer,
+    /// so every GUI process keeps only the pages it actually touches. The
+    /// kernel validates the file mapping and owns its lifetime through process
+    /// teardown; this function exposes only the fixed, validated font span.
+    pub fn load_system_font_mapping() -> Result<&'static [u8], crate::Error> {
+        let mut base = SYSTEM_FONT_BASE.load(Ordering::Acquire);
+        if base == 0 {
+            let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
+            let mapped = crate::mmap_file_lazy(descriptor, SYSTEM_FONT_MAPPING_BYTES, 0);
+            // The lazy mapping retains its file reference after close; do not
+            // leak a descriptor just to keep the read-only mapping alive.
+            let _ = crate::close(descriptor);
+            base = mapped?;
+            let _ = SYSTEM_FONT_BASE.compare_exchange(0, base, Ordering::AcqRel, Ordering::Acquire);
+            base = SYSTEM_FONT_BASE.load(Ordering::Acquire);
+        }
+        if base == 0 {
+            return Err(crate::Error::Failed);
+        }
+        // SAFETY: mmap_file_lazy returns a read-only userspace mapping of the
+        // validated system font, the file size is fixed by the staged asset,
+        // and the mapping remains valid until this process exits.
+        Ok(unsafe { core::slice::from_raw_parts(base as *const u8, SYSTEM_FONT_BYTES) })
+    }
+
+    /// Copy the staged font into caller-owned storage for bounded callers that
+    /// cannot use a lazy mapping. Prefer [`load_system_font_mapping`] for GUI
+    /// rendering so large font pages remain demand-paged and shared by the
+    /// kernel's file mapping cache.
     pub fn load_system_font_bytes(buffer: &mut [u8]) -> Result<usize, crate::Error> {
         let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
         let result = crate::read_all(descriptor, buffer);

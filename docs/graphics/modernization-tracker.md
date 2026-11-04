@@ -142,6 +142,10 @@ when one is available. The qualification harness now has an opt-in
 VGA output; the full 1280x800 journey now passes on 1/2/4 CPUs. The isolated
 4-CPU 6.04s overview sample was host scheduling variance; a controlled repeat
 passed and the existing 5s frame limit remains unchanged.
+Typography's former per-process font-capacity blocker is also closed: the
+existing read-only lazy file mapping now supplies the staged TTF without a
+607 KiB ELF buffer, and the sign-in label is the first production TTF call
+site with bitmap fallback.
 
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
@@ -223,6 +227,23 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-04 (session: shared lazy font mapping)
+
+Replaced the unsafe per-process large static font-buffer approach with
+`graphics::load_system_font_mapping()`, using the existing read-only,
+demand-paged `mmap_file_lazy` ABI and an atomic per-process mapping cache.
+The mapping is bounded to the validated 621,572-byte staged asset and the
+kernel owns teardown with the process mapping. WovenShell's sign-in label now
+uses `TrueTypeFace` through that mapping and falls back to the bitmap font if
+the optional asset is unavailable. Validation: shell target Clippy,
+workspace all-targets Clippy, 212 `libwoven` tests, and the complete real
+1280x800 VirtIO-GPU qualification passed on 1/2/4 CPUs. Evidence:
+`audit-artifacts/desktop-qualification-1793796482802807200/`,
+`audit-artifacts/desktop-qualification-1793796867299834900/`, and
+`audit-artifacts/desktop-qualification-1793796978626218100/`. The remaining
+typography work is migrating the other production text call sites and
+validating their layout/visual references.
 
 ### 2026-11-04 (session: GPU-path 1/2/4 CPU acceptance)
 

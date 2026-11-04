@@ -143,7 +143,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
 use libwoven::graphics::{
-    Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
+    Camera, Color, DepthBuffer, Rect, Renderer, TrueTypeFace, Vertex3, Vertex3Field, Vertex3Tex,
 };
 use libwoven::layout::{self, Frame};
 use libwoven::{
@@ -452,6 +452,15 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
 fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
     let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
     fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
+}
+
+/// Borrow the staged system face through its read-only lazy file mapping.
+/// Parsing the bounded table directory is cheap; glyph outlines remain
+/// demand-paged from the shared mapping and never inflate this ELF's `.bss`.
+fn system_font_face() -> Option<TrueTypeFace<'static>> {
+    libwoven::graphics::load_system_font_mapping()
+        .ok()
+        .and_then(|bytes| TrueTypeFace::from_bytes(bytes).ok())
 }
 
 /// `color`, lightened toward white by `amount` (0..=255) -- used to derive a
@@ -1520,7 +1529,18 @@ impl Desktop {
 
             // The sign-in prompt, then the accounts, the chosen one marked.
             let text = catalog.lookup("sign_in", "Sign in");
-            canvas.draw_text(centred(text), middle - 52, text, theme_text());
+            if let Some(face) = system_font_face() {
+                canvas.draw_text_ttf(
+                    centred(text),
+                    middle - 52,
+                    text,
+                    theme_text(),
+                    &face,
+                    12,
+                );
+            } else {
+                canvas.draw_text(centred(text), middle - 52, text, theme_text());
+            }
             for (index, account) in self.accounts.iter().flatten().enumerate() {
                 let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
                 if index == self.chosen {

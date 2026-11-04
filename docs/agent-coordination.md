@@ -8760,3 +8760,11 @@ desktop/input journey on 1, 2, and 4 CPUs. One isolated 4-CPU run exceeded
 the existing overview frame bound, but a controlled repeat passed; the
 failure is documented as host scheduling variance and the assertion remains
 unchanged.
+
+## Codex - Graphics modernization shared font mapping (2026-11-04)
+
+Resolved the per-process TTF capacity blocker using the existing read-only
+demand-paged `mmap_file_lazy` ABI. WovenShell's sign-in label now renders via
+`TrueTypeFace` with bitmap fallback. The full VirtIO-GPU qualification passed
+on 1/2/4 CPUs; remaining typography work is the broader call-site migration
+and reference validation.
