@@ -12113,6 +12113,20 @@ pub mod graphics {
             + i128::from(third) * third_weight;
         ((sum + total / 2) / total).clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
     }
+
+    /// Read the bundled NotoSans TTF staged at boot (graphics-modernization
+    /// Phase 3) into `buffer`, the same `open`/`read_all`/`close` pattern
+    /// `media::load_vfs_asset` uses for the wallpaper BMP. Returns the byte
+    /// count on success; `buffer` must be at least as large as the file
+    /// (currently 621,572 bytes -- size it generously, e.g. 768 KiB, to
+    /// tolerate a future font update without a code change). Parse the
+    /// result with `TrueTypeFace::from_bytes(&buffer[..length])`.
+    pub fn load_system_font_bytes(buffer: &mut [u8]) -> Result<usize, crate::Error> {
+        let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
+        let result = crate::read_all(descriptor, buffer);
+        let _ = crate::close(descriptor);
+        result
+    }
 }
 pub mod notifications {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -13745,6 +13759,60 @@ impl<'a> Canvas<'a> {
                     }
                 }
             }
+            cursor_x = cursor_x.saturating_add(font::ADVANCE);
+        }
+    }
+
+    /// Draw `text` through a real antialiased TrueType face instead of the
+    /// kernel's 5x7 bitmap font, graphics-modernization Phase 3 (see
+    /// `docs/graphics/modernization-tracker.md`). Deliberately keeps the
+    /// same fixed per-character advance (`font::ADVANCE`) and newline
+    /// behaviour as `draw_text`, rather than the font's own proportional
+    /// glyph widths: every existing caller's layout math (string-width
+    /// calculations, column alignment, panel sizing) was built assuming a
+    /// fixed-pitch cell, and this stays a drop-in replacement for
+    /// `draw_text` at the same call site rather than requiring a
+    /// layout-wide migration to go with it. A character the face has no
+    /// glyph for is skipped (left blank) rather than falling back to the
+    /// bitmap glyph for just that one character, which would look like
+    /// two different fonts spliced together; NotoSans covers the full
+    /// ASCII range this codebase actually uses.
+    ///
+    /// `x`/`y` are the top-left of the text, matching `draw_text`'s
+    /// convention; `TrueTypeFace::render_glyph` positions by baseline, so
+    /// this computes one internally (`scale * 4 / 5`, roughly a typical
+    /// ascent-to-em ratio -- there is no public ascent/descent accessor on
+    /// `TrueTypeFace` to use the font's own metric instead).
+    pub fn draw_text_ttf(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        color: u32,
+        face: &crate::graphics::TrueTypeFace<'_>,
+        scale: u16,
+    ) {
+        let ascent = i32::from(scale) * 4 / 5;
+        let (mut cursor_x, mut cursor_y) = (x, y);
+        let mut renderer = crate::graphics::Renderer::new(self);
+        let unpacked = crate::graphics::Color::rgb(
+            (color >> 16) as u8,
+            (color >> 8) as u8,
+            color as u8,
+        );
+        for character in text.chars() {
+            if character == '\n' {
+                cursor_x = x;
+                cursor_y = cursor_y.saturating_add(font::LINE_HEIGHT);
+                continue;
+            }
+            let _ = face.render_glyph(
+                character,
+                crate::graphics::Point::new(cursor_x, cursor_y.saturating_add(ascent)),
+                scale,
+                unpacked,
+                &mut renderer,
+            );
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
         }
     }
