@@ -113,6 +113,8 @@ def main():
         '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',
         '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
+        '-vga', 'none',
+        '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800',
         '-drive', f'if=ide,index=0,format=raw,file={disk}',
         '-netdev', 'user,id=net0',
         '-device', 'virtio-net-pci,netdev=net0,disable-modern=on',
