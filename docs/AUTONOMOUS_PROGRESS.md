@@ -1,5 +1,72 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that read_file refuses a file inode with size above MAX_FILE_SIZE
+
+Branch: `auto/wovenhat-development` (base `993ab736`). Working tree was clean.
+
+### Defect / gap
+
+`checked_inode` (wfs.rs line 837–841) guards:
+
+```rust
+if node.is_used()
+    && (!matches!(node.kind, KIND_FILE | KIND_DIR) || node.size > MAX_FILE_SIZE as u64)
+{
+    return Err(Error::Corrupt);
+}
+```
+
+This guard fires inside every `self.inode(number)?` and `self.inode_staged(txn, number)?`
+call, which means it is reached at the top of `read_file` and `write_file` before any
+per-operation size check runs.
+
+`check_refuses_file_inode_with_size_above_max_file_size` covers the same guard only via
+`check()`.  No prior test called `read_file` on a live file inode whose `size` field has
+been patched past `MAX_FILE_SIZE`.
+
+Without the guard, `read_file` would proceed to compute
+`needed = size.div_ceil(SECTOR_SIZE)` with an oversize value, and the per-slot loop
+`for slot in 0..needed` would then index `node.direct[slot]` at indices past the
+eight-element `DIRECT_BLOCKS` array, causing an out-of-bounds panic.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_file_refuses_a_file_inode_with_size_above_max_file_size`:
+
+- Calls `formatted()` and creates `a.txt` (5 bytes) via `create_file`, recording its inode.
+- Control: on the unpatched image, `read_file(file_inode, &mut out)` returns `Ok(5)` with
+  the correct content.
+- Forks the image and calls `reseal_inode_size(&corrupt, file_inode, MAX_FILE_SIZE as u64 + 1)`
+  to patch the `size` field while re-sealing the inode's structural FNV-1a checksum, so
+  `Inode::decode()` and the block-pointer guards in `checked_inode` accept the image.
+- Snapshots the image before the refused call.
+- Asserts `read_file(file_inode, &mut out)` returns `Err(Error::Corrupt)`:
+  `inode(file_inode)?` → `checked_inode` → `node.size > MAX_FILE_SIZE as u64` → `Err(Corrupt)`.
+- Asserts the image was not modified by the refused read.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **95 passed / 0 failed** (was 94; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The test patches `size` to `MAX_FILE_SIZE + 1` in a single-block file.  Any value
+  above `MAX_FILE_SIZE` would trigger the same guard; the adjacent boundary is sufficient.
+- `write_file` hits the same guard via `inode_staged` before any write proceeds; the
+  `read_file` path is representative.
+- No production code changed — the guard already existed in `checked_inode`; only the
+  missing runtime test was added.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
 ## 2026-11-04 — WovenFS: test that create_file refuses oversized data
 
 Branch: `auto/wovenhat-development` (base `5668d4d3`). Working tree was clean.

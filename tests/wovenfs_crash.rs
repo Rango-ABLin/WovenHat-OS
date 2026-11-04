@@ -5011,3 +5011,60 @@ fn create_file_refuses_oversized_data() {
     assert_eq!(&out, &exact, "content must match what was written");
     mount_consistent(&base, "after a valid create_file");
 }
+
+/// `read_file` must refuse a live file inode whose `size` field exceeds
+/// `MAX_FILE_SIZE`.
+///
+/// `checked_inode` (called via `self.inode(inode)?` at the top of `read_file`)
+/// guards:
+///
+/// ```ignore
+/// if node.is_used() && (!matches!(node.kind, KIND_FILE | KIND_DIR) || node.size > MAX_FILE_SIZE as u64) {
+///     return Err(Error::Corrupt);
+/// }
+/// ```
+///
+/// `check_refuses_file_inode_with_size_above_max_file_size` covers the same
+/// guard via `check()`.  No prior test exercised the runtime path: calling
+/// `read_file` on a live file inode whose `size` has been patched past
+/// `MAX_FILE_SIZE`.  The guard fires inside `inode()` before `read_file` ever
+/// inspects the size itself.  Without it, `read_file` would compute
+/// `needed = size.div_ceil(SECTOR_SIZE)` with an oversize value and then
+/// index `node.direct[slot]` at indices past `DIRECT_BLOCKS`, causing an
+/// out-of-bounds panic.
+#[test]
+fn read_file_refuses_a_file_inode_with_size_above_max_file_size() {
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create")
+    };
+
+    // Control: the unpatched file reads back correctly.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let mut out = [0u8; 5];
+        assert_eq!(volume.read_file(file_inode, &mut out), Ok(5));
+        assert_eq!(&out, b"hello");
+    }
+
+    // Patch the size field to MAX_FILE_SIZE + 1, re-sealing the structural
+    // checksum so mount() accepts the image; only the size-range guard fires.
+    let corrupt = base.fork(None);
+    reseal_inode_size(&corrupt, file_inode, MAX_FILE_SIZE as u64 + 1);
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        volume.read_file(file_inode, &mut out),
+        Err(Error::Corrupt),
+        "read_file must refuse a live file inode with size > MAX_FILE_SIZE"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "a refused read_file must not modify the image"
+    );
+}
