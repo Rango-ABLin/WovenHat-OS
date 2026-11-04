@@ -1222,3 +1222,15 @@ harness now emits bounded Phase 7 repaint and search-latency summaries into
 result.json, while explicitly identifying CPU and guest-memory measurements as
 unavailable guest ABIs rather than mislabeling host QEMU metrics as guest
 measurements. Existing timings_ms remains the input-to-captured-frame proxy.
+
+## Codex - Launcher visual refinement pass (2026-11-04)
+
+The first interactive inspection exposed a visual regression in the perceived
+icon quality: the shell's rounded app tiles were being covered by the older
+low-resolution IconPack overlay. Removed that overlay and rebuilt the glyphs
+from antialiased rounded primitives with softer shadows, consistent highlights,
+and Fluent-style geometry. The overview grid now uses larger 96x92 cells,
+48-pixel app tiles, six-column spacing at the accepted logical desktop size,
+and removes the large empty thumbnail reservation when no windows are open.
+The selected app receives a restrained rounded surface instead of a harsh
+pixel outline. Shell target Clippy passes with warnings denied.

@@ -62,26 +62,9 @@ fn icon_colors(icon: AppIcon) -> (u32, u32) {
     }
 }
 
-fn shared_icon_id(icon: AppIcon) -> libwoven::icons::IconId {
-    match icon {
-        AppIcon::Files => libwoven::icons::IconId::Files,
-        AppIcon::Terminal => libwoven::icons::IconId::Terminal,
-        AppIcon::Store => libwoven::icons::IconId::Store,
-        AppIcon::Settings => libwoven::icons::IconId::Settings,
-        AppIcon::Security => libwoven::icons::IconId::Security,
-        AppIcon::Images => libwoven::icons::IconId::Images,
-        AppIcon::Calculator => libwoven::icons::IconId::Calculator,
-        AppIcon::Editor
-        | AppIcon::Update
-        | AppIcon::Ai
-        | AppIcon::Monitor
-        | AppIcon::Installer
-        | AppIcon::Generic => libwoven::icons::IconId::Generic,
-    }
-}
-
-/// Draw a compact, legible app tile. The glyphs are deliberately geometric so
-/// they stay crisp in both the flat and 3D launcher textures.
+/// Draw a compact Fluent-inspired app tile. The icon is composed from
+/// antialiased rounded primitives; the former low-resolution bitmap overlay
+/// made every launcher icon read as jagged pixel art at desktop scale.
 pub fn draw_app_icon(
     canvas: &mut Canvas<'_>,
     x: i32,
@@ -96,9 +79,21 @@ pub fn draw_app_icon(
     // shared `Renderer::shadow` primitive rather than a second hand-offset
     // `fill_rounded` call.
     let radius = (size / 4).max(1) as usize;
-    Renderer::new(canvas).shadow(rect_of(Area::new(x, y, size, size)), 1, 2, radius, color_of(rgb(0, 0, 0)), u8::MAX);
+    Renderer::new(canvas).shadow(
+        rect_of(Area::new(x, y, size, size)),
+        1,
+        2,
+        radius,
+        color_of(rgb(0, 0, 0)),
+        72,
+    );
     fill_rounded(canvas, Area::new(x, y, size, size), radius, fill);
-    canvas.fill_rect(x + 2, y + 2, (size - 4) as usize, 2, ink);
+    fill_rounded(
+        canvas,
+        Area::new(x + 3, y + 3, size - 6, (size / 5).max(3)),
+        (size / 10).max(2) as usize,
+        ink,
+    );
     if selected {
         outline(
             canvas,
@@ -108,72 +103,62 @@ pub fn draw_app_icon(
     }
     let left = x + size / 4;
     let top = y + size / 3;
-    let span = (size / 2).max(4) as usize;
+    let span = (size / 2).max(4);
     match icon {
         AppIcon::Files => {
-            canvas.fill_rect(left, top - 2, span / 2 + 2, 3, ink);
-            canvas.fill_rect(left, top, span, span / 2 + 2, ink);
+            fill_rounded(canvas, Area::new(left, top - 2, span / 2 + 2, 5), 2, ink);
+            fill_rounded(canvas, Area::new(left, top + 3, span, span / 2), 3, ink);
         }
         AppIcon::Terminal => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left, top + 4, 2, 2, ink);
-            canvas.fill_rect(left + 4, top + 4, span.saturating_sub(4), 2, ink);
+            fill_rounded(canvas, Area::new(left, top, span, 3), 1, ink);
+            fill_rounded(canvas, Area::new(left, top + 5, 4, 4), 1, ink);
+            fill_rounded(canvas, Area::new(left + 7, top + 5, span.saturating_sub(7), 3), 1, ink);
         }
         AppIcon::Store => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left + 2, top + 4, span.saturating_sub(4), 2, ink);
-            canvas.fill_rect(left + 2, top + 8, span.saturating_sub(4), 2, ink);
+            fill_rounded(canvas, Area::new(left, top, span, 3), 1, ink);
+            fill_rounded(canvas, Area::new(left + 2, top + 5, span.saturating_sub(4), 3), 1, ink);
+            fill_rounded(canvas, Area::new(left + 2, top + 10, span.saturating_sub(4), 3), 1, ink);
         }
         AppIcon::Security => {
-            canvas.fill_rect(left + 2, top - 1, span.saturating_sub(4), 2, ink);
-            canvas.fill_rect(left, top + 1, span, 5, ink);
-            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
+            fill_rounded(canvas, Area::new(left + 2, top - 1, span.saturating_sub(4), 3), 1, ink);
+            fill_rounded(canvas, Area::new(left, top + 2, span, 6), 2, ink);
+            fill_rounded(canvas, Area::new(left + 2, top + 8, span.saturating_sub(4), 3), 1, ink);
         }
         AppIcon::Images => {
-            canvas.fill_rect(left, top + 3, span, span.saturating_sub(2), ink);
-            canvas.fill_rect(left + 3, top, 3, 3, ink);
+            fill_rounded(canvas, Area::new(left, top + 3, span, span.saturating_sub(2)), 3, ink);
+            fill_rounded(canvas, Area::new(left + 4, top, 5, 5), 2, ink);
         }
         AppIcon::Calculator => {
-            canvas.fill_rect(left, top, span, 2, ink);
-            canvas.fill_rect(left, top + 4, 2, 2, ink);
-            canvas.fill_rect(left + 5, top + 4, 2, 2, ink);
-            canvas.fill_rect(left, top + 8, 2, 2, ink);
-            canvas.fill_rect(left + 5, top + 8, 2, 2, ink);
+            fill_rounded(canvas, Area::new(left, top, span, 3), 1, ink);
+            for (column, row) in [(0, 5), (7, 5), (0, 12), (7, 12)] {
+                fill_rounded(canvas, Area::new(left + column, top + row, 4, 4), 1, ink);
+            }
         }
         AppIcon::Editor => {
-            canvas.fill_rect(left + 2, top - 1, 3, span + 2, ink);
-            canvas.fill_rect(left, top + span as i32, span, 2, ink);
+            fill_rounded(canvas, Area::new(left + 2, top - 1, 5, span + 2), 2, ink);
+            fill_rounded(canvas, Area::new(left, top + span, span, 3), 1, ink);
         }
         AppIcon::Settings => {
-            canvas.fill_rect(left, top + 2, span, 3, ink);
-            canvas.fill_rect(left + 3, top - 1, 3, span + 2, ink);
+            fill_rounded(canvas, Area::new(left, top + 2, span, 5), 2, ink);
+            fill_rounded(canvas, Area::new(left + 4, top - 1, 5, span + 2), 2, ink);
         }
         AppIcon::Monitor => {
-            canvas.fill_rect(left, top, span, span.saturating_sub(3), ink);
-            canvas.fill_rect(left + span as i32 / 2 - 1, top + span as i32 - 2, 2, 3, ink);
+            fill_rounded(canvas, Area::new(left, top, span, span.saturating_sub(3)), 2, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + span / 2 - 2, top + span - 2, 5, 5),
+                1,
+                ink,
+            );
         }
         AppIcon::Installer => {
-            canvas.fill_rect(left + 2, top - 1, 2, span.saturating_sub(2), ink);
-            canvas.fill_rect(left, top + span as i32 - 4, span, 2, ink);
-            canvas.fill_rect(left, top + span as i32, span, 2, ink);
+            fill_rounded(canvas, Area::new(left + 3, top - 1, 5, span.saturating_sub(2)), 2, ink);
+            fill_rounded(canvas, Area::new(left, top + span - 4, span, 4), 1, ink);
+            fill_rounded(canvas, Area::new(left, top + span, span, 4), 1, ink);
         }
         AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
-            canvas.fill_rect(left, top + 2, span, 2, ink);
-            canvas.fill_rect(left + 2, top + 6, span.saturating_sub(4), 2, ink);
+            fill_rounded(canvas, Area::new(left, top + 2, span, 4), 1, ink);
+            fill_rounded(canvas, Area::new(left + 2, top + 8, span.saturating_sub(4), 4), 1, ink);
         }
     }
-    let scale = (size.max(8) as usize / libwoven::icons::ICON_SIZE).clamp(1, 16);
-    let _ = libwoven::icons::IconPack::draw(
-        canvas,
-        x + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
-        y + (size - (libwoven::icons::ICON_SIZE * scale) as i32) / 2,
-        shared_icon_id(icon),
-        if selected {
-            libwoven::icons::IconState::Active
-        } else {
-            libwoven::icons::IconState::Normal
-        },
-        libwoven::icons::IconTheme::Dark,
-        scale,
-    );
 }

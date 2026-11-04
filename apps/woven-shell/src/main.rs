@@ -493,14 +493,15 @@ const ACTIVITIES_PADDING: i32 = 10;
 /// Activities overview layout (M3). Reuses `launcher_open`/`query`/
 /// `selected`/`filtered()` as its shared search/selection state.
 const OVERVIEW_MARGIN: i32 = 16;
-const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 8;
+const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 16;
 const OVERVIEW_THUMB_ROW_HEIGHT: i32 = 90;
 const OVERVIEW_THUMB_WIDTH: i32 = 140;
 const OVERVIEW_THUMB_HEIGHT: i32 = 74;
 const OVERVIEW_THUMB_GAP: i32 = 10;
-const OVERVIEW_CELL_WIDTH: i32 = 72;
-const OVERVIEW_CELL_HEIGHT: i32 = 64;
-const OVERVIEW_CELL_GAP: i32 = 8;
+const OVERVIEW_CELL_WIDTH: i32 = 96;
+const OVERVIEW_CELL_HEIGHT: i32 = 92;
+const OVERVIEW_CELL_GAP: i32 = 12;
+const OVERVIEW_APP_ICON_SIZE: i32 = 48;
 /// The Dash (M4): favorites and running apps, one row below the search
 /// field. Icon-only, no label -- GNOME-dash-style, not the labeled app
 /// grid below it.
@@ -894,7 +895,15 @@ impl Desktop {
 
     /// Top of the app grid, below the (always reserved) thumbnails row.
     fn overview_grid_top(&self) -> i32 {
-        self.overview_thumb_row_top() + OVERVIEW_THUMB_ROW_HEIGHT + OVERVIEW_MARGIN
+        let has_windows = self.entries().next().is_some();
+        self.overview_dash_row_top()
+            + OVERVIEW_DASH_ROW_HEIGHT
+            + OVERVIEW_MARGIN
+            + if has_windows {
+                OVERVIEW_THUMB_ROW_HEIGHT + OVERVIEW_MARGIN
+            } else {
+                0
+            }
     }
 
     /// Grid columns that fit the overview's width.
@@ -1332,12 +1341,12 @@ impl Desktop {
     /// yet (documented in `docs/graphics/overview-desktop-2026-11-03.md`).
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
-        fill_rounded_blended(canvas, overview, CHROME_RADIUS, theme_panel(), 235);
+        fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 248);
 
         // Search field.
         let catalog = shell_catalog(self.language);
         let search = self.overview_search_area();
-        fill_rounded(canvas, search, CHROME_RADIUS_SMALL, theme_taskbar());
+        fill_rounded(canvas, search, CHROME_RADIUS, theme_taskbar());
         let query = &self.query[..self.query_length];
         if query.is_empty() {
             canvas.draw_text_system(
@@ -1407,12 +1416,20 @@ impl Desktop {
         for (index, &app_index) in found[..count].iter().enumerate() {
             let Some(app) = self.apps[app_index] else { continue };
             let cell = self.overview_cell_area(index);
+            if index == self.selected {
+                fill_rounded(
+                    canvas,
+                    Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
+                    CHROME_RADIUS,
+                    lighten(theme_taskbar(), 18),
+                );
+            }
             draw_app_icon(
                 canvas,
-                cell.x + (cell.width - DESKTOP_ICON_SIZE) / 2,
+                cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
                 cell.y + 2,
                 app_icon(app.name()),
-                DESKTOP_ICON_SIZE,
+                OVERVIEW_APP_ICON_SIZE,
                 index == self.selected,
             );
             // Catalog names are "Woven<App>"; the grid already shows the
@@ -1430,7 +1447,7 @@ impl Desktop {
             let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
             canvas.draw_text_system(
                 text_x.max(cell.x),
-                cell.y + DESKTOP_ICON_SIZE + 6,
+                cell.y + OVERVIEW_APP_ICON_SIZE + 12,
                 text,
                 theme_text(),
             );
