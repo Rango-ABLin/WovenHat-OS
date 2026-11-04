@@ -8795,3 +8795,12 @@ rebuilt app glyphs with antialiased rounded primitives and softer shadows, and
 refined the overview grid to larger 96x92 cells with 48-pixel tiles and no
 empty thumbnail reservation when no windows are open. Shell target Clippy
 passes with warnings denied.
+
+## Codex - Complete taskbar and launcher chrome (2026-11-04)
+
+Implemented the updated taskbar as the only active desktop chrome: a
+localized WovenHat Start launcher, current-workspace window entries with
+active state, centered clock, workspace switcher, notification badge, and
+Quick Settings menu affordance. Taskbar entries focus their window on click.
+Removed stale Activities/top-bar/legacy-taskbar source terminology and kept
+the accepted launcher overview as the only full-screen launcher path.

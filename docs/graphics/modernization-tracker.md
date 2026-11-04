@@ -1234,3 +1234,15 @@ and Fluent-style geometry. The overview grid now uses larger 96x92 cells,
 and removes the large empty thumbnail reservation when no windows are open.
 The selected app receives a restrained rounded surface instead of a harsh
 pixel outline. Shell target Clippy passes with warnings denied.
+
+## Codex - Complete taskbar pass (2026-11-04)
+
+Replaced the incomplete top-bar presentation with one canonical taskbar
+renderer. It now provides a WovenHat Start launcher button, compact
+current-workspace window entries with app glyphs and active-window state,
+the centered clock, workspace switcher, unread badge, and a real three-line
+system-menu affordance for Quick Settings. Pointer clicks on task entries now
+focus the corresponding window. The old Activities-only label, placeholder
+equals glyph, and split legacy/top-bar rendering terminology were removed;
+the updated taskbar is the only rendered path. Shell target Clippy passes
+with warnings denied.

@@ -315,10 +315,10 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("enter_pin", "Enter PIN"),
             ("wrong_pin", "Wrong PIN"),
             ("try_again_shortly", "Try again shortly"),
-            // M5: the Overview layout's top bar and Activities overview
+            // M5: the Overview taskbar and launcher overview
             // (new strings since M2/M3, not part of the already-accepted
             // lock-screen gates above).
-            ("activities", "Activities"),
+            ("start", "Start"),
             ("type_to_search", "Type to search"),
             ("no_open_windows", "No open windows on this workspace"),
         ],
@@ -332,7 +332,7 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("enter_pin", "Lowetsani PIN"),
             ("wrong_pin", "PIN Yolakwika"),
             ("try_again_shortly", "Yesaninso Posachedwa"),
-            ("activities", "Zochitika"),
+            ("start", "Yambani"),
             ("type_to_search", "Lembani kufunafuna"),
             ("no_open_windows", "Palibe mawindo otseguka pa gawo ili"),
         ],
@@ -342,7 +342,7 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
     }
 }
 
-/// Both shell catalogs (lock screen, top bar, Activities overview),
+/// Both shell catalogs (lock screen, taskbar, launcher overview),
 /// const-initialized to `Catalog::new()` (an all-zero value LLVM places in
 /// `.bss`, not `.data`) and filled in place on first use, so no by-value
 /// `Catalog` is ever constructed on the stack.
@@ -362,7 +362,7 @@ static SHELL_CATALOGS: ShellCatalogs = ShellCatalogs {
 };
 
 /// The shell's translatable strings for `language` -- the lock screen,
-/// and, since M5, the Overview top bar and Activities overview -- built
+/// and, since M5, the taskbar and launcher overview -- built
 /// once (lazily, in place) through `libwoven::i18n::Catalog` (Stage
 /// 26.5). English values are byte-for-byte the literals every
 /// already-accepted lock-screen gate expects, so the default language
@@ -484,13 +484,15 @@ use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
 mod painter;
 use painter::Painter;
 
-/// The Overview top bar's "Activities" button label. Opens the Activities
-/// overview (M3): search, this workspace's window cards, and the app grid.
-const ACTIVITIES_LABEL: &str = "Activities";
-/// Horizontal padding inside the Activities button, each side.
-const ACTIVITIES_PADDING: i32 = 10;
+/// The desktop taskbar's launcher affordance. Opens the Start overview:
+/// search, current-workspace windows, and the application grid.
+const START_LABEL: &str = "Start";
+const START_BUTTON_WIDTH: i32 = 58;
+const START_ICON_SIZE: i32 = 14;
+const TASKBAR_ENTRY_WIDTH: i32 = 48;
+const TASKBAR_ENTRY_GAP: i32 = 4;
 
-/// Activities overview layout (M3). Reuses `launcher_open`/`query`/
+/// Launcher overview layout (M3). Reuses `launcher_open`/`query`/
 /// `selected`/`filtered()` as its shared search/selection state.
 const OVERVIEW_MARGIN: i32 = 16;
 const OVERVIEW_SEARCH_HEIGHT: i32 = PANEL_ROW + 16;
@@ -683,10 +685,8 @@ impl Desktop {
             .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
     }
 
-    /// The Overview top bar sits flush at the top of the screen. Kept as a
-    /// function (always 0) rather than inlined at every call site: M7
-    /// removed the Taskbar layout this distinguished, but callers still
-    /// read naturally as "the bar's top edge, plus N" either way.
+    /// The taskbar sits flush at the top of the screen. Keep this as a
+    /// function so every layout calculation shares one chrome origin.
     fn taskbar_top(&self) -> i32 {
         0
     }
@@ -695,7 +695,7 @@ impl Desktop {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
     }
 
-    /// The screen's usable band, excluding the top bar: `(top, height)`.
+    /// The screen's usable band, excluding the taskbar: `(top, height)`.
     /// Shared by every window-placement/clamp site that needs to keep
     /// windows clear of the bar (`work_area`, `open`, `resized`,
     /// `toggle_scale`, `drag_to_pointer`).
@@ -712,7 +712,7 @@ impl Desktop {
         self.taskbar_top() + 9
     }
 
-    /// GNOME-style: centered in the top bar, not right-aligned.
+    /// Centered in the taskbar, not right-aligned.
     fn clock_area(&self) -> Area {
         let x = (self.width - CLOCK_WIDTH) / 2;
         Area::new(x, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
@@ -723,7 +723,7 @@ impl Desktop {
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
-    /// Centered, dropping down from the top bar (M4): the fixed
+    /// Centered, dropping down from the taskbar (M4): the fixed
     /// TOAST_MARGIN from the screen's own top edge alone would land the
     /// toast under/behind the bar, since the bar occupies that band.
     fn toast_area(&self) -> Area {
@@ -783,29 +783,38 @@ impl Desktop {
         ]);
     }
 
-    /// Wide enough for the translated "Activities" label, whatever its
-    /// length in the active language.
+    /// Fixed launcher button geometry keeps the taskbar stable across
+    /// languages and avoids shifting the centered clock.
     fn start_area(&self) -> Area {
-        let label = shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL);
-        let width = font::text_width(label) as i32 + 2 * ACTIVITIES_PADDING;
-        Area::new(START_X, self.taskbar_top() + 4, width, START_HEIGHT as i32)
+        Area::new(
+            START_X,
+            self.taskbar_top() + 4,
+            START_BUTTON_WIDTH,
+            START_HEIGHT as i32,
+        )
     }
 
+    fn taskbar_entry_area(&self, index: usize) -> Area {
+        let x = self.start_area().x
+            + self.start_area().width
+            + 8
+            + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
+        Area::new(
+            x,
+            self.taskbar_top() + 4,
+            TASKBAR_ENTRY_WIDTH,
+            START_HEIGHT as i32,
+        )
+    }
 
-    /// The perspective card can leave a few pixels outside its flat source
-    /// rectangle at the receded top corners. Include that halo in damage so
-    /// closing or filtering the launcher cannot leave an old projected edge
-    /// on the wallpaper.
-    /// The Overview's full-screen overview isn't a 3D-projected card (see
-    /// `render_desktop`'s documented flat-only limitation for this chrome),
-    /// so it needs no projection halo -- unlike the legacy taskbar
-    /// launcher panel this once also covered, removed in M7.
+    /// The full-screen launcher has no projected halo; its bounded overview
+    /// area is the complete damage region.
     fn panel_damage_area(&self) -> Area {
         self.overview_area()
     }
 
-    /// The Activities overview (M3): search, this workspace's window
-    /// cards, and the app grid, filling the screen below the top bar.
+    /// The launcher overview (M3): search, this workspace's window cards,
+    /// and the app grid, filling the screen below the taskbar.
     /// Empty unless the launcher is open.
     fn overview_area(&self) -> Area {
         if !self.launcher_open {
@@ -1234,22 +1243,15 @@ impl Desktop {
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
-        // The top bar does not yet have a 3D perspective presentation
-        // (unlike the legacy taskbar's render_taskbar_3d, removed in M7):
-        // it always renders flat for now. Documented, not faked -- see
-        // docs/graphics/overview-desktop-2026-11-03.md.
         self.paint_desktop_icons(canvas);
-        self.paint_top_bar_content(canvas);
+        self.paint_taskbar_content(canvas);
     }
 
-    /// The Overview top bar's content: its translucent fill and bottom
-    /// accent line, the Activities button, the centered clock, the
+    /// The taskbar content: its translucent fill and bottom accent line, the
+    /// Start launcher, current-workspace window entries, the centered clock,
     /// workspace switcher, the system menu button, and the unread badge --
-    /// drawn at its own real screen position in `canvas`. Reuses the exact
-    /// same drawing primitives and `theme_*` colors as the legacy taskbar's
-    /// `paint_taskbar_content`, but is a separate function because the
-    /// chrome itself (labels, layout, what's shown) differs.
-    fn paint_top_bar_content(&self, canvas: &mut Canvas<'_>) {
+    /// drawn at its own real screen position in `canvas`.
+    fn paint_taskbar_content(&self, canvas: &mut Canvas<'_>) {
         let top = self.taskbar_top();
         let width = self.width as usize;
         let height = self.height;
@@ -1270,34 +1272,69 @@ impl Desktop {
             theme_taskbar(),
             TASKBAR_OPACITY,
         );
-        // The accent line sits at the bar's bottom edge (where a top bar
-        // visually meets the desktop below it), mirroring the legacy
-        // taskbar's accent line at its top edge.
+        // The accent line marks the taskbar's boundary with the desktop.
         canvas.fill_rect(0, top + TASKBAR_HEIGHT - 1, width, 1, theme_accent());
 
-        let activities = self.start_area();
+        let start = self.start_area();
+        let catalog = shell_catalog(self.language);
         let fill = theme_start_fill();
         Renderer::new(canvas).rounded_rect_gradient(
-            rect_of(activities),
+            rect_of(start),
             CHROME_RADIUS,
             color_of(lighten(fill, 24)),
             color_of(fill),
         );
         canvas.draw_text_system(
-            activities.x + ACTIVITIES_PADDING,
+            start.x + 24,
             self.text_y(),
-            shell_catalog(self.language).lookup("activities", ACTIVITIES_LABEL),
+            catalog.lookup("start", START_LABEL),
             theme_text(),
         );
+
+        let icon_left = start.x + 7;
+        let icon_top = start.y + (start.height - START_ICON_SIZE) / 2;
+        for (dx, dy, color) in [
+            (0, 0, theme_accent()),
+            (8, 0, theme_text()),
+            (0, 8, theme_text()),
+            (8, 8, theme_accent()),
+        ] {
+            fill_rounded(canvas, Area::new(icon_left + dx, icon_top + dy, 6, 6), 1, color);
+        }
+
+        for (index, (slot, window)) in self.entries().enumerate() {
+            let area = self.taskbar_entry_area(index);
+            let active = self.focused() == Some(slot);
+            fill_rounded(
+                canvas,
+                area,
+                CHROME_RADIUS_SMALL,
+                if active {
+                    lighten(theme_entry(true), 12)
+                } else {
+                    theme_entry(false)
+                },
+            );
+            draw_app_icon(
+                canvas,
+                area.x + 2,
+                area.y + 1,
+                app_icon(&window.title[..window.title_length]),
+                14,
+                false,
+            );
+            let mut title = [0u8; 32];
+            let length = label(&window.title[..window.title_length], 5, &mut title);
+            let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+            canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+        }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock_x = (self.width - font::text_width(text) as i32) / 2;
         canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
-        // The workspace switcher, left of the system menu button, same as
-        // the legacy taskbar (workspace_area is already derived from
-        // qs_button's position, so this needs no new geometry).
+        // The workspace switcher sits left of the system menu button.
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
             let fill = theme_entry(index == self.workspace);
@@ -1311,15 +1348,13 @@ impl Desktop {
             );
         }
 
-        // The system menu button: reuses Quick Settings' own state/actions
-        // (toggle_qs, qs_rows, paint_qs_content), just docked in the top
-        // bar's status cluster instead of the bottom taskbar.
+        // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
         let fill = theme_entry(self.qs_open);
         fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
-        // A plain ASCII glyph stands in for a dedicated menu icon until a
-        // later iconography pass (libwoven::icons) adds one.
-        canvas.draw_text_system(button.x + 5, self.text_y(), "=", theme_text());
+        for row in 0..3 {
+            canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
+        }
 
         if self.unread > 0 {
             let badge = self.badge_area();
@@ -1334,11 +1369,10 @@ impl Desktop {
         }
     }
 
-    /// The Activities overview's content (M3): search field, this
+    /// The launcher overview's content (M3): search field, this
     /// workspace's window cards, and the filtered app grid, drawn at its
-    /// own real screen position in `canvas`. Flat only, like
-    /// `paint_top_bar_content` -- no 3D presentation for the new chrome
-    /// yet (documented in `docs/graphics/overview-desktop-2026-11-03.md`).
+    /// own real screen position in `canvas`; no alternate legacy chrome is
+    /// rendered behind this overview.
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
         fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 248);
@@ -3165,6 +3199,12 @@ impl Desktop {
                 }
                 if self.start_area().contains(x, y) {
                     return self.toggle_launcher();
+                }
+                let taskbar_slot = self.entries().enumerate().find_map(|(index, (slot, _))| {
+                    self.taskbar_entry_area(index).contains(x, y).then_some(slot)
+                });
+                if let Some(slot) = taskbar_slot {
+                    return self.focus(slot);
                 }
                 // The Quick Settings button, and its panel's rows.
                 if self.qs_button().contains(x, y) {
