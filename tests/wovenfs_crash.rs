@@ -5237,3 +5237,98 @@ fn unlink_refuses_an_entry_whose_inode_field_is_named_by_another_entry() {
         .unlink(1, "a.txt", 2)
         .expect("unlink must succeed on the unpatched image");
 }
+
+#[test]
+fn unlink_refuses_an_entry_whose_inode_field_names_a_free_inode() {
+    // This test isolates the `!node.is_used()` arm of unlink's second guard
+    // (wfs.rs line 1288).  After passing the first three-arm guard (entry.inode
+    // is in range, is not dir_inode, and is unique in the directory), unlink
+    // reads the named inode and refuses if it is not in use.  Freeing a slot
+    // that is already free would corrupt the bitmap; more importantly the slot
+    // may already belong to a different file.
+    let (base, block, index) = two_file_root();
+
+    // inode_count == INODES == 32.  Inodes 1, 2, 3 are occupied (root,
+    // a.txt, b.txt).  Inode INODES (32) is the last valid slot and is free.
+    // Using it as the patch target ensures arm 1 (== dir_inode) and arm 2
+    // (> inode_count) of the first guard are both silent; the filter arm
+    // (count != 1) is also silent because no other directory entry names 32.
+    let free_inode = u64::from(INODES);
+
+    let image = base.fork(None);
+    patch_dir_entry(&image, block, index, 0, &free_inode.to_le_bytes());
+
+    // Preconditions: verify which arm of which guard fires.
+    // Arm 1 (entry.inode == dir_inode): silent because free_inode != 1.
+    assert!(
+        free_inode != 1,
+        "free_inode must not equal dir_inode so arm 1 is silent"
+    );
+    // Arm 2 (entry.inode > inode_count): silent because free_inode == inode_count.
+    assert!(
+        free_inode <= u64::from(INODES),
+        "free_inode must be in range so arm 2 is silent"
+    );
+    // Arm 3 (count != 1): silent because only a.txt's patched entry names
+    // free_inode (32); b.txt still names inode 3.  We verify this by
+    // inspecting the raw directory block bytes; read_dir only returns live
+    // entries and cannot be used here.
+    {
+        let raw_block = image.sectors()[block as usize];
+        let matches = (0..8usize)
+            .filter(|&slot| {
+                let start = slot * 64;
+                let inode = u64::from_le_bytes(raw_block[start..start + 8].try_into().unwrap());
+                inode == free_inode
+            })
+            .count();
+        assert_eq!(
+            matches, 1,
+            "only a.txt's patched entry names free_inode in the raw directory block"
+        );
+    }
+    // Second guard: !node.is_used() fires because free_inode names an unused slot.
+    {
+        let mut volume = Volume::mount(image.clone()).expect("mount");
+        assert!(
+            !volume.inode(free_inode).expect("inode").is_used(),
+            "free_inode must be unused so the !is_used() arm fires"
+        );
+    }
+
+    // Snapshot: unlink must not modify the image.
+    let before = image.sectors();
+
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must return Corrupt when the entry's inode field names a free inode"
+    );
+
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: b.txt is unmodified and still resolves on the patched image.
+    let b_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount base");
+        volume.lookup(1, "b.txt").expect("b.txt").inode
+    };
+    assert_eq!(
+        Volume::mount(image.clone())
+            .expect("mount")
+            .lookup(1, "b.txt")
+            .map(|e| e.inode),
+        Ok(b_inode),
+        "b.txt must still resolve on the patched image"
+    );
+
+    // Control: on the unpatched base image, unlink(a.txt) succeeds.
+    Volume::mount(base)
+        .expect("mount")
+        .unlink(1, "a.txt", 2)
+        .expect("unlink must succeed on the unpatched image");
+}

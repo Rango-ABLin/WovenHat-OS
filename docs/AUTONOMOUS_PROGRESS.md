@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field names a free inode
+
+Branch: `auto/wovenhat-development` (base `6d845147`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1288) has a second guard after the three-arm range/uniqueness check:
+
+```rust
+let mut node = self.inode_staged(&txn, entry.inode)?;
+if !node.is_used() || node.kind != KIND_FILE || node.links != 1 {
+    return Err(Error::Corrupt);
+}
+```
+
+The three arms of this guard:
+- `!node.is_used()` — fires when the named inode slot is free (zeroed). Freeing an
+  already-free slot corrupts the bitmap and may destroy a file that later reuses
+  that slot.
+- `node.kind != KIND_FILE` — fires when the inode is a directory. Covered by
+  `unlink_refuses_an_entry_naming_a_directory_kind_inode`.
+- `node.links != 1` — fires when the link count is not exactly 1. Covered by
+  `unlink_refuses_a_file_whose_link_count_is_not_one`.
+
+The `!node.is_used()` arm appears only in the bundled test
+`unlink_refuses_an_entry_that_does_not_name_one_live_file` (case 3, `"a free
+inode"`) but had no focused, isolated test of its own.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_an_entry_whose_inode_field_names_a_free_inode`:
+
+- Calls `two_file_root()` to get a volume with `a.txt` (inode 2) and `b.txt`
+  (inode 3) on a 32-inode volume.
+- Sets `free_inode = u64::from(INODES)` = 32, the last valid but unused slot.
+- Forks the image and calls `patch_dir_entry` to overwrite `a.txt`'s inode
+  field (bytes 0–7) with `free_inode`.
+- Verifies in a precondition block:
+  - `free_inode != 1` (arm 1 silent).
+  - `free_inode <= INODES` (arm 2 silent).
+  - Counts matching raw 8-byte inode fields in the directory block bytes; only
+    one entry names 32, so the count-!=1 arm is silent. (`read_dir` only
+    returns live entries and cannot be used for this check.)
+  - `volume.inode(free_inode).is_used()` is false, confirming the `!is_used()`
+    arm fires.
+- Snapshots the image and asserts `volume.unlink(1, "a.txt", 2)` returns
+  `Err(Error::Corrupt)`.
+- Asserts the image is unmodified.
+- Controls: `b.txt` still resolves on the patched image; on the unpatched base
+  image, `unlink(1, "a.txt", 2)` succeeds.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-04)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **99 passed / 0 failed** (was 98; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Uses `free_inode = INODES = 32`, the last valid but free slot. Any free slot
+  from 4 to 32 would trigger the same guard; this choice is the same as the
+  bundled test's case 3 for direct comparability.
+- The `!is_used()` arm is now exercised in isolation; the `kind != KIND_FILE`
+  and `links != 1` arms continue to have their own focused tests.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-04 — WovenFS: test that unlink refuses a directory entry whose inode field is shared by another entry
 
 Branch: `auto/wovenhat-development` (base `03f9d18f`). Working tree was clean.
