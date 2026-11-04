@@ -401,12 +401,31 @@ fn configured_gpu_outputs(mut gpu: crate::virtio_gpu::Gpu) -> Result<GpuOutputs,
             index, mode.width, mode.height
         ));
     }
-    let (width, height) = match modes[0] {
+    let reported = match modes[0] {
         mode if mode.enabled && mode.width > 0 && mode.height > 0 => (
             mode.width.min(MAX_GPU_OUTPUT_WIDTH),
             mode.height.min(MAX_GPU_OUTPUT_HEIGHT),
         ),
         _ => (1024, 768),
+    };
+    // A virtio-vga device can expose a conservative 640x480 resource mode
+    // while UEFI has already established a larger, valid GOP framebuffer.
+    // For a single head, retain that firmware geometry so the GPU path does
+    // not silently shrink or stretch the desktop during handoff. Multi-head
+    // devices keep the reported per-head mode because the boot framebuffer
+    // is not a reliable geometry source for each output.
+    let (width, height) = if gpu.scanouts == 1 {
+        crate::terminal::framebuffer_info()
+            .map(|info| {
+                (
+                    (info.width as u32).min(MAX_GPU_OUTPUT_WIDTH),
+                    (info.height as u32).min(MAX_GPU_OUTPUT_HEIGHT),
+                )
+            })
+            .filter(|&(width, height)| width > 0 && height > 0)
+            .unwrap_or(reported)
+    } else {
+        reported
     };
     let heads = (gpu.scanouts as usize)
         .min(MAX_OUTPUTS)

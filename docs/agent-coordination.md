@@ -8734,3 +8734,12 @@ all-targets Clippy pass. The one-CPU QEMU qualification reached desktop and
 sign-in but hit the known overview framebuffer material-change flake; its
 evidence is preserved under
 `audit-artifacts/desktop-qualification-1793793781279682800/`.
+
+## Codex - Graphics modernization Phase 1 display geometry (2026-11-04)
+
+Continued the graphics display claim after Phase 9. Kernel compositor mode
+selection now preserves valid single-head firmware geometry, and the
+interactive launcher requests `virtio-vga,id=gpu0,xres=1280,yres=800` with
+`-vga none`. A direct WHPX QEMU probe reached the 1280x800 VirtIO display and
+WovenShell desktop. The launcher-level retry was blocked by host guest-memory
+allocation; evidence was preserved and no unrelated QEMU was terminated.

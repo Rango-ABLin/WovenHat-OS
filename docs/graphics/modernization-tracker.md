@@ -134,7 +134,10 @@ window's complete footprint, including shadow reach. Remaining acceptance
 work is visual/performance evidence, not a stale-VGA or missing-occlusion
 implementation gap. Phase 9's reference comparator is now also wired into
 the real qualification as an opt-in sign-in baseline check; its result is
-persisted even when a later journey assertion fails.
+persisted even when a later journey assertion fails. The interactive
+VirtIO-GPU launcher now requests `1280x800` explicitly on its single
+`virtio-vga` device, and the compositor preserves a usable firmware geometry
+when one is available.
 
 | Phase | Area | Status | Next concrete step |
 |---|---|---|---|
@@ -216,6 +219,22 @@ each, including the 2026-11-03 M7-cutover-verification run referenced in
 `docs/stage-status.md`).
 
 ## Session log (append a dated entry every time you stop; newest first)
+
+### 2026-11-04 (session: Phase 1 VirtIO display geometry)
+
+Closed the remaining bounded display-mode implementation gap. The compositor
+now prefers a valid single-head firmware framebuffer geometry over a
+conservative VirtIO mode when firmware exposes one, while multi-head output
+negotiation remains per-head and bounded. `RUN-DESKTOP.ps1` now requests
+`virtio-vga,id=gpu0,xres=1280,yres=800` for both GPU modes, with `-vga none`
+and no stale VGA device. Kernel-target Clippy, workspace all-targets Clippy,
+and all 212 `libwoven` host tests passed. A direct WHPX QEMU probe using the
+explicit mode reached `[DISPLAY] virtio-gpu mode head=0 1280x800` and the
+WovenShell desktop; evidence is under
+`target/virtio-resolution-probe-20261104-1423b/`. A launcher-level retry was
+blocked separately by host memory allocation (`cannot set up guest memory
+'pc.ram'`) and was preserved under
+`target/desktop-interactive-20261104-142351-162/`.
 
 ### 2026-11-04 (session: Phase 9 qualification wiring completed)
 

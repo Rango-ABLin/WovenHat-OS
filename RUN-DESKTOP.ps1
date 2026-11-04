@@ -48,9 +48,9 @@ image = desktop.build_hardware_demo(out)
     # id=gpu0 lets a QMP `screendump` target this device specifically via
     # device='gpu0', head=0 when a device-specific capture is desired.
     $displayArgs = if ($Display -eq 'virtio-gpu') {
-        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0')
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800')
     } elseif ($Display -eq 'virtio-gpu-only') {
-        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0')
+        @('-display', 'gtk', '-vga', 'none', '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800')
     } else {
         @('-vga', 'std')
     }
