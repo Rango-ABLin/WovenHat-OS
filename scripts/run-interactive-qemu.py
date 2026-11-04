@@ -110,6 +110,7 @@ def main():
 
     command = [
         str(qemu), '-machine', 'pc', '-m', args.mem, '-smp', str(args.cpus),
+        '-display', 'gtk,zoom-to-fit=off',
         '-drive', f'if=pflash,unit=0,format=raw,readonly=on,file={firmware}',
         '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
