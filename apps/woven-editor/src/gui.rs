@@ -184,9 +184,9 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     libwoven::message_send(shell, &response).is_ok()
 }
 
-/// Open a bounded read-only editor workspace window through WovenShell.
-/// Editing commands remain available through the existing CLI until input
-/// widgets and file-operation events are added to the desktop client.
+/// Open a bounded interactive editor workspace window through WovenShell.
+/// The GUI owns text editing state and uses the capability-checked filesystem
+/// ABI only when the user explicitly activates Save.
 pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
