@@ -1,5 +1,67 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: sector-level atomicity proof for create_file when data blocks are exhausted
+
+Branch: `auto/wovenhat-development` (base `79737e8f`). Working tree was clean.
+
+### Defect / gap
+
+`create_file` (wfs.rs line 1066) calls `stage_create` and `stage_write` in a
+single transaction.  When all data blocks are taken, `allocate_block` returns
+`Err(NoSpace)` after `stage_create` has already staged a fresh inode and a new
+directory entry in the transaction buffer.  Because the commit never runs, the
+disk image is completely unmodified.
+
+The existing test `create_file_out_of_space_leaves_no_file` (line 482) verifies
+the logical outcome (the file is absent, `check()` passes), but does not snapshot
+the raw sector bytes before the refused call.  Without that snapshot it cannot
+prove that no sector write reached the disk — only that the logical view is clean.
+No prior test proved sector-level atomicity for the specific guard path where
+`stage_write` fails with `NoSpace` after `stage_create` has already staged its
+inode and directory entry.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace`:
+
+- Creates an 80-sector volume (same geometry as `data_full_volume()`), formats it
+  with the standard 32-inode count.
+- Fills the data region: calls `create_file` in a loop until `Err(NoSpace)` is
+  returned, recording the fill count.
+- Snapshots the full-volume image immediately before any refused call.
+- Calls `create_file(1, "overflow.bin", ...)` with a full-size payload.
+- Asserts the result is `Err(Error::NoSpace)`.
+- Asserts the raw sector image is byte-for-byte unchanged from the snapshot.
+- Controls: `lookup(1, "overflow.bin")` returns `Err(NotFound)` (no orphan
+  entry); all previously filled files remain accessible via `lookup`; `check()`
+  confirms the volume is consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **104 passed / 0 failed** (was 103; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Uses an 80-sector volume so data blocks (not inodes or directory slots) are
+  the binding constraint; filling yields 4 files (same as `data_full_volume()`).
+- The snapshot assertion proves zero sector writes occurred on the refused call,
+  not just that the logical view is clean.
+- The symmetric case (`create` succeeding followed by `write_file` failing with
+  `NoSpace`, leaving an orphan empty file) is documented in
+  `create_file_out_of_space_leaves_no_file` and is a known limitation of the
+  separate `create + write_file` sequence vs. the atomic `create_file`.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: test that create refuses an invalid name (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `faca32d2`). Working tree was clean.

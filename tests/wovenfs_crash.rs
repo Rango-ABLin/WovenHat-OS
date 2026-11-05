@@ -5641,3 +5641,82 @@ fn create_refuses_an_invalid_name() {
         .expect("create with short valid name must succeed");
     volume.check().expect("volume consistent after refused creates");
 }
+
+/// `create_file` (wfs.rs line 1066) calls `stage_create` and `stage_write` in a
+/// single transaction; if either fails the transaction is never committed and no
+/// sector is written.  When all data blocks are taken, `allocate_block` returns
+/// `Err(NoSpace)` and `stage_write` propagates it, while `stage_create` has
+/// already staged (in the transaction buffer) a fresh inode and a new directory
+/// entry.  Because the commit never runs, the disk image is completely unmodified.
+///
+/// `create_file_out_of_space_leaves_no_file` verifies the logical outcome (the
+/// file is absent and `check()` passes) but does not snapshot the raw sectors
+/// before the refused call.  Without that snapshot it cannot prove that no sector
+/// write reached the disk — only that the logical view is clean.  This test adds
+/// the sector-level atomicity proof: the image must be byte-for-byte identical
+/// before and after the refused `create_file`.
+#[test]
+fn create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace() {
+    // 80-sector volume: same geometry as data_full_volume().  Data blocks, not
+    // inodes or directory slots, are the binding constraint on a full volume.
+    let disk = CrashDisk::blank_sized(80);
+    Volume::format(disk.clone(), INODES).expect("format");
+
+    // Fill the data region until create_file fails with NoSpace.
+    let filled = {
+        let payload = vec![1u8; MAX_FILE_SIZE];
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        let mut count = 0usize;
+        loop {
+            let name = format!("fill{count}");
+            match volume.create_file(1, &name, 0o644, &payload, 1) {
+                Ok(_) => count += 1,
+                Err(Error::NoSpace) => break,
+                Err(err) => panic!("filling {name}: {err:?}"),
+            }
+        }
+        count
+    };
+    assert!(filled > 0, "expected at least one fill to succeed");
+
+    // Snapshot the data-full image before any refused call.
+    let snapshot = disk.sectors();
+
+    let mut volume = Volume::mount(disk.clone()).expect("mount");
+    let payload = vec![2u8; MAX_FILE_SIZE];
+
+    // create_file with data must fail: allocate_block finds no free block.
+    assert_eq!(
+        volume.create_file(1, "overflow.bin", 0o644, &payload, 2),
+        Err(Error::NoSpace),
+        "create_file must refuse when no data blocks remain"
+    );
+
+    // No sector must have been written.  The transaction staged the inode and
+    // directory entry in memory, but commit was never called.
+    assert!(
+        disk.sectors() == snapshot,
+        "a refused create_file must not modify any sector"
+    );
+
+    // The file must not appear in the directory.
+    assert_eq!(
+        volume.lookup(1, "overflow.bin").map(|e| e.inode),
+        Err(Error::NotFound),
+        "the refused create_file must not leave a file in the directory"
+    );
+
+    // All previously filled files must remain accessible.
+    for i in 0..filled {
+        let name = format!("fill{i}");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused create_file"
+        );
+    }
+
+    // The volume must still be consistent.
+    volume
+        .check()
+        .expect("volume must be consistent after a refused create_file");
+}
