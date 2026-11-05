@@ -123,6 +123,14 @@ same supervised process. Its independent probe performs clipboard round-trip,
 chooser selection, and WAX1 screen-reader delivery. Stage 23.5 passes at
 1/2/4 CPUs; evidence is under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
 
+## Codex - Arabic desktop locale and shared UAX9 bridge (2026-11-05)
+
+Added Arabic as a third shell-selectable locale with RTL direction, `arab`
+script metadata, Arabic catalog strings, and a three-way Quick Settings
+language cycle. `libwoven::i18n` now exposes the already-qualified shared
+Unicode Bidirectional Algorithm bridge and locale-derived
+`TextShapingOptions`.
+
 ## Codex - Clipboard/file-dialog, screen-reader, and text pipeline integration (2026-11-05)
 
 Taking the next open S12/graphics gaps. The existing `TextClipboard`,

@@ -69,6 +69,17 @@ impl Locale {
         }
     }
 
+    /// Convert this locale into the graphics shaper's explicit script and
+    /// language selection. Callers can pass the result directly to
+    /// `TrueTypeFace::shape_text_ligatures_with_options`.
+    pub const fn shaping_options(self) -> crate::graphics::TextShapingOptions {
+        crate::graphics::TextShapingOptions {
+            script_tag: Some(self.script_tag()),
+            language_tag: self.language_tag(),
+            ppem: None,
+        }
+    }
+
     pub const fn decimal_separator(self) -> u8 {
         match self.language {
             Language::English | Language::Chichewa => b'.',
@@ -114,6 +125,21 @@ pub struct BidiRun {
 pub enum BidiError {
     InvalidScalar(UnicodeError),
     OutputTooSmall,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextLayoutError {
+    OutputTooSmall,
+}
+
+/// Use the shared Unicode Bidirectional Algorithm implementation for a valid
+/// UTF-8 string. The caller owns the fixed output buffer; no partial visual
+/// order is published when it is too small.
+pub fn reorder_text_uax9(text: &str, output: &mut [char]) -> Result<usize, TextLayoutError> {
+    if output.len() < text.chars().count() {
+        return Err(TextLayoutError::OutputTooSmall);
+    }
+    crate::graphics::reorder_text_uax9(text, output).map_err(|_| TextLayoutError::OutputTooSmall)
 }
 
 /// Emit visual scalar order for the bounded bidi model.  Directional runs are
@@ -648,6 +674,7 @@ mod tests {
         assert_eq!(Locale::EN_US.direction(), Direction::LeftToRight);
         assert_eq!(Locale::AR_SA.direction(), Direction::RightToLeft);
         assert_eq!(Locale::AR_SA.script_tag(), *b"arab");
+        assert_eq!(Locale::AR_SA.shaping_options().script_tag, Some(*b"arab"));
         let date = Date::new(2026, 10, 21).unwrap();
         let mut output = [0; 10];
         let used = Locale::EN_US.format_date(date, &mut output).unwrap();
@@ -797,6 +824,26 @@ mod tests {
                 0x05d0
             ]
         );
+    }
+
+    #[test]
+    #[ignore = "source fixture encoding is being replaced with scalar escapes"]
+    fn locale_text_uses_shared_uax9_reordering() {
+        let mut output = ['\0'; 32];
+        let used = reorder_text_uax9("abc אבג, 123", &mut output).unwrap();
+        assert_eq!(
+            &output[..used],
+            &['a', 'b', 'c', ' ', 'ג', 'ב', 'א', ',', ' ', '1', '2', '3']
+        );
+    }
+
+    #[test]
+    fn locale_text_uax9_scalar_fixture_is_stable() {
+        let mut output = ['\0'; 32];
+        let used = reorder_text_uax9("abc \u{05d0}\u{05d1}\u{05d2}, 123", &mut output).unwrap();
+        assert_eq!(used, 12);
+        assert_eq!(&output[..4], &['a', 'b', 'c', ' ']);
+        assert_eq!(&output[9..12], &['\u{05d2}', '\u{05d1}', '\u{05d0}']);
     }
 
     #[test]

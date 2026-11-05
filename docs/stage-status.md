@@ -31,6 +31,12 @@ delivery, passing on 1/2/4 CPUs with exit 33. Evidence is retained under
 desktop services rather than a claim of physical assistive-device speech or
 full filesystem provider policy.
 
+The shell now exposes Arabic alongside English and Chichewa, including RTL
+locale metadata, Arabic catalog strings, and a three-way language cycle. The
+i18n module bridges callers to the shared UAX9 implementation and produces
+locale-derived OpenType shaping options, so shell and application text can
+select the same script/language policy.
+
 ## Stage 10.7 full regression after S12 GUI updates - 2026-11-05 - PASSED (SOFTWARE)
 
 The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and

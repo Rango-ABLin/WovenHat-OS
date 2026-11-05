@@ -336,6 +336,20 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("type_to_search", "Lembani kufunafuna"),
             ("no_open_windows", "Palibe mawindo otseguka pa gawo ili"),
         ],
+        Language::Arabic => &[
+            ("sign_in", "تسجيل الدخول"),
+            ("locked", "مقفل"),
+            ("change_pin", "تغيير الرقم السري"),
+            ("current_pin", "الرقم السري الحالي"),
+            ("new_pin", "الرقم السري الجديد"),
+            ("confirm_new_pin", "تأكيد الرقم السري الجديد"),
+            ("enter_pin", "أدخل الرقم السري"),
+            ("wrong_pin", "الرقم السري غير صحيح"),
+            ("try_again_shortly", "حاول مرة أخرى قريباً"),
+            ("start", "ابدأ"),
+            ("type_to_search", "اكتب للبحث"),
+            ("no_open_windows", "لا توجد نوافذ مفتوحة في مساحة العمل"),
+        ],
     };
     for (key, value) in entries {
         let _ = catalog.insert(key, value);
@@ -349,6 +363,7 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
 struct ShellCatalogs {
     english: UnsafeCell<libwoven::i18n::Catalog>,
     chichewa: UnsafeCell<libwoven::i18n::Catalog>,
+    arabic: UnsafeCell<libwoven::i18n::Catalog>,
     built: UnsafeCell<bool>,
 }
 
@@ -358,6 +373,7 @@ unsafe impl Sync for ShellCatalogs {}
 static SHELL_CATALOGS: ShellCatalogs = ShellCatalogs {
     english: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     chichewa: UnsafeCell::new(libwoven::i18n::Catalog::new()),
+    arabic: UnsafeCell::new(libwoven::i18n::Catalog::new()),
     built: UnsafeCell::new(false),
 };
 
@@ -376,11 +392,13 @@ fn shell_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n:
         if !*SHELL_CATALOGS.built.get() {
             fill_shell_catalog(&mut *SHELL_CATALOGS.english.get(), Language::English);
             fill_shell_catalog(&mut *SHELL_CATALOGS.chichewa.get(), Language::Chichewa);
+            fill_shell_catalog(&mut *SHELL_CATALOGS.arabic.get(), Language::Arabic);
             *SHELL_CATALOGS.built.get() = true;
         }
         match language {
             Language::English => &*SHELL_CATALOGS.english.get(),
             Language::Chichewa => &*SHELL_CATALOGS.chichewa.get(),
+            Language::Arabic => &*SHELL_CATALOGS.arabic.get(),
         }
     }
 }
@@ -1531,6 +1549,7 @@ impl Desktop {
             match self.language {
                 libwoven::i18n::Language::English => "Language: English",
                 libwoven::i18n::Language::Chichewa => "Language: Chichewa",
+                libwoven::i18n::Language::Arabic => "Language: Arabic",
             },
             if self.three_d {
                 "3D Desktop: On"
@@ -3238,6 +3257,9 @@ impl Desktop {
                                     libwoven::i18n::Language::Chichewa
                                 }
                                 libwoven::i18n::Language::Chichewa => {
+                                    libwoven::i18n::Language::Arabic
+                                }
+                                libwoven::i18n::Language::Arabic => {
                                     libwoven::i18n::Language::English
                                 }
                             };
