@@ -302,12 +302,16 @@ def main():
         if args.exercise_client_pointer:
             client_pointer_baseline = out / f'woven-{app[0]}-before-client-pointer.ppm'
             command_qmp('screendump', {'filename': str(client_pointer_baseline)})
-            # The compositor presents a 1280x800 framebuffer at scale 2, so
-            # the shell's logical pointer starts near (320,200). Move to a
-            # safe point inside the first client window in logical space.
+            # Normalize the logical pointer to the bottom-right corner before
+            # targeting the first client. Relative deltas otherwise depend on
+            # where launcher navigation left the pointer.
             command_qmp('input-send-event', {'events': [
-                {'type': 'rel', 'data': {'axis': 'x', 'value': -260}},
-                {'type': 'rel', 'data': {'axis': 'y', 'value': -100}},
+                {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': 1000}},
+            ]})
+            command_qmp('input-send-event', {'events': [
+                {'type': 'rel', 'data': {'axis': 'x', 'value': -580}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': -300}},
             ]})
             time.sleep(0.5)
             command_qmp('input-send-event', {'events': [
@@ -339,13 +343,18 @@ def main():
                 'terminal': {'move': (5, 20), 'marker': 'WovenTerminal: pointer cleared', 'name': 'terminal'},
                 'monitor': {'move': (10, 20), 'marker': 'WovenMonitor: pointer refreshed', 'name': 'monitor'},
                 'security': {'move': (10, -5), 'marker': 'WovenSecurity: pointer refreshed', 'name': 'security'},
-                'editor': {'move': (230, 130) if args.exercise_client_pointer else (-30, 30), 'marker': 'WovenEditor: pointer refreshed', 'name': 'editor'},
+                'editor': {'move': (270, 120) if args.exercise_client_pointer else (-310, -180), 'marker': 'WovenEditor: pointer refreshed', 'name': 'editor'},
                 'images': {'move': (10, 20), 'marker': 'WovenImages: pointer refreshed', 'name': 'images'},
                 'update': {'move': (10, -5), 'marker': 'WovenUpdate: pointer refreshed', 'name': 'update'},
                 'store': {'move': (10, 20), 'marker': 'WovenStore: pointer refreshed', 'name': 'store'},
             }[args.app]
             click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
             command_qmp('screendump', {'filename': str(click_baseline)})
+            if not args.exercise_client_pointer:
+                command_qmp('input-send-event', {'events': [
+                    {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
+                    {'type': 'rel', 'data': {'axis': 'y', 'value': 1000}},
+                ]})
             # The first window opens at (40, 40) in the logical 640x400
             # desktop. Each client control uses a fixed bounded local target.
             command_qmp('input-send-event', {'events': [

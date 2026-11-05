@@ -396,7 +396,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
 }
 
 fn save_note(text: &str) -> bool {
-    let Ok(descriptor) = libwoven::open("/mnt/woven-note.txt") else {
+    let Ok(descriptor) = libwoven::open_access("/mnt/woven-note.txt", 6) else {
         return false;
     };
     let result = libwoven::write_file(descriptor, text.as_bytes()) == Ok(text.len());

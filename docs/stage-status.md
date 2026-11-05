@@ -1,13 +1,13 @@
 # Stage status
 
-## WovenEditor live desktop qualification - 2026-11-05 - INCOMPLETE (EVIDENCE PRESERVED)
+## WovenEditor live desktop qualification - 2026-11-05 - PARTIAL PASS
 
-The desktop harness was repaired to provide the required search-service image
-and the desktop-qualified 5G guest memory. The corrected run reaches QEMU,
-signs in, opens WovenEditor, and receives `WovenEditor: pointer updated`, but
-the client-pointer capture is unchanged (`changed_pixels=0`) in
-`audit-artifacts/editor-desktop-1cpu-1793848134380845300`. The visual pointer
-repaint/input assertion remains open; no QEMU release-pass claim is made.
+The desktop harness now supplies the search-service image and qualified 5G
+guest memory. WovenEditor pointer-only client acceptance passes on 1/2/4 CPUs;
+evidence is retained under `audit-artifacts/editor-desktop-{1,2,4}cpu-*`. The
+direct click journey still has intermittent relative-mouse delivery and is
+not a release qualification. The GUI Save path creates the note through the
+capability-checked `open_access(..., 6)` ABI.
 
 ## S12 WovenEditor interactive GUI increment - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
 
