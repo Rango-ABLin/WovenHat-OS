@@ -1,0 +1,13 @@
+[package]
+name = "wovenhat-sdk-provenance-signer"
+version = "0.8.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+
+[lints.rust]
+warnings = "deny"

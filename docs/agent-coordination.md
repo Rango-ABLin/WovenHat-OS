@@ -9071,3 +9071,14 @@ still lacks a kernel/service TLS handshake, certificate-chain and hostname
 validation implementation, trust-store policy, and a reachable certified
 printer for end-to-end qualification.
 
+## Codex - detached signed SDK provenance path (2026-11-05)
+
+Added the standalone `tools/sdk-provenance-signer` Ed25519 tool and
+`scripts/sign-sdk-provenance.py`. Signing requires both
+`WOVENHAT_SDK_SIGNING_SEED_HEX` and the matching
+`WOVENHAT_SDK_TRUSTED_PUBLIC_KEY_HEX`; verification requires the trusted public
+key and checks the envelope schema, payload SHA-256, key identity, and detached
+signature. Tool check/Clippy and a sign-then-verify test pass with the existing
+development test key. A production claim still requires the authorized
+production key and release-owner custody of that key.
+

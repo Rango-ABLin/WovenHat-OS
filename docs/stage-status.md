@@ -12943,3 +12943,13 @@ release implementation still needs an OS TLS service with handshake,
 certificate-chain and hostname validation, trust-store/revocation policy,
 and an end-to-end run against a reachable certified IPP printer.
 
+## Signed SDK SBOM/provenance path - 2026-11-05 - SOFTWARE PASS / PRODUCTION KEY OPEN
+
+Added a standalone Ed25519 detached-signature tool and wrapper script for the
+CycloneDX/provenance document emitted by `verify-clean-room-sdk.py`. The tool
+fails closed unless the signing seed matches an explicitly supplied trusted
+public key, and verification checks the schema, payload digest, trusted key,
+and signature. Tool check, warning-denying Clippy, and sign/verify using the
+development test key pass. This is not production signing: an authorized
+production release key and controlled signing environment are still required.
+
