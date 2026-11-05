@@ -12953,3 +12953,12 @@ and signature. Tool check, warning-denying Clippy, and sign/verify using the
 development test key pass. This is not production signing: an authorized
 production release key and controlled signing environment are still required.
 
+## Clean-room rebuild and remote-admin wire boundary - 2026-11-05 - SOFTWARE PASS / EXTERNAL SECURITY OPEN
+
+The reproducible SDK script completed in a fresh temporary checkout with all
+239 libwoven tests passing. Remote administration now has a bounded WADM
+request codec with caller-owned payload copying and fail-closed framing checks.
+The protocol still intentionally has no network listener: authenticated TLS,
+client identity binding, and an external security review are required before
+policy mutation can be exposed remotely.
+

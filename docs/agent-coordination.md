@@ -9082,3 +9082,13 @@ signature. Tool check/Clippy and a sign-then-verify test pass with the existing
 development test key. A production claim still requires the authorized
 production key and release-owner custody of that key.
 
+## Codex - clean-room and remote-admin wire increments (2026-11-05)
+
+The independent temporary-tree SDK rebuild completed with all 239 libwoven
+tests passing and emitted `target/clean-room-report.json`. Remote administration
+now has a bounded WADM request codec that copies payloads into caller-owned
+storage and rejects bad versions, reserved bits, truncation, and oversized
+commands. No network listener was enabled: without authenticated TLS and
+client-identity binding, exposing policy mutation over raw TCP would violate
+the fail-closed security boundary.
+

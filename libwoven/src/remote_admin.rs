@@ -1,12 +1,15 @@
 //! Bounded authenticated administration and transactional policy rollback.
 //!
 //! This is the protocol/state boundary used by a remote administration
-//! service.  It deliberately does not contain a socket listener or a private
+//! service. It deliberately does not contain a socket listener or a private
 //! key: the service supplies authentication and transport, while this module
 //! guarantees replay protection, bounded records, and atomic rollback.
 
 pub const MAX_POLICY_BYTES: usize = 1024;
 pub const MAX_COMMAND_BYTES: usize = 256;
+const REQUEST_HEADER: usize = 26;
+const MAGIC: [u8; 4] = *b"WADM";
+const VERSION: u8 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -31,6 +34,72 @@ pub struct Request {
     pub nonce: u64,
     pub expected_generation: u64,
     pub payload_len: usize,
+}
+
+/// Encode the authenticated-command envelope used by a future transport
+/// listener. Authentication is deliberately not implied by this codec: the
+/// listener must bind it to a TLS client identity before calling `apply` or
+/// `rollback`.
+pub fn encode_request(request: &Request, payload: &[u8], output: &mut [u8]) -> Result<usize, Error> {
+    if request.payload_len != payload.len() || payload.len() > MAX_COMMAND_BYTES {
+        return Err(Error::TooLarge);
+    }
+    let total = REQUEST_HEADER.checked_add(payload.len()).ok_or(Error::TooLarge)?;
+    if output.len() < total {
+        return Err(Error::TooLarge);
+    }
+    output[..4].copy_from_slice(&MAGIC);
+    output[4] = VERSION;
+    output[5] = command_code(request.command).ok_or(Error::Invalid)?;
+    output[6..8].fill(0);
+    output[8..16].copy_from_slice(&request.nonce.to_be_bytes());
+    output[16..24].copy_from_slice(&request.expected_generation.to_be_bytes());
+    output[24..26].copy_from_slice(&(payload.len() as u16).to_be_bytes());
+    output[REQUEST_HEADER..total].copy_from_slice(payload);
+    Ok(total)
+}
+
+/// Decode one complete command without allocating or retaining a pointer into
+/// the caller's receive buffer. The payload is copied into caller-owned
+/// storage so it remains valid after the network buffer is reused.
+pub fn decode_request(input: &[u8], payload: &mut [u8]) -> Result<Request, Error> {
+    if input.len() < REQUEST_HEADER || input[..4] != MAGIC || input[4] != VERSION {
+        return Err(Error::Invalid);
+    }
+    if input[6] != 0 || input[7] != 0 {
+        return Err(Error::Invalid);
+    }
+    let length = u16::from_be_bytes([input[24], input[25]]) as usize;
+    let total = REQUEST_HEADER.checked_add(length).ok_or(Error::TooLarge)?;
+    if length > MAX_COMMAND_BYTES || input.len() != total || payload.len() < length {
+        return Err(Error::TooLarge);
+    }
+    payload[..length].copy_from_slice(&input[REQUEST_HEADER..total]);
+    Ok(Request {
+        command: decode_command(input[5]).ok_or(Error::Invalid)?,
+        nonce: u64::from_be_bytes(input[8..16].try_into().map_err(|_| Error::Invalid)?),
+        expected_generation: u64::from_be_bytes(
+            input[16..24].try_into().map_err(|_| Error::Invalid)?,
+        ),
+        payload_len: length,
+    })
+}
+
+fn command_code(command: Command) -> Option<u8> {
+    Some(match command {
+        Command::ApplyPolicy => 1,
+        Command::RollbackPolicy => 2,
+        Command::QueryPolicy => 3,
+    })
+}
+
+fn decode_command(code: u8) -> Option<Command> {
+    Some(match code {
+        1 => Command::ApplyPolicy,
+        2 => Command::RollbackPolicy,
+        3 => Command::QueryPolicy,
+        _ => return None,
+    })
 }
 
 pub trait Authorizer {
@@ -215,5 +284,37 @@ mod tests {
             Err(Error::GenerationMismatch)
         );
         assert_eq!(journal.rollback(&mut admin, 2, 2), Err(Error::Replay));
+    }
+
+    #[test]
+    fn request_wire_round_trip_copies_payload() {
+        let request = Request {
+            command: Command::ApplyPolicy,
+            nonce: 7,
+            expected_generation: 3,
+            payload_len: 5,
+        };
+        let mut encoded = [0u8; REQUEST_HEADER + 5];
+        let length = encode_request(&request, b"allow", &mut encoded).unwrap();
+        let mut payload = [0u8; MAX_COMMAND_BYTES];
+        let decoded = decode_request(&encoded[..length], &mut payload).unwrap();
+        assert_eq!(decoded, request);
+        assert_eq!(&payload[..decoded.payload_len], b"allow");
+    }
+
+    #[test]
+    fn request_wire_rejects_reserved_bits_and_truncation() {
+        let request = Request {
+            command: Command::QueryPolicy,
+            nonce: 1,
+            expected_generation: 1,
+            payload_len: 0,
+        };
+        let mut encoded = [0u8; REQUEST_HEADER];
+        encode_request(&request, &[], &mut encoded).unwrap();
+        encoded[6] = 1;
+        assert_eq!(decode_request(&encoded, &mut []), Err(Error::Invalid));
+        encoded[6] = 0;
+        assert_eq!(decode_request(&encoded[..REQUEST_HEADER - 1], &mut []), Err(Error::Invalid));
     }
 }
