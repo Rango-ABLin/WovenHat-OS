@@ -1,5 +1,86 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: create refuses when a live (used) inode in the allocator scan has a corrupt checksum (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `25f95f0c`). Working tree was clean.
+
+### Defect / gap
+
+`allocate_inode` (wfs.rs line 934) scans inodes from 2 to `inode_count`,
+calling `inode_staged(txn, number)?` on each slot.  `inode_staged` calls
+`checked_inode` → `Inode::decode(raw)`: a structural FNV-1a checksum
+mismatch at bytes 120–127 returns `None` → `Err(Error::Corrupt)`.
+
+The previous session proved atomicity for the case where the corrupted slot is
+a **free** inode: the slot is non-all-zero (checksum field flipped) so the
+all-zero fast path is bypassed and the checksum check fails.
+
+No test previously proved that this guard:
+1. Returns `Err(Corrupt)` when the corrupted slot is a **live, used** inode
+   encountered during the scan (not the free slot being allocated), and
+2. Leaves the image byte-for-byte identical (no staged sectors committed).
+
+The two paths differ in which slot triggers the error:
+- **Free inode corrupt**: scan passes through all used inodes normally, fails
+  on the free inode slot it was about to allocate.
+- **Used inode corrupt** (this session): scan fails at the used inode itself,
+  before it can even reach any free inode.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_refuses_when_a_used_inode_in_the_allocator_scan_has_a_corrupt_checksum_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()` to get a.bin (inode 2) and b.bin (inode 3).
+  Inode 4 is the first free inode on this image.
+- Forks the image (`corrupt = base.fork(None)`).
+- Corrupts b.bin's inode (inode 3) structural checksum: flips byte at
+  `inode_start * 512 + 2*128 + 120` (the first byte of inode 3's FNV-1a
+  checksum field).  Inode 3 is a live used inode; the flip makes the stored
+  checksum not match bytes 0–119 → `Inode::decode` returns `None`.
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.create(1, "c.txt", 0o644, 2)`:
+  - `stage_create` → `allocate_inode`:
+    - scan inode 2 → valid, `is_used = true` → continue
+    - scan inode 3 → `Inode::decode` returns `None` → `Err(Corrupt)`
+  - `stage_create` returns `Err(Corrupt)`.  No staging occurred.
+  - `create` returns `Err(Corrupt)` without calling `commit`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — no sector written.
+- Calls `volume.create_file(1, "c.txt", 0o644, b"data", 2)` — same path,
+  same result.
+- Asserts `Err(Error::Corrupt)` and `corrupt.sectors() == before`.
+- Control: on the unpatched `base`, `create_file` succeeds and returns `Ok(4)`.
+
+No production code changed.  Test count: 118 → 119.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **119 passed / 0 failed** (was 118; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `allocate_inode` used-inode-corrupt-checksum guard:
+  `stage_create` returns `Err(Corrupt)` with zero staged sectors and zero disk
+  writes when the scan encounters a live inode with a bad checksum.
+- Together with `create_refuses_when_a_free_inode_has_a_corrupt_structural_checksum_and_leaves_no_trace`,
+  all inode-checksum failure paths encountered **within** `allocate_inode`'s
+  scan loop are now covered:
+  - Free inode corrupt checksum → scan finds the free slot but `Inode::decode`
+    fails there. ← prior session
+  - Used inode corrupt checksum → scan fails at the used slot before any free
+    slot is reachable. ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: create refuses when a free inode has a corrupt structural checksum (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `6f37ff03`). Working tree was clean.

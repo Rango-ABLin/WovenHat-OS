@@ -7153,3 +7153,92 @@ fn create_refuses_when_a_free_inode_has_a_corrupt_structural_checksum_and_leaves
         );
     }
 }
+
+/// `allocate_inode` (wfs.rs line 934) scans from inode 2 to `inode_count`,
+/// calling `inode_staged(txn, number)?` on each slot.  `inode_staged` calls
+/// `checked_inode` → `Inode::decode(raw)`: a structural FNV-1a checksum
+/// mismatch at bytes 120–127 returns `None` → `Err(Error::Corrupt)`.
+///
+/// The existing test
+/// `create_refuses_when_a_free_inode_has_a_corrupt_structural_checksum_and_leaves_no_trace`
+/// covers the case where the corrupted slot is a **free** inode (all-zero
+/// content, checksum field flipped so the fast path is bypassed and the
+/// checksum check fails).
+///
+/// This test covers the remaining path: the corrupted slot is a **live, used**
+/// inode.  The scan passes through inode 2 (a.bin, valid) normally (`is_used()
+/// == true` → continue), then hits inode 3 (b.bin, live file) whose stored
+/// FNV-1a checksum field has been flipped.  `Inode::decode` finds the stored
+/// checksum does not match bytes 0–119 and returns `None` → `Err(Corrupt)`.
+/// `allocate_inode` propagates the error immediately — no staging has occurred
+/// — and `stage_create` returns `Err(Corrupt)` without calling `commit`.
+#[test]
+fn create_refuses_when_a_used_inode_in_the_allocator_scan_has_a_corrupt_checksum_and_leaves_no_trace()
+ {
+    // two_one_block_files(): a.bin → inode 2, b.bin → inode 3.
+    // Inode 4 would be the next free slot on an uncorrupt image.
+    let (base, _, _) = two_one_block_files();
+
+    // Fork and corrupt b.bin's inode (inode 3) structural checksum by flipping
+    // a byte in the checksum field.  Inode 3: index 2 (0-based: inode 1 → 0,
+    // 2 → 1, 3 → 2).  Four inodes per 512-byte sector; each slot 128 bytes;
+    // FNV-1a checksum field starts at offset 120 within the slot.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        let offset = 2 * 128; // inode 3 → index 2 within the inode sector
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must flag the corrupt live inode checksum.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode with a bad structural checksum"
+    );
+
+    // Snapshot: neither create nor create_file must modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // create must refuse: stage_create → allocate_inode scans inode 2 (valid,
+    // used → continue), then inode 3 (b.bin, corrupt checksum) →
+    // inode_staged(3) → Inode::decode returns None → Err(Corrupt).
+    // No sector is staged or committed.
+    assert_eq!(
+        volume.create(1, "c.txt", 0o644, 2),
+        Err(Error::Corrupt),
+        "create must refuse when a live inode in the scan has a corrupt checksum"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "a refused create must not modify the image"
+    );
+
+    // create_file uses the same stage_create → allocate_inode path.
+    assert_eq!(
+        volume.create_file(1, "c.txt", 0o644, b"data", 2),
+        Err(Error::Corrupt),
+        "create_file must refuse when a live inode in the scan has a corrupt checksum"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // Control: on the unpatched base image, create_file succeeds and returns
+    // inode 4 (first free slot after occupied inodes 2 and 3).
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.create_file(1, "c.txt", 0o644, b"data", 2),
+            Ok(4),
+            "control: create_file must succeed on the unpatched image and return inode 4"
+        );
+    }
+}
