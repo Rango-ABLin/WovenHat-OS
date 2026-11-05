@@ -9185,3 +9185,14 @@ Encipherment usage and no CA basic-constraints extension; it must not be used
 as a CA trust root. The actual issuing CA DER or a properly authorized device
 certificate is still required for printer qualification.
 
+## Codex - Stage 20.14b graphics oracle requalification (2026-11-05)
+
+Fixed the stale two-head acceptance oracle: the live shell uses a top-mounted
+rounded-gradient taskbar and the refined 220-pixel diagonal weave wallpaper,
+while the test still expected the old bottom-mounted flat bar and checkerboard
+wallpaper. The corrected gate passed at 1/2/4 CPUs with both heads verified.
+Timestamped evidence is retained under `audit-artifacts/stage20.14b-*`. A
+separate strict desktop rerun stalled in its prerequisite service-image build
+before QEMU launch and was stopped; that retained evidence is not counted as
+acceptance.
+

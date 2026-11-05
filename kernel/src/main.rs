@@ -9443,8 +9443,9 @@ fn stage20_14b_self_test() -> bool {
     const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
+    const WEAVE_PITCH: i32 = 220;
+    const WEAVE_TINT_OPACITY: u8 = 6;
     const RED: u32 = rgb(200, 60, 60);
-    const START_FILL: u32 = rgb(28, 115, 145);
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -9480,14 +9481,9 @@ fn stage20_14b_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / WEAVE_PITCH) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, WEAVE_TINT_OPACITY)
     }
 
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -9546,14 +9542,24 @@ fn stage20_14b_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
-    let top = height - 24;
+    // The current shell taskbar is anchored at the top of the primary
+    // monitor. Keep this acceptance geometry aligned with the live desktop;
+    // the old bottom-bar coordinate masked regressions in the updated shell.
+    let top = 0;
     serial::write_line(format_args!(
         "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
         width, height, scale, primary
     ));
     let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
     let taskbar_on_primary_only = until(2000, || {
-        compositor::pixel(6, top + 6) == Ok(START_FILL)
+        // The current Start button is a rounded gradient, so its interior is
+        // intentionally no longer equal to the old flat START_FILL token.
+        // Check that a point inside the primary taskbar differs from the
+        // wallpaper while the complete secondary head remains untouched.
+        let primary_bar = compositor::pixel(20, top + 10)
+            .map(|pixel| pixel != wallpaper(20, top + 10, height))
+            .unwrap_or(false);
+        primary_bar
             && wall(primary + 7, top + 7)
             && wall(width - 7, top + 7)
             && (top..height).all(|y| (primary..width).all(|x| wall(x, y)))

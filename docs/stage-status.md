@@ -1,5 +1,17 @@
 # Stage status
 
+## Graphics Stage 20.14b current-head requalification - 2026-11-05 - PASSED 1/2/4 CPUs
+
+Requalified the two-head VirtIO-GPU desktop after the visual-system update.
+The acceptance oracle was corrected to the current top-mounted rounded-gradient
+taskbar and 220-pixel diagonal weave wallpaper; it had still expected the
+retired bottom-mounted flat taskbar and 96-pixel checkerboard wallpaper. The
+gate now passes with both heads verified at 1, 2, and 4 CPUs. Evidence is
+retained under the three timestamped `audit-artifacts/stage20.14b-*` folders.
+The strict desktop journey rerun was separately stopped while its prerequisite
+service-image build remained stalled before QEMU launch; its retained build
+evidence is not counted as a pass or failure of the graphics gate.
+
 ## S13 IPP TLS failure classification - 2026-11-05 - BLOCKED ON TRUST INPUT
 
 The IPP probe now distinguishes connect, TLS, read, and HTTP failures. The
