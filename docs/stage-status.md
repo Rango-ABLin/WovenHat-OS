@@ -13010,3 +13010,13 @@ redacts credential/key/token patterns. ZIP timestamps and manifest ordering are
 deterministic. External privacy review and authenticated remote delivery remain
 open.
 
+## Mutual-TLS remote-admin service harness - 2026-11-05 - SOFTWARE PASS / OS DEPLOYMENT OPEN
+
+Added `tools/remote-admin-tls-service`. It requires explicit server
+certificate/key DER, client CA DER, and an expected client-certificate SHA-256
+fingerprint; Rustls mutual TLS authenticates the client before WADM policy
+apply/rollback/query handling. The service uses the existing bounded codec and
+generation/replay-protected journal, rejects missing arguments, and has clean
+warning-denying check/Clippy results. Freestanding OS service deployment,
+policy authority integration, and independent security review remain open.
+

@@ -9146,3 +9146,13 @@ timestamps/order plus a hashed manifest. A real retained serial log exported
 successfully and the redaction checks passed. External privacy review and
 authenticated remote delivery remain open.
 
+## Codex - mutual-TLS remote-admin service harness (2026-11-05)
+
+Added `tools/remote-admin-tls-service`, a host/service listener using Rustls
+mutual TLS and the WADM policy journal. It requires explicit server cert/key
+DER, client CA DER, and expected client-certificate fingerprint, then accepts
+only the authenticated client before processing bounded policy requests. The
+tool check/Clippy and missing-argument fail-closed gate pass. This is a service
+harness, not a claim that the freestanding OS has deployed the listener or
+passed independent security review.
+
