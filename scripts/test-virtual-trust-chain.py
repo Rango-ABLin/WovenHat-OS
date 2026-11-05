@@ -56,6 +56,62 @@ class TrustInputError(ValueError):
     """A caller input cannot be accepted at the trust boundary."""
 
 
+def _u16(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset:offset + 2], "little")
+
+
+def _u32(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset:offset + 4], "little")
+
+
+def _embedded_uefi_executable(image: Path, destination: Path) -> Path:
+    """Extract the contiguous PE/COFF BOOTX64 payload written by our FAT builder."""
+    data = image.read_bytes()
+    for start in range(len(data) - 64):
+        if data[start:start + 2] != b"MZ":
+            continue
+        pe = start + _u32(data, start + 0x3C)
+        if pe + 24 > len(data) or data[pe:pe + 4] != b"PE\0\0":
+            continue
+        sections = _u16(data, pe + 6)
+        optional_size = _u16(data, pe + 20)
+        optional = pe + 24
+        if optional + optional_size > len(data) or _u16(data, optional) != 0x20B:
+            continue
+        # The certificate table is the only PE data directory expressed as a
+        # file offset. It bounds an Authenticode-signed executable.
+        directory = optional + 112 + 4 * 8
+        if directory + 8 > optional + optional_size:
+            continue
+        end = start + _u32(data, directory) + _u32(data, directory + 4)
+        table = optional + optional_size
+        for section in range(sections):
+            header = table + section * 40
+            if header + 40 > len(data):
+                break
+            end = max(end, start + _u32(data, header + 20) + _u32(data, header + 16))
+        if end <= start or end > len(data):
+            continue
+        candidate = data[start:end]
+        if _u32(data, directory + 4) == 0:
+            continue
+        destination.write_bytes(candidate)
+        return destination
+    raise TrustInputError("no signed PE/COFF UEFI executable was found in the guest disk image")
+
+
+def verify_embedded_uefi_signature(sbverify: Path, certificate: Path, image: Path, output: Path) -> None:
+    executable = _embedded_uefi_executable(image, output / "BOOTX64.EFI")
+    verified = subprocess.run(
+        [str(sbverify), "--cert", str(certificate), str(executable)],
+        capture_output=True,
+        check=False,
+    )
+    (output / "sbverify.log").write_bytes(verified.stdout + verified.stderr)
+    if verified.returncode != 0:
+        raise TrustInputError("embedded UEFI executable is not Authenticode-signed by the supplied certificate")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -210,6 +266,8 @@ def build_qemu_command(
         f"file:{serial_log}",
         "-no-reboot",
         "-no-shutdown",
+        "-device",
+        "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-global",
         "driver=cfi.pflash01,property=secure,value=on",
         "-drive",
@@ -223,7 +281,9 @@ def build_qemu_command(
         "-device",
         "tpm-tis,tpmdev=tpm0",
         "-drive",
-        f"if=virtio,format=raw,readonly=on,file={disk_image}",
+        f"if=none,id=boot,format=raw,readonly=on,file={disk_image}",
+        "-device",
+        "virtio-blk-pci,drive=boot,bootindex=1",
     ]
 
 
@@ -282,14 +342,19 @@ def run_virtual_guest(
         _copy_read_only_source(disk_image, disk_copy)
         _copy_read_only_source(ovmf_vars, vars_copy)
         tpm_port = _reserve_tcp_port()
+        control_port = _reserve_tcp_port()
+        while control_port == tpm_port:
+            control_port = _reserve_tcp_port()
         swtpm_command = [
             str(swtpm),
             "socket",
             "--tpm2",
             "--tpmstate",
             f"dir={tpm_state}",
+            "--server",
+            f"type=tcp,port={tpm_port},bindaddr=127.0.0.1",
             "--ctrl",
-            f"type=tcp,port={tpm_port}",
+            f"type=tcp,port={control_port},bindaddr=127.0.0.1",
         ]
         qemu_command = build_qemu_command(
             qemu,
@@ -449,6 +514,7 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         checks.append({"name": "ovmf_code", "status": "BLOCKED", "detail": "OVMF CODE cannot be resolved"})
     file_input("ovmf_vars", args.ovmf_vars, "OVMF VARS template", max_bytes=MAX_KEY_BYTES)
     tool_input("swtpm", args.swtpm, "swtpm")
+    tool_input("sbverify", args.sbverify, "sbverify")
     file_input("disk_image", args.disk_image, "guest disk image")
     file_input("development_key", args.development_key, "development private key", max_bytes=MAX_KEY_BYTES)
     file_input("development_certificate", args.development_certificate, "development certificate", max_bytes=MAX_KEY_BYTES)
@@ -494,6 +560,15 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         else:
             checks.append({"name": "certificate_enrolled_in_ovmf_vars", "status": "PASS"})
 
+    if "sbverify" in resolved and "development_certificate" in resolved and "disk_image" in resolved:
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            verify_embedded_uefi_signature(resolved["sbverify"], resolved["development_certificate"], resolved["disk_image"], output.parent)
+            checks.append({"name": "embedded_uefi_authenticode_signature", "status": "PASS"})
+        except (TrustInputError, OSError) as exc:
+            blockers.append(_blocker("embedded-uefi-signature-invalid", str(exc)))
+            checks.append({"name": "embedded_uefi_authenticode_signature", "status": "BLOCKED", "detail": str(exc)})
+
     if args.preflight_only:
         blockers.append(_blocker("qemu-execution-not-requested", "preflight-only mode cannot qualify a trust chain"))
     elif not blockers:
@@ -533,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ovmf-code", "--firmware", dest="ovmf_code", type=Path, help="explicit OVMF CODE firmware")
     parser.add_argument("--ovmf-vars", "--firmware-vars", dest="ovmf_vars", type=Path, help="explicit Secure-Boot-enrolled OVMF VARS template")
     parser.add_argument("--swtpm", type=Path, help="explicit swtpm executable")
+    parser.add_argument("--sbverify", type=Path, help="explicit sbsigntool Authenticode verifier")
     parser.add_argument("--disk-image", "--image", dest="disk_image", type=Path, help="existing signed, file-backed guest image")
     parser.add_argument("--development-key", "--dev-key", dest="development_key", type=Path, help="caller-supplied development private key")
     parser.add_argument("--development-certificate", "--dev-certificate", "--dev-cert", dest="development_certificate", type=Path, help="caller-supplied development X.509 certificate")

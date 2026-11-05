@@ -262,23 +262,32 @@ fn load_file_from_boot_method(
 fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8]> {
     let mut file_system = boot::get_image_file_system(boot::image_handle()).ok()?;
 
-    let mut root = file_system.open_volume().unwrap();
+    let mut root = file_system
+        .open_volume()
+        .unwrap_or_else(|_| reject_firmware_resource("DiskOpenVolume"));
     let file_handle_result = root.open(name, FileMode::Read, FileAttribute::empty());
     let file_handle = file_handle_result.ok()?;
 
-    let mut file = match file_handle.into_type().unwrap() {
+    let mut file = match file_handle
+        .into_type()
+        .unwrap_or_else(|_| reject_firmware_resource("DiskFileType"))
+    {
         uefi::proto::media::file::FileType::Regular(f) => f,
-        uefi::proto::media::file::FileType::Dir(_) => panic!(),
+        uefi::proto::media::file::FileType::Dir(_) => reject_firmware_resource("DiskFileIsDirectory"),
     };
 
     let mut buf = [0; 500];
-    let file_info: &mut FileInfo = file.get_info(&mut buf).unwrap();
-    let file_size = usize::try_from(file_info.file_size()).unwrap();
+    let file_info: &mut FileInfo = file
+        .get_info(&mut buf)
+        .unwrap_or_else(|_| reject_firmware_resource("DiskFileInfo"));
+    let file_size = usize::try_from(file_info.file_size())
+        .unwrap_or_else(|_| reject_firmware_resource("DiskFileSize"));
     check_file_size(file_size, role);
 
     let file_slice =
         allocate_loader_data(file_size).unwrap_or_else(|error| reject_firmware_resource(error));
-    file.read(file_slice).unwrap();
+    file.read(file_slice)
+        .unwrap_or_else(|_| reject_firmware_resource("DiskRead"));
 
     Some(file_slice)
 }
@@ -294,7 +303,8 @@ fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'sta
 
     // Determine the kernel file size.
     let file_size = base_code.tftp_get_file_size(&server_ip.into(), name).ok()?;
-    let kernel_size = usize::try_from(file_size).expect("The file size should fit into usize");
+    let kernel_size = usize::try_from(file_size)
+        .unwrap_or_else(|_| reject_firmware_resource("TftpFileSize"));
     check_file_size(kernel_size, role);
 
     // Allocate some memory for the kernel file.
@@ -304,7 +314,7 @@ fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'sta
     // Load the kernel file.
     base_code
         .tftp_read_file(&server_ip.into(), name, Some(slice))
-        .expect("Failed to read kernel file from the TFTP boot server");
+        .unwrap_or_else(|_| reject_firmware_resource("TftpRead"));
 
     Some(slice)
 }
@@ -432,11 +442,17 @@ fn init_logger(config: &BootConfig) -> Option<RawFrameBufferInfo> {
             config
                 .frame_buffer
                 .minimum_framebuffer_height
-                .map(|v| usize::try_from(v).unwrap()),
+                .map(|v| {
+                    usize::try_from(v)
+                        .unwrap_or_else(|_| reject_firmware_resource("GraphicsHeight"))
+                }),
             config
                 .frame_buffer
                 .minimum_framebuffer_width
-                .map(|v| usize::try_from(v).unwrap()),
+                .map(|v| {
+                    usize::try_from(v)
+                        .unwrap_or_else(|_| reject_firmware_resource("GraphicsWidth"))
+                }),
         ) {
             (Some(height), Some(width)) => modes
                 .filter(|m| {
@@ -451,7 +467,7 @@ fn init_logger(config: &BootConfig) -> Option<RawFrameBufferInfo> {
     };
     if let Some(mode) = mode {
         gop.set_mode(&mode)
-            .expect("Failed to apply the desired display mode");
+            .unwrap_or_else(|_| reject_firmware_resource("GraphicsSetMode"));
     }
 
     let mode_info = gop.current_mode_info();
@@ -465,7 +481,7 @@ fn init_logger(config: &BootConfig) -> Option<RawFrameBufferInfo> {
             PixelFormat::Rgb => bootloader_api::info::PixelFormat::Rgb,
             PixelFormat::Bgr => bootloader_api::info::PixelFormat::Bgr,
             PixelFormat::Bitmask | PixelFormat::BltOnly => {
-                panic!("Bitmask and BltOnly framebuffers are not supported")
+                reject_firmware_resource("GraphicsPixelFormat")
             }
         },
         bytes_per_pixel: 4,
