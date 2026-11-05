@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file extend path refuses when allocated block is shared (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `bf3d48ee`). Working tree was clean.
+
+### Defect / gap
+
+The previous session (`bf3d48ee`) explicitly noted in its "Open" section: "The extend
+path (`allocate_block` → new block shared with another inode) is noted in the prior
+session as covered implicitly; a separate test remains possible."
+
+`stage_write` (wfs.rs line 1177) calls `self.allocate_block(txn)?` for each slot that
+is 0 (empty) and needed by the new write.  `allocate_block` scans the bitmap for a free
+block, stages a **bitmap-set** sector in the transaction, and returns the block number.
+Only after all block content and bitmap changes are staged does `refuse_shared_blocks`
+run.
+
+The existing tests cover the `refuse_shared_blocks` guard on:
+- In-place path: `direct[0]` shared, no allocation (see `write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`).
+- Shrink path: `stage_free_block` for slot ≥ needed stages a **bitmap-clear** before the guard (see `write_file_refuses_on_shrink_when_freed_block_is_shared_and_leaves_no_trace`).
+
+No test previously proved atomicity for the **extend path**, where `allocate_block`
+succeeds (bitmap-set staged + block returned) but `refuse_shared_blocks` then finds the
+newly allocated block is also named by another live inode.  This scenario stages three
+sectors before the guard fires: content for slot 0, bitmap-set for the new block, and
+content for the new block.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_on_extend_when_allocated_block_is_shared_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()` to get `a.bin` (`a_inode`, `a_block`) and `b.bin`
+  (`b_inode`, `b_block`).
+- Forks the image and calls `clear_bitmap_block(&image, b_block)` — bitmap now says
+  `b_block` is free, while `b_inode.direct[0]` still names it.
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = image.sectors()`.
+- Calls `volume.write_file(a_inode, &[8u8; 600], 2)` (600 bytes → two blocks needed):
+  - slot 0 (`a_block`): `bitmap_get(a_block)` = true → content sector staged in txn.
+  - slot 1 (empty): `allocate_block` scans from `data_start`, skips `a_block`
+    (allocated), finds `b_block` free → bitmap-set staged; `b_block` returned.
+  - slot 1 content: content sector for `b_block` staged in txn.
+  - `touched = [a_block, b_block, 0..., a_block, b_block, 0...]`.
+  - `refuse_shared_blocks` finds `b_inode.direct[0] = b_block ∈ touched`
+    → `Err(Corrupt)`.  `commit` never called.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `image.sectors() == before` — no sector was written.
+- Control: on a fresh image, extending a one-block file to two blocks succeeds and
+  reads back correctly.
+
+No production code changed.  Test count: 115 → 116.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **116 passed / 0 failed** (was 115; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the extend-path `refuse_shared_blocks` guard: three sectors
+  (content for slot 0, bitmap-set for the new block, content for the new block) are
+  staged and then discarded when `commit` is not called.
+- Together with the two prior sessions, all three `refuse_shared_blocks` guard paths in
+  `stage_write` are now covered:
+  - In-place path (slot 0 shared, no allocation, 1 staged sector).
+  - Shrink path (freed block shared, bitmap-clear staged before guard, 2 staged sectors).
+  - Extend path (allocated block shared, bitmap-set staged before guard, 3 staged sectors). ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: write_file shrink path refuses when freed block is shared (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `c8a8f036`). Working tree was clean.

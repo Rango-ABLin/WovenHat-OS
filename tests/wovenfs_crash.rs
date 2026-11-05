@@ -6829,3 +6829,99 @@ fn write_file_refuses_on_shrink_when_freed_block_is_shared_and_leaves_no_trace()
         assert_eq!(&out[..100], &[8u8; 100]);
     }
 }
+
+/// `stage_write` (wfs.rs line 1177) calls `self.allocate_block(txn)?` for each
+/// slot that is 0 (empty) and needed by the new write.  `allocate_block` scans
+/// the bitmap for a free block, stages a bitmap-set sector in the transaction,
+/// and returns the block number.  Only after all block content and bitmap changes
+/// are staged does `refuse_shared_blocks` run.
+///
+/// This test proves atomicity for the extend path of `stage_write` — the scenario
+/// where `allocate_block` succeeds (finds a bitmap-free block) but
+/// `refuse_shared_blocks` then detects that another live inode also names that
+/// same block:
+/// - `two_one_block_files()` creates `a.bin` (`a_inode`, `a_block`) and `b.bin`
+///   (`b_inode`, `b_block`).
+/// - `clear_bitmap_block(b_block)` corrupts the bitmap: `b_block` appears free
+///   in the bitmap, but `b_inode.direct[0]` still names it.
+/// - `write_file(a_inode, 600-byte payload)` triggers the extend path:
+///   - slot 0 (`a_block`): in-place rewrite, bitmap bit set → content staged.
+///   - slot 1 (empty): `allocate_block` scans from `data_start`, skips `a_block`
+///     (allocated), and finds `b_block` free → bitmap-set staged; content staged.
+///   - `touched = [a_block, b_block, 0..., a_block, b_block, 0...]`.
+///   - `refuse_shared_blocks` finds `b_inode.direct[0] = b_block ∈ touched`
+///     → `Err(Corrupt)`.  `commit` is never called.
+/// - All three staged sectors (content for `a_block`, bitmap-set for `b_block`,
+///   content for `b_block`) are discarded with the transaction.
+///
+/// Complements `write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`
+/// (in-place path, no allocation) and
+/// `write_file_refuses_on_shrink_when_freed_block_is_shared_and_leaves_no_trace`
+/// (shrink path, bitmap-clear staged before the guard).
+#[test]
+fn write_file_refuses_on_extend_when_allocated_block_is_shared_and_leaves_no_trace() {
+    // `two_one_block_files()` creates a.bin and b.bin, each with one data block.
+    let (base, a_inode, b_inode) = two_one_block_files();
+
+    // Record the data blocks of both files.
+    let a_block = read_inode_direct0(&base, a_inode);
+    let b_block = read_inode_direct0(&base, b_inode);
+    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+
+    // Fork and clear the bitmap bit for b_block.  The bitmap now treats b_block
+    // as free, but b_inode.direct[0] still names it.  When stage_write extends
+    // a.bin to two blocks, allocate_block scans from data_start, skips a_block
+    // (allocated), and returns b_block (the first "free" block it finds).
+    let image = base.fork(None);
+    clear_bitmap_block(&image, b_block);
+
+    // Precondition: check() must refuse the corrupt image (b_block is named by
+    // b_inode but free in the bitmap — a bitmap/inode inconsistency).
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see b_block as inode-named but free in the bitmap"
+    );
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // write_file(a_inode, 600-byte payload) triggers the extend path:
+    //   slot 0 (a_block): in-place rewrite, bitmap bit set → content staged in txn.
+    //   slot 1 (empty): allocate_block → b_block is "free" in the bitmap →
+    //     bitmap-set for b_block staged; b_block returned as the new block.
+    //   slot 1 content: content sector for b_block staged in txn.
+    //   touched = [a_block, b_block, 0..., a_block, b_block, 0...].
+    //   refuse_shared_blocks finds b_inode.direct[0]=b_block ∈ touched → Err(Corrupt).
+    //   commit never called.
+    assert_eq!(
+        volume.write_file(a_inode, &[8u8; 600], 2),
+        Err(Error::Corrupt),
+        "write_file must refuse when the extend path allocates a block named by another inode"
+    );
+
+    // No sector must have been written — the three staged sectors
+    // (content for a_block, bitmap-set for b_block, content for b_block)
+    // lived only in the transaction buffer; commit was never called.
+    assert!(
+        image.sectors() == before,
+        "a refused extend write_file must not modify the image"
+    );
+
+    // Control: on a fresh image with free data blocks, extending a one-block file
+    // to two blocks succeeds and reads back correctly.
+    {
+        let ctrl = formatted();
+        let mut cv = Volume::mount(ctrl).expect("mount ctrl");
+        let ctrl_inode = cv
+            .create_file(1, "ctrl.bin", 0o644, &[1u8; 400], 1)
+            .expect("create ctrl.bin with one block");
+        cv.write_file(ctrl_inode, &[2u8; 600], 2)
+            .expect("control: extend must succeed on a valid filesystem");
+        let mut out = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(cv.read_file(ctrl_inode, &mut out), Ok(600));
+        assert_eq!(&out[..600], &[2u8; 600]);
+    }
+}
