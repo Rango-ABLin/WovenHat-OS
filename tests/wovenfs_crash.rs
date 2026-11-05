@@ -7319,3 +7319,84 @@ fn create_refuses_when_a_used_inode_in_the_allocator_scan_has_a_corrupt_checksum
         );
     }
 }
+
+/// `stage_write` (wfs.rs line 1198) calls `refuse_shared_blocks` after staging
+/// all block content and bitmap changes in the transaction buffer, but before
+/// calling `commit`.  `refuse_shared_blocks` scans all inodes other than the
+/// write target, calling `inode_staged(txn, number)?` on each.  If any other
+/// live inode's structural FNV-1a checksum is bad, `inode_staged` returns
+/// `Err(Error::Corrupt)`, which propagates through `refuse_shared_blocks` and
+/// `stage_write` without reaching `commit`.
+///
+/// This test proves atomicity for that path: `write_file` is called on file
+/// `a.bin` while sibling file `b.bin`'s inode has a corrupt structural
+/// checksum.  By the time `refuse_shared_blocks` reaches `b.bin`, one content
+/// sector for `a.bin`'s data block has already been staged in the transaction
+/// buffer.  Because `commit` is never called, no sector is written.
+///
+/// This is distinct from `write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`,
+/// which corrupts the TARGET inode (zero sectors staged before failure), and
+/// from the `refuse_shared_blocks` tests that corrupt block pointers rather
+/// than inode checksums.
+#[test]
+fn write_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace()
+ {
+    // two_one_block_files(): a.bin → inode 2 (block a_block), b.bin → inode 3.
+    let (base, a_inode, _b_inode) = two_one_block_files();
+
+    // Fork and corrupt b.bin's inode (inode 3) structural checksum.
+    // Inode 3: 0-based index 2 (inode 1 → 0, inode 2 → 1, inode 3 → 2).
+    // Four inodes per 512-byte sector; each slot 128 bytes; FNV-1a checksum
+    // at byte 120 within the slot.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        let offset = 2 * 128; // inode 3 → slot index 2
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must flag the corrupt live inode checksum.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode with a bad structural checksum"
+    );
+
+    // Snapshot: write_file must not modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // write_file(a_inode): stage_write reads a.bin's inode (valid), stages its
+    // content sector for the in-place rewrite (1 sector in txn), then calls
+    // refuse_shared_blocks.  The scan reaches inode 3 (b.bin, corrupt checksum)
+    // → inode_staged(3) returns Err(Corrupt).  commit is never called.
+    assert_eq!(
+        volume.write_file(a_inode, &[7u8; 300], 2),
+        Err(Error::Corrupt),
+        "write_file must refuse when refuse_shared_blocks encounters a corrupt sibling inode"
+    );
+
+    // No sector must have been written: the content sector staged before the
+    // scan failed was in the transaction buffer only; commit was never called.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+
+    // Control: on the unpatched base image, write_file succeeds.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.write_file(a_inode, &[7u8; 300], 2),
+            Ok(()),
+            "control: write_file must succeed on the unpatched image"
+        );
+        v.check()
+            .expect("control: volume must be consistent after write_file");
+    }
+}

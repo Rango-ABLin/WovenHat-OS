@@ -1,5 +1,97 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: write_file refuses when refuse_shared_blocks encounters a corrupt sibling inode (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `53cfd2eb`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1198) calls `refuse_shared_blocks` after staging
+all block content and bitmap changes in the transaction buffer, but before
+calling `commit`. `refuse_shared_blocks` scans all inodes other than the write
+target, calling `inode_staged(txn, number)?` on each slot. If any other live
+inode's structural FNV-1a checksum is bad, `inode_staged` returns
+`Err(Error::Corrupt)`, which propagates through `refuse_shared_blocks` →
+`stage_write` → `write_file` without reaching `commit`.
+
+No prior test proved that this guard:
+1. Returns `Err(Corrupt)` when the scan encounters a corrupt NON-TARGET inode,
+   and
+2. Leaves the image byte-for-byte identical (staged content sector NOT written).
+
+The existing tests cover adjacent but distinct paths:
+- `write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`: the
+  TARGET inode is corrupt; `inode_staged(txn, a_inode)` at the start of
+  `stage_write` fails with 0 sectors staged before the error.
+- `write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`
+  and siblings: `refuse_shared_blocks` returns `Err(Corrupt)` because a live
+  inode's block pointer aliases the target's block; the inode itself is
+  structurally valid.
+
+The new scenario: `refuse_shared_blocks` returns `Err(Corrupt)` not because
+of a shared block pointer, but because `inode_staged` decodes a corrupt
+checksum for an inode it has never staged. At that point 1 content sector for
+the target's data block has already been staged in the transaction buffer.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()`: a.bin (inode 2, block a_block) and b.bin
+  (inode 3).
+- Forks image (`corrupt = base.fork(None)`).
+- Corrupts b.bin's inode (inode 3) structural checksum: flips byte at
+  `inode_start * 512 + 2*128 + 120` (the first byte of inode 3's FNV-1a
+  checksum field).
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.write_file(a_inode, &[7u8; 300], 2)`:
+  - `inode_staged(txn, 2)` → a.bin inode valid → continue.
+  - `needed = 1`; slot 0: `a_block != 0`; `bitmap_get(a_block)` = true →
+    content sector for a_block staged in txn (1 sector staged).
+  - `refuse_shared_blocks(txn, 2, &touched)`:
+    - number=1: root dir inode, valid, not sharing a_block → continue.
+    - number=2: skip (== owner).
+    - number=3: `inode_staged(txn, 3)` → b.bin inode, corrupt checksum →
+      `Inode::decode` returns `None` → `Err(Corrupt)`.
+  - `write_file` returns `Err(Corrupt)` without calling `commit`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — the 1 staged content sector was
+  discarded with the transaction; no sector written.
+- Control: on the unpatched `base`, `write_file(a_inode, &[7u8; 300], 2)`
+  succeeds and `check()` passes.
+
+No production code changed. Test count: 120 → 121.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **121 passed / 0 failed** (was 120; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `refuse_shared_blocks` corrupt-sibling-inode guard in
+  `stage_write`: 1 content sector is staged in the transaction before
+  `refuse_shared_blocks` returns `Err(Corrupt)` when it encounters a live inode
+  with a bad checksum, and the transaction is discarded with zero disk writes
+  when `commit` is not called.
+- Together with `write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`
+  (target inode corrupt, 0 sectors staged) and the `refuse_shared_blocks` shared-
+  block tests (valid inode checksums, shared pointer), all structural failure
+  modes of `refuse_shared_blocks` within `stage_write` are now covered:
+  - Target inode corrupt → `inode_staged(txn, inode)` fires before any staging. ← prior test
+  - Non-target inode corrupt → `inode_staged(txn, number)` fires inside the scan, with 1 sector staged. ← **this session**
+  - Shared block pointer → scan completes normally but reports aliasing. ← prior tests
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: write_file refuses when second block bitmap is clear, with one staged sector discarded (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `90a087ea`). Working tree was clean.
