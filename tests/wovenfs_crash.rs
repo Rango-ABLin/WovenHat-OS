@@ -6577,3 +6577,85 @@ fn write_file_refuses_when_shrink_frees_a_bitmap_clear_block_and_leaves_no_trace
             .expect("control: volume must be consistent after a successful shrink");
     }
 }
+
+/// `stage_unlink` (wfs.rs ~line 1292) frees every non-zero data block of the
+/// file being removed by calling `self.stage_free_block(&mut txn, block)?`.
+/// `stage_free_block` checks `!self.bitmap_get(txn, block)?` and returns
+/// `Err(Error::Corrupt)` when the bitmap bit is not set, indicating a
+/// bitmap/inode inconsistency.
+///
+/// When that guard fires during `unlink`, `commit` is never called.  Even
+/// though slot 0 may already have been staged in the transaction buffer (slot 0
+/// is freed first, then slot 1 is freed), no sector reaches the disk.
+///
+/// The existing test `a_pointer_at_a_block_the_bitmap_marks_free_is_not_reused_or_freed`
+/// covers the same guard via `redirect_inode_block`, which corrupts the
+/// *inode pointer* to point at a never-allocated block.  This test covers the
+/// distinct scenario where the *bitmap* is externally cleared for the file's
+/// own legitimately-held block, while the inode pointer remains correct.
+/// Both hit the same `stage_free_block` guard but through different kinds of
+/// image corruption.
+#[test]
+fn unlink_refuses_when_a_data_block_bitmap_bit_is_cleared_and_leaves_no_trace() {
+    // `two_block_file()` creates a 600-byte file (> SECTOR_SIZE = 512), so
+    // both direct[0] and direct[1] are non-zero.
+    let (base, file_inode) = two_block_file();
+
+    // Record direct[1] — the second data block that will be freed during unlink.
+    let block1 = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.inode(file_inode).expect("inode").direct[1]
+    };
+    assert!(block1 != 0, "a 600-byte file must use direct[1]");
+
+    // Fork and clear the bitmap bit for block1.  The inode still names block1,
+    // so the bitmap is now inconsistent: a live inode names a free block.
+    let image = base.fork(None);
+    clear_bitmap_block(&image, block1);
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode naming a block the bitmap marks free"
+    );
+
+    // Snapshot: the refused unlink must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+
+    // unlink frees direct[0] first (staged in the transaction buffer) then
+    // tries to free direct[1] via stage_free_block(block1).  block1's bitmap
+    // bit is clear, so stage_free_block returns Err(Corrupt), which unlink
+    // propagates without calling commit.
+    assert_eq!(
+        volume.unlink(1, "p.bin", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse when a data block's bitmap bit is externally cleared"
+    );
+
+    // No sector must have been written.  direct[0] was staged in the
+    // transaction buffer, but commit was never called.
+    assert!(
+        image.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched base image, unlink succeeds and the file is gone.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.unlink(1, "p.bin", 2),
+            Ok(()),
+            "control: unlink must succeed on a consistent image"
+        );
+        assert_eq!(
+            v.lookup(1, "p.bin"),
+            Err(Error::NotFound),
+            "control: file must be absent after a successful unlink"
+        );
+        v.check()
+            .expect("control: volume must be consistent after a successful unlink");
+    }
+}
