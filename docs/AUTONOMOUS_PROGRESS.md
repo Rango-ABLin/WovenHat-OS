@@ -1,5 +1,71 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file shrink path refuses when freed block is shared (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `c8a8f036`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs ~line 1190) shrinks a file from N blocks to M (M < N) by
+calling `stage_free_block(txn, block)` for each slot `>= needed`.
+`stage_free_block` checks that the bitmap bit IS set, then stages a bitmap-clear
+sector in the transaction buffer and zeroes `direct[slot]`.  Only after ALL block
+content and bitmap changes are staged does `refuse_shared_blocks` run.
+
+The previous session's atomicity proof
+(`write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`)
+explicitly noted: "Proves atomicity only for the in-place-rewrite path (one-block
+file, `direct[0]` shared with another inode)."  The shrink path differs because
+`stage_free_block` has already staged a bitmap sector in the transaction buffer
+before `refuse_shared_blocks` fires.  No prior test proved that those staged
+sectors (content + bitmap) are discarded when `refuse_shared_blocks` fires.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_on_shrink_when_freed_block_is_shared_and_leaves_no_trace`:
+
+- Uses `two_block_file()` to get `p.bin` (`p_inode`, `direct[0]=p0`, `direct[1]=p1`).
+- Creates a one-block file `a.bin` (`a_inode`), then calls
+  `redirect_inode_block(&base, a_inode, 0, p1)` — now both `a_inode` and `p_inode`
+  name `p1`; `a.bin`'s original block leaks in the bitmap (acceptable, `write_file`
+  does not call `check()`).
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = base.sectors()`.
+- Calls `volume.write_file(p_inode, &[8u8; 100], 3)` (100 bytes, shrinks to 1 block):
+  - slot 0 (`p0`): bitmap bit set → content sector staged in txn.
+  - slot 1 (`p1`): `stage_free_block(p1)` — bitmap bit IS set → bitmap-clear staged
+    in txn; `node.direct[1]` zeroed.
+  - `touched = [p0, p1, 0..., p0, 0, 0...]`
+  - `refuse_shared_blocks` scans `a_inode`, finds `direct[0]=p1 ∈ touched`
+    → `Err(Corrupt)`.  `commit` never called.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `base.sectors() == before` — no sector was written.
+- Control: on a fresh `two_block_file()` (no alias), shrinking write succeeds and
+  reads back correctly.
+
+No production code changed.  Test count: 114 → 115.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **115 passed / 0 failed** (was 114; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the shrink-path `refuse_shared_blocks` guard: both a content
+  sector (slot 0 in-place rewrite) and a bitmap sector (`stage_free_block` for slot 1)
+  are staged and then discarded when `commit` is not called.
+- The extend path (`allocate_block` → new block shared with another inode) is noted
+  in the prior session as covered implicitly; a separate test remains possible.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: write_file refuses and leaves no trace when refuse_shared_blocks triggers (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `91a38c37`). Working tree was clean.

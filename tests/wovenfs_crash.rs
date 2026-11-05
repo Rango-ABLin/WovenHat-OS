@@ -6733,3 +6733,99 @@ fn write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace() {
         assert_eq!(&out, b"updated");
     }
 }
+
+/// `stage_write` (wfs.rs ~line 1190) shrinks a file from two blocks to one:
+/// for the block no longer needed (`slot >= needed`), it calls
+/// `stage_free_block(txn, block)` which verifies the bitmap bit is set and
+/// stages a bitmap-clear sector in the transaction buffer before zeroing
+/// `direct[slot]`.  Only after all block content and bitmap changes are staged
+/// does `refuse_shared_blocks` run.  When another live inode names any block in
+/// `touched` (including blocks freed during the shrink), `refuse_shared_blocks`
+/// returns `Err(Corrupt)` and `commit` is never reached.
+///
+/// This proves atomicity for the shrink path of `stage_write`, a scenario where
+/// `stage_free_block` has already staged a bitmap sector *before*
+/// `refuse_shared_blocks` fires:
+/// - `two_block_file()` creates `p.bin` with `direct[0]=p0` and `direct[1]=p1`.
+/// - A second one-block file `a.bin` is redirected so `a_inode.direct[0]=p1`
+///   (two live inodes now name `p1`).
+/// - `write_file(p_inode, 100 bytes)` shrinks to one block:
+///   - slot 0: in-place rewrite of `p0` → content sector staged in txn.
+///   - slot 1: `stage_free_block(p1)` → bitmap bit IS set → bitmap-clear staged
+///     in txn; `direct[1]` zeroed.
+///   - `touched = [p0, p1, 0..., p0, 0, 0...]`.
+///   - `refuse_shared_blocks` scans `a_inode`, finds `direct[0]=p1 ∈ touched`
+///     → `Err(Corrupt)`.  `commit` is never called.
+/// - Both staged sectors (content + bitmap) are discarded with the txn.
+///
+/// Complements `write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`,
+/// which covers the in-place path where no bitmap staging precedes the guard.
+#[test]
+fn write_file_refuses_on_shrink_when_freed_block_is_shared_and_leaves_no_trace() {
+    // `two_block_file()` creates p.bin (600 bytes, two data blocks).
+    let (base, p_inode) = two_block_file();
+
+    // Record both data blocks of p.bin.
+    let (p_block0, p_block1) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let node = volume.inode(p_inode).expect("p_inode");
+        (node.direct[0], node.direct[1])
+    };
+    assert_ne!(p_block0, 0, "p.bin direct[0] must not be zero");
+    assert_ne!(p_block1, 0, "p.bin direct[1] must not be zero");
+
+    // Create a one-block file a.bin, then corrupt its direct[0] to point at p_block1.
+    // After the redirect both a_inode and p_inode name p_block1.  a.bin's original
+    // block leaks in the bitmap, which is acceptable: write_file does not call
+    // check(), so the orphan does not interfere.
+    let a_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.bin", 0o644, &[9u8; 300], 2)
+            .expect("create a.bin")
+    };
+    redirect_inode_block(&base, a_inode, 0, p_block1);
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(base.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see the alias on p_block1"
+    );
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // write_file(p_inode, 100 bytes) triggers the shrink path:
+    //   slot 0 (p_block0): in-place rewrite, bitmap bit set → content staged.
+    //   slot 1 (p_block1): stage_free_block succeeds (bitmap bit IS set) →
+    //     bitmap-clear staged; node.direct[1] zeroed.
+    //   touched = [p0, p1, 0..., p0, 0, 0...].
+    //   refuse_shared_blocks finds a_inode.direct[0]=p1 ∈ touched → Err(Corrupt).
+    //   commit never called.
+    assert_eq!(
+        volume.write_file(p_inode, &[8u8; 100], 3),
+        Err(Error::Corrupt),
+        "write_file must refuse when the shrink path detects a shared freed block"
+    );
+
+    // No sector must have been written — both staged sectors (content and bitmap)
+    // lived only in the transaction buffer; commit was never called.
+    assert!(
+        base.sectors() == before,
+        "a refused shrink write_file must not modify the image"
+    );
+
+    // Control: on a fresh two-block file (no alias), the same shrinking write succeeds.
+    {
+        let (ctrl, ctrl_inode) = two_block_file();
+        let mut cv = Volume::mount(ctrl.clone()).expect("mount ctrl");
+        cv.write_file(ctrl_inode, &[8u8; 100], 3)
+            .expect("control: shrink must succeed without a shared block");
+        let mut out = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(cv.read_file(ctrl_inode, &mut out), Ok(100));
+        assert_eq!(&out[..100], &[8u8; 100]);
+    }
+}
