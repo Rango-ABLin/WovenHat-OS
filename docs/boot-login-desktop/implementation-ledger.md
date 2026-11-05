@@ -96,3 +96,14 @@ Full Windows acceptance passes under acceptance-20261104-214457-697/:
 214 Python tests (six skips), host Rust tests, lint/build, 60 memory repetitions,
 network and isolated TCP 1/2/4 CPUs. Stage15.5 signed-handoff 1/2/4 and feature
 Clippy pass. B2 is accepted; full Phase B remains open.
+
+## BLD-B3 loader allocation failure
+
+Status: TESTED - PASS (bounded unit). Runtime `952eda65` converts checked
+loader-data allocation failure into static pre-handoff firmware-resource
+diagnostics. All 16 source-bound UEFI cases pass at 1/2/4 CPUs, including a
+real 256 MiB allocation-exhaustion case. The full Windows preservation gate
+passes at `acceptance-20261105-074313-292/` (215 Python tests, six skips,
+host Rust, 60 memory boots, network and Stage10.4-10.7 1/2/4 CPUs). Evidence
+is preserved at `D:\WovenHat-OS-audit-boot-loader-b3-20261105` after intact
+relocation to free workspace capacity. Full Phase B remains open.

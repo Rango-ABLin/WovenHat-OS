@@ -23,8 +23,10 @@ has been completed.
 - B1 rejects malformed policy, but the supported v1 subset currently covers
   existing logging/framebuffer settings only. Boot entry/timeout, alternate
   kernel path, root selection, recovery policy and command-line forwarding are
-  still required. Missing/corrupt/unsupported kernel-image failure qualification
-  and broader boot-information validation remain Phase B work.
+  still required. B2 covers selected malformed image structures and B3 covers
+  loader-data allocation failure; broader boot-information validation and
+  firmware disk/TFTP I/O, graphics, page-table and ExitBootServices failure
+  qualification remain Phase B work.
 - Kernel readiness and the actual first-userspace WovenInit/service dependency
   model are not implemented by this unit. The embedded /init stub and existing
   kernel-side supervisor must not be called a complete WovenInit architecture.
