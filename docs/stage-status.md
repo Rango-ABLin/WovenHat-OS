@@ -1,5 +1,13 @@
 # Stage status
 
+## Graphics compositor frame requalification - 2026-11-05 - PASSED 1/2/4 CPUs
+
+The current Stage 19.2 compositor gate passed at 1, 2, and 4 CPUs. Each run
+verified filesystem installation, surface creation, presentation, screen
+capture, application teardown, compositor retention, and both software 2D and
+3D WovenGraphics frame markers. Evidence is retained under
+`target/hello-gui-compositor-{1,2,4}cpu`.
+
 ## Graphics Stage 20.14b current-head requalification - 2026-11-05 - PASSED 1/2/4 CPUs
 
 Requalified the two-head VirtIO-GPU desktop after the visual-system update.

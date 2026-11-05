@@ -9196,3 +9196,10 @@ separate strict desktop rerun stalled in its prerequisite service-image build
 before QEMU launch and was stopped; that retained evidence is not counted as
 acceptance.
 
+## Codex - compositor frame requalification (2026-11-05)
+
+The current Stage 19.2 hello-gui compositor gate passed at 1/2/4 CPUs,
+including the software 2D and 3D frame markers, presentation, screen check,
+teardown, and compositor-retention checks. Evidence is retained under
+`target/hello-gui-compositor-{1,2,4}cpu`.
+
