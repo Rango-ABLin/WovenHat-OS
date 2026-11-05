@@ -7829,3 +7829,105 @@ fn read_dir_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
         assert_eq!(view.count(), 1, "control: one live entry expected");
     }
 }
+
+/// `unlink` (wfs.rs:1291) calls `self.refuse_shared_blocks(&txn, entry.inode,
+/// &node.direct)?` after loading and validating the directory inode, reading
+/// the directory entries, and loading the target file inode — but BEFORE any
+/// call to `stage_free_block`, `stage_inode`, `stage_dir_entry`, or `commit`.
+///
+/// `refuse_shared_blocks` scans every inode slot other than `entry.inode`,
+/// calling `inode_staged(txn, number)?` on each.  When a sibling inode's
+/// stored FNV-1a structural checksum does not match bytes 0–119,
+/// `Inode::decode` returns `None` → `Err(Error::Corrupt)`, which propagates
+/// through `refuse_shared_blocks` and `unlink` without reaching `commit`.
+///
+/// At that point zero sectors have been staged in the transaction buffer
+/// (nothing is staged before `refuse_shared_blocks` is called in `unlink`).
+/// Because `commit` is never called, the image is left byte-for-byte
+/// unchanged.
+///
+/// This completes the corrupt-sibling-inode symmetry closure for
+/// `refuse_shared_blocks`: the guard is now proven for all three callers:
+/// - `write_file` (1 staged sector before failure) ← prior session
+/// - `create_file` (5 staged sectors before failure) ← prior session
+/// - `unlink` (0 staged sectors before failure) ← **this test**
+///
+/// This is distinct from `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`,
+/// which corrupts the TARGET inode (the error fires at `inode_staged(&txn, entry.inode)?`
+/// before `refuse_shared_blocks` is called); here the TARGET inode is valid and
+/// a SIBLING inode's checksum is corrupt (the error fires inside the scan loop).
+#[test]
+fn unlink_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace()
+{
+    // two_one_block_files(): a.bin → inode 2 (block a_block), b.bin → inode 3
+    // (block b_block).  Both bitmap bits are set; both blocks are allocated.
+    let (base, _a_inode, _b_inode) = two_one_block_files();
+
+    // Fork and corrupt b.bin's inode (inode 3) structural checksum by flipping
+    // a byte in the checksum field.  Inode 3: 0-based index 2 within the inode
+    // sector (inode 1 → 0, inode 2 → 1, inode 3 → 2).  Four inodes per 512-byte
+    // sector; each slot 128 bytes; FNV-1a checksum field starts at byte 120
+    // within the slot.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        let offset = 2 * 128; // inode 3 → slot index 2
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must flag the corrupt live inode checksum.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode with a bad structural checksum"
+    );
+
+    // Snapshot: unlink must not modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount patched image");
+
+    // unlink(1, "a.bin"): loads inode 1 (dir, valid), reads directory entries,
+    // loads inode 2 (a.bin, valid), then calls refuse_shared_blocks(txn, 2, &[a_block, 0, ...]).
+    // The scan reaches inode 3 (b.bin, corrupt checksum) →
+    // inode_staged(3) → Inode::decode returns None → Err(Corrupt).
+    // commit is never called; 0 staged sectors are discarded.
+    assert_eq!(
+        volume.unlink(1, "a.bin", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse when refuse_shared_blocks encounters a corrupt sibling inode"
+    );
+
+    // No sector must have been written: the transaction held 0 staged sectors
+    // when the error fired; commit was never called.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // a.bin must still be present: the unlink was refused before any directory
+    // entry or inode was freed.  The directory inode (1) and a.bin's inode (2)
+    // are both valid, so lookup should succeed on the corrupt image.
+    assert!(
+        volume.lookup(1, "a.bin").is_ok(),
+        "a.bin must remain accessible after the refused unlink"
+    );
+
+    // Control: on the unpatched base image, unlink succeeds and a.bin is gone.
+    {
+        let ctrl = base.fork(None);
+        let mut cv = Volume::mount(ctrl.clone()).expect("mount ctrl");
+        cv.unlink(1, "a.bin", 2)
+            .expect("control: unlink must succeed on a consistent image");
+        assert_eq!(
+            cv.lookup(1, "a.bin"),
+            Err(Error::NotFound),
+            "control: a.bin must be absent after a successful unlink"
+        );
+        mount_consistent(&ctrl, "control: volume must be consistent after unlink");
+    }
+}

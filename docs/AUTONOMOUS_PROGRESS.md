@@ -1,5 +1,91 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: unlink refuses when refuse_shared_blocks encounters a corrupt sibling inode (symmetry closure)
+
+Branch: `auto/wovenhat-development` (base `372cc812`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs:1291) calls `self.refuse_shared_blocks(&txn, entry.inode,
+&node.direct)?` after loading and validating the directory inode, reading the
+directory entries, and loading and validating the target file inode — but
+**before** any call to `stage_free_block`, `stage_inode`, `stage_dir_entry`,
+or `commit`.
+
+`refuse_shared_blocks` scans all inode slots other than the target, calling
+`inode_staged(txn, number)?` on each. If a sibling inode's FNV-1a structural
+checksum is corrupt, `Inode::decode` returns `None` →
+`Err(Error::Corrupt)`, which propagates through `refuse_shared_blocks` →
+`unlink` without reaching `commit`. At that point **0 staged sectors** are in
+the transaction buffer.
+
+Prior sessions proved this guard for two other callers:
+- `write_file` — 1 staged sector before failure (prior session)
+- `create_file` — 5 staged sectors before failure (prior session)
+
+No test proved the same guard for `unlink` (0 staged sectors before failure).
+This is a symmetry gap in the `refuse_shared_blocks` corrupt-sibling-inode
+coverage.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()`: a.bin (inode 2, block a_block) and b.bin
+  (inode 3, block b_block). Both bitmap bits are set.
+- Forks the image (`corrupt = base.fork(None)`).
+- Corrupts b.bin's inode (inode 3) structural checksum: flips byte at
+  `inode_start * 512 + 2*128 + 120` (the first byte of inode 3's FNV-1a
+  checksum field).
+- Precondition: `check()` on the corrupt image returns `Err(Error::Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.unlink(1, "a.bin", 2)`:
+  - `self.inode(1)?` → directory inode valid → `Ok(dir)`.
+  - `self.dir_entries(&txn, &dir)?` → reads directory entries.
+  - Three-arm guard passes (entry.inode ≠ dir_inode, in range, unique).
+  - `self.inode_staged(&txn, entry.inode)?` → a.bin's inode valid → `Ok(node)`.
+  - `!node.is_used() || node.kind != KIND_FILE || node.links != 1` → all pass.
+  - `self.refuse_shared_blocks(&txn, 2, &node.direct)`:
+    - inode 1 (root dir): valid, block not in touched → continue.
+    - inode 2: skip (== owner).
+    - inode 3 (b.bin): `inode_staged(txn, 3)` → corrupt checksum →
+      `Inode::decode` returns `None` → `Err(Corrupt)`.
+  - `unlink` returns `Err(Corrupt)` without calling `commit`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — 0 staged sectors discarded; no
+  sector written.
+- Asserts `volume.lookup(1, "a.bin").is_ok()` — a.bin's inode and directory
+  entry are intact.
+- Control: on the unpatched `base`, `unlink(1, "a.bin", 2)` succeeds,
+  `lookup(1, "a.bin")` returns `NotFound`, and `check()` passes.
+
+No production code changed.  Test count: 126 → 127.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **127 passed / 0 failed** (was 126; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for `unlink` when `refuse_shared_blocks` encounters a
+  corrupt sibling inode checksum: 0 staged sectors are in the transaction
+  when the error fires; the image is left byte-for-byte unchanged.
+- Closes the final symmetry gap: corrupt-sibling-inode guard in
+  `refuse_shared_blocks` is now proven for all three callers:
+  - `write_file` (1 staged sector before failure) ← prior session
+  - `create_file` (5 staged sectors before failure) ← prior session
+  - `unlink` (0 staged sectors before failure) ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: lookup and read_dir refuse a corrupt directory inode checksum (symmetry closure)
 
 Branch: `auto/wovenhat-development` (base `e40a45f5`). Working tree was clean.
