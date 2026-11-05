@@ -23,7 +23,7 @@ extern crate alloc;
 #[cfg(not(target_os = "none"))]
 extern crate std;
 
-#[cfg(all(feature = "userspace-allocator", not(test)))]
+#[cfg(all(feature = "userspace-allocator", target_os = "none"))]
 mod userspace_allocator {
     use core::alloc::{GlobalAlloc, Layout};
     use core::sync::atomic::{AtomicU64, Ordering};

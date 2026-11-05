@@ -12989,6 +12989,12 @@ bundled public trust roots. The probe builds and warning-denying Clippy pass;
 its plaintext-URI rejection also passes. No certified printer endpoint or
 release CA bundle is available locally for final end-to-end certification.
 
+Fixed the host probe's startup access violation by restricting the freestanding
+userspace allocator to `target_os = "none"`; host/service tools now use the
+host allocator. The exact probe command no longer crashes: it reports bounded
+argument, plaintext, and missing-CA errors as exit code 2. Focused TLS tests,
+host Clippy, probe Clippy, and the freestanding kernel check pass.
+
 The SDK signing wrapper now has a `--production` mode requiring separate
 `WOVENHAT_SDK_PRODUCTION_SIGNING_SEED_HEX` and
 `WOVENHAT_SDK_PRODUCTION_TRUSTED_PUBLIC_KEY_HEX` variables, preventing the

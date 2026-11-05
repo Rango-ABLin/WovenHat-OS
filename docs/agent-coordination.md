@@ -9130,3 +9130,9 @@ request using explicit DER CA material or public roots. It builds, passes
 warning-denying Clippy, and rejects plaintext URIs; no local certified printer
 was available for an end-to-end run.
 
+The first probe execution exposed and fixed a host startup access violation:
+libwoven's freestanding syscall allocator had been linked into the host tool.
+The allocator is now target-gated to `x86_64-unknown-none`; the probe reports
+normal fail-closed errors instead of crashing. Focused TLS tests and all
+affected Clippy/build checks pass.
+
