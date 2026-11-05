@@ -8936,3 +8936,13 @@ Save button, Enter-to-save, dirty/saved status, and capability-checked write
 to `/mnt/woven-note.txt`. Release binary build and binary-specific warning-
 denying Clippy passed. The app all-targets Clippy remains unsuitable because
 its existing no-std library tests are compiled as host test targets.
+## Codex - WovenEditor QEMU qualification attempt and harness repair (2026-11-05)
+
+`test-files-desktop-qemu.py` was missing `WOVENHAT_SEARCH_IMAGE`, so its
+hardware-demo kernel build failed before QEMU. The harness now builds and
+passes the signed search service image like the other desktop harnesses. The
+corrected editor run reached QEMU and preserved
+`audit-artifacts/editor-desktop-1cpu-1793839534329812600`, but did not reach
+the completion marker during the client-pointer/click journey; it remains
+incomplete and is not a release qualification.
+

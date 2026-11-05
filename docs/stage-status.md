@@ -1,5 +1,14 @@
 # Stage status
 
+## WovenEditor live desktop qualification - 2026-11-05 - INCOMPLETE (EVIDENCE PRESERVED)
+
+The desktop harness was repaired to provide the required search-service image
+before building the hardware-demo image. The corrected run reached QEMU and
+captured `audit-artifacts/editor-desktop-1cpu-1793839534329812600`, but the
+guest did not reach the editor completion marker during the client-pointer and
+client-click journey. The run was stopped after preserving serial and PPM
+captures; no QEMU release-pass claim is made.
+
 ## S12 WovenEditor interactive GUI increment - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
 
 WovenEditor now has an actual bounded desktop editing flow: a focused UTF-8

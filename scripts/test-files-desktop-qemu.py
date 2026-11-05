@@ -104,6 +104,10 @@ def main():
         [sys.executable, str(root / 'scripts' / 'build-package-service.py')],
         cwd=root, env=package_env, text=True,
     ).strip()
+    env['WOVENHAT_SEARCH_IMAGE'] = subprocess.check_output(
+        [sys.executable, str(root / 'scripts' / 'build-search-service.py')],
+        cwd=root, env=package_env, text=True,
+    ).strip()
     env.update({
         'WOVENHAT_CALCULATOR_IMAGE': str(packages['woven-calculator']),
         'WOVENHAT_TERMINAL_IMAGE': str(packages['woven-terminal']),
