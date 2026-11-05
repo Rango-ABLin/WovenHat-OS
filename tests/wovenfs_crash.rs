@@ -5932,6 +5932,89 @@ fn create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace() {
         .expect("volume must be consistent after a refused create_file");
 }
 
+/// `create_file` (wfs.rs line 1066) calls `stage_create` then `stage_write` in a
+/// single transaction.  `stage_write` calls `allocate_block` once per needed data
+/// block.  When the first allocation succeeds but the second returns `Err(NoSpace)`
+/// (no free block remains), `stage_write` propagates the error without calling
+/// `commit`.  At that point five sectors are staged in the transaction buffer:
+///
+/// 1. new file inode         (staged by `stage_create`)
+/// 2. directory entry        (staged by `stage_create`)
+/// 3. directory inode update (staged by `stage_create`)
+/// 4. bitmap-set for block 0 (staged by `allocate_block` via `stage_bitmap`)
+/// 5. content sector for block 0 (staged by `txn.stage`)
+///
+/// Because `commit` is never reached, all five staged sectors are discarded and
+/// the disk image is byte-for-byte identical to before the call.
+///
+/// The existing `create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace`
+/// covers the case where ALL data blocks are exhausted before `stage_write` even
+/// begins the allocation loop — `allocate_block` fails at slot 0 with only the
+/// three `stage_create` sectors in the transaction buffer.  This test covers the
+/// complementary path: slot 0 allocation succeeds (two more sectors staged), and
+/// slot 1 allocation fails (five staged sectors total discarded with no disk write).
+///
+/// Setup: a 47-sector volume with 32 inodes.
+/// Layout: journal_start=2, journal_blocks=34, bitmap_start=36, bitmap_blocks=1,
+///         inode_start=37, inode_blocks=8 (ceil(32/4)), data_start=45.
+/// total_blocks=47 → data blocks: 45 (taken by root dir at format) and 46 (free).
+/// Exactly 1 free data block.  A 600-byte file needs 2 data blocks
+/// (ceil(600/512)=2), so the slot-1 allocation always fails on this geometry.
+#[test]
+fn create_file_refuses_when_second_data_block_cannot_be_allocated_and_leaves_no_trace() {
+    // A 47-sector volume with 32 inodes has exactly 2 data blocks.
+    let disk = CrashDisk::blank_sized(47);
+    Volume::format(disk.clone(), INODES).expect("format");
+
+    // Precondition: check() passes on the fresh image.
+    Volume::mount(disk.clone())
+        .expect("mount")
+        .check()
+        .expect("fresh 47-sector image is consistent");
+
+    // Snapshot before the refused call.
+    let before = disk.sectors();
+
+    let mut volume = Volume::mount(disk.clone()).expect("mount");
+
+    // 600 bytes needs 2 data blocks (ceil(600 / 512) = 2).
+    // stage_create stages new inode + dir entry + dir inode (3 sectors).
+    // stage_write slot 0: allocate_block succeeds (block 46 is free);
+    //   stage_bitmap(46, true) + txn.stage(46, content) → 2 more sectors staged.
+    // stage_write slot 1: allocate_block finds no free block → Err(NoSpace).
+    // commit is never called; all 5 staged sectors are discarded.
+    assert_eq!(
+        volume.create_file(1, "new.bin", 0o644, &[1u8; 600], 2),
+        Err(Error::NoSpace),
+        "create_file must refuse when the second data block cannot be allocated"
+    );
+
+    // All five staged sectors must have been discarded; no sector written to disk.
+    assert!(
+        disk.sectors() == before,
+        "refused create_file must not write any sector"
+    );
+
+    // No dangling directory entry must remain for the refused file.
+    assert_eq!(
+        volume.lookup(1, "new.bin").map(|e| e.inode),
+        Err(Error::NotFound),
+        "refused create_file must not leave a directory entry"
+    );
+
+    // The volume must still be consistent: block 46 and inode 2 remain free.
+    volume
+        .check()
+        .expect("volume must be consistent after the refused create_file");
+
+    // Control: a 1-block create_file must succeed — block 46 is still free.
+    assert_eq!(
+        volume.create_file(1, "ok.bin", 0o644, &[1u8; 1], 3),
+        Ok(2),
+        "single-block create_file must succeed after the refused 2-block call"
+    );
+}
+
 /// `stage_write` (wfs.rs line 1178) calls `self.allocate_block(txn)` for each
 /// new data block a write requires.  When `allocate_block` returns `Err(NoSpace)`
 /// (all data blocks taken), `stage_write` propagates the error and `commit` is

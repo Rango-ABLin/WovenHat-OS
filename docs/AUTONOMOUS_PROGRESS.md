@@ -1,5 +1,85 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: create_file refuses when second data block cannot be allocated (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `01d47bc3`). Working tree was clean.
+
+### Defect / gap
+
+`create_file` calls `stage_create` then `stage_write` in a single transaction.
+`stage_write` calls `allocate_block` once per needed data block (slot 0, 1, …).
+If slot 0 allocation succeeds but slot 1 returns `Err(NoSpace)`, `stage_write`
+propagates the error and `commit` is never called.  At that point five sectors
+are staged in the transaction buffer:
+
+1. new file inode         (staged by `stage_create`)
+2. directory entry        (staged by `stage_create`)
+3. directory inode update (staged by `stage_create`)
+4. bitmap-set for block 0 (staged by `allocate_block` / `stage_bitmap`)
+5. content sector for block 0 (staged by `txn.stage`)
+
+The existing test
+`create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace`
+covers the case where ALL data blocks are exhausted before `stage_write` even
+starts the loop — `allocate_block` fails at slot 0, so only the three
+`stage_create` sectors are in the transaction when the error fires.  No prior
+test proved the complementary path: slot 0 allocation succeeds (two more
+sectors staged, 5 total), and slot 1 allocation fails.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_file_refuses_when_second_data_block_cannot_be_allocated_and_leaves_no_trace`:
+
+- Uses `CrashDisk::blank_sized(47)` with 32 inodes.
+  Layout: `journal_start=2`, `journal_blocks=34`, `bitmap_start=36`,
+  `bitmap_blocks=1`, `inode_start=37`, `inode_blocks=8`, `data_start=45`.
+  `total_blocks=47` → 2 data blocks: block 45 (root dir) and block 46 (free).
+- Formats the volume; verifies `check()` passes.
+- Snapshots `let before = disk.sectors()`.
+- Calls `volume.create_file(1, "new.bin", 0o644, &[1u8; 600], 2)`:
+  - `stage_create` stages new inode 2, dir entry, dir inode (3 sectors in txn).
+  - `stage_write` slot 0: `allocate_block` → block 46 is free → `stage_bitmap(46,
+    true)` + `txn.stage(46, content)` → 2 more sectors staged (5 total in txn).
+  - `stage_write` slot 1: `allocate_block` → block 45 used, block 46 now staged
+    as used → no free block → `Err(NoSpace)`.
+  - `create_file` returns `Err(NoSpace)` without calling `commit`.
+- Asserts `Err(Error::NoSpace)`.
+- Asserts `disk.sectors() == before` — all 5 staged sectors discarded; no sector
+  written to disk.
+- Asserts `lookup(1, "new.bin") == Err(NotFound)` — no dangling directory entry.
+- Asserts `check()` passes — volume consistent; block 46 and inode 2 still free.
+- Control: `create_file(1, "ok.bin", 0o644, &[1u8; 1], 3)` returns `Ok(2)` —
+  block 46 is still available for a single-block file.
+
+No production code changed.  Test count: 122 → 123.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **123 passed / 0 failed** (was 122; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `create_file` path where `stage_write` succeeds at
+  slot 0 (bitmap-set + content staged) but fails at slot 1 (`allocate_block`
+  returns `Err(NoSpace)`): all 5 staged sectors are discarded with the
+  transaction when `commit` is never called.
+- Together with
+  `create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace` (all
+  blocks full, fails at slot 0) this closes both positions of the
+  `allocate_block` NoSpace guard in `stage_write` for the `create_file` caller:
+  - Slot 0 fails (0 extra sectors from `stage_write`). ← prior test
+  - Slot 0 succeeds, slot 1 fails (2 extra sectors from `stage_write`). ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: create_file refuses when refuse_shared_blocks encounters a corrupt sibling inode (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `211bc8c1`). Working tree was clean.
