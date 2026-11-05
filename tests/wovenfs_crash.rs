@@ -5539,3 +5539,105 @@ fn create_refuses_a_duplicate_name() {
         .expect("create other.txt with different name must succeed");
     volume.check().expect("volume consistent after refused creates");
 }
+
+/// `stage_create` (wfs.rs line 1093) rejects three classes of invalid name
+/// before allocating an inode or writing any sector:
+///
+/// ```ignore
+/// if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
+///     return Err(Error::InvalidName);
+/// }
+/// ```
+///
+/// The existing bundled test `names_are_validated_and_duplicates_refused`
+/// verifies the error variant for all three cases but does not snapshot the
+/// image before or after the refused calls, so it does not prove atomicity.
+/// This test adds that guarantee in isolation for each sub-case.
+#[test]
+fn create_refuses_an_invalid_name() {
+    use wfs::MAX_NAME;
+
+    let base = formatted();
+    // Snapshot the fresh image — no files yet.
+    let snapshot = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // Case 1: empty name.
+    assert_eq!(
+        volume.create(1, "", 0o644, 1),
+        Err(Error::InvalidName),
+        "create must refuse an empty name"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create (empty name) must not modify the image"
+    );
+
+    // Case 1b: create_file with empty name.
+    assert_eq!(
+        volume.create_file(1, "", 0o644, b"data", 1),
+        Err(Error::InvalidName),
+        "create_file must refuse an empty name"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create_file (empty name) must not modify the image"
+    );
+
+    // Case 2: name containing '/'.
+    assert_eq!(
+        volume.create(1, "a/b", 0o644, 1),
+        Err(Error::InvalidName),
+        "create must refuse a name containing '/'"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create (slash name) must not modify the image"
+    );
+
+    // Case 2b: create_file with slash name.
+    assert_eq!(
+        volume.create_file(1, "a/b", 0o644, b"data", 1),
+        Err(Error::InvalidName),
+        "create_file must refuse a name containing '/'"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create_file (slash name) must not modify the image"
+    );
+
+    // Case 3: name longer than MAX_NAME (48 bytes).
+    let long = "x".repeat(MAX_NAME + 1);
+    assert_eq!(
+        volume.create(1, &long, 0o644, 1),
+        Err(Error::InvalidName),
+        "create must refuse a name longer than MAX_NAME"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create (too-long name) must not modify the image"
+    );
+
+    // Case 3b: create_file with too-long name.
+    assert_eq!(
+        volume.create_file(1, &long, 0o644, b"data", 1),
+        Err(Error::InvalidName),
+        "create_file must refuse a name longer than MAX_NAME"
+    );
+    assert!(
+        base.sectors() == snapshot,
+        "refused create_file (too-long name) must not modify the image"
+    );
+
+    // Control: a name exactly MAX_NAME bytes is at the boundary and must succeed.
+    let exact = "y".repeat(MAX_NAME);
+    volume
+        .create(1, &exact, 0o644, 2)
+        .expect("create with MAX_NAME bytes must succeed");
+    // Control: a short valid name also succeeds.
+    volume
+        .create(1, "ok.txt", 0o644, 3)
+        .expect("create with short valid name must succeed");
+    volume.check().expect("volume consistent after refused creates");
+}

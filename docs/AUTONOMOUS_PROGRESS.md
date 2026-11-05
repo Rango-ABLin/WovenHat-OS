@@ -1,5 +1,64 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: test that create refuses an invalid name (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `faca32d2`). Working tree was clean.
+
+### Defect / gap
+
+`stage_create` (wfs.rs line 1093) rejects three classes of invalid name before
+allocating an inode or writing any sector:
+
+```rust
+if name.is_empty() || name.len() > MAX_NAME || name.contains('/') {
+    return Err(Error::InvalidName);
+}
+```
+
+The guard fires before any disk state is modified, so a refused call leaves the
+volume completely unmodified.  Without the guard, an empty name, a name containing
+`/`, or a name longer than the 48-byte `MAX_NAME` limit would proceed into
+`inode_staged` and directory-entry write paths, corrupting the directory block.
+
+The existing bundled test `names_are_validated_and_duplicates_refused` (line 409)
+verifies the error variant for all three cases but does not snapshot the image
+before or after the refused calls, so it does not prove that the guard fires
+before any sector is written.  No prior test exercised the `InvalidName` guard in
+isolation with an image-unmodified assertion.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test `create_refuses_an_invalid_name`:
+
+- Calls `formatted()` to get a fresh volume and snapshots the image.
+- For each of the three invalid-name sub-cases (empty, slash-containing, too-long),
+  asserts both `create(1, name, ...)` and `create_file(1, name, ..., data, ...)` return
+  `Err(Error::InvalidName)`, and asserts the image is unmodified after each refused call.
+- Controls: `create` with a name exactly `MAX_NAME` bytes long succeeds; a short valid
+  name also succeeds; `check()` confirms the volume is consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **103 passed / 0 failed** (was 102; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The guard fires before any inode is allocated or any sector is written, so the
+  image-unmodified assertion is authoritative for all three sub-cases.
+- Both `create` and `create_file` go through `stage_create`, so both are verified.
+- The `MAX_NAME`-boundary control (name of exactly 48 bytes) confirms the guard is
+  `>` (strict), not `>=`.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-04 — WovenFS: test that create refuses a duplicate name
 
 Branch: `auto/wovenhat-development` (base `263818dd`). Working tree was clean.
