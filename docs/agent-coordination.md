@@ -9092,3 +9092,14 @@ commands. No network listener was enabled: without authenticated TLS and
 client-identity binding, exposing policy mutation over raw TCP would violate
 the fail-closed security boundary.
 
+## Codex - Stage 10.7 host-test race closure (2026-11-05)
+
+The first full Stage 10.7 rerun exposed a real host-test isolation race: the
+integration dynamic-TLS test mutated the process-global thread table while the
+internal generation-exhaustion tests reset it. A shared `test_serial_guard`
+now covers both test groups; the affected thread-registry suite passed ten
+consecutive runs and warning-denying host/kernel Clippy passed. A subsequent
+full-chain rerun reached the repeated memory matrix but stopped on host disk
+exhaustion (`no space on device`), not a code/test failure; only generated
+`.cargo-build` output was removed and historical evidence was preserved.
+

@@ -84,6 +84,16 @@ impl Table {
 }
 static TABLE: Mutex<Table> = Mutex::with_rank(Table::new(), 10);
 
+#[cfg(test)]
+static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serialize host tests that intentionally reset the process-global registry.
+/// Production builds do not include this synchronization surface.
+#[cfg(test)]
+pub fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    TEST_SERIAL.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RobustState { Free, Consistent, Abandoned, Unrecoverable }
 #[derive(Clone, Copy)]
@@ -450,12 +460,10 @@ pub fn errno(id: ThreadId) -> Option<i32> {
 mod tests {
     use super::*;
 
-    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn isolated(test: impl FnOnce()) {
         // A failed regression must not prevent independent cases from running.
         // Each case starts with a fresh host-only table; assertions still fail.
-        let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+        let _serial = test_serial_guard();
         *TABLE.lock() = Table::new();
         *ROBUST.lock() = [RobustRecord { address: 0, owner: None, generation: 1, state: RobustState::Free }; MAX_ROBUST_RECORDS];
         test();

@@ -48,6 +48,7 @@ mod dynamic_tls_resource_tests {
 
     #[test]
     fn dynamic_tls_resource_install_and_clear_are_generation_safe() {
+        let _serial = thread::test_serial_guard();
         let id = thread::create(41).expect("thread slot");
         let resources = Resources {
             stack: AnonymousMapping { address: 0x1000 },

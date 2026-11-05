@@ -12962,3 +12962,14 @@ The protocol still intentionally has no network listener: authenticated TLS,
 client identity binding, and an external security review are required before
 policy mutation can be exposed remotely.
 
+## Stage 10.7 race closure - 2026-11-05 - FIX VALIDATED / FULL CHAIN RESOURCE-LIMITED
+
+Closed a host-only test isolation race in the global thread registry by
+serializing the internal generation-exhaustion tests with the integration
+dynamic-TLS test. The affected suite passed ten consecutive runs; target and
+host warning-denying Clippy passed. The complete Stage 10.7 rerun reached the
+repeated memory matrix and then failed because the Windows volume exhausted
+space while compiling a repeated QEMU image (`rustc-LLVM ERROR: no space on
+device`). Generated `.cargo-build` output was removed; source and historical
+evidence were retained. The chain must be rerun after resource recovery.
+
