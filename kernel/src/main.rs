@@ -468,6 +468,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     #[cfg(feature = "secure-boot")]
     serial::write_line(format_args!("[S15.5] signed kernel handoff: PASSED"));
+    // Stage 15.5 qualifies the pre-kernel trust boundary itself. Exit here so
+    // its QEMU gate cannot be delayed or obscured by unrelated later startup
+    // self-tests; production and every other stage continue unchanged.
+    #[cfg(feature = "stage15-5-test")]
+    {
+        serial::write_line(format_args!("[S15.5] secure boot handoff: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "qemu-test")]
     if !boot_measurement::self_test() {
         serial::write_line(format_args!(

@@ -1,0 +1,10 @@
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\bootloader-d32292392eb7b543\out\uefi-build\x86_64-unknown-uefi\release\deps\lock_api-6149cef2c0af61fc.d: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\mutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\remutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\rwlock.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\bootloader-d32292392eb7b543\out\uefi-build\x86_64-unknown-uefi\release\deps\liblock_api-6149cef2c0af61fc.rlib: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\mutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\remutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\rwlock.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\bootloader-d32292392eb7b543\out\uefi-build\x86_64-unknown-uefi\release\deps\liblock_api-6149cef2c0af61fc.rmeta: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\mutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\remutex.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\rwlock.rs
+
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\lib.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\mutex.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\remutex.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\lock_api-0.4.10\src\rwlock.rs:

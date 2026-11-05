@@ -1,0 +1,14 @@
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\serde-3b69e54693c58524.d: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\serde-2c2382482fd9b60b\out/private.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\libserde-3b69e54693c58524.rlib: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\serde-2c2382482fd9b60b\out/private.rs
+
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\deps\libserde-3b69e54693c58524.rmeta: C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\serde-2c2382482fd9b60b\out/private.rs
+
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs:
+C:\Users\banda\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs:
+C:\Users\banda\WovenHat-OS\.cargo-build-virtual-trust\release\build\serde-2c2382482fd9b60b\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\banda\\WovenHat-OS\\.cargo-build-virtual-trust\\release\\build\\serde-2c2382482fd9b60b\\out

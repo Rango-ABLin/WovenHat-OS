@@ -28,7 +28,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -231,19 +230,13 @@ def validate_development_key_material(
     }
 
 
-def _reserve_tcp_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
 def build_qemu_command(
     qemu: Path,
     ovmf_code: Path,
     ovmf_vars: Path,
     disk_image: Path,
     serial_log: Path,
-    tpm_port: int,
+    tpm_socket: Path,
     *,
     marker: str = DEFAULT_MARKER,
 ) -> list[str]:
@@ -253,7 +246,7 @@ def build_qemu_command(
     return [
         str(qemu),
         "-accel",
-        "tcg",
+        "tcg,thread=single",
         "-machine",
         "q35,smm=on",
         "-m",
@@ -262,22 +255,28 @@ def build_qemu_command(
         "1",
         "-display",
         "none",
-        "-chardev",
-        f"file,id=serial0,path={serial_log}",
-        "-device",
-        "isa-serial,chardev=serial0",
+        # `-serial` attaches the file directly to QEMU's built-in COM1.  Do
+        # not add a separate `isa-serial` device here: on q35 that can become
+        # COM2 while the kernel intentionally emits its acceptance marker on
+        # the standard COM1 I/O range (0x3f8).
+        "-serial",
+        f"file:{serial_log}",
         "-no-reboot",
         "-no-shutdown",
         "-device",
         "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-global",
         "driver=cfi.pflash01,property=secure,value=on",
+        "-global",
+        "ICH9-LPC.disable_s3=1",
+        "-global",
+        "mch.extended-tseg-mbytes=32",
         "-drive",
         f"if=pflash,format=raw,readonly=on,file={ovmf_code}",
         "-drive",
         f"if=pflash,format=raw,file={ovmf_vars}",
         "-chardev",
-        f"socket,id=chrtpm,host=127.0.0.1,port={tpm_port}",
+        f"socket,id=chrtpm,path={tpm_socket}",
         "-tpmdev",
         "emulator,id=tpm0,chardev=chrtpm",
         "-device",
@@ -295,6 +294,30 @@ def _copy_read_only_source(source: Path, destination: Path) -> None:
     if _sha256(source) != before:
         raise TrustInputError(f"source changed while copied: {source.name}")
     os.chmod(destination, 0o600)
+
+
+def provision_tpm_state(swtpm_setup: Path, state: Path, output: Path) -> None:
+    """Create a fresh, local TPM 2.0 state without involving host TPM data."""
+
+    setup = subprocess.run(
+        [
+            str(swtpm_setup),
+            "--tpm2",
+            "--tpm-state",
+            f"dir://{state}",
+            "--createek",
+            "--decryption",
+            "--pcr-banks",
+            "sha256",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    (output / "swtpm-setup.log").write_bytes(
+        (setup.stdout + setup.stderr)[-64 * 1024 :]
+    )
+    if setup.returncode != 0:
+        raise TrustInputError("swtpm_setup could not provision disposable TPM 2.0 state")
 
 
 def _wait_for_process(process: subprocess.Popen[bytes], seconds: float = 3.0) -> bool:
@@ -322,6 +345,7 @@ def _stop_process(process: subprocess.Popen[bytes] | None) -> int | None:
 def run_virtual_guest(
     qemu: Path,
     swtpm: Path,
+    swtpm_setup: Path,
     ovmf_code: Path,
     ovmf_vars: Path,
     disk_image: Path,
@@ -343,10 +367,9 @@ def run_virtual_guest(
         swtpm_log = work / "swtpm.log"
         _copy_read_only_source(disk_image, disk_copy)
         _copy_read_only_source(ovmf_vars, vars_copy)
-        tpm_port = _reserve_tcp_port()
-        control_port = _reserve_tcp_port()
-        while control_port == tpm_port:
-            control_port = _reserve_tcp_port()
+        provision_tpm_state(swtpm_setup, tpm_state, output)
+        tpm_socket = work / "swtpm.sock"
+        control_socket = work / "swtpm.ctrl"
         swtpm_command = [
             str(swtpm),
             "socket",
@@ -354,9 +377,18 @@ def run_virtual_guest(
             "--tpmstate",
             f"dir={tpm_state}",
             "--server",
-            f"type=tcp,port={tpm_port},bindaddr=127.0.0.1",
+            f"type=unixio,path={tpm_socket}",
             "--ctrl",
-            f"type=tcp,port={control_port},bindaddr=127.0.0.1",
+            f"type=unixio,path={control_socket}",
+            "--flags",
+            # QEMU drives the TPM command socket directly.  This flag makes
+            # that socket usable without a separate management client first
+            # sending an INIT control command.
+            "not-need-init",
+            "--locality",
+            # OVMF performs early TPM operations outside the default locality;
+            # permit those requests in this per-run emulator only.
+            "allow-set-locality",
         ]
         qemu_command = build_qemu_command(
             qemu,
@@ -364,7 +396,7 @@ def run_virtual_guest(
             vars_copy,
             disk_copy,
             serial_log,
-            tpm_port,
+            tpm_socket,
             marker=marker,
         )
         with swtpm_log.open("wb") as log:
@@ -376,6 +408,8 @@ def run_virtual_guest(
             )
         qemu_process: subprocess.Popen[bytes] | None = None
         qemu_returncode: int | None = None
+        qemu_stdout = b""
+        qemu_stderr = b""
         timed_out = False
         try:
             if not _wait_for_process(tpm_process):
@@ -387,11 +421,11 @@ def run_virtual_guest(
                 stderr=subprocess.PIPE,
             )
             try:
-                qemu_process.communicate(timeout=timeout)
+                qemu_stdout, qemu_stderr = qemu_process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 qemu_process.kill()
-                qemu_process.communicate()
+                qemu_stdout, qemu_stderr = qemu_process.communicate()
             qemu_returncode = qemu_process.returncode
         finally:
             swtpm_returncode = _stop_process(tpm_process)
@@ -399,6 +433,7 @@ def run_virtual_guest(
         swtpm_output = swtpm_log.read_text(encoding="utf-8", errors="replace") if swtpm_log.exists() else ""
         # Keep bounded evidence, not private key material or an unbounded guest log.
         (output / "qemu-serial.log").write_text(serial[-256 * 1024 :], encoding="utf-8")
+        (output / "qemu.log").write_bytes((qemu_stdout + qemu_stderr)[-256 * 1024 :])
         (output / "swtpm.log").write_text(swtpm_output[-64 * 1024 :], encoding="utf-8")
         marker_seen = marker in serial
         return {
@@ -411,6 +446,7 @@ def run_virtual_guest(
             "qemu_command": qemu_command,
             "swtpm_command": swtpm_command,
             "serial_log": str(output / "qemu-serial.log"),
+            "qemu_log": str(output / "qemu.log"),
             "swtpm_log": str(output / "swtpm.log"),
             "passed": (
                 not timed_out
@@ -516,6 +552,15 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         checks.append({"name": "ovmf_code", "status": "BLOCKED", "detail": "OVMF CODE cannot be resolved"})
     file_input("ovmf_vars", args.ovmf_vars, "OVMF VARS template", max_bytes=MAX_KEY_BYTES)
     tool_input("swtpm", args.swtpm, "swtpm")
+    if "swtpm" in resolved:
+        setup = resolved["swtpm"].with_name("swtpm_setup")
+        if setup.is_file() and os.access(setup, os.X_OK):
+            resolved["swtpm_setup"] = setup.resolve()
+            checks.append({"name": "swtpm_setup", "status": "PASS", "path": str(setup.resolve())})
+        else:
+            detail = "swtpm_setup is required to provision disposable TPM 2.0 state"
+            blockers.append(_blocker("missing-swtpm-setup", detail))
+            checks.append({"name": "swtpm_setup", "status": "BLOCKED", "detail": detail})
     tool_input("sbverify", args.sbverify, "sbverify")
     file_input("disk_image", args.disk_image, "guest disk image")
     file_input("development_key", args.development_key, "development private key", max_bytes=MAX_KEY_BYTES)
@@ -578,6 +623,7 @@ def qualify(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             execution = run_virtual_guest(
                 resolved["qemu"],
                 resolved["swtpm"],
+                resolved["swtpm_setup"],
                 resolved["ovmf_code"],
                 resolved["ovmf_vars"],
                 resolved["disk_image"],
