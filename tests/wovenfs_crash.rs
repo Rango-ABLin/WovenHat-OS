@@ -4313,6 +4313,9 @@ fn read_dir_refuses_a_file_inode_as_directory() {
 /// Without the guard, `dir_entries` would walk the file's data blocks as if they
 /// were directory entries, and the subsequent free of whichever inode was found
 /// there would corrupt unrelated metadata.
+///
+/// The guard fires before any transaction is staged or `commit` is called, so
+/// the refused call leaves the volume byte-for-byte unchanged.
 #[test]
 fn unlink_refuses_a_file_inode_as_directory() {
     let base = formatted();
@@ -4323,6 +4326,9 @@ fn unlink_refuses_a_file_inode_as_directory() {
             .expect("create hello.txt")
     };
 
+    // Snapshot the image after the create, before the refused call.
+    let before = base.sectors();
+
     let mut volume = Volume::mount(base.clone()).expect("mount");
 
     // Passing a file inode as the directory argument must be refused.
@@ -4330,6 +4336,10 @@ fn unlink_refuses_a_file_inode_as_directory() {
         volume.unlink(file_inode, "hello.txt", 2),
         Err(Error::NotADirectory),
         "unlink on a file inode must return NotADirectory"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused unlink must not modify the image"
     );
 
     // Control: the file still exists in the root directory and unlink through

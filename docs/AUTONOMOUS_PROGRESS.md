@@ -1,5 +1,52 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: atomicity proof for unlink refused because dir inode is a file
+
+Branch: `auto/wovenhat-development` (base `83dc3270`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1252) checks `dir.kind != KIND_DIR` before reading any
+directory entries, staging any transaction sector, or calling `commit`.  When a
+caller passes a file inode as `dir_inode`, the guard fires immediately and
+returns `Err(Error::NotADirectory)` with the volume entirely unmodified.
+
+The existing `unlink_refuses_a_file_inode_as_directory` test verified the
+correct error variant and that the named file remains accessible, but it did
+not snapshot the raw sector image before or after the refused call.  Without
+that snapshot the test suite could not prove zero sector writes occurred; it
+only confirmed the logical view.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — enhanced `unlink_refuses_a_file_inode_as_directory`:
+
+- Added `let before = base.sectors();` immediately after the create step and
+  before the refused call.
+- Added `assert!(base.sectors() == before, "a refused unlink must not modify
+  the image")` after the first `assert_eq!`.
+- Expanded the doc comment to state explicitly that the guard fires before any
+  transaction is staged or `commit` is called.
+
+No production code changed.  The test count is unchanged at 107.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **107 passed / 0 failed** |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The snapshot assertion covers only the `dir.kind != KIND_DIR` early-return
+  path; the existing atomicity proofs for valid unlink paths are unchanged.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: sector-level atomicity proof for write_file extension path when no data blocks remain
 
 Branch: `auto/wovenhat-development` (base `588d8caf`). Working tree was clean.
