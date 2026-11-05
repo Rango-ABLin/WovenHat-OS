@@ -30,6 +30,13 @@ class BootConfigGateTests(unittest.TestCase):
         self.assertTrue(MODULE.outcome_errors("kernel-allocation", None, log + "\n[BOOT]", 1))
         self.assertTrue(MODULE.outcome_errors("kernel-allocation", None, log.replace("firmware resource", "kernel image"), 1))
 
+    def test_disk_resource_failures_require_exact_firmware_markers(self):
+        log = "[WBOOT] firmware resource failure: DiskRead\n[WBOOT] boot stopped: firmware resource failure"
+        self.assertEqual(MODULE.outcome_errors("disk-read", None, log, 1), [])
+        self.assertTrue(MODULE.outcome_errors("disk-directory", None, log, 1))
+        self.assertTrue(MODULE.outcome_errors("disk-read", 33, log, 1))
+        self.assertTrue(MODULE.outcome_errors("disk-read", None, log + "\n[BOOT]", 1))
+
     def test_positive_requires_exit_and_kernel_marker(self):
         log = "[BOOT] ALL VALIDATIONS PASSED\n[SMP] online=1 expected=1 LAPIC/IOAPIC enabled"
         self.assertEqual(MODULE.outcome_errors("default", 33, log, 1), [])

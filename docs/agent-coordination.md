@@ -8976,3 +8976,6 @@ New scripts:
 212 libwoven host tests pass. stage-status.md updated with re-verification
 notes for 32.17 and 32.18. No kernel source changes; gates only.
 Next: Stage 32.19 live GDB COM2 client qualification.
+## Codex - BLD-B4 disk firmware-I/O failure qualification (2026-11-05)
+
+Claim the bounded disk metadata/read-failure fixture work in `tools/boot-config-fixtures`, the existing source-bound QEMU harness and its host tests, plus the corresponding bootloader disk-resource diagnostic if a defect is demonstrated. The fixture must be disposable and derived from the production image builder; it may not access a host disk or weaken the accepted disk-missing-to-TFTP fallback. TFTP, strict graphics, page-table and ExitBootServices qualification are explicitly outside this claim. Cargo and QEMU chains remain serialized.

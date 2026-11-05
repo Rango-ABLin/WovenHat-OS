@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_SIGNING_KEY");
     println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_SIGNING_CERTIFICATE");
     println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_WSL_DISTRO");
+    println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
     #[cfg(not(feature = "uefi"))]
     fn uefi_main() {}
     #[cfg(not(feature = "bios"))]
@@ -92,6 +93,12 @@ fn build_uefi_bootloader() -> PathBuf {
         cmd.arg("--version").arg(BOOTLOADER_VERSION);
     }
     cmd.arg("--locked");
+    if matches!(env::var("CARGO_NET_OFFLINE").as_deref(), Ok("true") | Ok("1")) {
+        // The parent build explicitly selected cached-only resolution. Keep
+        // the nested runtime install in the same mode so a clean project
+        // target directory remains reproducible without network access.
+        cmd.arg("--offline");
+    }
     cmd.arg("--target").arg("x86_64-unknown-uefi");
     cmd.arg("-Zbuild-std=core")
         .arg("-Zbuild-std-features=compiler-builtins-mem");

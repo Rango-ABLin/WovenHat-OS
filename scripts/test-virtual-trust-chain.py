@@ -262,7 +262,6 @@ def build_qemu_command(
         "-serial",
         f"file:{serial_log}",
         "-no-reboot",
-        "-no-shutdown",
         "-device",
         "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-global",
@@ -365,30 +364,28 @@ def run_virtual_guest(
         tpm_state.mkdir()
         serial_log = work / "qemu-serial.log"
         swtpm_log = work / "swtpm.log"
+        swtpm_engine_log = work / "swtpm-engine.log"
         _copy_read_only_source(disk_image, disk_copy)
         _copy_read_only_source(ovmf_vars, vars_copy)
         provision_tpm_state(swtpm_setup, tpm_state, output)
-        tpm_socket = work / "swtpm.sock"
-        control_socket = work / "swtpm.ctrl"
+        # QEMU's `tpmdev emulator` speaks the swtpm control protocol.  It
+        # must connect to this control socket (not to a separate raw server
+        # socket) so QEMU can issue the required INIT/locality operations.
+        tpm_socket = work / "swtpm.ctrl"
         swtpm_command = [
             str(swtpm),
             "socket",
             "--tpm2",
             "--tpmstate",
             f"dir={tpm_state}",
-            "--server",
-            f"type=unixio,path={tpm_socket}",
             "--ctrl",
-            f"type=unixio,path={control_socket}",
-            "--flags",
-            # QEMU drives the TPM command socket directly.  This flag makes
-            # that socket usable without a separate management client first
-            # sending an INIT control command.
-            "not-need-init",
+            f"type=unixio,path={tpm_socket}",
             "--locality",
             # OVMF performs early TPM operations outside the default locality;
             # permit those requests in this per-run emulator only.
             "allow-set-locality",
+            "--log",
+            f"file={swtpm_engine_log},level=20",
         ]
         qemu_command = build_qemu_command(
             qemu,
@@ -431,10 +428,12 @@ def run_virtual_guest(
             swtpm_returncode = _stop_process(tpm_process)
         serial = serial_log.read_text(encoding="utf-8", errors="replace") if serial_log.exists() else ""
         swtpm_output = swtpm_log.read_text(encoding="utf-8", errors="replace") if swtpm_log.exists() else ""
+        swtpm_engine_output = swtpm_engine_log.read_text(encoding="utf-8", errors="replace") if swtpm_engine_log.exists() else ""
         # Keep bounded evidence, not private key material or an unbounded guest log.
         (output / "qemu-serial.log").write_text(serial[-256 * 1024 :], encoding="utf-8")
         (output / "qemu.log").write_bytes((qemu_stdout + qemu_stderr)[-256 * 1024 :])
         (output / "swtpm.log").write_text(swtpm_output[-64 * 1024 :], encoding="utf-8")
+        (output / "swtpm-engine.log").write_text(swtpm_engine_output[-256 * 1024 :], encoding="utf-8")
         marker_seen = marker in serial
         return {
             "attempted": True,
@@ -448,6 +447,7 @@ def run_virtual_guest(
             "serial_log": str(output / "qemu-serial.log"),
             "qemu_log": str(output / "qemu.log"),
             "swtpm_log": str(output / "swtpm.log"),
+            "swtpm_engine_log": str(output / "swtpm-engine.log"),
             "passed": (
                 not timed_out
                 and qemu_returncode in ACCEPTABLE_QEMU_EXIT_CODES

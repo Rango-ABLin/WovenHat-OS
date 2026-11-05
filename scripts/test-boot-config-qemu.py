@@ -33,6 +33,8 @@ CASES = {
     "kernel-wrong-arch": "InvalidElfOrContract",
     "kernel-bad-table": "InvalidElfOrContract",
     "kernel-allocation": "LoaderAllocation",
+    "disk-directory": "DiskFileIsDirectory",
+    "disk-read": "DiskRead",
 }
 STOP = "[WBOOT] boot stopped: invalid boot configuration"
 BOOTLOADER_SOURCES = (
@@ -48,14 +50,18 @@ def failure_subject(name):
     return "kernel image" if name.startswith("kernel-") else "boot configuration"
 
 
+def firmware_failure(name):
+    return name == "kernel-allocation" or name.startswith("disk-")
+
+
 def stop_marker(name):
-    if name == "kernel-allocation":
+    if firmware_failure(name):
         return "[WBOOT] boot stopped: firmware resource failure"
     return f"[WBOOT] boot stopped: invalid {failure_subject(name)}"
 
 
 def rejection_marker(name, reason):
-    if name == "kernel-allocation":
+    if firmware_failure(name):
         return f"[WBOOT] firmware resource failure: {reason}"
     return f"[WBOOT] invalid {failure_subject(name)}: {reason}"
 
