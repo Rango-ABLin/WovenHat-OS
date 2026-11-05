@@ -4338,14 +4338,29 @@ has been integrated.
 `libwoven::clipboard::TextClipboard` is the bounded text-side SDK model. It
 accepts only non-empty UTF-8 up to 4096 bytes, clears stale bytes on replace,
 tracks a monotonic generation, and rejects invalid or oversized input without
-partial mutation. Transport, capability checks, and cross-process ownership
-remain service responsibilities.
+partial mutation. `libwoven::desktop_services::ClipboardClient` now carries
+set/get/clear requests over the kernel IPC handle ABI to the named
+`woven.clipboard` service; the service remains responsible for capability and
+cross-process ownership policy.
 
 `libwoven::file_dialog::FileDialog` is the bounded chooser state machine. It
 stores at most 64 provider-supplied opaque entries with bounded UTF-8 names,
-provides deterministic wraparound selection, and closes explicitly. It never
-opens paths or grants filesystem authority; the provider and permission layer
-must perform those operations.
+provides deterministic wraparound selection, and closes explicitly. Its
+`FileDialogClient` sends only navigation/cancel operations to the named
+`woven.file-dialog` provider; it never opens paths or grants filesystem
+authority.
+
+`libwoven::desktop_services::ScreenReaderClient` delivers the existing
+pointer-free `WAX1` semantic tree and `WAA1` focus announcement records to
+`woven.screen-reader`. Each response is fixed-shape and status-bearing, so a
+missing or malformed service cannot be mistaken for successful speech.
+
+`libwoven::i18n` provides locale direction and OpenType script/language tags,
+bounded NFC composition (including algorithmic Hangul), and visual bidi run
+ordering with paired punctuation mirroring. These are shared before the
+TrueType shaping APIs; callers select the returned tags through
+`TextShapingOptions`. Full Unicode data tables, IMEs, and physical assistive
+technology remain explicit release prerequisites.
 
 WovenEditor is the first application using the toolkit's text field as a full
 desktop editing flow rather than a status snapshot. Its GUI accepts bounded

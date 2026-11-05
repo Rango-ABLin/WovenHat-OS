@@ -1,10 +1,11 @@
 //! Bounded internationalization primitives for userspace.
 //!
-//! This module deliberately stops at the data and formatting boundary. It
-//! does not implement complete Unicode normalization, full UAX#9 bidi,
-//! shaping, keyboard layouts, or IMEs; those require compositor/input
-//! integration and remain later
-//! acceptance work.
+//! This module provides the bounded text policy shared by applications.  It
+//! validates Unicode scalars, performs NFC composition for the supported
+//! canonical algorithms, resolves visual directional runs, and exposes the
+//! OpenType script/language tags used by the graphics shaper.  The buffers are
+//! caller-owned and bounded; unsupported font-table behavior still fails
+//! closed in `libwoven::graphics`.
 
 #![allow(clippy::cast_possible_truncation)]
 
@@ -16,6 +17,7 @@ pub const MAX_TRANSLATIONS: usize = 32;
 pub enum Language {
     English,
     Chichewa,
+    Arabic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,14 +39,42 @@ impl Locale {
         language: Language::Chichewa,
         region: *b"MW",
     };
+    pub const AR_SA: Self = Self {
+        language: Language::Arabic,
+        region: *b"SA",
+    };
 
     pub const fn direction(self) -> Direction {
-        Direction::LeftToRight
+        match self.language {
+            Language::Arabic => Direction::RightToLeft,
+            Language::English | Language::Chichewa => Direction::LeftToRight,
+        }
+    }
+
+    /// OpenType `ScriptList` tag for this locale.
+    pub const fn script_tag(self) -> [u8; 4] {
+        match self.language {
+            Language::Arabic => *b"arab",
+            Language::English | Language::Chichewa => *b"latn",
+        }
+    }
+
+    /// OpenType `LangSys` tag when a locale has a stable language-system tag.
+    /// `None` selects the script default, which is the correct fallback for
+    /// fonts that do not carry a locale-specific record.
+    pub const fn language_tag(self) -> Option<[u8; 4]> {
+        match self.language {
+            Language::Arabic => Some(*b"ARA "),
+            Language::English | Language::Chichewa => None,
+        }
     }
 
     pub const fn decimal_separator(self) -> u8 {
         match self.language {
             Language::English | Language::Chichewa => b'.',
+            // Numeric formatting remains ASCII because callers provide byte
+            // buffers; localized punctuation is handled by text catalogs.
+            Language::Arabic => b'.',
         }
     }
 
@@ -84,6 +114,70 @@ pub struct BidiRun {
 pub enum BidiError {
     InvalidScalar(UnicodeError),
     OutputTooSmall,
+}
+
+/// Emit visual scalar order for the bounded bidi model.  Directional runs are
+/// reversed in place, RTL paired punctuation is mirrored, and the operation
+/// is transactional with respect to invalid scalars and capacity.
+pub fn resolve_bidi_visual_order(
+    input: &[u32],
+    base: Direction,
+    output: &mut [u32],
+) -> Result<usize, BidiError> {
+    if output.len() < input.len() {
+        return Err(BidiError::OutputTooSmall);
+    }
+    let mut runs = [BidiRun {
+        start: 0,
+        length: 0,
+        direction: Direction::LeftToRight,
+    }; MAX_BIDI_RUNS];
+    let count = resolve_bidi_runs(input, &mut runs)?;
+    let mut at = 0;
+    if base == Direction::LeftToRight {
+        for run in runs[..count].iter().copied() {
+            if run.direction == Direction::RightToLeft {
+                for &scalar in input[run.start..run.start + run.length].iter().rev() {
+                    output[at] = mirror_scalar(scalar);
+                    at += 1;
+                }
+            } else {
+                output[at..at + run.length]
+                    .copy_from_slice(&input[run.start..run.start + run.length]);
+                at += run.length;
+            }
+        }
+    } else {
+        for run in runs[..count].iter().rev().copied() {
+            for &scalar in input[run.start..run.start + run.length].iter().rev() {
+                output[at] = if run.direction == Direction::RightToLeft {
+                    mirror_scalar(scalar)
+                } else {
+                    scalar
+                };
+                at += 1;
+            }
+        }
+    }
+    Ok(at)
+}
+
+const fn mirror_scalar(value: u32) -> u32 {
+    match value {
+        0x28 => 0x29,
+        0x29 => 0x28,
+        0x5b => 0x5d,
+        0x5d => 0x5b,
+        0x7b => 0x7d,
+        0x7d => 0x7b,
+        0x3c => 0x3e,
+        0x3e => 0x3c,
+        0x00ab => 0x00bb,
+        0x00bb => 0x00ab,
+        0x2039 => 0x203a,
+        0x203a => 0x2039,
+        _ => value,
+    }
 }
 
 /// Classify the bounded set of strong ranges used by the first text path.
@@ -301,6 +395,56 @@ pub fn normalize_latin_nfc(input: &[u32], output: &mut [u32]) -> Result<usize, N
     Ok(length)
 }
 
+/// Bounded Unicode NFC composition used by the shared text pipeline.
+///
+/// Unlike the legacy Latin-only entry point, this accepts valid scalars and
+/// preserves combining marks for which no composition exists.  Canonical
+/// Hangul Jamo composition is algorithmic; common Latin compositions are
+/// shared with `normalize_latin_nfc`.  This makes fallback fonts and screen
+/// readers observe the same scalar stream without dropping unfamiliar text.
+pub fn normalize_nfc(input: &[u32], output: &mut [u32]) -> Result<usize, NormalizationError> {
+    if input.len() > output.len() || input.len() > MAX_NORMALIZATION_SCALARS {
+        return Err(NormalizationError::OutputTooSmall);
+    }
+    validate_scalars(input).map_err(NormalizationError::InvalidScalar)?;
+    let mut count = 0;
+    for &scalar in input {
+        if count != 0
+            && let Some(composed) = compose_hangul(output[count - 1], scalar)
+                .or_else(|| compose_latin(output[count - 1], scalar))
+        {
+            output[count - 1] = composed;
+            continue;
+        }
+        output[count] = scalar;
+        count += 1;
+    }
+    Ok(count)
+}
+
+const fn compose_hangul(base: u32, next: u32) -> Option<u32> {
+    const S_BASE: u32 = 0xac00;
+    const L_BASE: u32 = 0x1100;
+    const V_BASE: u32 = 0x1161;
+    const T_BASE: u32 = 0x11a7;
+    const L_COUNT: u32 = 19;
+    const V_COUNT: u32 = 21;
+    const T_COUNT: u32 = 28;
+    const N_COUNT: u32 = V_COUNT * T_COUNT;
+    if base >= L_BASE && base < L_BASE + L_COUNT && next >= V_BASE && next < V_BASE + V_COUNT {
+        return Some(S_BASE + ((base - L_BASE) * N_COUNT) + ((next - V_BASE) * T_COUNT));
+    }
+    if base >= S_BASE
+        && base < S_BASE + L_COUNT * N_COUNT
+        && (base - S_BASE).is_multiple_of(T_COUNT)
+        && next > T_BASE
+        && next < T_BASE + T_COUNT
+    {
+        return Some(base + next - T_BASE);
+    }
+    None
+}
+
 pub const MAX_NORMALIZATION_SCALARS: usize = 256;
 
 const fn is_combining_mark(value: u32) -> bool {
@@ -502,6 +646,8 @@ mod tests {
     #[test]
     fn locales_have_stable_direction_and_date_order() {
         assert_eq!(Locale::EN_US.direction(), Direction::LeftToRight);
+        assert_eq!(Locale::AR_SA.direction(), Direction::RightToLeft);
+        assert_eq!(Locale::AR_SA.script_tag(), *b"arab");
         let date = Date::new(2026, 10, 21).unwrap();
         let mut output = [0; 10];
         let used = Locale::EN_US.format_date(date, &mut output).unwrap();
@@ -626,6 +772,39 @@ mod tests {
             resolve_bidi_runs(&[b'a' as u32, 0x05d0], &mut []),
             Err(BidiError::OutputTooSmall)
         );
+    }
+
+    #[test]
+    fn visual_bidi_order_reverses_rtl_runs_and_mirrors_pairs() {
+        let input = [
+            b'A' as u32,
+            b' ' as u32,
+            0x05d0,
+            b'(' as u32,
+            0x05d1,
+            b')' as u32,
+        ];
+        let mut output = [0u32; 6];
+        let used = resolve_bidi_visual_order(&input, Direction::LeftToRight, &mut output).unwrap();
+        assert_eq!(
+            &output[..used],
+            &[
+                b'A' as u32,
+                b' ' as u32,
+                b'(' as u32,
+                0x05d1,
+                b')' as u32,
+                0x05d0
+            ]
+        );
+    }
+
+    #[test]
+    fn nfc_composes_hangul_jamo_without_dropping_unknown_marks() {
+        let input = [0x1100, 0x1161, 0x11a8, 0x0061, 0x0304];
+        let mut output = [0u32; 5];
+        let used = normalize_nfc(&input, &mut output).unwrap();
+        assert_eq!(&output[..used], &[0xac01, 0x0061, 0x0304]);
     }
 
     #[test]

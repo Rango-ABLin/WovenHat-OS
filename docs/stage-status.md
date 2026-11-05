@@ -1,5 +1,22 @@
 # Stage status
 
+## S12 desktop service and text pipeline integration - 2026-11-05 - ACCEPTED (SOFTWARE SDK)
+
+Added `libwoven::desktop_services` with a syscall-backed, fixed-size IPC
+transport and versioned clients for `woven.clipboard`, `woven.file-dialog`,
+and `woven.screen-reader`. Clipboard set/get/clear, chooser navigation/cancel,
+and WAX1/WAA1 tree/focus delivery all validate lengths, UTF-8, response shape,
+and service status without retaining caller buffers. Host loopback tests cover
+request emission and fail-closed oversized input; the no-std target check and
+warning-denying all-targets Clippy pass.
+
+Extended `libwoven::i18n` with Arabic locale direction/script metadata,
+algorithmic Hangul plus existing Latin NFC composition, visual bidi run
+ordering with paired-bracket mirroring, and locale shaping tags. This remains
+a bounded Unicode/OpenType contract: complete Unicode data tables, IMEs,
+keyboard layouts, and physical assistive devices are outside this software
+slice.
+
 ## Stage 10.7 full regression after S12 GUI updates - 2026-11-05 - PASSED (SOFTWARE)
 
 The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and

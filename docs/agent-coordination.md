@@ -105,6 +105,15 @@ warning-denying target Clippy/check pass; QEMU feature acceptance remains the
 next prerequisite and must be run before calling this slice fully accepted.
 
 # Agent coordination (Claude Code and Codex)
+
+## Codex - Clipboard/file-dialog, screen-reader, and text pipeline integration (2026-11-05)
+
+Taking the next open S12/graphics gaps. The existing `TextClipboard`,
+`FileDialog`, and `WAX1`/`WAA1` records are being promoted from local SDK
+models to versioned IPC client protocols with bounded request/response
+validation. The text path is being extended with locale-aware normalization,
+visual bidi ordering, and script/language shaping selection. No unbounded
+allocation, new kernel authority, or physical-device claim is introduced.
 # Agent coordination (Claude Code and Codex)
 
 ## Codex - Stage 10.7 full gate repair and revalidation (2026-11-04)
