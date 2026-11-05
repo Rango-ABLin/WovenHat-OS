@@ -1,5 +1,104 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: create_file refuses when refuse_shared_blocks encounters a corrupt sibling inode (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `211bc8c1`). Working tree was clean.
+
+### Defect / gap
+
+`create_file` calls `stage_create` and `stage_write` in a single transaction.
+`stage_create` pre-stages the new file inode, the directory entry, and the
+directory inode (three sectors) before `stage_write` runs.  `stage_write`
+then allocates a data block (staging a bitmap-set sector and a content
+sector — two more) before calling `refuse_shared_blocks`.
+
+`refuse_shared_blocks` scans all inodes other than the write target by
+calling `inode_staged(txn, number)?` on each.  If a sibling inode's stored
+FNV-1a structural checksum does not match bytes 0–119, `Inode::decode`
+returns `None` → `Err(Error::Corrupt)`, which propagates through
+`refuse_shared_blocks` and `stage_write` without reaching `commit`.
+
+The previous session proved this guard for `write_file` (1 sector staged
+before failure).  No test proved the same guard for `create_file`, where up
+to five sectors (new inode, dir entry, dir inode, bitmap-set, content) are
+staged in the transaction before `refuse_shared_blocks` encounters the
+corrupt sibling — and all five must be discarded when `commit` is never
+called.
+
+The existing test
+`create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_leaves_no_trace`
+covers the case where `refuse_shared_blocks` returns `Err(Corrupt)` because
+it finds a **shared block pointer** (bitmap cleared for a sibling block so
+the allocator picks it, then the guard detects the alias).  This new test
+covers the distinct path where `refuse_shared_blocks` returns `Err(Corrupt)`
+because a **sibling inode's checksum** is corrupt — `inode_staged` returns
+the error before the shared-block comparison runs.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()`: a.bin (inode 2, block a_block) and b.bin
+  (inode 3, block b_block).  Both bitmap bits are set.
+- Forks image (`corrupt = base.fork(None)`).
+- Corrupts b.bin's inode (inode 3) structural checksum: flips byte at
+  `inode_start * 512 + 2*128 + 120` (the first byte of inode 3's FNV-1a
+  checksum field).
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.create_file(1, "new.bin", 0o644, &[42u8; 1], 2)`:
+  - `stage_create` stages new inode 4, dir entry, dir inode (3 sectors in txn).
+  - `stage_write` allocates the first free data block C (≠ a_block, b_block,
+    since both are bitmap-allocated): bitmap-set + content staged (5 total).
+  - `refuse_shared_blocks(txn, 4, &touched)`:
+    - inode 1 (root dir): valid, block not in touched → continue.
+    - inode 2 (a.bin): valid, a_block not in touched → continue.
+    - inode 3 (b.bin): `inode_staged(txn, 3)` → `Inode::decode` finds corrupt
+      checksum → `None` → `Err(Corrupt)`.
+  - `create_file` returns `Err(Corrupt)` without calling `commit`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — all 5 staged sectors discarded; no
+  sector written.
+- Asserts `lookup(1, "new.bin") == Err(NotFound)` — no dangling entry.
+- Asserts `lookup(1, "a.bin").is_ok()` — existing valid file unaffected.
+  (b.bin's inode is intentionally corrupt; `lookup` correctly returns
+  `Err(Corrupt)` for it, so that assertion is omitted.)
+- Control: on the unpatched `base`, `create_file` succeeds and reads back
+  correctly.
+
+No production code changed.  Test count: 121 → 122.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | FAIL (open-brace placement); fixed with `cargo fmt --all`, then rerun |
+| `cargo fmt --all -- --check` (after fix) | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **122 passed / 0 failed** (was 121; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for `create_file` when `refuse_shared_blocks` encounters a
+  corrupt sibling inode checksum in `stage_write`: all 5 staged sectors (new
+  inode, dir entry, dir inode, bitmap-set, content) are discarded with the
+  transaction when `commit` is never called.
+- Together with the previous session's `write_file` test, all `refuse_shared_blocks`
+  guard paths that return `Err(Corrupt)` due to a **corrupt sibling inode checksum**
+  are now covered for both `write_file` (1 staged sector before failure) and
+  `create_file` (5 staged sectors before failure).
+- Combined with `create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_leaves_no_trace`
+  (shared block pointer path), all `refuse_shared_blocks` failure modes within
+  `stage_write` are now covered for the `create_file` caller:
+  - Shared block pointer → allocator picks an aliased block; guard detects. ← prior session
+  - Corrupt sibling inode checksum → `inode_staged` fails before the comparison. ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: write_file refuses when refuse_shared_blocks encounters a corrupt sibling inode (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `53cfd2eb`). Working tree was clean.

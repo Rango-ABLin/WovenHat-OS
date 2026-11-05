@@ -7400,3 +7400,111 @@ fn write_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_ino
             .expect("control: volume must be consistent after write_file");
     }
 }
+
+/// `create_file` calls `stage_create` and `stage_write` in a single
+/// transaction.  `stage_create` pre-stages the new file inode, the directory
+/// entry, and the directory inode (three sectors).  `stage_write` then
+/// allocates a data block for the new file — staging a bitmap-set sector and a
+/// content sector (two more) — before calling `refuse_shared_blocks`.
+///
+/// `refuse_shared_blocks` scans all inodes other than the write target by
+/// calling `inode_staged(txn, number)?` on each.  When a sibling inode's
+/// stored FNV-1a structural checksum does not match bytes 0–119, `Inode::decode`
+/// returns `None` → `Err(Error::Corrupt)`, which propagates through
+/// `refuse_shared_blocks` and `stage_write` without reaching `commit`.
+///
+/// At that point five sectors have been staged in the transaction buffer (new
+/// inode, dir entry, dir inode, bitmap-set, content).  Because `commit` is
+/// never called, all five staged changes are discarded and no sector reaches
+/// the disk.
+///
+/// This is distinct from
+/// `create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_leaves_no_trace`,
+/// which corrupts the **block pointer** of a sibling inode (causing the
+/// shared-block guard to fire); here the sibling inode's **checksum** is
+/// corrupt (causing `inode_staged` to return `Err(Corrupt)` before the
+/// shared-block comparison runs).
+#[test]
+fn create_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_and_leaves_no_trace()
+ {
+    // two_one_block_files(): a.bin → inode 2 (block a_block), b.bin → inode 3
+    // (block b_block).  Both bitmap bits are set; both blocks are allocated.
+    let (base, _a_inode, _b_inode) = two_one_block_files();
+
+    // Fork and corrupt b.bin's inode (inode 3) structural checksum by flipping
+    // a byte in the checksum field.  Inode 3: 0-based index 2 within the inode
+    // sector (inode 1 → 0, inode 2 → 1, inode 3 → 2).  Four inodes per 512-byte
+    // sector; each slot 128 bytes; FNV-1a checksum field starts at byte 120
+    // within the slot.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        let offset = 2 * 128; // inode 3 → slot index 2
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must flag the corrupt live inode checksum.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode with a bad structural checksum"
+    );
+
+    // Snapshot: create_file must not modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount patched image");
+
+    // create_file calls stage_create (stages new inode 4, dir entry, dir inode:
+    // 3 sectors in txn) then stage_write.  stage_write allocates the first free
+    // data block (some block C ≠ a_block, b_block, since both are bitmap-
+    // allocated), staging bitmap-set + content (2 more sectors: total 5).
+    // refuse_shared_blocks scans inodes 1 (root, valid), 2 (a.bin, valid), then
+    // 3 (b.bin, corrupt checksum) → inode_staged(3) → Err(Corrupt).
+    // commit is never called.
+    assert_eq!(
+        volume.create_file(1, "new.bin", 0o644, &[42u8; 1], 2),
+        Err(Error::Corrupt),
+        "create_file must refuse when refuse_shared_blocks encounters a corrupt sibling inode"
+    );
+
+    // No sector must have been written: all five staged sectors were in the
+    // transaction buffer only; commit was never called.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // "new.bin" must not appear in the directory.
+    assert_eq!(
+        volume.lookup(1, "new.bin"),
+        Err(Error::NotFound),
+        "the refused create_file must not leave a file in the directory"
+    );
+
+    // a.bin's inode is valid: it must remain accessible after the refused
+    // create_file.  b.bin's inode has an intentionally corrupt checksum, so
+    // lookup(b.bin) correctly returns Err(Corrupt); checking it here would
+    // conflate the pre-existing corruption with the refused operation.
+    assert!(
+        volume.lookup(1, "a.bin").is_ok(),
+        "a.bin must remain accessible after the refused create_file"
+    );
+
+    // Control: on the unpatched base image, create_file succeeds and the new
+    // file reads back correctly.
+    {
+        let ctrl = base.fork(None);
+        let mut cv = Volume::mount(ctrl).expect("mount ctrl");
+        let new_inode = cv
+            .create_file(1, "new.bin", 0o644, &[42u8; 1], 2)
+            .expect("control: create_file must succeed on a consistent image");
+        let mut out = [0u8; 1];
+        assert_eq!(cv.read_file(new_inode, &mut out), Ok(1));
+        assert_eq!(out[0], 42u8);
+    }
+}
