@@ -17,6 +17,12 @@ a bounded Unicode/OpenType contract: complete Unicode data tables, IMEs,
 keyboard layouts, and physical assistive devices are outside this software
 slice.
 
+The same module now contains `DesktopServiceBroker`, which owns the bounded
+clipboard, chooser, and accessibility delivery state and dispatches validated
+requests into fixed-size responses. Broker host tests cover successful state
+mutation and rejection of an untrusted screen-reader payload. Boot publication
+of a dedicated broker process remains a separate supervisor/package increment.
+
 ## Stage 10.7 full regression after S12 GUI updates - 2026-11-05 - PASSED (SOFTWARE)
 
 The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and

@@ -9,6 +9,9 @@ pub const MAX_MESSAGE_BYTES: usize = 256;
 pub const CLIPBOARD_SERVICE: &[u8] = b"woven.clipboard";
 pub const FILE_DIALOG_SERVICE: &[u8] = b"woven.file-dialog";
 pub const SCREEN_READER_SERVICE: &[u8] = b"woven.screen-reader";
+pub const STATUS_OK: u16 = 0;
+pub const STATUS_BAD_REQUEST: u16 = 1;
+pub const STATUS_TOO_LARGE: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -200,6 +203,223 @@ pub struct ScreenReaderClient<T> {
     request_id: u64,
 }
 
+/// Service-owned state and dispatch for the three desktop brokers.  The
+/// process hosting this value owns the buffers and calls `dispatch` after an
+/// IPC receive; no request slice is retained after the call returns.
+pub struct DesktopServiceBroker {
+    clipboard: crate::clipboard::TextClipboard,
+    file_dialog: crate::file_dialog::FileDialog,
+    snapshot: [u8; crate::accessibility::MAX_SNAPSHOT_BYTES],
+    snapshot_len: usize,
+    generation: u64,
+}
+
+impl DesktopServiceBroker {
+    pub const fn new() -> Self {
+        Self {
+            clipboard: crate::clipboard::TextClipboard::new(),
+            file_dialog: crate::file_dialog::FileDialog::new(),
+            snapshot: [0; crate::accessibility::MAX_SNAPSHOT_BYTES],
+            snapshot_len: 0,
+            generation: 0,
+        }
+    }
+
+    pub fn add_file_entry(
+        &mut self,
+        entry: crate::file_dialog::Entry,
+    ) -> Result<(), crate::file_dialog::Error> {
+        self.file_dialog.push(entry)
+    }
+
+    pub fn dispatch(&mut self, request: &[u8], response: &mut [u8]) -> Result<usize, Error> {
+        if request.len() < 16 {
+            return Err(Error::InvalidResponse);
+        }
+        match &request[..4] {
+            b"WCB1" => self.dispatch_clipboard(request, response),
+            b"WFD1" => self.dispatch_file_dialog(request, response),
+            b"WSR1" => self.dispatch_screen_reader(request, response),
+            _ => Err(Error::InvalidResponse),
+        }
+    }
+
+    fn dispatch_clipboard(&mut self, request: &[u8], response: &mut [u8]) -> Result<usize, Error> {
+        let (operation, id, payload) = decode_request(request, *b"WCB1")?;
+        let status = match operation {
+            1 => match core::str::from_utf8(payload)
+                .ok()
+                .and_then(|text| self.clipboard.set(text).ok())
+            {
+                Some(()) => STATUS_OK,
+                None => STATUS_BAD_REQUEST,
+            },
+            2 => STATUS_OK,
+            3 => {
+                self.clipboard.clear();
+                STATUS_OK
+            }
+            _ => STATUS_BAD_REQUEST,
+        };
+        let body = if operation == 2 {
+            self.clipboard.text().as_bytes()
+        } else {
+            &[]
+        };
+        encode_response(
+            *b"WCB1",
+            id,
+            status,
+            self.clipboard.generation(),
+            body,
+            response,
+        )
+    }
+
+    fn dispatch_file_dialog(
+        &mut self,
+        request: &[u8],
+        response: &mut [u8],
+    ) -> Result<usize, Error> {
+        let (operation, id, payload) = decode_request(request, *b"WFD1")?;
+        if !payload.is_empty() {
+            return encode_file_response(id, STATUS_BAD_REQUEST, None, response);
+        }
+        let selected = match operation {
+            1 => self.file_dialog.select_next(),
+            2 => self.file_dialog.select_previous(),
+            3 => {
+                self.file_dialog.cancel();
+                None
+            }
+            _ => return encode_file_response(id, STATUS_BAD_REQUEST, None, response),
+        };
+        encode_file_response(id, STATUS_OK, selected, response)
+    }
+
+    fn dispatch_screen_reader(
+        &mut self,
+        request: &[u8],
+        response: &mut [u8],
+    ) -> Result<usize, Error> {
+        let (operation, id, payload) = decode_request(request, *b"WSR1")?;
+        let valid = match operation {
+            1 => {
+                payload.len() >= 4
+                    && payload[..4] == *b"WAX1"
+                    && payload.len() <= self.snapshot.len()
+            }
+            2 => {
+                payload.len() == crate::accessibility::ANNOUNCEMENT_BYTES
+                    && payload[..4] == *b"WAA1"
+            }
+            _ => false,
+        };
+        if !valid {
+            return encode_response(
+                *b"WSR1",
+                id,
+                STATUS_BAD_REQUEST,
+                self.generation,
+                &[],
+                response,
+            );
+        }
+        if operation == 1 {
+            self.snapshot[..payload.len()].copy_from_slice(payload);
+            self.snapshot_len = payload.len();
+        }
+        self.generation = self.generation.wrapping_add(1).max(1);
+        encode_response(*b"WSR1", id, STATUS_OK, self.generation, &[], response)
+    }
+}
+
+impl Default for DesktopServiceBroker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn decode_request(request: &[u8], magic: [u8; 4]) -> Result<(u8, u64, &[u8]), Error> {
+    if request.len() < 16 || request[..4] != magic || request[4] != 1 {
+        return Err(Error::InvalidResponse);
+    }
+    let length = u16::from_le_bytes([request[6], request[7]]) as usize;
+    if 16usize.checked_add(length) != Some(request.len()) || request.len() > MAX_MESSAGE_BYTES {
+        return Err(Error::InvalidResponse);
+    }
+    Ok((
+        request[5],
+        u64::from_le_bytes(
+            request[8..16]
+                .try_into()
+                .map_err(|_| Error::InvalidResponse)?,
+        ),
+        &request[16..],
+    ))
+}
+
+fn encode_response(
+    magic: [u8; 4],
+    id: u64,
+    status: u16,
+    generation: u64,
+    body: &[u8],
+    output: &mut [u8],
+) -> Result<usize, Error> {
+    let total = 28usize.checked_add(body.len()).ok_or(Error::TooLarge)?;
+    if total > output.len() || total > MAX_MESSAGE_BYTES {
+        return Err(Error::TooLarge);
+    }
+    output[..4].copy_from_slice(&magic);
+    output[4] = 1;
+    output[5] = 0;
+    output[6..8].copy_from_slice(&(body.len() as u16).to_le_bytes());
+    output[8..16].copy_from_slice(&id.to_le_bytes());
+    output[16..18].copy_from_slice(&status.to_le_bytes());
+    output[18..26].copy_from_slice(&generation.to_le_bytes());
+    output[26..28].fill(0);
+    output[28..total].copy_from_slice(body);
+    Ok(total)
+}
+
+fn encode_file_response(
+    id: u64,
+    status: u16,
+    entry: Option<crate::file_dialog::Entry>,
+    output: &mut [u8],
+) -> Result<usize, Error> {
+    let mut name_storage = [0u8; crate::file_dialog::MAX_NAME_BYTES];
+    let (entry_id, directory, name_len) = match entry {
+        Some(entry) => {
+            let bytes = entry.name().as_bytes();
+            name_storage[..bytes.len()].copy_from_slice(bytes);
+            (entry.id, entry.directory, bytes.len())
+        }
+        None => (0, false, 0),
+    };
+    let name_bytes = &name_storage[..name_len];
+    if name_bytes.len() > 96 {
+        return Err(Error::TooLarge);
+    }
+    let total = 30 + name_bytes.len();
+    if output.len() < total || total > MAX_MESSAGE_BYTES {
+        return Err(Error::TooLarge);
+    }
+    output[..4].copy_from_slice(b"WFD1");
+    output[4] = 1;
+    output[5] = 0;
+    output[6..8].copy_from_slice(&((2 + name_bytes.len()) as u16).to_le_bytes());
+    output[8..16].copy_from_slice(&id.to_le_bytes());
+    output[16..18].copy_from_slice(&status.to_le_bytes());
+    output[18..26].copy_from_slice(&entry_id.to_le_bytes());
+    output[26..28].fill(0);
+    output[28] = name_bytes.len() as u8;
+    output[29] = u8::from(directory);
+    output[30..total].copy_from_slice(name_bytes);
+    Ok(total)
+}
+
 impl<T: Transport> ScreenReaderClient<T> {
     pub fn connect(mut transport: T) -> Result<Self, Error> {
         let endpoint = transport.discover(SCREEN_READER_SERVICE)?;
@@ -334,11 +554,13 @@ fn decode_file_dialog_response(bytes: &[u8], name: &mut [u8]) -> Result<FileDial
 }
 
 fn decode_screen_reader_response(bytes: &[u8]) -> Result<ScreenReaderReply, Error> {
-    if bytes.len() != 26
+    if bytes.len() != 28
         || bytes[..4] != *b"WSR1"
         || bytes[4] != 1
         || bytes[6] != 0
         || bytes[7] != 0
+        || bytes[26] != 0
+        || bytes[27] != 0
     {
         return Err(Error::InvalidResponse);
     }
@@ -413,5 +635,35 @@ mod tests {
         .unwrap();
         let too_long = "x".repeat(crate::clipboard::MAX_TEXT_BYTES + 1);
         assert_eq!(client.set(&too_long), Err(Error::TooLarge));
+    }
+
+    #[test]
+    fn broker_owns_clipboard_and_returns_generation() {
+        let mut broker = DesktopServiceBroker::new();
+        let mut request = [0u8; MAX_MESSAGE_BYTES];
+        let request_len = encode_clipboard_request(1, 41, b"hello", &mut request).unwrap();
+        let mut response = [0u8; MAX_MESSAGE_BYTES];
+        let response_len = broker
+            .dispatch(&request[..request_len], &mut response)
+            .unwrap();
+        let reply = decode_clipboard_response(&response[..response_len], None).unwrap();
+        assert_eq!(reply.status, STATUS_OK);
+        assert_eq!(reply.generation, 1);
+        assert_eq!(reply.text_len, 0);
+    }
+
+    #[test]
+    fn broker_rejects_untrusted_screen_reader_payloads() {
+        let mut broker = DesktopServiceBroker::new();
+        let mut request = [0u8; MAX_MESSAGE_BYTES];
+        let request_len =
+            encode_payload_request(*b"WSR1", 1, 2, b"not-a-tree", &mut request).unwrap();
+        let mut response = [0u8; MAX_MESSAGE_BYTES];
+        let response_len = broker
+            .dispatch(&request[..request_len], &mut response)
+            .unwrap();
+        let reply = decode_screen_reader_response(&response[..response_len]).unwrap();
+        assert_eq!(reply.status, STATUS_BAD_REQUEST);
+        assert_eq!(reply.generation, 0);
     }
 }

@@ -106,6 +106,15 @@ next prerequisite and must be run before calling this slice fully accepted.
 
 # Agent coordination (Claude Code and Codex)
 
+## Codex - Desktop service-side broker state (2026-11-05)
+
+Extended `libwoven::desktop_services` with `DesktopServiceBroker`, a bounded
+service-owned dispatcher for clipboard, file-dialog, and screen-reader
+requests. It owns clipboard generations, chooser state, and the latest
+pointer-free accessibility snapshot; malformed or oversized requests return
+explicit status records. This is ready for a Ring-3 service process but does
+not change the existing four-entry kernel supervisor or boot image packaging.
+
 ## Codex - Clipboard/file-dialog, screen-reader, and text pipeline integration (2026-11-05)
 
 Taking the next open S12/graphics gaps. The existing `TextClipboard`,
