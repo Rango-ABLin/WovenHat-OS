@@ -178,11 +178,11 @@ def main():
             if process.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError('desktop session did not start')
             time.sleep(0.1)
-        # Match the established shell acceptance: the session has started,
-        # but the lock-screen compositor/input handoff needs one frame before
-        # the first PS/2 sequence is meaningful.
-        time.sleep(4)
-        for attempt in range(2):
+        # Match the accepted desktop qualification handoff: the session
+        # marker precedes the final lock-screen compositor/input lease, so
+        # settle before injecting the first PS/2 sequence.
+        time.sleep(8)
+        for attempt in range(3):
             for key in ['1', '2', '3', '4', 'ret']:
                 command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 150})
                 time.sleep(0.4)
@@ -323,7 +323,7 @@ def main():
             ]})
             while f'{app[1]}: pointer updated' not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError('WovenCalculator did not receive a forwarded pointer event')
+                    raise RuntimeError(f'{app[1]} did not receive a forwarded pointer event')
                 time.sleep(0.1)
             time.sleep(1)
             client_pointer_capture = out / f'woven-{app[0]}-after-client-pointer.ppm'

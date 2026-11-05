@@ -10,6 +10,16 @@ validator has host coverage. The release settings binary, target Clippy, and
 real WovenSettings QEMU gates pass on 1/2/4 CPUs with exit 33; evidence is
 retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
 
+## WovenEditor desktop handoff qualification - 2026-11-05 - SOFTWARE PASS / CLICK OPEN
+
+The packaged WovenEditor baseline visual acceptance passes on 1 CPU after
+aligning the app harness with the accepted desktop handoff contract: an
+8-second compositor/input settle and three paced PIN attempts. Evidence is
+retained under `audit-artifacts/editor-desktop-1cpu-1793901272324078200`.
+The harness now reports the actual client name in forwarded-pointer failures.
+The stronger client-click assertion remains open because relative PS/2 target
+delivery is still intermittent; no click assertion was weakened.
+
 ## Graphics compositor frame requalification - 2026-11-05 - PASSED 1/2/4 CPUs
 
 The current Stage 19.2 compositor gate passed at 1, 2, and 4 CPUs. Each run

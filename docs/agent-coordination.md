@@ -122,6 +122,17 @@ a regression. Next open software item is the broader desktop/editor visual
 qualification; external physical, signing-custody, interoperability, and
 independent-review gates remain open.
 
+## Codex - WovenEditor desktop handoff harness repair (2026-11-05)
+
+Aligned `scripts/test-files-desktop-qemu.py` with the accepted desktop
+qualification handoff: 8 seconds of compositor/input settling and three
+paced PIN attempts. Corrected its forwarded-pointer failure text to use the
+actual selected client instead of the stale Calculator name. Python compile
+and diff checks pass. The packaged WovenEditor baseline visual acceptance
+passes on 1 CPU with evidence under
+`audit-artifacts/editor-desktop-1cpu-1793901272324078200`; direct relative
+client-click delivery remains unqualified and its assertions are unchanged.
+
 ## Codex - Desktop service-side broker state (2026-11-05)
 
 Extended `libwoven::desktop_services` with `DesktopServiceBroker`, a bounded
