@@ -8982,3 +8982,6 @@ Claim the bounded disk metadata/read-failure fixture work in `tools/boot-config-
 ## Codex - BLD-B4 accepted (2026-11-05)
 
 Runtime 44f780cf qualifies present-but-invalid disk metadata (`DiskFileIsDirectory`) and a broken FAT-chain read (`DiskRead`) through disposable source-bound UEFI images. The 18-case boot-policy matrix passed on 1/2/4 CPUs; full Windows preservation passed at acceptance-20261105-150609-454, including repeated 1/2/4-CPU memory boots, DNS/network and Stage10.4-10.7 gates. Missing disk retains the established TFTP fallback. This accepts only B4 disk I/O; TFTP, graphics, page-table, ExitBootServices and broader policy remain open.
+## Codex - BLD-B5 TFTP firmware-I/O failure qualification (2026-11-05)
+
+Claim only explicit TFTP size/read error handling and source-bound disposable network fixtures/harness coverage. Preserve the accepted missing-disk to TFTP fallback and do not start strict graphics, page-table, ExitBootServices, or broader policy work. Acceptance remains serialized at 1/2/4 CPUs and full Windows preservation.

@@ -307,7 +307,12 @@ fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'sta
     let server_ip = Ipv4Addr::from_octets(dhcpv4.bootp_si_addr);
 
     // Determine the kernel file size.
-    let file_size = base_code.tftp_get_file_size(&server_ip.into(), name).ok()?;
+    // Once PXE has supplied a DHCP boot server, a TFTP size failure is an I/O
+    // failure, not the normal absence used to select the disk-to-TFTP
+    // fallback. Do not continue with a partially established network source.
+    let file_size = base_code
+        .tftp_get_file_size(&server_ip.into(), name)
+        .unwrap_or_else(|_| reject_firmware_resource("TftpFileSize"));
     let kernel_size = usize::try_from(file_size)
         .unwrap_or_else(|_| reject_firmware_resource("TftpFileSize"));
     check_file_size(kernel_size, role);

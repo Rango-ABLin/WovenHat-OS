@@ -226,6 +226,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     allocation.create_uefi_image(&output.join("kernel-allocation.img"))?;
     println!("Created kernel-allocation.img");
 
+    // A real PXE/TFTP root containing the production UEFI loader but no
+    // kernel. When network boot selects it, the loader's TFTP size request
+    // for `kernel-x86_64` must fail closed rather than look like an absent
+    // disk file.
+    let tftp_size_failure = output.join("tftp-size-failure");
+    bootloader::DiskImageBuilder::empty().create_uefi_tftp_folder(&tftp_size_failure)?;
+    println!("Created tftp-size-failure/");
+
     Ok(())
 }
 
