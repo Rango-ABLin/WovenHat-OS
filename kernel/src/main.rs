@@ -9232,6 +9232,44 @@ fn stage13_15_self_test() -> bool {
         "completion arrives as a device interrupt and wakes the player before its deadline",
         irqs >= 1 && hda::audio_on_time() - on_time_before == 1,
     );
+    #[cfg(feature = "stage13-15-capture-test")]
+    let capture_ok = {
+    let captured = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--capture"],
+        Some(capability::CapabilitySet::only(capability::Capability::Console).with(
+            capability::Capability::Microphone,
+        )),
+    )
+    .and_then(wait_hello_gui_capture)
+    .map(|(_, status)| status);
+    serial::write_line(format_args!(
+        "[S13.15] capture client exit={}",
+        captured.map(|status| status.unwrap_or(-1)).unwrap_or(-2)
+    ));
+    let ok_capture = step(
+        "a client with Microphone captures a PCM block",
+        captured == Some(Ok(0)),
+    );
+    let denied_capture = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--capture"],
+        Some(capability::CapabilitySet::only(capability::Capability::Console)),
+    )
+    .and_then(wait_hello_gui_capture)
+    .map(|(_, status)| status);
+    serial::write_line(format_args!(
+        "[S13.15] capture denial exit={}",
+        denied_capture.map(|status| status.unwrap_or(-1)).unwrap_or(-2)
+    ));
+    let ok_capture_denied = step(
+        "a client without Microphone is refused",
+        denied_capture == Some(Ok(3)),
+    );
+    ok_capture && ok_capture_denied
+    };
+    #[cfg(not(feature = "stage13-15-capture-test"))]
+    let capture_ok = true;
     // Same program, without the capability: refused before any playback.
     let denied = spawn_hello_gui(
         HELLO_GUI_IMAGE,
@@ -9246,7 +9284,7 @@ fn stage13_15_self_test() -> bool {
         "a client without AudioPlayback is refused",
         denied == Some(Ok(3)) && hda::audio_plays() - plays_before == 1,
     );
-    ok_play && ok_irq && ok_denied
+    ok_play && ok_irq && capture_ok && ok_denied
 }
 
 #[cfg(any(
@@ -9345,6 +9383,20 @@ fn wait_hello_gui(pid: task::ProcessId) -> Option<(task::ProcessId, Result<i32, 
     let start = timer::ticks();
     while !task::process_exited(pid) {
         if timer::ticks().wrapping_sub(start) > 1000 {
+            return None;
+        }
+        task::yield_now();
+    }
+    Some((pid, task::wait_process(pid.as_u64())))
+}
+
+#[cfg(feature = "stage13-15-capture-test")]
+fn wait_hello_gui_capture(
+    pid: task::ProcessId,
+) -> Option<(task::ProcessId, Result<i32, task::WaitError>)> {
+    let start = timer::ticks();
+    while !task::process_exited(pid) {
+        if timer::ticks().wrapping_sub(start) > 5000 {
             return None;
         }
         task::yield_now();

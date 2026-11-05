@@ -143,6 +143,9 @@ struct AudioBuffer(core::cell::UnsafeCell<[u8; AUDIO_FRAMES * 4]>);
 unsafe impl Sync for AudioBuffer {}
 
 static AUDIO_PCM: AudioBuffer = AudioBuffer(core::cell::UnsafeCell::new([0; AUDIO_FRAMES * 4]));
+struct CaptureBuffer(core::cell::UnsafeCell<[u8; 4096]>);
+unsafe impl Sync for CaptureBuffer {}
+static AUDIO_CAPTURE_PCM: CaptureBuffer = CaptureBuffer(core::cell::UnsafeCell::new([0; 4096]));
 
 fn square_wave(pcm: &mut [u8; AUDIO_FRAMES * 4]) {
     for (frame, bytes) in pcm.as_chunks_mut::<4>().0.iter_mut().enumerate() {
@@ -171,6 +174,25 @@ fn audio() -> ! {
         fail(4);
     }
     libwoven::exit(0)
+}
+
+/// Stage 13.15 capture client. The kernel owns the DMA buffer and copies one
+/// fixed-size PCM block only after the capture stream has stopped.
+fn capture_audio() -> ! {
+    let Ok(info) = libwoven::audio_info() else { fail(6) };
+    if info.capture_streams == 0
+        || info.sample_rate != 48_000
+        || info.channels != 2
+        || info.bits != 16
+    {
+        fail(7);
+    }
+    // Keep the block out of the small Ring-3 stack.
+    let pcm = unsafe { &mut *AUDIO_CAPTURE_PCM.0.get() };
+    match libwoven::audio_capture(pcm) {
+        Ok(bytes) if bytes == pcm.len() => libwoven::exit(0),
+        _ => fail(3),
+    }
 }
 
 fn timer_event() -> ! {
@@ -497,6 +519,7 @@ fn scheduler_benchmark() -> ! {
 fn main(args: Args) -> ! {
     match args.get(1) {
         Some(b"--audio") => audio(),
+        Some(b"--capture") => capture_audio(),
         Some(b"--timer-event") => timer_event(),
         Some(b"--probe") => probe(args.get(2)),
         Some(b"--input") => run(Input::Poll),

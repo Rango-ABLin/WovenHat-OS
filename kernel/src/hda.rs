@@ -909,7 +909,7 @@ impl HdaController {
             position_after,
         })
     }
-    fn capture_smoke_test(&mut self) -> Result<CaptureSummary, InitError> {
+    fn capture(&mut self, mut output: Option<&mut [u8]>) -> Result<CaptureSummary, InitError> {
         const SD_BASE: u64 = 0x80;
         const SD_CTL: u64 = 0;
         const SD_STS: u64 = 3;
@@ -923,6 +923,16 @@ impl HdaController {
         const PCM_BYTES: u32 = 4096;
         const PCM_FORMAT: u16 = 0x0011;
         const SENTINEL: u8 = 0xa5;
+        // A capture request is bounded; do not let a missing codec route hold
+        // a Ring-3 caller past the service timeout while probing hardware.
+        const POLL_LIMIT: usize = 10_000;
+
+        if output
+            .as_ref()
+            .is_some_and(|buffer| buffer.len() < PCM_BYTES as usize)
+        {
+            return Err(InitError::InvalidLength);
+        }
 
         let codec = self.codec_summary()?;
         let mut adc = None;
@@ -1096,6 +1106,14 @@ impl HdaController {
         }
         if changed == 0 {
             return Err(InitError::CaptureBufferUnchanged);
+        }
+        if let Some(buffer) = output.as_mut() {
+            // SAFETY: the DMA stream has stopped and the acquire fence above
+            // orders every DMA-written byte before this copy.
+            for (index, destination) in buffer[..PCM_BYTES as usize].iter_mut().enumerate() {
+                *destination =
+                    unsafe { ptr::read_volatile((pcm.virtual_address as *const u8).add(index)) };
+            }
         }
         Ok(CaptureSummary {
             stream_index: 0,
@@ -1343,7 +1361,31 @@ pub fn capture_smoke_test() -> Result<CaptureSummary, InitError> {
         .lock()
         .as_mut()
         .ok_or(InitError::MissingController)?
-        .capture_smoke_test()
+        .capture(None)
+}
+pub const MAX_CAPTURE_BYTES: usize = 4096;
+pub fn capture(output: &mut [u8]) -> Result<usize, InitError> {
+    let vector = AUDIO_VECTOR.load(Ordering::Acquire);
+    if vector == 0 {
+        return Err(InitError::NotReady);
+    }
+    if output.len() != MAX_CAPTURE_BYTES {
+        return Err(InitError::InvalidLength);
+    }
+    if AUDIO_BUSY
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(InitError::Busy);
+    }
+    let result = CONTROLLER
+        .lock()
+        .as_mut()
+        .ok_or(InitError::MissingController)
+        .and_then(|controller| controller.capture(Some(output)))
+        .map(|summary| summary.bytes as usize);
+    AUDIO_BUSY.store(false, Ordering::Release);
+    result
 }
 fn find_controller() -> Option<pci::Device> {
     for i in 0..64 {

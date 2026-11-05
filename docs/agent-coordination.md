@@ -9051,3 +9051,13 @@ qualification script. Kernel audio capture remains blocked at the syscall/device
 boundary (the current ABI exposes playback only); external printer/TLS,
 production signing, independent rebuild, and independent security review will
 be recorded as fail-closed prerequisites rather than represented by mocks.
+## Codex - Native audio capture syscall and HDA client (2026-11-05)
+
+Added the bounded `AudioCapture=208` userspace/kernel ABI, Microphone
+capability ceiling for explicitly delegated system services, audited denial and
+success paths, HDA DMA copy-out after stream stop, and the `hello-gui
+--capture` client. Playback qualification remains green at 1 CPU. The capture
+feature compiles and lint-checks, but current QEMU's `wav` backend exposes no
+input source, so capture-specific QEMU hardware input qualification remains
+open and is isolated behind `stage13-15-capture-test`.
+

@@ -1,5 +1,16 @@
 # Stage status
 
+## S13 native capture syscall increment - 2026-11-05 - SOFTWARE PASS / INPUT HARDWARE OPEN
+
+Added `AudioCapture=208`, the `libwoven::audio_capture` wrapper, explicit
+`Microphone` service-capability delegation, audited failure/success paths, and
+HDA DMA capture copy-out with bounded 4096-byte PCM requests. The capture
+client and capture-feature kernel compile with warning-denying checks. The
+existing Stage 13.15 playback gate still passes at 1 CPU. Capture-specific
+qualification is isolated behind `stage13-15-capture-test`; the available QEMU
+WAV backend has no input source and returns `StreamNoProgress`, so no emulated
+or physical input qualification is claimed.
+
 ## S13/S15-S19 release-boundary increment - 2026-11-05 - SOFTWARE PASS / EXTERNALS OPEN
 
 Added fixed-capacity signed-16 PCM mixing and capture FIFO primitives with

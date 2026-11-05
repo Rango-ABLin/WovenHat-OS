@@ -81,6 +81,9 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
             .with(Capability::NetworkAdmin)
+            // Audio capture is available only to explicitly delegated system
+            // services; ordinary user processes remain outside this ceiling.
+            .with(Capability::Microphone)
             .with(Capability::AudioPlayback)
             // The desktop session turns the machine off (Stage 20.15);
             // applications never can.

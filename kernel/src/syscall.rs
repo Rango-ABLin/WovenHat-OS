@@ -402,6 +402,9 @@ pub enum Number {
     /// volume percent (0 mutes) -> the amplifier gain set; needs
     /// AudioPlayback
     AudioSetVolume = 205,
+    /// capture buffer, length (currently exactly 4096 bytes) -> bytes
+    /// captured; needs Microphone
+    AudioCapture = 208,
     /// deadline, user array of `{object, kind, mask}` records, count -> ready
     /// mask or 0 on timeout. `kind` is 0 for timer and 1 for event.
     WaitAnyObjects = 206,
@@ -1671,28 +1674,47 @@ fn sys_exec_command(user_line: u64, length: u64) -> u64 {
     let mut cursor = 0_usize;
     let mut write = 0_usize;
     while cursor < length {
-        while cursor < length && command[cursor].is_ascii_whitespace() { cursor += 1; }
-        if cursor == length { break; }
-        if argc == crate::userspace::MAX_ARGV { return SYSCALL_ERROR; }
+        while cursor < length && command[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor == length {
+            break;
+        }
+        if argc == crate::userspace::MAX_ARGV {
+            return SYSCALL_ERROR;
+        }
         let start = write;
         let mut quote = 0u8;
         while cursor < length {
             let byte = command[cursor];
             if byte == b'\\' && quote != b'\'' {
                 cursor += 1;
-                if cursor == length { return SYSCALL_ERROR; }
-                command[write] = command[cursor]; write += 1; cursor += 1;
+                if cursor == length {
+                    return SYSCALL_ERROR;
+                }
+                command[write] = command[cursor];
+                write += 1;
+                cursor += 1;
             } else if byte == b'\'' || byte == b'"' {
-                if quote == 0 { quote = byte; } else if quote == byte { quote = 0; }
+                if quote == 0 {
+                    quote = byte;
+                } else if quote == byte {
+                    quote = 0;
+                }
                 cursor += 1;
             } else if byte.is_ascii_whitespace() && quote == 0 {
                 break;
             } else {
-                command[write] = byte; write += 1; cursor += 1;
+                command[write] = byte;
+                write += 1;
+                cursor += 1;
             }
         }
-        if quote != 0 || start == write { return SYSCALL_ERROR; }
-        ranges[argc] = (start, write); argc += 1;
+        if quote != 0 || start == write {
+            return SYSCALL_ERROR;
+        }
+        ranges[argc] = (start, write);
+        argc += 1;
     }
     if argc == 0 {
         return SYSCALL_ERROR;
@@ -1788,26 +1810,43 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
     let mut argc = 0_usize;
     let mut cursor = 0_usize;
     while cursor < length {
-        while cursor < length && command[cursor].is_ascii_whitespace() { cursor += 1; }
-        if cursor == length { break; }
-        if argc == crate::userspace::MAX_ARGV { return SYSCALL_ERROR; }
+        while cursor < length && command[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor == length {
+            break;
+        }
+        if argc == crate::userspace::MAX_ARGV {
+            return SYSCALL_ERROR;
+        }
         let start = cursor;
         let mut quote = 0u8;
         while cursor < length {
             let byte = command[cursor];
             if byte == b'\\' && quote != b'\'' {
                 cursor += 1;
-                if cursor == length { return SYSCALL_ERROR; }
+                if cursor == length {
+                    return SYSCALL_ERROR;
+                }
                 cursor += 1;
             } else if byte == b'\'' || byte == b'"' {
-                if quote == 0 { quote = byte; } else if quote == byte { quote = 0; }
+                if quote == 0 {
+                    quote = byte;
+                } else if quote == byte {
+                    quote = 0;
+                }
                 cursor += 1;
             } else if byte.is_ascii_whitespace() && quote == 0 {
                 break;
-            } else { cursor += 1; }
+            } else {
+                cursor += 1;
+            }
         }
-        if quote != 0 || start == cursor { return SYSCALL_ERROR; }
-        ranges[argc] = (start, cursor); argc += 1;
+        if quote != 0 || start == cursor {
+            return SYSCALL_ERROR;
+        }
+        ranges[argc] = (start, cursor);
+        argc += 1;
     }
     if argc == 0 {
         return SYSCALL_ERROR;
@@ -2880,6 +2919,52 @@ fn sys_audio_play(_user_pcm: u64, _length: u64) -> u64 {
 }
 
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn sys_audio_capture(user_pcm: u64, length: u64) -> u64 {
+    let actor = crate::task::current_task_id().as_u64();
+    if !crate::task::current_has(crate::capability::Capability::Microphone) {
+        crate::audit::record(actor, crate::audit::Action::AudioCapture, 0, false);
+        return SYSCALL_ERROR;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length != crate::hda::MAX_CAPTURE_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let Some(mut pcm) = crate::heap::try_filled(0u8, length) else {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::AudioCapture,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    };
+    let result = crate::hda::capture(&mut pcm);
+    if result.is_err() || crate::paging::copy_to_current_user(user_pcm, &pcm).is_err() {
+        crate::audit::record(
+            actor,
+            crate::audit::Action::AudioCapture,
+            length as u64,
+            false,
+        );
+        return SYSCALL_ERROR;
+    }
+    crate::audit::record(
+        actor,
+        crate::audit::Action::AudioCapture,
+        length as u64,
+        true,
+    );
+    length as u64
+}
+
+#[cfg(not(any(not(feature = "qemu-test"), feature = "stage13-12-test")))]
+fn sys_audio_capture(_user_pcm: u64, _length: u64) -> u64 {
+    SYSCALL_ERROR
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 fn sys_audio_set_volume(percent: u64) -> u64 {
     if !crate::task::current_has(crate::capability::Capability::AudioPlayback) || percent > 100 {
         return SYSCALL_ERROR;
@@ -3156,7 +3241,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::DynamicTlsValidate as u64 => {
             let initializer_len = arg1 >> 32;
             let memory_size = arg1 & 0xffff_ffff;
-            match crate::task::validate_dynamic_tls_initializer(arg0, initializer_len, memory_size) {
+            match crate::task::validate_dynamic_tls_initializer(arg0, initializer_len, memory_size)
+            {
                 0 => SYSCALL_ERROR,
                 length => length,
             }
@@ -3164,13 +3250,30 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::DynamicTlsMapAll as u64 => {
             let initializer_len = usize::try_from(arg2 >> 32).ok();
             let memory_size = usize::try_from(arg2 & 0xffff_ffff).ok();
-            let (Some(initializer_len), Some(memory_size)) = (initializer_len, memory_size) else { return SYSCALL_ERROR; };
-            if initializer_len == 0 || initializer_len > memory_size || initializer_len > 4096 { return SYSCALL_ERROR; }
+            let (Some(initializer_len), Some(memory_size)) = (initializer_len, memory_size) else {
+                return SYSCALL_ERROR;
+            };
+            if initializer_len == 0 || initializer_len > memory_size || initializer_len > 4096 {
+                return SYSCALL_ERROR;
+            }
             let mut initializer = [0u8; 4096];
-            if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len]).is_err() || !crate::task::map_dynamic_tls_all(arg0, &initializer[..initializer_len], memory_size) { SYSCALL_ERROR } else { 0 }
+            if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len])
+                .is_err()
+                || !crate::task::map_dynamic_tls_all(
+                    arg0,
+                    &initializer[..initializer_len],
+                    memory_size,
+                )
+            {
+                SYSCALL_ERROR
+            } else {
+                0
+            }
         }
         value if value == Number::ThreadRobustRegister as u64 => {
-            let Some(thread) = crate::task::current_thread_id() else { return SYSCALL_ERROR; };
+            let Some(thread) = crate::task::current_thread_id() else {
+                return SYSCALL_ERROR;
+            };
             let mut probe = [0_u8; 4];
             if crate::paging::copy_from_current_user(arg0, &mut probe).is_err() {
                 return SYSCALL_ERROR;
@@ -3179,29 +3282,36 @@ pub extern "C" fn wovenhat_syscall_dispatch(
                 crate::thread::unregister_robust_mutex(thread, arg0)
             } else if arg1 == 1 {
                 crate::thread::register_robust_mutex(thread, arg0)
-            } else { false };
+            } else {
+                false
+            };
             u64::from(ok)
         }
         value if value == Number::ThreadRobustLock as u64 => {
-            let owner = crate::task::current_thread_id()
-                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            let owner = crate::task::current_thread_id().unwrap_or_else(|| {
+                crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64())
+            });
             crate::thread::robust_lock(owner, arg0)
         }
         value if value == Number::ThreadRobustUnlock as u64 => {
-            let owner = crate::task::current_thread_id()
-                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            let owner = crate::task::current_thread_id().unwrap_or_else(|| {
+                crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64())
+            });
             u64::from(crate::thread::robust_unlock(owner, arg0))
         }
         value if value == Number::ThreadRobustConsistent as u64 => {
-            let owner = crate::task::current_thread_id()
-                .unwrap_or_else(|| crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64()));
+            let owner = crate::task::current_thread_id().unwrap_or_else(|| {
+                crate::thread::ThreadId::from_raw(crate::task::current_task_id().as_u64())
+            });
             u64::from(crate::thread::robust_consistent(owner, arg0))
         }
         value if value == Number::ThreadRobustWait as u64 => {
-            crate::thread::wait_robust_waiter(arg0, crate::task::current_task_id().as_u64()); 0
+            crate::thread::wait_robust_waiter(arg0, crate::task::current_task_id().as_u64());
+            0
         }
         value if value == Number::ThreadRobustWake as u64 => {
-            crate::thread::signal_robust_waiter(arg0); 0
+            crate::thread::signal_robust_waiter(arg0);
+            0
         }
         value if value == Number::ThreadSleep as u64 => {
             crate::task::sleep_current(arg0);
@@ -3220,9 +3330,11 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::DynamicTlsModuleStart as u64 => {
             crate::task::dynamic_tls_module_range(arg0).map_or(SYSCALL_ERROR, |(start, _)| start)
         }
-        value if value == Number::DynamicTlsModuleSize as u64 => crate::task::dynamic_tls_module_range(arg0)
-            .and_then(|(_, size)| u64::try_from(size).ok())
-            .unwrap_or(SYSCALL_ERROR),
+        value if value == Number::DynamicTlsModuleSize as u64 => {
+            crate::task::dynamic_tls_module_range(arg0)
+                .and_then(|(_, size)| u64::try_from(size).ok())
+                .unwrap_or(SYSCALL_ERROR)
+        }
         value if value == Number::LazyBind as u64 => crate::task::resolve_lazy_binding(frame),
         value if value == Number::Getpid as u64 => crate::task::current_process_id(),
         value if value == Number::Waitpid as u64 => match if arg0 == u64::MAX {
@@ -3405,6 +3517,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         }
         value if value == Number::AudioInfo as u64 => sys_audio_info(arg0),
         value if value == Number::AudioPlay as u64 => sys_audio_play(arg0, arg1),
+        value if value == Number::AudioCapture as u64 => sys_audio_capture(arg0, arg1),
         value if value == Number::AudioSetVolume as u64 => sys_audio_set_volume(arg0),
         value if value == Number::GraphicsCompositorOutputs as u64 => sys_compositor_outputs(arg0),
         value if value == Number::PowerControl as u64 => sys_power_control(arg0, frame),

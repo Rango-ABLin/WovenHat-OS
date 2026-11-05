@@ -12524,6 +12524,7 @@ pub mod syscall {
     pub const AUDIO_INFO: u64 = 203;
     pub const AUDIO_PLAY: u64 = 204;
     pub const AUDIO_SET_VOLUME: u64 = 205;
+    pub const AUDIO_CAPTURE: u64 = 208;
     pub const GRAPHICS_COMPOSITOR_OUTPUTS: u64 = 207;
     pub const POWER_CONTROL: u64 = 209;
     pub const POWER_CAPABILITIES: u64 = 235;
@@ -14960,6 +14961,20 @@ pub fn audio_play(pcm: &[u8]) -> Result<usize, Error> {
         )
     })
     .map(|played| played as usize)
+}
+
+/// Capture one bounded 48 kHz 16-bit stereo PCM block. Needs the Microphone
+/// capability; the current device block is exactly 4096 bytes.
+pub fn audio_capture(pcm: &mut [u8]) -> Result<usize, Error> {
+    check(unsafe {
+        syscall::invoke(
+            syscall::AUDIO_CAPTURE,
+            pcm.as_mut_ptr() as u64,
+            pcm.len() as u64,
+            0,
+        )
+    })
+    .map(|captured| captured as usize)
 }
 
 /// Set the output volume, 0-100 (0 mutes); returns the amplifier gain set.
