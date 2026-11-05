@@ -1136,6 +1136,8 @@ Passes on 1/2/4 CPUs with exit 33. Evidence:
 `target/stage32-17-gdb-entry-{1,2,4}cpu/`. Target (stage32-17-test and
 stage32-12-test) and host warning-denying Clippy pass. No intermediate live
 GDB client needed; the stub loop timeout path is sufficient for gate acceptance.
+Re-verified 2026-11-05 via `scripts/test-stage32-17-idt-trap.py` (1/2/4 CPUs,
+exit 33).
 
 ## Stage 32.12 GDB trap-stop boundary QEMU gate - 2026-10-28 - ACCEPTED
 
@@ -12657,6 +12659,8 @@ pass. QEMU passes with the required marker at 1, 2, and 4 CPUs (exit 33).
 Evidence: `target/stage32-18-gdb-owner-binding-1cpu-1cpu-debug`,
 `target/stage32-18-gdb-owner-binding-2cpu-2cpu-debug`, and
 `target/stage32-18-gdb-owner-binding-4cpu-4cpu-debug`.
+Re-verified 2026-11-05 via `scripts/test-stage32-18-gdb-owner.py`; evidence
+`target/stage32-18-gdb-owner-binding-{1,2,4}cpu/` (exit 33).
 
 ## Stage 12.2 WovenFS extended attributes — 2026-10-28 — ACCEPTED
 

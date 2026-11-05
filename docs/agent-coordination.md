@@ -8959,3 +8959,20 @@ listed timestamped case directories. Only the bounded B2 structural unit is
 accepted; full Phase B and firmware Secure Boot qualification remain open.
 No Cargo or QEMU chain is active at this checkpoint. Next: existing firmware
 I/O/resource failure diagnostics; preserve current mapper/ABI/authority.
+
+## Claude Code — Stage 32.14-32.18 test script verification (2026-11-05)
+
+Re-ran the QEMU acceptance gates for Stages 32.14–32.18 after creating the
+missing test scripts for 32.17 and 32.18. All five stages pass on 1/2/4 CPUs
+with exit 33.
+
+New scripts:
+- scripts/test-stage32-17-idt-trap.py — feature stage32-17-test, marker
+  [S32.17] GDB trap entry: PASSED, evidence stage32-17-gdb-entry-{N}cpu.
+- scripts/test-stage32-18-gdb-owner.py — feature stage32-18-test, marker
+  [S32.18] GDB owner/binding attachment: PASSED, evidence
+  stage32-18-gdb-owner-binding-{N}cpu.
+
+212 libwoven host tests pass. stage-status.md updated with re-verification
+notes for 32.17 and 32.18. No kernel source changes; gates only.
+Next: Stage 32.19 live GDB COM2 client qualification.
