@@ -115,6 +115,14 @@ pointer-free accessibility snapshot; malformed or oversized requests return
 explicit status records. This is ready for a Ring-3 service process but does
 not change the existing four-entry kernel supervisor or boot image packaging.
 
+## Codex - Desktop brokers published through WovenSearch (2026-11-05)
+
+The existing IPC-only WovenSearch service now publishes and serves
+`woven.clipboard`, `woven.file-dialog`, and `woven.screen-reader` from the
+same supervised process. Its independent probe performs clipboard round-trip,
+chooser selection, and WAX1 screen-reader delivery. Stage 23.5 passes at
+1/2/4 CPUs; evidence is under `audit-artifacts/stage23.5-search-{1,2,4}cpu-*`.
+
 ## Codex - Clipboard/file-dialog, screen-reader, and text pipeline integration (2026-11-05)
 
 Taking the next open S12/graphics gaps. The existing `TextClipboard`,

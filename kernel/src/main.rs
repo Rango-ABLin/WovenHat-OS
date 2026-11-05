@@ -7374,6 +7374,10 @@ fn stage23_ai_broker_self_test(local_provider: bool) -> bool {
         task::yield_now();
     }
     if probe_status != Some(0) {
+        serial::write_line(format_args!(
+            "[S23.5S] probe returned failure status={:?}",
+            probe_status
+        ));
         return fail("probe returned failure");
     }
     if task::wait_process(service_pid.as_u64()).is_err() {
@@ -7710,6 +7714,10 @@ fn stage23_search_service_self_test() -> bool {
         task::yield_now();
     }
     if probe_status != Some(0) {
+        serial::write_line(format_args!(
+            "[S23.5S] probe returned failure status={:?}",
+            probe_status
+        ));
         return fail("probe returned failure");
     }
     if task::wait_process(service_pid.as_u64()).is_err() {

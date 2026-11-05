@@ -4354,6 +4354,9 @@ authority.
 pointer-free `WAX1` semantic tree and `WAA1` focus announcement records to
 `woven.screen-reader`. Each response is fixed-shape and status-bearing, so a
 missing or malformed service cannot be mistaken for successful speech.
+The supervised `woven-search` Ring-3 broker currently hosts these three
+bounded endpoints alongside search, so the existing service-slot and
+capability ABI remains unchanged while the desktop path is qualified.
 
 `libwoven::i18n` provides locale direction and OpenType script/language tags,
 bounded NFC composition (including algorithmic Hangul), and visual bidi run

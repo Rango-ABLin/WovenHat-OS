@@ -16,6 +16,9 @@ pub const STATUS_TOO_LARGE: u16 = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Transport,
+    SendFailed,
+    ReceiveFailed,
+    WouldBlock,
     TooLarge,
     InvalidResponse,
     ServiceRejected,
@@ -49,20 +52,20 @@ impl Transport for SyscallTransport {
         let result =
             unsafe { crate::syscall::ipc_message_send(endpoint, message.as_ptr(), message.len()) };
         if result == crate::syscall::ERROR {
-            Err(Error::Transport)
+            Err(Error::SendFailed)
         } else {
             Ok(())
         }
     }
 
-    fn receive(&mut self, endpoint: u64, output: &mut [u8]) -> Result<usize, Error> {
-        let result = unsafe {
-            crate::syscall::ipc_message_receive(endpoint, output.as_mut_ptr(), output.len())
-        };
-        if result == crate::syscall::ERROR || result == crate::syscall::WOULD_BLOCK {
-            Err(Error::Transport)
-        } else {
-            usize::try_from(result).map_err(|_| Error::InvalidResponse)
+    fn receive(&mut self, _endpoint: u64, output: &mut [u8]) -> Result<usize, Error> {
+        // Service handles are send-only for clients. Replies are delivered to
+        // the caller's process mailbox, preserving the existing IPC reply
+        // convention used by the other userspace service clients.
+        match crate::message_receive(output) {
+            Ok((length, _sender)) => Ok(length),
+            Err(crate::Error::WouldBlock) => Err(Error::WouldBlock),
+            Err(_) => Err(Error::ReceiveFailed),
         }
     }
 }
@@ -129,7 +132,7 @@ impl<T: Transport> ClipboardClient<T> {
     ) -> Result<ClipboardReply, Error> {
         self.transport.send(self.endpoint, request)?;
         let mut response = [0u8; MAX_MESSAGE_BYTES];
-        let length = self.transport.receive(self.endpoint, &mut response)?;
+        let length = receive_until_ready(&mut self.transport, self.endpoint, &mut response)?;
         let reply = decode_clipboard_response(&response[..length], None)?;
         if output.len() < reply.text_len {
             return Err(Error::TooLarge);
@@ -180,7 +183,7 @@ impl<T: Transport> FileDialogClient<T> {
         let length = encode_simple_request(*b"WFD1", operation, self.next_id(), &mut request)?;
         self.transport.send(self.endpoint, &request[..length])?;
         let mut response = [0u8; MAX_MESSAGE_BYTES];
-        let used = self.transport.receive(self.endpoint, &mut response)?;
+        let used = receive_until_ready(&mut self.transport, self.endpoint, &mut response)?;
         decode_file_dialog_response(&response[..used], name)
     }
 
@@ -340,6 +343,21 @@ impl Default for DesktopServiceBroker {
     }
 }
 
+fn receive_until_ready<T: Transport>(
+    transport: &mut T,
+    endpoint: u64,
+    output: &mut [u8],
+) -> Result<usize, Error> {
+    // IPC receive is non-blocking; yield so the broker can run without
+    // sleeping while holding any application lock.
+    loop {
+        match transport.receive(endpoint, output) {
+            Err(Error::WouldBlock | Error::ReceiveFailed) => crate::yield_now(),
+            result => return result,
+        }
+    }
+}
+
 fn decode_request(request: &[u8], magic: [u8; 4]) -> Result<(u8, u64, &[u8]), Error> {
     if request.len() < 16 || request[..4] != magic || request[4] != 1 {
         return Err(Error::InvalidResponse);
@@ -444,7 +462,7 @@ impl<T: Transport> ScreenReaderClient<T> {
             encode_payload_request(*b"WSR1", operation, self.next_id(), payload, &mut request)?;
         self.transport.send(self.endpoint, &request[..length])?;
         let mut response = [0u8; MAX_MESSAGE_BYTES];
-        let used = self.transport.receive(self.endpoint, &mut response)?;
+        let used = receive_until_ready(&mut self.transport, self.endpoint, &mut response)?;
         decode_screen_reader_response(&response[..used])
     }
 

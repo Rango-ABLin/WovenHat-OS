@@ -23,6 +23,14 @@ requests into fixed-size responses. Broker host tests cover successful state
 mutation and rejection of an untrusted screen-reader payload. Boot publication
 of a dedicated broker process remains a separate supervisor/package increment.
 
+The production WovenSearch broker now publishes those three named endpoints
+under its existing IPC-only supervised process. The Stage 23.5 independent
+QEMU probe performs clipboard set/get, file-dialog selection, and WAX1 tree
+delivery, passing on 1/2/4 CPUs with exit 33. Evidence is retained under
+`audit-artifacts/stage23.5-search-{1,2,4}cpu-*`. The endpoints remain bounded
+desktop services rather than a claim of physical assistive-device speech or
+full filesystem provider policy.
+
 ## Stage 10.7 full regression after S12 GUI updates - 2026-11-05 - PASSED (SOFTWARE)
 
 The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and

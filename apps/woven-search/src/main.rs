@@ -3,9 +3,14 @@
 
 use core::panic::PanicInfo;
 
+use libwoven::desktop_services::{
+    CLIPBOARD_SERVICE, ClipboardClient, DesktopServiceBroker, FILE_DIALOG_SERVICE,
+    FileDialogClient, MAX_MESSAGE_BYTES, SCREEN_READER_SERVICE, ScreenReaderClient,
+    SyscallTransport,
+};
 use libwoven::search_ipc::{self, Operation, Request, Response};
 use libwoven::semantic_search::{Entry, Index, Kind};
-use libwoven::{process, Args};
+use libwoven::{Args, process};
 
 libwoven::entry!(main);
 
@@ -15,7 +20,7 @@ const STATUS_BAD_REQUEST: u16 = 1;
 const REQUEST_CAPACITY: usize = search_ipc::MAX_MESSAGE_BYTES;
 
 static mut REQUEST_BYTES: [u8; REQUEST_CAPACITY] = [0; REQUEST_CAPACITY];
-static mut RESPONSE_BYTES: [u8; search_ipc::RESPONSE_LEN] = [0; search_ipc::RESPONSE_LEN];
+static mut RESPONSE_BYTES: [u8; MAX_MESSAGE_BYTES] = [0; MAX_MESSAGE_BYTES];
 
 fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--probe") {
@@ -32,6 +37,24 @@ fn broker() -> ! {
     if libwoven::ipc_service_publish(search_ipc::SERVICE_NAME, CLIENT_SEND, endpoint).is_err() {
         libwoven::exit(102);
     }
+    let desktop_endpoints = [
+        (CLIPBOARD_SERVICE, libwoven::ipc_endpoint_create()),
+        (FILE_DIALOG_SERVICE, libwoven::ipc_endpoint_create()),
+        (SCREEN_READER_SERVICE, libwoven::ipc_endpoint_create()),
+    ];
+    for (name, endpoint) in desktop_endpoints {
+        let Ok(endpoint) = endpoint else {
+            libwoven::exit(104)
+        };
+        if libwoven::ipc_service_publish(name, CLIENT_SEND, endpoint).is_err() {
+            libwoven::exit(105);
+        }
+    }
+    let mut desktop = DesktopServiceBroker::new();
+    let _ =
+        desktop.add_file_entry(libwoven::file_dialog::Entry::new(1, "Documents", true).unwrap());
+    let _ =
+        desktop.add_file_entry(libwoven::file_dialog::Entry::new(2, "Notes.txt", false).unwrap());
     let Some(index) = catalog_index() else {
         libwoven::exit(103);
     };
@@ -42,25 +65,35 @@ fn broker() -> ! {
             core::slice::from_raw_parts_mut(&raw mut REQUEST_BYTES as *mut u8, REQUEST_CAPACITY)
         };
         let response_bytes = unsafe {
-            core::slice::from_raw_parts_mut(
-                &raw mut RESPONSE_BYTES as *mut u8,
-                search_ipc::RESPONSE_LEN,
-            )
+            core::slice::from_raw_parts_mut(&raw mut RESPONSE_BYTES as *mut u8, MAX_MESSAGE_BYTES)
         };
-        let Ok((length, sender)) = libwoven::ipc_message_receive(endpoint, request_bytes) else {
+        let mut handled = false;
+        if let Ok((length, sender)) = libwoven::ipc_message_receive(endpoint, request_bytes) {
+            handled = true;
+            let response = dispatch(&index, sender.0, &request_bytes[..length]);
+            let Ok(response_length) = response.encode(response_bytes) else {
+                libwoven::exit(106);
+            };
+            let _ =
+                libwoven::message_send(process::Id(sender.0), &response_bytes[..response_length]);
+        }
+        for (_, endpoint) in desktop_endpoints {
+            let Ok(endpoint) = endpoint else { continue };
+            if let Ok((length, sender)) = libwoven::ipc_message_receive(endpoint, request_bytes) {
+                handled = true;
+                let Ok(response_length) =
+                    desktop.dispatch(&request_bytes[..length], response_bytes)
+                else {
+                    libwoven::exit(107)
+                };
+                let _ = libwoven::message_send(
+                    process::Id(sender.0),
+                    &response_bytes[..response_length],
+                );
+            }
+        }
+        if !handled {
             libwoven::yield_now();
-            continue;
-        };
-        let response = dispatch(&index, sender.0, &request_bytes[..length]);
-        let Ok(response_length) = response.encode(response_bytes) else {
-            libwoven::exit(104);
-        };
-        if libwoven::message_send(process::Id(sender.0), &response_bytes[..response_length])
-            .is_err()
-        {
-            // The sender has gone away. No search action has side effects, so
-            // discard this response and keep serving other clients.
-            continue;
         }
     }
 }
@@ -134,6 +167,49 @@ fn probe() -> ! {
                     && response.hits[0].id == 2
                     && response.hits[0].kind == Kind::Application
                 {
+                    let mut clipboard = match ClipboardClient::connect(SyscallTransport) {
+                        Ok(client) => client,
+                        Err(_) => libwoven::exit(115),
+                    };
+                    if let Err(error) = clipboard.set("desktop service") {
+                        let code = match error {
+                            libwoven::desktop_services::Error::Transport => 116,
+                            libwoven::desktop_services::Error::SendFailed => 128,
+                            libwoven::desktop_services::Error::ReceiveFailed => 129,
+                            libwoven::desktop_services::Error::WouldBlock => 124,
+                            libwoven::desktop_services::Error::TooLarge => 125,
+                            libwoven::desktop_services::Error::InvalidResponse => 126,
+                            libwoven::desktop_services::Error::ServiceRejected => 127,
+                        };
+                        libwoven::exit(code);
+                    }
+                    let mut clipboard_bytes = [0u8; 64];
+                    let Ok(reply) = clipboard.get(&mut clipboard_bytes) else {
+                        libwoven::exit(117);
+                    };
+                    if &clipboard_bytes[..reply.text_len] != b"desktop service" {
+                        libwoven::exit(118);
+                    }
+                    let mut dialog = match FileDialogClient::connect(SyscallTransport) {
+                        Ok(client) => client,
+                        Err(_) => libwoven::exit(119),
+                    };
+                    let mut name = [0u8; 96];
+                    let Ok(entry) = dialog.next(&mut name) else {
+                        libwoven::exit(120);
+                    };
+                    if entry.entry_id != 2 || &name[..entry.name_len] != b"Notes.txt" {
+                        libwoven::exit(121);
+                    }
+                    let mut reader = match ScreenReaderClient::connect(SyscallTransport) {
+                        Ok(client) => client,
+                        Err(_) => libwoven::exit(122),
+                    };
+                    let mut tree = [0u8; 10];
+                    tree[..4].copy_from_slice(b"WAX1");
+                    if reader.publish_tree(&tree).is_err() {
+                        libwoven::exit(123);
+                    }
                     libwoven::exit(0);
                 }
                 libwoven::exit(114);
