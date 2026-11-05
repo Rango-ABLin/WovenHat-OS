@@ -32,6 +32,7 @@ CASES = {
     "kernel-corrupt": "InvalidElfOrContract",
     "kernel-wrong-arch": "InvalidElfOrContract",
     "kernel-bad-table": "InvalidElfOrContract",
+    "kernel-allocation": "LoaderAllocation",
 }
 STOP = "[WBOOT] boot stopped: invalid boot configuration"
 BOOTLOADER_SOURCES = (
@@ -48,7 +49,15 @@ def failure_subject(name):
 
 
 def stop_marker(name):
+    if name == "kernel-allocation":
+        return "[WBOOT] boot stopped: firmware resource failure"
     return f"[WBOOT] boot stopped: invalid {failure_subject(name)}"
+
+
+def rejection_marker(name, reason):
+    if name == "kernel-allocation":
+        return f"[WBOOT] firmware resource failure: {reason}"
+    return f"[WBOOT] invalid {failure_subject(name)}: {reason}"
 
 
 def outcome_errors(name, returncode, log, cpus):
@@ -58,8 +67,8 @@ def outcome_errors(name, returncode, log, cpus):
             "[BOOT] ALL VALIDATIONS PASSED", f"[SMP] online={cpus} expected={cpus}",
         ])
     errors = []
-    if f"[WBOOT] invalid {failure_subject(name)}: {reason}" not in log or stop_marker(name) not in log:
-        errors.append("missing exact configuration rejection/stop markers")
+    if rejection_marker(name, reason) not in log or stop_marker(name) not in log:
+        errors.append("missing exact rejection/stop markers")
     if "exiting boot services" in log.lower() or "[BOOT]" in log:
         errors.append("rejected configuration continued to boot handoff")
     if "kernel panic" in log.lower():

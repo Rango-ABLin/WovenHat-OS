@@ -60,6 +60,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     bootloader::DiskImageBuilder::empty().create_uefi_image(&output.join("kernel-missing.img"))?;
 
+    // This is within the accepted raw-kernel bound, but cannot fit alongside
+    // firmware and the loader in the harness's fixed 256 MiB guest. It
+    // exercises the real UEFI allocation failure path without host media I/O.
+    let mut allocation = bootloader::DiskImageBuilder::empty();
+    allocation.set_file_contents("kernel-x86_64".into(), vec![0; 256 * 1024 * 1024]);
+    allocation.create_uefi_image(&output.join("kernel-allocation.img"))?;
+    println!("Created kernel-allocation.img");
+
     Ok(())
 }
 

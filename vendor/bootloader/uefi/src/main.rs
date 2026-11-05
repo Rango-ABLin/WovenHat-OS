@@ -197,6 +197,14 @@ fn reject_kernel(error: &str) -> ! {
     );
 }
 
+fn reject_firmware_resource(error: &str) -> ! {
+    log::error!("[WBOOT] firmware resource failure: {}", error);
+    panic!(
+        "[WBOOT] firmware resource failure: {}\n[WBOOT] boot stopped: firmware resource failure",
+        error
+    );
+}
+
 fn check_file_size(size: usize, role: FileRole) {
     match role {
         FileRole::Configuration => {
@@ -268,7 +276,8 @@ fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8
     let file_size = usize::try_from(file_info.file_size()).unwrap();
     check_file_size(file_size, role);
 
-    let file_slice = allocate_loader_data(file_size);
+    let file_slice =
+        allocate_loader_data(file_size).unwrap_or_else(|error| reject_firmware_resource(error));
     file.read(file_slice).unwrap();
 
     Some(file_slice)
@@ -289,7 +298,8 @@ fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'sta
     check_file_size(kernel_size, role);
 
     // Allocate some memory for the kernel file.
-    let slice = allocate_loader_data(kernel_size);
+    let slice =
+        allocate_loader_data(kernel_size).unwrap_or_else(|error| reject_firmware_resource(error));
 
     // Load the kernel file.
     base_code
@@ -299,15 +309,18 @@ fn load_file_from_tftp_boot_server(name: &CStr8, role: FileRole) -> Option<&'sta
     Some(slice)
 }
 
-fn allocate_loader_data(size: usize) -> &'static mut [u8] {
+fn allocate_loader_data(size: usize) -> Result<&'static mut [u8], &'static str> {
+    if size == 0 {
+        return Err("EmptyLoaderData");
+    }
     let ptr = boot::allocate_pages(
         AllocateType::AnyPages,
         MemoryType::LOADER_DATA,
-        ((size - 1) / 4096) + 1,
+        size.checked_add(4095).ok_or("LoaderSizeOverflow")? / 4096,
     )
-    .expect("Failed to allocate memory for the file");
+    .map_err(|_| "LoaderAllocation")?;
     unsafe { ptr::write_bytes(ptr.as_ptr(), 0, size) };
-    unsafe { slice::from_raw_parts_mut(ptr.as_ptr(), size) }
+    Ok(unsafe { slice::from_raw_parts_mut(ptr.as_ptr(), size) })
 }
 
 /// Opens PXE Base Code for the device path that loaded this image.
