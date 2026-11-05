@@ -9103,3 +9103,14 @@ full-chain rerun reached the repeated memory matrix but stopped on host disk
 exhaustion (`no space on device`), not a code/test failure; only generated
 `.cargo-build` output was removed and historical evidence was preserved.
 
+## Codex - final Stage 10.7 regression qualification (2026-11-05)
+
+After serializing the thread-registry host tests, making nested Cargo builds
+offline, and reclaiming only generated build output, the complete mandated
+`RUN-STAGE10.7.ps1` chain passed. Host regressions, build, warning-denying
+host/kernel Clippy, workspace tests, 1-CPU x10, 2-CPU x30, 4-CPU x20,
+networking at 1/2/4 CPUs, and all Stage 8.1 through 10.7 preservation markers
+passed. The read-only physical/trust preflight remains explicitly
+`NOT_QUALIFIED` for missing OVMF VARS, swtpm, disk image, development trust
+inputs, and native evidence.
+
