@@ -5977,3 +5977,145 @@ fn unlink_refuses_a_nonexistent_name_and_leaves_no_trace() {
         .check()
         .expect("volume must be consistent after the refused and successful unlinks");
 }
+
+/// `stage_write` (wfs.rs line 1152) stages a write transaction in a loop over
+/// `0..DIRECT_BLOCKS`.  For each slot already occupied by an existing data block
+/// (`direct[slot] != 0`) it performs a bitmap guard then calls `txn.stage(block,
+/// &sector)` to queue new content.  For each slot that the new data requires but
+/// that is currently empty (`direct[slot] == 0`) it calls `self.allocate_block(txn)?`
+/// to find a free data block.  If `allocate_block` returns `Err(NoSpace)` —
+/// because all data blocks are taken — `stage_write` propagates the error and
+/// `write_file` returns without calling `commit`.
+///
+/// `write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace` covers the
+/// case where the target file is *empty* (zero existing blocks), so
+/// `allocate_block` fails on the very first iteration before any `txn.stage` call
+/// is made.  This test covers the complementary case where the target file already
+/// has one data block:
+///
+/// - slot 0 is occupied → bitmap guard passes → `txn.stage(block0, &sector0)` is
+///   queued in the transaction buffer.
+/// - slot 1 is empty and needed by the two-block payload → `allocate_block(txn)`
+///   finds no free block and returns `Err(NoSpace)` → `stage_write` propagates it.
+///
+/// Even though one `txn.stage` call has already executed, `commit` is never
+/// reached, so no sector is written to disk.  The snapshot assertion proves this.
+///
+/// Without the `allocate_block` guard the write would corrupt the filesystem: it
+/// would continue with `direct[1]` still zero, dereference block 0 for the second
+/// sector's content, overwrite a live data block, and misrecord the inode's size.
+#[test]
+fn write_file_refuses_when_extension_would_overflow_data_region_and_leaves_no_trace() {
+    // 80-sector volume: same geometry as data_full_volume().
+    let disk = CrashDisk::blank_sized(80);
+    Volume::format(disk.clone(), INODES).expect("format");
+
+    // Create extendable.bin with exactly one block of data (512 bytes).
+    // This occupies direct[0] and leaves direct[1] empty.
+    let extendable_inode = {
+        let payload = vec![0xabu8; SECTOR_SIZE];
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        volume
+            .create_file(1, "extendable.bin", 0o644, &payload, 1)
+            .expect("create extendable.bin with one block")
+    };
+
+    // Fill the remaining data blocks so none are free.
+    // Pass 1: fill with max-size files (8 blocks each) until one more
+    //         max-size file no longer fits.
+    let large_count = {
+        let payload = vec![1u8; MAX_FILE_SIZE];
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        let mut count = 0usize;
+        loop {
+            let name = format!("large{count}");
+            match volume.create_file(1, &name, 0o644, &payload, 1) {
+                Ok(_) => count += 1,
+                Err(Error::NoSpace) => break,
+                Err(err) => panic!("large fill {name}: {err:?}"),
+            }
+        }
+        count
+    };
+
+    // Pass 2: fill the remaining (< 8) blocks with 1-byte files so that
+    //         every data block is allocated.
+    let small_count = {
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        let mut count = 0usize;
+        loop {
+            let name = format!("small{count}");
+            match volume.create_file(1, &name, 0o644, b"x", 1) {
+                Ok(_) => count += 1,
+                Err(Error::NoSpace) => break,
+                Err(err) => panic!("small fill {name}: {err:?}"),
+            }
+        }
+        count
+    };
+
+    assert!(
+        large_count > 0,
+        "expected at least one large fill to succeed on the 80-sector volume"
+    );
+
+    // Snapshot the completely-full image before any refused call.
+    let snapshot = disk.sectors();
+
+    let mut volume = Volume::mount(disk.clone()).expect("mount");
+
+    // The two-block payload requires SECTOR_SIZE + 1 bytes.  slot 0 is already
+    // occupied by extendable.bin's existing block; slot 1 is empty and needs a
+    // new allocation, which must fail.
+    let two_block_data = vec![0xcdu8; SECTOR_SIZE + 1];
+    assert_eq!(
+        volume.write_file(extendable_inode, &two_block_data, 2),
+        Err(Error::NoSpace),
+        "write_file must refuse when no data block is available for the extension"
+    );
+
+    // No sector must have been written — commit was never called even though
+    // txn.stage(block0, &sector0) was queued before allocate_block failed.
+    assert!(
+        disk.sectors() == snapshot,
+        "a refused write_file (extension path) must not modify any sector"
+    );
+
+    // extendable.bin must still be present with its original one-block content.
+    let entry = volume
+        .lookup(1, "extendable.bin")
+        .expect("extendable.bin must remain in the directory");
+    assert_eq!(
+        entry.inode, extendable_inode,
+        "extendable.bin must still name its original inode"
+    );
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    let len = volume
+        .read_file(extendable_inode, &mut out)
+        .expect("extendable.bin must remain readable");
+    assert_eq!(len, SECTOR_SIZE, "original one-block size must be unchanged");
+    assert!(
+        out[..SECTOR_SIZE].iter().all(|&b| b == 0xab),
+        "original content must be intact"
+    );
+
+    // All fill files must still be accessible.
+    for i in 0..large_count {
+        let name = format!("large{i}");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused write_file"
+        );
+    }
+    for i in 0..small_count {
+        let name = format!("small{i}");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused write_file"
+        );
+    }
+
+    volume
+        .check()
+        .expect("volume must be consistent after the refused write_file");
+}

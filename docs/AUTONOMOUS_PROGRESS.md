@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: sector-level atomicity proof for write_file extension path when no data blocks remain
+
+Branch: `auto/wovenhat-development` (base `588d8caf`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1152) loops over `0..DIRECT_BLOCKS`.  For each slot
+already occupied by an existing data block (`direct[slot] != 0`) it performs a
+bitmap guard then calls `txn.stage(block, &sector)` to queue the new content.
+For each slot that the new data requires but that is currently empty it calls
+`self.allocate_block(txn)?` to find a free data block.  If `allocate_block`
+returns `Err(NoSpace)` the `?` propagates the error and `write_file` returns
+without calling `commit`.
+
+`write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace` covers the
+case where the target file is *empty* (zero existing blocks), so
+`allocate_block` fails on the very first loop iteration before any `txn.stage`
+call is made.  No prior test proved atomicity for the complementary
+*extension* path: a file that already has one data block is rewritten in-place
+(slot 0) and then the write tries to allocate a second block (slot 1) for the
+larger payload.  In that path:
+
+1. slot 0 is occupied → bitmap guard passes → `txn.stage(block0, &sector0)` is
+   queued in the transaction buffer.
+2. slot 1 is empty and needed → `allocate_block(txn)` finds no free block and
+   returns `Err(NoSpace)`.
+3. `stage_write` propagates the error; `commit` is never called.
+
+Even though one `txn.stage` call has already executed, the absence of a commit
+means no sector reaches the disk.  Without the snapshot assertion the test
+suite cannot prove this — only that the logical view is consistent.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_extension_would_overflow_data_region_and_leaves_no_trace`:
+
+- Uses an 80-sector volume (same geometry as `data_full_volume()`).
+- Creates `extendable.bin` with exactly 512 bytes (one block, filling `direct[0]`).
+- Two-pass fill to exhaust all remaining data blocks (same approach as the existing
+  no-space test).
+- Snapshots the completely-full image before any refused call.
+- Calls `write_file(extendable_inode, &[0xcdu8; SECTOR_SIZE + 1], 2)` — the
+  513-byte payload requires 2 blocks; the second block cannot be allocated.
+- Asserts the result is `Err(Error::NoSpace)`.
+- Asserts the raw sector image is byte-for-byte unchanged from the snapshot.
+- Controls: `extendable.bin` is still present; its content is the original
+  512 bytes; all fill files remain accessible; `check()` confirms the volume is
+  consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **107 passed / 0 failed** (was 106; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Uses an 80-sector volume so data blocks (not inodes or directory slots) are
+  the binding constraint; the fill produces ≥1 large (8-block) file and some
+  small (1-block) files.
+- The snapshot assertion proves zero sector writes occurred on the refused call,
+  even though `txn.stage` was called once before `allocate_block` failed.
+- The symmetric case (empty-file no-space) is documented in
+  `write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace`.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: sector-level atomicity proof for unlink when the name is absent
 
 Branch: `auto/wovenhat-development` (base `9e5c3b3a`). Working tree was clean.
