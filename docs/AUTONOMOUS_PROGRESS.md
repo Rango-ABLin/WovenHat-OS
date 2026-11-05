@@ -1,5 +1,60 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: sector-level atomicity proof for unlink when the name is absent
+
+Branch: `auto/wovenhat-development` (base `9e5c3b3a`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs line 1249) searches the directory for the named entry.  When
+no matching entry exists it returns `Err(Error::NotFound)` at line 1263, before
+any transaction is staged or `commit` is called — so the disk image is
+completely unmodified.
+
+The existing `unlink_is_atomic_across_every_crash_point` test covers the success
+path at every write boundary.  The various `unlink_refuses_*` tests cover
+malformed directory entries.  None of them prove atomicity for the simplest
+failure path — a name that is simply absent from the directory — by snapshotting
+the raw sector image before and after the refused call.  Without that snapshot
+the test suite cannot prove zero sector writes occurred; it can only confirm the
+logical view is consistent.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_a_nonexistent_name_and_leaves_no_trace`:
+
+- Calls `formatted()` to get a fresh volume and creates `existing.txt` (7 bytes,
+  `"content"`) via `create_file`, recording its inode (`orig_inode`).
+- Snapshots the image after the create, before any refused call.
+- Calls `unlink(1, "absent.txt", 2)` — a name that was never created.
+- Asserts the result is `Err(Error::NotFound)`.
+- Asserts the raw sector image is byte-for-byte unchanged from the snapshot.
+- Controls: `lookup(1, "existing.txt")` still returns `orig_inode`; `read_file`
+  returns the original `"content"`; `unlink(1, "existing.txt", 3)` succeeds;
+  `check()` confirms the volume is consistent.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **106 passed / 0 failed** (was 105; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The `NotFound` guard fires at wfs.rs:1263 after a name scan of `view.entries`
+  with no match; no transaction is staged, no sector is modified.
+- This is the symmetric case to `create_refuses_a_duplicate_name`: create
+  refuses when a name IS present; unlink refuses when a name is NOT present.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: sector-level atomicity proof for write_file when data blocks are exhausted
 
 Branch: `auto/wovenhat-development` (base `b497bd50`). Working tree was clean.

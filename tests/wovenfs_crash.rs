@@ -5912,3 +5912,68 @@ fn write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace() {
         .check()
         .expect("volume must be consistent after a refused write_file");
 }
+
+/// `unlink` (wfs.rs line 1249) searches the directory for the named entry and
+/// returns `Err(NotFound)` at line 1263 when no matching entry exists.  At that
+/// point no transaction has been staged and `commit` has never been called, so
+/// the disk image is completely unmodified.
+///
+/// The existing `unlink_is_atomic_across_every_crash_point` test covers the
+/// success path at every write boundary.  The existing `unlink_refuses_*` tests
+/// cover malformed entries.  None of them prove atomicity for the simplest
+/// failure path — a name that is simply absent from the directory — by
+/// snapshotting the raw sector image before and after the refused call.  This
+/// test adds that guarantee in isolation.
+#[test]
+fn unlink_refuses_a_nonexistent_name_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a file so the directory is non-empty.
+    let orig_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "existing.txt", 0o644, b"content", 1)
+            .expect("create existing.txt")
+    };
+
+    // Snapshot the image after the create, before any refused call.
+    let snapshot = base.sectors();
+
+    let mut volume = Volume::mount(base.clone()).expect("mount");
+
+    // unlink must refuse — "absent.txt" does not appear in the directory.
+    assert_eq!(
+        volume.unlink(1, "absent.txt", 2),
+        Err(Error::NotFound),
+        "unlink must return NotFound when the name is absent from the directory"
+    );
+
+    // No sector must have been written.  The NotFound guard fires before any
+    // transaction is staged or committed.
+    assert!(
+        base.sectors() == snapshot,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: the existing file is still present and readable.
+    let entry = volume.lookup(1, "existing.txt").expect("lookup existing.txt");
+    assert_eq!(entry.inode, orig_inode, "original inode must be unchanged");
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    let len = volume
+        .read_file(orig_inode, &mut out)
+        .expect("read existing.txt");
+    assert_eq!(&out[..len], b"content", "original content must be intact");
+
+    // Control: unlink with the correct name still succeeds on the same image.
+    volume
+        .unlink(1, "existing.txt", 3)
+        .expect("unlink must succeed for the present name");
+    assert_eq!(
+        volume.lookup(1, "existing.txt"),
+        Err(Error::NotFound),
+        "existing.txt must be gone after a successful unlink"
+    );
+    volume
+        .check()
+        .expect("volume must be consistent after the refused and successful unlinks");
+}
