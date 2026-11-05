@@ -1,5 +1,60 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file corrupt-inode-checksum atomicity proof
+
+Branch: `auto/wovenhat-development` (base `40e4c5c5`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` calls `self.inode_staged(txn, inode)?`, which calls
+`checked_inode`, which calls `Inode::decode(raw)`.  If the inode's structural
+checksum (FNV-1a over bytes 0..120, stored at bytes 120..128) does not match,
+`Inode::decode` returns `None` and `checked_inode` returns `Err(Error::Corrupt)`
+immediately — before `txn.stage()` is called once and before `commit` is
+reached.  So the refused write leaves the image completely unmodified.
+
+The existing `check_refuses_an_inode_with_a_bad_structural_checksum` proved that
+`check()` refuses the same scenario, but no test verified that the runtime write
+path (`write_file`) also fails closed and leaves no trace.  Every other
+`write_file_refuses_*` test uses `reseal_inode_*` helpers (which keep the
+checksum valid but corrupt other semantic fields); none directly invalidated the
+checksum and confirmed zero sector writes.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`:
+
+- Creates `a.txt` to establish a valid file inode.
+- Forks the image and flips a byte at inode offset 120 (first byte of the
+  8-byte FNV-1a checksum field), invalidating the checksum.
+- Precondition assertion: `check()` on the corrupted image returns `Err(Corrupt)`.
+- Snapshots the corrupted image with `let before = corrupt.sectors()`.
+- Calls `write_file(file_inode, b"world", 2)` and asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — no sector was written.
+- Control: on the unpatched `base` image, `write_file` succeeds and reads back.
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **108 passed / 0 failed** (was 107; new test added) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity only for the structural-checksum path in `write_file`.
+  The analogous paths in `unlink` (which also calls `inode_staged` for the
+  file inode) and `create` / `stage_create` (which calls `inode_staged` for
+  the directory inode) are not covered by this test.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: write_file TooLarge atomicity proof
 
 Branch: `auto/wovenhat-development` (base `dd8c9998`). Working tree was clean.
