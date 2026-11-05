@@ -6491,3 +6491,89 @@ fn unlink_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
         );
     }
 }
+
+/// `stage_write` (wfs.rs line 1190) calls `self.stage_free_block(&mut txn,
+/// block)?` when shrinking a multi-block file: for each slot that the new
+/// write no longer needs (`slot >= needed && node.direct[slot] != 0`), it
+/// must free the existing block.  `stage_free_block` checks the bitmap before
+/// staging the free, returning `Err(Error::Corrupt)` if the block's bit is
+/// not set — meaning the bitmap and the inode disagree.
+///
+/// When that guard fires during a shrinking write, `commit` is never called,
+/// even though an earlier slot (slot 0) may already have been staged in the
+/// transaction buffer (slot 0 is rewritten in place first, then slot 1 is
+/// freed).  Because `commit` never runs, no sector reaches the disk.
+///
+/// This path is distinct from the existing test
+/// `write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free`,
+/// which covers the in-place-rewrite guard (`slot < needed && direct[slot] !=
+/// 0 && !bitmap_get(block)`) — not the shrink/free guard (`slot >= needed`).
+/// No prior test proved atomicity for the shrink path; this test adds that
+/// guarantee.
+#[test]
+fn write_file_refuses_when_shrink_frees_a_bitmap_clear_block_and_leaves_no_trace() {
+    // `two_block_file()` creates a 600-byte file (> SECTOR_SIZE = 512), so
+    // both direct[0] and direct[1] are non-zero.
+    let (base, file_inode) = two_block_file();
+
+    // Record direct[1] — the second data block that will be freed on shrink.
+    let block1 = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume.inode(file_inode).expect("inode").direct[1]
+    };
+    assert!(block1 != 0, "a 600-byte file must use direct[1]");
+
+    // Fork and clear the bitmap bit for block1.  The inode still names block1,
+    // so the bitmap is now inconsistent: a live inode names a free block.
+    let image = base.fork(None);
+    clear_bitmap_block(&image, block1);
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a live inode naming a block the bitmap marks free"
+    );
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount");
+
+    // Write with 5 bytes (< SECTOR_SIZE): only direct[0] is needed, so
+    // stage_write loops over slot 0 (rewritten in place) and then tries to
+    // free slot 1 via stage_free_block(block1).  block1's bitmap bit is
+    // clear, so stage_free_block returns Err(Corrupt), which write_file
+    // propagates without calling commit.
+    assert_eq!(
+        volume.write_file(file_inode, b"hello", 2),
+        Err(Error::Corrupt),
+        "write_file must refuse when shrinking would free a block the bitmap marks free"
+    );
+
+    // No sector must have been written.  Slot 0 was staged in the transaction
+    // buffer, but commit was never called.
+    assert!(
+        image.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+
+    // Control: on the unpatched base image, shrinking succeeds and reads back.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.write_file(file_inode, b"hello", 2),
+            Ok(()),
+            "control: write_file must succeed when shrinking on a consistent image"
+        );
+        let mut out = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            v.read_file(file_inode, &mut out),
+            Ok(5),
+            "control: shrunk file must read back 5 bytes"
+        );
+        assert_eq!(&out[..5], b"hello", "control: content must match");
+        v.check()
+            .expect("control: volume must be consistent after a successful shrink");
+    }
+}

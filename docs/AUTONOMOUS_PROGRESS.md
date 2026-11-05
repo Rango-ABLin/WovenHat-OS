@@ -1,5 +1,68 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file refuses when shrink frees a bitmap-clear block (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `d8ecd569`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1190) shrinks a multi-block file by calling
+`self.stage_free_block(&mut txn, block)?` for each slot that the new write no
+longer needs (`slot >= needed && node.direct[slot] != 0`).  `stage_free_block`
+checks `!self.bitmap_get(txn, block)?` and returns `Err(Error::Corrupt)` if the
+block's bitmap bit is not set — indicating a bitmap/inode inconsistency.
+
+When that guard fires, `commit` is never called.  Even though slot 0 may have
+already been staged in the transaction buffer (slot 0 is rewritten in place
+first, then slot 1 is freed), no sector reaches the disk.
+
+The existing `write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free`
+test covers the **in-place-rewrite guard** (`slot < needed && direct[slot] != 0 &&
+!bitmap_get(block)`) — not the **shrink/free guard** (`slot >= needed`).  No test
+previously proved atomicity for the shrink path.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_shrink_frees_a_bitmap_clear_block_and_leaves_no_trace`:
+
+- Uses `two_block_file()` to get a 600-byte file (direct[0] and direct[1] set).
+- Records `block1 = volume.inode(file_inode).direct[1]`.
+- Forks the image and calls `clear_bitmap_block(&image, block1)` — bitmap now
+  says block1 is free, while the inode still names it.
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = image.sectors()`.
+- Calls `volume.write_file(file_inode, b"hello", 2)` (5 bytes → only direct[0]
+  needed → slot 1 must be freed → `stage_free_block(block1)` → bitmap clear →
+  `Err(Corrupt)`).
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `image.sectors() == before` — no sector was written.
+- Control: on the unpatched base, the shrinking write succeeds, reads back 5 bytes,
+  and `check()` passes.
+
+No production code changed.  Test count: 111 → 112.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **112 passed / 0 failed** (was 111; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity only for the `stage_free_block` bitmap-clear guard in the
+  shrink path of `stage_write`.
+- The analogous guard in `unlink` (`stage_free_block` for each of the file's
+  data blocks) is a distinct path; a file whose data block bitmap bit was
+  externally cleared before `unlink` runs would also hit `stage_free_block`
+  returning `Err(Corrupt)`.  That path is not separately tested here.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: unlink refuses a corrupt directory-inode checksum atomicity proof
 
 Branch: `auto/wovenhat-development` (base `c69894dc`). Working tree was clean.
