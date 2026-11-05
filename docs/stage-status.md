@@ -1,5 +1,14 @@
 # Stage status
 
+## S12 WovenEditor interactive GUI increment - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
+
+WovenEditor now has an actual bounded desktop editing flow: a focused UTF-8
+text field, keyboard character/backspace handling, Save button, Enter-to-save,
+dirty/saved status, and capability-checked persistence to
+`/mnt/woven-note.txt`. Release binary build and binary-specific warning-denying
+Clippy pass. The app all-targets Clippy command still encounters the existing
+no-std test-target configuration problem; it is not used as a release claim.
+
 ## S12 bounded clipboard and file-chooser SDK surfaces - 2026-11-04 - ACCEPTED (SOFTWARE FOUNDATION)
 
 Added host-tested `libwoven::clipboard::TextClipboard` and

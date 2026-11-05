@@ -8928,3 +8928,11 @@ release runs on 1/2/4 CPUs with exit 33. Evidence is under
 `audit-artifacts/stage21.6-{1,2,4}cpu-*` and
 `audit-artifacts/stage22.3-{1,2,4}cpu-*`. These are bounded service gates;
 production trust custody and full store/catalog policy remain separate.
+## Codex - WovenEditor interactive GUI increment (2026-11-05)
+
+Upgraded the editor desktop client from a read-only workspace snapshot to a
+real bounded editor: UTF-8 text field, keyboard character/backspace events,
+Save button, Enter-to-save, dirty/saved status, and capability-checked write
+to `/mnt/woven-note.txt`. Release binary build and binary-specific warning-
+denying Clippy passed. The app all-targets Clippy remains unsuitable because
+its existing no-std library tests are compiled as host test targets.

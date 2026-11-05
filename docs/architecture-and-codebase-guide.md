@@ -4347,6 +4347,13 @@ provides deterministic wraparound selection, and closes explicitly. It never
 opens paths or grants filesystem authority; the provider and permission layer
 must perform those operations.
 
+WovenEditor is the first application using the toolkit's text field as a full
+desktop editing flow rather than a status snapshot. Its GUI accepts bounded
+UTF-8 character and backspace events, exposes Save and Enter-to-save actions,
+and writes only through the existing capability-checked file ABI. The fixed
+`/mnt/woven-note.txt` target is intentional for this increment; a provider-
+backed chooser and richer multi-document editor are separate prerequisites.
+
 ## Stage 28 disposable file-backed installation executor
 
 `scripts/execute-file-install.py` is deliberately outside the production
