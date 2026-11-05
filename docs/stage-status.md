@@ -13001,3 +13001,12 @@ The SDK signing wrapper now has a `--production` mode requiring separate
 development test key from being used accidentally. No authorized production
 key is present in this environment, so production attestation remains open.
 
+## Privacy-safe diagnostic export - 2026-11-05 - SOFTWARE PASS / EXTERNAL REVIEW OPEN
+
+Added `scripts/export-diagnostics.py`. It copies only explicitly named text
+evidence under `target/` or `audit-artifacts/`, rejects sensitive filenames,
+binary data, oversized files, duplicate paths, and bundles over 16 MiB, and
+redacts credential/key/token patterns. ZIP timestamps and manifest ordering are
+deterministic. External privacy review and authenticated remote delivery remain
+open.
+

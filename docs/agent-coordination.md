@@ -9136,3 +9136,13 @@ The allocator is now target-gated to `x86_64-unknown-none`; the probe reports
 normal fail-closed errors instead of crashing. Focused TLS tests and all
 affected Clippy/build checks pass.
 
+## Codex - bounded privacy-safe diagnostic export (2026-11-05)
+
+Added `scripts/export-diagnostics.py` for explicit-input diagnostic bundles.
+It accepts only text files under `target/` or `audit-artifacts/`, rejects
+sensitive filenames, binary/oversized/duplicate inputs, and bundles over 16
+MiB, redacts credential/key/token patterns, and writes deterministic ZIP
+timestamps/order plus a hashed manifest. A real retained serial log exported
+successfully and the redaction checks passed. External privacy review and
+authenticated remote delivery remain open.
+
