@@ -4795,3 +4795,17 @@ fallback shaping and input policy. Its UAX#9 ordering remains provided by the
 existing `unicode-bidi` hardcoded tables. Installer-generated
 `etc/wovenhat/settings.json` stores a canonical locale derived from the
 keyboard selection, and WovenShell restores it before rendering.
+
+### Persistent settings policy boundary
+
+`kernel::install_persistent_settings` validates the bounded installer settings
+record and installs it as writable user policy at
+`/etc/wovenhat/settings.json`; the mounted `/mnt` copy remains the durable
+source when the volume is writable. WovenSettings uses
+`libwoven::settings_policy::patch_high_contrast` to modify only the fixed-width
+`high_contrast` field, preserving the rest of the record without a general
+JSON parser or unbounded allocation. The GUI updates the installed copy for
+the current session and attempts the mounted source copy for reboot
+persistence. Malformed records and unavailable storage fail closed and leave
+the policy unchanged. Light/dark remain session previews because the shell's
+persisted policy surface currently distinguishes only high contrast.

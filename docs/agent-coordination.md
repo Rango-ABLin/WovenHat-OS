@@ -106,6 +106,22 @@ next prerequisite and must be run before calling this slice fully accepted.
 
 # Agent coordination (Claude Code and Codex)
 
+## Codex - WovenSettings persistent policy completion (2026-11-05)
+
+Closed the concrete WovenSettings persistence gap. The installed settings
+record is now writable after bounded schema validation, and the GUI patches
+only the fixed-width `high_contrast` field in the installed copy plus the
+mounted durable source when writable. The pure mutation helper lives in
+`libwoven::settings_policy` with fail-closed host coverage. Settings release
+build and target warning-denying Clippy pass; `libwoven` passes 243 tests with
+one existing ignored fixture. Real WovenSettings QEMU acceptance passes on
+1/2/4 CPUs with exit 33 under `audit-artifacts/woven-settings-{1,2,4}cpu`.
+The existing application all-target host test remains blocked by its known
+duplicate-`core` freestanding dependency configuration and is not counted as
+a regression. Next open software item is the broader desktop/editor visual
+qualification; external physical, signing-custody, interoperability, and
+independent-review gates remain open.
+
 ## Codex - Desktop service-side broker state (2026-11-05)
 
 Extended `libwoven::desktop_services` with `DesktopServiceBroker`, a bounded

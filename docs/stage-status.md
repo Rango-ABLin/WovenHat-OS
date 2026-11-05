@@ -1,5 +1,15 @@
 # Stage status
 
+## WovenSettings persistent high-contrast policy - 2026-11-05 - ACCEPTED (SOFTWARE)
+
+WovenSettings now persists the bounded `high_contrast` policy through the
+writable installed settings record and attempts the writable mounted source
+copy used for the next boot. The mutation is fixed-width, schema-field
+scoped, allocation-free, and fail-closed for malformed input. The shared
+validator has host coverage. The release settings binary, target Clippy, and
+real WovenSettings QEMU gates pass on 1/2/4 CPUs with exit 33; evidence is
+retained under `audit-artifacts/woven-settings-{1,2,4}cpu`.
+
 ## Graphics compositor frame requalification - 2026-11-05 - PASSED 1/2/4 CPUs
 
 The current Stage 19.2 compositor gate passed at 1, 2, and 4 CPUs. Each run

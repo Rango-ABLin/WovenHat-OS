@@ -168,6 +168,7 @@ pub mod package;
 pub mod package_ipc;
 pub mod recovery;
 pub mod semantic_search;
+pub mod settings_policy;
 pub mod search_ipc;
 pub mod store;
 pub mod ui;

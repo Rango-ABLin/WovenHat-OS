@@ -8644,7 +8644,10 @@ fn install_persistent_settings() -> bool {
             Err(_) => return false,
         }
     }
-    if vfs::create_read_only(TARGET, &data).is_err() {
+    // Settings are user policy, not immutable system content. Keep the
+    // imported record bounded and schema-checked, but make the installed
+    // copy writable so policy changes can be committed safely.
+    if vfs::write_file(TARGET, &data).is_err() {
         return false;
     }
     serial::write_line(format_args!(
