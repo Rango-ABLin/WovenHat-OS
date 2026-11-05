@@ -8954,3 +8954,12 @@ WovenSettings GUI. The state is session-local and capability-neutral; release
 build and binary-specific warning-denying Clippy pass. Persistent settings
 service integration remains open.
 
+## Codex - Stage 10.7 regression after S12 GUI updates (2026-11-05)
+
+The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and
+WovenSettings changes: host regressions, 206 tests, warning-denying
+host/kernel Clippy, 1/2/4-CPU memory closure, networking, and isolated
+Stages 10.4/10.5/10.6/10.7 all passed. The trust preflight remains
+`NOT_QUALIFIED` for missing external OVMF VARS, swtpm, disk image, and
+development signing inputs.
+

@@ -1,5 +1,15 @@
 # Stage status
 
+## Stage 10.7 full regression after S12 GUI updates - 2026-11-05 - PASSED (SOFTWARE)
+
+The mandated `RUN-STAGE10.7.ps1` gate passed after the WovenEditor and
+WovenSettings GUI updates: host regressions, 206 host tests, warning-denying
+host/kernel Clippy, 1-CPU x10 memory closure, 2-CPU x30 memory closure, 4-CPU
+x20 memory closure, 1/2/4-CPU networking, and isolated Stages 10.4/10.5/10.6/
+10.7 all passed. Trust/physical preflight remains `NOT_QUALIFIED` because
+OVMF VARS, swtpm, a guest disk image, and development signing inputs are not
+present.
+
 ## S12 WovenSettings interactive theme preview - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
 
 WovenSettings now provides visible, keyboard-driven Light, Dark, and High
