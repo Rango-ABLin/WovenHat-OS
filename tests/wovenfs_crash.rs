@@ -7591,3 +7591,91 @@ fn create_file_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_in
         assert_eq!(out[0], 42u8);
     }
 }
+
+/// `read_file` loads the file inode via `self.inode(inode)?` (wfs.rs:1214),
+/// which calls `self.checked_inode(raw)` → `Inode::decode(raw)`.
+/// When the inode's structural FNV-1a checksum is wrong, `Inode::decode`
+/// returns `None` and `checked_inode` returns `Err(Error::Corrupt)`.  That
+/// error propagates out of `read_file` before any data block is read or any
+/// output byte is written.
+///
+/// Unlike `write_file`, `read_file` is a pure read: it never calls `txn.stage`
+/// or `commit`, so "leaves no trace" is structurally guaranteed by the
+/// implementation.  This test makes the guarantee explicit with a snapshot
+/// comparison so a future refactor that accidentally adds a write path would be
+/// caught.
+///
+/// The analogous corrupt-inode-checksum guards on mutation operations are
+/// covered by:
+/// - `write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`
+/// - `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`
+/// - `create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+#[test]
+fn read_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a file so there is a valid inode to corrupt.
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt")
+    };
+
+    // Fork and corrupt the file inode's structural checksum.  Flip a byte at
+    // offset 120 within the inode slot: that is the first byte of the 8-byte
+    // FNV-1a checksum covering bytes 0..120.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        // Four inodes per sector; each inode slot is 128 bytes.
+        let index = file_inode - 1;
+        let lba = (inode_start + index / 4) as usize;
+        let offset = (index % 4) as usize * 128;
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a corrupt inode checksum"
+    );
+
+    // Snapshot: read_file must not modify the image (it is a pure read).
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+    let mut buf = [0u8; MAX_FILE_SIZE];
+
+    // read_file must refuse: inode() → checked_inode() → Inode::decode returns
+    // None → Err(Corrupt).  The function returns before reading any data block.
+    assert_eq!(
+        volume.read_file(file_inode, &mut buf),
+        Err(Error::Corrupt),
+        "read_file must refuse an inode with a bad structural checksum"
+    );
+
+    // The image must be byte-for-byte identical: read_file never stages or
+    // commits any writes.
+    assert!(
+        corrupt.sectors() == before,
+        "read_file must not modify the image even on a corrupt inode"
+    );
+
+    // Control: on the unpatched base image, read_file succeeds and returns
+    // the correct content.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        let mut out = [0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            v.read_file(file_inode, &mut out),
+            Ok(5),
+            "control: read_file must succeed on the unpatched image"
+        );
+        assert_eq!(&out[..5], b"hello", "control: content must match");
+    }
+}

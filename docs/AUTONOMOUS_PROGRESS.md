@@ -1,5 +1,72 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: read_file refuses a corrupt inode checksum and leaves no trace
+
+Branch: `auto/wovenhat-development` (base `a1922e10`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` loads the target inode via `self.inode(inode)?` (wfs.rs:1214),
+which calls `self.checked_inode(raw)` → `Inode::decode(raw).ok_or(Error::Corrupt)?`.
+When the inode's structural FNV-1a checksum is wrong, `Inode::decode` returns
+`None`, `checked_inode` returns `Err(Error::Corrupt)`, and `read_file` returns
+the error before reading any data block.
+
+Every mutation operation already had a corrupt-inode-checksum test:
+- `write_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`
+- `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`
+- `create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+
+No test proved the same guard for `read_file`.  While `read_file` is a pure
+read (it never calls `txn.stage` or `commit`, so "leaves no trace" is
+structurally guaranteed), an explicit snapshot comparison is still valuable: a
+future refactor that accidentally adds a write path would be caught.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace`:
+
+- Creates file `a.txt` with content `b"hello"` on a formatted volume; records
+  `file_inode` (inode 2 on the default layout).
+- Forks the image and flips byte at `inode_start * 512 + (file_inode-1)/4 * 512
+  + (file_inode-1)%4 * 128 + 120` — the first byte of inode 2's FNV-1a
+  structural checksum.
+- Precondition: `check()` on the corrupt image returns `Err(Error::Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.read_file(file_inode, &mut buf)`:
+  - `self.inode(file_inode)?` → `self.checked_inode(raw)` → `Inode::decode`
+    finds bad checksum → `None` → `Err(Corrupt)`.
+  - Function returns before reading any data block.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — no sector was written.
+- Control: on the unpatched `base`, `read_file` returns `Ok(5)` with content
+  `b"hello"`.
+
+No production code changed.  Test count: 123 → 124.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **124 passed / 0 failed** (was 123; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `read_file` returns `Err(Corrupt)` when the target inode's
+  structural FNV-1a checksum is bad, and leaves the image byte-for-byte
+  unchanged.
+- Closes the symmetry gap: corrupt-inode-checksum tests now exist for every
+  public WovenFS operation that takes an inode argument (`write_file`, `unlink`,
+  `create` / `create_file` via their directory-inode path, and `read_file`).
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: create_file refuses when second data block cannot be allocated (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `01d47bc3`). Working tree was clean.
