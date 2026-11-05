@@ -4354,6 +4354,12 @@ and writes only through the existing capability-checked file ABI. The fixed
 `/mnt/woven-note.txt` target is intentional for this increment; a provider-
 backed chooser and richer multi-document editor are separate prerequisites.
 
+WovenSettings now uses its GUI as an interactive theme preview surface. The
+bounded keyboard controls `l`, `d`, and `c` switch Light, Dark, and High
+Contrast rendering immediately and report the selected state. It deliberately
+does not persist policy or claim privileged device authority; persistence is a
+separate service boundary.
+
 ## Stage 28 disposable file-backed installation executor
 
 `scripts/execute-file-install.py` is deliberately outside the production

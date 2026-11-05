@@ -1,5 +1,12 @@
 # Stage status
 
+## S12 WovenSettings interactive theme preview - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
+
+WovenSettings now provides visible, keyboard-driven Light, Dark, and High
+Contrast theme preview states through the GUI. Release build and
+binary-specific warning-denying Clippy pass. The state remains session-local;
+persistent policy service integration remains open.
+
 ## WovenEditor live desktop qualification - 2026-11-05 - PARTIAL PASS
 
 The desktop harness now supplies the search-service image and qualified 5G

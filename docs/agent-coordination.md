@@ -8947,3 +8947,10 @@ receives its pointer event, but the captured client frame has
 The visual pointer repaint/input assertion remains incomplete and is not a
 release qualification.
 
+## Codex - WovenSettings interactive theme preview (2026-11-05)
+
+Added keyboard-driven Light, Dark, and High Contrast preview states to the
+WovenSettings GUI. The state is session-local and capability-neutral; release
+build and binary-specific warning-denying Clippy pass. Persistent settings
+service integration remains open.
+

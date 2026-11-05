@@ -230,6 +230,12 @@ fn draw_settings(
     } else {
         canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
     }
+    let theme_name = match mode {
+        ThemeMode::Dark => "Theme: Dark  (l=Light c=Contrast)",
+        ThemeMode::Light => "Theme: Light (d=Dark c=Contrast)",
+        ThemeMode::HighContrast => "Theme: Contrast (d=Dark l=Light)",
+    };
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 174, theme_name, accent);
     let mut refresh_digits = [0u8; 20];
     draw_number(
         canvas,
@@ -285,7 +291,7 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
 
 /// Open a read-only Settings window through WovenShell's WOPN protocol.
 /// The shell PID is supplied by the catalog's `%p` token.
-pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
+pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
@@ -359,17 +365,29 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                         drop(resized);
                     }
                 }
-            } else if (message.get(..length) == Some(&b"WKEY\x01"[..])
+            } else if message.get(..length) == Some(&b"WKEY\x01"[..])
                 || message.get(..length) == Some(&b"r"[..])
-                || message.get(..length) == Some(&b" "[..]))
-                && refresh.activate()
+                || message.get(..length) == Some(&b" "[..])
             {
+                if !refresh.activate() {
+                    continue;
+                }
                 refresh.focused = true;
                 refresh_count = refresh_count.saturating_add(1);
                 if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: keyboard refreshed\n");
+            } else if length == 1 && matches!(message[0], b'd' | b'l' | b'c') {
+                mode = match message[0] {
+                    b'l' => ThemeMode::Light,
+                    b'c' => ThemeMode::HighContrast,
+                    _ => ThemeMode::Dark,
+                };
+                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                    fail(8)
+                }
+                let _ = libwoven::print("WovenSettings: theme changed\n");
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
                 pointer = Some((
                     u16::from_le_bytes([message[4], message[5]]),
