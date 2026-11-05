@@ -1223,17 +1223,50 @@ fn unlink_refuses_an_entry_that_does_not_name_one_live_file() {
     mount_consistent(&image, "after a valid unlink");
 }
 
+/// When a directory entry's `name_len` field is patched to a value larger than
+/// `MAX_NAME` (48), `DirEntry::matches` evaluates `self.name.get(..name.len())`
+/// with an out-of-bounds end index.  `slice::get` returns `None` for any index
+/// beyond the slice length, so the comparison `None == Some(name.as_bytes())`
+/// is `false` and no entry matches.  Both `lookup` and `unlink` therefore
+/// return `Err(Error::NotFound)`.  `unlink` returns `NotFound` before any
+/// transaction sector is staged or `commit` is called, so the image is
+/// completely unmodified.
 #[test]
 fn an_entry_name_length_past_the_name_field_does_not_match() {
     let (base, block, index) = two_file_root();
+    // 60 chars > MAX_NAME (48): self.name.get(..60) returns None, so matches()
+    // is false for every entry and both lookup and unlink return NotFound.
     let long = "x".repeat(60);
     patch_dir_entry(&base, block, index, 8, &60u16.to_le_bytes());
+
+    // Snapshot: neither lookup nor unlink should modify any sector.
+    let before = base.sectors();
+
     let mut volume = Volume::mount(base.clone()).expect("mount");
     assert_eq!(
         volume.lookup(1, &long).map(|entry| entry.inode),
-        Err(Error::NotFound)
+        Err(Error::NotFound),
+        "lookup must not match an entry whose name_len exceeds MAX_NAME"
     );
-    assert_eq!(volume.unlink(1, &long, 2), Err(Error::NotFound));
+    assert_eq!(
+        volume.unlink(1, &long, 2),
+        Err(Error::NotFound),
+        "unlink must not match an entry whose name_len exceeds MAX_NAME"
+    );
+
+    assert!(
+        base.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on an independent fork with name_len restored to 5, unlink of
+    // "a.txt" succeeds (the entry name bytes were never altered).
+    let ctrl = base.fork(None);
+    patch_dir_entry(&ctrl, block, index, 8, &5u16.to_le_bytes());
+    Volume::mount(ctrl)
+        .expect("mount control")
+        .unlink(1, "a.txt", 3)
+        .expect("unlink must succeed after restoring the name_len field");
 }
 
 /// Set an on-disk inode's `data_checksum` to the checksum of `bytes`,

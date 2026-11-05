@@ -1,5 +1,68 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: atomicity proof for unlink refused by oversized name_len field
+
+Branch: `auto/wovenhat-development` (base `07270a93`). Working tree was clean.
+
+### Defect / gap
+
+`DirEntry::matches` (wfs.rs line 286) guards against an oversized `name_len`
+field via the slice method `self.name.get(..name.len())`.  When `name_len` is
+patched past `MAX_NAME` (48), `slice::get` returns `None` for any index beyond
+the slice length; the comparison `None == Some(name.as_bytes())` is `false` and
+the entry never matches.  Both `lookup` and `unlink` therefore return
+`Err(Error::NotFound)`.  `unlink` returns `NotFound` before any transaction
+sector is staged or `commit` is called — the image is completely unmodified.
+
+The existing `an_entry_name_length_past_the_name_field_does_not_match` test
+verified the correct error variant from both `lookup` and `unlink`, but it did
+not snapshot the raw sector image before or after the refused calls.  Without
+that snapshot the test suite could not prove zero sector writes occurred; it
+only confirmed the logical view.  The test also lacked a doc comment explaining
+which guard fires and why, and lacked a control case showing the success path.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — enhanced
+`an_entry_name_length_past_the_name_field_does_not_match`:
+
+- Added a doc comment describing the `DirEntry::matches` path that fires:
+  `name_len > MAX_NAME` → `self.name.get(..name.len()) == None` → `false` →
+  `NotFound`, before any sector is written.
+- Added an inline comment on the `long` variable explaining why 60 chars
+  triggers the guard.
+- Added `let before = base.sectors();` immediately after `patch_dir_entry`.
+- Added error messages to both `assert_eq!` calls.
+- Added `assert!(base.sectors() == before, "a refused unlink must not modify
+  the image")` after the unlink assertion.
+- Added a control case using `base.fork(None)`: patches `name_len` back to 5
+  (the actual length of "a.txt") and confirms `unlink("a.txt")` succeeds,
+  proving the name bytes were never altered by the refused call.
+
+No production code changed.  The test count is unchanged at 107 (existing test
+enhanced; no new `#[test]` added).
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **107 passed / 0 failed** |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The snapshot assertion covers only the `name_len > MAX_NAME` guard path in
+  `matches()`; the separate `self.inode != 0` and byte-equality guards are not
+  exercised here.
+- The control patches the name_len field back to 5 on a fork of the already-
+  patched `base`; it does not start from the original unforked `two_file_root()`
+  image, but the name bytes in the entry are identical in both.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: atomicity proof for unlink refused because dir inode is a file
 
 Branch: `auto/wovenhat-development` (base `83dc3270`). Working tree was clean.
