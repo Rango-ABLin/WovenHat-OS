@@ -1,5 +1,15 @@
 # Stage status
 
+## S16 bounded adversarial matrix evidence audit - 2026-11-05 - SOFTWARE PASS / EXTERNAL REVIEW OPEN
+
+Added `scripts/verify-stage31-matrix.py`, a read-only fail-closed audit of the
+retained seeded Stage 31 cross-subsystem campaign. It verifies the complete
+nine-scenario set, exactly one report per 1/2/4-CPU profile, zero child exit
+codes, and retained command/result/output evidence. The audit passed and wrote
+`target/stage31-matrix-audit.json`. This closes the bounded software matrix;
+arbitrary in-guest fault injection, native qualification, an approved
+compatibility target, and independent security review remain separate gates.
+
 ## S13 native capture syscall increment - 2026-11-05 - SOFTWARE PASS / INPUT HARDWARE OPEN
 
 Added `AudioCapture=208`, the `libwoven::audio_capture` wrapper, explicit

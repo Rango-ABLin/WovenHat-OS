@@ -9156,3 +9156,13 @@ tool check/Clippy and missing-argument fail-closed gate pass. This is a service
 harness, not a claim that the freestanding OS has deployed the listener or
 passed independent security review.
 
+## Codex - Stage 31 bounded matrix evidence audit (2026-11-05)
+
+Added `scripts/verify-stage31-matrix.py`, a read-only fail-closed verifier for
+the retained seeded nine-scenario Stage 31 campaign. It checks the exact
+scenario set, canonical 1/2/4-CPU reports, zero child return codes, and each
+child's command/result/stdout evidence. The audit passed and produced
+`target/stage31-matrix-audit.json`. This is bounded QEMU software evidence;
+arbitrary in-guest fault injection, native qualification, compatibility-target
+approval, and independent security review remain open.
+
