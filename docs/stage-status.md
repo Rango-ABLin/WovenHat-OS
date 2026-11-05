@@ -1,5 +1,21 @@
 # Stage status
 
+## S13/S15-S19 release-boundary increment - 2026-11-05 - SOFTWARE PASS / EXTERNALS OPEN
+
+Added fixed-capacity signed-16 PCM mixing and capture FIFO primitives with
+saturating arithmetic, frame validation, overflow accounting, and no device
+state. Added bounded IPP/1.1 request/response codecs with length and version
+validation. Existing HDA playback/capture qualification passed at 1/2/4 CPUs;
+the media/WAV and image codec suites remain green. Added the locked offline
+clean-room SDK/provenance verifier and deterministic tracked-source digest;
+the provenance unit gate passes after the exact lockfile cache is present.
+
+Adversarial process-crash containment passed at 1/2/4 CPUs. Structured
+diagnostics/log filtering passed at 1/2/4 CPUs, and existing authenticated
+admin/identity tests pass. IPP network transport/printer certification,
+native audio capture hardware, external clean-room rebuild, signed SBOM
+attestation, and independent security review remain separate release gates.
+
 ## S12 Unicode and keyboard release qualification - 2026-11-05 - SOFTWARE PASS / PHYSICAL OPEN
 
 Complete generated UAX #44 General_Category, UAX #24 Script, canonical-

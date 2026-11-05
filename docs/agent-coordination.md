@@ -9027,3 +9027,19 @@ The dedicated USB-HID keyboard gate passed at 1/2/4 CPUs with evidence under
 qualification remains `PHYSICAL_NOT_TESTED`: no signed native evidence or
 authorized physical device was supplied. QEMU evidence is not relabeled as a
 physical claim.
+## Codex - Audio/media/IPP and release-boundary qualification (2026-11-05)
+
+Added `libwoven::audio` fixed-capacity S16 mixing and capture FIFO primitives:
+saturating accumulation, stereo frame alignment, bounded output, and
+observable overflow accounting. Added `libwoven::ipp` bounded IPP/1.1 request
+and response codecs with version, length, attribute, and status validation.
+Existing HDA playback/capture qualification passed on 1/2/4 CPUs with
+waveform evidence under `audit-artifacts/stage13.15-{1,2,4}cpu-*`.
+
+Added `scripts/verify-clean-room-sdk.py` and host coverage for locked offline
+Cargo metadata, in-tree path dependency rejection, deterministic tracked-source
+hashing, and Rust toolchain provenance. The exact lockfile cache was fetched;
+the verifier now passes. Stage 31 process-crash isolation and Stage 32.7
+diagnostic filtering passed on 1/2/4 CPUs. Native capture devices, IPP network
+transport/printer certification, signed external SBOM attestation, and
+independent security review are not inferred from these software gates.

@@ -132,6 +132,7 @@ pub mod terminal {
 }
 pub mod abi;
 pub mod accessibility;
+pub mod audio;
 pub mod clipboard;
 pub mod desktop_services;
 pub mod file_dialog;
@@ -144,6 +145,7 @@ pub mod browser;
 pub mod javascript;
 pub mod codecs;
 pub mod i18n;
+pub mod ipp;
 pub mod keyboard_layout;
 pub mod unicode_data;
 pub mod icons;
