@@ -1,2 +1,8 @@
 [unstable]
 bindeps = true
+
+# All acceptance builds must be reproducible from the checked-in lockfile and
+# the local Cargo cache. Nested bootloader builds inherit this setting instead
+# of attempting an unreviewed crates.io download.
+[net]
+offline = true
