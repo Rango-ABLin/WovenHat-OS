@@ -308,7 +308,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 ) {
                     fail(8)
                 }
-                let _ = libwoven::print("WovenEditor: pointer updated\n");
+                log_pointer(pointer);
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
@@ -339,7 +339,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 ) {
                     fail(8)
                 }
-                let _ = libwoven::print("WovenEditor: pointer updated\n");
+                log_pointer(pointer);
             } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 {
                 let event = match message[4] {
                     1 => Some(InputEvent::Key(Key::Enter)),
@@ -407,6 +407,22 @@ fn save_note(text: &str) -> bool {
         }
     }
     result
+}
+
+fn log_pointer(pointer: Option<(u16, u16)>) {
+    let Some((x, y)) = pointer else {
+        let _ = libwoven::print("WovenEditor: pointer updated\n");
+        return;
+    };
+    let mut digits = [0u8; 20];
+    let x_text = libwoven::format_u64(u64::from(x), &mut digits);
+    let mut y_digits = [0u8; 20];
+    let y_text = libwoven::format_u64(u64::from(y), &mut y_digits);
+    let _ = libwoven::print("WovenEditor: pointer updated x=");
+    if let Ok(text) = core::str::from_utf8(x_text) { let _ = libwoven::print(text); }
+    let _ = libwoven::print(" y=");
+    if let Ok(text) = core::str::from_utf8(y_text) { let _ = libwoven::print(text); }
+    let _ = libwoven::print("\n");
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {
