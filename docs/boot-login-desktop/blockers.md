@@ -1,20 +1,18 @@
 # Blockers and remaining prerequisites
 
 Status: IN PROGRESS. Phase A is accepted. Phase B1 is accepted after its final matrix and full preservation gate.
-Bounded B2 kernel-image validation is accepted at 72be85aa. Full Phase B
-remains open for remaining boot policy and failure/trust qualification. Later phases remain
+Bounded B2 kernel-image validation is accepted at 72be85aa. B4 disk firmware-I/O
+failure qualification is accepted at 44f780cf. Full Phase B remains open for
+remaining boot policy and failure/trust qualification. Later phases remain
 behind the Phase B gate. This file does not claim all feasible software work
 has been completed.
 
 ## External qualification prerequisites
 
-- Actual virtual-trust preflight exited 2: swtpm is unavailable. A signed image,
-  development key/certificate and verified firmware enrollment were not supplied.
-  Installed CODE/VARS were inspected without executing a VM or modifying host
-  firmware. Evidence: audit-artifacts/boot-login-baseline-repair-20261104/
-  virtual-trust-preflight.json. Provisioned signing/trust inputs and a suitable
-  software-TPM environment are required before that gate can run. Do not invent
-  production keys or infer firmware Secure Boot from the software WBOT check.
+- Virtual Secure Boot/TPM qualification passed with the provisioned development
+  key, enrolled certificate, signed guest image and disposable TPM state.
+  Evidence: `audit-artifacts/virtual-trust/qualified-custom-ovmf.json`. This is
+  development-chain evidence, not production-key or physical-firmware evidence.
 - Physical TPM, GPU/input, removable media and real power-loss qualification
   remain unperformed. No physical device or host firmware was modified.
 
@@ -24,8 +22,11 @@ has been completed.
   existing logging/framebuffer settings only. Boot entry/timeout, alternate
   kernel path, root selection, recovery policy and command-line forwarding are
   still required. B2 covers selected malformed image structures and B3 covers
-  loader-data allocation failure; broader boot-information validation and
-  firmware disk/TFTP I/O, graphics, page-table and ExitBootServices failure
+  loader-data allocation failure. B4 adds source-bound disposable FAT fixtures
+  for a present directory instead of the kernel (`DiskFileIsDirectory`) and a
+  broken FAT chain (`DiskRead`), with 1/2/4-CPU and full-Windows acceptance.
+  Broader boot-information validation and firmware TFTP I/O, graphics,
+  page-table and ExitBootServices failure
   qualification remain Phase B work.
 - Kernel readiness and the actual first-userspace WovenInit/service dependency
   model are not implemented by this unit. The embedded /init stub and existing

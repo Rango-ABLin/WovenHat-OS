@@ -1,5 +1,19 @@
 # Stage status
 
+## Boot/login/desktop B4 disk firmware-I/O - 2026-11-05 - TESTED PASS (bounded unit)
+
+Runtime `44f780cf` adds two source-bound disposable FAT fixtures to the
+existing UEFI boot-policy harness: a kernel entry with directory metadata,
+which stops with `DiskFileIsDirectory`, and a deliberately broken FAT chain,
+which OVMF reports as `DiskRead`. Both stop before kernel handoff; a missing
+disk remains a normal TFTP-fallback condition. The fixture/harness matrix
+passed at 1/2/4 CPUs and the complete Windows preservation gate passed at
+`audit-artifacts/acceptance-20261105-150609-454/`, including 10 one-CPU, 30
+two-CPU and 20 four-CPU repeated memory boots and the 1/2/4 CPU networking
+and Stage10.4-10.7 checks. This accepts only the disk failure boundary; Phase
+B remains open for TFTP, graphics, page-table, ExitBootServices and broader
+policy work.
+
 ## Boot/login/desktop B1 configuration - 2026-11-04 - TESTED — PASS (bounded unit)
 
 The existing 0.11.17 UEFI runtime is retained under vendor/bootloader/uefi;

@@ -8979,3 +8979,6 @@ Next: Stage 32.19 live GDB COM2 client qualification.
 ## Codex - BLD-B4 disk firmware-I/O failure qualification (2026-11-05)
 
 Claim the bounded disk metadata/read-failure fixture work in `tools/boot-config-fixtures`, the existing source-bound QEMU harness and its host tests, plus the corresponding bootloader disk-resource diagnostic if a defect is demonstrated. The fixture must be disposable and derived from the production image builder; it may not access a host disk or weaken the accepted disk-missing-to-TFTP fallback. TFTP, strict graphics, page-table and ExitBootServices qualification are explicitly outside this claim. Cargo and QEMU chains remain serialized.
+## Codex - BLD-B4 accepted (2026-11-05)
+
+Runtime 44f780cf qualifies present-but-invalid disk metadata (`DiskFileIsDirectory`) and a broken FAT-chain read (`DiskRead`) through disposable source-bound UEFI images. The 18-case boot-policy matrix passed on 1/2/4 CPUs; full Windows preservation passed at acceptance-20261105-150609-454, including repeated 1/2/4-CPU memory boots, DNS/network and Stage10.4-10.7 gates. Missing disk retains the established TFTP fallback. This accepts only B4 disk I/O; TFTP, graphics, page-table, ExitBootServices and broader policy remain open.

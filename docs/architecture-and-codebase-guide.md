@@ -15,6 +15,13 @@ supported fields, compatibility and qualification limits.
 Bounded B2 structural kernel-image validation is accepted at 72be85aa; see
 `docs/boot-login-desktop/boot-image-validation.md`. It preserves the common
 mapper and BootInfo and does not establish image authenticity.
+Bounded B4 firmware-I/O qualification adds disposable production-image FAT
+fixtures for present-but-invalid disk metadata and a broken file chain. The
+loader preserves the legitimate absent-disk return used by TFTP fallback, but
+stops before handoff on `DiskFileIsDirectory` or `DiskRead`; the exact markers
+are asserted through source-hashed 1/2/4-CPU QEMU images. This does not yet
+qualify TFTP failure handling, strict graphics policy, page-table exhaustion,
+or `ExitBootServices` recovery.
 See `docs/boot-login-desktop/architecture.md` and `security-model.md` for
 actual source edges, audit gaps, and acceptance limits. No replacement stack
 or completed startup/security milestone is claimed by this audit.
