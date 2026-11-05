@@ -1,5 +1,58 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file TooLarge atomicity proof
+
+Branch: `auto/wovenhat-development` (base `dd8c9998`). Working tree was clean.
+
+### Defect / gap
+
+`write_file` calls `stage_write`, which checks `data.len() > MAX_FILE_SIZE` (wfs.rs
+line ~1160) and returns `Err(TooLarge)` before `inode_staged`, any `txn.stage`, or
+`commit`. The existing `a_file_larger_than_the_direct_block_limit_is_refused` test
+verified the correct error variant and that `volume.check()` passed, but it did not
+snapshot the raw sector image before or after the refused call. Without that snapshot
+the test suite could not prove zero sector writes occurred; it only confirmed the
+logical view.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — enhanced
+`a_file_larger_than_the_direct_block_limit_is_refused`:
+
+- Added a doc comment describing which guard fires: `data.len() > MAX_FILE_SIZE` →
+  `Err(TooLarge)` before any sector is staged or committed.
+- Added an inline comment on the `oversized` variable explaining why `MAX_FILE_SIZE + 1`
+  triggers the guard.
+- Added `let before = base.sectors();` immediately after `create` succeeds.
+- Added error message to the `assert_eq!` on the refused call.
+- Added `assert!(base.sectors() == before, "a refused write_file must not modify the
+  image")` after the refused call.
+- Added a control case using `base.fork(None)`: writes exactly `MAX_FILE_SIZE` bytes
+  and reads them back, confirming the guard fires at strictly greater-than and that the
+  content is preserved.
+
+No production code changed. The test count is unchanged at 107 (existing test
+enhanced; no new `#[test]` added).
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **107 passed / 0 failed** |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- The snapshot assertion covers only the `TooLarge` path in `stage_write`; the
+  `NotFound` and `NotADirectory` paths in the same function are not exercised here.
+- The control case uses a fork of `base` (which includes the previously committed
+  `create`); it does not start from a fresh formatted image.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: atomicity proof for unlink refused by oversized name_len field
 
 Branch: `auto/wovenhat-development` (base `07270a93`). Working tree was clean.

@@ -370,17 +370,41 @@ fn a_torn_journal_payload_is_rejected_by_the_commit_checksum() {
     recovered.read_dir(1).expect("root readable");
 }
 
+/// `stage_write` (called by `write_file`) checks `data.len() > MAX_FILE_SIZE` (wfs.rs
+/// line ~1160) before `inode_staged`, any `txn.stage`, or `commit`, so the image is
+/// completely unmodified when the call is refused.
 #[test]
 fn a_file_larger_than_the_direct_block_limit_is_refused() {
     let base = formatted();
     let mut volume = Volume::mount(base.clone()).expect("mount");
+    // create succeeds and commits; snapshot the image at that point.
     let inode = volume.create(1, "big.bin", 0o644, 1).expect("create");
-    let oversized = vec![0u8; MAX_FILE_SIZE + 1];
+    let oversized = vec![0u8; MAX_FILE_SIZE + 1]; // MAX_FILE_SIZE + 1 triggers the guard
+    let before = base.sectors();
     assert_eq!(
         volume.write_file(inode, &oversized, 2),
-        Err(Error::TooLarge)
+        Err(Error::TooLarge),
+        "write_file must refuse data exceeding MAX_FILE_SIZE"
+    );
+    assert!(
+        base.sectors() == before,
+        "a refused write_file must not modify the image"
     );
     volume.check().expect("refusal left the volume consistent");
+
+    // Control: exactly MAX_FILE_SIZE bytes is accepted.
+    let image = base.fork(None);
+    let mut v = Volume::mount(image.clone()).expect("mount");
+    let max_data = vec![0xabu8; MAX_FILE_SIZE];
+    v.write_file(inode, &max_data, 3)
+        .expect("write of exactly MAX_FILE_SIZE must succeed");
+    let mut out = vec![0u8; MAX_FILE_SIZE];
+    assert_eq!(
+        v.read_file(inode, &mut out),
+        Ok(MAX_FILE_SIZE),
+        "control: file at MAX_FILE_SIZE must read back correctly"
+    );
+    assert_eq!(&out, &max_data, "control: read-back content must match");
 }
 
 #[test]
