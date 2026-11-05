@@ -9061,3 +9061,13 @@ feature compiles and lint-checks, but current QEMU's `wav` backend exposes no
 input source, so capture-specific QEMU hardware input qualification remains
 open and is isolated behind `stage13-15-capture-test`.
 
+## Codex - userspace network plumbing for secure IPP handoff (2026-11-05)
+
+Added `libwoven::network` wrappers for the existing bounded kernel TCP/DNS
+ABI. Socket ownership closes on drop; unfinished DNS queries cancel on drop;
+endpoint packing, socket kinds, host tests, and warning-denying Clippy pass.
+This is only the transport handoff for IPP. It does not claim TLS: the OS
+still lacks a kernel/service TLS handshake, certificate-chain and hostname
+validation implementation, trust-store policy, and a reachable certified
+printer for end-to-end qualification.
+

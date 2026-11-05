@@ -12932,3 +12932,14 @@ the timestamped `audit-artifacts/stage13.*cpu-*` directories, including the
 current sweep at source tip. This is deterministic QEMU/software acceptance;
 physical hardware, radio interoperability, and certification remain separate.
 
+## Secure IPP transport handoff - 2026-11-05 - SOFTWARE PLUMBING PASS / TLS OPEN
+
+`libwoven::network` now exposes safe wrappers over the existing bounded kernel
+TCP/DNS ABI, including explicit TCP/UDP socket kinds, endpoint packing, bind,
+send/receive, and RAII cancellation of unfinished DNS queries. Host tests and
+warning-denying Clippy pass. The IPP client remains HTTPS-only and requires a
+`SecureTransport` implementation. No plaintext adapter was added: a real
+release implementation still needs an OS TLS service with handshake,
+certificate-chain and hostname validation, trust-store/revocation policy,
+and an end-to-end run against a reachable certified IPP printer.
+

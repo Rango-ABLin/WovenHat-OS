@@ -153,6 +153,8 @@ pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
 pub mod media;
+#[path = "net.rs"]
+pub mod network;
 pub mod dynamic_tls;
 pub mod elf_loader;
 pub mod module_namespace;
@@ -12440,6 +12442,20 @@ pub mod syscall {
     pub const CHDIR: u64 = 20;
     pub const GETCWD: u64 = 21;
     pub const GETPPID: u64 = 25;
+    pub const SOCKET: u64 = 37;
+    pub const BIND: u64 = 38;
+    pub const CONNECT: u64 = 39;
+    pub const NET_SEND: u64 = 40;
+    pub const NET_RECV: u64 = 41;
+    pub const NET_CLOSE: u64 = 42;
+    pub const NET_INFO: u64 = 43;
+    pub const DNS_START: u64 = 44;
+    pub const DNS_POLL: u64 = 45;
+    pub const DNS_CANCEL: u64 = 97;
+    pub const NET_PEER: u64 = 46;
+    pub const DHCP: u64 = 47;
+    pub const PING_START: u64 = 48;
+    pub const PING_POLL: u64 = 49;
     pub const KILL: u64 = 26;
     pub const LSEEK: u64 = 27;
     /// Map an open file's contents read-only and demand-paged (no write
