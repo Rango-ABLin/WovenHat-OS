@@ -1,5 +1,71 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: sector-level atomicity proof for write_file when data blocks are exhausted
+
+Branch: `auto/wovenhat-development` (base `b497bd50`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1178) calls `self.allocate_block(txn)` for each new
+data block a write requires.  When `allocate_block` returns `Err(NoSpace)` —
+all data blocks taken — `stage_write` propagates the error and `commit` is
+never reached, so no sector is written to disk.
+
+The existing test `create_file_out_of_space_leaves_no_file` exercises this path
+indirectly via the `create + write_file` sequence: it verifies that the empty
+orphan file still exists after the refused write (the logical outcome) but does
+not snapshot the raw sector bytes before the refused call.  Without that snapshot
+it cannot prove that no sector write reached the disk — only that the logical
+view is consistent.  No prior test exercised `write_file`'s own `NoSpace` path
+with a sector-level image-unmodified assertion.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace`:
+
+- Uses an 80-sector volume (same geometry as `data_full_volume()`).
+- Creates an empty file `target.txt` via `create` (no data block consumed).
+- Two-pass fill to exhaust all data blocks:
+  - Pass 1: `create_file` with `MAX_FILE_SIZE` payload until `NoSpace`
+    (fills 4 × 8 = 32 of the 34 available data blocks, leaving 2 free).
+  - Pass 2: `create_file` with a 1-byte payload until `NoSpace`
+    (fills the remaining 2 blocks, so 0 free blocks remain).
+- Snapshots the completely-full image before any refused call.
+- Calls `write_file(target_inode, b"hello", 2)`.
+- Asserts the result is `Err(Error::NoSpace)`.
+- Asserts the raw sector image is byte-for-byte unchanged from the snapshot.
+- Controls: `target.txt` is still present in the directory; all fill files
+  remain accessible; `check()` confirms the volume is consistent.
+
+Also applied `cargo fmt --all` to fix pre-existing formatting drift in earlier
+test functions (no logic changes, diffs are purely cosmetic line-wrapping).
+
+No production code changed.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `cargo test --test wovenfs_crash` | PASS, **105 passed / 0 failed** (was 104; new test added) |
+| `cargo test -p wovenhat-os --tests --no-fail-fast` | PASS, **105 passed / 0 failed** |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (default) | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-5-test -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Uses an 80-sector volume so data blocks (not inodes or directory slots) are
+  the binding constraint; filling yields 4 large + 2 small files.
+- The snapshot assertion proves zero sector writes occurred on the refused call
+  (transaction staged but never committed).
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: sector-level atomicity proof for create_file when data blocks are exhausted
 
 Branch: `auto/wovenhat-development` (base `79737e8f`). Working tree was clean.

@@ -1,4 +1,4 @@
-﻿//! Exhaustive crash-recovery proof for WovenFS.
+//! Exhaustive crash-recovery proof for WovenFS.
 //!
 //! These tests do not assert that recovery works in general; they enumerate
 //! every point at which an operation can lose power and check the result at
@@ -2093,9 +2093,21 @@ fn check_refuses_a_directory_entry_with_nonzero_bytes_beyond_name_len() {
     // byte, a mid-range byte, and the last byte of the name field.
     let name_len = 5usize; // "a.txt"
     let cases: &[(usize, &[u8], &str)] = &[
-        (16 + name_len,           &[0xFF], "first byte beyond name_len (offset 21)"),
-        (16 + name_len + 10,      &[0x01], "mid-range byte beyond name_len (offset 31)"),
-        (16 + MAX_NAME - 1,       &[0x80], "last byte of the name field (offset 63)"),
+        (
+            16 + name_len,
+            &[0xFF],
+            "first byte beyond name_len (offset 21)",
+        ),
+        (
+            16 + name_len + 10,
+            &[0x01],
+            "mid-range byte beyond name_len (offset 31)",
+        ),
+        (
+            16 + MAX_NAME - 1,
+            &[0x80],
+            "last byte of the name field (offset 63)",
+        ),
     ];
 
     for &(at, patch, label) in cases {
@@ -2426,7 +2438,11 @@ fn read_file_succeeds_for_an_empty_file() {
     );
     // check() must also pass: a freshly-created empty file is structurally
     // consistent — it has no blocks, so no block or checksum checks apply.
-    assert_eq!(volume.check(), Ok(()), "empty file must not make check() fail");
+    assert_eq!(
+        volume.check(),
+        Ok(()),
+        "empty file must not make check() fail"
+    );
 }
 
 /// `check()` must refuse an image that contains a live `KIND_FILE` inode with
@@ -2541,7 +2557,9 @@ fn check_refuses_a_zero_size_file_with_nonzero_data_checksum() {
     let base = formatted();
     let file_inode = {
         let mut volume = Volume::mount(base.clone()).expect("mount");
-        volume.create(1, "empty.txt", 0o600, 1).expect("create empty file")
+        volume
+            .create(1, "empty.txt", 0o600, 1)
+            .expect("create empty file")
     };
 
     let corrupt = base.fork(None);
@@ -2583,7 +2601,10 @@ fn check_refuses_root_directory_inode_with_nonzero_data_checksum() {
         let volume = Volume::mount(base.clone()).expect("mount");
         volume.super_block().root_inode
     };
-    assert_eq!(root_inode, 1, "sanity: root inode is always 1 on a fresh volume");
+    assert_eq!(
+        root_inode, 1,
+        "sanity: root inode is always 1 on a fresh volume"
+    );
 
     let corrupt = base.fork(None);
     // Set data_checksum to fnv1a(b"corrupt") — a non-zero value.
@@ -2626,7 +2647,10 @@ fn check_refuses_root_directory_inode_with_wrong_size() {
         let volume = Volume::mount(base.clone()).expect("mount");
         volume.super_block().root_inode
     };
-    assert_eq!(root_inode, 1, "sanity: root inode is always 1 on a fresh volume");
+    assert_eq!(
+        root_inode, 1,
+        "sanity: root inode is always 1 on a fresh volume"
+    );
 
     for size in [0u64, 1, SECTOR_SIZE as u64 - 1, SECTOR_SIZE as u64 + 1] {
         let corrupt = base.fork(None);
@@ -2681,7 +2705,10 @@ fn check_refuses_root_directory_inode_with_zero_first_direct_block() {
         Err(Error::Corrupt),
         "check() must refuse root directory inode with direct[0] == 0"
     );
-    assert!(corrupt.sectors() == before, "check() must not modify the image");
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
 
     // Control: the unpatched volume passes check().
     let mut clean = Volume::mount(base).expect("mount clean");
@@ -2739,7 +2766,10 @@ fn check_refuses_root_directory_inode_with_nonzero_extra_direct_block() {
         Err(Error::Corrupt),
         "check() must refuse a root directory inode with non-zero direct[1]"
     );
-    assert!(corrupt.sectors() == before, "check() must not modify the image");
+    assert!(
+        corrupt.sectors() == before,
+        "check() must not modify the image"
+    );
 
     // Control: the unpatched volume passes check().
     let mut clean = Volume::mount(base).expect("mount clean");
@@ -3159,7 +3189,10 @@ fn check_refuses_root_directory_inode_with_nonzero_created_timestamp() {
         let volume = Volume::mount(base.clone()).expect("mount");
         volume.super_block().root_inode
     };
-    assert_eq!(root_inode, 1, "sanity: root inode is always 1 on a fresh volume");
+    assert_eq!(
+        root_inode, 1,
+        "sanity: root inode is always 1 on a fresh volume"
+    );
 
     // `format()` builds the root inode via `Inode::empty()`, which zeroes
     // every field including `created`.  Only `stage_create` ever writes a
@@ -3336,7 +3369,13 @@ fn check_refuses_a_directory_entry_with_inode_number_out_of_range() {
     // Patch a.txt's directory entry inode field (bytes 0–7) to INODES + 1
     // (= 33), which is one past the end of the inode table (inode_count = 32).
     let image = base.fork(None);
-    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+    patch_dir_entry(
+        &image,
+        block,
+        index,
+        0,
+        &(u64::from(INODES) + 1).to_le_bytes(),
+    );
     // Snapshot after patching: check() must not write anything.
     let before = image.sectors();
 
@@ -3609,7 +3648,10 @@ fn check_refuses_two_file_inodes_naming_the_same_block() {
         let b_node = volume.inode(b_inode).expect("b inode");
         (a_node.direct[0], b_node.direct[0])
     };
-    assert_ne!(block_a, block_b, "fresh allocation must give distinct blocks");
+    assert_ne!(
+        block_a, block_b,
+        "fresh allocation must give distinct blocks"
+    );
 
     let image = base.fork(None);
     // Point b.txt at a.txt's block; re-seals b.txt's inode checksum.
@@ -4140,7 +4182,11 @@ fn read_file_refuses_a_buffer_smaller_than_the_file() {
         Ok(5),
         "read_file must succeed with a buffer larger than the file"
     );
-    assert_eq!(&big[..5], b"hello", "large-buffer content prefix must match");
+    assert_eq!(
+        &big[..5],
+        b"hello",
+        "large-buffer content prefix must match"
+    );
 }
 
 #[test]
@@ -4625,11 +4671,7 @@ fn read_file_refuses_a_file_with_a_mismatched_data_checksum() {
         .read_file(file_inode, &mut out)
         .expect("control read_file");
     assert_eq!(n, 11, "control: file must read back 11 bytes");
-    assert_eq!(
-        &out[..11],
-        b"hello world",
-        "control: content must match"
-    );
+    assert_eq!(&out[..11], b"hello world", "control: content must match");
 
     // Fork and flip one byte in the data block without touching the inode.
     // The stored data_checksum no longer matches the on-disk content.
@@ -4794,7 +4836,13 @@ fn lookup_refuses_an_entry_naming_an_out_of_range_inode() {
     // Patch a.txt's directory entry inode field (bytes 0–7) to inode_count + 1,
     // which is one past the last valid inode slot.
     let image = base.fork(None);
-    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+    patch_dir_entry(
+        &image,
+        block,
+        index,
+        0,
+        &(u64::from(INODES) + 1).to_le_bytes(),
+    );
 
     // Snapshot: lookup must not write anything.
     let before = image.sectors();
@@ -4975,7 +5023,10 @@ fn unlink_refuses_a_file_that_shares_a_data_block_with_another_file() {
     // Record the data blocks allocated to a.bin and b.bin.
     let a_block = read_inode_direct0(&base, a_inode);
     let b_block = read_inode_direct0(&base, b_inode);
-    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+    assert_ne!(
+        a_block, b_block,
+        "fresh allocator must give distinct blocks"
+    );
 
     // Fork and redirect b_inode's direct[0] to a_block.  After this both
     // a.bin and b.bin name a_block.  b_block is orphaned in the bitmap but
@@ -5004,7 +5055,9 @@ fn unlink_refuses_a_file_that_shares_a_data_block_with_another_file() {
     // Control: on the unpatched image, unlink of a.bin succeeds.
     let ctrl = base.fork(None);
     let mut volume = Volume::mount(ctrl.clone()).expect("mount");
-    volume.unlink(1, "a.bin", 2).expect("control: unlink must succeed");
+    volume
+        .unlink(1, "a.bin", 2)
+        .expect("control: unlink must succeed");
     mount_consistent(&ctrl, "after a valid unlink");
 }
 
@@ -5144,7 +5197,13 @@ fn unlink_refuses_an_entry_naming_an_out_of_range_inode() {
     // which is one past the last valid inode slot.  Directory blocks carry no
     // checksum, so the patch takes effect immediately with no re-sealing.
     let image = base.fork(None);
-    patch_dir_entry(&image, block, index, 0, &(u64::from(INODES) + 1).to_le_bytes());
+    patch_dir_entry(
+        &image,
+        block,
+        index,
+        0,
+        &(u64::from(INODES) + 1).to_le_bytes(),
+    );
 
     // Snapshot: unlink must not write anything.
     let before = image.sectors();
@@ -5464,7 +5523,9 @@ fn create_refuses_when_all_inodes_are_exhausted() {
     let mut out = vec![0u8; MAX_FILE_SIZE];
     let len = volume.read_file(2, &mut out).expect("read first.txt");
     assert_eq!(&out[..len], b"hello");
-    volume.check().expect("volume consistent after refused creates");
+    volume
+        .check()
+        .expect("volume consistent after refused creates");
 }
 
 /// `stage_create` (wfs.rs line 1101) scans `view.entries` for any entry
@@ -5530,14 +5591,18 @@ fn create_refuses_a_duplicate_name() {
     let entry = volume.lookup(1, "hello.txt").expect("lookup hello.txt");
     assert_eq!(entry.inode, orig_inode, "original inode must be unchanged");
     let mut out = vec![0u8; MAX_FILE_SIZE];
-    let len = volume.read_file(orig_inode, &mut out).expect("read hello.txt");
+    let len = volume
+        .read_file(orig_inode, &mut out)
+        .expect("read hello.txt");
     assert_eq!(&out[..len], b"world", "original content must be intact");
 
     // Control: a different name still creates successfully.
     volume
         .create(1, "other.txt", 0o644, 3)
         .expect("create other.txt with different name must succeed");
-    volume.check().expect("volume consistent after refused creates");
+    volume
+        .check()
+        .expect("volume consistent after refused creates");
 }
 
 /// `stage_create` (wfs.rs line 1093) rejects three classes of invalid name
@@ -5639,7 +5704,9 @@ fn create_refuses_an_invalid_name() {
     volume
         .create(1, "ok.txt", 0o644, 3)
         .expect("create with short valid name must succeed");
-    volume.check().expect("volume consistent after refused creates");
+    volume
+        .check()
+        .expect("volume consistent after refused creates");
 }
 
 /// `create_file` (wfs.rs line 1066) calls `stage_create` and `stage_write` in a
@@ -5719,4 +5786,129 @@ fn create_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace() {
     volume
         .check()
         .expect("volume must be consistent after a refused create_file");
+}
+
+/// `stage_write` (wfs.rs line 1178) calls `self.allocate_block(txn)` for each
+/// new data block a write requires.  When `allocate_block` returns `Err(NoSpace)`
+/// (all data blocks taken), `stage_write` propagates the error and `commit` is
+/// never reached, so no sector is written to disk.
+///
+/// The existing test `create_file_out_of_space_leaves_no_file` exercises this
+/// path indirectly via the `create + write_file` sequence: it verifies that the
+/// empty orphan file still exists after the refused write (the logical outcome)
+/// but does not snapshot the raw sector bytes before the refused call.  Without
+/// that snapshot it cannot prove that no sector write reached the disk — only
+/// that the logical view is consistent.
+///
+/// This test adds the sector-level atomicity proof for the `write_file` path:
+/// when all data blocks are taken and an existing empty file needs a new block,
+/// `write_file` returns `Err(NoSpace)` and the image is byte-for-byte identical
+/// to the snapshot taken before the refused call.
+///
+/// The fill uses two passes to exhaust every data block:
+///  1. `MAX_FILE_SIZE` files (8 blocks each) fill the bulk of the data region.
+///  2. Single-block files (one byte each) fill the remaining blocks.
+///
+/// After both passes `allocate_block` finds no free block, so even a 1-byte
+/// write to the empty file fails.
+#[test]
+fn write_file_refuses_when_no_data_blocks_remain_and_leaves_no_trace() {
+    // 80-sector volume: same geometry as data_full_volume().  Data blocks, not
+    // inodes or directory slots, are the binding constraint on a full volume.
+    let disk = CrashDisk::blank_sized(80);
+    Volume::format(disk.clone(), INODES).expect("format");
+
+    // Create an empty file first.  `create` allocates an inode and a directory
+    // entry but no data block, so the file consumes no space from the data region.
+    let target_inode = {
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        volume
+            .create(1, "target.txt", 0o600, 1)
+            .expect("create empty target file")
+    };
+
+    // Pass 1: fill with full-size files until a full-size file no longer fits.
+    let large_count = {
+        let payload = vec![1u8; MAX_FILE_SIZE];
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        let mut count = 0usize;
+        loop {
+            let name = format!("large{count}");
+            match volume.create_file(1, &name, 0o644, &payload, 1) {
+                Ok(_) => count += 1,
+                Err(Error::NoSpace) => break,
+                Err(err) => panic!("large fill {name}: {err:?}"),
+            }
+        }
+        count
+    };
+
+    // Pass 2: fill the remaining (< 8) data blocks with 1-byte files.
+    let small_count = {
+        let mut volume = Volume::mount(disk.clone()).expect("mount");
+        let mut count = 0usize;
+        loop {
+            let name = format!("small{count}");
+            match volume.create_file(1, &name, 0o644, b"x", 1) {
+                Ok(_) => count += 1,
+                Err(Error::NoSpace) => break,
+                Err(err) => panic!("small fill {name}: {err:?}"),
+            }
+        }
+        count
+    };
+
+    // After both passes every data block is allocated.
+    assert!(
+        large_count > 0,
+        "expected at least one large fill file to succeed"
+    );
+
+    // Snapshot the completely full image before any refused call.
+    let snapshot = disk.sectors();
+
+    let mut volume = Volume::mount(disk.clone()).expect("mount");
+
+    // write_file must fail: `allocate_block` finds no free data block.
+    assert_eq!(
+        volume.write_file(target_inode, b"hello", 2),
+        Err(Error::NoSpace),
+        "write_file must refuse when no data blocks remain"
+    );
+
+    // No sector must have been written.  `stage_write` staged a bitmap update
+    // in the transaction buffer but never called `commit`.
+    assert!(
+        disk.sectors() == snapshot,
+        "a refused write_file must not modify any sector"
+    );
+
+    // The target file must still appear in the directory; write_file does not
+    // modify the directory entry even on failure.
+    assert_eq!(
+        volume.lookup(1, "target.txt").map(|e| e.inode),
+        Ok(target_inode),
+        "the target file must remain in the directory after the refused write"
+    );
+
+    // All fill files must remain accessible.
+    for i in 0..large_count {
+        let name = format!("large{i}");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused write_file"
+        );
+    }
+    for i in 0..small_count {
+        let name = format!("small{i}");
+        assert!(
+            volume.lookup(1, &name).is_ok(),
+            "{name}: must remain accessible after the refused write_file"
+        );
+    }
+
+    // The volume must still be consistent.
+    volume
+        .check()
+        .expect("volume must be consistent after a refused write_file");
 }
