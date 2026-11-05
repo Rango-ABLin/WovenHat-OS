@@ -1,5 +1,84 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: create refuses when a free inode has a corrupt structural checksum (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `6f37ff03`). Working tree was clean.
+
+### Defect / gap
+
+`allocate_inode` (wfs.rs ~line 934) scans inodes from 2 to `inode_count`
+calling `inode_staged(txn, number)` on each slot.  `inode_staged` calls
+`checked_inode`, which calls `Inode::decode(raw)`:
+
+- If `raw[..INODE_SIZE]` is all-zero → fast path: `Some(Inode::empty())` (free inode).
+- Otherwise: checks the structural FNV-1a checksum at bytes 120–127.  A
+  mismatch returns `None` → `Err(Error::Corrupt)`.
+
+A free inode slot is normally all-zero (written by `format` and zeroed on
+every `unlink`).  If bit rot or an incomplete zero leaves the slot non-all-zero,
+`Inode::decode` skips the fast path, finds the stored checksum mismatches
+bytes 0–119, and returns `None` → `Err(Corrupt)`.
+
+No prior test proved that this guard:
+1. Returns `Err(Corrupt)` (not `NoSpace` or some other error), and
+2. Leaves the image byte-for-byte identical (no staged sectors committed).
+
+The analogous guard where `inode_staged(txn, dir_inode)?` encounters a bad
+checksum is covered by
+`create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`.  The
+path where `allocate_inode`'s scan loop itself encounters a bad free-inode
+checksum was not separately tested.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_refuses_when_a_free_inode_has_a_corrupt_structural_checksum_and_leaves_no_trace`:
+
+- Uses `formatted()` as the base.
+- Creates `a.txt` → allocates inode 2; inode 3 is now the first free inode
+  the allocator would choose next.
+- Forks the image (`corrupt = base.fork(None)`).
+- Corrupts inode 3's structural checksum: flips byte at `inode_start * 512 +
+  2*128 + 120` (the first byte of inode 3's FNV-1a checksum field).
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.create(1, "new.txt", 0o644, 2)`:
+  - `stage_create` → `allocate_inode`:
+    - scan inode 2 → `is_used = true` → continue
+    - scan inode 3 → `Inode::decode` returns `None` → `Err(Corrupt)`
+  - `stage_create` returns `Err(Corrupt)`.  No staging occurred.
+  - `create` returns `Err(Corrupt)` without calling `commit`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — no sector written.
+- Calls `volume.create_file(1, "new.txt", 0o644, b"data", 2)` — same path,
+  same result.
+- Asserts `Err(Error::Corrupt)` and `corrupt.sectors() == before`.
+- Control: on the unpatched `base`, `create_file` succeeds and returns `Ok(3)`.
+
+No production code changed.  Test count: 117 → 118.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **118 passed / 0 failed** (was 117; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `allocate_inode` bad-checksum guard: `stage_create`
+  returns `Err(Corrupt)` with zero staged sectors and zero disk writes.
+- Together with `create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`,
+  all inode-checksum failure paths in `stage_create` are now covered:
+  - Directory inode bad checksum → `inode_staged(txn, dir_inode)?` fires first.
+  - Free file-inode bad checksum → `allocate_inode`'s scan loop fires. ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: create_file atomic when refuse_shared_blocks triggers in stage_write (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `e8d6eec2`). Working tree was clean.

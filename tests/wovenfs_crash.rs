@@ -7047,3 +7047,109 @@ fn create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_lea
         assert_eq!(out[0], 42u8);
     }
 }
+
+/// `allocate_inode` (wfs.rs ~line 934) scans inodes from 2 to `inode_count`
+/// looking for the first free slot.  For each candidate it calls
+/// `inode_staged(txn, number)`, which invokes `checked_inode`, which calls
+/// `Inode::decode(raw)`:
+///
+/// ```text
+/// if raw[..INODE_SIZE].iter().all(|byte| *byte == 0) {
+///     return Some(Self::empty());   // all-zero → free inode, skip checksum
+/// }
+/// if read_u64(raw, INODE_CHECKSUM_AT) != fnv1a(&raw[..INODE_CHECKSUM_AT]) {
+///     return None;   // bad checksum → Err(Corrupt)
+/// }
+/// ```
+///
+/// A free inode slot is normally all-zero (written by `format` and zeroed on
+/// every `unlink`).  If bit rot or an incomplete zero leaves the slot
+/// non-all-zero, `Inode::decode` skips the fast path and finds the stored
+/// checksum mismatches bytes 0–119 → returns `None` → `Err(Corrupt)`.
+///
+/// When `allocate_inode` hits such a slot, it propagates `Err(Corrupt)`
+/// through `stage_create` before staging anything in the transaction.
+/// Both `create` and `create_file` go through `stage_create` →
+/// `allocate_inode`, so this test covers both public entry points.
+///
+/// `create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+/// covers the analogous path where `inode_staged(txn, dir_inode)?` encounters
+/// a bad checksum; this test covers the case where a **free file-inode** slot
+/// in the allocator scan carries a bad checksum.
+#[test]
+fn create_refuses_when_a_free_inode_has_a_corrupt_structural_checksum_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create one file: this allocates inode 2, leaving inode 3 as the first
+    // free inode that allocate_inode would choose on the next create.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+    }
+
+    // Fork and corrupt inode 3's structural checksum.  Inode 3 is an
+    // all-zero free slot.  Flipping a byte in the checksum field (offset 120
+    // within the inode slot) makes the slot non-all-zero: `Inode::decode`
+    // skips the all-zero fast path, then finds the stored checksum does not
+    // match the FNV-1a of bytes 0–119, and returns None → Err(Corrupt).
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        // Inode 3: index = 2.  Four inodes per sector; each slot is 128 bytes.
+        let lba = inode_start as usize; // index / 4 = 0 → first inode sector
+        let offset = 2 * 128; // index % 4 = 2 → slot 2 → byte offset 256
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a free-inode slot with a bad structural checksum"
+    );
+
+    // Snapshot: neither create nor create_file must modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // create must refuse: stage_create → allocate_inode scans inode 2 (used),
+    // then inode 3 → inode_staged(3) → checked_inode → Inode::decode returns
+    // None → Err(Corrupt).  No sector is staged or committed.
+    assert_eq!(
+        volume.create(1, "new.txt", 0o644, 2),
+        Err(Error::Corrupt),
+        "create must refuse when a free inode has a corrupt structural checksum"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "a refused create must not modify the image"
+    );
+
+    // create_file uses the same stage_create → allocate_inode path.
+    assert_eq!(
+        volume.create_file(1, "new.txt", 0o644, b"data", 2),
+        Err(Error::Corrupt),
+        "create_file must refuse when a free inode has a corrupt structural checksum"
+    );
+    assert!(
+        corrupt.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // Control: on the unpatched base image, create_file succeeds and returns
+    // inode 3 (the first free inode after inode 2).
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.create_file(1, "new.txt", 0o644, b"data", 2),
+            Ok(3),
+            "control: create_file must succeed on the unpatched image and return inode 3"
+        );
+    }
+}
