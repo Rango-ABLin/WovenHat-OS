@@ -4784,3 +4784,13 @@ installed-image harness provisions a GPT WovenFS system partition and reaches
 the qualification marker on 1/2/4 CPUs. This is disposable-image
 qualification only; physical power-loss and removable-hardware qualification
 remain separate release gates.
+### Locale and input policy boundary
+
+`libwoven::keyboard_layout` translates physical PS/2 set-1 positions into
+locale characters without changing the kernel `Key` ABI. It includes the
+common ISO/ANSI layouts, AltGr policy, and a fixed one-dead-key IME composer.
+`libwoven::unicode_data` exposes checked scalar script/category/combining/RTL
+properties for fallback shaping and input policy. Its UAX#9 ordering remains
+provided by the existing `unicode-bidi` hardcoded tables. Installer-generated
+`etc/wovenhat/settings.json` stores a canonical locale derived from the
+keyboard selection, and WovenShell restores it before rendering.

@@ -44,6 +44,29 @@ impl Locale {
         region: *b"SA",
     };
 
+    /// Parse the canonical persisted `language-REGION` tag.  The parser is
+    /// deliberately case-tolerant for provisioning files but only accepts
+    /// locales with a reviewed desktop catalog.
+    pub fn parse_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "en-US" | "en_US" | "en-us" => Some(Self::EN_US),
+            "en-GB" | "en_GB" | "en-gb" => Some(Self::EN_GB),
+            "ny-MW" | "ny_MW" | "ny-mw" => Some(Self::NY_MW),
+            "ar-SA" | "ar_SA" | "ar-sa" => Some(Self::AR_SA),
+            _ => None,
+        }
+    }
+
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::EN_US => "en-US",
+            Self::EN_GB => "en-GB",
+            Self::NY_MW => "ny-MW",
+            Self::AR_SA => "ar-SA",
+            _ => "en-US",
+        }
+    }
+
     pub const fn direction(self) -> Direction {
         match self.language {
             Language::Arabic => Direction::RightToLeft,

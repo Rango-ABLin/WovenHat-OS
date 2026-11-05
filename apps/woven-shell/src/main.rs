@@ -3709,6 +3709,11 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     let _ = libwoven::close(descriptor);
     let Ok(length) = read else { return };
     let data = &bytes[..length.min(bytes.len())];
+    if let Some(locale) = json_string(data, b"locale")
+        .and_then(libwoven::i18n::Locale::parse_tag)
+    {
+        desktop.language = locale.language;
+    }
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
     if settings.high_contrast {
@@ -3717,6 +3722,29 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     if settings.reduced_motion {
         desktop.reduced_motion = true;
     }
+}
+
+/// Read one bounded JSON string field from the installed settings envelope.
+/// This is intentionally narrower than a general JSON parser: settings are a
+/// kernel-provisioned record and malformed or escaped values are ignored.
+fn json_string<'a>(data: &'a [u8], key: &[u8]) -> Option<&'a str> {
+    let mut needle = [0u8; 32];
+    let length = 2usize.checked_add(key.len())?;
+    if length > needle.len() {
+        return None;
+    }
+    needle[0] = b'\"';
+    needle[1..1 + key.len()].copy_from_slice(key);
+    needle[1 + key.len()] = b'\"';
+    let start = data.windows(length).position(|window| window == &needle[..length])?;
+    let rest = &data[start + length..];
+    let colon = rest.iter().position(|byte| *byte == b':')?;
+    let quoted = &rest[colon + 1..];
+    if quoted.first().copied()? != b'\"' {
+        return None;
+    }
+    let end = quoted[1..].iter().position(|byte| *byte == b'\"')? + 1;
+    core::str::from_utf8(&quoted[1..end]).ok()
 }
 
 mod input;

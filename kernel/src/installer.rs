@@ -111,6 +111,12 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
         .map_err(|_| Error::Provisioning)?;
     let keyboard = core::str::from_utf8(&plan.keyboard[..plan.keyboard_len])
         .map_err(|_| Error::Provisioning)?;
+    let locale = match keyboard {
+        "gb" | "uk" => "en-GB",
+        "ny" | "ny-MW" => "ny-MW",
+        "ar" | "ar-SA" => "ar-SA",
+        _ => "en-US",
+    };
     let network =
         core::str::from_utf8(&plan.network[..plan.network_len]).map_err(|_| Error::Provisioning)?;
     let password = &plan.password[..plan.password_len];
@@ -125,7 +131,7 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
     push_hex(&mut digest_hex, &digest);
     let accounts = format!("{user}:{salt_hex}:{digest_hex}\n");
     let settings = format!(
-        "{{\"schema\":\"wovenhat-installed-v1\",\"user\":\"{user}\",\"timezone\":\"{timezone}\",\"keyboard\":\"{keyboard}\",\"network\":\"{network}\",\"high_contrast\":false,\"reduced_motion\":false}}\n"
+        "{{\"schema\":\"wovenhat-installed-v1\",\"user\":\"{user}\",\"timezone\":\"{timezone}\",\"keyboard\":\"{keyboard}\",\"locale\":\"{locale}\",\"network\":\"{network}\",\"high_contrast\":false,\"reduced_motion\":false}}\n"
     );
     fat32::create_path_file(
         &mut data,

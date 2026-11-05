@@ -8997,3 +8997,20 @@ Stages 10.4/10.5/10.6/10.7 all passed. The trust preflight remains
 `NOT_QUALIFIED` for missing external OVMF VARS, swtpm, disk image, and
 development signing inputs.
 
+## Codex - Locale, keyboard-layout, and Unicode data increment (2026-11-05)
+
+Added `libwoven::keyboard_layout` as the shared policy layer above the stable
+physical-key ABI. It covers the common ISO/ANSI desktop layouts (US, UK,
+German, French, Spanish, Swiss German, Italian, Portuguese, Nordic, and
+Arabic), AltGr mappings, and bounded dead-key IME composition with literal
+fallback when a pair is unsupported. Added `libwoven::unicode_data` with a
+versioned, allocation-free scalar property interface for scripts, categories,
+combining marks, and RTL detection; full UAX#9 remains delegated to the
+existing hardcoded `unicode-bidi` tables.
+
+Installed settings now persist a canonical `locale` field derived from the
+installer keyboard choice, and WovenShell reads that field before applying
+accessibility settings. Host `libwoven` tests and the shell target check pass.
+The physical keyboard matrix still uses the stable kernel event ABI; runtime
+layout selection is a userspace policy and does not alter that ABI.
+

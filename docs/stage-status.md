@@ -1,5 +1,19 @@
 # Stage status
 
+## S12 locale/input text increment - 2026-11-05 - ACCEPTED (SOFTWARE BOUNDARY)
+
+Added bounded shared keyboard-layout policy for ten common desktop layouts,
+AltGr handling, and transactional dead-key composition. Added versioned
+Unicode scalar property tables for script/category/combining/RTL decisions;
+the full UAX#9 implementation remains the existing `unicode-bidi` hardcoded
+data path. Installer provisioning now writes `locale` beside `keyboard` in
+`etc/wovenhat/settings.json`, and WovenShell restores the persisted locale at
+startup. `cargo test -p libwoven --lib` passed (229 tests, 1 existing ignored),
+the WovenShell target check and warning-denying target Clippy passed. A direct
+kernel `system-apps` check was not used as a gate because it requires the
+harness-provided `WOVENHAT_*_IMAGE` environment variables.
+
+
 ## S12 desktop service and text pipeline integration - 2026-11-05 - ACCEPTED (SOFTWARE SDK)
 
 Added `libwoven::desktop_services` with a syscall-backed, fixed-size IPC

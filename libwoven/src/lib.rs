@@ -144,6 +144,8 @@ pub mod browser;
 pub mod javascript;
 pub mod codecs;
 pub mod i18n;
+pub mod keyboard_layout;
+pub mod unicode_data;
 pub mod icons;
 pub mod identity;
 pub mod installer_ipc;
