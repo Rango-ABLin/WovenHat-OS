@@ -9166,3 +9166,13 @@ child's command/result/stdout evidence. The audit passed and produced
 arbitrary in-guest fault injection, native qualification, compatibility-target
 approval, and independent security review remain open.
 
+## Codex - explicit-address TLS/IPP probe (2026-11-05)
+
+Added `RustlsTransport::with_roots_and_connect_address` and the probe's
+`--connect-address` option. The explicit address is used only for TCP; the
+URI host remains the TLS SNI and certificate-validation name. This avoids
+requiring a Windows hosts-file edit for an authorized device certificate.
+Focused libwoven tests, warning-denying Clippy, and the probe build pass. The
+provided device certificate was loaded locally, but the device did not return
+a bounded valid IPP response, so printer certification remains open.
+

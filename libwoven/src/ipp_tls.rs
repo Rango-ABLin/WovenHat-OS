@@ -8,6 +8,7 @@
 
 use alloc::borrow::ToOwned;
 use alloc::format;
+use alloc::string::String;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ const MAX_HTTP_BODY: usize = 4096;
 pub struct RustlsTransport {
     config: Arc<ClientConfig>,
     timeout: Duration,
+    connect_address: Option<String>,
 }
 
 impl RustlsTransport {
@@ -41,7 +43,25 @@ impl RustlsTransport {
         Ok(Self {
             config: Arc::new(config),
             timeout,
+            connect_address: None,
         })
+    }
+
+    /// Build a transport that connects to an explicit address while retaining
+    /// the endpoint host for TLS SNI and certificate-name validation. This is
+    /// for controlled diagnostics and printers whose certificate DNS name is
+    /// not present in local DNS; it never disables hostname validation.
+    pub fn with_roots_and_connect_address(
+        roots: RootCertStore,
+        timeout: Duration,
+        connect_address: &str,
+    ) -> Result<Self, Error> {
+        if connect_address.is_empty() {
+            return Err(Error::Transport);
+        }
+        let mut transport = Self::with_roots(roots, timeout)?;
+        transport.connect_address = Some(connect_address.to_owned());
+        Ok(transport)
     }
 
     pub fn with_system_roots(timeout: Duration) -> Result<Self, Error> {
@@ -61,7 +81,8 @@ impl SecureTransport for RustlsTransport {
         if !endpoint.secure || request.len() > MAX_HTTP_BODY || response.is_empty() {
             return Err(Error::InsecureEndpoint);
         }
-        let stream = TcpStream::connect((endpoint.host, endpoint.port)).map_err(|_| Error::Transport)?;
+        let address = self.connect_address.as_deref().unwrap_or(endpoint.host);
+        let stream = TcpStream::connect((address, endpoint.port)).map_err(|_| Error::Transport)?;
         stream
             .set_read_timeout(Some(self.timeout))
             .map_err(|_| Error::Transport)?;

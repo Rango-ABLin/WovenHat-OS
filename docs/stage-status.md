@@ -1,5 +1,16 @@
 # Stage status
 
+## S13 explicit-address TLS/IPP probe - 2026-11-05 - SOFTWARE PASS / PRINTER RESPONSE OPEN
+
+The host Rustls transport and IPP probe now support `--connect-address`, which
+connects to an explicit IP while preserving the URI hostname for SNI and
+certificate validation. This removes the need for a Windows hosts-file change
+when a controlled printer certificate name is not registered in DNS. The
+affected libwoven tests, warning-denying Clippy, and probe build pass. The
+provided device certificate was accepted as a local trust input, but the
+probe still receives no valid bounded IPP response from the current endpoint;
+printer URI/service behavior remains unqualified.
+
 ## S16 bounded adversarial matrix evidence audit - 2026-11-05 - SOFTWARE PASS / EXTERNAL REVIEW OPEN
 
 Added `scripts/verify-stage31-matrix.py`, a read-only fail-closed audit of the

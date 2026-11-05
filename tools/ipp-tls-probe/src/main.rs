@@ -16,11 +16,18 @@ fn fail(message: impl AsRef<str>) -> ! {
 
 fn main() {
     let mut args = env::args().skip(1);
-    let uri = args.next().unwrap_or_else(|| fail("usage: ipp-tls-probe URI NAME [CA_DER]"));
-    let name = args.next().unwrap_or_else(|| fail("usage: ipp-tls-probe URI NAME [CA_DER]"));
-    let ca_der = args.next();
-    if args.next().is_some() {
-        fail("usage: ipp-tls-probe URI NAME [CA_DER]");
+    let uri = args.next().unwrap_or_else(|| fail("usage: ipp-tls-probe URI NAME [CA_DER] [--connect-address ADDRESS]"));
+    let name = args.next().unwrap_or_else(|| fail("usage: ipp-tls-probe URI NAME [CA_DER] [--connect-address ADDRESS]"));
+    let mut ca_der = None;
+    let mut connect_address = None;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--connect-address" => {
+                connect_address = Some(args.next().unwrap_or_else(|| fail("--connect-address requires ADDRESS")));
+            }
+            _ if ca_der.is_none() => ca_der = Some(argument),
+            _ => fail("usage: ipp-tls-probe URI NAME [CA_DER] [--connect-address ADDRESS]"),
+        }
     }
     let endpoint = parse_endpoint(&uri).unwrap_or_else(|_| fail("invalid IPP URI"));
     if !endpoint.secure {
@@ -35,7 +42,14 @@ fn main() {
     } else {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
-    let transport = RustlsTransport::with_roots(roots, Duration::from_secs(10))
+    let transport = match connect_address.as_deref() {
+        Some(address) => RustlsTransport::with_roots_and_connect_address(
+            roots,
+            Duration::from_secs(10),
+            address,
+        ),
+        None => RustlsTransport::with_roots(roots, Duration::from_secs(10)),
+    }
         .unwrap_or_else(|_| fail("TLS transport configuration rejected"));
     let uri_static: &'static str = Box::leak(uri.clone().into_boxed_str());
     let name_static: &'static str = Box::leak(name.into_boxed_str());
