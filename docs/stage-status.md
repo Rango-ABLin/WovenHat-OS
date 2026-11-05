@@ -3,11 +3,11 @@
 ## WovenEditor live desktop qualification - 2026-11-05 - INCOMPLETE (EVIDENCE PRESERVED)
 
 The desktop harness was repaired to provide the required search-service image
-before building the hardware-demo image. The corrected run reached QEMU and
-captured `audit-artifacts/editor-desktop-1cpu-1793839534329812600`, but the
-guest did not reach the editor completion marker during the client-pointer and
-client-click journey. The run was stopped after preserving serial and PPM
-captures; no QEMU release-pass claim is made.
+and the desktop-qualified 5G guest memory. The corrected run reaches QEMU,
+signs in, opens WovenEditor, and receives `WovenEditor: pointer updated`, but
+the client-pointer capture is unchanged (`changed_pixels=0`) in
+`audit-artifacts/editor-desktop-1cpu-1793848134380845300`. The visual pointer
+repaint/input assertion remains open; no QEMU release-pass claim is made.
 
 ## S12 WovenEditor interactive GUI increment - 2026-11-05 - ACCEPTED (SOFTWARE BINARY)
 

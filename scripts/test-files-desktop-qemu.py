@@ -56,6 +56,7 @@ def main():
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument('--memory', default='5G', help='guest RAM (default: 5G, matching desktop qualification)')
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
     parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, Security, Editor, Images, Update, Store, or Files)')
     parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
@@ -135,7 +136,7 @@ def main():
     out.mkdir(parents=True)
     serial = out / 'serial.log'
     qmp_port = free_port()
-    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', '256M',
+    command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', args.memory,
                '-smp', str(args.cpus), '-display', 'none', '-serial', f'file:{serial}',
                '-no-reboot', '-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off',
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
@@ -301,12 +302,12 @@ def main():
         if args.exercise_client_pointer:
             client_pointer_baseline = out / f'woven-{app[0]}-before-client-pointer.ppm'
             command_qmp('screendump', {'filename': str(client_pointer_baseline)})
-            # The first window opens at (40, 40) in the 1280x800 QEMU
-            # desktop. Move from the established centre to a safe point in
-            # Calculator's client surface, then click it.
+            # The compositor presents a 1280x800 framebuffer at scale 2, so
+            # the shell's logical pointer starts near (320,200). Move to a
+            # safe point inside the first client window in logical space.
             command_qmp('input-send-event', {'events': [
-                {'type': 'rel', 'data': {'axis': 'x', 'value': -540}},
-                {'type': 'rel', 'data': {'axis': 'y', 'value': -320}},
+                {'type': 'rel', 'data': {'axis': 'x', 'value': -260}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': -100}},
             ]})
             time.sleep(0.5)
             command_qmp('input-send-event', {'events': [
@@ -338,7 +339,7 @@ def main():
                 'terminal': {'move': (5, 20), 'marker': 'WovenTerminal: pointer cleared', 'name': 'terminal'},
                 'monitor': {'move': (10, 20), 'marker': 'WovenMonitor: pointer refreshed', 'name': 'monitor'},
                 'security': {'move': (10, -5), 'marker': 'WovenSecurity: pointer refreshed', 'name': 'security'},
-                'editor': {'move': (10, 20), 'marker': 'WovenEditor: pointer refreshed', 'name': 'editor'},
+                'editor': {'move': (230, 130) if args.exercise_client_pointer else (-30, 30), 'marker': 'WovenEditor: pointer refreshed', 'name': 'editor'},
                 'images': {'move': (10, 20), 'marker': 'WovenImages: pointer refreshed', 'name': 'images'},
                 'update': {'move': (10, -5), 'marker': 'WovenUpdate: pointer refreshed', 'name': 'update'},
                 'store': {'move': (10, 20), 'marker': 'WovenStore: pointer refreshed', 'name': 'store'},

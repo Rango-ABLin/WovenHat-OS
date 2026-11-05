@@ -8938,11 +8938,12 @@ denying Clippy passed. The app all-targets Clippy remains unsuitable because
 its existing no-std library tests are compiled as host test targets.
 ## Codex - WovenEditor QEMU qualification attempt and harness repair (2026-11-05)
 
-`test-files-desktop-qemu.py` was missing `WOVENHAT_SEARCH_IMAGE`, so its
-hardware-demo kernel build failed before QEMU. The harness now builds and
-passes the signed search service image like the other desktop harnesses. The
-corrected editor run reached QEMU and preserved
-`audit-artifacts/editor-desktop-1cpu-1793839534329812600`, but did not reach
-the completion marker during the client-pointer/click journey; it remains
-incomplete and is not a release qualification.
+`test-files-desktop-qemu.py` was missing `WOVENHAT_SEARCH_IMAGE` and used a
+stale 256M guest for the graphics-heavy desktop. The harness now builds and
+passes the signed search service image and defaults to the desktop-qualified
+5G memory. The corrected editor run reaches QEMU, signs in, opens the app, and
+receives its pointer event, but the captured client frame has
+`changed_pixels=0` in `audit-artifacts/editor-desktop-1cpu-1793848134380845300`.
+The visual pointer repaint/input assertion remains incomplete and is not a
+release qualification.
 
