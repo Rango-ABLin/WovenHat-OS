@@ -5,16 +5,21 @@
 Added fixed-capacity signed-16 PCM mixing and capture FIFO primitives with
 saturating arithmetic, frame validation, overflow accounting, and no device
 state. Added bounded IPP/1.1 request/response codecs with length and version
-validation. Existing HDA playback/capture qualification passed at 1/2/4 CPUs;
+validation, HTTPS-only printer discovery, and a platform-owned secure
+transport contract. Added replay-protected authenticated administration
+records with generation-checked policy apply/rollback. Existing HDA
+playback/capture qualification passed at 1/2/4 CPUs;
 the media/WAV and image codec suites remain green. Added the locked offline
-clean-room SDK/provenance verifier and deterministic tracked-source digest;
-the provenance unit gate passes after the exact lockfile cache is present.
+clean-room SDK/provenance verifier, deterministic tracked-source digest, and
+isolated git-archive rebuild gate; all pass with the cached lockfile.
 
 Adversarial process-crash containment passed at 1/2/4 CPUs. Structured
 diagnostics/log filtering passed at 1/2/4 CPUs, and existing authenticated
-admin/identity tests pass. IPP network transport/printer certification,
-native audio capture hardware, external clean-room rebuild, signed SBOM
-attestation, and independent security review remain separate release gates.
+admin/identity tests pass. A real network transport implementation, reachable
+printer/TLS certification, and native audio capture still require the missing
+kernel device/service boundaries and external hardware. The isolated rebuild
+is software-qualified but not an independent organization; signed SBOM
+attestation and independent security review remain external release gates.
 
 ## S12 Unicode and keyboard release qualification - 2026-11-05 - SOFTWARE PASS / PHYSICAL OPEN
 

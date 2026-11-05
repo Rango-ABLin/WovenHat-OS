@@ -9043,3 +9043,11 @@ the verifier now passes. Stage 31 process-crash isolation and Stage 32.7
 diagnostic filtering passed on 1/2/4 CPUs. Native capture devices, IPP network
 transport/printer certification, signed external SBOM attestation, and
 independent security review are not inferred from these software gates.
+## Codex - IPP/admin/reproducibility release-boundary pass (2026-11-05)
+
+Implementing bounded IPP secure-transport/discovery contracts, authenticated
+remote-administration and policy rollback records, and an isolated rebuild
+qualification script. Kernel audio capture remains blocked at the syscall/device
+boundary (the current ABI exposes playback only); external printer/TLS,
+production signing, independent rebuild, and independent security review will
+be recorded as fail-closed prerequisites rather than represented by mocks.

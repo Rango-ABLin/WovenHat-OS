@@ -146,6 +146,7 @@ pub mod javascript;
 pub mod codecs;
 pub mod i18n;
 pub mod ipp;
+pub mod remote_admin;
 pub mod keyboard_layout;
 pub mod unicode_data;
 pub mod icons;
