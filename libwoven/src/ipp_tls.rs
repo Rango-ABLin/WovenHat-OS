@@ -82,13 +82,13 @@ impl SecureTransport for RustlsTransport {
             return Err(Error::InsecureEndpoint);
         }
         let address = self.connect_address.as_deref().unwrap_or(endpoint.host);
-        let stream = TcpStream::connect((address, endpoint.port)).map_err(|_| Error::Transport)?;
+        let stream = TcpStream::connect((address, endpoint.port)).map_err(|_| Error::Connect)?;
         stream
             .set_read_timeout(Some(self.timeout))
-            .map_err(|_| Error::Transport)?;
+            .map_err(|_| Error::Connect)?;
         stream
             .set_write_timeout(Some(self.timeout))
-            .map_err(|_| Error::Transport)?;
+            .map_err(|_| Error::Connect)?;
         let name = ServerName::try_from(endpoint.host.to_owned()).map_err(|_| Error::Certificate)?;
         let connection = ClientConnection::new(Arc::clone(&self.config), name)
             .map_err(|_| Error::Certificate)?;
@@ -99,9 +99,9 @@ impl SecureTransport for RustlsTransport {
             endpoint.host,
             request.len()
         );
-        tls.write_all(header.as_bytes()).map_err(|_| Error::Transport)?;
-        tls.write_all(request).map_err(|_| Error::Transport)?;
-        tls.flush().map_err(|_| Error::Transport)?;
+        tls.write_all(header.as_bytes()).map_err(|_| Error::Tls)?;
+        tls.write_all(request).map_err(|_| Error::Tls)?;
+        tls.flush().map_err(|_| Error::Tls)?;
 
         let mut raw = [0u8; MAX_HTTP_HEADERS + MAX_HTTP_BODY];
         let mut length = 0;
@@ -109,9 +109,9 @@ impl SecureTransport for RustlsTransport {
             if length == raw.len() {
                 return Err(Error::TooLarge);
             }
-            let read = tls.read(&mut raw[length..]).map_err(|_| Error::Transport)?;
+            let read = tls.read(&mut raw[length..]).map_err(|_| Error::Read)?;
             if read == 0 {
-                return Err(Error::Transport);
+                return Err(Error::Read);
             }
             length += read;
             if let Some(end) = raw[..length].windows(4).position(|window| window == b"\r\n\r\n") {
@@ -121,11 +121,11 @@ impl SecureTransport for RustlsTransport {
                 return Err(Error::TooLarge);
             }
         };
-        let status = parse_status(&raw[..header_end]).ok_or(Error::Transport)?;
+        let status = parse_status(&raw[..header_end]).ok_or(Error::Http)?;
         if !(200..300).contains(&status) || has_chunked_encoding(&raw[..header_end]) {
-            return Err(Error::Transport);
+            return Err(Error::Http);
         }
-        let body_length = content_length(&raw[..header_end]).ok_or(Error::Transport)?;
+        let body_length = content_length(&raw[..header_end]).ok_or(Error::Http)?;
         if body_length > response.len() || body_length > MAX_HTTP_BODY {
             return Err(Error::TooLarge);
         }
@@ -136,9 +136,9 @@ impl SecureTransport for RustlsTransport {
         while received < body_length {
             let read = tls
                 .read(&mut response[received..body_length])
-                .map_err(|_| Error::Transport)?;
+                .map_err(|_| Error::Read)?;
             if read == 0 {
-                return Err(Error::Transport);
+                return Err(Error::Read);
             }
             received += read;
         }

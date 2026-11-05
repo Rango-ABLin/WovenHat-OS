@@ -15,6 +15,10 @@ pub enum Error {
     InvalidEndpoint,
     InsecureEndpoint,
     Transport,
+    Connect,
+    Tls,
+    Read,
+    Http,
     Certificate,
 }
 

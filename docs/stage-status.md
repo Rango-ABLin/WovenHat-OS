@@ -1,5 +1,15 @@
 # Stage status
 
+## S13 IPP TLS failure classification - 2026-11-05 - BLOCKED ON TRUST INPUT
+
+The IPP probe now distinguishes connect, TLS, read, and HTTP failures. The
+current device run reaches the TLS boundary but fails during negotiation. The
+exported certificate is a server leaf (`Digital Signature, Key Encipherment`)
+without a CA basic-constraints extension, so it is not a valid CA trust input
+for the Rustls verifier. A printer/network administrator must provide the
+actual issuing CA DER or explicitly provision a properly authorized device
+certificate; the leaf must not be relabeled as a CA.
+
 ## S13 explicit-address TLS/IPP probe - 2026-11-05 - SOFTWARE PASS / PRINTER RESPONSE OPEN
 
 The host Rustls transport and IPP probe now support `--connect-address`, which

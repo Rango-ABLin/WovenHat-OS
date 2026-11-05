@@ -9176,3 +9176,12 @@ Focused libwoven tests, warning-denying Clippy, and the probe build pass. The
 provided device certificate was loaded locally, but the device did not return
 a bounded valid IPP response, so printer certification remains open.
 
+## Codex - IPP TLS failure classification (2026-11-05)
+
+Added granular IPP errors for connect, TLS, read, and HTTP boundaries. The
+current device probe reaches TLS but fails negotiation. `certutil -dump` shows
+the supplied certificate is a server leaf with Digital Signature/Key
+Encipherment usage and no CA basic-constraints extension; it must not be used
+as a CA trust root. The actual issuing CA DER or a properly authorized device
+certificate is still required for printer qualification.
+
