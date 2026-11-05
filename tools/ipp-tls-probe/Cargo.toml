@@ -1,0 +1,11 @@
+[package]
+name = "wovenhat-ipp-tls-probe"
+version = "0.8.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+libwoven = { path = "../../libwoven" }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.9"

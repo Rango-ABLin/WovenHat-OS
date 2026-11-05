@@ -9114,3 +9114,19 @@ passed. The read-only physical/trust preflight remains explicitly
 `NOT_QUALIFIED` for missing OVMF VARS, swtpm, disk image, development trust
 inputs, and native evidence.
 
+## Codex - real Rustls IPP transport and production key separation (2026-11-05)
+
+Added the host/service-side `libwoven::ipp_tls::RustlsTransport`: explicit CA
+roots, Rustls TLS 1.2+, certificate/hostname verification, bounded HTTP/IPP
+transport, timeouts, and fail-closed response handling. Freestanding builds do
+not include host networking/TLS. The provenance signer wrapper now requires
+separate production-only key variables under `--production`, so development
+test credentials cannot be silently promoted. Software checks pass; a
+reachable certified printer, OS service integration, and authorized production
+key are still external prerequisites.
+
+Added `tools/ipp-tls-probe` for a real HTTPS IPP Get-Printer-Attributes
+request using explicit DER CA material or public roots. It builds, passes
+warning-denying Clippy, and rejects plaintext URIs; no local certified printer
+was available for an end-to-end run.
+

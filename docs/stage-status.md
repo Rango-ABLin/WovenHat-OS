@@ -12974,3 +12974,24 @@ chain passed: host regressions, build, Clippy, workspace tests, 1-CPU x10,
 preservation markers. The separate read-only trust/physical preflight remains
 `NOT_QUALIFIED` because required external inputs were not supplied.
 
+## Real host TLS IPP transport and production-signing separation - 2026-11-05 - SOFTWARE PASS / EXTERNALS OPEN
+
+Added `libwoven::ipp_tls::RustlsTransport` for host/service builds. It uses an
+explicit trust store, Rustls TLS negotiation, certificate-chain and hostname
+validation, bounded HTTPS headers/body parsing, timeouts, and no plaintext or
+chunked-transfer fallback. It is excluded from the freestanding image, where
+the privileged TLS service ABI remains the required integration boundary. The
+242-test libwoven suite, host Clippy, and freestanding kernel check pass.
+
+Added `tools/ipp-tls-probe`, which performs an actual HTTPS IPP
+Get-Printer-Attributes request with either explicit DER CA material or the
+bundled public trust roots. The probe builds and warning-denying Clippy pass;
+its plaintext-URI rejection also passes. No certified printer endpoint or
+release CA bundle is available locally for final end-to-end certification.
+
+The SDK signing wrapper now has a `--production` mode requiring separate
+`WOVENHAT_SDK_PRODUCTION_SIGNING_SEED_HEX` and
+`WOVENHAT_SDK_PRODUCTION_TRUSTED_PUBLIC_KEY_HEX` variables, preventing the
+development test key from being used accidentally. No authorized production
+key is present in this environment, so production attestation remains open.
+

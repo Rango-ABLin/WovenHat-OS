@@ -1,4 +1,5 @@
 #![cfg_attr(not(test), no_std)]
+
 //! The WovenHat userspace API.
 //!
 //! This is the boundary an application links against instead of issuing `int
@@ -19,6 +20,8 @@
 //! that payload to `i32` recovers negative statuses, including -1 and -2.
 
 extern crate alloc;
+#[cfg(not(target_os = "none"))]
+extern crate std;
 
 #[cfg(all(feature = "userspace-allocator", not(test)))]
 mod userspace_allocator {
@@ -146,6 +149,8 @@ pub mod javascript;
 pub mod codecs;
 pub mod i18n;
 pub mod ipp;
+#[cfg(not(target_os = "none"))]
+pub mod ipp_tls;
 pub mod remote_admin;
 pub mod keyboard_layout;
 pub mod unicode_data;

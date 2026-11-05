@@ -34,6 +34,8 @@ zenwebp = { version = "=0.3.2", default-features = false }
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 oxideav-webp = { version = "0.3.1", default-features = false }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.9"
 
 [lints.rust]
 warnings = "deny"
