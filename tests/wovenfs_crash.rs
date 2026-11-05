@@ -7679,3 +7679,153 @@ fn read_file_refuses_a_corrupt_inode_checksum_and_leaves_no_trace() {
         assert_eq!(&out[..5], b"hello", "control: content must match");
     }
 }
+
+/// `lookup` loads the directory inode via `self.inode(dir_inode)?` (wfs.rs:964),
+/// which calls `self.checked_inode(raw)` → `Inode::decode(raw)`.
+/// When the directory inode's structural FNV-1a checksum is wrong, `Inode::decode`
+/// returns `None` and `inode` returns `Err(Error::Corrupt)` before any directory
+/// block is read or any output is returned.
+///
+/// `lookup` is a pure read: it never calls `txn.stage` or `commit`, so "leaves
+/// no trace" is structurally guaranteed.  This test makes the guarantee explicit
+/// with a snapshot comparison so a future refactor that accidentally adds a write
+/// path would be caught.
+///
+/// The analogous corrupt-directory-inode-checksum guards on mutation operations are:
+/// - `create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+/// - `unlink_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+#[test]
+fn lookup_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a file so there is a valid directory entry to find.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+    }
+
+    // Fork and corrupt the root directory inode's structural checksum.
+    // The root inode is inode 1; index = 0 → first slot of the first inode sector.
+    // Flip a byte at offset 120 within the slot: that is the first byte of the
+    // 8-byte FNV-1a checksum covering bytes 0..120.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        corrupt.image.borrow_mut()[lba][120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a corrupt directory inode checksum"
+    );
+
+    // Snapshot: lookup must not modify the image (it is a pure read).
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // lookup must refuse: inode(dir_inode) → checked_inode → Inode::decode returns
+    // None → Err(Corrupt).  The function returns before reading any directory block.
+    assert_eq!(
+        volume.lookup(1, "a.txt"),
+        Err(Error::Corrupt),
+        "lookup must refuse when the directory inode has a bad structural checksum"
+    );
+
+    // The image must be byte-for-byte identical: lookup never stages or commits writes.
+    assert!(
+        corrupt.sectors() == before,
+        "lookup must not modify the image even on a corrupt directory inode"
+    );
+
+    // Control: on the unpatched base image, lookup succeeds.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        let entry = v
+            .lookup(1, "a.txt")
+            .expect("control: lookup must succeed on the unpatched image");
+        assert!(entry.inode > 1, "control: found inode must be beyond root");
+    }
+}
+
+/// `read_dir` loads the directory inode via `self.inode(dir_inode)?` (wfs.rs:994),
+/// which calls `self.checked_inode(raw)` → `Inode::decode(raw)`.
+/// When the directory inode's structural FNV-1a checksum is wrong, `Inode::decode`
+/// returns `None` and `inode` returns `Err(Error::Corrupt)` before any directory
+/// block is read or any entries are returned.
+///
+/// `read_dir` is a pure read: it never calls `txn.stage` or `commit`, so "leaves
+/// no trace" is structurally guaranteed.  This test makes the guarantee explicit
+/// with a snapshot comparison so a future refactor that accidentally adds a write
+/// path would be caught.
+///
+/// The analogous corrupt-directory-inode-checksum guard for `lookup` is:
+/// - `lookup_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+#[test]
+fn read_dir_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a file so there is a valid directory entry to enumerate.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+    }
+
+    // Fork and corrupt the root directory inode's structural checksum.
+    // The root inode is inode 1; index = 0 → first slot of the first inode sector.
+    // Flip a byte at offset 120 within the slot: that is the first byte of the
+    // 8-byte FNV-1a checksum covering bytes 0..120.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        corrupt.image.borrow_mut()[lba][120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a corrupt directory inode checksum"
+    );
+
+    // Snapshot: read_dir must not modify the image (it is a pure read).
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // read_dir must refuse: inode(dir_inode) → checked_inode → Inode::decode returns
+    // None → Err(Corrupt).  The function returns before reading any directory block.
+    assert!(
+        matches!(volume.read_dir(1), Err(Error::Corrupt)),
+        "read_dir must refuse when the directory inode has a bad structural checksum"
+    );
+
+    // The image must be byte-for-byte identical: read_dir never stages or commits writes.
+    assert!(
+        corrupt.sectors() == before,
+        "read_dir must not modify the image even on a corrupt directory inode"
+    );
+
+    // Control: on the unpatched base image, read_dir succeeds and lists the file.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        let view = v
+            .read_dir(1)
+            .expect("control: read_dir must succeed on the unpatched image");
+        assert_eq!(view.count(), 1, "control: one live entry expected");
+    }
+}
