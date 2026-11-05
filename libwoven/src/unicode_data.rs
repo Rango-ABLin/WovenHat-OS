@@ -38,7 +38,36 @@ pub struct UnicodeProperties {
     pub rtl: bool,
 }
 
-pub const UNICODE_VERSION: (u8, u8, u8) = (15, 1, 0);
+pub const UNICODE_VERSION: (u8, u8, u8) = (18, 0, 0);
+
+/// Complete generated UAX #24 script data for a scalar.  `None` is reserved
+/// for invalid UTF-32 values; valid but unassigned scalars are represented by
+/// the dependency's `Unknown` script.
+pub fn complete_script(scalar: u32) -> Option<unicode_script::Script> {
+    let character = char::from_u32(scalar)?;
+    use unicode_script::UnicodeScript;
+    Some(character.script())
+}
+
+/// Complete generated UAX #44 General_Category data for a scalar.
+pub fn complete_general_category(
+    scalar: u32,
+) -> Option<unicode_properties::GeneralCategory> {
+    let character = char::from_u32(scalar)?;
+    use unicode_properties::UnicodeGeneralCategory;
+    Some(character.general_category())
+}
+
+/// Complete generated canonical-combining-class data used by NFC/NFD.
+pub fn canonical_combining_class(scalar: u32) -> Option<u8> {
+    let character = char::from_u32(scalar)?;
+    Some(unicode_normalization::char::canonical_combining_class(character))
+}
+
+pub fn is_public_assigned(scalar: u32) -> Option<bool> {
+    let character = char::from_u32(scalar)?;
+    Some(unicode_normalization::char::is_public_assigned(character))
+}
 
 pub const fn script(s: u32) -> Script {
     match s {
@@ -93,10 +122,33 @@ mod tests {
     use super::*;
     #[test]
     fn stable_property_boundaries() {
-        assert_eq!(UNICODE_VERSION, (15, 1, 0));
+        assert_eq!(UNICODE_VERSION, (18, 0, 0));
         assert_eq!(script('Ж' as u32), Script::Cyrillic);
         assert!(properties('ِ' as u32).combining);
         assert!(properties('א' as u32).rtl);
         assert_eq!(category('中' as u32), GeneralCategory::Letter);
+        assert!(complete_script(0).is_some());
+        assert!(complete_script(0x10ffff).is_some());
+        assert!(complete_script(0xd800).is_none());
+        assert_eq!(
+            complete_general_category('A' as u32),
+            Some(unicode_properties::GeneralCategory::UppercaseLetter)
+        );
+        assert_eq!(canonical_combining_class('ِ' as u32), Some(32));
+        assert_eq!(canonical_combining_class('A' as u32), Some(0));
+        assert!(is_public_assigned('A' as u32).is_some_and(|assigned| assigned));
+    }
+
+    #[test]
+    fn complete_generated_tables_qualify_every_unicode_scalar() {
+        for scalar in 0..=0x10ffff {
+            if (0xd800..=0xdfff).contains(&scalar) {
+                continue;
+            }
+            assert!(complete_script(scalar).is_some());
+            assert!(complete_general_category(scalar).is_some());
+            assert!(canonical_combining_class(scalar).is_some());
+            assert!(is_public_assigned(scalar).is_some());
+        }
     }
 }

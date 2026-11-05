@@ -9014,3 +9014,16 @@ accessibility settings. Host `libwoven` tests and the shell target check pass.
 The physical keyboard matrix still uses the stable kernel event ABI; runtime
 layout selection is a userspace policy and does not alter that ABI.
 
+## Codex - Full Unicode table and keyboard release qualification (2026-11-05)
+
+Replaced the prior coarse-only Unicode property dependency with complete
+generated UAX #44 General_Category, UAX #24 Script, canonical-combining, and
+existing full hardcoded UAX #9 bidi data. The qualification test iterates
+every Unicode scalar (excluding surrogates) and passes. Host libwoven tests,
+warning-denying Clippy, and the freestanding target check pass.
+
+The dedicated USB-HID keyboard gate passed at 1/2/4 CPUs with evidence under
+`target/s03-keyboard-injection-{1,2,4}cpu`. Native physical keyboard
+qualification remains `PHYSICAL_NOT_TESTED`: no signed native evidence or
+authorized physical device was supplied. QEMU evidence is not relabeled as a
+physical claim.

@@ -1,5 +1,16 @@
 # Stage status
 
+## S12 Unicode and keyboard release qualification - 2026-11-05 - SOFTWARE PASS / PHYSICAL OPEN
+
+Complete generated UAX #44 General_Category, UAX #24 Script, canonical-
+combining, and existing hardcoded UAX #9 bidi data are linked into libwoven.
+An exhaustive test iterates every Unicode scalar and passes; host Clippy and
+the freestanding libwoven check pass. The USB-HID keyboard release gate passes
+at 1/2/4 CPUs with evidence under `target/s03-keyboard-injection-{1,2,4}cpu`.
+
+Native physical keyboard qualification remains open because the read-only
+preflight found no supplied signed native evidence or authorized device.
+
 ## S12 locale/input text increment - 2026-11-05 - ACCEPTED (SOFTWARE BOUNDARY)
 
 Added bounded shared keyboard-layout policy for ten common desktop layouts,

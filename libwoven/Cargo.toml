@@ -20,6 +20,11 @@ hmac = { version = "0.12", default-features = false }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 # Full Unicode Bidirectional Algorithm (UAX #9), no_std + alloc capable.
 unicode-bidi = { version = "0.3.18", default-features = false, features = ["hardcoded-data"] }
+# Complete UAX #44 General_Category and UAX #24 Script tables. These crates
+# are no_std and keep the generated data in the freestanding image.
+unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
+unicode-script = { version = "0.5.9", default-features = false }
+unicode-normalization = { version = "0.1.25", default-features = false }
 # Pure-Rust no_std+alloc image decoders. SIMD and std integrations stay off so
 # the same bounded codec boundary can build into Ring-3 images.
 zune-core = { version = "0.5.3", default-features = false }
