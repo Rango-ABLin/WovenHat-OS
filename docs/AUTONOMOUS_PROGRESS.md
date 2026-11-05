@@ -1,5 +1,82 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: write_file refuses when second block bitmap is clear, with one staged sector discarded (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `90a087ea`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs ~line 1175) iterates over `0..DIRECT_BLOCKS` in order.
+For each slot that is in-use (non-zero) and needed by the write, it checks:
+
+```rust
+} else if !self.bitmap_get(txn, node.direct[slot])? {
+    return Err(Error::Corrupt);
+}
+```
+
+If that check passes for slot 0, the content sector for slot 0 is **staged
+in the transaction** (`txn.stage(block0, &content)`).  The existing test
+`write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free` only
+exercises a single-block file: the guard fires on slot 0 with 0 sectors
+already staged.
+
+No test previously proved the two-block in-place path:
+1. slot 0: bitmap check passes → content sector for block0 staged in txn
+   (1 sector in transaction, nothing on disk yet).
+2. slot 1: bitmap check fires `Err(Corrupt)` → `commit` never called.
+3. The staged content sector for block0 must be discarded; the image must
+   be byte-for-byte identical to before the call.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_second_block_bitmap_is_clear_and_leaves_no_trace`:
+
+- Uses `formatted()` as the base.
+- Creates `big.bin` with 600 bytes of data → two 512-byte sectors, so
+  `direct[0] = block0` and `direct[1] = block1` are both non-zero.
+- Forks the image (`image = base.fork(None)`).
+- Clears the bitmap bit for `block1` via `clear_bitmap_block(&image, block1)`.
+  `block0`'s bit is left set.
+- Precondition: `check()` on the patched image returns `Err(Corrupt)`.
+- Snapshots `let before = image.sectors()`.
+- Calls `volume.write_file(file_inode, &[2u8; 600], 2)`:
+  - slot 0: `bitmap_get(block0)` = true → content staged in txn.
+  - slot 1: `bitmap_get(block1)` = false → `Err(Corrupt)`.
+  - `commit` never called.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `image.sectors() == before` — the content staged for slot 0 was
+  discarded; no sector written.
+- Control: on the unpatched `base`, the same `write_file` call succeeds.
+
+No production code changed.  Test count: 119 → 120.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **120 passed / 0 failed** (was 119; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `stage_write` in-place bitmap guard on the second
+  block of a two-block file: 1 sector is staged in the transaction before the
+  guard fires on slot 1, and the transaction is discarded with zero disk writes
+  when `commit` is not called.
+- Together with `write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free`
+  (single-block case, 0 sectors staged before the guard), all in-place bitmap
+  guard positions are now covered:
+  - Single-block file: guard fires at slot 0 (0 staged sectors before the guard). ← prior test
+  - Two-block file: guard fires at slot 1 (1 staged sector before the guard). ← **this session**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: create refuses when a live (used) inode in the allocator scan has a corrupt checksum (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `25f95f0c`). Working tree was clean.

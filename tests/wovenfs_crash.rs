@@ -5071,6 +5071,83 @@ fn write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free() {
     );
 }
 
+/// `stage_write` (wfs.rs line ~1175) iterates over every slot in order.  For
+/// each in-place slot it checks `!bitmap_get(txn, node.direct[slot])` and
+/// returns `Err(Corrupt)` if the bit is clear.  When a two-block file has its
+/// **second** block's bitmap bit cleared, the check for slot 0 passes and its
+/// content sector is staged in the transaction; the check for slot 1 then fires
+/// `Err(Corrupt)` before `commit` is ever called.  That staged sector must not
+/// reach the disk.
+///
+/// `write_file_refuses_a_file_whose_existing_block_the_bitmap_marks_free`
+/// covers the single-block case (slot 0 fires, 0 sectors staged before the
+/// guard).  This test covers the two-block in-place case: slot 0 passes
+/// (content staged in txn), slot 1 fires (`Err(Corrupt)`, transaction
+/// discarded without commit).
+#[test]
+fn write_file_refuses_when_second_block_bitmap_is_clear_and_leaves_no_trace() {
+    // Create a two-block file (600 bytes → needs two 512-byte sectors).
+    let base = formatted();
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "big.bin", 0o644, &[1u8; 600], 1)
+            .expect("create big.bin")
+    };
+
+    // Record both data blocks.
+    let (block0, block1) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let node = volume.inode(file_inode).expect("inode");
+        assert!(
+            node.direct[0] != 0 && node.direct[1] != 0,
+            "two-block file must have direct[0] and direct[1] set"
+        );
+        (node.direct[0], node.direct[1])
+    };
+    assert_ne!(block0, block1, "allocator must give distinct blocks");
+
+    // Control: on the unpatched image, write_file succeeds.
+    {
+        let ctrl = base.fork(None);
+        let mut v = Volume::mount(ctrl.clone()).expect("mount ctrl");
+        v.write_file(file_inode, &[2u8; 600], 2)
+            .expect("control: write_file must succeed on the unpatched image");
+    }
+
+    // Fork and clear the bitmap bit for block1 only.  block0's bit remains set
+    // so the bitmap check passes for slot 0 and stages its content sector in
+    // the transaction; slot 1 then fires Err(Corrupt) before commit.
+    let image = base.fork(None);
+    clear_bitmap_block(&image, block1);
+
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see the bitmap inconsistency for block1"
+    );
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // stage_write slot 0: bitmap_get(block0) = true → content staged in txn.
+    // stage_write slot 1: bitmap_get(block1) = false → Err(Corrupt), commit never called.
+    assert_eq!(
+        volume.write_file(file_inode, &[2u8; 600], 2),
+        Err(Error::Corrupt),
+        "write_file must return Corrupt when the second block is not in the bitmap"
+    );
+
+    // The refused write must not have modified the image even though one content
+    // sector was staged in the transaction before the guard fired.
+    assert!(
+        image.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+}
+
 /// `unlink` calls `self.refuse_shared_blocks(&txn, entry.inode, &node.direct)` before
 /// freeing any block.  If a second live inode names the same data block as the file
 /// being unlinked, freeing that block would destroy the second file's data and leave its
