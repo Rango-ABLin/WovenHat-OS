@@ -260,7 +260,8 @@ fn load_file_from_boot_method(
 }
 
 fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8]> {
-    let mut file_system = boot::get_image_file_system(boot::image_handle()).ok()?;
+    let mut file_system = boot::get_image_file_system(boot::image_handle())
+        .unwrap_or_else(|_| reject_firmware_resource("DiskFileSystem"));
 
     let mut root = file_system
         .open_volume()
@@ -286,8 +287,12 @@ fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8
 
     let file_slice =
         allocate_loader_data(file_size).unwrap_or_else(|error| reject_firmware_resource(error));
-    file.read(file_slice)
+    let bytes_read = file
+        .read(file_slice)
         .unwrap_or_else(|_| reject_firmware_resource("DiskRead"));
+    if bytes_read != file_size {
+        reject_firmware_resource("DiskShortRead");
+    }
 
     Some(file_slice)
 }
