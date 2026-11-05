@@ -6659,3 +6659,77 @@ fn unlink_refuses_when_a_data_block_bitmap_bit_is_cleared_and_leaves_no_trace() 
             .expect("control: volume must be consistent after a successful unlink");
     }
 }
+
+/// `stage_write` (wfs.rs line 1198) calls `refuse_shared_blocks` after staging
+/// all block content and bitmap changes in the transaction buffer, but before
+/// calling `commit`.  If a live inode other than the target file names any of
+/// the same data blocks, `refuse_shared_blocks` returns `Err(Corrupt)`.
+/// Because `commit` is never reached, no staged changes reach the disk.
+///
+/// This test proves that the atomicity guarantee holds for the
+/// `refuse_shared_blocks` guard in `stage_write`:
+/// - Two files share a data block via inode corruption (`redirect_inode_block`).
+/// - `write_file` on the first file stages an in-place rewrite of that block
+///   in the transaction buffer.
+/// - `refuse_shared_blocks` finds the second inode also naming the block and
+///   returns `Err(Corrupt)`.
+/// - No sector is written: `commit` was never called.
+///
+/// `unlink_refuses_a_file_that_shares_a_data_block_with_another_file` covers
+/// the same guard on the `unlink` path.  This test covers the `write_file`
+/// (i.e. `stage_write`) path.
+#[test]
+fn write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace() {
+    let (base, a_inode, b_inode) = two_one_block_files();
+
+    // Record the blocks allocated to a.bin and b.bin.
+    let a_block = read_inode_direct0(&base, a_inode);
+    let b_block = read_inode_direct0(&base, b_inode);
+    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+
+    // Fork and redirect b_inode.direct[0] to a_block.  After this both
+    // a.bin and b.bin name a_block; b_block is orphaned in the bitmap but
+    // write_file does not call check(), so the orphan does not interfere.
+    let image = base.fork(None);
+    redirect_inode_block(&image, b_inode, 0, a_block);
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse two live inodes naming the same data block"
+    );
+
+    // Snapshot: the refused write must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // write_file stages the in-place rewrite of a_block in the transaction
+    // buffer (bitmap_get returns true; block is allocated), then calls
+    // refuse_shared_blocks([a_block, ..., a_block, ...]) and finds b_inode
+    // also naming a_block → Err(Corrupt).  commit is never called.
+    assert_eq!(
+        volume.write_file(a_inode, b"updated", 2),
+        Err(Error::Corrupt),
+        "write_file must refuse when another live inode shares the data block"
+    );
+
+    // No sector must have been written — the in-place rewrite was staged only
+    // in the transaction buffer; commit was never called.
+    assert!(
+        image.sectors() == before,
+        "a refused write_file must not modify the image"
+    );
+
+    // Control: on the unpatched image, write_file succeeds.
+    {
+        let ctrl = base.fork(None);
+        let mut v = Volume::mount(ctrl.clone()).expect("mount");
+        v.write_file(a_inode, b"updated", 2)
+            .expect("control: write_file must succeed on the unpatched image");
+        let mut out = vec![0u8; 7];
+        assert_eq!(v.read_file(a_inode, &mut out), Ok(7));
+        assert_eq!(&out, b"updated");
+    }
+}

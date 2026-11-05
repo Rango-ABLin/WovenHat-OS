@@ -1,5 +1,68 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: write_file refuses and leaves no trace when refuse_shared_blocks triggers (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `91a38c37`). Working tree was clean.
+
+### Defect / gap
+
+`stage_write` (wfs.rs line 1198) calls `refuse_shared_blocks(txn, inode, &touched)` after staging
+all block content and bitmap changes in the transaction buffer, but before calling `commit`.  If a
+live inode other than the target file names any of the same data blocks, `refuse_shared_blocks`
+returns `Err(Corrupt)` and `commit` is never reached — so no staged changes reach disk.
+
+The existing test `unlink_refuses_a_file_that_shares_a_data_block_with_another_file` (line 5087)
+covers the same `refuse_shared_blocks` guard on the `unlink` path.  No test previously proved
+the analogous atomicity guarantee for the `write_file` (i.e. `stage_write`) path: that when two
+live inodes share a data block and `write_file` is called on one of them, the in-place rewrite
+staged in the transaction buffer is never committed and no sector reaches disk.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()` to get `a.bin` (a_inode, a_block) and `b.bin` (b_inode, b_block).
+- Forks the image and calls `redirect_inode_block(&image, b_inode, 0, a_block)` — now both
+  a_inode and b_inode name a_block; b_block is orphaned in the bitmap but `write_file` does not
+  call `check()`, so the orphan does not interfere.
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = image.sectors()`.
+- Calls `volume.write_file(a_inode, b"updated", 2)`:
+  - Slot 0: `a_block != 0`, `bitmap_get(a_block)` = true (allocated) → stages in-place rewrite in txn
+  - `touched = [a_block, 0, ..., a_block, 0, ...]`
+  - `refuse_shared_blocks(txn, a_inode, touched)` finds b_inode also naming a_block → `Err(Corrupt)`
+  - `commit` is never called → no sector reaches disk.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `image.sectors() == before` — no sector was written.
+- Control: on the unpatched base, `write_file(a_inode, b"updated", 2)` succeeds and reads back
+  correctly.
+
+No production code changed.  Test count: 113 → 114.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **114 passed / 0 failed** (was 113; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity only for the `refuse_shared_blocks` guard in `stage_write` via the
+  in-place-rewrite path (one-block file, `direct[0]` shared with another inode).
+- The extend path (allocating a new second block into `direct[1]`) is not separately
+  tested but `refuse_shared_blocks` sees the existing `direct[0]` in `touched` regardless,
+  so the guard fires on that path too.
+- `create_file` calls `stage_write` internally; its `refuse_shared_blocks` guard is exercised
+  through the same `stage_write` function, so a separate `create_file` test would be redundant.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
+
 ## 2026-11-05 — WovenFS: unlink refuses when a data-block bitmap bit is cleared (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `ca631780`). Working tree was clean.
