@@ -1,5 +1,75 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: unlink and create corrupt-inode-checksum atomicity proofs
+
+Branch: `auto/wovenhat-development` (base `2efc85d0`). Working tree was clean.
+
+### Defect / gap
+
+The previous session (`2efc85d0`) proved that `write_file` fails closed when the
+target file inode's structural FNV-1a checksum is bad (`Inode::decode` returns
+`None` → `Err(Corrupt)` before any sector is staged or committed).  That entry
+explicitly listed two uncovered analogous paths:
+
+- **`unlink`** — calls `self.inode_staged(&txn, entry.inode)?` (wfs.rs:1287) for
+  the file inode after successfully reading the directory inode and finding the
+  entry.  A bad file-inode checksum reaches `Inode::decode` before any
+  `txn.stage()` call.
+- **`create` / `stage_create`** — calls `self.inode_staged(txn, dir_inode)?`
+  (wfs.rs:1096) as the first substantive operation.  A bad directory-inode
+  checksum reaches `Inode::decode` before any `txn.stage()` call.
+
+No test existed that forked the image, invalidated the respective inode's
+checksum, snapshotted the raw sectors, called the refused operation, and proved
+zero sector writes.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added two tests:
+
+1. **`unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`**:
+   - Creates `a.txt` on the base image to establish a valid file inode.
+   - Forks to `corrupt` and flips byte 120 of the file inode's slot (first byte
+     of the 8-byte FNV-1a checksum).
+   - Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+   - Snapshots `let before = corrupt.sectors()`.
+   - Calls `volume.unlink(1, "a.txt", 2)` and asserts `Err(Error::Corrupt)`.
+   - Asserts `corrupt.sectors() == before` — no sector was written.
+   - Control: on the unpatched base, `unlink` succeeds and `lookup` returns
+     `NotFound`.
+
+2. **`create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`**:
+   - Uses `formatted()` only (root inode = 1, no files).
+   - Forks to `corrupt` and flips byte 120 of inode-1's slot (index 0 → first
+     slot of `inode_start` sector, offset 120).
+   - Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+   - Snapshots `let before = corrupt.sectors()`.
+   - Calls `volume.create(1, "a.txt", 0o644, 1)` and asserts `Err(Error::Corrupt)`.
+   - Asserts `corrupt.sectors() == before` — no sector was written.
+   - Control: on the unpatched base, `create` succeeds and returns an inode > 1.
+
+No production code changed.  Test count: 108 → 110.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash` | PASS, **110 passed / 0 failed** (was 108; two new tests) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, no output) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, no output) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity only for the `inode_staged` checksum barrier in `unlink` (file
+  inode) and `create`/`create_file` (directory inode).
+- The analogous `inode()` checksum path at unlink line 1251 (directory inode,
+  which is loaded before the file inode) is not separately tested; it is the same
+  `Inode::decode` → `Err(Corrupt)` barrier.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: write_file corrupt-inode-checksum atomicity proof
 
 Branch: `auto/wovenhat-development` (base `40e4c5c5`). Working tree was clean.
