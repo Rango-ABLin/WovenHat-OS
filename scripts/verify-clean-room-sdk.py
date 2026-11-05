@@ -54,8 +54,21 @@ def main() -> int:
             files.append({"path": relative, "sha256": hashlib.sha256(data).hexdigest()})
     output = root / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
+    components = [{
+        "type": "library",
+        "bom-ref": package["name"] + "@" + package["version"],
+        "name": package["name"],
+        "version": package["version"],
+        "purl": package.get("source", "pkg:wovenhat/" + package["name"]),
+    } for package in sorted(document["packages"], key=lambda item: (item["name"], item["version"]))]
     output.write_text(json.dumps({
         "schema": "wovenhat.sdk-provenance/v1",
+        "sbom": {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "components": components,
+        },
         "source_sha256": digest.hexdigest(),
         "rustc": subprocess.check_output(["rustc", "-Vv"], text=True).strip(),
         "packages": sorted({package["name"] + "@" + package["version"] for package in document["packages"]}),

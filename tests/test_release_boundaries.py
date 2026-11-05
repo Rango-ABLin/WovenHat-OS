@@ -21,6 +21,8 @@ class ReleaseBoundaryTests(unittest.TestCase):
         self.assertTrue(document["offline_locked_metadata"])
         self.assertTrue(document["source_sha256"])
         self.assertIn("libwoven@0.1.0", document["packages"])
+        self.assertEqual(document["sbom"]["bomFormat"], "CycloneDX")
+        self.assertTrue(any(component["name"] == "libwoven" for component in document["sbom"]["components"]))
 
 
 if __name__ == "__main__":
