@@ -6415,3 +6415,79 @@ fn create_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
         assert!(inode > 1, "control: allocated inode must be beyond root");
     }
 }
+
+/// `unlink` loads the directory inode via `self.inode(dir_inode)?` (wfs.rs:1251),
+/// which calls `self.checked_inode(raw)` → `Inode::decode(raw)`.
+/// When the directory inode's structural FNV-1a checksum is wrong, `Inode::decode`
+/// returns `None` and `inode` returns `Err(Error::Corrupt)` before `Transaction::new`
+/// has staged anything, leaving the image completely unmodified.
+///
+/// This covers the directory-inode path in `unlink`, complementing
+/// `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace` which covers
+/// the file-inode path at line 1287.
+#[test]
+fn unlink_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a file so there is a valid directory entry to target.
+    {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+    }
+
+    // Fork and corrupt the root directory inode's structural checksum.
+    // The root inode is inode 1; index = 0 → first slot of the first inode sector.
+    // Flip a byte at offset 120 within the slot: that is the first byte of the
+    // 8-byte FNV-1a checksum covering bytes 0..120.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let lba = inode_start as usize;
+        corrupt.image.borrow_mut()[lba][120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a corrupt directory inode checksum"
+    );
+
+    // Snapshot: unlink must not modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // unlink must refuse: inode(dir_inode) → Inode::decode returns None → Err(Corrupt).
+    assert_eq!(
+        volume.unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse when the directory inode has a bad structural checksum"
+    );
+
+    // The refused unlink must not have modified the image.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched base image, unlink succeeds and the file is gone.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.unlink(1, "a.txt", 2),
+            Ok(()),
+            "control: unlink must succeed on the unpatched image"
+        );
+        assert_eq!(
+            v.lookup(1, "a.txt"),
+            Err(Error::NotFound),
+            "control: file must be absent after a successful unlink"
+        );
+    }
+}
