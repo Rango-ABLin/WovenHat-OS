@@ -6023,7 +6023,9 @@ fn unlink_refuses_a_nonexistent_name_and_leaves_no_trace() {
     );
 
     // Control: the existing file is still present and readable.
-    let entry = volume.lookup(1, "existing.txt").expect("lookup existing.txt");
+    let entry = volume
+        .lookup(1, "existing.txt")
+        .expect("lookup existing.txt");
     assert_eq!(entry.inode, orig_inode, "original inode must be unchanged");
     let mut out = vec![0u8; MAX_FILE_SIZE];
     let len = volume
@@ -6160,7 +6162,10 @@ fn write_file_refuses_when_extension_would_overflow_data_region_and_leaves_no_tr
     let len = volume
         .read_file(extendable_inode, &mut out)
         .expect("extendable.bin must remain readable");
-    assert_eq!(len, SECTOR_SIZE, "original one-block size must be unchanged");
+    assert_eq!(
+        len, SECTOR_SIZE,
+        "original one-block size must be unchanged"
+    );
     assert!(
         out[..SECTOR_SIZE].iter().all(|&b| b == 0xab),
         "original content must be intact"
@@ -6685,7 +6690,10 @@ fn write_file_refuses_when_a_shared_block_is_detected_and_leaves_no_trace() {
     // Record the blocks allocated to a.bin and b.bin.
     let a_block = read_inode_direct0(&base, a_inode);
     let b_block = read_inode_direct0(&base, b_inode);
-    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+    assert_ne!(
+        a_block, b_block,
+        "fresh allocator must give distinct blocks"
+    );
 
     // Fork and redirect b_inode.direct[0] to a_block.  After this both
     // a.bin and b.bin name a_block; b_block is orphaned in the bitmap but
@@ -6866,7 +6874,10 @@ fn write_file_refuses_on_extend_when_allocated_block_is_shared_and_leaves_no_tra
     // Record the data blocks of both files.
     let a_block = read_inode_direct0(&base, a_inode);
     let b_block = read_inode_direct0(&base, b_inode);
-    assert_ne!(a_block, b_block, "fresh allocator must give distinct blocks");
+    assert_ne!(
+        a_block, b_block,
+        "fresh allocator must give distinct blocks"
+    );
 
     // Fork and clear the bitmap bit for b_block.  The bitmap now treats b_block
     // as free, but b_inode.direct[0] still names it.  When stage_write extends
@@ -6923,5 +6934,116 @@ fn write_file_refuses_on_extend_when_allocated_block_is_shared_and_leaves_no_tra
         let mut out = vec![0u8; MAX_FILE_SIZE];
         assert_eq!(cv.read_file(ctrl_inode, &mut out), Ok(600));
         assert_eq!(&out[..600], &[2u8; 600]);
+    }
+}
+
+/// `create_file` (wfs.rs line 1066) calls `stage_create` then `stage_write` in
+/// a single transaction.  `stage_create` stages three sectors — the new file
+/// inode, the directory entry, and the directory inode — before `stage_write`
+/// is called.  `stage_write` then stages a bitmap-set sector and a data content
+/// sector for each new block it allocates.  If `refuse_shared_blocks` triggers
+/// after all that staging, `commit` is never called and none of the staged
+/// sectors reach the disk.
+///
+/// This test proves that `create_file` is atomic when `refuse_shared_blocks`
+/// fires inside `stage_write`:
+/// - `two_one_block_files()` creates `a.bin` (`a_inode`, `a_block`) and `b.bin`
+///   (`b_inode`, `b_block`).
+/// - `clear_bitmap_block(b_block)` corrupts the bitmap: `b_block` appears free
+///   in the bitmap but `b_inode.direct[0]` still names it.
+/// - `create_file(1, "new.bin", 0o644, &[42u8; 1], 2)`:
+///   - `stage_create` allocates a new inode (direct pointers all zero), stages
+///     the new inode, the directory entry, and the directory inode.
+///   - `stage_write` reads the new inode from the transaction (all-zero direct
+///     pointers), calls `allocate_block` for slot 0, finds `b_block` free in
+///     the bitmap, stages a bitmap-set for `b_block` and the data content sector.
+///   - `refuse_shared_blocks` finds `b_inode.direct[0] = b_block` in the
+///     touched set → `Err(Corrupt)`.  `commit` is never called.
+/// - No sector is written: the transaction with up to five staged changes
+///   (new inode, dir entry, dir inode, bitmap-set, content) is discarded.
+/// - "new.bin" does not appear in the directory and other files are intact.
+///
+/// Extends the proof given for `write_file` (extend path,
+/// `write_file_refuses_on_extend_when_allocated_block_is_shared_and_leaves_no_trace`)
+/// to the case where `stage_create` has already pre-staged sectors in the same
+/// transaction before `stage_write` runs and triggers `refuse_shared_blocks`.
+#[test]
+fn create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_leaves_no_trace() {
+    let (base, a_inode, b_inode) = two_one_block_files();
+
+    let a_block = read_inode_direct0(&base, a_inode);
+    let b_block = read_inode_direct0(&base, b_inode);
+    assert_ne!(
+        a_block, b_block,
+        "fresh allocator must give distinct blocks"
+    );
+
+    // Clear the bitmap bit for b_block.  The bitmap now treats b_block as free,
+    // but b_inode.direct[0] still names it.  When stage_write allocates the
+    // first block for the new file, allocate_block scans from data_start, skips
+    // a_block (bitmap-allocated), and returns b_block (the first "free" block it
+    // finds after a_block).
+    let image = base.fork(None);
+    clear_bitmap_block(&image, b_block);
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(image.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must see b_block as inode-named but free in the bitmap"
+    );
+
+    // Snapshot: the refused create_file must not modify any sector.
+    let before = image.sectors();
+
+    let mut volume = Volume::mount(image.clone()).expect("mount patched image");
+
+    // create_file calls stage_create (stages new inode + dir entry + dir inode)
+    // then stage_write.  stage_write allocates b_block for slot 0
+    // (bitmap-set staged + content staged), then refuse_shared_blocks finds
+    // b_inode.direct[0] = b_block in the touched set → Err(Corrupt).
+    // commit is never called.
+    assert_eq!(
+        volume.create_file(1, "new.bin", 0o644, &[42u8; 1], 2),
+        Err(Error::Corrupt),
+        "create_file must refuse when refuse_shared_blocks triggers in stage_write"
+    );
+
+    // No sector must have been written.  stage_create staged the new inode,
+    // dir entry and dir inode; stage_write staged a bitmap-set and content
+    // sector for b_block.  None reached the disk because commit was never called.
+    assert!(
+        image.sectors() == before,
+        "a refused create_file must not modify the image"
+    );
+
+    // "new.bin" must not appear in the directory.
+    assert_eq!(
+        volume.lookup(1, "new.bin"),
+        Err(Error::NotFound),
+        "the refused create_file must not leave a file in the directory"
+    );
+
+    // Existing files must remain readable after the refused create_file.
+    assert!(
+        volume.lookup(1, "a.bin").is_ok(),
+        "a.bin must remain accessible after the refused create_file"
+    );
+    assert!(
+        volume.lookup(1, "b.bin").is_ok(),
+        "b.bin must remain accessible after the refused create_file"
+    );
+
+    // Control: on a fresh image (no bitmap corruption), create_file succeeds
+    // and the new file reads back correctly.
+    {
+        let ctrl = base.fork(None);
+        let mut cv = Volume::mount(ctrl).expect("mount ctrl");
+        let new_inode = cv
+            .create_file(1, "new.bin", 0o644, &[42u8; 1], 2)
+            .expect("control: create_file must succeed on a consistent image");
+        let mut out = [0u8; 1];
+        assert_eq!(cv.read_file(new_inode, &mut out), Ok(1));
+        assert_eq!(out[0], 42u8);
     }
 }

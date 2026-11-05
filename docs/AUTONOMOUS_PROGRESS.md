@@ -1,5 +1,69 @@
 # Autonomous progress log
 
+## 2026-11-05 — WovenFS: create_file atomic when refuse_shared_blocks triggers in stage_write (atomicity proof)
+
+Branch: `auto/wovenhat-development` (base `e8d6eec2`). Working tree was clean.
+
+### Defect / gap
+
+The previous sessions proved atomicity for all three `refuse_shared_blocks` guard paths in
+`stage_write` when invoked via `write_file` (which uses a fresh transaction).  `create_file`
+calls `stage_create` and `stage_write` in the **same** transaction: `stage_create` pre-stages
+the new file inode, the directory entry, and the directory inode before `stage_write` runs.
+When `refuse_shared_blocks` triggers in `stage_write` during a `create_file` call, up to five
+sectors have already been staged (new inode, dir entry, dir inode from `stage_create`, plus
+bitmap-set and content sector from `stage_write`).  No test proved that all five staged changes
+are discarded (i.e. `commit` is never called) in this scenario.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`create_file_refuses_when_refuse_shared_blocks_triggers_in_stage_write_and_leaves_no_trace`:
+
+- Uses `two_one_block_files()` to get `a.bin` (`a_inode`, `a_block`) and `b.bin`
+  (`b_inode`, `b_block`).
+- Clears the bitmap bit for `b_block` via `clear_bitmap_block` → bitmap says `b_block` is free
+  while `b_inode.direct[0]` still names it.
+- Precondition: `check()` on the corrupt image returns `Err(Corrupt)`.
+- Snapshots `let before = image.sectors()`.
+- Calls `volume.create_file(1, "new.bin", 0o644, &[42u8; 1], 2)`:
+  - `stage_create` allocates inode 4 (first free), stages the new inode, dir entry, dir inode.
+  - `stage_write` reads the new inode from the transaction (all-zero direct pointers),
+    calls `allocate_block` for slot 0: scans bitmap, skips `a_block` (allocated), finds
+    `b_block` free → stages bitmap-set for `b_block`, stages content sector.
+  - `touched = [0..., b_block, 0...]` (before=zeros, after=`b_block` in slot 0).
+  - `refuse_shared_blocks` finds `b_inode.direct[0] = b_block ∈ touched` → `Err(Corrupt)`.
+  - `commit` never called.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `image.sectors() == before` — no sector written.
+- Asserts `lookup(1, "new.bin")` returns `Err(NotFound)` — no dangling entry.
+- Asserts `a.bin` and `b.bin` remain accessible.
+- Control: on a fresh image, `create_file` succeeds and reads back correctly.
+
+No production code changed.  Test count: 116 → 117.
+
+### Results (run on this host, 2026-11-05)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | FAIL (reformatted one `assert_ne!` call in prior tests); fixed with `cargo fmt --all`, then rerun |
+| `cargo fmt --all -- --check` (after fix) | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **117 passed / 0 failed** (was 116; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves atomicity for the `create_file` path when `refuse_shared_blocks` triggers in
+  `stage_write`: up to five staged sectors (new inode, dir entry, dir inode, bitmap-set,
+  content) are discarded with the transaction when `commit` is not called.
+- Together with the previous three sessions all `refuse_shared_blocks` guard paths in
+  `stage_write` are now covered for both the `write_file` and `create_file` callers.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-05 — WovenFS: write_file extend path refuses when allocated block is shared (atomicity proof)
 
 Branch: `auto/wovenhat-development` (base `bf3d48ee`). Working tree was clean.
