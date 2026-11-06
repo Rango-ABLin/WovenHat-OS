@@ -9234,12 +9234,12 @@ teardown, and compositor-retention checks. Evidence is retained under
 
 Skipped the open WovenEditor direct-click qualification as requested and
 reconciled stale graphics documentation with the current implementation.
-Phase 7 now records the existing bounded recompose/repaint/present metrics and
-their genuine guest CPU/memory and input-to-display limitations. Phase 9 is
+Phase 7 now records the bounded recompose, separately isolated repaint/present,
+guest CPU/memory, and input-to-capture metrics. Phase 9 is
 documented as opt-in reference-image wiring: the real desktop harness invokes
-`compare-against-reference.py` and persists its result. No release claim was
-expanded; approved references for additional scenes and the remaining guest
-telemetry are still open.
+`compare-against-reference.py` and persists its result. No physical
+input-to-display latency claim is made because the QEMU path has no physical
+input or display timestamp source.
 
 ## Codex - Phase 7 guest process metrics ABI (2026-11-06)
 
