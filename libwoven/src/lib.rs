@@ -12558,6 +12558,8 @@ pub mod syscall {
     pub const INSTALLER_INVENTORY: u64 = 241;
     pub const INSTALLER_INSTALL: u64 = 242;
     pub const ABI_NEGOTIATE: u64 = 243;
+    /// output versioned current-process performance metrics (32 bytes)
+    pub const PROCESS_METRICS: u64 = 246;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -14913,6 +14915,37 @@ pub fn cpu_frequency_info() -> Result<Option<CpuFrequencyInfo>, Error> {
         maximum_mhz: u32::from_le_bytes(bytes[5..9].try_into().unwrap_or([0; 4])),
         bus_mhz: u32::from_le_bytes(bytes[9..13].try_into().unwrap_or([0; 4])),
     }))
+}
+
+/// Bounded scheduler and virtual-address-space metrics for the calling
+/// process. Runtime is measured in 100 Hz timer ticks; mapped bytes describe
+/// virtual reservation, not physical RSS or shared-page ownership.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProcessMetrics {
+    pub abi_version: u32,
+    pub cpu: u32,
+    pub cpu_count: u32,
+    pub runtime_ticks: u64,
+    pub mapped_bytes: u64,
+}
+
+pub fn process_metrics() -> Result<ProcessMetrics, Error> {
+    let mut bytes = [0u8; 32];
+    check(unsafe {
+        syscall::invoke(
+            syscall::PROCESS_METRICS,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    Ok(ProcessMetrics {
+        abi_version: u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4])),
+        cpu: u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
+        cpu_count: u32::from_le_bytes(bytes[8..12].try_into().unwrap_or([0; 4])),
+        runtime_ticks: u64::from_le_bytes(bytes[16..24].try_into().unwrap_or([0; 8])),
+        mapped_bytes: u64::from_le_bytes(bytes[24..32].try_into().unwrap_or([0; 8])),
+    })
 }
 
 pub fn compositor_outputs() -> Result<([Output; 4], usize), Error> {

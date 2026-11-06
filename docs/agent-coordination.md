@@ -9241,3 +9241,15 @@ documented as opt-in reference-image wiring: the real desktop harness invokes
 expanded; approved references for additional scenes and the remaining guest
 telemetry are still open.
 
+## Codex - Phase 7 guest process metrics ABI (2026-11-06)
+
+Added syscall 246 (`PROCESS_METRICS`) and `libwoven::process_metrics()`. The
+fixed 32-byte versioned record reports current CPU identity/count, current-task
+runtime ticks, and current-process virtual mapping reservation. WovenShell logs
+it alongside repaint/present timing, and the desktop qualification parser
+stores samples and a bounded summary in `phase7_metrics`. The record is
+read-only, validates output capacity and userspace pointers through the
+existing copy boundary, and explicitly does not claim physical RSS or whole-
+guest CPU utilization. Host libwoven tests, target checks, and warning-denying
+Clippy pass; fresh 1/2/4-CPU QEMU evidence remains the next acceptance step.
+

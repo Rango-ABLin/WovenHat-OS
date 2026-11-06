@@ -4976,6 +4976,30 @@ impl AddressSpace {
         self.tls.map(InitialTls::range)
     }
 
+    /// Return the virtual bytes reserved by this process image and its
+    /// bounded anonymous mappings. This is diagnostic accounting, not a
+    /// physical-resident or shared-page measurement.
+    pub fn mapped_bytes(
+        self,
+        anonymous: &[Option<AnonymousMapping>; MAX_ANONYMOUS_MAPPINGS],
+    ) -> usize {
+        let image_bytes = self.mappings[..self.mapping_count]
+            .iter()
+            .map(|mapping| mapping.size())
+            .fold(0usize, usize::saturating_add);
+        let stack_bytes = UserStack::SIZE;
+        let tls_bytes = self.tls.map_or(0, |tls| tls.layout.mapping_size);
+        let anonymous_bytes = anonymous
+            .iter()
+            .flatten()
+            .map(|mapping| mapping.size)
+            .fold(0usize, usize::saturating_add);
+        image_bytes
+            .saturating_add(stack_bytes)
+            .saturating_add(tls_bytes)
+            .saturating_add(anonymous_bytes)
+    }
+
     pub fn dynamic_tls_address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {
         self.tls?.address(module, offset, tls_base)
     }

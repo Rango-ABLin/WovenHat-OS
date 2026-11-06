@@ -4809,3 +4809,17 @@ the current session and attempts the mounted source copy for reboot
 persistence. Malformed records and unavailable storage fail closed and leave
 the policy unchanged. Light/dark remain session previews because the shell's
 persisted policy surface currently distinguishes only high contrast.
+
+## Phase 7 process performance metrics (2026-11-06)
+
+The read-only `PROCESS_METRICS` ABI (syscall 246) exposes a fixed 32-byte
+versioned record to the calling Ring-3 process. It contains the ABI version,
+current CPU and online CPU count, scheduler runtime ticks for the current task,
+and virtual mapping bytes reserved by the current process image, stack, TLS,
+and bounded anonymous mappings. The kernel copies the record only after
+validating the caller's output capacity and pointer. Runtime is a 100 Hz
+timer-tick accounting value; mapped bytes are not physical RSS and shared
+pages are not attributed as private memory. WovenShell logs the record beside
+repaint/present timing, and the host qualification parser stores it under
+`phase7_metrics`. Whole-guest utilization and input-to-display latency remain
+separate measurements and are not inferred from this record.

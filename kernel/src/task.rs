@@ -921,6 +921,20 @@ pub struct Summary {
     pub idle_heartbeats: u64,
 }
 
+/// Read-only metrics for the calling process. `mapped_bytes` is virtual
+/// address-space reservation, while `runtime_ticks` is scheduler runtime for
+/// the current task; neither is a physical-RSS or billing guarantee.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct ProcessMetrics {
+    pub abi_version: u32,
+    pub cpu: u32,
+    pub cpu_count: u32,
+    pub reserved: u32,
+    pub runtime_ticks: u64,
+    pub mapped_bytes: u64,
+}
+
 /// Scheduler-visible load for one logical CPU.
 ///
 /// `runnable` counts non-idle tasks that are either Ready or Running. Keeping
@@ -3119,6 +3133,38 @@ pub fn process_task_blocked(id: ProcessId) -> bool {
 
 pub fn current_process_id() -> u64 {
     CURRENT_PROCESS_IDS[crate::smp::cpu_index()].load(Ordering::Acquire)
+}
+
+/// Snapshot bounded performance-accounting values for the current process.
+/// The scheduler and process-table locks are acquired separately so this
+/// query does not introduce a lock-order edge between them.
+pub fn current_process_metrics() -> Option<ProcessMetrics> {
+    let cpu = crate::smp::cpu_index();
+    let runtime_ticks = {
+        let scheduler = SCHEDULER.lock();
+        if scheduler.task_count == 0 {
+            return None;
+        }
+        scheduler.tasks[scheduler.current_slot[cpu]].runtime_ticks
+    };
+    let process_id = current_process_id();
+    let mapped_bytes = process_table_lock()
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == process_id)
+        .and_then(|process| {
+            process
+                .address_space
+                .map(|space| space.mapped_bytes(&process.memory_mappings))
+        })?;
+    Some(ProcessMetrics {
+        abi_version: 1,
+        cpu: u32::try_from(cpu).ok()?,
+        cpu_count: u32::try_from(crate::smp::online_count()).ok()?,
+        reserved: 0,
+        runtime_ticks,
+        mapped_bytes: u64::try_from(mapped_bytes).ok()?,
+    })
 }
 
 /// The current process's address space, if any. Used by debug/diagnostic

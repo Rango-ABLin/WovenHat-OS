@@ -836,6 +836,20 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         int(value)
         for value in re.findall(r"woven-shell: search latency ticks=(\d+)", text)
     ]
+    process_metrics = [
+        {
+            "abi_version": int(abi),
+            "cpu": int(cpu),
+            "cpu_count": int(cpus),
+            "runtime_ticks": int(runtime),
+            "mapped_bytes": int(mapped),
+        }
+        for abi, cpu, cpus, runtime, mapped in re.findall(
+            r"woven-shell: process metrics abi=(\d+) cpu=(\d+) cpus=(\d+) "
+            r"runtime_ticks=(\d+) mapped_bytes=(\d+)",
+            text,
+        )
+    ]
     result: dict[str, Any] = {
         "tick_rate_hz": 100,
         "recompose_samples": len(recomposes),
@@ -852,13 +866,23 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         "present_samples": len(presents),
         "present_ticks": presents,
         "present_ms": [round(value * 10.0, 3) for value in presents],
+        "process_metrics_samples": process_metrics,
         "measurement_limits": {
             "input_to_frame_ms": "host QMP input-to-capture proxy is recorded in timings_ms",
-            "cpu": "not exposed as a guest ABI measurement; host QEMU utilization is not a guest performance claim",
-            "guest_memory": "not exposed as a guest ABI measurement",
+            "cpu": "current WovenShell scheduler runtime is exposed in guest timer ticks; this is process CPU accounting, not whole-guest utilization",
+            "guest_memory": "current WovenShell virtual mapping reservation is exposed; this is not physical RSS or whole-guest memory",
             "host_qemu_cpu_memory": "not used as a guest performance claim",
         },
     }
+    if process_metrics:
+        result["process_metrics_summary"] = {
+            "abi_versions": sorted({sample["abi_version"] for sample in process_metrics}),
+            "cpu_ids": sorted({sample["cpu"] for sample in process_metrics}),
+            "cpu_counts": sorted({sample["cpu_count"] for sample in process_metrics}),
+            "runtime_tick_delta": process_metrics[-1]["runtime_ticks"] - process_metrics[0]["runtime_ticks"],
+            "mapped_bytes_min": min(sample["mapped_bytes"] for sample in process_metrics),
+            "mapped_bytes_max": max(sample["mapped_bytes"] for sample in process_metrics),
+        }
     if active_recomposes:
         ordered = sorted(active_recomposes)
         p95_index = min(len(ordered) - 1, max(0, (len(ordered) * 95 + 99) // 100 - 1))

@@ -3974,6 +3974,25 @@ fn main(args: Args) -> ! {
                 b"woven-shell: present ticks=",
                 libwoven::format_u64(present_ticks, &mut present_digits),
             ]);
+            if let Ok(metrics) = libwoven::process_metrics() {
+                let mut abi_digits = [0u8; 20];
+                let mut cpu_digits = [0u8; 20];
+                let mut cpus_digits = [0u8; 20];
+                let mut runtime_digits = [0u8; 20];
+                let mut mapped_digits = [0u8; 20];
+                log(&[
+                    b"woven-shell: process metrics abi=",
+                    libwoven::format_u64(metrics.abi_version as u64, &mut abi_digits),
+                    b" cpu=",
+                    libwoven::format_u64(metrics.cpu as u64, &mut cpu_digits),
+                    b" cpus=",
+                    libwoven::format_u64(metrics.cpu_count as u64, &mut cpus_digits),
+                    b" runtime_ticks=",
+                    libwoven::format_u64(metrics.runtime_ticks, &mut runtime_digits),
+                    b" mapped_bytes=",
+                    libwoven::format_u64(metrics.mapped_bytes, &mut mapped_digits),
+                ]);
+            }
         }
     }
 }
