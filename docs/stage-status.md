@@ -1,5 +1,14 @@
 # Stage status
 
+## Graphics occlusion status reconciliation - 2026-11-06 - SOFTWARE IMPLEMENTED
+
+The previously reported Phase 5 occlusion gap was stale. WovenShell now uses
+the bounded `frame_is_fully_occluded` scan during repaint to skip lower
+windows whose complete footprint is covered by a higher fully opaque frame.
+The existing topmost-first input routing is unchanged. This closes the
+software occlusion item; GPU/interactive-display qualification remains a
+separate Phase 5/6 boundary.
+
 ## Phase 7 guest performance metrics - 2026-11-06 - ACCEPTED SOFTWARE/QEMU 1/2/4 CPUs
 
 Added syscall 246 and the `libwoven::process_metrics()` wrapper, plus syscall

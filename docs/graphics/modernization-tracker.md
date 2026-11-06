@@ -174,6 +174,13 @@ User chose VFS staging over a new syscall (no new kernel capability, reuses the 
 | 9 | QA automation | PARTIAL, opt-in reference comparison wired | `scripts/test-desktop-qualification.py --reference-image ...` invokes `scripts/compare-against-reference.py` during the real sign-in capture and persists the result in both `reference-comparison.json` and `result.json`; matching-dimension content failures are gate failures, while dimension mismatch is retained as an explicit incompatibility. Real deterministic comparator checks and the 1-CPU wiring run passed as recorded in the session log. Remaining: approved references for additional scenes/resolutions and a complete release baseline set. |
 | 10 | Release qualification | NOT STARTED as a single gate | Don't start this until Phases 1-9 above are each at least "PARTIAL with a clear remaining list," per the mandate's own ordering. |
 
+2026-11-06 code audit correction: the Phase 5 row's older occlusion note is
+stale. `WovenShell::frame_is_fully_occluded` now skips a lower window when a
+higher fully opaque frame contains its footprint, with the bounded
+`MAX_WINDOWS` stack limiting the scan. Input routing remains topmost-first.
+Phase 5 is still partial because the separate GPU/interactive-display and
+other compositor release boundaries remain open.
+
 ### Qualification addendum (2026-11-04)
 
 The following results supersede stale historical wording in the phase rows

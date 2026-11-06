@@ -9253,6 +9253,15 @@ passed on 1/2/4 CPUs with evidence retained in the three dated directories in
 `docs/stage-status.md`. True input-to-display latency and isolated repaint cost
 remain separate measurement gaps.
 
+## Codex - Phase 5 occlusion status reconciliation (2026-11-06)
+
+Audited the current WovenShell repaint path after the tracker still described
+occlusion as missing. `frame_is_fully_occluded` is present and called for
+each stacked window; it skips only a lower window fully covered by a higher
+fully opaque frame, with the bounded window stack preventing an unbounded
+scene walk. The tracker and stage status now record this as implemented while
+keeping the unrelated GPU/interactive-display boundaries open.
+
 ## Codex - Phase 7 latency and isolated compositor measurement (2026-11-06)
 
 The end-to-end desktop qualification was attempted twice with WHPX at one
