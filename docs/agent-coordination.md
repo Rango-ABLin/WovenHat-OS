@@ -9291,3 +9291,16 @@ production-marker chain. The read-only physical/trust preflight correctly
 remained `NOT_QUALIFIED` because external OVMF VARS, swtpm, disk, and
 development signing inputs were not supplied.
 
+## Codex - WSL virtual-trust tooling and qualification (2026-11-06)
+
+Installed the missing WSL2 Ubuntu tools: `swtpm`, Linux QEMU 8.2.2, OVMF 4M,
+OpenSSL, `efitools`, and `sbsigntool`. Generated disposable development-only
+RSA certificate material and a copied OVMF VARS test store; no production key,
+host firmware, TPM, or raw device was touched. The preflight passes every
+input check, including key/certificate matching and certificate enrollment.
+The actual trust run remains `NOT_QUALIFIED`: QEMU exits 1 without the
+`[S15.5] secure boot handoff: PASSED` marker, even with the dedicated
+`stage15-5-test` image. Evidence is in
+`target/virtual-trust-wsl-preflight.json` and
+`target/virtual-trust-wsl-result-stage15-5.json`.
+
