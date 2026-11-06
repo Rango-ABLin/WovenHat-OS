@@ -57,6 +57,8 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--memory', default='5G', help='guest RAM (default: 5G, matching desktop qualification)')
+    parser.add_argument('--display', choices=('std', 'virtio-vga'), default='virtio-vga',
+                        help='display path to exercise (default: live VirtIO-GPU surface)')
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
     parser.add_argument('--exercise-resize', action='store_true', help='exercise the WovenShell WSIZ/WRSZ path (Calculator, Terminal, Settings, Monitor, Security, Editor, Images, Update, Store, or Files)')
     parser.add_argument('--exercise-pointer', action='store_true', help='exercise the desktop PS/2 pointer cursor path with relative motion and a click')
@@ -136,12 +138,15 @@ def main():
     out.mkdir(parents=True)
     serial = out / 'serial.log'
     qmp_port = free_port()
+    display_args = (['-display', 'none', '-vga', 'none',
+                     '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800']
+                    if args.display == 'virtio-vga' else ['-vga', 'std'])
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', args.memory,
-               '-smp', str(args.cpus), '-display', 'none', '-serial', f'file:{serial}',
+               '-smp', str(args.cpus), '-serial', f'file:{serial}',
                '-no-reboot', '-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off',
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
-               '-device', 'virtio-blk-pci,drive=boot,bootindex=1', '-vga', 'std']
+               '-device', 'virtio-blk-pci,drive=boot,bootindex=1'] + display_args
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     errors = []
     process = subprocess.Popen(command, cwd=root, stdout=(out / 'qemu.log').open('w'),
@@ -172,6 +177,12 @@ def main():
                 if 'return' in response:
                     return response['return']
 
+        def screendump(path):
+            dump_arguments = {'filename': str(path)}
+            if args.display == 'virtio-vga':
+                dump_arguments.update({'device': 'gpu0', 'head': 0})
+            command_qmp('screendump', dump_arguments)
+
         command_qmp('qmp_capabilities')
         deadline = time.monotonic() + 180
         while '[SESSION] WovenShell desktop started' not in serial.read_text(errors='replace'):
@@ -194,7 +205,7 @@ def main():
                 raise RuntimeError('demo sign-in failed')
             time.sleep(0.1)
         baseline = out / 'desktop-before-files.ppm'
-        command_qmp('screendump', {'filename': str(baseline)})
+        screendump(baseline)
         for key in ['f1', *app[3], 'ret']:
             command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 80})
             time.sleep(0.12)
@@ -249,13 +260,13 @@ def main():
         }.get(args.app)
         if input_sequence is not None:
             input_baseline = out / f'woven-{app[0]}-before-input.ppm'
-            command_qmp('screendump', {'filename': str(input_baseline)})
+            screendump(input_baseline)
             for key in input_sequence:
                 command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': key}], 'hold-time': 160})
                 time.sleep(0.3)
             time.sleep(2)
         capture = out / f'woven-{app[0]}.ppm'
-        command_qmp('screendump', {'filename': str(capture)})
+        screendump(capture)
         time.sleep(0.5)
         width, height, pixels = ppm_pixels(capture)
         before_width, before_height, before = ppm_pixels(baseline)
@@ -274,7 +285,7 @@ def main():
         pointer_baseline = None
         if args.exercise_pointer:
             pointer_baseline = out / f'woven-{app[0]}-before-pointer.ppm'
-            command_qmp('screendump', {'filename': str(pointer_baseline)})
+            screendump(pointer_baseline)
             command_qmp('input-send-event', {'events': [
                 {'type': 'rel', 'data': {'axis': 'x', 'value': 40}},
                 {'type': 'rel', 'data': {'axis': 'y', 'value': 25}},
@@ -289,7 +300,7 @@ def main():
             ]})
             time.sleep(1)
             pointer_capture = out / f'woven-{app[0]}-after-pointer.ppm'
-            command_qmp('screendump', {'filename': str(pointer_capture)})
+            screendump(pointer_capture)
             pointer_width, pointer_height, pointer_pixels = ppm_pixels(pointer_capture)
             before_pointer_width, before_pointer_height, before_pointer = ppm_pixels(pointer_baseline)
             if (pointer_width, pointer_height) != (before_pointer_width, before_pointer_height):
@@ -301,7 +312,7 @@ def main():
             parser.error('--exercise-client-pointer currently supports the packaged desktop clients only')
         if args.exercise_client_pointer:
             client_pointer_baseline = out / f'woven-{app[0]}-before-client-pointer.ppm'
-            command_qmp('screendump', {'filename': str(client_pointer_baseline)})
+            screendump(client_pointer_baseline)
             # Normalize the logical pointer to the bottom-right corner before
             # targeting the first client. Relative deltas otherwise depend on
             # where launcher navigation left the pointer.
@@ -327,7 +338,7 @@ def main():
                 time.sleep(0.1)
             time.sleep(1)
             client_pointer_capture = out / f'woven-{app[0]}-after-client-pointer.ppm'
-            command_qmp('screendump', {'filename': str(client_pointer_capture)})
+            screendump(client_pointer_capture)
             client_width, client_height, client_pixels = ppm_pixels(client_pointer_capture)
             before_client_width, before_client_height, before_client = ppm_pixels(client_pointer_baseline)
             if (client_width, client_height) != (before_client_width, before_client_height):
@@ -349,7 +360,7 @@ def main():
                 'store': {'move': (10, 20), 'marker': 'WovenStore: pointer refreshed', 'name': 'store'},
             }[args.app]
             click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
-            command_qmp('screendump', {'filename': str(click_baseline)})
+            screendump(click_baseline)
             if not args.exercise_client_pointer:
                 command_qmp('input-send-event', {'events': [
                     {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
@@ -369,14 +380,14 @@ def main():
             command_qmp('input-send-event', {'events': [
                 {'type': 'btn', 'data': {'down': False, 'button': 'left'}},
             ]})
-            command_qmp('screendump', {'filename': str(out / f"woven-{control['name']}-after-client-click.ppm")})
+            screendump(out / f"woven-{control['name']}-after-client-click.ppm")
             while control['marker'] not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError(f'{app[1]} did not activate its bounded control through forwarded pointer input')
                 time.sleep(0.1)
             time.sleep(1)
             click_capture = out / f"woven-{control['name']}-after-client-click.ppm"
-            command_qmp('screendump', {'filename': str(click_capture)})
+            screendump(click_capture)
             click_width, click_height, click_pixels = ppm_pixels(click_capture)
             before_click_width, before_click_height, before_click = ppm_pixels(click_baseline)
             if (click_width, click_height) != (before_click_width, before_click_height):
@@ -387,7 +398,7 @@ def main():
         resize_baseline = None
         if args.exercise_resize:
             resize_baseline = out / f'woven-{app[0]}-before-resize.ppm'
-            command_qmp('screendump', {'filename': str(resize_baseline)})
+            screendump(resize_baseline)
             command_qmp('send-key', {'keys': [{'type': 'qcode', 'data': 'f2'}], 'hold-time': 160})
             while f'woven-shell: window resized: {app[1].replace("Woven", "")}' not in serial.read_text(errors='replace'):
                 if process.poll() is not None or time.monotonic() > deadline:
@@ -395,7 +406,7 @@ def main():
                 time.sleep(0.1)
             time.sleep(1)
             resized_capture = out / f'woven-{app[0]}-after-resize.ppm'
-            command_qmp('screendump', {'filename': str(resized_capture)})
+            screendump(resized_capture)
             resize_width, resize_height, resize_pixels = ppm_pixels(resized_capture)
             before_resize_width, before_resize_height, before_resize = ppm_pixels(resize_baseline)
             if (resize_width, resize_height) != (before_resize_width, before_resize_height):

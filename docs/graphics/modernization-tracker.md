@@ -141,7 +141,11 @@ when one is available. The qualification harness now has an opt-in
 `--display virtio-vga` mode that captures QMP device `gpu0` instead of stale
 VGA output; the full 1280x800 journey now passes on 1/2/4 CPUs. The isolated
 4-CPU 6.04s overview sample was host scheduling variance; a controlled repeat
-passed and the existing 5s frame limit remains unchanged.
+passed and the existing 5s frame limit remains unchanged. The packaged-client
+acceptance harness now defaults to the same live VirtIO-GPU surface and uses
+device-specific `gpu0` captures; `--display std` remains available only for
+legacy comparison. This prevents app pointer/click acceptance from
+accidentally validating the stale VGA console.
 Typography's former per-process font-capacity blocker is also closed: the
 existing read-only lazy file mapping now supplies the staged TTF without a
 607 KiB ELF buffer, and the sign-in label is the first production TTF call

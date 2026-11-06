@@ -1,5 +1,15 @@
 # Stage status
 
+## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
+
+`scripts/test-files-desktop-qemu.py` now defaults to the live
+`virtio-vga,id=gpu0` surface with `-vga none` and sends all QMP screendumps to
+that device and head. The legacy VGA path remains available through explicit
+`--display std`. Python compilation, CLI validation, and diff checks pass.
+The WovenEditor direct-click journey remains unqualified because this host
+cannot currently allocate the required QEMU guest memory; no QEMU acceptance
+claim is made from this change.
+
 ## Virtual trust tooling and WSL qualification - 2026-11-06 - QUALIFIED (DISPOSABLE WSL2)
 
 Installed `swtpm`, Linux QEMU 8.2.2, OVMF 4M, OpenSSL, `efitools`, and

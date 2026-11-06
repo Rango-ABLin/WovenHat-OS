@@ -106,6 +106,15 @@ next prerequisite and must be run before calling this slice fully accepted.
 
 # Agent coordination (Claude Code and Codex)
 
+## Codex - packaged-client acceptance uses live VirtIO-GPU output (2026-11-06)
+
+The `scripts/test-files-desktop-qemu.py` harness now defaults to a single
+`virtio-vga,id=gpu0` display with `-vga none` and directs every QMP screendump
+to `device=gpu0,head=0`. The legacy `--display std` path remains explicit for
+comparison. Python compilation, help output, and `git diff --check` pass. This
+is a harness correction only; the WovenEditor 1/2/4-CPU journey still needs a
+host with enough free RAM for QEMU and has not been claimed as accepted here.
+
 ## Codex - WovenSettings persistent policy completion (2026-11-05)
 
 Closed the concrete WovenSettings persistence gap. The installed settings
