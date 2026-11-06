@@ -78,6 +78,7 @@ def main() -> int:
             crop = frame[y:y + height, x:x + width]
             baseline_frames.append(float(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).mean()))
     baseline = statistics.median(baseline_frames[-30:])
+    keydowns.clear()
     print("Ready. Press the chosen key only when the desktop visibly changes.")
     print("Press Esc to stop early.")
 
