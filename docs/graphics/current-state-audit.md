@@ -78,7 +78,7 @@ stale palette/start-mode fixtures were repaired.
 | Keyboard/mouse input | PARTIAL | QEMU keyboard/pointer acceptance exists, including launcher and desktop qualification; native hardware input remains unqualified. |
 | VirtIO GPU 2D | PARTIAL | `kernel/src/virtio_gpu.rs` has scanout/resource support and QEMU gates; production hardware coverage and full reset/recovery are not closed. |
 | GPU acceleration | MISSING/UNVERIFIED | No verified VirGL/Vulkan-capable execution path is claimed. CPU fallback remains the trusted path. |
-| Performance qualification | UNVERIFIED | Some bounded QEMU gates exist; no complete 60-FPS/latency/memory benchmark report for the mandate exists. |
+| Performance qualification | PARTIAL | Real QEMU qualification records bounded recompose, repaint, present, search-latency, and input-to-capture proxy metrics in `result.json` on the accepted 1/2/4-CPU journeys. True input-to-display latency, isolated repaint cost, and guest CPU/memory under sustained animation remain unavailable because the current guest ABI does not expose them. |
 | Graphics security/fuzzing | PARTIAL | Bounds and ownership defenses exist; complete malformed image/font/protocol fuzz coverage is not complete. |
 | Visual regression | PARTIAL | Guest screenshots and oracle checks exist; Stage 20.1 software/QEMU is green, while broader 3D visual coverage remains separate. |
 | Native hardware certification | NOT STARTED/UNVERIFIED | Read-only physical preflights and QEMU stimulators do not constitute native qualification. |

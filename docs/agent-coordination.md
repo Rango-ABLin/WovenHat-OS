@@ -9230,3 +9230,14 @@ including the software 2D and 3D frame markers, presentation, screen check,
 teardown, and compositor-retention checks. Evidence is retained under
 `target/hello-gui-compositor-{1,2,4}cpu`.
 
+## Codex - non-app graphics status reconciliation (2026-11-06)
+
+Skipped the open WovenEditor direct-click qualification as requested and
+reconciled stale graphics documentation with the current implementation.
+Phase 7 now records the existing bounded recompose/repaint/present metrics and
+their genuine guest CPU/memory and input-to-display limitations. Phase 9 is
+documented as opt-in reference-image wiring: the real desktop harness invokes
+`compare-against-reference.py` and persists its result. No release claim was
+expanded; approved references for additional scenes and the remaining guest
+telemetry are still open.
+
