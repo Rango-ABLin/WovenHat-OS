@@ -9253,3 +9253,19 @@ passed on 1/2/4 CPUs with evidence retained in the three dated directories in
 `docs/stage-status.md`. True input-to-display latency and isolated repaint cost
 remain separate measurement gaps.
 
+## Codex - Phase 7 latency and isolated compositor measurement (2026-11-06)
+
+The end-to-end desktop qualification was attempted twice with WHPX at one
+CPU. Both runs are preserved under `audit-artifacts/desktop-qualification-`
+`1793944771421171800` and `1793944913024318600`: the first timed out waiting
+for the Overview framebuffer change, and the second measured 5010.5 ms for the
+Overview transition against the 5000 ms gate. These runs remain failures and
+do not establish physical input-to-display latency; the harness injects QMP
+events and measures host input-to-capture time.
+
+The existing isolated Stage 30.4 compositor benchmark passed on 1/2/4 CPUs,
+with evidence in `target/hello-gui-compositor-benchmark-{1,2,4}cpu`. It reports
+the real compositor surface write plus present operation, but not the full
+WovenShell repaint body. Therefore isolated repaint cost and physical
+input-to-display latency remain open rather than being inferred from proxies.
+
