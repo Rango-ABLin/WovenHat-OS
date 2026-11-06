@@ -7931,3 +7931,84 @@ fn unlink_refuses_when_refuse_shared_blocks_encounters_a_corrupt_sibling_inode_a
         mount_consistent(&ctrl, "control: volume must be consistent after unlink");
     }
 }
+
+/// `read_file` (wfs.rs:1242-1244) verifies the entire file content against the
+/// inode's `data_checksum` after assembling all data blocks:
+///
+/// ```rust
+/// if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
+///     return Err(Error::Corrupt);
+/// }
+/// ```
+///
+/// `read_file_refuses_a_file_with_a_mismatched_data_checksum` only exercises
+/// this path for a single-block file (11 bytes in one block).  A multi-block
+/// file requires both blocks to be read before the checksum comparison fires;
+/// corruption in the second block is therefore caught by the same final check,
+/// not by an earlier per-block guard.
+///
+/// `two_block_file()` creates `p.bin` with 600 bytes of `[7u8; 600]`
+/// (block 0: bytes 0–511; block 1: bytes 512–599).  Flipping a byte in block 1
+/// changes the reconstructed content without touching the inode, so the
+/// inode's structural checksum remains valid and `Volume::mount` accepts the
+/// image.  `read_file` then reads both blocks, computes `fnv1a(&out[..600])`
+/// over the patched content, and finds a mismatch against `node.data_checksum`
+/// (which still records the hash of the original `[7u8; 600]`).
+///
+/// Because `read_file` is a pure read (it never calls `txn.stage` or `commit`),
+/// "leaves no trace" is structurally guaranteed, but the snapshot comparison
+/// makes a future refactor that accidentally adds a write path immediately
+/// visible.
+#[test]
+fn read_file_refuses_a_multi_block_file_with_a_mismatched_data_checksum() {
+    let (base, inode) = two_block_file();
+
+    // Control: the unpatched two-block file reads back correctly.
+    {
+        let mut out = [0u8; MAX_FILE_SIZE];
+        let n = Volume::mount(base.clone())
+            .expect("mount control")
+            .read_file(inode, &mut out)
+            .expect("control read_file");
+        assert_eq!(n, 600, "control: file must read back 600 bytes");
+        assert_eq!(&out[..600], &[7u8; 600][..], "control: content must match");
+    }
+
+    // Retrieve direct[1] — the second data block LBA — from the unpatched image.
+    let second_block = Volume::mount(base.clone())
+        .expect("mount for inode lookup")
+        .inode(inode)
+        .expect("inode")
+        .direct[1];
+    assert_ne!(
+        second_block, 0,
+        "two-block file must have a non-zero direct[1]"
+    );
+
+    // Fork and flip the first byte of the second data block only.
+    // The inode sector is untouched, so the inode's structural checksum stays
+    // valid and Volume::mount accepts the image.
+    // The inode's data_checksum still records fnv1a(&[7u8; 600]).
+    let corrupt = base.fork(None);
+    corrupt.flip_byte(second_block as usize, 0);
+
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount patched image");
+    let mut buf = [0u8; MAX_FILE_SIZE];
+
+    // read_file reads block 0 (bytes 0..512) and block 1 (bytes 512..600, but
+    // first byte of block 1 is now 7^0xFF).  Then fnv1a(&out[..600]) is
+    // computed over the patched bytes and found not equal to data_checksum.
+    assert_eq!(
+        volume.read_file(inode, &mut buf),
+        Err(Error::Corrupt),
+        "read_file must return Corrupt when the second block's content does not match data_checksum"
+    );
+
+    // A pure read must not modify the image.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused read_file must not modify the image"
+    );
+}

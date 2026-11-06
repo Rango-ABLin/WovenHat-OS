@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: read_file refuses a multi-block file with a mismatched data checksum (symmetry closure)
+
+Branch: `auto/wovenhat-development` (base `8f2e0469`). Working tree was clean.
+
+### Defect / gap
+
+`read_file` (wfs.rs:1242-1244) verifies the entire assembled file content against
+the inode's `data_checksum` after reading all data blocks:
+
+```rust
+if size > 0 && fnv1a(&out[..size]) != node.data_checksum {
+    return Err(Error::Corrupt);
+}
+```
+
+The existing test `read_file_refuses_a_file_with_a_mismatched_data_checksum` only
+exercises this path for a single-block file (11 bytes; a corrupted first block
+triggers the check). For a two-block file (600 bytes; block 0: bytes 0–511,
+block 1: bytes 512–599), corruption isolated to the **second** block still
+reaches the same final checksum comparison — but no test proved this.
+
+The existing `read_file_refuses_a_multi_block_file_with_a_zero_interior_block_pointer`
+only reaches the per-block `block == 0` guard (wfs.rs:1231-1233) and returns
+before the data-checksum comparison fires. So neither existing test exercises
+the data-checksum path for multi-block files.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_file_refuses_a_multi_block_file_with_a_mismatched_data_checksum`:
+
+- Uses `two_block_file()`: file `p.bin` with `[7u8; 600]` bytes; `direct[0]`
+  holds the first 512 bytes, `direct[1]` holds the last 88 bytes.
+- Retrieves `direct[1]` from the unpatched base image.
+- Forks the image (`corrupt = base.fork(None)`).
+- Flips the first byte of the second data block:
+  `corrupt.flip_byte(direct[1] as usize, 0)` → byte `7` becomes `7 ^ 0xFF = 0xF8`.
+- The inode sector is untouched, so the inode's structural checksum stays valid
+  and `Volume::mount` accepts the image. `data_checksum` still records
+  `fnv1a(&[7u8; 600])`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.read_file(inode, &mut buf)`:
+  - `self.inode(inode)?` → structural checksum valid → `Ok(node)`.
+  - Block 0 reads fine (512 bytes, `copied = 512`).
+  - Block 1 reads fine (88 bytes, but first byte is `0xF8`).
+  - `fnv1a(&out[..600])` ≠ `node.data_checksum` → `Err(Error::Corrupt)`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — read_file is a pure read; no sector
+  was written.
+- Control: on the unpatched base, `read_file` returns `Ok(600)` with `[7u8; 600]`.
+
+No production code changed. Test count: 127 → 128.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **128 passed / 0 failed** (was 127; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `read_file` detects a data-checksum mismatch in the second block
+  of a multi-block file, leaving the image byte-for-byte unchanged.
+- Closes the data-checksum symmetry gap for `read_file`:
+  - Single-block mismatch ← `read_file_refuses_a_file_with_a_mismatched_data_checksum`
+  - Zero second-block pointer ← `read_file_refuses_a_multi_block_file_with_a_zero_interior_block_pointer`
+  - **Multi-block second-block content corruption** ← **this test**
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — completion_queue: duplicate-reserve, publish/remove guards and partial-snapshot (correctness proofs)
 
 Branch: `auto/wovenhat-development` (base `bd9897fe`). Working tree was clean.
