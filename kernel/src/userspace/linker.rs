@@ -785,6 +785,10 @@ pub(super) fn load_with_geometry(
     let lazy_trampoline_base = lifecycle_trampoline.checked_add(0x100)?;
     let trampoline = UserMapping::new(lifecycle_trampoline, 4096, false, true)?;
     paging::map_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, true, false).ok()?;
+    // Register the mapping immediately: every subsequent fallible operation
+    // must leave a range for Pending::drop to reclaim.
+    pending.space.mappings[pending.space.mapping_count] = trampoline;
+    pending.space.mapping_count += 1;
     paging::zero_user_range_in(page_table, lifecycle_trampoline, 4096).ok()?;
     // The exit continuation preserves the status in callee-saved R12 while
     // destructors run, then re-enters the normal exit syscall path.
@@ -795,8 +799,6 @@ pub(super) fn load_with_geometry(
         0x0f, 0x0b, // ud2 if the syscall unexpectedly returns
     ];
     paging::write_user_bytes(page_table, lifecycle_trampoline, &trampoline_code).ok()?;
-    pending.space.mappings[pending.space.mapping_count] = trampoline;
-    pending.space.mapping_count += 1;
     pending.space.lifecycle_trampoline = lifecycle_trampoline;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.
@@ -811,6 +813,7 @@ pub(super) fn load_with_geometry(
         0
     };
     paging::map_user_range_in_inactive(page_table, stack_base, stack.size, true, false).ok()?;
+    // Own the stack before zeroing and argv construction can fail.
     pending.stack_mapped = true;
     paging::zero_user_range_in(page_table, stack_base, stack.size).ok()?;
     if !paging::user_range_is_unmapped_in(page_table, stack.guard_base, UserStack::GUARD_SIZE)
