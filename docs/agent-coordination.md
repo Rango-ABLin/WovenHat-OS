@@ -9243,18 +9243,13 @@ telemetry are still open.
 
 ## Codex - Phase 7 guest process metrics ABI (2026-11-06)
 
-Added syscall 246 (`PROCESS_METRICS`) and `libwoven::process_metrics()`. The
-fixed 32-byte versioned record reports current CPU identity/count, current-task
-runtime ticks, and current-process virtual mapping reservation. WovenShell logs
-it alongside repaint/present timing, and the desktop qualification parser
-stores samples and a bounded summary in `phase7_metrics`. The record is
-read-only, validates output capacity and userspace pointers through the
-existing copy boundary, and explicitly does not claim physical RSS or whole-
-guest CPU utilization. Host libwoven tests, target checks, and warning-denying
-Clippy pass. The real VirtIO-GPU desktop journey then passed on 1/2/4 CPUs
-with stable 581,632-byte shell virtual mapping accounting; evidence is retained
-in the three dated desktop-qualification directories recorded in
-`docs/stage-status.md`. The remaining Phase 7 limits are true input-to-display
-latency, isolated repaint cost, and whole-guest rather than shell-process
-resource telemetry.
+Added syscall 246 (`PROCESS_METRICS`) and syscall 247 (`SYSTEM_METRICS`) with
+the corresponding libwoven wrappers. The fixed records report current-task
+and guest-wide scheduler/allocator metrics with explicit non-RSS semantics;
+WovenShell logs them beside repaint/present timing and the qualification parser
+stores bounded samples and summaries. Host tests, target checks, and
+warning-denying Clippy pass. The expanded real VirtIO-GPU desktop journey
+passed on 1/2/4 CPUs with evidence retained in the three dated directories in
+`docs/stage-status.md`. True input-to-display latency and isolated repaint cost
+remain separate measurement gaps.
 

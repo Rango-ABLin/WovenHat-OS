@@ -1,19 +1,24 @@
 # Stage status
 
-## Phase 7 guest process performance metrics - 2026-11-06 - ACCEPTED SOFTWARE/QEMU 1/2/4 CPUs
+## Phase 7 guest performance metrics - 2026-11-06 - ACCEPTED SOFTWARE/QEMU 1/2/4 CPUs
 
-Added syscall 246 and the `libwoven::process_metrics()` wrapper. The bounded,
-read-only record reports ABI version, CPU identity/count, current-task runtime
-ticks, and the current process virtual mapping reservation. WovenShell emits
-the record beside its repaint/present samples, and the desktop qualification
-harness persists parsed samples and a summary in `phase7_metrics`. The values
-are explicitly not physical RSS or whole-guest CPU utilization. Host and
-kernel target checks pass, and the new evidence path passed on 1/2/4 CPUs.
+Added syscall 246 and the `libwoven::process_metrics()` wrapper, plus syscall
+247 and `libwoven::system_metrics()` for guest-wide timer/CPU runtime,
+physical-frame, and kernel-heap counters. The bounded read-only records report
+their ABI versions and explicit accounting semantics. WovenShell emits both
+records beside repaint/present samples, and the desktop qualification harness
+persists parsed samples and summaries in `phase7_metrics`. Host and kernel
+target checks plus warning-denying Clippy pass, and the new evidence path
+passed on 1/2/4 CPUs.
 Evidence is retained under:
 
-- `audit-artifacts/desktop-qualification-1793942242290408100` (1 CPU)
-- `audit-artifacts/desktop-qualification-1793942758245598500` (2 CPUs)
-- `audit-artifacts/desktop-qualification-1793942880380379500` (4 CPUs)
+- `audit-artifacts/desktop-qualification-1793943615116549700` (1 CPU)
+- `audit-artifacts/desktop-qualification-1793943939073618700` (2 CPUs)
+- `audit-artifacts/desktop-qualification-1793944207609065300` (4 CPUs)
+
+Measured normalized guest CPU was 100.0%, 84.873%, and 39.6% respectively;
+physical-frame and kernel-heap ranges were stable within each run. These are
+guest scheduler/allocator measurements, not host utilization or process RSS.
 
 ## WovenSettings persistent high-contrast policy - 2026-11-05 - ACCEPTED (SOFTWARE)
 

@@ -4816,10 +4816,12 @@ The read-only `PROCESS_METRICS` ABI (syscall 246) exposes a fixed 32-byte
 versioned record to the calling Ring-3 process. It contains the ABI version,
 current CPU and online CPU count, scheduler runtime ticks for the current task,
 and virtual mapping bytes reserved by the current process image, stack, TLS,
-and bounded anonymous mappings. The kernel copies the record only after
-validating the caller's output capacity and pointer. Runtime is a 100 Hz
-timer-tick accounting value; mapped bytes are not physical RSS and shared
-pages are not attributed as private memory. WovenShell logs the record beside
-repaint/present timing, and the host qualification parser stores it under
-`phase7_metrics`. Whole-guest utilization and input-to-display latency remain
-separate measurements and are not inferred from this record.
+and bounded anonymous mappings. Syscall 247, `SYSTEM_METRICS`, exposes a fixed
+56-byte versioned guest-wide record with timer ticks, aggregate scheduler CPU
+runtime, physical-frame totals/usage, and kernel heap allocation bytes. The
+kernel copies both records only after validating the caller's output capacity
+and pointer. Runtime is 100 Hz scheduler accounting; mapped bytes are not
+physical RSS and shared pages are not attributed as private memory. WovenShell
+logs both records beside repaint/present timing, and the host qualification
+parser stores them under `phase7_metrics`. Input-to-display latency remains a
+separate measurement and is not inferred from these records.
