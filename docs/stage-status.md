@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase 7 guest process performance metrics - 2026-11-06 - SOFTWARE IMPLEMENTED / QEMU REQUALIFICATION OPEN
+## Phase 7 guest process performance metrics - 2026-11-06 - ACCEPTED SOFTWARE/QEMU 1/2/4 CPUs
 
 Added syscall 246 and the `libwoven::process_metrics()` wrapper. The bounded,
 read-only record reports ABI version, CPU identity/count, current-task runtime
@@ -8,8 +8,12 @@ ticks, and the current process virtual mapping reservation. WovenShell emits
 the record beside its repaint/present samples, and the desktop qualification
 harness persists parsed samples and a summary in `phase7_metrics`. The values
 are explicitly not physical RSS or whole-guest CPU utilization. Host and
-kernel target checks pass; a fresh 1/2/4-CPU desktop run is still required to
-qualify the new evidence path.
+kernel target checks pass, and the new evidence path passed on 1/2/4 CPUs.
+Evidence is retained under:
+
+- `audit-artifacts/desktop-qualification-1793942242290408100` (1 CPU)
+- `audit-artifacts/desktop-qualification-1793942758245598500` (2 CPUs)
+- `audit-artifacts/desktop-qualification-1793942880380379500` (4 CPUs)
 
 ## WovenSettings persistent high-contrast policy - 2026-11-05 - ACCEPTED (SOFTWARE)
 

@@ -9251,5 +9251,10 @@ stores samples and a bounded summary in `phase7_metrics`. The record is
 read-only, validates output capacity and userspace pointers through the
 existing copy boundary, and explicitly does not claim physical RSS or whole-
 guest CPU utilization. Host libwoven tests, target checks, and warning-denying
-Clippy pass; fresh 1/2/4-CPU QEMU evidence remains the next acceptance step.
+Clippy pass. The real VirtIO-GPU desktop journey then passed on 1/2/4 CPUs
+with stable 581,632-byte shell virtual mapping accounting; evidence is retained
+in the three dated desktop-qualification directories recorded in
+`docs/stage-status.md`. The remaining Phase 7 limits are true input-to-display
+latency, isolated repaint cost, and whole-guest rather than shell-process
+resource telemetry.
 
