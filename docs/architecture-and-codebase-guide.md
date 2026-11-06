@@ -4749,3 +4749,16 @@ installed-image harness provisions a GPT WovenFS system partition and reaches
 the qualification marker on 1/2/4 CPUs. This is disposable-image
 qualification only; physical power-loss and removable-hardware qualification
 remain separate release gates.
+
+## Bootloader B5 firmware TFTP boundary (2026-11-06)
+
+`vendor/bootloader/uefi/src/main.rs` treats absence of a loaded-image file
+system as the normal no-disk condition so PXE boot can use the existing TFTP
+fallback; it does not hide failures after a filesystem has been obtained.
+`scripts/test-tftp-read-qemu.py` and `scripts/tftp-read-failure-server.py`
+provide a disposable QEMU socket-network fixture. It supplies DHCP and the
+loader transfer, permits the kernel `TftpFileSize` exchange, and deliberately
+returns a TFTP error for the subsequent `TftpRead`. The harness asserts both
+fixture-side protocol events and the loader's exact serial diagnostic at 1, 2,
+and 4 CPUs. This is a bounded UEFI/QEMU firmware-I/O contract, not physical
+NIC, PXE-ROM, or production-network qualification.

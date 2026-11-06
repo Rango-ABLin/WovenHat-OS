@@ -8996,3 +8996,4 @@ serial log. All three CPU configurations (1/2/4) pass with exit 33. Evidence:
 
 212 libwoven host tests pass. stage-status.md updated with the 32.19 entry.
 Next: Stage 32.20 live GDB detach, 32.21 live GDB kill, 32.22 register read.
+**Codex BLD-B5 accepted (2026-11-06):** Direct firmware PXE qualifies the separate `TftpRead` failure fixture on 1/2/4 CPUs. The socket fixture serves the loader, completes kernel-size negotiation, and deliberately rejects the subsequent kernel read; the harness requires the exact `TftpRead` serial marker. Evidence is `audit-artifacts/tftp-read-direct-fixed-{1,2,4}cpu-20261106-*`; the full Windows preservation gate is `audit-artifacts/acceptance-20261106-071704-125`. B5 only is accepted. Do not claim broader policy, strict graphics, page-table, ExitBootServices, physical PXE/NIC, or production-network qualification.

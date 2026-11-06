@@ -12779,3 +12779,21 @@ UEFI cases, software signed-handoff and full Windows preservation at 1/2/4
 CPUs: audit-artifacts/boot-image-b2/ and acceptance-20261104-214457-697/.
 No later phase or complete boot/login/desktop gate is accepted.
 See docs/boot-login-desktop/boot-image-validation.md.
+
+## Boot/login/desktop B5 TFTP firmware-I/O boundary - ACCEPTED (2026-11-06)
+
+The UEFI loader preserves the normal disk-missing-to-TFTP fallback while
+reporting explicit firmware failures for both `TftpFileSize` and `TftpRead`.
+The B5 fixture uses a disposable QEMU PXE/DHCP/TFTP network and a compatible
+OVMF build: it serves the loader, acknowledges the kernel size request, then
+deliberately rejects the subsequent kernel read. The exact `TftpRead` serial
+marker passed at 1, 2, and 4 CPUs in
+`audit-artifacts/tftp-read-direct-fixed-{1,2,4}cpu-20261106-*`; the preceding
+real `TftpFileSize` fixture remains preserved under
+`audit-artifacts/boot-tftp-b5-pxe-ipxe-v2-20261105-165828`.
+
+The full Windows preservation gate passed in
+`audit-artifacts/acceptance-20261106-071704-125`, including its 1/2/4-CPU
+runtime matrix and Stage 10.7 completion. This accepts only B5 firmware TFTP
+I/O. Broader boot policy, strict graphics rejection, controlled page-table
+failure, and recoverable `ExitBootServices` qualification remain open.
