@@ -1,6 +1,6 @@
 pub const SECTOR_SIZE: usize = 512;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     OutOfBounds,
     InvalidBuffer,

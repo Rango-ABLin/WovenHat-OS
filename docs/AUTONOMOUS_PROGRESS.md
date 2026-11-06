@@ -1,5 +1,79 @@
 # Autonomous progress log
 
+## 2026-11-06 — partition: boundary proofs for PartitionDevice::new and find_fat32 (correctness proofs)
+
+Branch: `auto/wovenhat-development` (base `f3355b72`). Working tree was clean.
+
+### Defect / gap
+
+`kernel/src/partition.rs` enforces several bounds that prevent partition reads/writes
+from escaping their region (e.g. a zero `start_lba` would allow writes to the MBR), and
+`find_fat32` enforces MBR signature validity, partition-entry boot-flag validity, and
+partition-geometry validity. These guards were covered only by the kernel's own QEMU
+`self_test()` function; none were exercised by the host integration test suite.
+
+The integration test file `tests/buffer_cache.rs` had exactly one test (`partition_flush_reaches_cache_and_device`),
+which only verified the flush path. Nine distinct boundary conditions were untested:
+
+1. `PartitionDevice::new` refuses `start_lba == 0` (MBR sector off-limits)
+2. `PartitionDevice::new` refuses `sectors == 0`
+3. `PartitionDevice::new` refuses when `start_lba + sectors` overflows `u64`
+4. `PartitionDevice::new` refuses when partition end exceeds `sector_count`
+5. `find_fat32` returns `Ok(None)` for a disk with no MBR signature (bytes 510–511 not `0x55 0xAA`)
+6. `find_fat32` returns `Err(InvalidTable)` for an invalid boot flag in a partition entry
+7. `find_fat32` returns `Err(OutOfBounds)` for a FAT32 entry with `start_lba == 0`
+8. `find_fat32` returns `Err(OutOfBounds)` when partition end exceeds `sector_count`
+9. `find_fat32` returns `Ok(None)` for a valid MBR with only non-FAT32 entries (NTFS)
+
+### Change
+
+**`kernel/src/block.rs`** — added `Debug` to `#[derive(...)]` on `Error`.  
+**`kernel/src/partition.rs`** — added `Debug` to `#[derive(...)]` on `Partition` and `Error`.  
+Both are required for `assert_eq!` in the test; both are non-breaking additions
+(they add a trait impl, change no behavior, and preserve all existing derives).
+
+**`tests/buffer_cache.rs`** — added test
+`partition_device_refuses_invalid_geometry_and_find_fat32_rejects_bad_mbr`:
+
+- Cases 1–4: creates a `RamDisk<8>` and constructs `Partition` structs with each
+  invalid geometry; each `PartitionDevice::new` call must return
+  `Err(partition::Error::OutOfBounds)`.
+- Case 5: creates a zeroed `RamDisk<8>` (no MBR signature);
+  `find_fat32` must return `Ok(None)`.
+- Case 6: writes an MBR with a valid signature but boot flag `0x40` in entry 0;
+  `find_fat32` must return `Err(InvalidTable)`.
+- Case 7: writes an MBR with a FAT32 LBA entry whose `start_lba = 0, sectors = 1`;
+  `find_fat32` must return `Err(OutOfBounds)`.
+- Case 8: writes an MBR with a FAT32 LBA entry whose `start_lba = 5, sectors = 5`
+  (end = 10 > 8 = disk size); `find_fat32` must return `Err(OutOfBounds)`.
+- Case 9: writes an MBR with a valid NTFS entry (type `0x07`, `start_lba = 1, sectors = 4`);
+  `find_fat32` must return `Ok(None)` since there is no FAT32 entry.
+
+Test count in `buffer_cache.rs`: 1 → 2 (plus 3 internal `block_cache` tests → total 5 running).
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test buffer_cache` | PASS, **5 passed / 0 failed** (was 4; one new integration test) |
+| `cargo test --test wovenfs_crash` | PASS, **131 passed / 0 failed** (no regression) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves all nine boundary conditions in `PartitionDevice::new` and `find_fat32` that
+  prevent partition operations from escaping their designated sector range.
+- The `Debug` additions to `block::Error`, `partition::Partition`, and `partition::Error`
+  are production improvements with no behavioral change.
+- The existing `self_test()` function in `partition.rs` and the QEMU host gate were
+  not rerun; the host tests confirm correctness against those same guards on this host.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: read_dir filters an entry with a corrupt file inode checksum (asymmetry proof)
 
 Branch: `auto/wovenhat-development` (base `a46bdb79`). Working tree was clean.
