@@ -145,7 +145,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Never overwrite an existing fixture or source image. Every image below
     // is created under this newly-created directory, with no device access.
     fs::create_dir(&output)?;
-    let cases: [(&str, Option<&[u8]>); 8] = [
+    let cases: [(&str, Option<&[u8]>); 10] = [
         ("default", None),
         ("legacy", Some(b"{}")),
         ("version1", Some(br#"{"version":1,"serial_logging":true}"#)),
@@ -154,11 +154,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ("trailing", Some(b"{}garbage")),
         ("unsupported", Some(br#"{"version":2}"#)),
         ("unknown", Some(br#"{"recovery_mode":true}"#)),
+        ("recovery", Some(br#"{"boot_entry":"recovery","root":"recovery","command_line":"recovery"}"#)),
+        ("diagnostics", Some(br#"{"boot_entry":"diagnostics","command_line":"diagnostics"}"#)),
     ];
     for (name, configuration) in cases {
         let mut builder = bootloader::DiskImageBuilder::new(kernel.clone());
         if let Some(configuration) = configuration {
             builder.set_file_contents("boot.json".into(), configuration.to_vec());
+        }
+        if matches!(name, "recovery" | "diagnostics") {
+            let selected = if name == "recovery" {
+                "kernel-recovery"
+            } else {
+                "kernel-diagnostic"
+            };
+            builder.set_file_contents(selected.into(), bytes.clone());
         }
         builder.create_uefi_image(&output.join(format!("{name}.img")))?;
         println!("Created {name}.img");

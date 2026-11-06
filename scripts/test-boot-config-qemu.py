@@ -25,6 +25,8 @@ CASES = {
     "trailing": "TrailingData",
     "unsupported": "UnsupportedVersion",
     "unknown": "Malformed",
+    "recovery": None,
+    "diagnostics": None,
     "oversized": "TooLarge",
     "kernel-empty": "Empty",
     "kernel-missing": "Missing",
@@ -43,6 +45,9 @@ BOOTLOADER_SOURCES = (
     "vendor/bootloader/uefi/src/main.rs", "vendor/bootloader/uefi/src/config.rs",
     "vendor/bootloader/uefi/src/memory_descriptor.rs",
     "vendor/bootloader/uefi/src/image.rs",
+    "vendor/bootloader-api/src/info.rs",
+    "vendor/bootloader-x86_64-common/src/lib.rs",
+    "kernel/src/main.rs",
 )
 
 
