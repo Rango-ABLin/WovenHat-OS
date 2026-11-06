@@ -1,5 +1,70 @@
 # Autonomous progress log
 
+## 2026-11-06 — completion_queue: duplicate-reserve, publish/remove guards and partial-snapshot (correctness proofs)
+
+Branch: `auto/wovenhat-development` (base `bd9897fe`). Working tree was clean.
+
+### Defect / gap
+
+`kernel/src/completion_queue.rs` had two tests covering capacity backpressure, FIFO
+sequencing, and sequence-exhaustion renumbering, but three defensive guards were
+never exercised:
+
+1. **`reserve` refuses a duplicate operation ID** (`reserve` returns `false` when
+   the same operation is already in the queue — whether still pending or already
+   published). Without this guard, a slot leak occurs: two slots would hold the
+   same operation and only one would be removed by `remove`.
+
+2. **`publish` returns `false` for an operation never reserved** — defended by the
+   `find(|e| e.event.operation == operation)` returning `None` path in `publish`.
+   Not tested.
+
+3. **`remove` returns `false` for an operation not in the queue** — defended by the
+   `find(|s| s.is_some_and(...))` returning `None` path in `remove`. Not tested.
+
+An additional structural property was untested: **`snapshot` with an output buffer
+smaller than the number of published events** returns only the first N events by
+sequence, leaves all events in the queue, and a subsequent full snapshot returns all
+events (snapshot is non-destructive).
+
+### Change
+
+**`kernel/src/completion_queue.rs`** — added test
+`duplicate_reserve_publish_remove_guards` inside the existing `#[cfg(test)] mod tests`:
+
+- `q.reserve(7, 100)` → `true`.
+- `q.reserve(7, 200)` (duplicate, unpublished) → `false`.
+- `q.publish(7, 2, 0, 42, 0)` → `true` (sequence 1).
+- `q.reserve(7, 300)` (duplicate, already published) → `false`.
+- `q.publish(999, 0, 0, 0, 0)` (never reserved) → `false`.
+- `q.remove(999)` (not in queue) → `false`.
+- `q.reserve(5, 0) && q.publish(5, 0, 0, 0, 55)` → adds second event (sequence 2).
+- `snapshot` into 1-slot buffer → count 1, `out[0].operation == 7` (earliest sequence).
+- `snapshot` into 2-slot buffer → count 2, operations (7, 5) in sequence order.
+- `q.remove(7)` → `true`; `q.reserve(7, 400)` → `true` (slot freed, same id reusable).
+
+No production code changed. Test count: 2 → 3 in `completion_queue`.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test completion_queue` | PASS, **3 passed / 0 failed** (was 2; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves three untested correctness guards in `Queue`: duplicate-reserve
+  prohibition, publish/remove refusal for unknown operations, and partial-snapshot
+  non-destructiveness.
+- No production code was changed; test-only addition.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: unlink refuses when refuse_shared_blocks encounters a corrupt sibling inode (symmetry closure)
 
 Branch: `auto/wovenhat-development` (base `372cc812`). Working tree was clean.
