@@ -69,6 +69,24 @@ def main():
     out = root / 'target' / 'release-validation'
     out.mkdir(parents=True, exist_ok=True)
     report = []
+    # Bind every recorded software acceptance gate to the exact source revision.
+    # A passing marker from another tree must never be treated as closure proof.
+    source_sha = subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=root, text=True
+    ).strip()
+    if len(source_sha) != 40 or any(c not in '0123456789abcdef' for c in source_sha):
+        raise SystemExit('Release acceptance could not identify an exact source SHA')
+    # A commit hash does not describe uncommitted tracked source changes.
+    # Ignore untracked build outputs, but reject staged and unstaged edits.
+    tracked_changes = subprocess.check_output(
+        ['git', 'status', '--porcelain=v1', '--untracked-files=no'],
+        cwd=root, text=True,
+    ).strip()
+    if tracked_changes:
+        raise SystemExit(
+            'Release acceptance requires a clean tracked source tree. '
+            'Commit or revert changes before testing: ' + tracked_changes
+        )
     # Release acceptance is serialized and must not depend on Cargo's
     # incremental artifact graph. On Windows, a stale/missing incremental
     # object directory can make an otherwise valid image build fail before
@@ -84,9 +102,15 @@ def main():
         result = subprocess.run(command, cwd=run_cwd, env=env or acceptance_env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 creationflags=flags)
-        (out / f'{name}.log').write_text(result.stdout, encoding='utf-8')
+        log_path = out / f'{name}.log'
+        log_bytes = result.stdout.encode('utf-8')
+        log_path.write_bytes(log_bytes)
         print(result.stdout, flush=True)
         report.append(dict(check=name, passed=result.returncode == 0,
+                           source_sha=source_sha, command=command,
+                           exit_code=result.returncode,
+                           log_path=str(log_path.relative_to(root)),
+                           log_sha256=hashlib.sha256(log_bytes).hexdigest(),
                            seconds=round(time.monotonic() - start, 2)))
         (out / 'results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         if result.returncode:
@@ -337,7 +361,21 @@ def main():
         app_root = root / 'apps' / app
         sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
     sources += sorted((root / 'scripts').glob('*.py'))
-    manifest = dict(image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
+    # Recheck the source after all builds: tests against a moving tree are not
+    # evidence for the initial commit, even when every individual gate passed.
+    final_sha = subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=root, text=True
+    ).strip()
+    final_changes = subprocess.check_output(
+        ['git', 'status', '--porcelain=v1', '--untracked-files=no'],
+        cwd=root, text=True,
+    ).strip()
+    if final_sha != source_sha or final_changes:
+        raise SystemExit(
+            'Source revision or tracked files changed during acceptance; '
+            'discard the release result and rerun from a clean immutable tree.'
+        )
+    manifest = dict(source_sha=source_sha, image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
                     checks_sha256=hashlib.sha256((out / 'results.json').read_bytes()).hexdigest(),
                     sources={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources})
     (out / 'validated-image.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
