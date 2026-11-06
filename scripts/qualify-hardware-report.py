@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -28,6 +28,25 @@ TIERS = {"tier1", "tier2", "tier3"}
 
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _repository_relative_evidence_path(evidence: str) -> bool:
+    """Apply the same fail-closed path policy on Linux and Windows runners.
+
+    Native Path.is_absolute() on Linux does not recognize Windows drive or
+    UNC paths. Evidence uses repository-relative POSIX separators only.
+    This is syntactic validation; consumers must still prevent symlink escapes.
+    """
+    if not evidence or "\\" in evidence or "\x00" in evidence:
+        return False
+    posix = PurePosixPath(evidence)
+    windows = PureWindowsPath(evidence)
+    return (
+        not posix.is_absolute()
+        and not windows.anchor
+        and ".." not in posix.parts
+        and posix.parts != ()
+    )
 
 
 def validate(report: Any) -> list[str]:
@@ -73,7 +92,7 @@ def validate(report: Any) -> list[str]:
         evidence = _text(item.get("evidence"))
         if not evidence:
             errors.append(f"{prefix}.evidence is required")
-        elif Path(evidence).is_absolute() or ".." in Path(evidence).parts:
+        elif not _repository_relative_evidence_path(evidence):
             errors.append(f"{prefix}.evidence must be a repository-relative path")
         if item.get("tier") == "tier1" and not (
             item.get("environment") == "native" and item.get("result") == "passed"
