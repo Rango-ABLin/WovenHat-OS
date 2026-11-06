@@ -8160,3 +8160,96 @@ fn write_file_truncate_to_empty_and_create_file_with_empty_data_pass_check() {
         );
     }
 }
+
+/// `read_dir` encounters a directory entry whose file inode has a corrupt
+/// structural checksum.  Unlike `lookup`, which propagates `Err(Corrupt)` via
+/// `?`, `read_dir` uses `.unwrap_or(false)` for each entry's inode validity
+/// check, so the corrupt entry is silently filtered (zeroed) rather than
+/// aborting the whole listing.  The remaining valid entries are still returned.
+///
+/// This documents the deliberate asymmetry between `lookup` and `read_dir`:
+/// `read_dir` is resilient to isolated inode corruption so callers can
+/// enumerate the remaining live entries, while `lookup` is strict because it
+/// is about to operate on a named target.
+#[test]
+fn read_dir_filters_an_entry_whose_file_inode_has_a_corrupt_checksum() {
+    // Build a root directory with two files.
+    let base = formatted();
+    let (file_inode_a, _file_inode_b) = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        let a = volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt");
+        let b = volume
+            .create_file(1, "b.txt", 0o644, b"world", 2)
+            .expect("create b.txt");
+        (a, b)
+    };
+
+    // Fork and corrupt the structural checksum of a.txt's inode.
+    // Byte 120 within each 128-byte inode slot is the first byte of the
+    // 8-byte FNV-1a checksum covering bytes 0..120.
+    let corrupt = base.fork(None);
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        let index = file_inode_a - 1;
+        let lba = (inode_start + index / 4) as usize;
+        let offset = (index % 4) as usize * 128;
+        corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF;
+    }
+
+    // Precondition: check() must refuse the corrupt image.
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a corrupt file inode checksum"
+    );
+
+    // Snapshot: read_dir must not modify the image (it is a pure read).
+    let before = corrupt.sectors();
+
+    let view = {
+        let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+        volume
+            .read_dir(1)
+            .expect("read_dir must succeed even when a file inode checksum is corrupt")
+    };
+
+    // The corrupt a.txt entry must be silently filtered out.
+    assert!(
+        !view.live().any(|e| e.matches("a.txt")),
+        "live() must not return the entry with the corrupt file inode"
+    );
+    // The valid b.txt entry must still appear.
+    assert!(
+        view.live().any(|e| e.matches("b.txt")),
+        "live() must still return the valid b.txt entry"
+    );
+    assert_eq!(view.count(), 1, "count must be 1 (only b.txt visible)");
+
+    // The image must be byte-for-byte identical: read_dir is a pure read.
+    assert!(
+        corrupt.sectors() == before,
+        "read_dir must not modify the image"
+    );
+
+    // Control: on the unpatched base image both entries appear.
+    {
+        let view_clean = Volume::mount(base.clone())
+            .expect("mount clean")
+            .read_dir(1)
+            .expect("read_dir clean");
+        assert!(
+            view_clean.live().any(|e| e.matches("a.txt")),
+            "clean: a.txt visible"
+        );
+        assert!(
+            view_clean.live().any(|e| e.matches("b.txt")),
+            "clean: b.txt visible"
+        );
+        assert_eq!(view_clean.count(), 2, "clean: count must be 2");
+    }
+}

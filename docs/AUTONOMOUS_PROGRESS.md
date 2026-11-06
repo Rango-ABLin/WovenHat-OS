@@ -1,5 +1,80 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: read_dir filters an entry with a corrupt file inode checksum (asymmetry proof)
+
+Branch: `auto/wovenhat-development` (base `a46bdb79`). Working tree was clean.
+
+### Defect / gap
+
+`read_dir` (wfs.rs:992) and `lookup` (wfs.rs:962) both reach each directory
+entry's file inode via `self.inode(entry.inode)`, but they handle a corrupt
+structural checksum differently:
+
+- **`lookup`** uses `?`:
+  ```rust
+  || !self.inode(entry.inode)?.is_used()
+  ```
+  A corrupt checksum → `Err(Corrupt)` propagated to the caller.
+  Tested by `lookup_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`.
+
+- **`read_dir`** uses `.unwrap_or(false)`:
+  ```rust
+  let valid = self
+      .inode(entry.inode)
+      .map(|n| n.is_used())
+      .unwrap_or(false);
+  if !valid { *entry = DirEntry::empty(); }
+  ```
+  A corrupt checksum → `Err` mapped to `false` → entry silently zeroed.
+  **No test proved this.**
+
+This asymmetry is deliberate: `read_dir` is resilient so callers can enumerate
+remaining live entries despite isolated corruption, while `lookup` is strict
+because it names a specific target about to be operated on.  But the resilient
+path was exercised only for free inodes (`mode == 0`), not corrupt checksums.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`read_dir_filters_an_entry_whose_file_inode_has_a_corrupt_checksum`:
+
+- Creates `a.txt` and `b.txt` in the root directory.
+- Forks the image and flips byte 120 within `a.txt`'s 128-byte inode slot
+  (first byte of the 8-byte FNV-1a structural checksum).
+- Precondition: `Volume::mount(...).check() == Err(Error::Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.read_dir(1)`:
+  - Asserts `Ok(view)` — no error propagated.
+  - Asserts `!view.live().any(|e| e.matches("a.txt"))` — corrupt entry filtered.
+  - Asserts `view.live().any(|e| e.matches("b.txt"))` — valid entry retained.
+  - Asserts `view.count() == 1`.
+- Asserts `corrupt.sectors() == before` — read_dir is a pure read.
+- Control: on the unpatched base, both `a.txt` and `b.txt` appear and
+  `count() == 2`.
+
+No production code changed. Test count: 130 → 131.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **131 passed / 0 failed** (was 130; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `read_dir` silently filters a corrupt-checksum file inode entry
+  (treating it like a stale entry) rather than aborting the listing.
+- Documents and locks in the deliberate asymmetry between `read_dir` and
+  `lookup` for corrupt file inodes.
+- No production code was changed; test-only addition.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: stage_write sets data_checksum=0 for empty data (production bug + correctness proof)
 
 Branch: `auto/wovenhat-development` (base `f11a1ec3`). Working tree was clean.
