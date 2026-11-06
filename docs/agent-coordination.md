@@ -9264,8 +9264,11 @@ do not establish physical input-to-display latency; the harness injects QMP
 events and measures host input-to-capture time.
 
 The existing isolated Stage 30.4 compositor benchmark passed on 1/2/4 CPUs,
-with evidence in `target/hello-gui-compositor-benchmark-{1,2,4}cpu`. It reports
-the real compositor surface write plus present operation, but not the full
-WovenShell repaint body. Therefore isolated repaint cost and physical
-input-to-display latency remain open rather than being inferred from proxies.
+with evidence in `target/hello-gui-compositor-benchmark-{1,2,4}cpu`. In
+addition, the accepted desktop runs separately time the full WovenShell
+`desktop.repaint()` body and `compositor_present()`; their repaint
+min/median/max distributions are recorded in `stage-status.md`. Isolated
+repaint cost is therefore qualified. Physical input-to-display latency
+remains open because QMP input and framebuffer capture are not physical
+device/display timestamps.
 

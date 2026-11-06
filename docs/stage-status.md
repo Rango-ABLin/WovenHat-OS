@@ -19,6 +19,11 @@ Evidence is retained under:
 Measured normalized guest CPU was 100.0%, 84.873%, and 39.6% respectively;
 physical-frame and kernel-heap ranges were stable within each run. These are
 guest scheduler/allocator measurements, not host utilization or process RSS.
+The same accepted runs isolate `desktop.repaint()` from
+`compositor_present()`: repaint min/median/max were 0/1030/3920 ms (1 CPU),
+0/1105/3870 ms (2 CPUs), and 280/4060/9430 ms (4 CPUs). The present-only
+distributions remained separately recorded. These values are guest repaint
+cost, not physical display latency.
 
 ## WovenSettings persistent high-contrast policy - 2026-11-05 - ACCEPTED (SOFTWARE)
 
