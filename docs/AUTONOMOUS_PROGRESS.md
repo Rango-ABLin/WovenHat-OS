@@ -1,5 +1,84 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: unlink refuses a file inode with links != 1 (correctness proof)
+
+Branch: `auto/wovenhat-development` (base `6799f9e5`). Working tree was clean.
+
+### Defect / gap
+
+`unlink` (wfs.rs:1253) contains the guard:
+
+```rust
+let mut node = self.inode_staged(&txn, entry.inode)?;
+if !node.is_used() || node.kind != KIND_FILE || node.links != 1 {
+    return Err(Error::Corrupt);
+}
+```
+
+The existing test `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`
+exercises the case where `inode_staged` itself returns `Err(Corrupt)` (via a flipped
+structural checksum byte → `Inode::decode` returns `None`). The error propagates from
+`inode_staged` before the guard runs, so the `links != 1` branch of the guard was
+**never exercised by any test**.
+
+`check()` (wfs.rs:1376) independently validates the same invariant:
+
+```rust
+if node.kind == KIND_FILE && node.links != 1 {
+    return Err(Error::Corrupt);
+}
+```
+
+WovenFS has no hard-link path: `stage_create` always writes `links = 1`, and nothing
+else modifies it. Any other count is therefore corruption that no runtime path can
+produce; `unlink` must refuse rather than free blocks that another (possibly phantom)
+name might still reference.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`unlink_refuses_a_file_inode_with_links_not_one_and_leaves_no_trace`:
+
+- Creates `a.txt` in the root directory (inode 2, `links = 1`).
+- Forks the image.
+- Locates the file inode's raw 128-byte slot: `lba = inode_start + (file_inode-1)/4`,
+  `slot_base = ((file_inode-1) % 4) * 128`.
+- Changes bytes 4..8 of the slot from `[1, 0, 0, 0]` to `[2, 0, 0, 0]` (links field,
+  little-endian u32).
+- Recomputes the structural FNV-1a checksum over bytes 0..120 and re-seals it at bytes
+  120..128, so `Inode::decode` succeeds but `links == 2`.
+- Precondition: `Volume::mount(...).check() == Err(Error::Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.unlink(1, "a.txt", 2)`:
+  - Asserts `Err(Error::Corrupt)` — the `links != 1` guard fires.
+  - Asserts `corrupt.sectors() == before` — no sector was staged or committed.
+- Control: on the unpatched base image (links == 1), `unlink` returns `Ok(())` and
+  `lookup` returns `Err(NotFound)`.
+
+No production code changed. Test count: 131 → 132.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo test --test wovenfs_crash unlink_refuses_...` | PASS, **1 passed / 0 failed** |
+| `cargo test --test wovenfs_crash` | PASS, **132 passed / 0 failed** (was 131) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `unlink` refuses a structurally-valid file inode whose `links` field is
+  not 1, covering the previously untested branch of the guard at wfs.rs:1292.
+- The crafted inode has a valid structural checksum, so `Inode::decode` succeeds and
+  the guard (not `inode_staged`) is the first to fire — this is distinct from the
+  existing corrupt-checksum test.
+- No production code was changed; test-only addition.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — partition: boundary proofs for PartitionDevice::new and find_fat32 (correctness proofs)
 
 Branch: `auto/wovenhat-development` (base `f3355b72`). Working tree was clean.

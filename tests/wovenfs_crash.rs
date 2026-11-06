@@ -8253,3 +8253,114 @@ fn read_dir_filters_an_entry_whose_file_inode_has_a_corrupt_checksum() {
         assert_eq!(view_clean.count(), 2, "clean: count must be 2");
     }
 }
+
+/// `unlink` (wfs.rs line 1253) calls `self.inode_staged(&txn, entry.inode)?`
+/// to load the target file inode, then checks:
+///
+///   if !node.is_used() || node.kind != KIND_FILE || node.links != 1 {
+///       return Err(Error::Corrupt);
+///   }
+///
+/// The existing test `unlink_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`
+/// exercises the structural-checksum path: a flipped checksum byte makes
+/// `Inode::decode` return `None` → `inode_staged` returns `Err(Corrupt)` before
+/// the guard even runs.  The `links != 1` branch of the same guard is therefore
+/// not covered there.
+///
+/// This test targets the `links != 1` branch directly.  It crafts a file inode
+/// that is structurally valid (passes `Inode::decode`) but carries `links == 2`.
+/// `stage_create` always writes `links = 1`; any other count is corruption that
+/// no runtime path can produce, so `unlink` must refuse rather than free blocks
+/// that another (possibly phantom) name might still reference.
+#[test]
+fn unlink_refuses_a_file_inode_with_links_not_one_and_leaves_no_trace() {
+    let base = formatted();
+
+    // Create a.txt so there is a valid file inode to manipulate (inode 2).
+    let file_inode = {
+        let mut volume = Volume::mount(base.clone()).expect("mount");
+        volume
+            .create_file(1, "a.txt", 0o644, b"hello", 1)
+            .expect("create a.txt")
+    };
+
+    // Fork the base image for the crafted-inode scenario.
+    let corrupt = base.fork(None);
+
+    // Find the raw location of a.txt's inode, change links from 1 to 2, and
+    // reseal the structural FNV-1a checksum so Inode::decode still succeeds.
+    // The links != 1 guard in unlink (not inode_staged) is then the first to fire.
+    {
+        let inode_start = {
+            let volume = Volume::mount(corrupt.clone()).expect("mount");
+            volume.super_block().inode_start
+        };
+        // 0-based index; four 128-byte slots per 512-byte sector.
+        let index = file_inode - 1;
+        let lba = (inode_start + index / 4) as usize;
+        let slot_base = (index % 4) as usize * 128;
+
+        let mut img = corrupt.image.borrow_mut();
+
+        // `links` is a little-endian u32 at bytes 4..8 of the inode slot.
+        // Before: [1, 0, 0, 0]. After: [2, 0, 0, 0].
+        for (i, &b) in 2u32.to_le_bytes().iter().enumerate() {
+            img[lba][slot_base + 4 + i] = b;
+        }
+
+        // Recompute structural FNV-1a checksum over inode bytes 0..120 and
+        // reseal at bytes 120..128, so Inode::decode succeeds with links == 2.
+        let new_checksum: u64 = {
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for i in 0..120usize {
+                h = (h ^ u64::from(img[lba][slot_base + i]))
+                    .wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            h
+        };
+        for (i, &b) in new_checksum.to_le_bytes().iter().enumerate() {
+            img[lba][slot_base + 120 + i] = b;
+        }
+    }
+
+    // Precondition: check() must refuse the crafted inode (links == 2 ≠ 1).
+    assert_eq!(
+        Volume::mount(corrupt.clone()).expect("mount").check(),
+        Err(Error::Corrupt),
+        "check() must refuse a file inode with links != 1"
+    );
+
+    // Snapshot: unlink must not modify the image.
+    let before = corrupt.sectors();
+
+    let mut volume = Volume::mount(corrupt.clone()).expect("mount");
+
+    // unlink must refuse: inode_staged returns Ok (checksum is valid), then the
+    // `node.links != 1` guard fires → Err(Corrupt). No sector is staged or committed.
+    assert_eq!(
+        volume.unlink(1, "a.txt", 2),
+        Err(Error::Corrupt),
+        "unlink must refuse a file inode with links != 1"
+    );
+
+    // The refused unlink must leave the image byte-for-byte identical.
+    assert!(
+        corrupt.sectors() == before,
+        "a refused unlink must not modify the image"
+    );
+
+    // Control: on the unpatched base image (links == 1), unlink succeeds.
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount base");
+        assert_eq!(
+            v.unlink(1, "a.txt", 2),
+            Ok(()),
+            "control: unlink must succeed on the unpatched image"
+        );
+        assert_eq!(
+            v.lookup(1, "a.txt"),
+            Err(Error::NotFound),
+            "control: file must be absent after a successful unlink"
+        );
+    }
+}
