@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 10.7 full Windows gate - 2026-11-06 - PASSED (SOFTWARE)
+
+`RUN-STAGE10.7.ps1` completed the required Windows acceptance chain. Host
+desktop, dual-monitor, and session regressions passed on 1/2/4 CPUs; host and
+kernel warning-denying Clippy passed; the host test suite passed; the 1-CPU
+10-run, 2-CPU 30-run, and 4-CPU 20-run QEMU memory matrices passed; network
+regression passed on 1/2/4 CPUs; and the complete Stage 8.1 through Stage 10.7
+production-marker chain passed on 1/2/4 CPUs. The read-only physical/trust
+preflight remains `NOT_QUALIFIED` because no OVMF VARS, swtpm, guest disk,
+development certificate, or development private key was supplied; it did not
+alter the software gate result.
+
 ## Graphics occlusion status reconciliation - 2026-11-06 - SOFTWARE IMPLEMENTED
 
 The previously reported Phase 5 occlusion gap was stale. WovenShell now uses

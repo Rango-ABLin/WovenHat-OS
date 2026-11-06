@@ -9250,8 +9250,9 @@ WovenShell logs them beside repaint/present timing and the qualification parser
 stores bounded samples and summaries. Host tests, target checks, and
 warning-denying Clippy pass. The expanded real VirtIO-GPU desktop journey
 passed on 1/2/4 CPUs with evidence retained in the three dated directories in
-`docs/stage-status.md`. True input-to-display latency and isolated repaint cost
-remain separate measurement gaps.
+`docs/stage-status.md`. Physical input-to-display latency remains a separate
+hardware measurement gap; isolated repaint cost is qualified by the separate
+shell repaint timing recorded in `stage-status.md`.
 
 ## Codex - Phase 5 occlusion status reconciliation (2026-11-06)
 
@@ -9280,4 +9281,13 @@ min/median/max distributions are recorded in `stage-status.md`. Isolated
 repaint cost is therefore qualified. Physical input-to-display latency
 remains open because QMP input and framebuffer capture are not physical
 device/display timestamps.
+
+## Codex - Stage 10.7 full Windows gate (2026-11-06)
+
+`RUN-STAGE10.7.ps1` passed its software acceptance chain: host regressions,
+warning-denying host/kernel Clippy, host tests, the 1/2/4-CPU memory matrices,
+1/2/4-CPU network regression, and the complete Stage 8.1 through 10.7
+production-marker chain. The read-only physical/trust preflight correctly
+remained `NOT_QUALIFIED` because external OVMF VARS, swtpm, disk, and
+development signing inputs were not supplied.
 
