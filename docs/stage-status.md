@@ -1,15 +1,18 @@
 # Stage status
 
-## Virtual trust tooling and WSL qualification - 2026-11-06 - TOOLS PASS / GUEST OPEN
+## Virtual trust tooling and WSL qualification - 2026-11-06 - QUALIFIED (DISPOSABLE WSL2)
 
 Installed `swtpm`, Linux QEMU 8.2.2, OVMF 4M, OpenSSL, `efitools`, and
 `sbsigntool` in the existing WSL2 Ubuntu distribution. The virtual-trust
 preflight now passes QEMU, OVMF CODE/VARS, swtpm, disk-image, development-key,
 development-certificate, key-match, and certificate-enrollment checks. The
-actual disposable WSL2 run remains `NOT_QUALIFIED`: QEMU exits 1 without the
-`[S15.5] secure boot handoff: PASSED` marker, including with the dedicated
-`stage15-5-test` image. No production key, host firmware, TPM, or raw device
-was touched.
+The disposable WSL2 run now qualifies with the dedicated `stage15-5-test`
+image, OVMF Secure Boot, software TPM, and the enrolled test key: the exact
+`[S15.5] secure boot handoff: PASSED` marker was observed. The guest is
+long-lived, so the harness accepts its bounded timeout only after the marker
+is present. This is disposable virtual qualification, not production-key or
+physical-platform certification; no production key, host firmware, TPM, or
+raw device was touched.
 
 ## Stage 10.7 full Windows gate - 2026-11-06 - PASSED (SOFTWARE)
 

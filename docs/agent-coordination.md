@@ -9298,9 +9298,12 @@ OpenSSL, `efitools`, and `sbsigntool`. Generated disposable development-only
 RSA certificate material and a copied OVMF VARS test store; no production key,
 host firmware, TPM, or raw device was touched. The preflight passes every
 input check, including key/certificate matching and certificate enrollment.
-The actual trust run remains `NOT_QUALIFIED`: QEMU exits 1 without the
-`[S15.5] secure boot handoff: PASSED` marker, even with the dedicated
-`stage15-5-test` image. Evidence is in
-`target/virtual-trust-wsl-preflight.json` and
-`target/virtual-trust-wsl-result-stage15-5.json`.
+The first actual trust run exposed two issues: Linux required a Unix TPM
+control socket, and the EFI payload was unsigned. The harness now selects Unix
+TPM transport on POSIX, the disposable test image is signed with the OVMF
+snakeoil test key, and the long-lived guest timeout is accepted only after the
+exact `[S15.5] secure boot handoff: PASSED` marker. The final result is
+`QUALIFIED` in `target/virtual-trust-wsl-result-snakeoil-final.json`; this is
+virtual disposable qualification only, not production-key or physical-platform
+certification.
 

@@ -94,6 +94,11 @@ class VirtualTrustChainTests(unittest.TestCase):
             self.assertEqual(result["status"], "NOT_QUALIFIED")
             self.assertFalse(result["qualified"])
 
+    def test_long_lived_guest_requires_marker_before_timeout_is_accepted(self) -> None:
+        self.assertTrue(MODULE._guest_verification_passed(-9, True, True))
+        self.assertFalse(MODULE._guest_verification_passed(-9, True, False))
+        self.assertFalse(MODULE._guest_verification_passed(1, False, True))
+
     def test_raw_output_path_is_rejected_without_writing(self) -> None:
         args = type("Args", (), {"output": Path(r"\\.\PhysicalDrive0")})()
         code, result = MODULE.qualify(args)

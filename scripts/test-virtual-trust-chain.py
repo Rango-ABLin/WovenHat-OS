@@ -264,6 +264,14 @@ def _stop_process(process: subprocess.Popen[bytes] | None) -> int | None:
     return process.returncode
 
 
+def _guest_verification_passed(
+    qemu_returncode: int | None, timed_out: bool, marker_seen: bool
+) -> bool:
+    """Accept a bounded long-lived guest only after the trust marker appears."""
+
+    return marker_seen and (qemu_returncode in ACCEPTABLE_QEMU_EXIT_CODES or timed_out)
+
+
 def run_virtual_guest(
     qemu: Path,
     swtpm: Path,
@@ -360,11 +368,12 @@ def run_virtual_guest(
             "swtpm_command": swtpm_command,
             "serial_log": str(output / "qemu-serial.log"),
             "swtpm_log": str(output / "swtpm.log"),
-            "passed": (
-                not timed_out
-                and qemu_returncode in ACCEPTABLE_QEMU_EXIT_CODES
-                and marker_seen
-            ),
+            # The signed-handoff marker is emitted by the production-style
+            # guest before it continues into its normal long-lived runtime;
+            # that guest is not required to terminate with the qemu-test exit
+            # code. A timeout is accepted only after the exact marker was
+            # observed. A timeout without the marker remains a failure.
+            "passed": _guest_verification_passed(qemu_returncode, timed_out, marker_seen),
         }
 
 
