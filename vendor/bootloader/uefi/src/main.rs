@@ -54,6 +54,16 @@ const KERNEL_FILE: BootFile = BootFile {
     tftp: cstr8!("kernel-x86_64"),
     role: FileRole::Kernel,
 };
+const RECOVERY_KERNEL_FILE: BootFile = BootFile {
+    disk: cstr16!("kernel-recovery"),
+    tftp: cstr8!("kernel-recovery"),
+    role: FileRole::Kernel,
+};
+const DIAGNOSTIC_KERNEL_FILE: BootFile = BootFile {
+    disk: cstr16!("kernel-diagnostic"),
+    tftp: cstr8!("kernel-diagnostic"),
+    role: FileRole::Kernel,
+};
 const CONFIG_FILE: BootFile = BootFile {
     disk: cstr16!("boot.json"),
     tftp: cstr8!("boot.json"),
@@ -68,24 +78,26 @@ const RAMDISK_FILE: BootFile = BootFile {
 #[entry]
 fn main() -> Status {
     let mut boot_mode = BootMode::Disk;
+    let config_file = load_config_file(BootMode::Disk);
+    let mut error_loading_config = None;
+    let policy = match config_file.as_deref().map(config::parse).transpose() {
+        Ok(data) => data.unwrap_or_else(default_policy),
+        Err(err) => {
+            error_loading_config = Some(err);
+            default_policy()
+        }
+    };
+    let kernel_file = kernel_file_for(policy.handoff.entry);
 
-    let mut kernel = load_kernel(boot_mode);
+    let mut kernel = load_kernel(kernel_file, boot_mode);
     if kernel.is_none() {
         // Try TFTP boot
         boot_mode = BootMode::Tftp;
-        kernel = load_kernel(boot_mode);
+        kernel = load_kernel(kernel_file, boot_mode);
     }
     let kernel = kernel.unwrap_or_else(|| reject_kernel("Missing"));
 
-    let config_file = load_config_file(boot_mode);
-    let mut error_loading_config = None;
-    let mut config: BootConfig = match config_file.as_deref().map(config::parse).transpose() {
-        Ok(data) => data.unwrap_or_default(),
-        Err(err) => {
-            error_loading_config = Some(err);
-            Default::default()
-        }
-    };
+    let mut config = policy.boot;
 
     #[allow(deprecated)]
     if config.frame_buffer.minimum_framebuffer_height.is_none() {
@@ -161,6 +173,7 @@ fn main() -> Status {
         },
         ramdisk_addr,
         ramdisk_len,
+        boot_policy: policy.handoff,
     };
 
     bootloader_x86_64_common::load_and_switch_to_kernel(
@@ -176,6 +189,22 @@ fn main() -> Status {
 pub enum BootMode {
     Disk,
     Tftp,
+}
+
+fn default_policy() -> config::Policy {
+    config::Policy {
+        boot: BootConfig::default(),
+        handoff: bootloader_api::info::BootPolicy::default(),
+    }
+}
+
+fn kernel_file_for(entry: u8) -> &'static BootFile {
+    match entry {
+        0 => &KERNEL_FILE,
+        1 => &RECOVERY_KERNEL_FILE,
+        2 => &DIAGNOSTIC_KERNEL_FILE,
+        _ => reject_configuration(config::Error::UnsupportedPolicy),
+    }
 }
 
 fn reject_configuration(error: config::Error) -> ! {
@@ -233,8 +262,8 @@ fn load_config_file(boot_mode: BootMode) -> Option<&'static mut [u8]> {
     load_file_from_boot_method(&CONFIG_FILE, boot_mode)
 }
 
-fn load_kernel(boot_mode: BootMode) -> Option<Kernel<'static>> {
-    let kernel_slice = load_file_from_boot_method(&KERNEL_FILE, boot_mode)?;
+fn load_kernel(file: &BootFile, boot_mode: BootMode) -> Option<Kernel<'static>> {
+    let kernel_slice = load_file_from_boot_method(file, boot_mode)?;
     let config = image::validate(kernel_slice).unwrap_or_else(|error| {
         log::error!("[WBOOT] kernel validation detail: {:?}", error);
         reject_kernel("InvalidElfOrContract")

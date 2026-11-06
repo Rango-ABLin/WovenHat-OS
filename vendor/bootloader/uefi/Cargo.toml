@@ -48,6 +48,11 @@ version = "1"
 default-features = false
 features = ["derive"]
 
+[dependencies.heapless]
+version = "0.7.17"
+default-features = false
+features = ["serde"]
+
 [dependencies.uefi]
 version = "0.38.0"
 
@@ -58,3 +63,7 @@ version = "0.15.2"
 version = "0.8"
 
 [workspace]
+
+[patch.crates-io]
+bootloader_api = { path = "../../bootloader-api" }
+bootloader-x86_64-common = { path = "../../bootloader-x86_64-common" }

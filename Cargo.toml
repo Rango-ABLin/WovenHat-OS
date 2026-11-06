@@ -4,10 +4,19 @@ members = ["kernel", "libwoven"]
 # Applications are excluded deliberately. They are freestanding Ring-3 ELF
 # images with their own linker script and link flags, so a host-targeted
 # workspace build must not try to compile them.
-exclude = ["vendor/bootloader", "apps/hello", "apps/hello-gui", "apps/woven-shell"]
+exclude = [
+    "vendor/bootloader",
+    "vendor/bootloader-api",
+    "vendor/bootloader-x86_64-common",
+    "apps/hello",
+    "apps/hello-gui",
+    "apps/woven-shell",
+]
 
 [patch.crates-io]
 bootloader = { path = "vendor/bootloader" }
+bootloader_api = { path = "vendor/bootloader-api" }
+bootloader-x86_64-common = { path = "vendor/bootloader-x86_64-common" }
 
 [features]
 physical-probe = ["kernel/physical-probe"]

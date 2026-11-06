@@ -336,6 +336,9 @@ static S04_QUOTA_STOP: AtomicBool = AtomicBool::new(false);
 
 #[allow(unreachable_code)]
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    if !valid_boot_policy(&boot_info.boot_policy) {
+        halt();
+    }
     // Verify the immutable bootloader image before allocator, paging, and
     // runtime initialization can modify writable PT_LOAD bytes.
     #[cfg(feature = "secure-boot")]
@@ -6619,6 +6622,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     loop {
         x86_64::instructions::hlt();
+    }
+}
+
+fn valid_boot_policy(policy: &bootloader_api::info::BootPolicy) -> bool {
+    if policy.reserved != [0; 2] || usize::from(policy.command_line_len) > policy.command_line.len()
+    {
+        return false;
+    }
+    let command_len = usize::from(policy.command_line_len);
+    if core::str::from_utf8(&policy.command_line[..command_len]).is_err()
+        || policy.command_line[command_len..]
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return false;
+    }
+    match policy.version {
+        0 => *policy == bootloader_api::info::BootPolicy::default(),
+        1 => policy.entry <= 2 && policy.root <= 1 && policy.timeout_ms <= 30_000,
+        _ => false,
     }
 }
 
