@@ -12662,6 +12662,21 @@ At final inspection QEMU PID 17040 had exited; RUN-DESKTOP.ps1 relaunches it.
 RUN-DESKTOP.ps1 defaults to WHPX, accepts -Accelerator tcg and boots a private
 read-only image snapshot. This focused repair is not full Stage 20/32 or full
 historical Windows acceptance; the seven failed graphics gates need follow-up.
+## Stage 32.19 live GDB COM2 client qualification — 2026-11-06 — ACCEPTED
+
+A real RSP exchange over QEMU COM2 (TCP-backed second serial port). The kernel
+spawns a scheduler-owned `gdb-live-test` task that fires INT3; the Python
+harness connects via TCP, polls until `S05` arrives, sends `c` (continue), and
+the task stores `HANDLER_FIRED` into `LIVE_TASK_DONE` before yielding forever.
+The main boot loop polls `live_task_done()` and writes the acceptance marker.
+No new kernel source; feature `stage32-19-test = ["qemu-test", "gdb-entry"]`
+was already defined. Script: `scripts/test-stage32-19-live-gdb.py`.
+
+Passes on 1/2/4 CPUs with exit 33. Evidence:
+`target/stage32-19-live-gdb-{1,2,4}cpu/`. Host warning-denying Clippy and
+212 libwoven tests pass. Live GDB detach (32.20), kill (32.21), and register
+read (32.22) remain open.
+
 ## Stage 32.18 GDB owner/binding attachment QEMU gate - 2026-10-28 - ACCEPTED
 
 The owner/binding boot self-test now exercises same-task token reuse,

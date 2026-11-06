@@ -8985,3 +8985,14 @@ Runtime 44f780cf qualifies present-but-invalid disk metadata (`DiskFileIsDirecto
 ## Codex - BLD-B5 TFTP firmware-I/O failure qualification (2026-11-05)
 
 Claim only explicit TFTP size/read error handling and source-bound disposable network fixtures/harness coverage. Preserve the accepted missing-disk to TFTP fallback and do not start strict graphics, page-table, ExitBootServices, or broader policy work. Acceptance remains serialized at 1/2/4 CPUs and full Windows preservation.
+## Claude Code — Stage 32.19 live GDB COM2 client qualification (2026-11-06)
+
+Ran the existing scripts/test-stage32-19-live-gdb.py harness. Builds with
+feature stage32-19-test; QEMU exposes COM2 as a TCP socket. The Python
+harness connects, polls for the S05 INT3 stop reply, sends c (continue),
+and waits for [S32.19] live GDB COM2 client qualification: PASSED in the
+serial log. All three CPU configurations (1/2/4) pass with exit 33. Evidence:
+	arget/stage32-19-live-gdb-{1,2,4}cpu/.
+
+212 libwoven host tests pass. stage-status.md updated with the 32.19 entry.
+Next: Stage 32.20 live GDB detach, 32.21 live GDB kill, 32.22 register read.
