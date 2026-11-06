@@ -28,6 +28,16 @@ has been completed.
   Broader boot-information validation and firmware TFTP I/O, graphics,
   page-table and ExitBootServices failure
   qualification remain Phase B work.
+- B5 TFTP size failure is exercised through a real QEMU/iPXE boot and emits
+  `TftpFileSize`. A real deterministic `TftpRead` fixture is not qualified:
+  QEMU's built-in TFTP service cannot distinguish successful size negotiation
+  from a forced subsequent read failure. A disposable DHCP/TFTP socket fixture
+  can serve the loader, but the chainloaded loader's firmware PXE Base Code is
+  not attached to that iPXE network stack. Rebuilt OVMF with forced controller
+  connection and `snponly.efi` still exposes no usable SNP device. Evidence:
+  `audit-artifacts/tftp-read-*-20261105-*`. Do not mark B5 or Phase B accepted
+  until a compatible firmware/SNP network stack is available and the exact
+  `TftpRead` marker passes at 1/2/4 CPUs.
 - Kernel readiness and the actual first-userspace WovenInit/service dependency
   model are not implemented by this unit. The embedded /init stub and existing
   kernel-side supervisor must not be called a complete WovenInit architecture.

@@ -260,8 +260,14 @@ fn load_file_from_boot_method(
 }
 
 fn load_file_from_disk(name: &CStr16, role: FileRole) -> Option<&'static mut [u8]> {
-    let mut file_system = boot::get_image_file_system(boot::image_handle())
-        .unwrap_or_else(|_| reject_firmware_resource("DiskFileSystem"));
+    // A loader entered through a PXE device has no filesystem protocol on its
+    // loaded-image handle. That is the normal disk-unavailable condition which
+    // selects the existing disk-to-TFTP fallback. Once a filesystem is found,
+    // all open/metadata/read failures remain explicit firmware-resource
+    // failures below.
+    let Ok(mut file_system) = boot::get_image_file_system(boot::image_handle()) else {
+        return None;
+    };
 
     let mut root = file_system
         .open_volume()
