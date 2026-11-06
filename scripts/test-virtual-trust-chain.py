@@ -187,13 +187,20 @@ def build_qemu_command(
     ovmf_vars: Path,
     disk_image: Path,
     serial_log: Path,
-    tpm_port: int,
+    tpm_endpoint: int | Path,
+    tpm_transport: str = "tcp",
     *,
     marker: str = DEFAULT_MARKER,
 ) -> list[str]:
     """Build the isolated QEMU command; ``marker`` documents the contract."""
 
     del marker  # The marker is checked in the serial evidence after boot.
+    if tpm_transport == "unix":
+        chardev = f"socket,id=chrtpm,path={tpm_endpoint}"
+    elif tpm_transport == "tcp":
+        chardev = f"socket,id=chrtpm,host=127.0.0.1,port={tpm_endpoint}"
+    else:
+        raise ValueError(f"unsupported TPM transport: {tpm_transport}")
     return [
         str(qemu),
         "-accel",
@@ -217,7 +224,7 @@ def build_qemu_command(
         "-drive",
         f"if=pflash,format=raw,file={ovmf_vars}",
         "-chardev",
-        f"socket,id=chrtpm,host=127.0.0.1,port={tpm_port}",
+        chardev,
         "-tpmdev",
         "emulator,id=tpm0,chardev=chrtpm",
         "-device",
@@ -281,7 +288,14 @@ def run_virtual_guest(
         swtpm_log = work / "swtpm.log"
         _copy_read_only_source(disk_image, disk_copy)
         _copy_read_only_source(ovmf_vars, vars_copy)
-        tpm_port = _reserve_tcp_port()
+        if os.name == "nt":
+            tpm_endpoint: int | Path = _reserve_tcp_port()
+            tpm_transport = "tcp"
+            control = f"type=tcp,port={tpm_endpoint}"
+        else:
+            tpm_endpoint = work / "swtpm-control.sock"
+            tpm_transport = "unix"
+            control = f"type=unixio,path={tpm_endpoint}"
         swtpm_command = [
             str(swtpm),
             "socket",
@@ -289,7 +303,7 @@ def run_virtual_guest(
             "--tpmstate",
             f"dir={tpm_state}",
             "--ctrl",
-            f"type=tcp,port={tpm_port}",
+            control,
         ]
         qemu_command = build_qemu_command(
             qemu,
@@ -297,7 +311,8 @@ def run_virtual_guest(
             vars_copy,
             disk_copy,
             serial_log,
-            tpm_port,
+            tpm_endpoint,
+            tpm_transport,
             marker=marker,
         )
         with swtpm_log.open("wb") as log:
