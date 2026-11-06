@@ -1,5 +1,87 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: stage_write sets data_checksum=0 for empty data (production bug + correctness proof)
+
+Branch: `auto/wovenhat-development` (base `f11a1ec3`). Working tree was clean.
+
+### Defect
+
+`stage_write` (wfs.rs:1202) computed `node.data_checksum = fnv1a(data)` unconditionally.
+For empty data (`data = &[]`), `fnv1a(&[]) = FNV_OFFSET_BASIS = 0xcbf2_9ce4_8422_2325`, which is
+non-zero.
+
+The invariant enforced by `check()` (wfs.rs:1382):
+```rust
+if node.kind == KIND_FILE && node.size == 0 && node.data_checksum != 0 {
+    return Err(Error::Corrupt);
+}
+```
+
+requires that every size-0 file inode has `data_checksum = 0`. With the bug:
+
+- `write_file(inode, &[], now)` — file truncation to empty — succeeds (`Ok(())`), but stores
+  `data_checksum = FNV_OFFSET_BASIS`. Subsequent `check()` returns `Err(Corrupt)`.
+- `create_file(dir, name, mode, &[], now)` — calls `stage_write` with empty data — same result.
+
+Both paths are reachable in production. The VFS write helper at wfs.rs:2127:
+```rust
+volume.write_file(inode, &out[..length], now)?;
+```
+sets `length = current_len.max(end)`; if `end = 0` (zero-byte write at offset 0), this truncates
+the file. `create_file` is called on that same path for new files (wfs.rs:2111).
+
+The bug was masked because no existing test called either function with empty data on a valid
+volume: the two `write_file(&[], ...)` calls in `a_block_named_by_two_inodes_is_not_rewritten_or_freed`
+both fail before commit (image is already corrupt, `refuse_shared_blocks` fires first).
+
+### Change
+
+**`kernel/src/wfs.rs`** — `stage_write`, line 1202:
+
+```rust
+// Before:
+node.data_checksum = fnv1a(data);
+
+// After:
+node.data_checksum = if data.is_empty() { 0 } else { fnv1a(data) };
+```
+
+A four-line comment explains the invariant.  No other production code changed.
+
+**`tests/wovenfs_crash.rs`** — added test
+`write_file_truncate_to_empty_and_create_file_with_empty_data_pass_check`:
+
+- **Case 1 (truncation):** creates a file with 300 bytes of content (one block), then calls
+  `write_file(inode, &[], 3)`.  Asserts `Ok(())`.  Asserts `check()` returns `Ok(())`.  Asserts
+  `read_file` returns `Ok(0)`.
+- **Case 2 (create_file with empty data):** calls `create_file(1, "empty.bin", 0o644, &[], 1)`.
+  Asserts `Ok(inode)`.  Asserts `check()` returns `Ok(())`.  Asserts `read_file` returns `Ok(0)`.
+
+Both cases fail without the production fix (check() returns `Err(Corrupt)` with
+`data_checksum = FNV_OFFSET_BASIS != 0`).
+
+Test count: 129 → 130.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **130 passed / 0 failed** (was 129; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `write_file` truncation to empty and `create_file` with empty data both produce a
+  volume that passes `check()`, and that `read_file` returns 0 bytes.
+- Closes the size-0 data_checksum inconsistency: `stage_write` now maintains the same invariant
+  as `stage_create` (empty files carry `data_checksum = 0`).
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: lookup refuses a corrupt file inode checksum (correctness proof)
 
 Branch: `auto/wovenhat-development` (base `181abb90`). Working tree was clean.

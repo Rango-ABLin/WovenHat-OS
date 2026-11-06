@@ -8103,3 +8103,60 @@ fn lookup_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace() {
         );
     }
 }
+
+/// `stage_write` must store `data_checksum = 0` for an empty write, not
+/// `fnv1a(&[]) = FNV_OFFSET_BASIS`.  `check()` flags any size-0 file inode
+/// with a non-zero `data_checksum` as corrupt; before the fix both
+/// `write_file(inode, &[], now)` (file truncation) and
+/// `create_file(dir, name, mode, &[], now)` would leave the volume in a state
+/// that failed `check()`.
+#[test]
+fn write_file_truncate_to_empty_and_create_file_with_empty_data_pass_check() {
+    // ── Case 1: truncate an existing one-block file to empty ─────────────
+    let base = formatted();
+    let inode = {
+        let mut v = Volume::mount(base.clone()).expect("mount");
+        let n = v.create(1, "data.bin", 0o644, 1).expect("create");
+        v.write_file(n, &[0x5a_u8; 300], 2).expect("initial write");
+        n
+    };
+    {
+        let mut v = Volume::mount(base.clone()).expect("mount");
+        assert_eq!(
+            v.write_file(inode, &[], 3),
+            Ok(()),
+            "write_file with empty data must succeed"
+        );
+        assert_eq!(
+            v.check(),
+            Ok(()),
+            "check() must pass after truncating a file to empty"
+        );
+        let mut buf = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            v.read_file(inode, &mut buf),
+            Ok(0),
+            "read_file must return 0 bytes for the truncated file"
+        );
+    }
+
+    // ── Case 2: create_file called with an empty data slice ───────────────
+    let base2 = formatted();
+    {
+        let mut v = Volume::mount(base2.clone()).expect("mount");
+        let n = v
+            .create_file(1, "empty.bin", 0o644, &[], 1)
+            .expect("create_file with empty data must succeed");
+        assert_eq!(
+            v.check(),
+            Ok(()),
+            "check() must pass after create_file with empty data"
+        );
+        let mut buf = vec![0u8; MAX_FILE_SIZE];
+        assert_eq!(
+            v.read_file(n, &mut buf),
+            Ok(0),
+            "read_file must return 0 bytes for empty file from create_file"
+        );
+    }
+}

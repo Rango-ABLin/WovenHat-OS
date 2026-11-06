@@ -1199,7 +1199,11 @@ impl<D: BlockDevice> Volume<D> {
 
         node.size = data.len() as u64;
         node.modified = now;
-        node.data_checksum = fnv1a(data);
+        // A size-0 file carries data_checksum = 0, not the FNV-1a initial
+        // value. check() flags any size-0 inode with data_checksum != 0 as
+        // corrupt; fnv1a(&[]) = FNV_OFFSET_BASIS != 0, so an empty write
+        // must zero the field rather than compute the hash.
+        node.data_checksum = if data.is_empty() { 0 } else { fnv1a(data) };
         self.stage_inode(txn, inode, &node)
     }
 
