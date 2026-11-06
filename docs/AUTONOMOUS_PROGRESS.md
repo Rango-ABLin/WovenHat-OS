@@ -1,5 +1,72 @@
 # Autonomous progress log
 
+## 2026-11-06 — WovenFS: lookup refuses a corrupt file inode checksum (correctness proof)
+
+Branch: `auto/wovenhat-development` (base `181abb90`). Working tree was clean.
+
+### Defect / gap
+
+`lookup` (wfs.rs:962) validates two inodes:
+
+1. The directory inode at line 964: `let dir = self.inode(dir_inode)?;`
+2. The target file inode at line 979: `... !self.inode(entry.inode)?.is_used()`
+
+The existing test `lookup_refuses_a_corrupt_directory_inode_checksum_and_leaves_no_trace`
+covers guard 1 (directory inode corrupt). The existing test
+`lookup_refuses_a_stale_entry_naming_a_free_inode` covers the `is_used()` branch of guard 2
+(inode found but mode == 0). No test proved that `lookup` refuses via `Err(Corrupt)` when the
+**target file inode**'s structural checksum is wrong — the `Err` path of the `?` operator in
+guard 2.
+
+When the file inode's FNV-1a structural checksum is wrong:
+- `self.inode(entry.inode)?` → `checked_inode` → `Inode::decode` returns `None` → `Err(Corrupt)`;
+- `lookup` propagates the error without returning a `DirEntry`;
+- no write path is exercised (lookup is a pure read).
+
+The analogous file-inode-corrupt guards are tested for `read_file`, `write_file`, and `unlink`,
+but `lookup` was missing its counterpart.
+
+### Change
+
+**`tests/wovenfs_crash.rs`** — added test
+`lookup_refuses_a_corrupt_file_inode_checksum_and_leaves_no_trace`:
+
+- Calls `create_file(1, "a.txt", 0o644, b"hello", 1)` → `file_inode`.
+- Forks the image (`corrupt = base.fork(None)`).
+- Flips byte 120 within the file inode's 128-byte slot (the first byte of the FNV-1a
+  structural checksum field): `corrupt.image.borrow_mut()[lba][offset + 120] ^= 0xFF`.
+  The inode is now non-all-zero with a mismatched checksum → `Inode::decode` returns `None`.
+- Precondition: `Volume::mount(corrupt).check() == Err(Error::Corrupt)`.
+- Snapshots `let before = corrupt.sectors()`.
+- Calls `volume.lookup(1, "a.txt")`:
+  - directory inode (1) → valid;
+  - directory scan finds "a.txt" → `entry.inode = file_inode`;
+  - `self.inode(entry.inode)?` → `Err(Error::Corrupt)`.
+- Asserts `Err(Error::Corrupt)`.
+- Asserts `corrupt.sectors() == before` — lookup is a pure read; no sector was written.
+- Control: on the unpatched base, `lookup` returns `Ok(entry)` with `entry.inode == file_inode`.
+
+No production code changed. Test count: 128 → 129.
+
+### Results (run on this host, 2026-11-06)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS (exit 0, no output) |
+| `cargo test --test wovenfs_crash` | PASS, **129 passed / 0 failed** (was 128; one new test) |
+| `cargo clippy --all-targets -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+| `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage15-1-test -- -D warnings` | PASS (exit 0, Finished with no warnings) |
+
+No QEMU runs this session (one chain at a time rule; prior passing results remain valid).
+
+### Limits / open
+
+- Proves that `lookup` refuses a corrupt target file inode and returns no `DirEntry` to the caller.
+- Closes the lookup file-inode-checksum gap: the directory-inode path was already covered;
+  the target-file-inode path was not.
+- Stage 15.3–15.9 QEMU gates and physical USB qualification were not rerun.
+
+
 ## 2026-11-06 — WovenFS: read_file refuses a multi-block file with a mismatched data checksum (symmetry closure)
 
 Branch: `auto/wovenhat-development` (base `8f2e0469`). Working tree was clean.
