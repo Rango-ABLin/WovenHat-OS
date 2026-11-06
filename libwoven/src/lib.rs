@@ -12560,6 +12560,8 @@ pub mod syscall {
     pub const ABI_NEGOTIATE: u64 = 243;
     /// output versioned current-process performance metrics (32 bytes)
     pub const PROCESS_METRICS: u64 = 246;
+    /// output versioned guest-wide performance metrics (56 bytes)
+    pub const SYSTEM_METRICS: u64 = 247;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -14945,6 +14947,43 @@ pub fn process_metrics() -> Result<ProcessMetrics, Error> {
         cpu_count: u32::from_le_bytes(bytes[8..12].try_into().unwrap_or([0; 4])),
         runtime_ticks: u64::from_le_bytes(bytes[16..24].try_into().unwrap_or([0; 8])),
         mapped_bytes: u64::from_le_bytes(bytes[24..32].try_into().unwrap_or([0; 8])),
+    })
+}
+
+/// Guest-wide performance counters for qualification and diagnostics. Frame
+/// counts are physical allocator values; heap bytes are kernel allocation
+/// values, not process RSS.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SystemMetrics {
+    pub abi_version: u32,
+    pub cpu_count: u32,
+    pub timer_ticks: u64,
+    pub cpu_runtime_ticks: u64,
+    pub total_frames: u64,
+    pub allocated_frames: u64,
+    pub remaining_frames: u64,
+    pub heap_allocated_bytes: u64,
+}
+
+pub fn system_metrics() -> Result<SystemMetrics, Error> {
+    let mut bytes = [0u8; 56];
+    check(unsafe {
+        syscall::invoke(
+            syscall::SYSTEM_METRICS,
+            bytes.as_mut_ptr() as u64,
+            bytes.len() as u64,
+            0,
+        )
+    })?;
+    Ok(SystemMetrics {
+        abi_version: u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4])),
+        cpu_count: u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
+        timer_ticks: u64::from_le_bytes(bytes[8..16].try_into().unwrap_or([0; 8])),
+        cpu_runtime_ticks: u64::from_le_bytes(bytes[16..24].try_into().unwrap_or([0; 8])),
+        total_frames: u64::from_le_bytes(bytes[24..32].try_into().unwrap_or([0; 8])),
+        allocated_frames: u64::from_le_bytes(bytes[32..40].try_into().unwrap_or([0; 8])),
+        remaining_frames: u64::from_le_bytes(bytes[40..48].try_into().unwrap_or([0; 8])),
+        heap_allocated_bytes: u64::from_le_bytes(bytes[48..56].try_into().unwrap_or([0; 8])),
     })
 }
 

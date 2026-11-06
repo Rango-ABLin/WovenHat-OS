@@ -449,6 +449,8 @@ pub enum Number {
     /// output `{version,cpu,cpu_count,reserved,runtime_ticks,mapped_bytes}`
     /// (32 bytes) -> 0 or ERROR
     ProcessMetrics = 246,
+    /// output versioned guest-wide counters (56 bytes) -> 0 or ERROR
+    SystemMetrics = 247,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -2020,6 +2022,23 @@ fn sys_process_metrics(user_out: u64, capacity: u64) -> u64 {
     crate::paging::copy_to_current_user(user_out, bytes).map_or(SYSCALL_ERROR, |_| 0)
 }
 
+fn sys_system_metrics(user_out: u64, capacity: u64) -> u64 {
+    let Ok(capacity) = usize::try_from(capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity < core::mem::size_of::<crate::task::SystemMetrics>() {
+        return SYSCALL_ERROR;
+    }
+    let metrics = crate::task::system_metrics();
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (&metrics as *const crate::task::SystemMetrics).cast::<u8>(),
+            core::mem::size_of::<crate::task::SystemMetrics>(),
+        )
+    };
+    crate::paging::copy_to_current_user(user_out, bytes).map_or(SYSCALL_ERROR, |_| 0)
+}
+
 fn sys_socket(kind: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
@@ -3128,6 +3147,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ProcessCount as u64 => crate::task::process_count() as u64,
         value if value == Number::ProcessInfo as u64 => sys_process_info(arg0, arg1),
         value if value == Number::ProcessMetrics as u64 => sys_process_metrics(arg0, arg1),
+        value if value == Number::SystemMetrics as u64 => sys_system_metrics(arg0, arg1),
         value if value == Number::SpawnCommand as u64 => sys_spawn_command(arg0, arg1),
         value if value == Number::MmapFileShared as u64 => {
             crate::task::mmap_file_current(arg0, arg1, arg2, true, true, true)

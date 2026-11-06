@@ -850,6 +850,23 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
             text,
         )
     ]
+    system_metrics = [
+        {
+            "abi_version": int(abi),
+            "cpu_count": int(cpus),
+            "timer_ticks": int(timer),
+            "cpu_runtime_ticks": int(runtime),
+            "allocated_frames": int(allocated),
+            "remaining_frames": int(remaining),
+            "heap_bytes": int(heap),
+        }
+        for abi, cpus, timer, runtime, allocated, remaining, heap in re.findall(
+            r"woven-shell: system metrics abi=(\d+) cpus=(\d+) timer_ticks=(\d+) "
+            r"cpu_runtime_ticks=(\d+) allocated_frames=(\d+) remaining_frames=(\d+) "
+            r"heap_bytes=(\d+)",
+            text,
+        )
+    ]
     result: dict[str, Any] = {
         "tick_rate_hz": 100,
         "recompose_samples": len(recomposes),
@@ -867,6 +884,7 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
         "present_ticks": presents,
         "present_ms": [round(value * 10.0, 3) for value in presents],
         "process_metrics_samples": process_metrics,
+        "system_metrics_samples": system_metrics,
         "measurement_limits": {
             "input_to_frame_ms": "host QMP input-to-capture proxy is recorded in timings_ms",
             "cpu": "current WovenShell scheduler runtime is exposed in guest timer ticks; this is process CPU accounting, not whole-guest utilization",
@@ -882,6 +900,27 @@ def phase7_metrics(serial_path: Path) -> dict[str, Any]:
             "runtime_tick_delta": process_metrics[-1]["runtime_ticks"] - process_metrics[0]["runtime_ticks"],
             "mapped_bytes_min": min(sample["mapped_bytes"] for sample in process_metrics),
             "mapped_bytes_max": max(sample["mapped_bytes"] for sample in process_metrics),
+        }
+    if system_metrics:
+        first = system_metrics[0]
+        last = system_metrics[-1]
+        timer_delta = last["timer_ticks"] - first["timer_ticks"]
+        runtime_delta = last["cpu_runtime_ticks"] - first["cpu_runtime_ticks"]
+        cpu_count = max(1, last["cpu_count"])
+        result["system_metrics_summary"] = {
+            "abi_versions": sorted({sample["abi_version"] for sample in system_metrics}),
+            "cpu_counts": sorted({sample["cpu_count"] for sample in system_metrics}),
+            "timer_tick_delta": timer_delta,
+            "cpu_runtime_tick_delta": runtime_delta,
+            "normalized_cpu_percent": round(
+                (runtime_delta * 100.0) / (timer_delta * cpu_count), 3
+            ) if timer_delta else None,
+            "allocated_frames_min": min(sample["allocated_frames"] for sample in system_metrics),
+            "allocated_frames_max": max(sample["allocated_frames"] for sample in system_metrics),
+            "remaining_frames_min": min(sample["remaining_frames"] for sample in system_metrics),
+            "remaining_frames_max": max(sample["remaining_frames"] for sample in system_metrics),
+            "heap_bytes_min": min(sample["heap_bytes"] for sample in system_metrics),
+            "heap_bytes_max": max(sample["heap_bytes"] for sample in system_metrics),
         }
     if active_recomposes:
         ordered = sorted(active_recomposes)

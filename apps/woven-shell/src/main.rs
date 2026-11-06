@@ -3993,6 +3993,31 @@ fn main(args: Args) -> ! {
                     libwoven::format_u64(metrics.mapped_bytes, &mut mapped_digits),
                 ]);
             }
+            if let Ok(metrics) = libwoven::system_metrics() {
+                let mut abi_digits = [0u8; 20];
+                let mut cpus_digits = [0u8; 20];
+                let mut timer_digits = [0u8; 20];
+                let mut runtime_digits = [0u8; 20];
+                let mut frames_digits = [0u8; 20];
+                let mut remaining_digits = [0u8; 20];
+                let mut heap_digits = [0u8; 20];
+                log(&[
+                    b"woven-shell: system metrics abi=",
+                    libwoven::format_u64(metrics.abi_version as u64, &mut abi_digits),
+                    b" cpus=",
+                    libwoven::format_u64(metrics.cpu_count as u64, &mut cpus_digits),
+                    b" timer_ticks=",
+                    libwoven::format_u64(metrics.timer_ticks, &mut timer_digits),
+                    b" cpu_runtime_ticks=",
+                    libwoven::format_u64(metrics.cpu_runtime_ticks, &mut runtime_digits),
+                    b" allocated_frames=",
+                    libwoven::format_u64(metrics.allocated_frames, &mut frames_digits),
+                    b" remaining_frames=",
+                    libwoven::format_u64(metrics.remaining_frames, &mut remaining_digits),
+                    b" heap_bytes=",
+                    libwoven::format_u64(metrics.heap_allocated_bytes, &mut heap_digits),
+                ]);
+            }
         }
     }
 }

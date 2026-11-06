@@ -350,18 +350,25 @@ def main():
             }[args.app]
             click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
             command_qmp('screendump', {'filename': str(click_baseline)})
+            # `window opened` is emitted when the shell accepts the launch,
+            # before the client has necessarily consumed its first surface
+            # and input-lease handoff.  Let that event-driven handoff settle
+            # before injecting the relative PS/2 target; otherwise the move
+            # can be consumed by the old workspace and the click is lost.
+            time.sleep(0.8)
             if not args.exercise_client_pointer:
                 command_qmp('input-send-event', {'events': [
                     {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
                     {'type': 'rel', 'data': {'axis': 'y', 'value': 1000}},
                 ]})
+                time.sleep(0.15)
             # The first window opens at (40, 40) in the logical 640x400
             # desktop. Each client control uses a fixed bounded local target.
             command_qmp('input-send-event', {'events': [
                 {'type': 'rel', 'data': {'axis': 'x', 'value': control['move'][0]}},
                 {'type': 'rel', 'data': {'axis': 'y', 'value': control['move'][1]}},
             ]})
-            time.sleep(0.5)
+            time.sleep(0.8)
             command_qmp('input-send-event', {'events': [
                 {'type': 'btn', 'data': {'down': True, 'button': 'left'}},
             ]})

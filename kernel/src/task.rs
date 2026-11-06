@@ -935,6 +935,22 @@ pub struct ProcessMetrics {
     pub mapped_bytes: u64,
 }
 
+/// Read-only guest-wide performance counters used by release qualification.
+/// Frame counts are physical allocator accounting; heap bytes are kernel heap
+/// allocation accounting. Neither is a process RSS value.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SystemMetrics {
+    pub abi_version: u32,
+    pub cpu_count: u32,
+    pub timer_ticks: u64,
+    pub cpu_runtime_ticks: u64,
+    pub total_frames: u64,
+    pub allocated_frames: u64,
+    pub remaining_frames: u64,
+    pub heap_allocated_bytes: u64,
+}
+
 /// Scheduler-visible load for one logical CPU.
 ///
 /// `runnable` counts non-idle tasks that are either Ready or Running. Keeping
@@ -7916,9 +7932,26 @@ pub fn task_accounting(id: TaskId) -> Option<TaskAccounting> {
 }
 
 /// Snapshot timer-tick runtime accumulated by each logical CPU.
-#[cfg(feature = "s04-scheduler-accounting-test")]
 pub fn cpu_runtime_ticks() -> [u64; crate::smp::MAX_CPUS] {
     core::array::from_fn(|cpu| CPU_RUNTIME_TICKS[cpu].load(Ordering::Relaxed))
+}
+
+pub fn system_metrics() -> SystemMetrics {
+    let memory = crate::memory::stats();
+    let heap = crate::heap::stats();
+    SystemMetrics {
+        abi_version: 1,
+        cpu_count: crate::smp::online_count() as u32,
+        timer_ticks: crate::timer::ticks(),
+        cpu_runtime_ticks: cpu_runtime_ticks()
+            .into_iter()
+            .take(crate::smp::online_count())
+            .fold(0, u64::saturating_add),
+        total_frames: memory.total_frames,
+        allocated_frames: memory.allocated_frames,
+        remaining_frames: memory.remaining_frames,
+        heap_allocated_bytes: heap.allocated_bytes as u64,
+    }
 }
 
 /// Perform one bounded automatic load-balancing transfer. Only explicitly
