@@ -145,7 +145,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Never overwrite an existing fixture or source image. Every image below
     // is created under this newly-created directory, with no device access.
     fs::create_dir(&output)?;
-    let cases: [(&str, Option<&[u8]>); 10] = [
+    let cases: [(&str, Option<&[u8]>); 11] = [
         ("default", None),
         ("legacy", Some(b"{}")),
         ("version1", Some(br#"{"version":1,"serial_logging":true}"#)),
@@ -156,6 +156,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ("unknown", Some(br#"{"recovery_mode":true}"#)),
         ("recovery", Some(br#"{"boot_entry":"recovery","root":"recovery","command_line":"recovery"}"#)),
         ("diagnostics", Some(br#"{"boot_entry":"diagnostics","command_line":"diagnostics"}"#)),
+        ("graphics-unsupported", Some(br#"{"frame_buffer":{"minimum_framebuffer_width":16384,"minimum_framebuffer_height":16384}}"#)),
     ];
     for (name, configuration) in cases {
         let mut builder = bootloader::DiskImageBuilder::new(kernel.clone());

@@ -27,6 +27,7 @@ CASES = {
     "unknown": "Malformed",
     "recovery": None,
     "diagnostics": None,
+    "graphics-unsupported": "GraphicsUnsupportedMode",
     "oversized": "TooLarge",
     "kernel-empty": "Empty",
     "kernel-missing": "Missing",
@@ -56,7 +57,7 @@ def failure_subject(name):
 
 
 def firmware_failure(name):
-    return name == "kernel-allocation" or name.startswith("disk-")
+    return name in ("kernel-allocation", "graphics-unsupported") or name.startswith("disk-")
 
 
 def stop_marker(name):

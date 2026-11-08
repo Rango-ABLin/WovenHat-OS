@@ -234,6 +234,16 @@ fn reject_firmware_resource(error: &str) -> ! {
     );
 }
 
+/// Fail closed after `ExitBootServices`. Firmware recovery is no longer legal,
+/// but the serial/framebuffer logger remains available for an exact diagnosis.
+fn reject_post_exit_resource(error: &str) -> ! {
+    log::error!("[WBOOT] post-exit resource failure: {}", error);
+    panic!(
+        "[WBOOT] post-exit resource failure: {}\n[WBOOT] boot stopped: post-exit resource failure",
+        error
+    );
+}
+
 fn check_file_size(size: usize, role: FileRole) {
     match role {
         FileRole::Configuration => {
@@ -416,7 +426,7 @@ fn create_page_tables(
         };
         let new_frame = frame_allocator
             .allocate_frame()
-            .expect("Failed to allocate frame for new level 4 table");
+            .unwrap_or_else(|| reject_post_exit_resource("PageTableFrameExhausted"));
         let new_table: &mut PageTable = {
             let ptr: *mut PageTable =
                 (phys_offset + new_frame.start_address().as_u64()).as_mut_ptr();
@@ -456,7 +466,9 @@ fn create_page_tables(
     // create a new page table hierarchy for the kernel
     let (kernel_page_table, kernel_level_4_frame) = {
         // get an unused frame for new level 4 page table
-        let frame: PhysFrame = frame_allocator.allocate_frame().expect("no unused frames");
+        let frame: PhysFrame = frame_allocator
+            .allocate_frame()
+            .unwrap_or_else(|| reject_post_exit_resource("PageTableFrameExhausted"));
         log::info!("New page table at: {:#?}", frame);
         // get the corresponding virtual address
         let addr = phys_offset + frame.start_address().as_u64();
@@ -510,6 +522,11 @@ fn init_logger(config: &BootConfig) -> Option<RawFrameBufferInfo> {
             _ => None,
         }
     };
+    let graphics_mode_was_requested = config.frame_buffer.minimum_framebuffer_height.is_some()
+        || config.frame_buffer.minimum_framebuffer_width.is_some();
+    if graphics_mode_was_requested && mode.is_none() {
+        reject_firmware_resource("GraphicsUnsupportedMode");
+    }
     if let Some(mode) = mode {
         gop.set_mode(&mode)
             .unwrap_or_else(|_| reject_firmware_resource("GraphicsSetMode"));
