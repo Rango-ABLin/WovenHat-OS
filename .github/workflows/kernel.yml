@@ -891,6 +891,16 @@ jobs:
           components: clippy,rust-src,llvm-tools-preview
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      # Acceptance builds are offline by policy, but hosted runners start
+      # without the required crates.io index and crate archives.
+      - name: Prefetch locked desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          (cd apps/hello && cargo --config net.offline=false fetch --locked)
+          (cd apps/hello-gui && cargo --config net.offline=false fetch --locked)
+          (cd apps/woven-files && cargo --config net.offline=false fetch --locked)
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
         shell: bash
         run: |
