@@ -37,6 +37,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -157,6 +165,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -605,6 +621,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -838,6 +862,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -944,6 +976,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
@@ -1098,6 +1138,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1164,6 +1212,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1243,6 +1299,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1310,6 +1374,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1374,6 +1446,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1454,6 +1534,14 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
