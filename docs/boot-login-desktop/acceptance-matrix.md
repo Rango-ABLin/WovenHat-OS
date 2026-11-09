@@ -1,13 +1,14 @@
 # Acceptance matrix
 
-Status: IN PROGRESS. Phase A is COMPLETE at runtime revision a980619e;
-later phases are not accepted.
+Status: IN PROGRESS. Phases A-C are COMPLETE; Phase D is the next software
+gate. Phase B physical firmware/trust qualification remains explicitly
+deferred to the final hardware pass.
 
 | Gate | Required evidence | Current status |
 |---|---|---|
 | A: baseline/architecture | source inventory, existing tests, startup/security trace | COMPLETE |
-| B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | IN PROGRESS (B1/B2 accepted bounded units; remaining boot policy/failure/trust work open) |
-| C: init/readiness | essential dependencies and bounded failure recovery | NOT STARTED |
+| B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | COMPLETE (software/QEMU; physical firmware, PXE/NIC and production Secure Boot remain hardware/trust work) |
+| C: init/readiness | essential dependencies and bounded failure recovery | COMPLETE (bounded WovenInit DAG, ownership/liveness readiness, deadline and all-process rollback at 1/2/4 CPUs) |
 | D: splash | framebuffer captures and ownership transition | NOT STARTED |
 | E: authentication | entropy, protected storage, wrong credentials, rate limits, first run | NOT STARTED |
 | F: login | graphical/input/accessibility evidence through real authority | NOT STARTED |

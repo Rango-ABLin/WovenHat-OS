@@ -131,3 +131,30 @@ Python harness tests, host/kernel/UEFI warning-denying Clippy, and format checks
 pass. The complete Windows preservation chain passed at
 `audit-artifacts/acceptance-20261109-094329-057`. Physical firmware, PXE/NIC,
 Secure Boot provisioning, and device recovery remain hardware/trust work.
+
+## BLD-C Phase C WovenInit readiness closure (2026-11-09)
+
+Status: ACCEPTED. `kernel/src/woven_init.rs` replaces unordered production
+service startup with a bounded four-node dependency graph. Package readiness
+precedes update, installer, and search. Readiness requires the expected live
+PID to own the expected service with nonzero client rights; waits are bounded
+to 500 ticks. Any dependency, spawn, registration, or readiness failure rolls
+back every process started by the transaction in reverse order.
+
+Normal WovenInit-to-desktop acceptance passed at
+`target/shell-regression/system-apps-1cpu-1794222517041520300`,
+`system-apps-2cpu-1794222656818206300`, and
+`system-apps-4cpu-1794222770523822300`. The feature-isolated failure case kills
+update after registration but before readiness publication; its evidence is
+`system-apps-1cpu-1794222602511550200`,
+`system-apps-2cpu-1794222715234098900`, and
+`system-apps-4cpu-1794222829517617100` under the same directory. All three CPU
+counts reject the barrier, verify every graph process exited, and emit
+`[PHASE C] WovenInit readiness failure rollback: PASSED`. Production
+and failure-feature target Clippy, Python syntax/oracles, formatting, and diff
+checks pass. The complete Windows preservation chain passed in
+`audit-artifacts/acceptance-20261109-131738-437` (218 host tests, warning-clean
+build/lints, 60 repeated memory boots, network and Stage 10.4-10.7 at 1/2/4
+CPUs). The preceding failed run is retained at
+`audit-artifacts/acceptance-20261109-131508-542`; it exposed and led to repair
+of a stale licensed-font host oracle, not a runtime relaxation.

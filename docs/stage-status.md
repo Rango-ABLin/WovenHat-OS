@@ -12808,3 +12808,18 @@ full Windows preservation chain passed in
 `audit-artifacts/acceptance-20261109-094329-057`. Physical firmware behavior,
 Secure Boot enrollment/signing, real PXE/NIC behavior, and device recovery are
 explicitly not claimed.
+
+## Boot/login/desktop Phase C WovenInit readiness (2026-11-09)
+
+Phase C is accepted. Production essential services now cross a bounded
+dependency/readiness barrier before WovenShell starts: package is the root;
+update, installer, and search depend on it. The barrier validates service
+ownership, client rights, and process liveness with a 500-tick deadline.
+Failure rolls back all processes started by the graph in reverse order.
+
+Happy-path desktop and deterministic post-registration readiness-failure
+rollback passed on 1/2/4 CPUs. The full Windows preservation chain passed at
+`audit-artifacts/acceptance-20261109-131738-437`. No syscall, ABI, capability,
+kernel object, lock, unsafe block, or asynchronous userspace-pointer lifetime
+was added. Phase D splash ownership/visual acceptance is next; physical
+firmware and device qualification remain deferred to the final hardware pass.

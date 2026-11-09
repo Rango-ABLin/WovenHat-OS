@@ -4773,3 +4773,22 @@ never invokes firmware console/protocol APIs afterward. The kernel validates
 the handoff again, exposes its command line read-only, and routes maintenance
 selection into a least-privilege read-only recovery service rather than the
 normal desktop/session path.
+
+## Phase C WovenInit dependency/readiness architecture (2026-11-09)
+
+`kernel/src/woven_init.rs` is the production essential-service orchestration
+boundary. Its fixed four-node graph uses a ready bitmask rather than dynamic
+allocation: package has no dependencies, and update, installer, and search
+each require package. Nodes transition Pending -> Starting -> Ready or Failed.
+The graph selects only nodes whose dependency mask is satisfied and fails
+closed if no pending node can advance.
+
+Readiness is stronger than successful spawn: the expected PID must remain
+alive and own the expected service-registry entry with nonzero client rights.
+The wait is bounded to 500 timer ticks. WovenInit never performs process
+operations while holding the service-registry lock. Before the barrier, any
+failure kills every process started by the graph in reverse order; after the
+barrier, `service_supervisor` retains its existing bounded crash/restart
+lifecycle. WovenShell starts only after all four ready bits are set. The
+feature-isolated failure fixture terminates update between registration and
+publication and verifies complete rollback on 1/2/4 CPUs.

@@ -8894,7 +8894,7 @@ competing formatting over these files during this bounded unit.
 
 Runtime a980619e passed full RUN-STAGE10.7.ps1 with approved networking,
 including all 60 memory repetitions and 1/2/4-CPU network/async gates. All
-Stage12.1–12.5 matrices and final affected feature lints also pass. Evidence:
+Stage12.1â€“12.5 matrices and final affected feature lints also pass. Evidence:
 audit-artifacts/acceptance-20261104-194935-034/ and
 boot-login-baseline-repair-20261104/final-stage12-matrix.log. Diagnostics,
 probe and fixture repairs plus formatting are accepted as bounded baseline
@@ -8960,16 +8960,16 @@ accepted; full Phase B and firmware Secure Boot qualification remain open.
 No Cargo or QEMU chain is active at this checkpoint. Next: existing firmware
 I/O/resource failure diagnostics; preserve current mapper/ABI/authority.
 
-## Claude Code — Stage 32.14-32.18 test script verification (2026-11-05)
+## Claude Code â€” Stage 32.14-32.18 test script verification (2026-11-05)
 
-Re-ran the QEMU acceptance gates for Stages 32.14–32.18 after creating the
+Re-ran the QEMU acceptance gates for Stages 32.14â€“32.18 after creating the
 missing test scripts for 32.17 and 32.18. All five stages pass on 1/2/4 CPUs
 with exit 33.
 
 New scripts:
-- scripts/test-stage32-17-idt-trap.py — feature stage32-17-test, marker
+- scripts/test-stage32-17-idt-trap.py â€” feature stage32-17-test, marker
   [S32.17] GDB trap entry: PASSED, evidence stage32-17-gdb-entry-{N}cpu.
-- scripts/test-stage32-18-gdb-owner.py — feature stage32-18-test, marker
+- scripts/test-stage32-18-gdb-owner.py â€” feature stage32-18-test, marker
   [S32.18] GDB owner/binding attachment: PASSED, evidence
   stage32-18-gdb-owner-binding-{N}cpu.
 
@@ -8985,7 +8985,7 @@ Runtime 44f780cf qualifies present-but-invalid disk metadata (`DiskFileIsDirecto
 ## Codex - BLD-B5 TFTP firmware-I/O failure qualification (2026-11-05)
 
 Claim only explicit TFTP size/read error handling and source-bound disposable network fixtures/harness coverage. Preserve the accepted missing-disk to TFTP fallback and do not start strict graphics, page-table, ExitBootServices, or broader policy work. Acceptance remains serialized at 1/2/4 CPUs and full Windows preservation.
-## Claude Code — Stage 32.19 live GDB COM2 client qualification (2026-11-06)
+## Claude Code â€” Stage 32.19 live GDB COM2 client qualification (2026-11-06)
 
 Ran the existing scripts/test-stage32-19-live-gdb.py harness. Builds with
 feature stage32-19-test; QEMU exposes COM2 as a TCP socket. The Python
@@ -9004,3 +9004,18 @@ User authorized completing the remaining Phase B scope in roadmap order: version
 ## Codex - Boot/recovery policy through WovenInit completion (2026-11-09)
 
 User authorizes completing Phase B boot/recovery policy and remaining firmware failure boundaries, then Phase C kernel readiness and real WovenInit dependency/readiness integration, in that order. Resuming clean source 5d1b1c09; recent boot-policy commits are implementation, not accepted evidence. Claim existing UEFI config/main, boot policy ABI/kernel consumers, source-bound fixtures/tests and startup docs for Phase B; Phase C source ownership will be recorded after the Phase B gate. Preserve all historical evidence and serialize Cargo/QEMU. Begin by diagnosing current-source baseline before edits. No physical device/firmware or production signing actions are in scope.
+
+## Codex - Phase C WovenInit accepted (2026-11-09)
+
+Phase C owns `kernel/src/woven_init.rs`, the production startup delegation and
+feature-isolated rollback marker in `kernel/src/main.rs`, the two Cargo feature
+declarations, `scripts/test-shell-qemu.py`, and its serial-safety host oracle.
+The fixed package-rooted four-service graph requires live owner-bound IPC
+publication before readiness and rolls back every started graph process on a
+bounded failure. Happy path and forced post-registration update failure pass
+at 1/2/4 CPUs. Production/failure target Clippy and the complete Windows gate
+pass; final evidence is
+`audit-artifacts/acceptance-20261109-131738-437`. The earlier failed gate
+`acceptance-20261109-131508-542` is retained and records the stale font-marker
+oracle defect that was corrected. No Cargo/QEMU chain is active. Phase D is
+next; physical firmware/trust/device work remains reserved for the final pass.

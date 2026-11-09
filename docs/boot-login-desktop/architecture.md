@@ -1,7 +1,7 @@
 # Boot, login and desktop architecture
 
-Status: COMPLETE (Phase A inventory only), 2026-11-04. Initial source audit
-at 70b49c74; reconciled integration and accepted runtime baseline a980619e.
+Status: IN PROGRESS through Phase C, 2026-11-09. Phase A inventory, Phase B
+software/QEMU boot recovery, and Phase C WovenInit readiness are accepted.
 
 Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
 review found no changes since the initial audit in session.rs, accounts.rs,
@@ -48,11 +48,18 @@ input, checks AccountManage, and delegates to kernel identity authority.
 `identity_runtime::apply_view` assigns task credentials. This is an existing
 architecture to audit and extend, not grounds to create a competing stack.
 
-The fallback `userspace::create_init_process` loads an embedded assembly stub
-as `/init`; it is not the requested userspace dependency supervisor.
-`kernel/src/service_supervisor.rs` provides bounded kernel-side supervision
-for four service kinds, but excludes WovenShell. No separate WovenInit,
-WovenLogin, or WovenSession application was found in the app inventory.
+The fallback `userspace::create_init_process` still provides the diagnostic
+assembly stub as `/init`; it is not used as proof of production readiness.
+Production system services now start through `kernel/src/woven_init.rs`.
+WovenInit owns a bounded four-node dependency graph: package has no
+prerequisite, while update, installer, and search each require package to be
+ready. A node becomes ready only after its expected PID is alive and owns the
+expected IPC service with nonzero client rights. Each readiness wait is
+bounded to 500 timer ticks. A spawn, registration, dependency, or readiness
+failure kills every process started by that transaction in reverse order;
+the existing supervisor takes over restart policy only after the barrier.
+WovenShell remains outside this essential-service graph and starts after the
+barrier, preserving the later login/session phase boundary.
 
 There is already a splash: `kernel/src/console.rs::show_splash_frame`, driven
 by `kernel_main`'s `boot_stage`. Its spinner phase uses timer ticks and its
@@ -71,3 +78,15 @@ embedded init and expose the diagnostic shell; they need policy review.
 Phase A's inventory and baseline gate is closed. The prescribed Windows chain,
 Stage12.1–12.5 matrices and affected feature lints passed. Security findings
 remain open requirements for later phases, not accepted production behavior.
+
+## Phase B and C accepted boundaries (2026-11-09)
+
+Phase B validates the versioned bounded boot-policy handoff, strict graphics
+and firmware/resource failures, and read-only recovery routing. Phase C adds
+no syscall, capability, kernel object, lock, ABI, unsafe block, or asynchronous
+userspace pointer. WovenInit performs process operations outside the service
+registry lock and uses the scheduler/timer-driven service publication path.
+The production graph passed normal desktop boots and the deterministic
+post-package update failure passed complete rollback at 1/2/4 CPUs. The full
+preservation chain passed in
+`audit-artifacts/acceptance-20261109-131738-437`.

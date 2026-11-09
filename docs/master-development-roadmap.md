@@ -10,6 +10,17 @@ formatting repairs are documented in docs/boot-login-desktop/. This closes
 inventory/baseline only. Next: Phase B boot failure/configuration qualification;
 no WovenInit/login/session/release completion is claimed.
 
+Boot/login/desktop directive — Phase C init/readiness accepted (2026-11-09)
+Phase B software/QEMU boot recovery is complete, with physical firmware/trust
+work deferred to the final hardware pass. Phase C replaces unordered essential
+service startup with a fixed package-rooted WovenInit dependency graph. Live
+owner-bound service publication is required before readiness; a bounded
+failure rolls back every graph process. Happy path and forced readiness
+failure pass at 1/2/4 CPUs, and the complete Windows preservation gate passes
+at `audit-artifacts/acceptance-20261109-131738-437`. Next: Phase D splash
+ownership and visual acceptance. No later login/session/release gate is
+claimed by this entry.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual
