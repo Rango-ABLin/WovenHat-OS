@@ -26,12 +26,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -141,12 +146,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -584,12 +594,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -812,12 +827,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -913,12 +933,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
@@ -1062,12 +1087,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1123,12 +1153,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1197,12 +1232,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1259,12 +1299,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1318,12 +1363,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1393,12 +1443,17 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
-      # Hosted runners start with an empty Cargo registry. Populate it from
-      # the checked-in lockfile before the repository's offline-only builds.
-      - name: Prefetch locked Rust dependencies
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
