@@ -9019,3 +9019,14 @@ pass; final evidence is
 `acceptance-20261109-131508-542` is retained and records the stale font-marker
 oracle defect that was corrected. No Cargo/QEMU chain is active. Phase D is
 next; physical firmware/trust/device work remains reserved for the final pass.
+
+## Codex - Phase D splash acceptance claim (2026-11-09)
+
+User authorizes Phase D only: splash framebuffer rendering, truthful timing,
+and the transition from kernel splash ownership to the production desktop.
+Claim the existing `kernel/src/console.rs` splash renderer, its `boot_stage`
+call sites in `kernel/src/main.rs`, focused host/QEMU visual harnesses, and the
+Phase D boot/login/desktop records. Preserve the accepted Phase B/C boot and
+WovenInit contracts, compositor/display authority, syscall ABI, capabilities,
+and all prior stage gates. Do not start Phase E authentication work. Cargo and
+QEMU acceptance remain serialized; no physical-device action is authorized.

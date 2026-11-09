@@ -1050,28 +1050,43 @@ pub fn pixel_for(pid: u64, x: i32, y: i32) -> Result<u32, Error> {
 /// Present on behalf of the lease holder, taking the display from the terminal
 /// on first use. Returns the number of pixels written.
 pub fn present_for(pid: u64) -> Result<usize, Error> {
-    let mut guard = STATE.lock();
-    let state = guard.as_mut().ok_or(Error::NotReady)?;
-    if state.holder != Some(pid) {
-        return Err(Error::NotHolder);
-    }
-    // The console has the display: draw nothing, keep the damage.
-    if state.console {
-        return Ok(0);
-    }
-    if !state.presenting {
-        if !crate::terminal::set_display_owned(true) && !has_gpu(state) {
-            return Err(Error::NoDisplay);
+    let (written, took_display) = {
+        let mut guard = STATE.lock();
+        let state = guard.as_mut().ok_or(Error::NotReady)?;
+        if state.holder != Some(pid) {
+            return Err(Error::NotHolder);
         }
-        state.presenting = true;
-        let bounds = state.surface.bounds();
-        state.damage.add(bounds);
-        // The user is now looking at the holder's screen, so keystrokes are
-        // meant for it rather than for the hidden terminal.
-        crate::woven_input::set_focus(Some(pid));
+        // The console has the display: draw nothing, keep the damage.
+        if state.console {
+            return Ok(0);
+        }
+        let took_display = !state.presenting;
+        if took_display {
+            if !crate::terminal::set_display_owned(true) && !has_gpu(state) {
+                return Err(Error::NoDisplay);
+            }
+            state.presenting = true;
+            let bounds = state.surface.bounds();
+            state.damage.add(bounds);
+            // The user is now looking at the holder's screen, so keystrokes
+            // are meant for it rather than for the hidden terminal.
+            crate::woven_input::set_focus(Some(pid));
+        }
+        let written = present_state(state)?;
+        state.damage.clear();
+        (written, took_display)
+    };
+    // Serial output can poll a UART. Keep it outside the compositor lock so
+    // first-frame evidence cannot extend the display ownership critical
+    // section or block another CPU's graphics operation.
+    if took_display {
+        crate::serial::write_line(format_args!(
+            "[PHASE D] display handoff owner=desktop pid={} first_frame_pixels={} tick={}",
+            pid,
+            written,
+            crate::timer::ticks()
+        ));
     }
-    let written = present_state(state)?;
-    state.damage.clear();
     Ok(written)
 }
 

@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -60,7 +61,7 @@ def normal_boot_serial_errors(log: str, system_apps: bool, app_count: int | None
 
 
 
-def validate_desktop_frame(path: Path) -> tuple[int, int]:
+def read_ppm(path: Path) -> tuple[int, int, bytes]:
     """Require a complete, non-uniform QEMU P6 framebuffer capture.
 
     A successful screendump command can still capture a blank screen. Keep
@@ -104,10 +105,47 @@ def validate_desktop_frame(path: Path) -> tuple[int, int]:
     pixels = data[offset:]
     if len(pixels) != width * height * 3:
         raise ValueError('Truncated or oversized desktop framebuffer')
+    return width, height, pixels
+
+
+def validate_desktop_frame(path: Path) -> tuple[int, int]:
+    """Require a complete, non-uniform QEMU P6 framebuffer capture."""
+    width, height, pixels = read_ppm(path)
     first = pixels[:3]
     if all(pixels[index:index + 3] == first for index in range(0, len(pixels), 3)):
         raise ValueError('Desktop framebuffer is a uniform blank image')
     return width, height
+
+
+def validate_splash_frame(path: Path) -> tuple[int, int, bytes]:
+    """Require the production splash palette and substantial background."""
+    width, height, pixels = read_ppm(path)
+    colors = [pixels[index:index + 3] for index in range(0, len(pixels), 3)]
+    background = sum(color == bytes((4, 12, 28)) for color in colors)
+    gold = sum(color == bytes((255, 205, 96)) for color in colors)
+    teal = sum(color == bytes((40, 220, 230)) for color in colors)
+    if background < width * height * 3 // 4:
+        raise ValueError('Splash does not retain the branded dark background')
+    if gold < 100 or teal < 100:
+        raise ValueError('Splash is missing its gold mark or teal wordmark')
+    return width, height, pixels
+
+
+def validate_phase_d_timing(log: str) -> None:
+    """Require truthful pre-timer labeling and monotonic post-timer totals."""
+    if '[BOOT PROFILE] KERNEL BOOT [1/7]: graphics surface ready timing=pre-timer' not in log:
+        raise ValueError('The pre-timer graphics stage is not labeled truthfully')
+    if 'scope=kernel-post-timer' not in log:
+        raise ValueError('The kernel timer origin is missing')
+    samples = re.findall(r'\[BOOT PROFILE\] KERNEL BOOT \[([^]]+)\]: .* '
+                         r'delta_ticks=(\d+) total_ticks=(\d+)', log)
+    stages = [stage for stage, _, _ in samples]
+    for required in ('2/7', '3/7', '4/7', '5/7', '6/7', '7/7'):
+        if required not in stages:
+            raise ValueError(f'Missing timed kernel boot stage {required}')
+    totals = [int(total) for _, _, total in samples]
+    if totals != sorted(totals):
+        raise ValueError('Kernel boot profile totals moved backwards')
 
 
 def main():
@@ -126,8 +164,11 @@ def main():
                         help='run the signed-service crash/restart acceptance image')
     parser.add_argument('--woven-init-failure-test', action='store_true',
                         help='run WovenInit readiness-failure rollback acceptance')
+    parser.add_argument('--phase-d-splash-test', action='store_true',
+                        help='capture and verify splash-to-desktop framebuffer ownership')
     args = parser.parse_args()
-    if args.hardware_demo or args.supervisor_test or args.woven_init_failure_test:
+    if (args.hardware_demo or args.supervisor_test or args.woven_init_failure_test
+            or args.phase_d_splash_test):
         args.system_apps = True
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -207,7 +248,8 @@ def main():
     # Keep evidence for each CPU/boot mode distinct; a later run must not
     # silently overwrite the previous run's serial or QEMU logs.
     out = root / 'target' / 'shell-regression' / (
-        f'{"system-apps" if args.system_apps else "diagnostic"}-{args.cpus}cpu-{time.time_ns()}'
+        f'{"phase-d" if args.phase_d_splash_test else "system-apps" if args.system_apps else "diagnostic"}'
+        f'-{args.cpus}cpu-{time.time_ns()}'
     )
     out.mkdir(parents=True, exist_ok=False)
     serial = out / 'serial.log'
@@ -233,6 +275,75 @@ def main():
     with (out / 'qemu.log').open('w') as errors:
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
+            if args.phase_d_splash_test:
+                splash_marker = '[PHASE D] splash visible owner=terminal'
+                deadline = time.monotonic() + 180
+                while splash_marker not in serial.read_text(errors='replace'):
+                    if process.poll() is not None or time.monotonic() > deadline:
+                        raise RuntimeError('Splash ownership marker was not reached')
+                    time.sleep(0.05)
+                with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
+                    stream = connection.makefile('rwb')
+                    json.loads(stream.readline())
+
+                    def phase_d_execute(qmp_command, arguments=None):
+                        request = {'execute': qmp_command}
+                        if arguments is not None:
+                            request['arguments'] = arguments
+                        stream.write((json.dumps(request) + '\n').encode())
+                        stream.flush()
+                        while True:
+                            response = json.loads(stream.readline())
+                            if 'error' in response:
+                                raise RuntimeError(response['error'])
+                            if 'return' in response:
+                                return response['return']
+
+                    phase_d_execute('qmp_capabilities')
+                    splash = out / 'splash-terminal-owned.ppm'
+                    phase_d_execute('screendump', {'filename': str(splash)})
+                    try:
+                        splash_width, splash_height, splash_pixels = validate_splash_frame(splash)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid Phase D splash framebuffer: {error}') from error
+
+                    handoff_marker = '[PHASE D] display handoff owner=desktop'
+                    desktop_marker = '[BOOT] desktop-first runtime ready'
+                    deadline = time.monotonic() + 240
+                    while True:
+                        evidence = serial.read_text(errors='replace')
+                        if handoff_marker in evidence and desktop_marker in evidence:
+                            break
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise RuntimeError('Desktop ownership handoff was not reached')
+                        time.sleep(0.05)
+                    # Let one additional desktop frame settle before capture.
+                    time.sleep(1)
+                    desktop = out / 'desktop-after-handoff.ppm'
+                    phase_d_execute('screendump', {'filename': str(desktop)})
+                    desktop_width, desktop_height, desktop_pixels = read_ppm(desktop)
+                    if (desktop_width, desktop_height) != (splash_width, splash_height):
+                        raise RuntimeError('Framebuffer geometry changed across ownership handoff')
+                    changed = sum(
+                        splash_pixels[index:index + 3] != desktop_pixels[index:index + 3]
+                        for index in range(0, len(splash_pixels), 3)
+                    )
+                    if changed < splash_width * splash_height // 4:
+                        raise RuntimeError('Desktop did not materially replace the splash frame')
+                    evidence = serial.read_text(errors='replace')
+                    try:
+                        validate_phase_d_timing(evidence)
+                    except ValueError as error:
+                        raise RuntimeError(f'Invalid Phase D timing evidence: {error}') from error
+                    if evidence.index(splash_marker) >= evidence.index(handoff_marker):
+                        raise RuntimeError('Desktop handoff preceded splash ownership')
+                    if any(fatal in evidence.lower() for fatal in
+                           ('kernel panic', 'panicked at', 'security violation', 'security: failed')):
+                        raise RuntimeError('Fatal evidence appeared during Phase D acceptance')
+                    print(f'Phase D splash/ownership/timing: PASS ({args.cpus} CPU)', flush=True)
+                    print(f'Framebuffer: {splash_width}x{splash_height}; changed pixels: {changed}', flush=True)
+                    print('Evidence:', out)
+                    return 0
             if args.supervisor_test or args.woven_init_failure_test:
                 if args.woven_init_failure_test:
                     markers = ('[PHASE C] WovenInit readiness failure rollback: PASSED',)

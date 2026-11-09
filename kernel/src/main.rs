@@ -410,7 +410,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut console = Console::new(info, 40, 40, 2);
 
     #[cfg(feature = "system-apps")]
-    console.show_splash();
+    {
+        console.show_splash();
+        match info {
+            Some(info) => serial::write_line(format_args!(
+                "[PHASE D] splash visible owner=terminal width={} height={} timing=pre-timer",
+                info.width, info.height
+            )),
+            None => serial::write_line(format_args!(
+                "[PHASE D] splash unavailable owner=none timing=pre-timer"
+            )),
+        }
+    }
 
     #[cfg(not(feature = "system-apps"))]
     console.clear();
@@ -1591,7 +1602,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // registry blits onto, sized to the framebuffer. Deferred to here
         // because its allocation needs a mapped heap.
         compositor::init_for_display();
-        boot_stage(&mut console, "BOOT LOADER [1/7]: graphics surface ready");
+        boot_stage(&mut console, "KERNEL BOOT [1/7]: graphics surface ready");
         console.println("BOOT: starting CPU and interrupt setup");
     } else {
         console.println("KERNEL HEAP: SELF TEST FAILED");
@@ -1635,6 +1646,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         pic::init();
         timer::init();
+        start_boot_profile();
 
         let early_devices = [
             device::Device {
@@ -1707,7 +1719,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             console.println("PAGER: START FAILED");
             halt();
         }
-        boot_stage(&mut console, "BOOT LOADER [2/7]: scheduler and I/O ready");
+        boot_stage(&mut console, "KERNEL BOOT [2/7]: scheduler and I/O ready");
         #[cfg(not(feature = "system-apps"))]
         if maintenance_boot {
             serial::write_line(format_args!(
@@ -1759,7 +1771,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 "[FS] FAT32 mount failed; continuing with RAM VFS"
             )),
         }
-        boot_stage(&mut console, "BOOT LOADER [3/7]: storage checked");
+        boot_stage(&mut console, "KERNEL BOOT [3/7]: storage checked");
 
         for dir in ["/etc", "/var", "/home", "/tmp", "/proc"] {
             let _ = vfs::mkdir(dir);
@@ -1807,7 +1819,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 serial::write_line(format_args!("[DEMO] account provisioning failed"));
                 halt();
             }
-            boot_stage(&mut console, "BOOT LOADER [3.1/7]: demo accounts hashed");
+            boot_stage(&mut console, "KERNEL BOOT [3.1/7]: demo accounts hashed");
         }
 
         #[cfg(feature = "system-apps")]
@@ -1818,7 +1830,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             boot_stage(
                 &mut console,
-                "BOOT LOADER [3.2/7]: system app catalog installed",
+                "KERNEL BOOT [3.2/7]: system app catalog installed",
             );
             if maintenance_boot {
                 run_read_only_boot_maintenance(boot_info.boot_policy.entry);
@@ -1845,7 +1857,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 qemu_test_exit_success();
             }
         }
-        boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
+        boot_stage(&mut console, "KERNEL BOOT [4/7]: system files ready");
 
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
@@ -1897,7 +1909,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 error
             )),
         }
-        boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
+        boot_stage(&mut console, "KERNEL BOOT [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
         if !maintenance_boot && !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
@@ -2011,7 +2023,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         {
             boot_stage(
                 &mut console,
-                "BOOT LOADER [6/7]: starting WovenShell desktop",
+                "KERNEL BOOT [6/7]: starting WovenShell desktop",
             );
             let accounts = vfs::stat("/etc/wovenhat/accounts")
                 .is_ok()
@@ -2044,7 +2056,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     desktop_session_started = session_ready || task::process_alive(pid);
                     if session_ready {
                         console.println("DESKTOP SESSION: STARTED (F12 SWITCHES TO THIS CONSOLE)");
-                        boot_stage(&mut console, "BOOT LOADER [7/7]: desktop ready");
+                        boot_stage(&mut console, "KERNEL BOOT [7/7]: desktop ready");
                         alloc::format!("SESSION: started as pid {pid} (F12 shows the desktop)")
                     } else if !task::process_alive(pid) {
                         serial::write_line(format_args!(
@@ -18146,17 +18158,29 @@ fn stage18_2_self_test() -> bool {
 
 /// Boot-stage timing (Stage 30 boot profiling -- "fast boot" is a named
 /// target). Ticks are 100 Hz, so this is coarse (10 ms resolution) but
-/// enough to see which stage of a slow boot is the slow one. The first call
-/// measures from tick 0 (the timer's own start), which is what "time to the
-/// first stage" should mean anyway.
+/// enough to see which stage of a slow boot is the slow one. Timing begins
+/// only after `timer::init`; firmware-to-kernel and pre-timer work are not
+/// misreported as elapsed zero-tick kernel time.
 static BOOT_STAGE_CLOCK: AtomicU64 = AtomicU64::new(0);
+static BOOT_PROFILE_START: AtomicU64 = AtomicU64::new(0);
+static BOOT_PROFILE_READY: AtomicBool = AtomicBool::new(false);
+
+fn start_boot_profile() {
+    let now = timer::ticks();
+    BOOT_PROFILE_START.store(now, Ordering::Release);
+    BOOT_STAGE_CLOCK.store(now, Ordering::Release);
+    BOOT_PROFILE_READY.store(true, Ordering::Release);
+    serial::write_line(format_args!(
+        "[BOOT PROFILE] timer ready tick={} resolution_ms=10 scope=kernel-post-timer",
+        now
+    ));
+}
 
 /// Print `label` on screen exactly as the unprofiled call did, and log how
 /// many ticks elapsed since the previous call (or boot start, for the
 /// first) to serial as `[BOOT PROFILE]`.
 fn boot_stage(console: &mut Console, label: &str) {
     let now = timer::ticks();
-    let previous = BOOT_STAGE_CLOCK.swap(now, Ordering::AcqRel);
     // Drive the spinner from elapsed wall-clock ticks, not from how many
     // times this function has run: boot stages vary wildly in length, so a
     // per-call counter froze the spinner through a slow stage and then
@@ -18165,11 +18189,18 @@ fn boot_stage(console: &mut Console, label: &str) {
     #[cfg(feature = "system-apps")]
     console.show_splash_frame((now / 4) as usize);
     console.println(label);
-    serial::write_line(format_args!(
-        "[BOOT PROFILE] {} (+{} ticks)",
-        label,
-        now.saturating_sub(previous)
-    ));
+    if BOOT_PROFILE_READY.load(Ordering::Acquire) {
+        let previous = BOOT_STAGE_CLOCK.swap(now, Ordering::AcqRel);
+        let start = BOOT_PROFILE_START.load(Ordering::Acquire);
+        serial::write_line(format_args!(
+            "[BOOT PROFILE] {} delta_ticks={} total_ticks={}",
+            label,
+            now.saturating_sub(previous),
+            now.saturating_sub(start)
+        ));
+    } else {
+        serial::write_line(format_args!("[BOOT PROFILE] {} timing=pre-timer", label));
+    }
 }
 
 /// Stop the machine after an unrecoverable boot or validation error.

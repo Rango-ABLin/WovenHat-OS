@@ -1,6 +1,7 @@
 """Fail-closed normal-boot serial evidence tests."""
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'test-shell-qemu.py'
@@ -58,6 +59,37 @@ class NormalBootSerialSafetyTests(unittest.TestCase):
     def test_missing_keyboard_smp_evidence(self):
         self.assertTrue(SHELL.normal_boot_serial_errors(
             BASE.replace('[SMP] acknowledged TLB shootdowns: PASSED', ''), False))
+
+    def test_phase_d_timing_requires_truthful_monotonic_stages(self):
+        log = ('[BOOT PROFILE] KERNEL BOOT [1/7]: graphics surface ready timing=pre-timer\n'
+               '[BOOT PROFILE] timer ready tick=0 resolution_ms=10 scope=kernel-post-timer\n')
+        total = 0
+        for stage in ('2/7', '3/7', '4/7', '5/7', '6/7', '7/7'):
+            total += 3
+            log += (f'[BOOT PROFILE] KERNEL BOOT [{stage}]: ready '
+                    f'delta_ticks=3 total_ticks={total}\n')
+        SHELL.validate_phase_d_timing(log)
+        with self.assertRaises(ValueError):
+            SHELL.validate_phase_d_timing(log.replace('total_ticks=9', 'total_ticks=99'))
+        with self.assertRaises(ValueError):
+            SHELL.validate_phase_d_timing(log.replace('timing=pre-timer',
+                                                       'delta_ticks=0 total_ticks=0'))
+
+    def test_phase_d_splash_palette_fails_closed(self):
+        width = height = 64
+        pixels = bytearray(bytes((4, 12, 28)) * (width * height))
+        for index in range(120):
+            pixels[index * 3:index * 3 + 3] = bytes((255, 205, 96))
+            offset = (width * height - 1 - index) * 3
+            pixels[offset:offset + 3] = bytes((40, 220, 230))
+        with tempfile.TemporaryDirectory() as directory:
+            frame = Path(directory) / 'splash.ppm'
+            frame.write_bytes(f'P6\n{width} {height}\n255\n'.encode() + pixels)
+            self.assertEqual(SHELL.validate_splash_frame(frame)[:2], (width, height))
+            frame.write_bytes(f'P6\n{width} {height}\n255\n'.encode()
+                              + bytes((4, 12, 28)) * (width * height))
+            with self.assertRaises(ValueError):
+                SHELL.validate_splash_frame(frame)
 
 
 if __name__ == '__main__':
