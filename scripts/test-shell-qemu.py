@@ -22,7 +22,8 @@ def build_woven_shell(root):
 
 def apps_installed_marker(app_count: int) -> str:
     """Kernel marker for a fully installed signed system-app catalog."""
-    return f'[APPS] {app_count} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes'
+    return (f'[APPS] {app_count} signed applications, licensed wallpaper, and licensed font installed; '
+            'wallpaper VFS readback 43254 bytes, font VFS readback 621572 bytes')
 
 
 def normal_boot_serial_errors(log: str, system_apps: bool, app_count: int | None = None) -> list[str]:
@@ -123,8 +124,10 @@ def main():
                         help='build the disposable demo image and verify demo sign-in')
     parser.add_argument('--supervisor-test', action='store_true',
                         help='run the signed-service crash/restart acceptance image')
+    parser.add_argument('--woven-init-failure-test', action='store_true',
+                        help='run WovenInit readiness-failure rollback acceptance')
     args = parser.parse_args()
-    if args.hardware_demo or args.supervisor_test:
+    if args.hardware_demo or args.supervisor_test or args.woven_init_failure_test:
         args.system_apps = True
     root = Path(__file__).resolve().parents[1]
     qemu = Path(args.qemu)
@@ -181,7 +184,8 @@ def main():
         ).strip()
         build_env.setdefault('WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX', test_public_key)
         build_env['WOVENHAT_SHELL_IMAGE'] = str(build_woven_shell(root))
-        feature = ('stage31-service-supervisor-test' if args.supervisor_test
+        feature = ('woven-init-failure-test' if args.woven_init_failure_test
+                   else 'stage31-service-supervisor-test' if args.supervisor_test
                    else 'hardware-demo' if args.hardware_demo else 'system-apps')
         feature_arguments = ['--features', feature]
     cargo_command = ['cargo']
@@ -222,18 +226,21 @@ def main():
                *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy is not None else []),
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
                '-device', 'virtio-blk-pci,drive=boot,bootindex=1']
-    if args.supervisor_test:
+    if args.supervisor_test or args.woven_init_failure_test:
         command.insert(command.index('-drive'), '-device')
         command.insert(command.index('-drive'), 'isa-debug-exit,iobase=0xf4,iosize=0x04')
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     with (out / 'qemu.log').open('w') as errors:
         process = subprocess.Popen(command, cwd=root, stdout=errors, stderr=errors, creationflags=flags)
         try:
-            if args.supervisor_test:
-                markers = (
-                    '[STAGE31 SUPERVISOR] update recovery: PASSED',
-                    '[STAGE31 SUPERVISOR] search recovery: PASSED',
-                )
+            if args.supervisor_test or args.woven_init_failure_test:
+                if args.woven_init_failure_test:
+                    markers = ('[PHASE C] WovenInit readiness failure rollback: PASSED',)
+                else:
+                    markers = (
+                        '[STAGE31 SUPERVISOR] update recovery: PASSED',
+                        '[STAGE31 SUPERVISOR] search recovery: PASSED',
+                    )
                 deadline = time.monotonic() + 240
                 while not all(marker in serial.read_text(errors='replace') for marker in markers):
                     if process.poll() is not None or time.monotonic() > deadline:
@@ -254,7 +261,9 @@ def main():
                     failures.append('Search supervisor recovery timed out')
                 if failures:
                     raise RuntimeError('; '.join(failures))
-                print('Signed service supervisor crash/restart: PASS', flush=True)
+                print(('WovenInit readiness failure rollback: PASS'
+                       if args.woven_init_failure_test
+                       else 'Signed service supervisor crash/restart: PASS'), flush=True)
                 print('Serial log:', serial)
                 print('UEFI image:', image)
                 return 0
@@ -267,10 +276,8 @@ def main():
                 time.sleep(0.1)
             if args.system_apps and apps_installed_marker(app_count) not in serial.read_text(errors='replace'):
                 raise RuntimeError('Production system-app catalog was not installed; inspect shell-regression logs')
-            if args.system_apps and '[SERVICES] woven-package published as pid ' not in serial.read_text(errors='replace'):
-                raise RuntimeError('WovenPackage production service was not published; inspect shell-regression logs')
-            if args.system_apps and '[SERVICES] woven-update published as pid ' not in serial.read_text(errors='replace'):
-                raise RuntimeError('WovenUpdate production service was not published; inspect shell-regression logs')
+            if args.system_apps and '[WOVENINIT] essential services ready mask=0xf' not in serial.read_text(errors='replace'):
+                raise RuntimeError('WovenInit essential readiness barrier was not reached; inspect shell-regression logs')
             if args.hardware_demo and '[DEMO] sample accounts installed in volatile VFS (ada, lin)' not in serial.read_text(errors='replace'):
                 raise RuntimeError('Hardware-demo accounts were not provisioned; inspect shell-regression logs')
             time.sleep(1)

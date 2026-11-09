@@ -225,6 +225,7 @@ stage32-22-test = ["qemu-test", "gdb-entry"]
 # separate from the process-crash gate because it boots the signed system-app
 # catalog and exercises restart publication through the real IPC registry.
 stage31-service-supervisor-test = ["system-apps"]
+woven-init-failure-test = ["system-apps"]
 stage31-driver-restart-test = []
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]

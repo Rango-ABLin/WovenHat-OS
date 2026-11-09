@@ -14,7 +14,7 @@ APPS = 11
 BASE = ('[BOOT] shell-first runtime ready\n'
         '[SMP] acknowledged TLB shootdowns: PASSED\n')
 DESKTOP = ('[BOOT] desktop-first runtime ready\n'
-           f'[APPS] {APPS} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes\n'
+           f'{SHELL.apps_installed_marker(APPS)}\n'
            '[SESSION] WovenShell desktop started as pid 2\n'
            '[SESSION] diagnostic console\n'
            '[SESSION] back to the desktop\n'
@@ -30,7 +30,7 @@ class NormalBootSerialSafetyTests(unittest.TestCase):
 
     def test_old_install_marker_cannot_claim_wallpaper_readback(self):
         old = DESKTOP.replace(
-            f'[APPS] {APPS} signed applications and licensed wallpaper installed; wallpaper VFS readback 43254 bytes',
+            SHELL.apps_installed_marker(APPS),
             f'[APPS] {APPS} signed applications installed')
         self.assertTrue(SHELL.normal_boot_serial_errors(old, True, APPS))
 

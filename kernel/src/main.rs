@@ -1824,6 +1824,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 run_read_only_boot_maintenance(boot_info.boot_policy.entry);
             }
             if !start_production_system_services() {
+                #[cfg(feature = "woven-init-failure-test")]
+                if woven_init::failure_test_passed() {
+                    serial::write_line(format_args!(
+                        "[PHASE C] WovenInit readiness failure rollback: PASSED"
+                    ));
+                    qemu_test_exit_success();
+                }
                 serial::write_line(format_args!("[SERVICES] production service startup failed"));
                 halt();
             }
@@ -6896,6 +6903,7 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
 
 #[cfg(any(
     feature = "qemu-test",
+    feature = "woven-init-failure-test",
     feature = "stage31-service-supervisor-test",
     feature = "stage31-driver-restart-test"
 ))]

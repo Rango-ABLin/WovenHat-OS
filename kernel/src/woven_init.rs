@@ -5,9 +5,13 @@
 //! lifecycle supervision in `service_supervisor`.
 
 use crate::{serial, service_supervisor, task, timer};
+#[cfg(feature = "woven-init-failure-test")]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_NODES: usize = 4;
 const READY_TIMEOUT_TICKS: u64 = 500;
+#[cfg(feature = "woven-init-failure-test")]
+static FAILURE_TEST_PASSED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -123,6 +127,14 @@ pub fn start() -> bool {
             return rollback(&graph);
         }
         graph[index].pid = Some(pid);
+        #[cfg(feature = "woven-init-failure-test")]
+        if node.kind == service_supervisor::ServiceKind::Update {
+            // Exercise the real startup boundary: the dependency was ready,
+            // this service was spawned and registered, but it died before
+            // publishing readiness. WovenInit must reject the partial graph
+            // and tear down every process it already started.
+            let _ = task::kill_process(pid.as_u64(), 9);
+        }
         let deadline = timer::ticks().saturating_add(READY_TIMEOUT_TICKS);
         if !wait_ready(graph[index], deadline) {
             graph[index].state = State::Failed;
@@ -146,12 +158,28 @@ pub fn start() -> bool {
 }
 
 fn rollback(graph: &[Node; MAX_NODES]) -> bool {
+    let mut _had_process = false;
     for node in graph.iter().rev() {
         if let Some(pid) = node.pid {
+            _had_process = true;
             if !task::process_exited(pid) {
                 let _ = task::kill_process(pid.as_u64(), 9);
             }
         }
     }
+    #[cfg(feature = "woven-init-failure-test")]
+    if _had_process
+        && graph
+            .iter()
+            .filter_map(|node| node.pid)
+            .all(task::process_exited)
+    {
+        FAILURE_TEST_PASSED.store(true, Ordering::Release);
+    }
     false
+}
+
+#[cfg(feature = "woven-init-failure-test")]
+pub fn failure_test_passed() -> bool {
+    FAILURE_TEST_PASSED.load(Ordering::Acquire)
 }
