@@ -448,7 +448,16 @@ pub(super) fn run() -> bool {
         drop(alloc::vec![0_u8; crate::vfs::NODE_CAPACITY*3]);
         crate::heap::maintain_capacity();
         let frames = crate::memory::stats().allocated_frames;
-        let program = load(&main, &["shared-test"])?;
+        let Some(program) = load(&main, &["shared-test"]) else {
+            // Distinguish failed legitimate signed loading from the preceding
+            // expected signature/path rejection tests without weakening policy.
+            step("valid signed dependency load", false);
+            return None;
+        };
+        if !step("valid signed dependency load", true) {
+            let _ = destroy(program.address_space);
+            return None;
+        }
         let mut address = [0; 8];
         paging::read_user_bytes_in(
             program.address_space.paging,

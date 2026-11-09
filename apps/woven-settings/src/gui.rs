@@ -42,6 +42,8 @@ const PANEL_HEIGHT: usize = 216;
 // Keep the static render target below the current Ring-3 image/stack window.
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
+const SETTINGS_PATH: &str = "/etc/wovenhat/settings.json";
+const SETTINGS_SOURCE_PATH: &str = "/mnt/etc/wovenhat/settings.json";
 
 struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
@@ -230,6 +232,12 @@ fn draw_settings(
     } else {
         canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 152, "unavailable", text);
     }
+    let theme_name = match mode {
+        ThemeMode::Dark => "Theme: Dark  (l=Light c=Contrast)",
+        ThemeMode::Light => "Theme: Light (d=Dark c=Contrast)",
+        ThemeMode::HighContrast => "Theme: Contrast (d=Dark l=Light)",
+    };
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 174, theme_name, accent);
     let mut refresh_digits = [0u8; 20];
     draw_number(
         canvas,
@@ -274,6 +282,61 @@ fn render(
     window.write_canvas(&canvas).is_ok()
 }
 
+fn read_settings(output: &mut [u8]) -> Option<usize> {
+    let descriptor = libwoven::open(SETTINGS_PATH).ok()?;
+    let result = libwoven::read(descriptor, output);
+    let _ = libwoven::close(descriptor);
+    result.ok()
+}
+
+fn persist_settings_file(path: &str, enabled: bool) -> bool {
+    let mut data = [0u8; 512];
+    let length = if path == SETTINGS_PATH {
+        match read_settings(&mut data) {
+            Some(length) => length,
+            None => return false,
+        }
+    } else {
+        let Ok(descriptor) = libwoven::open(path) else {
+            return false;
+        };
+        let result = libwoven::read(descriptor, &mut data);
+        let _ = libwoven::close(descriptor);
+        let Ok(length) = result else { return false };
+        length
+    };
+    if !libwoven::settings_policy::patch_high_contrast(&mut data[..length], enabled) {
+        return false;
+    }
+    let Ok(descriptor) = libwoven::open_access(path, 2) else {
+        return false;
+    };
+    let result = libwoven::write_file_all(descriptor, &data[..length]) == Ok(length);
+    let _ = libwoven::close(descriptor);
+    result
+}
+
+fn persist_high_contrast(enabled: bool) -> bool {
+    let installed = persist_settings_file(SETTINGS_PATH, enabled);
+    let durable = persist_settings_file(SETTINGS_SOURCE_PATH, enabled);
+    installed || durable
+}
+
+fn persisted_mode(fallback: ThemeMode) -> ThemeMode {
+    let mut data = [0u8; 512];
+    let Some(length) = read_settings(&mut data) else {
+        return fallback;
+    };
+    if data[..length]
+        .windows(b"\"high_contrast\":true".len())
+        .any(|window| window == b"\"high_contrast\":true")
+    {
+        ThemeMode::HighContrast
+    } else {
+        fallback
+    }
+}
+
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     let mut response = [0u8; 16];
     response[..4].copy_from_slice(b"WRSZ");
@@ -285,10 +348,11 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
 
 /// Open a read-only Settings window through WovenShell's WOPN protocol.
 /// The shell PID is supplied by the catalog's `%p` token.
-pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
+pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
     };
+    mode = persisted_mode(mode);
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
     let mut refresh = Button::new(
         Frame::new(
@@ -336,7 +400,14 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
             if message.get(..length) == Some(&b"WCAN"[..]) {
                 refresh.cancel_pointer();
                 pointer_pressed = false;
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                if !render(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    mode,
+                    &refresh,
+                ) {
                     fail(8)
                 }
                 continue;
@@ -348,7 +419,14 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                        if render(
+                            &resized,
+                            pointer,
+                            pointer_pressed,
+                            refresh_count,
+                            mode,
+                            &refresh,
+                        ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenSettings: window resized\n");
@@ -359,17 +437,46 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                         drop(resized);
                     }
                 }
-            } else if (message.get(..length) == Some(&b"WKEY\x01"[..])
+            } else if message.get(..length) == Some(&b"WKEY\x01"[..])
                 || message.get(..length) == Some(&b"r"[..])
-                || message.get(..length) == Some(&b" "[..]))
-                && refresh.activate()
+                || message.get(..length) == Some(&b" "[..])
             {
+                if !refresh.activate() {
+                    continue;
+                }
                 refresh.focused = true;
                 refresh_count = refresh_count.saturating_add(1);
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                if !render(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    mode,
+                    &refresh,
+                ) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: keyboard refreshed\n");
+            } else if length == 1 && matches!(message[0], b'd' | b'l' | b'c') {
+                mode = match message[0] {
+                    b'l' => ThemeMode::Light,
+                    b'c' => ThemeMode::HighContrast,
+                    _ => ThemeMode::Dark,
+                };
+                if !persist_high_contrast(mode == ThemeMode::HighContrast) {
+                    let _ = libwoven::print("WovenSettings: theme persistence unavailable\n");
+                }
+                if !render(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    mode,
+                    &refresh,
+                ) {
+                    fail(8)
+                }
+                let _ = libwoven::print("WovenSettings: theme changed\n");
             } else if message.get(..4) == Some(&b"WPMV"[..]) && length == 8 {
                 pointer = Some((
                     u16::from_le_bytes([message[4], message[5]]),
@@ -378,7 +485,14 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                 if let Some((x, y)) = pointer {
                     refresh.pointer_move(i32::from(x), i32::from(y));
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                if !render(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    mode,
+                    &refresh,
+                ) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");
@@ -391,7 +505,14 @@ pub fn run(shell: Option<&[u8]>, mode: ThemeMode) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenSettings: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, mode, &refresh) {
+                if !render(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    mode,
+                    &refresh,
+                ) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: pointer updated\n");

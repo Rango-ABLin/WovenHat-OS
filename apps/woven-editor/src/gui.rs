@@ -1,6 +1,6 @@
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::ui::{Button, Label, TextField, Theme};
+use libwoven::{rgb, Canvas, GraphicsSurface, InputEvent, Key};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -11,6 +11,9 @@ const BUTTON_X: i32 = 250;
 const BUTTON_Y: i32 = 170;
 const BUTTON_WIDTH: usize = 80;
 const BUTTON_HEIGHT: usize = 20;
+const SAVE_X: i32 = 160;
+const SAVE_WIDTH: usize = 80;
+const MAX_TEXT: usize = 256;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
@@ -18,6 +21,27 @@ const PANEL_HEIGHT: usize = 196;
 const MAX_ENTRIES: usize = 32;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
+
+struct EditorView<'a, 'b> {
+    refresh_count: u32,
+    refresh: &'a Button<'b>,
+    save: &'a Button<'b>,
+    editor: &'a TextField<MAX_TEXT>,
+    saved: bool,
+}
+
+macro_rules! render_editor {
+    ($window:expr, $pointer:expr, $pressed:expr, $refresh_count:expr, $refresh:expr, $save:expr, $editor:expr, $saved:expr) => {{
+        let view = EditorView {
+            refresh_count: $refresh_count,
+            refresh: $refresh,
+            save: $save,
+            editor: $editor,
+            saved: $saved,
+        };
+        render($window, $pointer, $pressed, &view)
+    }};
+}
 
 struct PixelBuffer(core::cell::UnsafeCell<[u32; MAX_SURFACE_WIDTH * MAX_SURFACE_HEIGHT]>);
 
@@ -56,12 +80,18 @@ fn draw_editor(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
-    refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &EditorView<'_, '_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
+    stroke_rect(
+        canvas,
+        PANEL_X,
+        PANEL_Y,
+        PANEL_WIDTH,
+        PANEL_HEIGHT,
+        THEME.accent,
+    );
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenEditor",
@@ -83,15 +113,37 @@ fn draw_editor(
     if let Ok(text) = core::str::from_utf8(count_text) {
         canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
     }
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 136, "CLI: --view PATH", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 154, "CLI: --write PATH TEXT", THEME.text);
+    canvas.draw_text_system(
+        PANEL_X + 10,
+        PANEL_Y + 124,
+        "Note (saved to /mnt/woven-note.txt)",
+        THEME.accent,
+    );
+    view.editor.draw(canvas, THEME);
+    canvas.draw_text_system(
+        PANEL_X + 10,
+        PANEL_Y + 154,
+        "Type text, Backspace, Enter to save",
+        THEME.text,
+    );
+    canvas.draw_text_system(
+        PANEL_X + 10,
+        PANEL_Y + 172,
+        if view.saved {
+            "Saved"
+        } else {
+            "Unsaved changes"
+        },
+        if view.saved { THEME.accent } else { THEME.text },
+    );
     let mut refresh_digits = [0u8; 20];
     canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
-    let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
+    let refresh_text = libwoven::format_u64(u64::from(view.refresh_count), &mut refresh_digits);
     if let Ok(text) = core::str::from_utf8(refresh_text) {
         canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
     }
-    refresh.draw(canvas, THEME);
+    view.refresh.draw(canvas, THEME);
+    view.save.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
@@ -107,8 +159,7 @@ fn render(
     window: &GraphicsSurface,
     pointer: Option<(u16, u16)>,
     pressed: bool,
-    refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &EditorView<'_, '_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -120,7 +171,7 @@ fn render(
     ) else {
         return false;
     };
-    draw_editor(&mut canvas, pointer, pressed, refresh_count, refresh);
+    draw_editor(&mut canvas, pointer, pressed, view);
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -133,9 +184,9 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     libwoven::message_send(shell, &response).is_ok()
 }
 
-/// Open a bounded read-only editor workspace window through WovenShell.
-/// Editing commands remain available through the existing CLI until input
-/// widgets and file-operation events are added to the desktop client.
+/// Open a bounded interactive editor workspace window through WovenShell.
+/// The GUI owns text editing state and uses the capability-checked filesystem
+/// ABI only when the user explicitly activates Save.
 pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
@@ -150,7 +201,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         ),
         "Refresh",
     );
-    if !render(&window, None, false, 0, &refresh) {
+    let mut save = Button::new(
+        Frame::new(SAVE_X, BUTTON_Y, SAVE_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Save",
+    );
+    let mut editor = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PANEL_Y + 136, 316, 18));
+    editor.focused = true;
+    let mut saved = false;
+    if !render_editor!(&window, None, false, 0, &refresh, &save, &editor, saved) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -187,7 +245,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..length) == Some(&b"WCAN"[..]) {
                 refresh.cancel_pointer();
                 pointer_pressed = false;
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_editor!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    &refresh,
+                    &save,
+                    &editor,
+                    saved
+                ) {
                     fail(8)
                 }
                 continue;
@@ -199,7 +266,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, &refresh) {
+                        if render_editor!(
+                            &resized,
+                            pointer,
+                            pointer_pressed,
+                            refresh_count,
+                            &refresh,
+                            &save,
+                            &editor,
+                            saved
+                        ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenEditor: window resized\n");
@@ -217,29 +293,136 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 ));
                 if let Some((x, y)) = pointer {
                     refresh.pointer_move(i32::from(x), i32::from(y));
+                    save.pointer_move(i32::from(x), i32::from(y));
+                    editor.pointer(i32::from(x), i32::from(y), false);
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_editor!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    &refresh,
+                    &save,
+                    &editor,
+                    saved
+                ) {
                     fail(8)
                 }
-                let _ = libwoven::print("WovenEditor: pointer updated\n");
+                log_pointer(pointer);
             } else if message.get(..4) == Some(&b"WPBT"[..]) && length == 10 && message[4] == 0 {
                 pointer_pressed = message[5] != 0;
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
+                if editor.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    saved = false;
+                }
                 if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenEditor: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if save.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed)
+                    && save_note(editor.as_str())
+                {
+                    saved = true;
+                    let _ = libwoven::print("WovenEditor: note saved\n");
+                }
+                if !render_editor!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    &refresh,
+                    &save,
+                    &editor,
+                    saved
+                ) {
                     fail(8)
                 }
-                let _ = libwoven::print("WovenEditor: pointer updated\n");
+                log_pointer(pointer);
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 {
+                let event = match message[4] {
+                    1 => Some(InputEvent::Key(Key::Enter)),
+                    2 => Some(InputEvent::Key(Key::Backspace)),
+                    _ => None,
+                };
+                let changed = if let Some(event) = event {
+                    if matches!(event, InputEvent::Key(Key::Enter)) {
+                        if save_note(editor.as_str()) {
+                            saved = true;
+                        }
+                        true
+                    } else {
+                        editor.handle(event)
+                    }
+                } else {
+                    false
+                };
+                if changed {
+                    if !matches!(event, Some(InputEvent::Key(Key::Enter))) {
+                        saved = false;
+                    }
+                    let _ = render_editor!(
+                        &window,
+                        pointer,
+                        pointer_pressed,
+                        refresh_count,
+                        &refresh,
+                        &save,
+                        &editor,
+                        saved
+                    );
+                }
+            } else if length == 1
+                && message[0].is_ascii_graphic()
+                && editor.handle(InputEvent::Key(Key::Char(message[0] as char)))
+            {
+                saved = false;
+                let _ = render_editor!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    &refresh,
+                    &save,
+                    &editor,
+                    saved
+                );
             }
         }
     }
     drop(window);
     libwoven::exit(0)
+}
+
+fn save_note(text: &str) -> bool {
+    let Ok(descriptor) = libwoven::open_access("/mnt/woven-note.txt", 6) else {
+        return false;
+    };
+    let result = libwoven::write_file(descriptor, text.as_bytes()) == Ok(text.len());
+    let _ = libwoven::close(descriptor);
+    if result {
+        unsafe {
+            libwoven::syscall::sync();
+        }
+    }
+    result
+}
+
+fn log_pointer(pointer: Option<(u16, u16)>) {
+    let Some((x, y)) = pointer else {
+        let _ = libwoven::print("WovenEditor: pointer updated\n");
+        return;
+    };
+    let mut digits = [0u8; 20];
+    let x_text = libwoven::format_u64(u64::from(x), &mut digits);
+    let mut y_digits = [0u8; 20];
+    let y_text = libwoven::format_u64(u64::from(y), &mut y_digits);
+    let _ = libwoven::print("WovenEditor: pointer updated x=");
+    if let Ok(text) = core::str::from_utf8(x_text) { let _ = libwoven::print(text); }
+    let _ = libwoven::print(" y=");
+    if let Ok(text) = core::str::from_utf8(y_text) { let _ = libwoven::print(text); }
+    let _ = libwoven::print("\n");
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {

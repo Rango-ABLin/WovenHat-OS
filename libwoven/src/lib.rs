@@ -154,6 +154,7 @@ pub mod recovery;
 pub mod runtime_modules;
 pub mod search_ipc;
 pub mod semantic_search;
+pub mod settings_policy;
 pub mod store;
 pub mod ui;
 pub mod update_ipc;
