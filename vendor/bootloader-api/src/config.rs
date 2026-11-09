@@ -40,7 +40,9 @@ pub struct BootloaderConfig {
 impl BootloaderConfig {
     pub(crate) const UUID: [u8; 16] = [
         0x74, 0x3C, 0xA9, 0x61, 0x09, 0x36, 0x46, 0xA0, 0xBB, 0x55, 0x5C, 0x15, 0x89, 0x15, 0x25,
-        0x3D,
+        // WovenHat BootInfo policy extension revision 1. Distinct from the
+        // upstream contract: mismatched loaders/kernels reject before handoff.
+        0x3E,
     ];
     #[doc(hidden)]
     pub const SERIALIZED_LEN: usize = 133;

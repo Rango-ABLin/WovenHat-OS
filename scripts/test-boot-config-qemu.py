@@ -28,6 +28,11 @@ CASES = {
     "recovery": None,
     "diagnostics": None,
     "graphics-unsupported": "GraphicsUnsupportedMode",
+    "graphics-silent": "GraphicsUnsupportedMode",
+    "alternate-path": None,
+    "invalid-path": "UnsupportedPolicy",
+    "invalid-timeout": "UnsupportedPolicy",
+    "invalid-command": "UnsupportedPolicy",
     "oversized": "TooLarge",
     "kernel-empty": "Empty",
     "kernel-missing": "Missing",
@@ -46,10 +51,18 @@ BOOTLOADER_SOURCES = (
     "vendor/bootloader/uefi/src/main.rs", "vendor/bootloader/uefi/src/config.rs",
     "vendor/bootloader/uefi/src/memory_descriptor.rs",
     "vendor/bootloader/uefi/src/image.rs",
+    "vendor/bootloader/uefi/src/exit.rs",
     "vendor/bootloader-api/src/info.rs",
     "vendor/bootloader-x86_64-common/src/lib.rs",
     "kernel/src/main.rs",
+    "kernel/src/recovery.rs", "kernel/src/syscall.rs",
 )
+BOOTLOADER_SOURCES = tuple(sorted(set(BOOTLOADER_SOURCES) | {
+    str(path.relative_to(ROOT)).replace("\\", "/")
+    for directory in ("vendor/bootloader-api", "vendor/bootloader-x86_64-common")
+    for path in (ROOT / directory / "src").rglob("*.rs")
+} | {"vendor/bootloader-api/Cargo.toml", "vendor/bootloader-api/build.rs",
+     "vendor/bootloader-x86_64-common/Cargo.toml"}))
 
 
 def failure_subject(name):
@@ -57,16 +70,20 @@ def failure_subject(name):
 
 
 def firmware_failure(name):
-    return name in ("kernel-allocation", "graphics-unsupported") or name.startswith("disk-")
+    return name in ("kernel-allocation", "graphics-unsupported", "graphics-silent") or name.startswith("disk-")
 
 
 def stop_marker(name):
+    if name in ("page-table", "mapping", "exit-failure"):
+        return "[WBOOT] boot stopped: post-exit resource failure"
     if firmware_failure(name):
         return "[WBOOT] boot stopped: firmware resource failure"
     return f"[WBOOT] boot stopped: invalid {failure_subject(name)}"
 
 
 def rejection_marker(name, reason):
+    if name in ("page-table", "mapping", "exit-failure"):
+        return f"[WBOOT] post-exit resource failure: {reason}"
     if firmware_failure(name):
         return f"[WBOOT] firmware resource failure: {reason}"
     return f"[WBOOT] invalid {failure_subject(name)}: {reason}"
@@ -75,13 +92,24 @@ def rejection_marker(name, reason):
 def outcome_errors(name, returncode, log, cpus):
     reason = CASES[name]
     if reason is None:
-        return validation_errors(returncode, log, [
+        errors = validation_errors(returncode, log, [
             "[BOOT] ALL VALIDATIONS PASSED", f"[SMP] online={cpus} expected={cpus}",
         ])
+        selected = {
+            "recovery": "version=1 entry=1 root=1 timeout_ms=0 command_line_bytes=8",
+            "diagnostics": "version=1 entry=2 root=0 timeout_ms=0 command_line_bytes=11",
+            "alternate-path": "version=1 entry=0 root=0 timeout_ms=10 command_line_bytes=17",
+        }.get(name)
+        if selected and f"[BOOT POLICY] accepted {selected}" not in log:
+            errors.append("missing exact selected-policy handoff")
+        if name == "exit-retry" and "[WBOOT] ExitBootServices succeeded attempts=2" not in log:
+            errors.append("missing actual stale-key recovery")
+        return errors
     errors = []
     if rejection_marker(name, reason) not in log or stop_marker(name) not in log:
         errors.append("missing exact rejection/stop markers")
-    if "exiting boot services" in log.lower() or "[BOOT]" in log:
+    if (name not in ("page-table", "mapping", "exit-failure")
+            and "exiting boot services" in log.lower()) or "[BOOT]" in log:
         errors.append("rejected configuration continued to boot handoff")
     if "kernel panic" in log.lower():
         errors.append("unexpected kernel panic")
@@ -118,13 +146,19 @@ def run_build(command, log, env):
     return result.stdout
 
 
-def prepare(fixtures):
+def prepare(fixtures, fault=None):
     if fixtures.exists() or fixtures.is_symlink():
         raise ValueError("fixture output must not already exist")
     fixtures.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["CARGO_TARGET_DIR"] = str(ROOT / "target")
     env["CARGO_BUILD_BUILD_DIR"] = str(ROOT / ".cargo-build")
+    # Match RUN-STAGE10.7.ps1. Qualification must resolve only from the
+    # checked-in lockfiles and the local Cargo cache, never a live registry.
+    env["CARGO_NET_OFFLINE"] = "true"
+    env.pop("WOVENHAT_UEFI_QUALIFICATION_FAULT", None)
+    if fault:
+        env["WOVENHAT_UEFI_QUALIFICATION_FAULT"] = fault
     output = run_build(
         ["cargo", "build", "-p", "wovenhat-kernel", "--target", "x86_64-unknown-none",
          "--features", "qemu-test", "--message-format=json"],
@@ -139,11 +173,16 @@ def prepare(fixtures):
             kernel = Path(record["executable"])
     if kernel is None:
         raise RuntimeError("Cargo did not identify the kernel executable")
+    # The fixture producer embeds the UEFI runtime into the image it creates,
+    # so it must inherit a requested qualification fault. `env` is explicitly
+    # offline above, which keeps this nested local build hermetic.
     run_build(
         ["cargo", "run", "--manifest-path", "tools/boot-config-fixtures/Cargo.toml",
-         "--", str(kernel), str(fixtures)],
+         "--", str(kernel), str(fixtures)] + (["--single"] if fault else []),
         fixtures.with_name(fixtures.name + "-fixture-build.log"), env,
     )
+    if fault:
+        (fixtures / "default.img").rename(fixtures / f"{fault}.img")
     manifest = {"kernel_sha256": digest(kernel), "source_sha256_lf": source_snapshot(), "images": {
         name: digest(fixtures / f"{name}.img") for name in CASES
     }}
@@ -221,21 +260,27 @@ def run_case(name, image, qemu, firmware, cpus, timeout, output):
 
 
 def main():
+    global CASES
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--fault", choices=("page-table", "mapping", "exit-retry", "exit-failure"))
     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--qemu", type=Path, default=Path(r"C:\Program Files\qemu\qemu-system-x86_64.exe"))
     parser.add_argument("--firmware", type=Path)
     args = parser.parse_args()
+    if args.fault:
+        CASES = {args.fault: {"page-table": "PageTableFrameExhausted",
+                 "mapping": "KernelMapping", "exit-retry": None,
+                 "exit-failure": "ExitBootServices"}[args.fault]}
     if args.timeout <= 0:
         parser.error("timeout must be positive")
     if args.fixtures.is_symlink():
         parser.error("fixtures must not be a symlink")
     fixtures = args.fixtures.resolve()
     if args.prepare:
-        prepare(fixtures)
+        prepare(fixtures, args.fault)
     manifest_path = fixtures / "manifest.json"
     regular_input(manifest_path, 64 * 1024)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

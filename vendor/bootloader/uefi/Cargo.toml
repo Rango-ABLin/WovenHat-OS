@@ -64,6 +64,12 @@ version = "0.8"
 
 [workspace]
 
+[features]
+qualification-page-table = ["bootloader-x86_64-common/qualification-frame-limit"]
+qualification-mapping = ["bootloader-x86_64-common/qualification-frame-limit"]
+qualification-exit-retry = []
+qualification-exit-failure = []
+
 [patch.crates-io]
 bootloader_api = { path = "../../bootloader-api" }
 bootloader-x86_64-common = { path = "../../bootloader-x86_64-common" }

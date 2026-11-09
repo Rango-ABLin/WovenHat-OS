@@ -1,18 +1,20 @@
-use crate::{PAGE_SIZE, level_4_entries::UsedLevel4Entries};
+use crate::{level_4_entries::UsedLevel4Entries, PAGE_SIZE};
 use bootloader_api::{config::Mapping, info::TlsTemplate};
 use core::{cmp, iter::Step, mem::size_of, ops::Add};
 
 use x86_64::{
-    PhysAddr, VirtAddr, align_up,
+    align_up,
     structures::paging::{
-        FrameAllocator, Page, PageSize, PageTableFlags as Flags, PhysFrame, Size4KiB, Translate,
         mapper::{MappedFrame, MapperAllSizes, TranslateResult},
+        FrameAllocator, Page, PageSize, PageTableFlags as Flags, PhysFrame, Size4KiB, Translate,
     },
+    PhysAddr, VirtAddr,
 };
 use xmas_elf::{
-    ElfFile, dynamic, header,
+    dynamic, header,
     program::{self, ProgramHeader, SegmentData, Type},
     sections::Rela,
+    ElfFile,
 };
 
 use super::Kernel;
@@ -282,7 +284,9 @@ where
         let end_page = Page::containing_address(zero_end - 1u64);
         for page in Page::range_inclusive(start_page, end_page) {
             // allocate a new unused frame
-            let frame = self.frame_allocator.allocate_frame().unwrap();
+            let frame = self.frame_allocator.allocate_frame().unwrap_or_else(|| {
+                panic!("[WBOOT] post-exit resource failure: KernelFrameExhausted")
+            });
 
             // zero frame, utilizing identity-mapping
             let frame_ptr = frame.start_address().as_u64() as *mut PageArray;
@@ -480,7 +484,10 @@ where
         }
 
         // Allocate a new frame and copy the memory, utilizing that both frames are identity mapped.
-        let new_frame = self.frame_allocator.allocate_frame().unwrap();
+        let new_frame = self
+            .frame_allocator
+            .allocate_frame()
+            .unwrap_or_else(|| panic!("[WBOOT] post-exit resource failure: KernelFrameExhausted"));
         let frame_ptr = frame.start_address().as_u64() as *const u8;
         let new_frame_ptr = new_frame.start_address().as_u64() as *mut u8;
         unsafe {

@@ -4762,3 +4762,14 @@ returns a TFTP error for the subsequent `TftpRead`. The harness asserts both
 fixture-side protocol events and the loader's exact serial diagnostic at 1, 2,
 and 4 CPUs. This is a bounded UEFI/QEMU firmware-I/O contract, not physical
 NIC, PXE-ROM, or production-network qualification.
+
+## Phase B boot/recovery architecture (2026-11-09)
+
+`BootInfo.boot_policy` is a versioned extension after the preserved legacy
+prefix. UEFI validates bounded decoded config values, selects the policy's
+kernel before fallback, and uses a raw bounded ExitBootServices transaction.
+The transaction captures firmware entry points before its first attempt and
+never invokes firmware console/protocol APIs afterward. The kernel validates
+the handoff again, exposes its command line read-only, and routes maintenance
+selection into a least-privilege read-only recovery service rather than the
+normal desktop/session path.

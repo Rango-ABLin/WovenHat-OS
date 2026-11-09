@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -12,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_SIGNING_CERTIFICATE");
     println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_WSL_DISTRO");
     println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_UEFI_QUALIFICATION_FAULT");
     #[cfg(not(feature = "uefi"))]
     fn uefi_main() {}
     #[cfg(not(feature = "bios"))]
@@ -82,6 +82,8 @@ fn build_uefi_bootloader() -> PathBuf {
         // local build
         cmd.arg("--path").arg("uefi");
         println!("cargo:rerun-if-changed=uefi");
+        println!("cargo:rerun-if-changed=../bootloader-api");
+        println!("cargo:rerun-if-changed=../bootloader-x86_64-common");
         if Path::new("common").exists() {
             println!("cargo:rerun-if-changed=common");
         }
@@ -93,7 +95,20 @@ fn build_uefi_bootloader() -> PathBuf {
         cmd.arg("--version").arg(BOOTLOADER_VERSION);
     }
     cmd.arg("--locked");
-    if matches!(env::var("CARGO_NET_OFFLINE").as_deref(), Ok("true") | Ok("1")) {
+    if let Ok(fault) = env::var("WOVENHAT_UEFI_QUALIFICATION_FAULT") {
+        assert!(
+            matches!(
+                fault.as_str(),
+                "page-table" | "mapping" | "exit-retry" | "exit-failure"
+            ),
+            "unsupported UEFI qualification fault"
+        );
+        cmd.arg("--features").arg(format!("qualification-{fault}"));
+    }
+    if matches!(
+        env::var("CARGO_NET_OFFLINE").as_deref(),
+        Ok("true") | Ok("1")
+    ) {
         // The parent build explicitly selected cached-only resolution. Keep
         // the nested runtime install in the same mode so a clean project
         // target directory remains reproducible without network access.
@@ -145,7 +160,11 @@ fn wsl_path(path: &Path) -> String {
         bytes.len() >= 3 && bytes[1] == b':' && bytes[2] == b'/',
         "signing paths must be on a mounted Windows drive"
     );
-    format!("/mnt/{}/{}", (bytes[0] as char).to_ascii_lowercase(), &text[3..])
+    format!(
+        "/mnt/{}/{}",
+        (bytes[0] as char).to_ascii_lowercase(),
+        &text[3..]
+    )
 }
 
 /// Sign the boot manager that is embedded by `include_bytes!` below.
@@ -170,11 +189,13 @@ fn sign_uefi_authenticode_if_requested(efi_path: &Path) {
             .expect("UEFI Authenticode signing requires WOVENHAT_UEFI_SIGNING_KEY"),
     );
     let certificate = PathBuf::from(
-        env::var_os("WOVENHAT_UEFI_SIGNING_CERTIFICATE").expect(
-            "UEFI Authenticode signing requires WOVENHAT_UEFI_SIGNING_CERTIFICATE",
-        ),
+        env::var_os("WOVENHAT_UEFI_SIGNING_CERTIFICATE")
+            .expect("UEFI Authenticode signing requires WOVENHAT_UEFI_SIGNING_CERTIFICATE"),
     );
-    assert!(key.is_file(), "UEFI Authenticode signing key is not a regular file");
+    assert!(
+        key.is_file(),
+        "UEFI Authenticode signing key is not a regular file"
+    );
     assert!(
         certificate.is_file(),
         "UEFI Authenticode signing certificate is not a regular file"
@@ -188,7 +209,10 @@ fn sign_uefi_authenticode_if_requested(efi_path: &Path) {
         .args(["--output", &wsl_path(&signed), &wsl_path(efi_path)])
         .status()
         .expect("failed to invoke WSL sbsign");
-    assert!(status.success(), "WSL sbsign rejected the UEFI boot manager");
+    assert!(
+        status.success(),
+        "WSL sbsign rejected the UEFI boot manager"
+    );
     fs::rename(&signed, efi_path).expect("failed to replace UEFI boot manager with signed output");
 }
 

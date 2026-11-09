@@ -1,8 +1,9 @@
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use core::{cmp, mem::MaybeUninit};
 use x86_64::{
-    PhysAddr, align_down, align_up,
+    align_down, align_up,
     structures::paging::{FrameAllocator, PhysFrame, Size4KiB},
+    PhysAddr,
 };
 
 /// A slice of memory that is used by the bootloader and needs to be reserved
@@ -49,6 +50,8 @@ pub struct LegacyFrameAllocator<I, D> {
     current_descriptor: Option<D>,
     next_frame: PhysFrame,
     min_frame: PhysFrame,
+    #[cfg(feature = "qualification-frame-limit")]
+    frame_budget: usize,
 }
 
 /// Start address of the first frame that is not part of the lower 1MB of frames
@@ -86,7 +89,16 @@ where
             current_descriptor: None,
             next_frame: frame,
             min_frame: frame,
+            #[cfg(feature = "qualification-frame-limit")]
+            frame_budget: usize::MAX,
         }
+    }
+
+    /// Qualification images only: exhaust the actual allocator after a bounded
+    /// number of allocations. Production builds have no budget field or hook.
+    #[cfg(feature = "qualification-frame-limit")]
+    pub fn set_frame_budget(&mut self, frames: usize) {
+        self.frame_budget = frames;
     }
 
     fn allocate_frame_from_descriptor(&mut self, descriptor: D) -> Option<PhysFrame> {
@@ -298,6 +310,10 @@ where
     I::Item: LegacyMemoryRegion,
 {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        #[cfg(feature = "qualification-frame-limit")]
+        {
+            self.frame_budget = self.frame_budget.checked_sub(1)?;
+        }
         if let Some(current_descriptor) = self.current_descriptor {
             match self.allocate_frame_from_descriptor(current_descriptor) {
                 Some(frame) => return Some(frame),

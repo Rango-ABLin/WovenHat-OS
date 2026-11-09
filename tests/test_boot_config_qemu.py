@@ -15,6 +15,19 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BootConfigGateTests(unittest.TestCase):
+    def test_selected_policy_cannot_pass_on_an_ordinary_default_boot(self):
+        log = "[BOOT] ALL VALIDATIONS PASSED\n[SMP] online=1 expected=1"
+        self.assertTrue(MODULE.outcome_errors("recovery", 33, log, 1))
+        log += "\n[BOOT POLICY] accepted version=1 entry=1 root=1 timeout_ms=0 command_line_bytes=8"
+        self.assertEqual(MODULE.outcome_errors("recovery", 33, log, 1), [])
+
+    def test_post_exit_failure_is_terminal_and_cannot_reach_kernel(self):
+        with patch.object(MODULE, "CASES", {"page-table": "PageTableFrameExhausted"}):
+            log = "TRACE: exiting boot services\n[WBOOT] post-exit resource failure: PageTableFrameExhausted\n[WBOOT] boot stopped: post-exit resource failure"
+            self.assertEqual(MODULE.outcome_errors("page-table", None, log, 1), [])
+            self.assertTrue(MODULE.outcome_errors("page-table", 33, log, 1))
+            self.assertTrue(MODULE.outcome_errors("page-table", None, log + "\n[BOOT]", 1))
+
     def test_kernel_failure_requires_its_own_markers(self):
         log = "[WBOOT] invalid kernel image: Empty\n[WBOOT] boot stopped: invalid kernel image"
         self.assertEqual(MODULE.outcome_errors("kernel-empty", None, log, 1), [])

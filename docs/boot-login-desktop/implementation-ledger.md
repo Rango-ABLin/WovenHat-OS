@@ -107,3 +107,27 @@ passes at `acceptance-20261105-074313-292/` (215 Python tests, six skips,
 host Rust, 60 memory boots, network and Stage10.4-10.7 1/2/4 CPUs). Evidence
 is preserved at `D:\WovenHat-OS-audit-boot-loader-b3-20261105` after intact
 relocation to free workspace capacity. Full Phase B remains open.
+
+## BLD-B resume / Phase C prerequisites (2026-11-09)
+
+Status: IN PROGRESS. Base 5d1b1c09. User explicitly requests completing boot/recovery policy, firmware failure handling, then WovenInit service dependency/readiness integration. The first actual-source baseline `cargo test --test boot_config` fails with eight stale Policy field references and missing heapless dependency (target/boot-policy-resume-baseline.log). Repair preserves original assertions under Policy.boot and adds handoff/bounded command-line assertions. The initial repaired run also caught unread handoff under denied warnings (target/boot-policy-resume-repair.log); coverage now reads and checks the handoff rather than suppressing dead-code warnings.
+
+The full Windows baseline is serialized in audit-artifacts/acceptance-20261109-082549-583. Runtime sources remain frozen while it runs. The source review must distinguish a stale checked-in UEFI lockfile from the actual nested install graph: nested install output confirms the local common mapper is compiled. No Phase B or Phase C closure is claimed. Independent read-only Phase B verification is requested under the roadmap acceptance loop; no second build/test chain is authorized.
+
+## BLD-B Phase B boot/recovery closure (2026-11-09)
+
+Status: ACCEPTED (software/QEMU scope). Boot policy is a versioned, bounded
+BootInfo extension with a new serialized bootloader UUID, preserving the legacy
+prefix. The UEFI parser validates and decodes bounded policy data, selects
+default/recovery/diagnostic/alternate kernels without fallback downgrade, and
+hands the exact read-only command line to the kernel. Recovery boots suppress
+the durable root, desktop, accounts, and destructive recovery authority.
+
+The source-bound 26-case policy/firmware matrix passed at 1/2/4 CPUs, including
+strict GOP rejection, disk I/O, alternate selection, and invalid policy cases.
+Real page-table/mapping exhaustion, stale-key ExitBootServices retry, and forced
+ExitBootServices failure fixtures also passed at 1/2/4 CPUs. Host policy tests,
+Python harness tests, host/kernel/UEFI warning-denying Clippy, and format checks
+pass. The complete Windows preservation chain passed at
+`audit-artifacts/acceptance-20261109-094329-057`. Physical firmware, PXE/NIC,
+Secure Boot provisioning, and device recovery remain hardware/trust work.

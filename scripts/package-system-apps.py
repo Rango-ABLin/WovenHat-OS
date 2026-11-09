@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -248,6 +249,11 @@ def main() -> int:
                 })
             records.append(record)
 
+    recovery = package_dir / "woven-recovery.wapp"
+    run([sys.executable, str(root / "scripts/build-recovery-service.py"),
+         "--output", str(recovery)] + (["--production"] if args.production else []),
+        cwd=root, env=dict(os.environ))
+    recovery_info = validate_wapp(recovery)
     manifest = {
         "format": "WovenHat system-app install plan",
         "format_version": 1,
@@ -255,6 +261,8 @@ def main() -> int:
         "package_signature_format": "WAPP-v1",
         "kernel_install_boundary": "stage19-multi-package-ram-install",
         "apps": records,
+        "boot_components": [{"id": "woven-recovery", "package": "packages/woven-recovery.wapp",
+                             "package_sha256": recovery_info["sha256"]}],
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Packaged {len(records)} signed system applications in {output}")

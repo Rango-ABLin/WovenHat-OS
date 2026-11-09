@@ -336,9 +336,21 @@ static S04_QUOTA_STOP: AtomicBool = AtomicBool::new(false);
 
 #[allow(unreachable_code)]
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    if !valid_boot_policy(&boot_info.boot_policy) {
+    serial::init();
+    if !boot_info.boot_policy.is_valid() {
+        serial::write_line(format_args!("[BOOT POLICY] invalid handoff; stopped"));
         halt();
     }
+    serial::write_line(format_args!(
+        "[BOOT POLICY] accepted version={} entry={} root={} timeout_ms={} command_line_bytes={}",
+        boot_info.boot_policy.version,
+        boot_info.boot_policy.entry,
+        boot_info.boot_policy.root,
+        boot_info.boot_policy.timeout_ms,
+        boot_info.boot_policy.command_line_len
+    ));
+    #[cfg(not(feature = "qemu-test"))]
+    let maintenance_boot = boot_info.boot_policy.entry != 0 || boot_info.boot_policy.root == 1;
     // Verify the immutable bootloader image before allocator, paging, and
     // runtime initialization can modify writable PT_LOAD bytes.
     #[cfg(feature = "secure-boot")]
@@ -461,7 +473,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         halt();
     }
 
-    serial::init();
     #[cfg(feature = "secure-boot")]
     if !secure_boot_verified {
         serial::write_line(format_args!("[S15.5] signed kernel handoff: FAILED"));
@@ -1695,6 +1706,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             halt();
         }
         boot_stage(&mut console, "BOOT LOADER [2/7]: scheduler and I/O ready");
+        #[cfg(not(feature = "system-apps"))]
+        if maintenance_boot {
+            serial::write_line(format_args!(
+                "[BOOT POLICY] maintenance image unavailable; stopped"
+            ));
+            halt();
+        }
 
         let ata_sectors = ata::init();
         if let Some(sectors) = ata_sectors {
@@ -1706,7 +1724,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[ATA] primary-master not detected"));
         }
 
-        match storage::mount_ata_root() {
+        match if maintenance_boot {
+            storage::MountStatus::NoDevice
+        } else {
+            storage::mount_ata_root()
+        } {
             storage::MountStatus::Mounted(count) => {
                 let _ = device::register(device::Device {
                     name: "ata0",
@@ -1737,8 +1759,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         boot_stage(&mut console, "BOOT LOADER [3/7]: storage checked");
 
-        for dir in ["/etc", "/var", "/home", "/tmp"] {
+        for dir in ["/etc", "/var", "/home", "/tmp", "/proc"] {
             let _ = vfs::mkdir(dir);
+        }
+        let command_line = &boot_info.boot_policy.command_line
+            [..usize::from(boot_info.boot_policy.command_line_len)];
+        if vfs::create_read_only("/proc/cmdline", command_line).is_err() {
+            serial::write_line(format_args!(
+                "[BOOT POLICY] command line publication failed; stopped"
+            ));
+            halt();
         }
 
         // Persistent accounts (from a provisioned `/mnt/etc/wovenhat/accounts`)
@@ -1749,14 +1779,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // boots to an accounts-less session, which is what a first-boot
         // setup step is for.
         #[cfg(feature = "system-apps")]
-        if !install_persistent_accounts() {
+        if !maintenance_boot && !install_persistent_accounts() {
             serial::write_line(format_args!(
                 "[SESSION] persistent account provisioning failed"
             ));
             halt();
         }
         #[cfg(feature = "system-apps")]
-        if !install_persistent_settings() {
+        if !maintenance_boot && !install_persistent_settings() {
             serial::write_line(format_args!(
                 "[SESSION] persistent settings provisioning failed"
             ));
@@ -1771,7 +1801,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // rather than by inference.
         #[cfg(feature = "hardware-demo")]
         {
-            if !install_hardware_demo_accounts() {
+            if !maintenance_boot && !install_hardware_demo_accounts() {
                 serial::write_line(format_args!("[DEMO] account provisioning failed"));
                 halt();
             }
@@ -1788,6 +1818,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 &mut console,
                 "BOOT LOADER [3.2/7]: system app catalog installed",
             );
+            if maintenance_boot {
+                run_read_only_boot_maintenance(boot_info.boot_policy.entry);
+            }
             if !start_production_system_services() {
                 serial::write_line(format_args!("[SERVICES] production service startup failed"));
                 halt();
@@ -1857,7 +1890,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
         // Without an ATA disk, mount the first ready NVMe or AHCI disk.
-        if !storage::mnt_mounted() {
+        if !maintenance_boot && !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
                 block_io::select_root(root);
                 match storage::mount_ata_root() {
@@ -6625,23 +6658,57 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 }
 
-fn valid_boot_policy(policy: &bootloader_api::info::BootPolicy) -> bool {
-    if policy.reserved != [0; 2] || usize::from(policy.command_line_len) > policy.command_line.len()
-    {
-        return false;
-    }
-    let command_len = usize::from(policy.command_line_len);
-    if core::str::from_utf8(&policy.command_line[..command_len]).is_err()
-        || policy.command_line[command_len..]
-            .iter()
-            .any(|byte| *byte != 0)
-    {
-        return false;
-    }
-    match policy.version {
-        0 => *policy == bootloader_api::info::BootPolicy::default(),
-        1 => policy.entry <= 2 && policy.root <= 1 && policy.timeout_ms <= 30_000,
-        _ => false,
+/// Maintenance never starts the login/desktop or imports durable account data.
+/// A config-selected mode is insufficient authority for reset/reinstall.
+#[cfg(feature = "system-apps")]
+fn run_read_only_boot_maintenance(entry: u8) -> ! {
+    use capability::{Capability, CapabilitySet};
+    recovery::enter_read_only_boot();
+    serial::write_line(format_args!(
+        "[BOOT POLICY] maintenance entry={} root=ramfs read_only=true",
+        entry
+    ));
+    let command = if entry == 2 { "logs" } else { "status" };
+    let Some(program) = userspace::load_elf_with_argv_verified(
+        RECOVERY_APP_IMAGE,
+        &["/bin/wovenhat-recovery", command],
+    ) else {
+        serial::write_line(format_args!(
+            "[BOOT POLICY] maintenance image rejected; stopped"
+        ));
+        halt();
+    };
+    let capabilities = CapabilitySet::only(Capability::Console).with(Capability::Recovery);
+    let Ok((pid, _, _)) = task::spawn_user_system_service("woven-recovery", program, capabilities)
+    else {
+        serial::write_line(format_args!(
+            "[BOOT POLICY] maintenance spawn failed; stopped"
+        ));
+        halt();
+    };
+    let deadline = timer::ticks().saturating_add(500);
+    loop {
+        match task::wait_process(pid.as_u64()) {
+            Ok(0) => {
+                serial::write_line(format_args!(
+                    "[BOOT POLICY] read-only recovery completed; desktop suppressed"
+                ));
+                halt();
+            }
+            Ok(_) | Err(task::WaitError::NoSuchChild) => {
+                serial::write_line(format_args!("[BOOT POLICY] maintenance failed; stopped"));
+                halt();
+            }
+            Err(task::WaitError::StillRunning) => {}
+        }
+        if timer::ticks() >= deadline {
+            let _ = task::kill_process(pid.as_u64(), 9);
+            serial::write_line(format_args!("[BOOT POLICY] maintenance timed out; stopped"));
+            halt();
+        }
+        syscall::service_pending();
+        task::preemption_point();
+        x86_64::instructions::hlt();
     }
 }
 
@@ -6945,8 +7012,8 @@ const SYSTEM_APP_UPDATE: &[u8] = include_bytes!(env!("WOVENHAT_UPDATE_IMAGE"));
 // Only the Stage 27.5 recovery gate embeds this image. Production
 // `system-apps` builds do not use it, and their harnesses do not set
 // WOVENHAT_RECOVERY_IMAGE, so it must not be required there.
-#[cfg(feature = "stage27-5-recovery-test")]
-const RECOVERY_APP_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RECOVERY_IMAGE"));
+#[cfg(any(feature = "stage27-5-recovery-test", feature = "system-apps"))]
+const RECOVERY_APP_IMAGE: &[u8] = include!(concat!(env!("OUT_DIR"), "/recovery-image.rs"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
 const SYSTEM_APP_STORE: &[u8] = include_bytes!(env!("WOVENHAT_STORE_IMAGE"));
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]

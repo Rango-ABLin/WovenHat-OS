@@ -4,20 +4,20 @@
 
 use crate::legacy_memory_region::{LegacyFrameAllocator, LegacyMemoryRegion};
 use bootloader_api::{
-    BootInfo, BootloaderConfig,
     config::Mapping,
     info::{FrameBuffer, FrameBufferInfo, MemoryRegion, TlsTemplate},
+    BootInfo, BootloaderConfig,
 };
 use bootloader_boot_config::{BootConfig, LevelFilter};
 use core::{alloc::Layout, arch::asm, mem::MaybeUninit, slice};
 use level_4_entries::UsedLevel4Entries;
 use usize_conversions::FromUsize;
 use x86_64::{
-    PhysAddr, VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTableFlags, PageTableIndex,
-        PhysFrame, Size2MiB, Size4KiB, page_table::PageTableLevel,
+        page_table::PageTableLevel, FrameAllocator, Mapper, OffsetPageTable, Page, PageSize,
+        PageTableFlags, PageTableIndex, PhysFrame, Size2MiB, Size4KiB,
     },
+    PhysAddr, VirtAddr,
 };
 use xmas_elf::ElfFile;
 
@@ -208,7 +208,12 @@ where
         frame_allocator,
         &mut used_entries,
     )
-    .expect("no entry point");
+    .unwrap_or_else(|error| {
+        panic!(
+            "[WBOOT] post-exit resource failure: KernelMapping: {}",
+            error
+        )
+    });
     log::info!("Entry point at: {:#x}", entry_point.as_u64());
     // create a stack
     let stack_start = {

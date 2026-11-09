@@ -891,8 +891,13 @@ fn sys_recovery_query(operation: u64, user_buffer_or_offset: u64, user_offset: u
     ) {
         return crate::recovery::ADMISSION_DENIED;
     }
+    let destructive = matches!(
+        operation,
+        crate::recovery::OP_RESET_ADMISSION | crate::recovery::OP_REINSTALL_ADMISSION
+    );
     if !crate::task::current_has(crate::capability::Capability::Recovery)
-        || !crate::recovery::boot_mode_authorized()
+        || (!crate::recovery::boot_mode_authorized()
+            && (destructive || !crate::recovery::read_only_boot()))
     {
         return crate::recovery::ADMISSION_DENIED;
     }

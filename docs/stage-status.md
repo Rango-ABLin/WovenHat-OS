@@ -12797,3 +12797,14 @@ The full Windows preservation gate passed in
 runtime matrix and Stage 10.7 completion. This accepts only B5 firmware TFTP
 I/O. Broader boot policy, strict graphics rejection, controlled page-table
 failure, and recoverable `ExitBootServices` qualification remain open.
+
+## Boot/login/desktop Phase B closure (2026-11-09)
+
+Phase B is accepted for deterministic software/QEMU scope. Versioned bounded
+boot policy, recovery/diagnostic/alternate selection, strict graphics refusal,
+disk and TFTP diagnostics, controlled post-exit resource failure, and a
+two-attempt ExitBootServices transaction are qualified at 1/2/4 CPUs. The
+full Windows preservation chain passed in
+`audit-artifacts/acceptance-20261109-094329-057`. Physical firmware behavior,
+Secure Boot enrollment/signing, real PXE/NIC behavior, and device recovery are
+explicitly not claimed.

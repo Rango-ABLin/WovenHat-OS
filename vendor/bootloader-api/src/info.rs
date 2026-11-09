@@ -67,14 +67,14 @@ pub struct BootInfo {
     /// Size of the kernel stack
     pub kernel_stack_len: u64,
 
+    #[doc(hidden)]
+    pub _test_sentinel: u64,
+
     /// Versioned, bounded policy selected by the UEFI loader.
     ///
     /// Version zero is the legacy/default policy. Kernels must reject an
     /// unknown version before interpreting any of its fields.
     pub boot_policy: BootPolicy,
-
-    #[doc(hidden)]
-    pub _test_sentinel: u64,
 }
 
 impl BootInfo {
@@ -133,6 +133,28 @@ impl Default for BootPolicy {
             command_line_len: 0,
             reserved: [0; 2],
             command_line: [0; 256],
+        }
+    }
+}
+
+impl BootPolicy {
+    /// Validate the complete owned policy before interpreting any field.
+    /// Command-line bytes are data, never instructions or authority.
+    pub fn is_valid(&self) -> bool {
+        let len = usize::from(self.command_line_len);
+        if self.reserved != [0; 2] || len > self.command_line.len() {
+            return false;
+        }
+        let Ok(line) = core::str::from_utf8(&self.command_line[..len]) else {
+            return false;
+        };
+        if line.chars().any(char::is_control) || self.command_line[len..].iter().any(|b| *b != 0) {
+            return false;
+        }
+        match self.version {
+            0 => *self == Self::default(),
+            1 => self.entry <= 2 && self.root <= 1 && self.timeout_ms <= 30_000,
+            _ => false,
         }
     }
 }

@@ -28,6 +28,9 @@ repository = "https://github.com/rust-osdev/bootloader"
 name = "bootloader_x86_64_common"
 path = "src/lib.rs"
 
+[features]
+qualification-frame-limit = []
+
 [dependencies.bootloader-boot-config]
 version = "0.11.17"
 

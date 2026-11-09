@@ -123,6 +123,11 @@ def main():
             boot_transfers[(src, sport)] = (0, block_size)
             send(sock, frame(src, SERVER_MAC, 0x0800, ipv4(CLIENT_IP, udp(CLIENT_IP, TFTP_TRANSFER_PORT, sport, oack))))
             continue
+        if name in ("boot.json", "ramdisk"):
+            note(f"TFTP optional {name} absent")
+            error = b"\0\x05\0\x01not-found\0"
+            send(sock, frame(src, SERVER_MAC, 0x0800, ipv4(CLIENT_IP, udp(CLIENT_IP, TFTP_TRANSFER_PORT, sport, error))))
+            continue
         if name == "kernel-x86_64" and "tsize" in options:
             note("TFTP kernel tsize acknowledged")
             oack = b"\x00\x06tsize\x004096\x00"
