@@ -84,6 +84,10 @@ impl Table {
 }
 static TABLE: Mutex<Table> = Mutex::with_rank(Table::new(), 10);
 
+// Host tests that mutate the global registry must synchronize across test modules.
+#[cfg(test)]
+pub(crate) static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RobustState {
     Free,
@@ -529,12 +533,10 @@ pub fn errno(id: ThreadId) -> Option<i32> {
 mod tests {
     use super::*;
 
-    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn isolated(test: impl FnOnce()) {
         // A failed regression must not prevent independent cases from running.
         // Each case starts with a fresh host-only table; assertions still fail.
-        let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|error| error.into_inner());
         *TABLE.lock() = Table::new();
         *ROBUST.lock() = [RobustRecord {
             address: 0,
