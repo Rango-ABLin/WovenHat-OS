@@ -353,6 +353,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ));
     #[cfg(not(feature = "qemu-test"))]
     let maintenance_boot = boot_info.boot_policy.entry != 0 || boot_info.boot_policy.root == 1;
+    // Some feature combinations compile out the later maintenance-mode consumers.
+    // Keep the policy calculation and silence the configuration-only unused lint.
+    #[cfg(not(feature = "qemu-test"))]
+    let _ = maintenance_boot;
     // Verify the immutable bootloader image before allocator, paging, and
     // runtime initialization can modify writable PT_LOAD bytes.
     #[cfg(feature = "secure-boot")]
