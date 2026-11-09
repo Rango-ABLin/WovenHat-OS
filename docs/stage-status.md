@@ -12823,3 +12823,18 @@ rollback passed on 1/2/4 CPUs. The full Windows preservation chain passed at
 kernel object, lock, unsafe block, or asynchronous userspace-pointer lifetime
 was added. Phase D splash ownership/visual acceptance is next; physical
 firmware and device qualification remain deferred to the final hardware pass.
+
+## Boot/login/desktop Phase D splash acceptance (2026-11-09)
+
+Phase D is accepted. The existing branded kernel splash is visibly captured
+while the terminal owns the 1280x800 framebuffer. Boot-stage timing no longer
+attributes pre-timer work to tick zero: post-timer delta/total samples begin
+after PIT initialization and remain monotonic. The real WovenShell compositor
+lease then takes display/input ownership on its first successfully presented
+full frame; its evidence write occurs outside the compositor lock.
+
+Focused visual/QMP acceptance passed at 1/2/4 CPUs, with every pixel changing
+between the retained splash and desktop captures. Full Windows preservation
+passed at `audit-artifacts/acceptance-20261109-142532-913`. No ABI, capability,
+unsafe code, timeout, or alternate graphics stack was introduced. Phase E is
+next and remains unstarted.

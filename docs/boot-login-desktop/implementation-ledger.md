@@ -158,3 +158,24 @@ build/lints, 60 repeated memory boots, network and Stage 10.4-10.7 at 1/2/4
 CPUs). The preceding failed run is retained at
 `audit-artifacts/acceptance-20261109-131508-542`; it exposed and led to repair
 of a stale licensed-font host oracle, not a runtime relaxation.
+
+## BLD-D Phase D splash/ownership closure (2026-11-09)
+
+Status: ACCEPTED. Existing splash rendering is preserved; incorrect
+`BOOT LOADER` kernel-stage labels are corrected to `KERNEL BOOT`. Stage 1 is
+truthfully classified as pre-timer, and monotonic delta/total measurements
+begin only after PIT initialization. The compositor records its first
+terminal-to-desktop handoff after the owner-authorized frame has been presented
+and after releasing the compositor lock. No ABI, capability, kernel object,
+lock, unsafe block, deadline, or framebuffer ownership rule was added.
+
+The source-bound QMP gate passed at 1/2/4 CPUs with 1280x800 captures:
+`target/shell-regression/phase-d-1cpu-1794226887479458400`,
+`phase-d-2cpu-1794227010862864400`, and
+`phase-d-4cpu-1794227079535988900`. Every run validated the splash palette,
+monotonic post-timer stages, WovenInit barrier, exclusive desktop handoff, and
+all 1,024,000 pixels changing between splash and desktop. The 1-CPU splash and
+desktop frames were visually inspected. Ten focused host oracles, workspace
+all-targets Clippy, production kernel Clippy, formatting, and diff checks pass.
+The full Windows preservation chain passed at
+`audit-artifacts/acceptance-20261109-142532-913`.

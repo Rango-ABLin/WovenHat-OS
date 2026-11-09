@@ -21,6 +21,15 @@ at `audit-artifacts/acceptance-20261109-131738-437`. Next: Phase D splash
 ownership and visual acceptance. No later login/session/release gate is
 claimed by this entry.
 
+Boot/login/desktop directive — Phase D splash accepted (2026-11-09)
+The existing early framebuffer renderer is retained. Kernel stages are labeled
+truthfully, timer deltas begin only after timer initialization, and the
+terminal-owned splash transitions to the owner-authorized WovenShell first
+frame through the existing exclusive compositor lease. Visual and source-bound
+acceptance passed on 1/2/4 CPUs; the complete Windows preservation chain passed
+at `audit-artifacts/acceptance-20261109-142532-913`. Next: Phase E
+authentication. No Phase E or later authority claim is made here.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual

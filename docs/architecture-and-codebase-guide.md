@@ -4792,3 +4792,18 @@ barrier, `service_supervisor` retains its existing bounded crash/restart
 lifecycle. WovenShell starts only after all four ready bits are set. The
 feature-isolated failure fixture terminates update between registration and
 publication and verifies complete rollback on 1/2/4 CPUs.
+
+## Phase D splash-to-desktop ownership architecture (2026-11-09)
+
+`console::show_splash_frame` remains the sole production boot splash. It draws
+through the terminal framebuffer lock before the compositor owns scanout.
+`boot_stage` labels this as kernel work, treats the first graphics stage as
+pre-timer, and records 100 Hz delta/total ticks only after `timer::init`.
+
+The desktop transition remains capability- and lease-bound:
+`compositor::present_for` requires the current process to hold the exclusive
+lease, marks the terminal framebuffer display-owned, damages the full surface,
+sets input focus, and presents the first complete frame. Only after the
+compositor lock is released does it emit the Phase D transition marker. The
+QMP harness retains both frames and validates palette, geometry, ordering,
+timing monotonicity, and material pixel replacement on 1/2/4 CPUs.

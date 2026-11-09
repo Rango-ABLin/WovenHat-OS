@@ -9030,3 +9030,14 @@ Phase D boot/login/desktop records. Preserve the accepted Phase B/C boot and
 WovenInit contracts, compositor/display authority, syscall ABI, capabilities,
 and all prior stage gates. Do not start Phase E authentication work. Cargo and
 QEMU acceptance remain serialized; no physical-device action is authorized.
+
+## Codex - Phase D splash acceptance complete (2026-11-09)
+
+Runtime `e3132468` preserves the existing splash and compositor architecture,
+corrects kernel-stage/timer semantics, and adds an out-of-lock first-frame
+handoff marker plus a source-bound visual QMP gate. Focused palette, timing,
+ordering, geometry, and full-frame replacement acceptance passed at 1/2/4
+CPUs in `target/shell-regression/phase-d-{1,2,4}cpu-*`; the exact directories
+are recorded in the implementation ledger. The full Windows preservation gate
+passed at `audit-artifacts/acceptance-20261109-142532-913`. No Cargo/QEMU chain
+is active. Phase E was not started; physical qualification remains deferred.

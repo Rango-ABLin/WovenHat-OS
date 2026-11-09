@@ -90,3 +90,20 @@ The production graph passed normal desktop boots and the deterministic
 post-package update failure passed complete rollback at 1/2/4 CPUs. The full
 preservation chain passed in
 `audit-artifacts/acceptance-20261109-131738-437`.
+
+## Phase D splash, timing, and ownership boundary (2026-11-09)
+
+The production splash remains the existing early integer renderer in
+`kernel/src/console.rs`; no second graphics stack was introduced. While it is
+visible, the text terminal owns the boot framebuffer. Kernel boot stages now
+say `KERNEL BOOT`, and the pre-timer graphics stage is explicitly labeled
+`timing=pre-timer`. Delta and total tick measurements begin only after
+`timer::init`, at the documented 10 ms resolution, so they do not claim
+firmware-to-kernel timing.
+
+WovenShell retains the established `DisplayIo` plus exclusive compositor-lease
+authority. Its first successful full-frame presentation atomically transfers
+scanout and input focus from the terminal; the evidence marker is emitted only
+after releasing the compositor lock. The Phase D harness captures and validates
+the branded terminal-owned splash, waits for that real owner-bound first frame,
+captures the desktop, and requires a material replacement at unchanged geometry.
