@@ -12,8 +12,8 @@ libwoven::entry!(main);
 const MAX_ENTRIES: usize = 128;
 const MAX_PREVIEW: usize = 2048;
 
-const WIDTH: u32 = 320;
-const HEIGHT: u32 = 240;
+const WIDTH: u32 = 440;
+const HEIGHT: u32 = 300;
 const BACKGROUND: u32 = rgb(14, 18, 30);
 /// The shared WovenUI theme (tokens.rs-equivalent for apps): surface,
 /// accent, text, disabled and focus colors, unified with
@@ -21,16 +21,16 @@ const BACKGROUND: u32 = rgb(14, 18, 30);
 /// system rather than each choosing its own accent independently.
 const THEME: Theme = Theme::DARK;
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
-const BUTTON_X: i32 = 220;
-const BUTTON_Y: i32 = 206;
+const BUTTON_X: i32 = 344;
+const BUTTON_Y: i32 = 266;
 const BUTTON_WIDTH: usize = 80;
 const BUTTON_HEIGHT: usize = 20;
 
-const PANEL_X: i32 = 12;
-const PANEL_Y: i32 = 12;
-const PANEL_WIDTH: usize = 296;
-const PANEL_HEIGHT: usize = 216;
-const LINE_HEIGHT: i32 = 10;
+const PANEL_X: i32 = 126;
+const PANEL_Y: i32 = 74;
+const PANEL_WIDTH: usize = 302;
+const PANEL_HEIGHT: usize = 182;
+const LINE_HEIGHT: i32 = 14;
 const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -70,14 +70,34 @@ fn draw_files(
     refresh_count: u32,
     refresh_button: &Button<'_>,
 ) {
+    // First modernization slice: a consistent app header, navigation rail,
+    // content area and status bar. Navigation is deliberately visual only;
+    // directory operations remain read-only and scoped to /mnt.
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
+    canvas.fill_rect(0, 0, canvas.width(), 46, THEME.surface);
+    canvas.fill_rect(0, 45, canvas.width(), 1, THEME.accent);
+    canvas.draw_text_system(16, 13, "WovenFiles", THEME.text);
+    canvas.draw_text_system(16, 30, "Browse files", THEME.disabled);
+
+    canvas.fill_rect(0, 46, 114, 254, THEME.surface);
+    canvas.fill_rect(113, 46, 1, 254, THEME.disabled);
+    canvas.draw_text_system(14, 62, "PLACES", THEME.accent);
+    canvas.fill_rect(8, 84, 98, 28, BACKGROUND);
+    canvas.fill_rect(8, 84, 3, 28, THEME.accent);
+    canvas.draw_text_system(18, 94, "Mounted files", THEME.text);
+    canvas.draw_text_system(14, 128, "Read-only", THEME.disabled);
+
+    canvas.draw_text_system(PANEL_X, 57, "Location: /mnt", THEME.text);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
-    Label::new(Frame::new(PANEL_X + 6, PANEL_Y + 4, 180, 16), "/mnt").draw(canvas, THEME);
+    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.disabled);
+    canvas.fill_rect(PANEL_X + 1, PANEL_Y + 1, PANEL_WIDTH - 2, 22, BACKGROUND);
+    Label::new(Frame::new(PANEL_X + 9, PANEL_Y + 6, 180, 16), "Name").draw(canvas, THEME);
+    canvas.draw_text_system(PANEL_X + 220, PANEL_Y + 6, "Type", THEME.text);
+
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
     for index in 0..MAX_ENTRIES {
-        if shown >= MAX_VISIBLE_LINES.saturating_sub(2) {
+        if shown >= MAX_VISIBLE_LINES.saturating_sub(3) {
             break;
         }
         match libwoven::read_dir("/mnt", index, &mut name) {
@@ -90,11 +110,16 @@ fn draw_files(
                 }
                 let shown_length = text_length + usize::from(directory && text_length < line.len());
                 let text = core::str::from_utf8(&line[..shown_length]).unwrap_or("?");
+                let y = PANEL_Y + 30 + (shown as i32) * LINE_HEIGHT;
+                if shown % 2 == 1 {
+                    canvas.fill_rect(PANEL_X + 1, y - 2, PANEL_WIDTH - 2, LINE_HEIGHT as usize, BACKGROUND);
+                }
+                canvas.draw_text_system(PANEL_X + 9, y, text, THEME.text);
                 canvas.draw_text_system(
-                    PANEL_X + 6,
-                    PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
-                    text,
-                    THEME.text,
+                    PANEL_X + 220,
+                    y,
+                    if directory { "Folder" } else { "File" },
+                    THEME.disabled,
                 );
                 shown += 1;
             }
@@ -102,18 +127,13 @@ fn draw_files(
         }
     }
     if shown == 0 {
-        canvas.draw_text_system(
-            PANEL_X + 6,
-            PANEL_Y + 6 + LINE_HEIGHT,
-            "(empty or unavailable)",
-            THEME.text,
-        );
+        canvas.draw_text_system(PANEL_X + 9, PANEL_Y + 35, "No entries available", THEME.text);
     }
+    canvas.draw_text_system(PANEL_X, 274, "Refreshes:", THEME.disabled);
     let mut digits = [0u8; 20];
     let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut digits);
     if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text_system(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", THEME.text);
-        canvas.draw_text_system(PANEL_X + 66, PANEL_Y + 194, refresh_text, THEME.accent);
+        canvas.draw_text_system(PANEL_X + 70, 274, refresh_text, THEME.accent);
     }
     refresh_button.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
