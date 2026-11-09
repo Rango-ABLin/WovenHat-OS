@@ -26,6 +26,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -135,6 +138,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -572,6 +578,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -794,6 +803,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -889,6 +901,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       # Acceptance builds are offline by policy, but hosted runners start
@@ -1042,6 +1057,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1097,6 +1115,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1165,6 +1186,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1221,6 +1245,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1274,6 +1301,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1343,6 +1373,9 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel dependencies
+        shell: bash
+        run: cargo --config net.offline=false fetch --locked
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
