@@ -1,5 +1,24 @@
 # Stage status
 
+## Boot/login/desktop Phase F graphical login - 2026-11-10 - COMPLETE
+
+WovenLogin now provides a complete bounded graphical pre-authentication path
+inside WovenShell: account choice, masked PIN input, keyboard and pointer
+navigation, wrong-credential feedback, high-contrast presentation, and
+power/restart controls. Authentication and unlock continue through the kernel
+identity authority; no shell-side verifier or session-minting shortcut was
+added.
+
+The enhanced Stage 20.12 journey passes on 1/2/4 CPUs. Normal and
+high-contrast 1280x800 frames were captured and visually inspected; the final
+WHPX qualification passes the unchanged 20-second input and 5-second frame
+budgets at `target/phase-f-login-whpx-1cpu-20261110-171909`. Affected target
+and host Clippy pass with warnings denied. The complete Windows preservation
+chain passed at `audit-artifacts/acceptance-20261110-172935-815` (220 host
+harness tests, host Rust tests, build/lints, 60 memory boots, live networking,
+and Stage 10.4-10.7 on 1/2/4 CPUs). Phase G session management is next.
+Physical trust/device work remains deferred and is not claimed here.
+
 ## Boot/login/desktop Phase E authentication - 2026-11-10 - COMPLETE
 
 The kernel now owns plaintext credential verification and privileged session

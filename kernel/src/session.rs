@@ -9,14 +9,22 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-#[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+#[cfg(any(
+    feature = "system-apps",
+    feature = "stage20-12-test",
+    feature = "stage20-15-test"
+))]
 use crate::capability::{Capability, CapabilitySet};
 
 /// The session's process id; 0 before a session starts.
 static SESSION: AtomicU64 = AtomicU64::new(0);
 static CONSOLE: AtomicBool = AtomicBool::new(false);
 
-#[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+#[cfg(any(
+    feature = "system-apps",
+    feature = "stage20-12-test",
+    feature = "stage20-15-test"
+))]
 /// Why the session could not start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -26,7 +34,11 @@ pub enum Error {
     Identity,
 }
 
-#[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+#[cfg(any(
+    feature = "system-apps",
+    feature = "stage20-12-test",
+    feature = "stage20-15-test"
+))]
 /// What the session may do: draw, take input, talk to applications, read
 /// the catalog, launch applications, play sound, turn the machine off, and
 /// change the signed-in account's own PIN.
@@ -40,7 +52,11 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
     .with(Capability::PowerControl)
     .with(Capability::AccountManage);
 
-#[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+#[cfg(any(
+    feature = "system-apps",
+    feature = "stage20-12-test",
+    feature = "stage20-15-test"
+))]
 /// Start WovenShell from `image` as the session. With accounts, it opens
 /// at the sign-in screen.
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
@@ -52,12 +68,20 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     let public_accounts = Some(crate::identity_runtime::PUBLIC_USERS_PATH);
     #[cfg(not(feature = "system-apps"))]
     let public_accounts = accounts;
-    #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
+    #[cfg(any(
+        feature = "system-apps",
+        feature = "stage20-12-test",
+        feature = "stage20-15-test"
+    ))]
     let settings = crate::vfs::stat("/etc/wovenhat/settings.json")
         .ok()
         .filter(|stat| stat.kind == crate::vfs::NodeKind::File)
         .map(|_| "/etc/wovenhat/settings.json");
-    #[cfg(not(any(feature = "system-apps", feature = "stage20-15-test")))]
+    #[cfg(not(any(
+        feature = "system-apps",
+        feature = "stage20-12-test",
+        feature = "stage20-15-test"
+    )))]
     let settings: Option<&str> = None;
     // Build one bounded argv without allocating. The emulated demo uses the
     // existing flat renderer and reduced motion; other sessions retain their
@@ -92,6 +116,13 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
 pub fn active() -> Option<u64> {
     let pid = SESSION.load(Ordering::Acquire);
     (pid != 0 && crate::compositor::holder() == Some(pid)).then_some(pid)
+}
+
+/// The designated desktop-session process, including while its compositor is
+/// hidden or it is still at the pre-authentication screen.
+pub fn primary_process() -> Option<u64> {
+    let pid = SESSION.load(Ordering::Acquire);
+    (pid != 0).then_some(pid)
 }
 
 /// Whether the diagnostic console is showing instead of the session.

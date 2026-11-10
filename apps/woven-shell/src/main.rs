@@ -180,7 +180,7 @@ const CENTER_WIDTH: i32 = 164;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
-const QS_ROWS: usize = 10;
+const QS_ROWS: usize = 11;
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -1634,6 +1634,7 @@ impl Desktop {
             },
             "Lock screen",
             "Change PIN",
+            "Log out",
             match self.language {
                 libwoven::i18n::Language::English => "Language: English",
                 libwoven::i18n::Language::Chichewa => "Language: Chichewa",
@@ -1800,6 +1801,50 @@ impl Desktop {
         self.forget_entry();
         self.prompt = LockPrompt::Enter;
         log(&[b"woven-shell: locked"]);
+        self.screen()
+    }
+
+    /// End the authenticated desktop transaction. Descendants receive an
+    /// uncatchable termination request before the kernel session is closed;
+    /// closing revokes inherited credentials immediately, even while a child
+    /// is completing scheduler-owned teardown.
+    fn logout(&mut self) -> Area {
+        let _ = self.close_panels();
+        self.cancel_pointer_gesture();
+        for child in self.children.iter().flatten() {
+            if libwoven::kill(
+                libwoven::process::SignalTarget::Process(child.pid),
+                9,
+            )
+            .is_err()
+            {
+                log(&[b"woven-shell: logout child termination failed"]);
+            }
+        }
+        if let Some(session) = self.kernel_session {
+            if libwoven::identity::session_close(session).is_err() {
+                log(&[b"woven-shell: kernel identity close failed"]);
+                return self.screen();
+            }
+        }
+        self.wipe_change_pin_old();
+        for byte in &mut self.change_pin_new {
+            // SAFETY: a valid byte of our own array; volatile so logout does
+            // not leave credential material for the next session.
+            unsafe { core::ptr::write_volatile(byte, 0) };
+        }
+        self.change_pin_new_length = 0;
+        self.change_pin = None;
+        self.kernel_session = None;
+        self.session = None;
+        self.chosen = 0;
+        self.locked = true;
+        self.mode = LockMode::SignIn;
+        self.failures = 0;
+        self.lockout_until = 0;
+        self.forget_entry();
+        self.prompt = LockPrompt::Enter;
+        log(&[b"woven-shell: logged out"]);
         self.screen()
     }
 
@@ -3419,7 +3464,8 @@ impl Desktop {
                         4 => self.toggle_tiling(),
                         5 => self.lock(),
                         6 => self.start_change_pin(),
-                        7 => {
+                        7 => self.logout(),
+                        8 => {
                             self.language = match self.language {
                                 libwoven::i18n::Language::English => {
                                     libwoven::i18n::Language::Chichewa
@@ -3431,7 +3477,7 @@ impl Desktop {
                             log(&[b"woven-shell: language toggled"]);
                             panel
                         }
-                        8 => {
+                        9 => {
                             self.three_d = !self.three_d;
                             log(if self.three_d {
                                 &[b"woven-shell: 3D desktop on"]
@@ -3442,7 +3488,7 @@ impl Desktop {
                             // differently in 3D mode, not just this panel.
                             panel.union(self.screen())
                         }
-                        9 => {
+                        10 => {
                             self.reduced_motion = !self.reduced_motion;
                             log(if self.reduced_motion {
                                 &[b"woven-shell: reduced motion on"]

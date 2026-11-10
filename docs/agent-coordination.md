@@ -9077,3 +9077,23 @@ authority. Preserve Phase E documentation changes and all accepted Phase B-E
 contracts. First audit the directive exit gate and current evidence; implement
 only missing Phase F behavior. Do not begin Phase G, perform physical actions,
 commit or push. Cargo/QEMU chains remain serialized.
+
+## Codex - Phase F graphical login accepted (2026-11-10)
+
+The complete WovenLogin path passes the enhanced Stage 20.12 journey on 1/2/4
+CPUs. The final normal/high-contrast WHPX visual gate passes at
+`target/phase-f-login-whpx-1cpu-20261110-171909` under unchanged input/frame
+budgets, and the complete Windows preservation chain passes at
+`audit-artifacts/acceptance-20261110-172935-815`. Earlier performance-gate
+failures remain retained. No QEMU/Cargo chain is active. Phase G is next;
+physical firmware/TPM/device qualification remains deferred.
+
+## Codex - Phase G session-management claim (2026-11-10)
+
+User authorization to continue through remaining software gates is active.
+Claim Phase G only: authenticated session creation, kernel-enforced identity,
+process inheritance, desktop-launch authorization, lock/unlock, logout and
+owner teardown. Preserve accepted Phase A-F behavior and ABI. First audit the
+existing identity/process relationships and focused gates, then implement the
+smallest missing security closure. Do not begin Phase H or perform physical
+device/trust actions. Cargo and QEMU acceptance remain serialized.

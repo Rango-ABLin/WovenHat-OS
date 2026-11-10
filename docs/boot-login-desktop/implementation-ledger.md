@@ -198,3 +198,26 @@ passed with warnings denied. The complete Windows preservation chain passed at
 host Rust tests, 60 repeated memory boots, live networking, and Stage 10.4-10.7
 on 1/2/4 CPUs. Phase F is next; no graphical-login, session/desktop or physical
 hardware gate is claimed by this entry.
+
+## BLD-F Phase F graphical login closure (2026-11-10)
+
+Status: ACCEPTED. The existing WovenShell pre-authentication state now renders
+the complete WovenLogin interaction: responsive account selection, masked PIN
+entry, explicit graphical submission, keyboard/pointer navigation, visible
+authentication failure, high-contrast mode, and power/restart controls. Every
+credential submission still calls the accepted kernel identity authority; no
+verifier access, local authentication, new syscall, capability, kernel object,
+unsafe block, or deadline was added.
+
+The enhanced Stage 20.12 sign-in/lock journey passed at
+`target/woven-shell-sign-in-{1,2,4}cpu`. The final WHPX visual qualification
+passed at `target/phase-f-login-whpx-1cpu-20261110-171909`; its normal and
+high-contrast 1280x800 frames were visually inspected and met the unchanged
+20-second input and 5-second frame budgets. Earlier TCG/WHPX runs remain
+retained at `target/phase-f-login-1cpu-20261110-134803` and
+`target/phase-f-login-whpx-1cpu-20261110-{135314,135614,140242}`; they exposed
+a performance-metric classification defect, which was corrected without
+raising a budget. App target, affected kernel target and workspace host Clippy
+pass with warnings denied. The complete Windows preservation chain passed at
+`audit-artifacts/acceptance-20261110-172935-815`. Phase G is next; no session
+management or physical hardware gate is claimed by this entry.

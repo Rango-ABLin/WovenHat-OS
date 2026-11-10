@@ -1804,6 +1804,8 @@ fn sys_spawn_command(user_line: u64, length: u64) -> u64 {
     let actor = crate::task::current_process_id();
     if !crate::task::current_has(crate::capability::Capability::FileRead)
         || !crate::task::current_has(crate::capability::Capability::ProcessCreate)
+        || (crate::session::primary_process() == Some(actor)
+            && crate::task::current_identity_session().is_none())
     {
         return SYSCALL_ERROR;
     }

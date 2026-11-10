@@ -1,6 +1,6 @@
 # Test results
 
-Status: IN PROGRESS. Phases A-E are accepted; Phase F is next.
+Status: IN PROGRESS. Phases A-F are accepted; Phase G is next.
 
 ## Windows baseline attempts
 
@@ -115,6 +115,28 @@ warning-denying build/lints, 10 one-CPU, 30 two-CPU and 20 four-CPU memory boots
 live network 1/2/4 and Stage 10.4-10.7 1/2/4. Its read-only physical/trust
 preflight correctly remained not qualified and made no device or firmware
 change. No timeout, retry budget, marker or assertion was relaxed.
+
+## Phase F graphical login acceptance
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Graphical sign-in, account navigation, wrong/correct PIN and lock/unlock | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| Normal/high-contrast visual and performance qualification | `target/phase-f-login-whpx-1cpu-20261110-171909` | PASS |
+| WovenShell no-std target Clippy | `cargo clippy --manifest-path apps/woven-shell/Cargo.toml --target x86_64-unknown-none -- -D warnings` | PASS |
+| Stage 20.12 kernel target Clippy | Stage 20.12 feature, warnings denied | PASS |
+| Workspace host-target Clippy | `cargo clippy --all-targets -- -D warnings` | PASS |
+| Full Windows preservation | `audit-artifacts/acceptance-20261110-172935-815` | PASS |
+
+The final visual run captured and visually inspected `woven-login.ppm` and
+`woven-login-high-contrast.ppm`. It met the existing 20-second input and
+5-second screendump-frame budgets. The earlier retained runs
+`target/phase-f-login-1cpu-20261110-134803` and
+`target/phase-f-login-whpx-1cpu-20261110-{135314,135614,140242}` failed before
+the harness separated input-to-render latency from QMP screendump latency; no
+deadline was increased. The full gate ran 220 host harness tests, host Rust
+tests, warning-denying build/lints, 60 memory boots, live network 1/2/4 and
+Stage 10.4-10.7 on 1/2/4 CPUs. Physical/trust preflight remained read-only and
+not qualified.
 
 
 ## B2 accepted bounded unit at 72be85aa

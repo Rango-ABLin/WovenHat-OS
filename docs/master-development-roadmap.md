@@ -41,6 +41,18 @@ and identity ABI gates pass at 1/2/4 CPUs. The complete Windows preservation
 gate passes at `audit-artifacts/acceptance-20261110-123957-212`. Next: Phase F
 graphical login. Physical firmware/TPM/native qualification remains deferred.
 
+Boot/login/desktop directive - Phase F graphical login accepted (2026-11-10)
+WovenLogin remains a least-privilege pre-authentication surface inside
+WovenShell. It provides bounded account selection, masked PIN entry, keyboard
+and pointer navigation, visible failure handling, high-contrast controls, and
+power/restart actions through the existing ABI. Successful submission reaches
+the kernel authentication authority rather than a shell-local shortcut.
+Focused login and lock acceptance passes at 1/2/4 CPUs, the normal and
+high-contrast frames pass the unchanged visual/performance budgets, and the
+complete Windows preservation gate passes at
+`audit-artifacts/acceptance-20261110-172935-815`. Next: Phase G session
+management. Physical firmware/TPM/native qualification remains deferred.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual

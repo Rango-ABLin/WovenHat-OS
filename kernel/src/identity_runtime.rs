@@ -360,6 +360,10 @@ pub(crate) fn release_owner(owner: u64) {
             let _ = authority.close_session(*session);
         }
     }
+    drop(authority);
+    for session in sessions[..count].iter().flatten() {
+        crate::task::revoke_identity_session(session.0);
+    }
 }
 
 pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId, Error> {
@@ -409,7 +413,9 @@ pub(crate) fn lock(owner: u64, session: SessionId) -> Result<(), Error> {
         authority.lock(binding.session).map_err(Error::Identity)?;
         authority.view(binding.session).map_err(Error::Identity)?
     };
-    apply_view(owner, view)
+    apply_view(owner, view)?;
+    crate::task::set_identity_session_active(session.0, false);
+    Ok(())
 }
 
 pub(crate) fn unlock(owner: u64, session: SessionId, password: &[u8]) -> Result<(), Error> {
@@ -432,7 +438,9 @@ pub(crate) fn unlock(owner: u64, session: SessionId, password: &[u8]) -> Result<
         authority.view(binding.session).map_err(Error::Identity)?
     };
     clear_failures(&binding.name[..binding.name_len]);
-    apply_view(owner, view)
+    apply_view(owner, view)?;
+    crate::task::set_identity_session_active(session.0, true);
+    Ok(())
 }
 
 pub(crate) fn elevate(owner: u64, session: SessionId, password: &[u8]) -> Result<(), Error> {
@@ -465,8 +473,9 @@ pub(crate) fn close(owner: u64, session: SessionId) -> Result<(), Error> {
             .map_err(Error::Identity)?;
     }
     BINDINGS.lock()[slot] = None;
+    crate::task::revoke_identity_session(session.0);
     if crate::task::current_process_id() != owner
-        || !crate::task::set_current_credentials(crate::task::Credentials::USERSPACE)
+        || !crate::task::set_current_identity(crate::task::Credentials::USERSPACE, None, false)
     {
         return Err(Error::Task);
     }
@@ -674,10 +683,15 @@ fn apply_view(owner: u64, view: SessionView) -> Result<(), Error> {
     if view.id.0 == 0 || crate::task::current_process_id() != owner {
         return Err(Error::Task);
     }
-    if !crate::task::set_current_credentials(crate::task::Credentials {
-        uid: view.uid,
-        gid: view.gid.0,
-    }) {
+    let active = view.state == libwoven::identity::SessionState::Active;
+    if !crate::task::set_current_identity(
+        crate::task::Credentials {
+            uid: view.uid,
+            gid: view.gid.0,
+        },
+        Some(view.id.0),
+        active,
+    ) {
         return Err(Error::Task);
     }
     Ok(())

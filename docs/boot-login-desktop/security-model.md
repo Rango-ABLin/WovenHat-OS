@@ -1,6 +1,6 @@
 # Security audit
 
-Status: PHASE E ACCEPTED, 2026-11-10. Later login, session, recovery and
+Status: PHASE F ACCEPTED, 2026-11-10. Later session, recovery and
 hardware/trust findings remain open until their own gates pass.
 
 The kernel identity authority is the authentication boundary. Plaintext
@@ -37,12 +37,15 @@ Accepted Phase E controls:
 - Correct sign-in applies the selected user's identity, lock requires the same
   kernel authority to unlock, and PIN rotation invalidates the old credential.
 
-Remaining boundaries are deliberately outside Phase E: Phase F must qualify
-the full graphical login and accessibility behavior; Phases G/H must prove
-session-owned launch authority, inheritance, logout cleanup and desktop
-authorization; recovery/F12/fallback behavior remains subject to its later
-negative integration gates. Production Secure Boot keys, physical TPM and
-native hardware remain final trust/hardware work.
+Phase F qualifies the full graphical login path, including keyboard/pointer
+selection, masked PIN entry, failure feedback, high contrast and calls into the
+actual kernel authentication service. The login surface consumes only public
+account names and does not gain verifier access or local session-minting
+authority. Remaining boundaries are deliberately outside Phase F: Phases G/H
+must prove session-owned launch authority, inheritance, logout cleanup and
+desktop authorization; recovery/F12/fallback behavior remains subject to its
+later negative integration gates. Production Secure Boot keys, physical TPM
+and native hardware remain final trust/hardware work.
 
 The kernel shell authorizes commands against the current kernel task's
 capabilities (`shell::authorize`), not an authenticated desktop session.

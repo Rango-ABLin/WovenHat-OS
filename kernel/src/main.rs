@@ -11035,6 +11035,14 @@ fn stage20_12_self_test() -> bool {
     let written = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
         && vfs::mkdir("/etc/wovenhat").is_ok()
         && vfs::create_read_only("/etc/wovenhat/accounts", file.as_bytes()).is_ok()
+        && (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
+        && (vfs::stat("/share/applications").is_ok()
+            || vfs::mkdir("/share/applications").is_ok())
+        && vfs::create_read_only(
+            "/share/applications/hello.app",
+            b"Name=Hello\nExec=hello-gui --desktop-client %p a\n",
+        )
+        .is_ok()
         && vfs::create_read_only("/bin/hello-gui", HELLO_GUI_IMAGE).is_ok();
     if !step("accounts file written (salted hashes, no PINs)", written) {
         return false;
@@ -11061,26 +11069,13 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
-    let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
-        .with(capability::Capability::DisplayIo)
-        .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc)
-        .with(capability::Capability::FileRead)
-        .with(capability::Capability::AccountManage);
-    let Some(program) = userspace::load_elf_with_argv(
+    let Ok(shell_pid) = session::start(
         WOVEN_SHELL_IMAGE,
-        &[
-            "/bin/woven-shell",
-            "--accounts",
-            identity_runtime::PUBLIC_USERS_PATH,
-        ],
+        Some(identity_runtime::PUBLIC_USERS_PATH),
     ) else {
-        return step("shell image loads", false);
-    };
-    let Ok((shell, _, _)) = task::spawn_user_system_service("woven-shell", program, capabilities)
-    else {
         return step("shell spawned", false);
     };
+    let shell = task::ProcessId::from_u64(shell_pid);
     if !step(
         "shell took the display",
         until(3000, || {
@@ -11243,6 +11238,26 @@ fn stage20_12_self_test() -> bool {
         return false;
     }
 
+    if !step(
+        "authenticated desktop launches an application",
+        keys(&[0x3b, 0x1c]) && until(1000, || task::live_child(shell).is_some()),
+    ) {
+        return false;
+    }
+    let Some(child) = task::live_child(shell) else {
+        return step("launched child remains live", false);
+    };
+    let shell_credentials = task::process_credentials(shell);
+    if !step(
+        "child inherits the kernel-enforced session identity",
+        shell_credentials.is_some()
+            && shell_credentials == task::process_credentials(child)
+            && task::process_identity_session(shell).is_some()
+            && task::process_identity_session(shell) == task::process_identity_session(child),
+    ) {
+        return false;
+    }
+
     // Lock through Quick Settings: the lock screen wants lin's PIN. Quick
     // Settings begins below the top taskbar; row 5 is "Lock screen".
     let lock_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 5) * 14 + 7);
@@ -11256,6 +11271,14 @@ fn stage20_12_self_test() -> bool {
         && until(1000, || {
             line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
         });
+    if !step(
+        "lock suspends inherited session authority",
+        locked
+            && task::process_identity_session(shell).is_none()
+            && task::process_identity_session(child).is_none(),
+    ) {
+        return false;
+    }
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
         && until(PIN_CHECK_TICKS, || failures() > 0)
@@ -11266,6 +11289,40 @@ fn stage20_12_self_test() -> bool {
     if !step(
         "the lock screen refuses ada's PIN and takes lin's",
         lock_checks,
+    ) {
+        return false;
+    }
+    if !step(
+        "unlock restores inherited session authority",
+        task::process_identity_session(shell).is_some()
+            && task::process_identity_session(shell) == task::process_identity_session(child),
+    ) {
+        return false;
+    }
+
+
+    // Log out through Quick Settings. Row 7 is the new session-termination
+    // action. The child must lose its identity immediately and complete
+    // scheduler-owned teardown before another account can use the desktop.
+    let logout_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 7) * 14 + 7);
+    let logged_out = move_by(button.0 + 8 - lock_row.0, button.1 + 8 - lock_row.1)
+        && click()
+        && move_by(
+            logout_row.0 - (button.0 + 8),
+            logout_row.1 - (button.1 + 8),
+        )
+        && click()
+        && until(1000, || sign_in("> ada", "  lin", "Enter PIN"));
+    if !step("logout returns to account selection", logged_out) {
+        return false;
+    }
+    if !step(
+        "logout revokes identity and cleans up session children",
+        task::process_credentials(shell) == Some(task::Credentials::USERSPACE)
+            && task::process_identity_session(shell).is_none()
+            && until(1000, || {
+                task::process_credentials(child).is_none() || task::process_exited(child)
+            }),
     ) {
         return false;
     }

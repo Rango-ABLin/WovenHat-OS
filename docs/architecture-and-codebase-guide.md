@@ -4830,3 +4830,20 @@ sets input focus, and presents the first complete frame. Only after the
 compositor lock is released does it emit the Phase D transition marker. The
 QMP harness retains both frames and validates palette, geometry, ordering,
 timing monotonicity, and material pixel replacement on 1/2/4 CPUs.
+
+## Phase F graphical login architecture (2026-11-10)
+
+WovenLogin is the pre-authentication state of `apps/woven-shell`, not a second
+privileged process. Before authentication it exposes only the public bounded
+account-name catalog and sends the selected name plus copied masked PIN to the
+accepted kernel identity authority. The shell never receives verifier-bearing
+records and does not mint a session locally.
+
+The surface has responsive card, account, submit and action hit regions shared
+by painting and pointer handling. Tab and arrow navigation, Enter submission,
+pointer account selection and the graphical submit button all converge on the
+same authentication path. F4 toggles a login-only high-contrast palette and
+repaints the bounded card region; the wallpaper remains theme-neutral. F2/F3
+use the existing power-control ABI. Locked presentation keeps window and
+notification content hidden while retaining the login pointer. Session
+inheritance, desktop-launch authority and logout teardown remain Phase G.
