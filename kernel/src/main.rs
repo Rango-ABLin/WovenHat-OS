@@ -16111,13 +16111,24 @@ fn stage20_1_self_test() -> bool {
     let top = height - TASKBAR_HEIGHT;
     // Wallpaper: corner, centre, both weave lines, and the last row above
     // the taskbar, each a block wide enough to straddle a grid line.
-    let wall = region(0, 0, 40, 40, |x, y| expected_wallpaper(x, y, width, height))
-        && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
-            expected_wallpaper(x, y, width, height)
-        })
-        && region(width - 40, top - 40, 40, 40, |x, y| {
-            expected_wallpaper(x, y, width, height)
-        });
+    // Claiming the compositor precedes the shell's first complete paint.
+    // Wait for the actual wallpaper to arrive rather than sampling the
+    // compositor's initial dark clear color. Retain every pixel assertion
+    // and a bounded timeout for a genuinely broken renderer.
+    let wallpaper_start = timer::ticks();
+    let wall = loop {
+        let matches = region(0, 0, 40, 40, |x, y| expected_wallpaper(x, y, width, height))
+            && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            })
+            && region(width - 40, top - 40, 40, 40, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            });
+        if matches || timer::ticks().wrapping_sub(wallpaper_start) > 3000 {
+            break matches;
+        }
+        task::yield_now();
+    };
     if !wall {
         // The full-area oracle stays authoritative. Log the first mismatched
         // pixel and its expected/observed RGB to distinguish a renderer
