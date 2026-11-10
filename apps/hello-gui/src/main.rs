@@ -517,9 +517,29 @@ fn main(args: Args) -> ! {
         Some(b"--fs-benchmark") => fs_benchmark(),
         Some(b"--compositor-benchmark") => compositor_benchmark(),
         Some(b"--scheduler-benchmark") => scheduler_benchmark(),
+        Some(b"--identity-storage-probe") => identity_storage_probe(),
         Some(_) => fail(250),
         None => run(Input::None),
     }
+}
+
+/// Phase E: an ordinary FileRead process may consume the public account-name
+/// catalog, but must never open the credential verifier record itself.
+fn identity_storage_probe() -> ! {
+    if libwoven::open("/etc/wovenhat/accounts").is_ok() {
+        fail(251);
+    }
+    let Ok(descriptor) = libwoven::open("/etc/wovenhat/users") else {
+        fail(252)
+    };
+    let mut names = [0u8; 32];
+    let result = libwoven::read(descriptor, &mut names);
+    let _ = libwoven::close(descriptor);
+    if result != Ok(8) || &names[..8] != b"ada\nlin\n" {
+        fail(253);
+    }
+    let _ = libwoven::print("hello-gui: protected identity storage: PASSED\n");
+    libwoven::exit(0)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

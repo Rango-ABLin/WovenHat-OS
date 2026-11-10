@@ -6183,15 +6183,16 @@ fn sandbox_file_access_for_task(target: TaskId, path: &str, write: bool) -> bool
 
 fn authorize_current_file_path(path: &str, write: bool) -> bool {
     let scope = wovenguard::classify_file_path(path);
-    let allowed = current_file_access_allowed(
-        if write {
-            Capability::FileWrite
-        } else {
-            Capability::FileRead
-        },
-        scope,
-        write,
-    );
+    let allowed = !crate::accounts::userspace_protected_path(path)
+        && current_file_access_allowed(
+            if write {
+                Capability::FileWrite
+            } else {
+                Capability::FileRead
+            },
+            scope,
+            write,
+        );
     let actor = current_process_id();
     crate::audit::record_detail(
         actor,

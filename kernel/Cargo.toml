@@ -102,6 +102,8 @@ stage25-15-test = ["qemu-test"]
 # capability boundary and the same kernel-injected pointer/keyboard path as
 # the earlier desktop tests.
 stage24-59-test = ["qemu-test", "system-apps"]
+# Production negative gate: a missing first account withholds WovenShell.
+phase-e-auth-test = ["qemu-test", "system-apps"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

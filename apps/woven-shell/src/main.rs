@@ -192,6 +192,38 @@ const PIN_LOCKOUT: u64 = 5 * libwoven::time::TICKS_PER_SECOND;
 /// Accounts the sign-in screen offers.
 const MAX_ACCOUNTS: usize = 4;
 
+/// Public login profile supplied by the kernel. Credential salts and
+/// verifiers stay in the privileged identity authority and are never parsed
+/// by WovenShell.
+#[derive(Clone, Copy)]
+struct PublicAccount {
+    name: [u8; libwoven::accounts::MAX_NAME],
+    name_len: usize,
+}
+
+impl PublicAccount {
+    fn parse(line: &[u8]) -> Option<Self> {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty()
+            || line.len() > libwoven::accounts::MAX_NAME
+            || !line.iter().all(|byte| (b' '..=b'~').contains(byte))
+            || line.contains(&b':')
+        {
+            return None;
+        }
+        let mut account = Self {
+            name: [0; libwoven::accounts::MAX_NAME],
+            name_len: line.len(),
+        };
+        account.name[..line.len()].copy_from_slice(line);
+        Some(account)
+    }
+
+    fn name(&self) -> &[u8] {
+        &self.name[..self.name_len]
+    }
+}
+
 /// Whether the locked screen is the sign-in screen, the lock screen, or the
 /// signed-in account changing its own PIN.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -570,7 +602,7 @@ struct Desktop {
     lockout_until: libwoven::time::Ticks,
     prompt: LockPrompt,
     mode: LockMode,
-    accounts: [Option<libwoven::accounts::Account>; MAX_ACCOUNTS],
+    accounts: [Option<PublicAccount>; MAX_ACCOUNTS],
     /// The account chosen on the sign-in screen.
     chosen: usize,
     /// The account signed in, if any.
@@ -1348,6 +1380,15 @@ impl Desktop {
             );
         }
 
+        // Keep the authenticated identity visible beside the workspace
+        // switcher. The public profile contains only the bounded account
+        // name; credential salts and verifiers never enter WovenShell.
+        if let Some(account) = self.session.and_then(|index| self.accounts[index]) {
+            let text = core::str::from_utf8(account.name()).unwrap_or("?");
+            let x = self.workspace_area(0).x - 6 - font::text_width(text) as i32;
+            canvas.draw_text_system(x, self.text_y(), text, theme_text());
+        }
+
         // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
         let fill = theme_entry(self.qs_open);
@@ -1698,17 +1739,10 @@ impl Desktop {
         self.entry_length = 0;
     }
 
-    /// Check the typed digits: against the chosen account when signing in,
-    /// the signed-in account when locked or confirming its current PIN to
-    /// change it, or else the `--pin` PIN.
+    /// Check the legacy `--pin`-only mode. Account-backed authentication is
+    /// always delegated to the kernel identity authority; WovenShell never
+    /// receives verifier material with which to check it locally.
     fn pin_matches(&self) -> bool {
-        let account = match self.mode {
-            LockMode::SignIn => Some(self.chosen),
-            LockMode::Lock | LockMode::ChangePin => self.session,
-        };
-        if let Some(account) = account.and_then(|index| self.accounts[index]) {
-            return account.verify(&self.entry[..self.entry_length]);
-        }
         let Some((stored, length)) = &self.pin else {
             return true;
         };
@@ -1765,11 +1799,9 @@ impl Desktop {
                     let kernel_authenticated = match self.mode {
                         LockMode::SignIn => match self.accounts[self.chosen] {
                             Some(account) => {
-                                let digest =
-                                    account.password_digest(&self.entry[..self.entry_length]);
-                                match libwoven::identity::session_open_verified(
+                                match libwoven::identity::session_open(
                                     account.name(),
-                                    &digest,
+                                    &self.entry[..self.entry_length],
                                 ) {
                                     Ok(session) => {
                                         self.kernel_session = Some(session);
@@ -1784,11 +1816,12 @@ impl Desktop {
                             self.kernel_session,
                             self.session.and_then(|index| self.accounts[index]),
                         ) {
-                            (Some(session), Some(account)) => {
-                                let digest =
-                                    account.password_digest(&self.entry[..self.entry_length]);
-                                libwoven::identity::session_unlock_verified(session, &digest)
-                                    .is_ok()
+                            (Some(session), Some(_account)) => {
+                                libwoven::identity::session_unlock(
+                                    session,
+                                    &self.entry[..self.entry_length],
+                                )
+                                .is_ok()
                             }
                             // No account ever signed in: this is the legacy
                             // `--pin`-only mode, which has no kernel session
@@ -1951,7 +1984,7 @@ impl Desktop {
                 let succeeded = matches!(result, Some(Ok(())));
                 if succeeded {
                     self.accounts = [None; MAX_ACCOUNTS];
-                    load_accounts("/etc/wovenhat/accounts", &mut self.accounts);
+                    load_accounts("/etc/wovenhat/users", &mut self.accounts);
                     self.session = session_name.and_then(|(value, length)| {
                         self.accounts.iter().position(|account| {
                             account.is_some_and(|account| account.name() == &value[..length])
@@ -3649,7 +3682,7 @@ impl Desktop {
 
 /// Read up to [`MAX_ACCOUNTS`] accounts from an accounts file into
 /// `accounts`, which starts empty; malformed lines are skipped.
-fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>; MAX_ACCOUNTS]) {
+fn load_accounts(path: &str, accounts: &mut [Option<PublicAccount>; MAX_ACCOUNTS]) {
     let Ok(descriptor) = libwoven::open(path) else {
         return;
     };
@@ -3662,7 +3695,7 @@ fn load_accounts(path: &str, accounts: &mut [Option<libwoven::accounts::Account>
         if count == MAX_ACCOUNTS {
             break;
         }
-        if let Some(account) = libwoven::accounts::Account::parse(line) {
+        if let Some(account) = PublicAccount::parse(line) {
             accounts[count] = Some(account);
             count += 1;
         }

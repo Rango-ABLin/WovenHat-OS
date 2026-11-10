@@ -45,9 +45,13 @@ pub const CAPABILITIES: CapabilitySet = CapabilitySet::only(Capability::Console)
 /// at the sign-in screen.
 pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     #[cfg(feature = "system-apps")]
-    if let Some(path) = accounts {
-        crate::identity_runtime::load_durable_or_accounts(path).map_err(|_| Error::Identity)?;
-    }
+    let accounts = accounts.ok_or(Error::Identity)?;
+    #[cfg(feature = "system-apps")]
+    crate::identity_runtime::load_durable_or_accounts(accounts).map_err(|_| Error::Identity)?;
+    #[cfg(feature = "system-apps")]
+    let public_accounts = Some(crate::identity_runtime::PUBLIC_USERS_PATH);
+    #[cfg(not(feature = "system-apps"))]
+    let public_accounts = accounts;
     #[cfg(any(feature = "system-apps", feature = "stage20-15-test"))]
     let settings = crate::vfs::stat("/etc/wovenhat/settings.json")
         .ok()
@@ -61,7 +65,7 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     let mut argv = [""; 7];
     let mut argc = 1;
     argv[0] = "/bin/woven-shell";
-    if let Some(path) = accounts {
+    if let Some(path) = public_accounts {
         argv[argc] = "--accounts";
         argv[argc + 1] = path;
         argc += 2;

@@ -31,7 +31,6 @@ pub enum Error {
     Provisioning,
 }
 
-#[derive(Clone, Copy)]
 struct Plan {
     target_sectors: u64,
     data_sectors: u64,
@@ -58,7 +57,7 @@ pub fn install(plan_bytes: &[u8]) -> Result<u8, Error> {
 fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<(), Error> {
     let mut target = device;
     let target_sectors = target.sector_count();
-    let plan = parse_plan(plan_bytes, target_sectors)?;
+    let mut plan = parse_plan(plan_bytes, target_sectors)?;
     if plan.data_sectors < libwoven::installer_ipc::INSTALLER_MIN_DATA_SECTORS
         || ESP_SECTORS
             .checked_add(plan.data_sectors)
@@ -115,10 +114,9 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
         core::str::from_utf8(&plan.network[..plan.network_len]).map_err(|_| Error::Provisioning)?;
     let password = &plan.password[..plan.password_len];
     let mut salt = [0_u8; 16];
-    for chunk in salt.chunks_mut(8) {
-        chunk.copy_from_slice(&crate::entropy::random_u64().to_le_bytes()[..chunk.len()]);
-    }
+    crate::entropy::fill_secure(&mut salt).map_err(|_| Error::Provisioning)?;
     let digest = libwoven::accounts::hash_pin(&salt, password);
+    plan.password.fill(0);
     let mut salt_hex = String::new();
     let mut digest_hex = String::new();
     push_hex(&mut salt_hex, &salt);

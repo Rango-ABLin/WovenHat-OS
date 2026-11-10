@@ -1785,19 +1785,41 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             halt();
         }
 
-        // Persistent accounts (from a provisioned `/mnt/etc/wovenhat/accounts`)
-        // are a production concern, not a hardware-demo-only one: a real
-        // release image has no other way to carry real sign-in accounts.
-        // Finding none is not a failure (`install_persistent_accounts`
-        // returns `true` for that case) -- a machine with no accounts yet
-        // boots to an accounts-less session, which is what a first-boot
-        // setup step is for.
+        // The installer provisions the first account into the installed
+        // volume. A normal production boot must find and validate that record
+        // before any privileged desktop session is started. Missing state is
+        // an incomplete installation/recovery condition, never an
+        // accounts-less desktop. The disposable hardware demo installs its
+        // explicit test account immediately below and is the sole exception.
         #[cfg(feature = "system-apps")]
-        if !maintenance_boot && !install_persistent_accounts() {
-            serial::write_line(format_args!(
-                "[SESSION] persistent account provisioning failed"
-            ));
-            halt();
+        if !maintenance_boot {
+            match install_persistent_accounts() {
+                PersistentAccounts::Installed => {}
+                PersistentAccounts::Missing if cfg!(feature = "hardware-demo") => {
+                    serial::write_line(format_args!(
+                        "[SESSION] persistent accounts absent; hardware demo account pending"
+                    ));
+                }
+                PersistentAccounts::Missing => {
+                    serial::write_line(format_args!(
+                        "[SESSION] SETUP REQUIRED: no provisioned account; desktop withheld"
+                    ));
+                    #[cfg(feature = "phase-e-auth-test")]
+                    {
+                        serial::write_line(format_args!(
+                            "[PHASE E] missing account withholds desktop: PASSED"
+                        ));
+                        qemu_test_exit_success();
+                    }
+                    halt();
+                }
+                PersistentAccounts::Invalid => {
+                    serial::write_line(format_args!(
+                        "[SESSION] persistent account provisioning failed; desktop withheld"
+                    ));
+                    halt();
+                }
+            }
         }
         #[cfg(feature = "system-apps")]
         if !maintenance_boot && !install_persistent_settings() {
@@ -8527,7 +8549,15 @@ fn install_production_system_apps() -> bool {
 }
 
 #[cfg(feature = "system-apps")]
-fn install_persistent_accounts() -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PersistentAccounts {
+    Installed,
+    Missing,
+    Invalid,
+}
+
+#[cfg(feature = "system-apps")]
+fn install_persistent_accounts() -> PersistentAccounts {
     const SOURCE: &str = "/mnt/etc/wovenhat/accounts";
     const TARGET: &str = "/etc/wovenhat/accounts";
 
@@ -8537,44 +8567,44 @@ fn install_persistent_accounts() -> bool {
             serial::write_line(format_args!(
                 "[SESSION] persistent accounts path is not a file"
             ));
-            return false;
+            return PersistentAccounts::Invalid;
         }
-        Err(vfs::Error::NotFound) => return true,
-        Err(_) => return false,
+        Err(vfs::Error::NotFound) => return PersistentAccounts::Missing,
+        Err(_) => return PersistentAccounts::Invalid,
     };
     if source.size == 0 || source.size > vfs::NODE_CAPACITY {
         serial::write_line(format_args!(
             "[SESSION] persistent accounts file has invalid size: {}",
             source.size
         ));
-        return false;
+        return PersistentAccounts::Invalid;
     }
 
     let mut data = alloc::vec![0u8; source.size];
     let Ok(read) = vfs::read_all(SOURCE, &mut data) else {
         serial::write_line(format_args!("[SESSION] persistent accounts read failed"));
-        return false;
+        return PersistentAccounts::Invalid;
     };
     if read != source.size || !has_valid_account_line(&data) {
         serial::write_line(format_args!(
             "[SESSION] persistent accounts file contains no valid account"
         ));
-        return false;
+        return PersistentAccounts::Invalid;
     }
     for directory in ["/etc", "/etc/wovenhat"] {
         match vfs::mkdir(directory) {
             Ok(()) | Err(vfs::Error::AlreadyExists) => {}
-            Err(_) => return false,
+            Err(_) => return PersistentAccounts::Invalid,
         }
     }
     if vfs::create_read_only(TARGET, &data).is_err() {
-        return false;
+        return PersistentAccounts::Invalid;
     }
     serial::write_line(format_args!(
         "[SESSION] persistent accounts imported from {}",
         SOURCE
     ));
-    true
+    PersistentAccounts::Installed
 }
 
 #[cfg(feature = "system-apps")]
@@ -10144,7 +10174,10 @@ fn stage24_59_change_pin_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    // WovenShell's production chrome is top-aligned: the 24-pixel taskbar
+    // starts at y=0 and Quick Settings opens immediately below it at y=26.
+    // Keep the oracle independent of shell-private layout helpers.
+    let top = 0;
     let middle = height / 2;
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
@@ -10165,24 +10198,21 @@ fn stage24_59_change_pin_self_test() -> bool {
     if !step(
         "ada sign-in prompt rendered",
         until(1000, || {
-            line(middle - 60, "Sign in") && line(middle - 4, "Enter PIN")
+            line(middle - 52, "Sign in") && line(middle - 4, "Enter PIN")
         }),
     ) {
         return false;
     }
     if !step(
         "ada signs in",
-        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(1000, || !line(middle - 60, "Sign in")),
+        keys(&[0x02, 0x03, 0x04, 0x05, 0x1c]) && until(1000, || !line(middle - 52, "Sign in")),
     ) {
         return false;
     }
     let button = (width - 54 - 5 * 20, top + 4);
-    // Row 6 of 8, "Change PIN": Language was appended after it, so only the
-    // row-count term needs updating, not the row index.
-    let change_row = (
-        width - 4 - 164 + 28,
-        top - 2 - (10 * 14 + 2) + 1 + 6 * 14 + 7,
-    );
+    // Quick Settings begins below the top taskbar. Row 6 is "Change PIN";
+    // sample the row center after the title row.
+    let change_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 6) * 14 + 7);
     let opened = move_by(button.0 + 8 - width / 2, button.1 + 8 - middle)
         && click()
         && until(1000, compositor::presented);
@@ -10211,12 +10241,8 @@ fn stage24_59_change_pin_self_test() -> bool {
     ) {
         return false;
     }
-    // Row 5 of 8, "Change PIN" and Language were both appended after
-    // "Lock screen", so only the row-count term needs updating.
-    let lock_row = (
-        width - 4 - 164 + 28,
-        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
-    );
+    // Row 5 is "Lock screen" in the same top-aligned panel.
+    let lock_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 5) * 14 + 7);
     let qs_reopened = move_by(button.0 + 8 - change_row.0, button.1 + 8 - change_row.1) && click();
     let locked = qs_reopened
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
@@ -10661,9 +10687,10 @@ fn stage20_13_self_test() -> bool {
 /// Stage 20.12 acceptance: signing in.
 ///
 /// The kernel writes an accounts file with two local accounts: `ada`, PIN
-/// 1234, and `lin`, PIN 9876. Each line holds a salt and `SHA-256(salt ||
-/// PIN)`, computed here with the kernel's own SHA-256. The shell starts with
-/// `--accounts` and `FileRead`. With real i8042 input the kernel checks:
+/// 1234, and `lin`, PIN 9876. Each line holds a salt and PBKDF2-HMAC-SHA256
+/// verifier, computed here with the kernel's own crypto implementation. The
+/// shell receives only the public account-name catalog; the kernel retains
+/// and verifies the credential records. With real i8042 input the kernel checks:
 /// - the desktop opens at the sign-in screen, ada chosen;
 /// - Tab chooses lin;
 /// - ada's PIN is refused for lin;
@@ -10965,6 +10992,22 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
+    let storage_probe_capabilities =
+        capability::CapabilitySet::only(capability::Capability::Console)
+            .with(capability::Capability::FileRead);
+    let protected_storage = spawn_hello_gui(
+        HELLO_GUI_IMAGE,
+        &["/bin/hello-gui", "--identity-storage-probe"],
+        Some(storage_probe_capabilities),
+    )
+    .and_then(wait_hello_gui)
+    .is_some_and(|(_, status)| status == Ok(0));
+    if !step(
+        "userspace reads public names but not credential verifiers",
+        protected_storage,
+    ) {
+        return false;
+    }
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
@@ -10973,7 +11016,11 @@ fn stage20_12_self_test() -> bool {
         .with(capability::Capability::AccountManage);
     let Some(program) = userspace::load_elf_with_argv(
         WOVEN_SHELL_IMAGE,
-        &["/bin/woven-shell", "--accounts", "/etc/wovenhat/accounts"],
+        &[
+            "/bin/woven-shell",
+            "--accounts",
+            identity_runtime::PUBLIC_USERS_PATH,
+        ],
     ) else {
         return step("shell image loads", false);
     };
@@ -10993,10 +11040,11 @@ fn stage20_12_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    // WovenShell's production chrome is top-aligned: the 24-pixel taskbar
+    // starts at y=0 and Quick Settings opens immediately below it at y=26.
+    // Keep the oracle independent of shell-private layout helpers.
+    let top = 0;
     let middle = height / 2;
-    let dim =
-        move |x: i32, y: i32| blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160);
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
         let mut mask = Surface::new(width as usize, 7);
@@ -11005,28 +11053,19 @@ fn stage20_12_self_test() -> bool {
         mask.draw_text(x0, 0, text, WHITE);
         (y0..y0 + 7).all(|y| {
             (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
-                    WHITE
-                } else {
-                    dim(x, y)
-                };
-                let actual = compositor::pixel(x, y);
-                if x == x0 + 82 && y == y0 + 30 {
-                    serial::write_line(format_args!(
-                        "[S20.10] panel sample actual={:?} expected={:#x}",
-                        actual, expected
-                    ));
-                }
-                actual == Ok(expected)
+                // The sign-in content sits on a frosted card over the
+                // projected wallpaper. Verify the independently rendered
+                // glyph mask here; the interaction and identity-state
+                // assertions below verify the complete authentication path.
+                mask.pixel(x, y - y0) != Some(WHITE) || compositor::pixel(x, y) == Ok(WHITE)
             })
         })
     };
     let sign_in = |first: &str, second: &str, prompt: &str| {
-        line(middle - 60, "Sign in")
-            && line(middle - 46, first)
-            && line(middle - 36, second)
+        line(middle - 52, "Sign in")
+            && line(middle - 38, first)
+            && line(middle - 28, second)
             && line(middle - 4, prompt)
-            && compositor::pixel(300, top + 12) == Ok(dim(300, top + 12))
     };
     if !step(
         "the desktop opens at the sign-in screen, ada chosen",
@@ -11040,10 +11079,10 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
-    // WovenShell hashes the PIN (100,000-iteration PBKDF2) in Ring-3 before
-    // the kernel verifies it, which takes 300-450 ticks under QEMU TCG and
-    // longer on a loaded CI runner. Wait for the kernel to record the
-    // attempt's outcome, then give the screen its usual bound to show it.
+    // The kernel verifies the plaintext PIN against the protected
+    // 100,000-iteration PBKDF2 record, which takes 300-450 ticks under QEMU
+    // TCG and longer on a loaded CI runner. Wait for the kernel to record
+    // the attempt's outcome, then give the screen its usual bound to show it.
     // PIN_CHECK_TICKS is only a liveness cap; the event gates progress.
     const PIN_CHECK_TICKS: u64 = 6000;
     let failures = || identity_runtime::failure_count(b"lin");
@@ -11087,15 +11126,9 @@ fn stage20_12_self_test() -> bool {
         return false;
     }
 
-    // Lock through Quick Settings: the lock screen wants lin's PIN. Row 5 of
-    // 8 ("Lock screen"): this geometry was stale at QS_ROWS=5/row 4, from
-    // before Tiling moved "Lock screen" to row 5 -- Change PIN and Language
-    // were both appended after it since, so only the row-count term needed
-    // updating, not the row index.
-    let lock_row = (
-        width - 4 - 164 + 28,
-        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
-    );
+    // Lock through Quick Settings: the lock screen wants lin's PIN. Quick
+    // Settings begins below the top taskbar; row 5 is "Lock screen".
+    let lock_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 5) * 14 + 7);
     let (px, py) = (width / 2, height / 2);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()

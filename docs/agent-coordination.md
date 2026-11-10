@@ -9041,3 +9041,17 @@ CPUs in `target/shell-regression/phase-d-{1,2,4}cpu-*`; the exact directories
 are recorded in the implementation ledger. The full Windows preservation gate
 passed at `audit-artifacts/acceptance-20261109-142532-913`. No Cargo/QEMU chain
 is active. Phase E was not started; physical qualification remains deferred.
+
+## Codex - Phase E authentication infrastructure (2026-11-09)
+
+User authorized proceeding to Phase E while physical qualification remains
+deferred. Claim the existing authentication boundary only: `kernel/src/entropy.rs`,
+`kernel/src/accounts.rs`, `kernel/src/identity_runtime.rs`,
+`kernel/src/identity_storage.rs`, `libwoven/src/identity.rs`, the account-facing
+portion of `libwoven/src/lib.rs`, focused authentication harnesses, and the
+boot/login/desktop Phase E records. Preserve the accepted Phase B-D boot,
+WovenInit, splash and compositor contracts. First audit and close secure salt
+generation, protected verifier storage, privileged authentication/IPC authority,
+first-run fail-closed behavior, durable rate limiting, and negative session-minting
+tests before claiming the gate. Do not start Phase F UI work or perform physical
+device, firmware, TPM provisioning, media-write, commit, or push operations.

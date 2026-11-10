@@ -14,6 +14,19 @@ use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
 pub const ACCOUNTS_PATH: &str = "/etc/wovenhat/accounts";
+
+/// Credential-bearing records are kernel-private even when a process has
+/// broad file capabilities. Authentication clients receive the separately
+/// published public user-name catalog instead.
+pub(crate) fn userspace_protected_path(path: &str) -> bool {
+    [
+        ACCOUNTS_PATH,
+        "/mnt/etc/wovenhat/accounts",
+        "/wfs/identity-state-a",
+        "/wfs/identity-state-b",
+    ]
+    .contains(&path)
+}
 pub(crate) const MAX_NAME: usize = 16;
 const MAX_SALT: usize = 32;
 /// Only `fresh_salt` below uses this; see its own `system-apps` gate.

@@ -26,6 +26,7 @@ STAGES={
     '20.19': ('stage20-19-test', '[S20.19] input isolation: PASSED', 'woven-shell-input-isolation', 'input isolation'),
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
     '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
+    'phase-e-missing': ('phase-e-auth-test', '[PHASE E] missing account withholds desktop: PASSED', 'phase-e-missing-account', 'missing-account fail-closed'),
     '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
     '20.18': ('stage20-18-test', '[S20.18] 3D desktop title bars: PASSED', 'woven-shell-3d-title', '3D desktop title bars'),
 }
@@ -62,7 +63,7 @@ def main():
     image=app_dir/'target'/'x86_64-unknown-none'/'release'/APP
     env=dict(os.environ)
     env['WOVENHAT_SHELL_IMAGE']=str(image)
-    if a.stage == '24.59':
+    if a.stage in ('24.59', 'phase-e-missing'):
         # The acceptance image uses the production identity/session capability
         # boundary, so wire the same signed package set as a system-app boot.
         test_public_key = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'
@@ -114,7 +115,12 @@ def main():
     vars_copy=None
     if a.firmware_vars is not None:
         vars_copy=out/'OVMF_VARS.fd'; shutil.copyfile(a.firmware_vars,vars_copy)
-    cmd=[str(qemu),'-accel','tcg,tb-size=128','-machine','q35','-m','256M','-smp',str(a.cpus),
+    # Credential creation/rotation is required to use the kernel's secure
+    # entropy boundary. Model RDRAND explicitly for that gate; QEMU's default
+    # qemu64 CPU omits it and must remain useful for separate fail-closed
+    # coverage rather than silently exercising the non-cryptographic fallback.
+    cpu_args = ['-cpu', 'max'] if a.stage == '24.59' else []
+    cmd=[str(qemu),'-accel','tcg,tb-size=128','-machine','q35',*cpu_args,'-m','256M','-smp',str(a.cpus),
          '-display','none','-serial',f'file:{serial}','-no-reboot',
          '-device','isa-debug-exit,iobase=0xf4,iosize=0x04',
          '-drive',f'if=pflash,format=raw,readonly=on,file={fw}',
@@ -128,7 +134,7 @@ def main():
             print(f'QEMU timeout. Evidence: {out}',file=sys.stderr); return 1
     text=serial.read_text(errors='replace') if serial.exists() else ''
     for line in text.splitlines():
-        if '[S20.' in line or 'woven-shell' in line or 'hello-gui' in line: print('  '+line.strip())
+        if '[S20.' in line or '[PHASE E]' in line or '[SESSION]' in line or 'woven-shell' in line or 'hello-gui' in line: print('  '+line.strip())
     if code != 33 or marker not in text:
         print(f'FAILED (exit {code}). Evidence: {out}',file=sys.stderr)
         print(text[-3000:],file=sys.stderr); return 1

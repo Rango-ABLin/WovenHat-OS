@@ -40,6 +40,7 @@ struct LockoutEntry {
 
 const MAX_BINDINGS: usize = libwoven::identity::MAX_SESSIONS;
 const LOCKOUT_TICKS: u64 = 500;
+pub(crate) const PUBLIC_USERS_PATH: &str = "/etc/wovenhat/users";
 static AUTHORITY: IrqMutex<Option<Authority>> = IrqMutex::with_rank(None, 4);
 static BINDINGS: IrqMutex<[Option<Binding>; MAX_BINDINGS]> =
     IrqMutex::with_rank([None; MAX_BINDINGS], 5);
@@ -49,11 +50,37 @@ static LOCKOUTS: IrqMutex<[Option<LockoutEntry>; libwoven::identity::MAX_USERS]>
     IrqMutex::with_rank([None; libwoven::identity::MAX_USERS], 6);
 static LOCKOUT_SATURATED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "system-apps")]
+fn fresh_credential_salt() -> Result<[u8; 16], Error> {
+    let mut salt = [0u8; 16];
+    crate::entropy::fill_secure(&mut salt).map_err(|_| Error::NotReady)?;
+    Ok(salt)
+}
+
 pub(crate) fn install(authority: Authority) {
     *AUTHORITY.lock() = Some(authority);
     BINDINGS.lock().fill(None);
     LOCKOUTS.lock().fill(None);
     LOCKOUT_SATURATED.store(false, Ordering::Release);
+}
+
+#[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
+fn publish_public_users(authority: &Authority) -> Result<(), Error> {
+    let mut names = [0u8; libwoven::identity::MAX_USERS * (libwoven::accounts::MAX_NAME + 1)];
+    let length = authority
+        .encode_public_users(&mut names)
+        .map_err(Error::Identity)?;
+    match crate::vfs::stat(PUBLIC_USERS_PATH) {
+        Ok(stat) if stat.kind == crate::vfs::NodeKind::File => {
+            crate::vfs::overwrite_trusted(PUBLIC_USERS_PATH, &names[..length])
+                .map_err(|_| Error::Storage)
+        }
+        Err(crate::vfs::Error::NotFound) => {
+            crate::vfs::create_read_only(PUBLIC_USERS_PATH, &names[..length])
+                .map_err(|_| Error::Storage)
+        }
+        _ => Err(Error::Storage),
+    }
 }
 
 #[cfg(any(feature = "stage20-12-test", feature = "system-apps"))]
@@ -90,6 +117,7 @@ pub(crate) fn load_accounts_file(path: &str) -> Result<(), Error> {
     if count == 0 {
         return Err(Error::Storage);
     }
+    publish_public_users(&authority)?;
     install(authority);
     crate::serial::write_line(format_args!(
         "[IDENTITY] loaded {} account credentials from {}",
@@ -103,6 +131,7 @@ pub(crate) fn load_durable_or_accounts(path: &str) -> Result<(), Error> {
     let mut snapshot = [0u8; libwoven::identity::SNAPSHOT_BYTES];
     if let Ok(sequence) = crate::identity_storage::load(&mut snapshot) {
         let authority = Authority::decode_snapshot(&snapshot).map_err(Error::Identity)?;
+        publish_public_users(&authority)?;
         install(authority);
         crate::serial::write_line(format_args!(
             "[IDENTITY] loaded durable WID2 snapshot sequence={}",
@@ -128,10 +157,7 @@ pub(crate) fn change_pin(
     {
         return Err(Error::Owner);
     }
-    let mut salt = [0u8; 16];
-    for chunk in salt.chunks_mut(8) {
-        chunk.copy_from_slice(&crate::entropy::random_u64().to_le_bytes()[..chunk.len()]);
-    }
+    let salt = fresh_credential_salt()?;
     {
         let mut authority = AUTHORITY.lock();
         authority
@@ -158,10 +184,7 @@ pub(crate) fn admin_add_user(
     administrator: bool,
 ) -> Result<libwoven::identity::UserId, Error> {
     let session = owner_session(owner)?;
-    let mut salt = [0u8; 16];
-    for chunk in salt.chunks_mut(8) {
-        chunk.copy_from_slice(&crate::entropy::random_u64().to_le_bytes()[..chunk.len()]);
-    }
+    let salt = fresh_credential_salt()?;
     let mut authority = AUTHORITY.lock();
     let authority = authority.as_mut().ok_or(Error::NotReady)?;
     let group = authority.group_id(b"users").map_err(Error::Identity)?;
@@ -355,33 +378,12 @@ pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId
                 note_failure(name, authority.lockout_failures());
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
-            Err(error) => return Err(Error::Identity(error)),
-        };
-        let view = authority.view(session).map_err(Error::Identity)?;
-        (session, view)
-    };
-    clear_failures(name);
-    BINDINGS.lock()[binding_slot] = Some(binding(session, owner, name));
-    if apply_view(owner, view).is_err() {
-        let _ = close(owner, session);
-        return Err(Error::Task);
-    }
-    Ok(session)
-}
-
-pub(crate) fn open_digest(owner: u64, name: &[u8], digest: &[u8; 32]) -> Result<SessionId, Error> {
-    check_lockout(name)?;
-    let binding_slot = BINDINGS
-        .lock()
-        .iter()
-        .position(Option::is_none)
-        .ok_or(Error::Full)?;
-    let (session, view) = {
-        let mut authority = AUTHORITY.lock();
-        let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        let session = match authority.open_named_session_digest(name, digest) {
-            Ok(session) => session,
-            Err(IdentityError::WrongPassword) => {
+            Err(IdentityError::NotFound) => {
+                // Do the same bounded PBKDF2 work as a real account before
+                // returning the same public error. This prevents both error-
+                // and coarse timing-based account enumeration.
+                let dummy = libwoven::accounts::hash_pin(b"WovenHatDummySalt", password);
+                core::hint::black_box(dummy);
                 note_failure(name, authority.lockout_failures());
                 return Err(Error::Identity(IdentityError::WrongPassword));
             }
@@ -417,33 +419,6 @@ pub(crate) fn unlock(owner: u64, session: SessionId, password: &[u8]) -> Result<
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
         match authority.unlock(binding.session, password) {
-            Ok(()) => {}
-            Err(IdentityError::WrongPassword) => {
-                note_failure(
-                    &binding.name[..binding.name_len],
-                    authority.lockout_failures(),
-                );
-                return Err(Error::Identity(IdentityError::WrongPassword));
-            }
-            Err(error) => return Err(Error::Identity(error)),
-        }
-        authority.view(binding.session).map_err(Error::Identity)?
-    };
-    clear_failures(&binding.name[..binding.name_len]);
-    apply_view(owner, view)
-}
-
-pub(crate) fn unlock_digest(
-    owner: u64,
-    session: SessionId,
-    digest: &[u8; 32],
-) -> Result<(), Error> {
-    let binding = owned_binding(owner, session)?;
-    check_lockout(&binding.name[..binding.name_len])?;
-    let view = {
-        let mut authority = AUTHORITY.lock();
-        let authority = authority.as_mut().ok_or(Error::NotReady)?;
-        match authority.unlock_digest(binding.session, digest) {
             Ok(()) => {}
             Err(IdentityError::WrongPassword) => {
                 note_failure(
@@ -710,6 +685,31 @@ fn apply_view(owner: u64, view: SessionView) -> Result<(), Error> {
 
 #[cfg(any(feature = "stage24-4-test", feature = "stage24-5-test"))]
 pub(crate) fn self_test() -> bool {
+    let mut authority = Authority::new();
+    let Ok(group) = authority.add_group(b"users") else {
+        return false;
+    };
+    if authority
+        .add_administrator(b"alice", group, b"salt", b"1234")
+        .is_err()
+    {
+        return false;
+    }
+    install(authority);
+    for _ in 0..libwoven::identity::DEFAULT_LOCKOUT_FAILURES {
+        if !matches!(
+            open(1, b"unknown", b"wrong"),
+            Err(Error::Identity(IdentityError::WrongPassword))
+        ) {
+            return false;
+        }
+    }
+    if !matches!(
+        open(1, b"unknown", b"wrong"),
+        Err(Error::Identity(IdentityError::Locked))
+    ) {
+        return false;
+    }
     let mut authority = Authority::new();
     let Ok(group) = authority.add_group(b"users") else {
         return false;
