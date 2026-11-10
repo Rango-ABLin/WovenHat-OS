@@ -1,49 +1,48 @@
 # Security audit
 
-Status: IN PROGRESS. Findings are source observations, not exploit proofs.
+Status: PHASE E ACCEPTED, 2026-11-10. Later login, session, recovery and
+hardware/trust findings remain open until their own gates pass.
 
-The kernel identity authority is the authentication boundary. The existing
-verified-open syscall checks AccountManage, limits message size, copies user
-bytes, decodes the name/digest, and records success/failure in the audit path.
-identity_runtime binds sessions to owners, applies task credentials, and closes
-owner sessions during release. Concurrency, teardown and negative runtime
-qualification remain required.
+The kernel identity authority is the authentication boundary. Plaintext
+credentials cross the bounded syscall ABI only after user buffers are copied;
+the kernel verifies them against its protected authority state, binds a session
+to the calling process, applies credentials only after success, and releases
+owner bindings during process teardown. The retired digest-replay syscalls keep
+their ABI numbers reserved but return failure without authenticating.
 
-Existing passwords use PBKDF2-HMAC-SHA256 at 100000 iterations. Argon2id is
-not established. Account-backed UI computes the digest; the privileged kernel
-checks it. Audit whether public account records expose verifier-equivalent
-material and permit credential replay before approving this interface.
+Passwords use PBKDF2-HMAC-SHA256 at 100000 iterations. Argon2id is not
+established. Credential salts are generated only by `entropy::fill_secure`,
+which requires CPU RDRAND and zeroes the destination on failure; provisioning
+and PIN rotation fail closed when that source is unavailable.
 
-Source trace confirms `libwoven/src/lib.rs::accounts::Account` parses the
-stored salt/hash and exposes `credential_material`. In
-`libwoven/src/identity.rs`, `Credential::verify_digest` compares the submitted
-32 bytes directly with the stored hash. The verified-open syscall requires
-AccountManage, so this is an exposed password-equivalent to a trusted login
-client, not evidence that an arbitrary process can call the syscall. The
-accounts import uses `vfs::create_read_only`, whose file mode is 0444. Public
-profiles and protected verifiers are therefore not separated in this path.
-An attacker model and negative tests must cover both record reads and trusted
-client compromise/replay; avoid claiming plaintext-only verification.
+Verifier-bearing account and WID2 paths are kernel-protected and cannot be
+opened through the userspace VFS ABI. A separate public names catalog supplies
+only bounded account names to WovenShell. The shell no longer receives salts or
+hashes, and the public libwoven digest helpers fail closed. The Stage 20.12
+runtime probe verifies that userspace can read names but cannot read verifier
+records.
 
-Observed gaps against the new directive:
+Accepted Phase E controls:
 
-- identity_runtime::admin_add_user and change_pin obtain salts through
-  entropy::random_u64. That API documents a best-effort fallback unsuitable
-  for cryptographic material. The feature-gated secure pool explicitly has
-  no production entropy source. Do not claim secure provisioning readiness.
-- kernel_main permits missing accounts and starts the shell without --accounts.
-  The account-backed shell path fails closed on unreadable/empty records, but
-  the no-account mode needs explicit setup/recovery policy and negative tests.
-- Session bootstrap gives the shell AccountManage, ProcessCreate, PowerControl
-  and other capabilities before sign-in. Their use before authentication and
-  inheritance into children require a complete authority trace.
-- F12 diagnostic-console commands and fallback init need authentication and
-  recovery bypass review.
-- Desktop is not included in the existing four-kind service supervisor.
+- The installer creates the initial account with secure entropy and publishes
+  the durable account/identity state. An installed production boot with missing
+  or invalid account state logs setup-required and halts before WovenShell.
+- Unknown and known usernames take the same bounded PBKDF authentication path;
+  both feed the fixed-capacity per-account failure table. The configurable
+  threshold is durable, while transient failure counts and cooldowns reset at
+  boot and are therefore not claimed as durable state.
+- Wrong credentials, missing accounts and unavailable entropy cannot create an
+  active privileged session. Owner-bound identity and ABI gates pass on 1/2/4
+  CPUs, including reserved digest-replay rejection.
+- Correct sign-in applies the selected user's identity, lock requires the same
+  kernel authority to unlock, and PIN rotation invalidates the old credential.
 
-No new bypass, credential, entropy generator, capability or cryptography is
-introduced by this baseline unit. Secure Boot firmware compatibility is not
-proved by the optional WBOT ramdisk manifest generated by build.rs.
+Remaining boundaries are deliberately outside Phase E: Phase F must qualify
+the full graphical login and accessibility behavior; Phases G/H must prove
+session-owned launch authority, inheritance, logout cleanup and desktop
+authorization; recovery/F12/fallback behavior remains subject to its later
+negative integration gates. Production Secure Boot keys, physical TPM and
+native hardware remain final trust/hardware work.
 
 The kernel shell authorizes commands against the current kernel task's
 capabilities (`shell::authorize`), not an authenticated desktop session.

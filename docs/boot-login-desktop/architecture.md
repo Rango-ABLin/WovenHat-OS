@@ -1,7 +1,8 @@
 # Boot, login and desktop architecture
 
-Status: IN PROGRESS through Phase C, 2026-11-09. Phase A inventory, Phase B
-software/QEMU boot recovery, and Phase C WovenInit readiness are accepted.
+Status: IN PROGRESS through Phase E, 2026-11-10. Phase A inventory, Phase B
+software/QEMU boot recovery, Phase C WovenInit readiness, Phase D splash
+handoff, and Phase E authentication infrastructure are accepted.
 
 Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
 review found no changes since the initial audit in session.rs, accounts.rs,
@@ -41,12 +42,20 @@ the shell as a system service. It records the process identifier; `active()`
 also requires compositor ownership. Process spawn and display ownership are
 not proof of successful authentication or an interactive frame.
 
-WovenShell currently combines sign-in, lock UI, and desktop in
-`apps/woven-shell/src/main.rs`. Account-backed sign-in computes a digest in
-userspace and requests `session_open_verified`; the syscall copies bounded
-input, checks AccountManage, and delegates to kernel identity authority.
-`identity_runtime::apply_view` assigns task credentials. This is an existing
-architecture to audit and extend, not grounds to create a competing stack.
+WovenShell combines sign-in, lock UI, and desktop in
+`apps/woven-shell/src/main.rs`, but it receives only the public bounded account
+name catalog. Plaintext credentials are copied through the bounded identity ABI
+and verified by the kernel authority; verifier-bearing account/WID2 files are
+not userspace-readable. `identity_runtime::apply_view` assigns task credentials
+only after successful authentication. Digest-replay syscall numbers remain
+reserved and fail closed.
+
+The installer is the first-account provisioning authority. It obtains salts
+from the kernel secure-entropy boundary and publishes durable account and WID2
+state. A production installed boot with missing or invalid account state stops
+before starting WovenShell; only the explicitly feature-gated hardware demo may
+defer account installation. Phase E accepts this authentication substrate, not
+the later graphical login/session/desktop phase behavior.
 
 The fallback `userspace::create_init_process` still provides the diagnostic
 assembly stub as `/init`; it is not used as proof of production readiness.

@@ -1,6 +1,6 @@
 # Acceptance matrix
 
-Status: IN PROGRESS. Phases A-D are COMPLETE; Phase E is the next software
+Status: IN PROGRESS. Phases A-E are COMPLETE; Phase F is the next software
 gate. Phase B physical firmware/trust qualification remains explicitly
 deferred to the final hardware pass.
 
@@ -10,7 +10,7 @@ deferred to the final hardware pass.
 | B: UEFI handoff | positive 1/2/4-CPU boots, missing/corrupt kernel failures | COMPLETE (software/QEMU; physical firmware, PXE/NIC and production Secure Boot remain hardware/trust work) |
 | C: init/readiness | essential dependencies and bounded failure recovery | COMPLETE (bounded WovenInit DAG, ownership/liveness readiness, deadline and all-process rollback at 1/2/4 CPUs) |
 | D: splash | framebuffer captures and ownership transition | COMPLETE (terminal-owned branded splash, truthful timer scope, exclusive compositor handoff, and visual 1/2/4-CPU evidence) |
-| E: authentication | entropy, protected storage, wrong credentials, rate limits, first run | NOT STARTED |
+| E: authentication | entropy, protected storage, wrong credentials, rate limits, first run | COMPLETE (kernel-owned plaintext verification, protected verifier storage, secure-entropy failure closure, installer provisioning, missing-account refusal, and 1/2/4-CPU evidence) |
 | F: login | graphical/input/accessibility evidence through real authority | NOT STARTED |
 | G: session | owner/identity isolation, replay rejection, lock/logout cleanup | NOT STARTED |
 | H: desktop | authenticated launch and real taskbar/apps/windows/input | NOT STARTED |

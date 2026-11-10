@@ -907,6 +907,29 @@ presence only; it never treats an address or table as authenticated hardware
 evidence. Missing or malformed TPM2 data cannot silently downgrade the
 identity or volume-crypto trust boundary.
 
+### Boot/login Phase E - authentication boundary
+
+`kernel/src/identity_runtime.rs` is the credential-verification and
+session-minting authority. The public ABI copies bounded plaintext credentials
+before verification; task credentials are applied only after success and the
+binding remains owner-scoped. Legacy verified-digest syscall numbers remain
+reserved for ABI stability but fail closed. Known and unknown names execute the
+same bounded PBKDF path and contribute to the bounded lockout table.
+
+`kernel/src/identity_storage.rs` and the VFS protected-path policy keep account
+verifiers and WID2 snapshots unavailable to userspace. `/etc/wovenhat/users`
+contains only public names for WovenShell. New account and PIN salts use
+`entropy::fill_secure`, which requires RDRAND, retries each word a bounded
+number of times, zeroes the destination on failure and never substitutes timer
+entropy.
+
+The installer provisions the first durable account. Production startup loads
+valid persistent state before WovenShell and withholds the desktop when account
+state is missing or invalid. The `hardware-demo` exception is feature-gated and
+is not production policy. Phase E acceptance covers the authentication
+substrate; graphical login behavior and session-owned desktop launch remain
+Phase F and G/H gates.
+
 ### Stage 24.16 - durable/configurable lockout policy
 
 `Authority` stores a bounded failed-authentication threshold (1..=32) in the

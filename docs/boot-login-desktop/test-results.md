@@ -1,6 +1,6 @@
 # Test results
 
-Status: IN PROGRESS. No full directive phase is accepted by this unit.
+Status: IN PROGRESS. Phases A-E are accepted; Phase F is next.
 
 ## Windows baseline attempts
 
@@ -62,9 +62,9 @@ Status: COMPLETE for inventory/baseline, runtime source a980619e. The full
 network-enabled RUN-STAGE10.7.ps1 run acceptance-20261104-194935-034 exited 0
 with its final acceptance marker. Host Python: 208 tests, six skips. Build,
 host/kernel warning-denying Clippy, Cargo host tests, 60 repeated memory/boot
-runs, network 1/2/4 CPUs and isolated Stage10.4–10.7 1/2/4 matrices all pass.
-All eight final feature lints (Stage12.1–12.5, Stage15.2, Stage32.1/32.2) pass.
-Stage12.1–12.5 QEMU also passes all 15 cases; final-stage12-matrix.log retains
+runs, network 1/2/4 CPUs and isolated Stage10.4â€“10.7 1/2/4 matrices all pass.
+All eight final feature lints (Stage12.1â€“12.5, Stage15.2, Stage32.1/32.2) pass.
+Stage12.1â€“12.5 QEMU also passes all 15 cases; final-stage12-matrix.log retains
 individual evidence paths. This does not accept later startup/security phases
 or substitute mocked graphics output for real graphical qualification.
 
@@ -77,7 +77,7 @@ is claimed for that test-only spelling change. Original lint output retained.
 
 ## B1 configuration acceptance
 
-Runtime aaeaaf8f: TESTED — PASS for the bounded B1 unit. All 27 real UEFI
+Runtime aaeaaf8f: TESTED â€” PASS for the bounded B1 unit. All 27 real UEFI
 configuration cases passed with the same prepared image/source hashes across
 1/2/4 CPUs. Final case logs: audit-artifacts/boot-config-b1/final-{1,2,4}cpu.log.
 The individual timestamped directories retain commands, source/image/firmware
@@ -87,12 +87,34 @@ and oversized failure screens were visually inspected.
 Existing Stage15.5 signed-handoff passed on 1/2/4 CPUs. The complete Windows
 preservation run audit-artifacts/acceptance-20261104-205802-369/ exited 0:
 213 Python tests (six skips), Rust host tests, warning-denying host/kernel
-Clippy, 60 memory repetitions, network 1/2/4 and isolated Stage10.4–10.7.
+Clippy, 60 memory repetitions, network 1/2/4 and isolated Stage10.4â€“10.7.
 Five actual-source parser tests and five host oracle/provenance tests pass;
 standalone UEFI target and fixture-builder Clippy pass. No warning or assertion
 was suppressed. The original trailing-data mismatch and initial upstream lint
 failures remain retained. This does not accept full Phase B or authenticated
 firmware boot. Next: missing/corrupt/unsupported kernel-image failure handling.
+
+## Phase E authentication acceptance
+
+Source: `1ff84dcc3dd7a34ae172b95ce7f01c26f3a1a75f`.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Missing/invalid account withholds desktop and session | `target/phase-e-missing-account-{1,2,4}cpu` | PASS |
+| Secure entropy unavailable/zeroized failure | `target/phase-e-entropy-failure-{1,2,4}cpu` | PASS |
+| First-user installer provisioning | `target/phase-e-first-user-{1,2,4}cpu` | PASS |
+| Protected verifier storage and real sign-in/lock | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| Owner binding, known/unknown lockout | `audit-artifacts/stage24.4-{1,2,4}cpu-*` | PASS |
+| Identity syscall ABI / retired replay calls | `audit-artifacts/stage24.5-{1,2,4}cpu-*` | PASS |
+| Durable Change-PIN flow | `target/woven-shell-change-pin-{1,2,4}cpu` | PASS |
+| Full Windows preservation | `audit-artifacts/acceptance-20261110-123957-212` | PASS |
+
+Affected kernel feature Clippy and workspace `cargo clippy --all-targets -- -D
+warnings` passed. The full gate ran 220 host harness tests, host Rust tests,
+warning-denying build/lints, 10 one-CPU, 30 two-CPU and 20 four-CPU memory boots,
+live network 1/2/4 and Stage 10.4-10.7 1/2/4. Its read-only physical/trust
+preflight correctly remained not qualified and made no device or firmware
+change. No timeout, retry budget, marker or assertion was relaxed.
 
 
 ## B2 accepted bounded unit at 72be85aa

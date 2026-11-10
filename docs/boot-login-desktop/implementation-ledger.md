@@ -179,3 +179,22 @@ desktop frames were visually inspected. Ten focused host oracles, workspace
 all-targets Clippy, production kernel Clippy, formatting, and diff checks pass.
 The full Windows preservation chain passed at
 `audit-artifacts/acceptance-20261109-142532-913`.
+
+## BLD-E Phase E authentication closure (2026-11-10)
+
+Status: ACCEPTED. Production credential creation and rotation use the bounded
+secure-entropy API and fail closed without RDRAND. Verifier-bearing account and
+WID2 paths are protected from userspace; WovenShell consumes a separate
+names-only catalog and sends bounded plaintext credentials to the kernel
+authority. Digest-replay calls are retired fail-closed without renumbering the
+ABI. Missing or invalid production account state stops before the desktop, and
+the existing installer is the first-account provisioning path.
+
+The missing-account, unavailable-entropy, first-user installer, Stage 20.12
+sign-in/lock, Stage 24.4 identity/lockout, Stage 24.5 ABI and Stage 24.59
+Change-PIN gates passed at 1/2/4 CPUs. Direct feature and host-target Clippy
+passed with warnings denied. The complete Windows preservation chain passed at
+`audit-artifacts/acceptance-20261110-123957-212` with 220 host harness tests,
+host Rust tests, 60 repeated memory boots, live networking, and Stage 10.4-10.7
+on 1/2/4 CPUs. Phase F is next; no graphical-login, session/desktop or physical
+hardware gate is claimed by this entry.

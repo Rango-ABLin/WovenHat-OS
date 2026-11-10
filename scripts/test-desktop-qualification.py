@@ -534,6 +534,32 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # allow the guest a full settling interval before injecting the
             # PIN, especially under host CPU contention.
             time.sleep(8.0)
+            login = output / "woven-login.ppm"
+            _, _, login_pixels = capture_frame(
+                qmp, login, time.monotonic() + args.frame_timeout, timings, "woven_login"
+            )
+            screenshots.append(login.name)
+
+            # F4 is the keyboard-only accessibility control advertised by
+            # WovenLogin. Capture both states and require an actual frame
+            # change before restoring the normal theme for the journey below.
+            qmp.key("f4", 150)
+            login_hc = output / "woven-login-high-contrast.ppm"
+            _, _, high_contrast_pixels = capture_until_changed(
+                qmp,
+                login_hc,
+                login_pixels,
+                time.monotonic() + args.frame_timeout,
+                timings,
+                "woven_login_high_contrast",
+                1000,
+            )
+            if high_contrast_pixels == login_pixels:
+                raise GateFailure("WovenLogin high-contrast action did not change the frame")
+            screenshots.append(login_hc.name)
+            qmp.key("f4", 150)
+            time.sleep(0.5)
+
             input_started = time.monotonic()
             for attempt in range(3):
                 for key in ("1", "2", "3", "4", "ret"):

@@ -330,6 +330,26 @@ fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
     (text, if seconds { 8 } else { 5 })
 }
 
+/// Login-screen date in an unambiguous, fixed-width form.
+fn date_text(time: Option<DateTime>) -> [u8; 10] {
+    let Some(time) = time else {
+        return *b"---- -- --";
+    };
+    let year = time.year;
+    [
+        b'0' + ((year / 1000) % 10) as u8,
+        b'0' + ((year / 100) % 10) as u8,
+        b'0' + ((year / 10) % 10) as u8,
+        b'0' + (year % 10) as u8,
+        b'-',
+        b'0' + time.month / 10,
+        b'0' + time.month % 10,
+        b'-',
+        b'0' + time.day / 10,
+        b'0' + time.day % 10,
+    ]
+}
+
 /// Fill an already-allocated, already-zeroed catalog in place. Never builds
 /// or returns a `Catalog` by value: at `MAX_TRANSLATIONS` entries it is
 /// several KiB, and the user stack is 16 KiB (see `DesktopState`), so even a
@@ -715,6 +735,40 @@ impl Desktop {
         let middle = self.height / 2;
         self.screen()
             .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
+    }
+
+    fn login_card(&self) -> Area {
+        let width = (self.width - 16).clamp(1, 360);
+        Area::new((self.width - width) / 2, self.height / 2 - 130, width, 250)
+            .intersect(self.screen())
+    }
+
+    fn login_account_area(&self, index: usize) -> Area {
+        Area::new(
+            self.width / 2 - 90,
+            self.height / 2 - 41 + index as i32 * 10,
+            180,
+            10,
+        )
+        .intersect(self.screen())
+    }
+
+    fn login_submit_area(&self) -> Area {
+        Area::new(self.width / 2 - 48, self.height / 2 + 30, 96, 18)
+            .intersect(self.screen())
+    }
+
+    fn login_action_area(&self, index: usize) -> Area {
+        const WIDTH: i32 = 74;
+        const GAP: i32 = 6;
+        let total = 3 * WIDTH + 2 * GAP;
+        Area::new(
+            (self.width - total) / 2 + index as i32 * (WIDTH + GAP),
+            self.height / 2 + 58,
+            WIDTH,
+            18,
+        )
+        .intersect(self.screen())
     }
 
     /// The taskbar sits flush at the top of the screen. Keep this as a
@@ -1598,10 +1652,17 @@ impl Desktop {
 
         // A frosted card behind the sign-in/lock content, Windows-11-style,
         // instead of text floating directly on the dimmed wallpaper.
-        let card = Area::new(self.width / 2 - 140, middle - 120, 280, 170);
+        let card = if self.mode == LockMode::SignIn {
+            self.login_card()
+        } else {
+            Area::new(self.width / 2 - 140, middle - 120, 280, 170)
+        };
         fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, rgb(10, 14, 24), 170);
 
         if self.mode == LockMode::SignIn {
+            let date = date_text(self.time);
+            let date = core::str::from_utf8(&date).unwrap_or("---- -- --");
+            canvas.draw_text_system(centred(date), middle - 112, date, theme_muted());
             // A circular avatar for the selected account: its initial inside
             // a filled circle, the same technique used for rounded chrome.
             let initial = self.accounts[self.chosen]
@@ -1685,6 +1746,32 @@ impl Desktop {
                 fill_circle(canvas, left + index * 10 + 3, middle + 15, 6, theme_text());
             }
         }
+        if self.mode == LockMode::SignIn {
+            let submit = self.login_submit_area();
+            fill_rounded(canvas, submit, CHROME_RADIUS_SMALL, theme_entry(true));
+            let label = catalog.lookup("sign_in", "Sign in");
+            canvas.draw_text_system(
+                submit.x + (submit.width - font::text_width(label) as i32) / 2,
+                submit.y + 6,
+                label,
+                theme_text(),
+            );
+            for (index, label) in ["Power F2", "Restart F3", "Contrast F4"]
+                .iter()
+                .enumerate()
+            {
+                let action = self.login_action_area(index);
+                fill_rounded(canvas, action, CHROME_RADIUS_SMALL, theme_panel());
+                canvas.draw_text_system(
+                    action.x + (action.width - font::text_width(label) as i32) / 2,
+                    action.y + 6,
+                    label,
+                    theme_text(),
+                );
+            }
+            let hint = "Tab user   Enter sign in";
+            canvas.draw_text_system(centred(hint), middle + 88, hint, theme_muted());
+        }
     }
 
     fn lock(&mut self) -> Area {
@@ -1757,6 +1844,9 @@ impl Desktop {
     /// A key at the lock screen. Returns the area to repaint.
     fn lock_key(&mut self, key: Key) -> Area {
         match key {
+            Key::F2 if self.mode == LockMode::SignIn => self.power(false),
+            Key::F3 if self.mode == LockMode::SignIn => self.power(true),
+            Key::F4 if self.mode == LockMode::SignIn => self.toggle_login_contrast(),
             Key::Char(digit) if digit.is_ascii_digit() => {
                 if self.entry_length < MAX_PIN {
                     self.entry[self.entry_length] = digit as u8;
@@ -1870,6 +1960,51 @@ impl Desktop {
             }
             _ => Area::new(0, 0, 0, 0),
         }
+    }
+
+    fn toggle_login_contrast(&mut self) -> Area {
+        let next = u8::from(!high_contrast());
+        THEME_MODE.store(next, Ordering::Relaxed);
+        log(if next != 0 {
+            &[b"woven-shell: login high contrast on"]
+        } else {
+            &[b"woven-shell: login high contrast off"]
+        });
+        self.screen()
+    }
+
+    fn login_pointer_press(&mut self) -> Area {
+        if self.mode != LockMode::SignIn {
+            return Area::new(0, 0, 0, 0);
+        }
+        let (x, y) = self.pointer;
+        if let Some(index) = self
+            .accounts
+            .iter()
+            .enumerate()
+            .find_map(|(index, account)| {
+                (account.is_some() && self.login_account_area(index).contains(x, y))
+                    .then_some(index)
+            })
+        {
+            self.chosen = index;
+            self.forget_entry();
+            self.prompt = LockPrompt::Enter;
+            return self.lock_account_area();
+        }
+        if self.login_submit_area().contains(x, y) {
+            return self.lock_key(Key::Enter);
+        }
+        if self.login_action_area(0).contains(x, y) {
+            return self.power(false);
+        }
+        if self.login_action_area(1).contains(x, y) {
+            return self.power(true);
+        }
+        if self.login_action_area(2).contains(x, y) {
+            return self.toggle_login_contrast();
+        }
+        Area::new(0, 0, 0, 0)
     }
 
     /// Securely wipe the stashed current PIN.
@@ -2747,10 +2882,14 @@ impl Desktop {
         if area.is_empty() {
             return None;
         }
-        // Locked, nothing but the lock screen is drawn: no window, no
-        // notification, no pointer.
+        // Locked, nothing but the lock screen and its own pointer are drawn:
+        // no window or notification content may leak through.
         if self.locked {
             painter.draw(area, |canvas| self.render_lock(canvas));
+            let cursor = self.cursor_area().intersect(area);
+            if !cursor.is_empty() {
+                painter.overlay(cursor, |canvas| self.render_cursor(canvas));
+            }
             return None;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
@@ -3192,6 +3331,10 @@ impl Desktop {
         if self.locked {
             return match event {
                 InputEvent::Key(key) => self.lock_key(key),
+                InputEvent::PointerButton {
+                    button: 0,
+                    pressed: true,
+                } => self.login_pointer_press(),
                 _ => empty,
             };
         }
@@ -3469,10 +3612,10 @@ impl Desktop {
             x.clamp(0, self.desktop_width - 1),
             y.clamp(0, self.height - 1),
         );
+        self.pointer_visible = true;
         if self.locked {
             return Area::new(0, 0, 0, 0);
         }
-        self.pointer_visible = true;
         let moved = self.drag_to_pointer();
         if self.drag.is_none() {
             self.forward_pointer_move();
@@ -3899,7 +4042,7 @@ fn main(args: Args) -> ! {
             let pointer_before = (desktop.pointer, desktop.pointer_visible);
             let cursor_before = desktop.cursor_area();
             dirty.add(desktop.handle_input(event));
-            if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
+            if pointer_before != (desktop.pointer, desktop.pointer_visible) {
                 dirty.add(cursor_before);
                 dirty.add(desktop.cursor_area());
             }

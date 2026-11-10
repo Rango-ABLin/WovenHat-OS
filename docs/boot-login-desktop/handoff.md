@@ -1,5 +1,11 @@
 # Handoff
 
+Current directive status: Phases A-E COMPLETE at source `1ff84dcc`. Phase E
+authentication evidence is recorded in `test-results.md` and the full Windows
+preservation bundle is `audit-artifacts/acceptance-20261110-123957-212`. Phase F
+graphical login is next. Physical firmware/TPM/device qualification remains
+deferred; no physical action, commit or push was performed by Codex.
+
 Phase A: COMPLETE (inventory and baseline only). Runtime source a980619e.
 Branch: test/boot-login-baseline. Integration source: d21807ba; local merge
 aeb9d40a. Repairs: 6b4cf263 diagnostics/probe, b75b9366 persistent test fixture,

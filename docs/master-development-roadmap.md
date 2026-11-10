@@ -28,7 +28,18 @@ terminal-owned splash transitions to the owner-authorized WovenShell first
 frame through the existing exclusive compositor lease. Visual and source-bound
 acceptance passed on 1/2/4 CPUs; the complete Windows preservation chain passed
 at `audit-artifacts/acceptance-20261109-142532-913`. Next: Phase E
-authentication. No Phase E or later authority claim is made here.
+authentication. This historical Phase D entry claims no later authority.
+
+Boot/login/desktop directive - Phase E authentication accepted (2026-11-10)
+The kernel is the credential-verification and session-minting authority.
+Credential salts require secure entropy and fail closed when RDRAND is absent;
+verifier-bearing account/WID2 records are hidden from userspace behind a public
+names-only catalog; digest-replay entry points are retired fail-closed while
+their ABI numbers remain reserved. Installer provisioning, missing-account
+desktop refusal, unknown/known-user rate limiting, sign-in/lock, PIN rotation,
+and identity ABI gates pass at 1/2/4 CPUs. The complete Windows preservation
+gate passes at `audit-artifacts/acceptance-20261110-123957-212`. Next: Phase F
+graphical login. Physical firmware/TPM/native qualification remains deferred.
 
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with

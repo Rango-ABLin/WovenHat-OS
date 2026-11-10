@@ -10743,9 +10743,11 @@ fn stage20_13_self_test() -> bool {
 /// shell receives only the public account-name catalog; the kernel retains
 /// and verifies the credential records. With real i8042 input the kernel checks:
 /// - the desktop opens at the sign-in screen, ada chosen;
-/// - Tab chooses lin;
+/// - pre-auth power/accessibility actions render and F4 toggles contrast;
+/// - pointer selection chooses lin and Tab navigation remains functional;
 /// - ada's PIN is refused for lin;
-/// - lin's PIN signs in, and lin's name appears in the taskbar;
+/// - the graphical sign-in button authenticates lin through the kernel, and
+///   lin's name appears in the taskbar;
 /// - once locked, the lock screen wants lin's PIN, and refuses ada's.
 ///
 /// Rows are compared with the kernel's own rendering.
@@ -11112,6 +11114,19 @@ fn stage20_12_self_test() -> bool {
             })
         })
     };
+    let text_at = |x0: i32, y0: i32, text: &str| {
+        let width = crate::font::text_width(text) as i32;
+        let mut mask = Surface::new(width.max(1) as usize, 7);
+        let bounds = mask.bounds();
+        mask.fill_rect(bounds, UNSET);
+        mask.draw_text(0, 0, text, WHITE);
+        (y0..y0 + 7).all(|y| {
+            (x0..x0 + width).all(|x| {
+                mask.pixel(x - x0, y - y0) != Some(WHITE)
+                    || compositor::pixel(x, y) == Ok(WHITE)
+            })
+        })
+    };
     let sign_in = |first: &str, second: &str, prompt: &str| {
         line(middle - 52, "Sign in")
             && line(middle - 38, first)
@@ -11124,9 +11139,58 @@ fn stage20_12_self_test() -> bool {
     ) {
         return false;
     }
+    let action_width = 74;
+    let action_gap = 6;
+    let actions_left = (width - (3 * action_width + 2 * action_gap)) / 2;
+    let action_y = middle + 64;
     if !step(
-        "Tab chooses lin",
-        keys(&[0x0f]) && until(500, || sign_in("  ada", "> lin", "Enter PIN")),
+        "power, restart and accessibility actions rendered",
+        text_at(
+            actions_left + (action_width - crate::font::text_width("Power F2") as i32) / 2,
+            action_y,
+            "Power F2",
+        ) && text_at(
+            actions_left
+                + action_width
+                + action_gap
+                + (action_width - crate::font::text_width("Restart F3") as i32) / 2,
+            action_y,
+            "Restart F3",
+        ) && text_at(
+            actions_left
+                + 2 * (action_width + action_gap)
+                + (action_width - crate::font::text_width("Contrast F4") as i32) / 2,
+            action_y,
+            "Contrast F4",
+        ),
+    ) {
+        return false;
+    }
+    let avatar_sample = (width / 2, middle - 70);
+    let contrast_on = keys(&[0x3e])
+        && until(500, || {
+            compositor::pixel(avatar_sample.0, avatar_sample.1) == Ok(rgb(255, 255, 0))
+        });
+    let contrast_off = contrast_on
+        && keys(&[0x3e])
+        && until(500, || {
+            compositor::pixel(avatar_sample.0, avatar_sample.1) != Ok(rgb(255, 255, 0))
+        });
+    if !step("keyboard accessibility toggles high contrast", contrast_off) {
+        return false;
+    }
+    if !step(
+        "pointer chooses lin",
+        move_by(0, -26) && click() && until(500, || sign_in("  ada", "> lin", "Enter PIN")),
+    ) {
+        return false;
+    }
+    if !step(
+        "Tab navigation cycles accounts",
+        keys(&[0x0f])
+            && until(500, || sign_in("> ada", "  lin", "Enter PIN"))
+            && keys(&[0x0f])
+            && until(500, || sign_in("  ada", "> lin", "Enter PIN")),
     ) {
         return false;
     }
@@ -11167,11 +11231,13 @@ fn stage20_12_self_test() -> bool {
         glyphs_match && glyph_pixels > 0
     };
     // A successful verification clears lin's recorded failures.
-    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
+    let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07])
+        && move_by(0, 65)
+        && click()
         && until(PIN_CHECK_TICKS, || failures() == 0)
         && until(1000, name_shown);
     if !step(
-        "lin's PIN signs in; lin's name is on the taskbar",
+        "graphical sign-in authenticates lin; lin's name is on the taskbar",
         signed_in,
     ) {
         return false;
@@ -11180,7 +11246,9 @@ fn stage20_12_self_test() -> bool {
     // Lock through Quick Settings: the lock screen wants lin's PIN. Quick
     // Settings begins below the top taskbar; row 5 is "Lock screen".
     let lock_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 5) * 14 + 7);
-    let (px, py) = (width / 2, height / 2);
+    // The graphical submit click leaves the pointer at the sign-in button's
+    // center, not at the initial screen center.
+    let (px, py) = (width / 2, middle + 39);
     let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
         && click()
         && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))

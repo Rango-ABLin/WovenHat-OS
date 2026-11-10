@@ -1,5 +1,24 @@
 # Stage status
 
+## Boot/login/desktop Phase E authentication - 2026-11-10 - COMPLETE
+
+The kernel now owns plaintext credential verification and privileged session
+creation. Account and WID2 verifier paths are inaccessible through userspace;
+WovenShell reads only a bounded public names catalog. Secure salts require
+RDRAND and are zeroed on failure, with no timer-derived fallback. Digest-replay
+syscalls remain ABI-reserved but fail closed. Installer provisioning is the
+first-account path; missing or invalid production account state withholds the
+desktop.
+
+Secure-entropy failure, missing-account refusal, first-user provisioning,
+sign-in/lock, lockout, Change-PIN, and Stage 24.5 ABI gates pass on 1/2/4 CPUs.
+All affected target features and workspace host targets pass warning-denying
+Clippy. The complete Windows preservation chain passed at
+`audit-artifacts/acceptance-20261110-123957-212` (220 host harness tests, host
+Rust tests, build/lints, 60 memory boots, network and Stage 10.4-10.7 on 1/2/4
+CPUs). Phase F graphical login is next. Physical trust/device work remains
+deferred and is not claimed here.
+
 ## Boot/login/desktop B4 disk firmware-I/O - 2026-11-05 - TESTED PASS (bounded unit)
 
 Runtime `44f780cf` adds two source-bound disposable FAT fixtures to the

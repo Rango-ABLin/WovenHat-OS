@@ -9055,3 +9055,25 @@ generation, protected verifier storage, privileged authentication/IPC authority,
 first-run fail-closed behavior, durable rate limiting, and negative session-minting
 tests before claiming the gate. Do not start Phase F UI work or perform physical
 device, firmware, TPM provisioning, media-write, commit, or push operations.
+
+## Codex - Phase E authentication accepted (2026-11-10)
+
+Phase E passes at source `1ff84dcc`: secure entropy and zeroization failure,
+missing-account desktop/session refusal, installer first-user provisioning,
+protected verifier storage, sign-in/lock, known/unknown-user lockout, identity
+ABI replay rejection, and Change-PIN all pass on 1/2/4 CPUs. Affected target
+features and host targets pass warning-denying Clippy. The full Windows gate
+passed at `audit-artifacts/acceptance-20261110-123957-212`. No QEMU/Cargo chain
+is active. Phase F is next; physical firmware/TPM/device qualification remains
+deferred. Codex did not commit or push these documentation changes.
+
+## Codex - Phase F graphical login claim (2026-11-10)
+
+User authorized continuing through all remaining software gates before the
+deferred hardware pass. Claim Phase F only: the existing WovenShell graphical
+sign-in surface, input focus/masking, account selection, accessibility,
+failure/lockout presentation, and its calls into the accepted kernel identity
+authority. Preserve Phase E documentation changes and all accepted Phase B-E
+contracts. First audit the directive exit gate and current evidence; implement
+only missing Phase F behavior. Do not begin Phase G, perform physical actions,
+commit or push. Cargo/QEMU chains remain serialized.
