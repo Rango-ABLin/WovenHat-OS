@@ -1,3 +1,22 @@
+## Codex - GitHub Actions offline dependency resolution repair (2026-11-10)
+
+Scope: CI-only dependency preparation on `codex/ci-desktop-cache-prefetch-01`;
+do not touch WovenHat Overview, application ABI, kernel behavior, or the
+WovenFiles visual modernization branch. Root `.cargo/config.toml` deliberately
+enforces offline acceptance. Fresh GitHub-hosted runners lacked `hmac` and
+`bootloader_api`; after root prefetch, the vendored bootloader's separate
+`cargo install bootloader-x86_64-uefi =0.11.17` still failed offline because
+it has its own dependency graph. Desktop prefetch also hit stale standalone
+`apps/hello/Cargo.lock` under `--locked`.
+
+The CI patch now primes the nested UEFI bootloader dependency graph explicitly
+before offline acceptance, and permits standalone application lockfile refresh
+on the ephemeral runner during prefetch. Root prefetch stays locked; the
+repository's offline acceptance configuration and test assertions are unchanged.
+This is a candidate fix, NOT a passed CI/QEMU qualification. The standalone
+application lockfiles should be regenerated and reviewed in a separate focused
+follow-up; do not merge without passing checks.
+
 ## Codex - S12 bounded clipboard and file-chooser SDK surfaces (2026-11-04)
 
 Added host-tested fixed-capacity `libwoven::clipboard::TextClipboard` and
