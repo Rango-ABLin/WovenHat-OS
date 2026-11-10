@@ -12353,14 +12353,10 @@ fn stage20_17_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = crate::display::blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            crate::display::blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independently verify the current diagonal weave in projected 3D.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        crate::display::blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
