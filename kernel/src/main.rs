@@ -9783,14 +9783,16 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1: the launcher's first row is the catalog's application.
-    // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's icon occupies the left margin and its text
-    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
+    // F1 opens the modern full-desktop overview, not the removed
+    // three-row popup. Verify the installed application's real grid label.
+    // Recompute this geometry independently from the shell's layout: search
+    // (14 + 16), dash (40), three 16px margins, then the 48px app icon
+    // and 12px label spacing in the first 96px grid cell at x=16.
+    let name = "Hello";
+    let label_x = 16 + (96 - crate::font::text_width(name) as i32) / 2;
+    let label_y = 16 + (14 + 16) + 16 + 40 + 16 + 48 + 12;
     let listed = key(0x3b)
-        && until(1000, || {
-            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
-        });
+        && until(1000, || text_at(label_x, label_y, name, rgb(255, 255, 255)));
     let closed = key(0x3b);
     if !step(
         "the launcher lists the installed application",
