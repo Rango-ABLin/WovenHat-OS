@@ -104,6 +104,7 @@ stage25-15-test = ["qemu-test"]
 stage24-59-test = ["qemu-test", "system-apps"]
 # Production negative gate: a missing first account withholds WovenShell.
 phase-e-auth-test = ["qemu-test", "system-apps"]
+phase-e-entropy-test = ["qemu-test"]
 stage14-1-test = ["network-test"]
 stage14-2-test = ["network-test", "stage14-1-test"]
 stage14-3-test = ["network-test", "stage14-2-test"]

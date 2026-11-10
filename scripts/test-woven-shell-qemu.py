@@ -27,6 +27,8 @@ STAGES={
     '20.13': ('stage20-13-test', '[S20.13] workspaces: PASSED', 'woven-shell-workspaces', 'workspaces'),
     '24.59': ('stage24-59-test', '[S24.59] Change-PIN flow: PASSED', 'woven-shell-change-pin', 'Change-PIN flow'),
     'phase-e-missing': ('phase-e-auth-test', '[PHASE E] missing account withholds desktop: PASSED', 'phase-e-missing-account', 'missing-account fail-closed'),
+    'phase-e-entropy': ('phase-e-entropy-test', '[PHASE E] unavailable secure entropy fails closed: PASSED', 'phase-e-entropy-failure', 'secure-entropy fail-closed'),
+    'phase-e-first-user': ('stage28-installer-test', '[STAGE28 INSTALLER] GPT/FAT32/EFI/provisioning: PASSED', 'phase-e-first-user', 'first-user provisioning'),
     '20.17': ('stage20-17-test', '[S20.17] 3D desktop Quick Settings: PASSED', 'woven-shell-3d', '3D desktop Quick Settings'),
     '20.18': ('stage20-18-test', '[S20.18] 3D desktop title bars: PASSED', 'woven-shell-3d-title', '3D desktop title bars'),
 }
@@ -119,8 +121,14 @@ def main():
     # entropy boundary. Model RDRAND explicitly for that gate; QEMU's default
     # qemu64 CPU omits it and must remain useful for separate fail-closed
     # coverage rather than silently exercising the non-cryptographic fallback.
-    cpu_args = ['-cpu', 'max'] if a.stage == '24.59' else []
-    cmd=[str(qemu),'-accel','tcg,tb-size=128','-machine','q35',*cpu_args,'-m','256M','-smp',str(a.cpus),
+    if a.stage in ('24.59', 'phase-e-first-user'):
+        cpu_args = ['-cpu', 'max']
+    elif a.stage == 'phase-e-entropy':
+        cpu_args = ['-cpu', 'max,-rdrand']
+    else:
+        cpu_args = []
+    memory = '512M' if a.stage == 'phase-e-missing' else '256M'
+    cmd=[str(qemu),'-accel','tcg,tb-size=128','-machine','q35',*cpu_args,'-m',memory,'-smp',str(a.cpus),
          '-display','none','-serial',f'file:{serial}','-no-reboot',
          '-device','isa-debug-exit,iobase=0xf4,iosize=0x04',
          '-drive',f'if=pflash,format=raw,readonly=on,file={fw}',

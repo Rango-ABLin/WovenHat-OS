@@ -1793,27 +1793,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // explicit test account immediately below and is the sole exception.
         #[cfg(feature = "system-apps")]
         if !maintenance_boot {
-            match install_persistent_accounts() {
-                PersistentAccounts::Installed => {}
-                PersistentAccounts::Missing if cfg!(feature = "hardware-demo") => {
+            let persistent_accounts = install_persistent_accounts();
+            match persistent_account_boot_policy(persistent_accounts) {
+                AccountBootPolicy::Proceed => {}
+                AccountBootPolicy::DemoPending => {
                     serial::write_line(format_args!(
                         "[SESSION] persistent accounts absent; hardware demo account pending"
                     ));
                 }
-                PersistentAccounts::Missing => {
+                AccountBootPolicy::Withhold
+                    if persistent_accounts == PersistentAccounts::Missing =>
+                {
                     serial::write_line(format_args!(
                         "[SESSION] SETUP REQUIRED: no provisioned account; desktop withheld"
                     ));
-                    #[cfg(feature = "phase-e-auth-test")]
-                    {
-                        serial::write_line(format_args!(
-                            "[PHASE E] missing account withholds desktop: PASSED"
-                        ));
-                        qemu_test_exit_success();
-                    }
                     halt();
                 }
-                PersistentAccounts::Invalid => {
+                AccountBootPolicy::Withhold => {
                     serial::write_line(format_args!(
                         "[SESSION] persistent account provisioning failed; desktop withheld"
                     ));
@@ -5414,6 +5410,42 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S24.5] WovenIdentity syscall ABI: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "phase-e-auth-test")]
+    {
+        let missing_withheld = persistent_account_boot_policy(PersistentAccounts::Missing)
+            == AccountBootPolicy::Withhold;
+        let invalid_withheld = persistent_account_boot_policy(PersistentAccounts::Invalid)
+            == AccountBootPolicy::Withhold;
+        let session_refused = matches!(
+            session::start(WOVEN_SHELL_IMAGE, None),
+            Err(session::Error::Identity)
+        ) && session::active().is_none();
+        if !missing_withheld || !invalid_withheld || !session_refused {
+            serial::write_line(format_args!(
+                "[PHASE E] missing account withholds desktop: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[PHASE E] missing account withholds desktop: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "phase-e-entropy-test")]
+    {
+        let mut salt = [0xa5_u8; 16];
+        let unavailable = entropy::fill_secure(&mut salt).is_err() && salt == [0; 16];
+        if !unavailable {
+            serial::write_line(format_args!(
+                "[PHASE E] unavailable secure entropy fails closed: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[PHASE E] unavailable secure entropy fails closed: PASSED"
+        ));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage27-2-test")]
     {
         if !update::durable_self_test() {
@@ -8554,6 +8586,25 @@ enum PersistentAccounts {
     Installed,
     Missing,
     Invalid,
+}
+
+#[cfg(feature = "system-apps")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AccountBootPolicy {
+    Proceed,
+    DemoPending,
+    Withhold,
+}
+
+#[cfg(feature = "system-apps")]
+fn persistent_account_boot_policy(accounts: PersistentAccounts) -> AccountBootPolicy {
+    match accounts {
+        PersistentAccounts::Installed => AccountBootPolicy::Proceed,
+        PersistentAccounts::Missing if cfg!(feature = "hardware-demo") => {
+            AccountBootPolicy::DemoPending
+        }
+        PersistentAccounts::Missing | PersistentAccounts::Invalid => AccountBootPolicy::Withhold,
+    }
 }
 
 #[cfg(feature = "system-apps")]
