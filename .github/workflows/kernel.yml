@@ -31,6 +31,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -152,6 +160,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -601,6 +617,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -835,6 +859,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -942,6 +974,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1109,6 +1149,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1176,6 +1224,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1256,6 +1312,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1324,6 +1388,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1389,6 +1461,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
@@ -1470,6 +1550,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
           # The vendored bootloader build.rs invokes a separate cargo install
           # for this exact version. Prime its independent dependency graph now,
           # so the actual acceptance build can remain offline.
