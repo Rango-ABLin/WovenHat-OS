@@ -9802,8 +9802,8 @@ fn stage20_15_self_test() -> bool {
         // Record whether the expected bitmap glyph is offset, recolored,
         // or absent, without weakening the strict assertion.
         let mut found = None;
-        for dy in -24..=24 {
-            for dx in -24..=24 {
+        for dy in [-16, -8, 0, 8, 16] {
+            for dx in [-16, -8, 0, 8, 16] {
                 if text_at(label_x + dx, label_y + dy, name, rgb(255, 255, 255)) {
                     found = Some((dx, dy));
                     break;
