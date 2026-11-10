@@ -314,6 +314,18 @@ fn wallpaper(x: i32, y: i32, height: i32) -> u32 {
     blend(tint, base, WEAVE_TINT_OPACITY)
 }
 
+/// The login wallpaper remains decorative and theme-neutral. High contrast
+/// applies to the opaque login card and controls, so toggling it needs only a
+/// bounded card repaint rather than a full framebuffer transition.
+fn login_wallpaper(x: i32, y: i32, height: i32) -> u32 {
+    let span = (height - 1).max(1);
+    let t = (y.clamp(0, span) * 255 / span) as u8;
+    let base = blend(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
+    let band = ((x + y) / WEAVE_PITCH) % 2 == 0;
+    let tint = if band { WEAVE } else { WEAVE_SHADE };
+    blend(tint, base, WEAVE_TINT_OPACITY)
+}
+
 /// Clock text for `time`: `HH:MM`, or `HH:MM:SS` with `seconds`, and dashes
 /// when the clock could not be read. Returns the bytes and their length.
 fn clock_text(time: Option<DateTime>, seconds: bool) -> ([u8; 8], usize) {
@@ -1644,7 +1656,7 @@ impl Desktop {
     fn render_lock(&self, canvas: &mut Canvas<'_>) {
         let height = self.height;
         self.render_floor_3d(canvas, |x, y| {
-            blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM)
+            blend(rgb(0, 0, 0), login_wallpaper(x, y, height), LOCK_DIM)
         });
         let middle = self.height / 2;
         let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
@@ -1970,7 +1982,7 @@ impl Desktop {
         } else {
             &[b"woven-shell: login high contrast off"]
         });
-        self.screen()
+        self.login_card()
     }
 
     fn login_pointer_press(&mut self) -> Area {
