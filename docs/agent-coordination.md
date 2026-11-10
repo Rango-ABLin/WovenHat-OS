@@ -1,3 +1,18 @@
+## Codex - xHCI stage-gating correction (2026-11-10)
+
+The 2026-11-10 kernel run advanced Stage 13.5 successfully, then Stage
+13.6 failed with the same `keyboard_presses` E0425. The decoder and
+`usage_key` are pure, allocation-free helpers used by the unconditional
+xHCI `self_test`; their earlier cfg excluded some QEMU acceptance
+features. Removed the two narrow cfg attributes instead of extending
+stage-specific lists indefinitely. No HID event delivery or runtime
+initialization logic changed. Commit `40f6c191`; awaiting kernel CI
+qualification. Hardware Qualification succeeded on that commit.
+
+Do not treat unrelated Stage 11.5 loader, Stage 20.1 WovenShell, live FAT32
+batch-persist, WovenImages, or Stage 31 randomized 4-CPU failures as fixed.
+Inspect preserved serial/QEMU evidence before modifying runtime behavior.
+
 ## Codex - CI second-pass gate diagnosis (2026-11-10)
 
 The first full kernel run after dependency prefetch reached real acceptance:
