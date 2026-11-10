@@ -354,15 +354,14 @@ pub(crate) fn release_owner(owner: u64) {
             }
         }
     }
+    for session in sessions[..count].iter().flatten() {
+        crate::task::revoke_identity_session(session.0);
+    }
     let mut authority = AUTHORITY.lock();
     if let Some(authority) = authority.as_mut() {
         for session in sessions[..count].iter().flatten() {
             let _ = authority.close_session(*session);
         }
-    }
-    drop(authority);
-    for session in sessions[..count].iter().flatten() {
-        crate::task::revoke_identity_session(session.0);
     }
 }
 
@@ -407,6 +406,9 @@ pub(crate) fn open(owner: u64, name: &[u8], password: &[u8]) -> Result<SessionId
 
 pub(crate) fn lock(owner: u64, session: SessionId) -> Result<(), Error> {
     let binding = owned_binding(owner, session)?;
+    // Suspend every inherited process before changing authority state. A
+    // concurrent child can therefore only observe the fail-closed state.
+    crate::task::set_identity_session_active(session.0, false);
     let view = {
         let mut authority = AUTHORITY.lock();
         let authority = authority.as_mut().ok_or(Error::NotReady)?;
@@ -414,7 +416,6 @@ pub(crate) fn lock(owner: u64, session: SessionId) -> Result<(), Error> {
         authority.view(binding.session).map_err(Error::Identity)?
     };
     apply_view(owner, view)?;
-    crate::task::set_identity_session_active(session.0, false);
     Ok(())
 }
 
@@ -464,6 +465,9 @@ pub(crate) fn close(owner: u64, session: SessionId) -> Result<(), Error> {
             entry.is_some_and(|binding| binding.session == session && binding.owner == owner)
         })
         .ok_or(Error::Owner)?;
+    // Revoke inherited authority before retiring the token so descendants
+    // cannot race a final privileged operation against logout.
+    crate::task::revoke_identity_session(session.0);
     {
         let mut authority = AUTHORITY.lock();
         authority
@@ -473,7 +477,6 @@ pub(crate) fn close(owner: u64, session: SessionId) -> Result<(), Error> {
             .map_err(Error::Identity)?;
     }
     BINDINGS.lock()[slot] = None;
-    crate::task::revoke_identity_session(session.0);
     if crate::task::current_process_id() != owner
         || !crate::task::set_current_identity(crate::task::Credentials::USERSPACE, None, false)
     {
