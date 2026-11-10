@@ -7614,15 +7614,19 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [
-        Capability::Ai,
-        Capability::Secrets,
-        Capability::Camera,
-        Capability::Microphone,
-    ] {
+    // The system-service ceiling permits Microphone only so explicitly
+    // delegated audio-capture services can operate (Stage 13). A ceiling is
+    // not an actual grant; no service receives it unless requested and
+    // authorized. AI, secret, and camera authority remain excluded.
+    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
+    }
+    if !system.contains(Capability::Microphone)
+        || CapabilitySet::empty().contains(Capability::Microphone)
+    {
+        return fail("microphone delegation ceiling or empty grants invalid");
     }
     true
 }
