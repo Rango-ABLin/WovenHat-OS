@@ -1142,9 +1142,7 @@ impl HdaController {
 }
 /// The playback interrupt vector (0 until output starts), and the plays and
 /// interrupts completed, for the gate.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
 static AUDIO_VECTOR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test", feature = "stage13-8-test"))]
 static AUDIO_BUSY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_PLAYS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
