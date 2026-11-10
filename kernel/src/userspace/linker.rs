@@ -714,13 +714,19 @@ pub(super) fn load_with_candidate_bias(
     args: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
-    load_with_geometry(
-        bytes,
-        args,
-        candidate_bias,
-        aslr_stack_base()?,
-        aslr_mmap_base()?,
-    )
+    // A linked Ring-3 application can have more writable/BSS pages than
+    // the original fixed 0xe0000 image window. Place the anonymous mmap
+    // arena beyond the main ELF's last page AND its lifecycle trampoline,
+    // leaving forced-geometry loader tests unchanged. In particular this
+    // keeps large signed applications from overlapping the mmap arena.
+    let image = elf::parse(bytes).ok()?.relocated_for_execution(candidate_bias)?;
+    let image_end = image.segments().try_fold(LIFECYCLE_TRAMPOLINE, |end, segment| {
+        Some(end.max(segment.mapping_start.checked_add(segment.mapping_size as u64)?))
+    })?;
+    let trampoline_base = image_end.checked_add(4095)? & !4095;
+    let minimum_mmap_base = trampoline_base.checked_add(4096)?;
+    let mmap_base = aslr_mmap_base()?.max(minimum_mmap_base);
+    load_with_geometry(bytes, args, candidate_bias, aslr_stack_base()?, mmap_base)
 }
 
 // One graph-loader path for production draws and forced-draw CPU regressions.
@@ -770,9 +776,15 @@ pub(super) fn load_with_geometry(
         }
     }
     map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
+    // The trampoline lives in the main executable's low-address arena.
+    // Shared libraries occupy the separate LIBRARY_START region; including
+    // their high addresses here would incorrectly push the trampoline past
+    // the mmap arena and reject every valid dependency graph.
     let mut image_end = LIFECYCLE_TRAMPOLINE;
     for mapping in &pending.space.mappings[..pending.space.mapping_count] {
-        image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+        if mapping.start() < LIBRARY_START {
+            image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+        }
     }
     let lifecycle_trampoline = if LIFECYCLE_TRAMPOLINE < image_end {
         image_end.checked_add(4095).map(|address| address & !4095)?

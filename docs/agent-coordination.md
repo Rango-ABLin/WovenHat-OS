@@ -1,3 +1,86 @@
+## Codex - PR #143 exact failing-job evidence and bounded repairs (2026-11-10)
+
+Inspected both push and pull-request job logs for workflow runs
+`42783980507` and `42783985719`, plus downloaded QEMU artifacts.
+The nine red checks consolidate to five acceptance areas, not nine distinct
+regressions. The core job ultimately failed WovenImages: its signed WebP
+decoder ELF mapped a writable/BSS segment through offset `0xe1000`,
+overlapping the original anonymous mmap start `0xe0000`. The normal graph
+loader now reserves a page-aligned mmap floor beyond the main executable and
+the lifecycle trampoline; explicit-geometry regression hooks remain unchanged.
+
+Stage 20.1 failed because its independent pixel oracle expected the retired
+96px square/checkerboard wallpaper. Updated all twelve Stage 20 oracles to
+the current 220px diagonal, 6-alpha weave without sharing the application
+renderer or weakening pixel comparisons. Stage 20.15 launched the shell and
+loaded a one-entry catalog, but its launcher panel was placed at y=height,
+fully off-screen. Fixed the overview area above the bottom taskbar, and
+retargeted the live test to the actual modern application-grid label.
+
+Unresolved: Stage 11.5's preserved serial output shows five negative
+dependency-verification checks PASSED, followed by loader failure before
+the positive transitive-graph relocation assertion. Further instrumentation
+of its verified graph load is required before a safe runtime fix. The Stage 31
+randomized four-CPU run passed the storage-write-fault scenario but timed out
+in the following service-supervisor scenario at 600s; the independent
+service-supervisor gate has passed. No test was removed, timeout increased,
+or security guard bypassed.
+
+Changes are CI candidates only, not release/stage acceptance. Hardware
+Qualification has passed on several intermediate commits; the full kernel
+matrix on the new head still needs verification. Keep PR #143 draft.
+
+## Codex - xHCI stage-gating correction (2026-11-10)
+
+The 2026-11-10 kernel run advanced Stage 13.5 successfully, then Stage
+13.6 failed with the same `keyboard_presses` E0425. The decoder and
+`usage_key` are pure, allocation-free helpers used by the unconditional
+xHCI `self_test`; their earlier cfg excluded some QEMU acceptance
+features. Removed the two narrow cfg attributes instead of extending
+stage-specific lists indefinitely. No HID event delivery or runtime
+initialization logic changed. Commit `40f6c191`; awaiting kernel CI
+qualification. Hardware Qualification succeeded on that commit.
+
+Do not treat unrelated Stage 11.5 loader, Stage 20.1 WovenShell, live FAT32
+batch-persist, WovenImages, or Stage 31 randomized 4-CPU failures as fixed.
+Inspect preserved serial/QEMU evidence before modifying runtime behavior.
+
+## Codex - CI second-pass gate diagnosis (2026-11-10)
+
+The first full kernel run after dependency prefetch reached real acceptance:
+`wovenfs-lint` and `network-security` passed. Remaining failures included
+Stage 13.5 target Clippy E0425 (the xHCI Stage 13.5 self-test referenced
+`keyboard_presses` while its cfg only admitted production/Stage 13.12);
+the keyboard decoder and its `usage_key` helper now explicitly admit
+`stage13-5-test` without enabling runtime input services. Other jobs reached
+Stage 11.5 loader-hardening failure, Stage 20.1 WovenShell desktop exit 35,
+and live FAT32 mutation failure at batch persist. These are NOT declared fixed.
+
+Core packaging and Stage 28 installer lint also attempted uncached independent
+Ring-3 app crates (`cfg-if` download error). CI now prefetches all eleven
+system apps plus `tools/wapp-packager` before offline acceptance. Changes
+are unqualified until a new CI run passes; preserve QEMU evidence and avoid
+weakening assertions/timeouts.
+
+## Codex - GitHub Actions offline dependency resolution repair (2026-11-10)
+
+Scope: CI-only dependency preparation on `codex/ci-desktop-cache-prefetch-01`;
+do not touch WovenHat Overview, application ABI, kernel behavior, or the
+WovenFiles visual modernization branch. Root `.cargo/config.toml` deliberately
+enforces offline acceptance. Fresh GitHub-hosted runners lacked `hmac` and
+`bootloader_api`; after root prefetch, the vendored bootloader's separate
+`cargo install bootloader-x86_64-uefi =0.11.17` still failed offline because
+it has its own dependency graph. Desktop prefetch also hit stale standalone
+`apps/hello/Cargo.lock` under `--locked`.
+
+The CI patch now primes the nested UEFI bootloader dependency graph explicitly
+before offline acceptance, and permits standalone application lockfile refresh
+on the ephemeral runner during prefetch. Root prefetch stays locked; the
+repository's offline acceptance configuration and test assertions are unchanged.
+This is a candidate fix, NOT a passed CI/QEMU qualification. The standalone
+application lockfiles should be regenerated and reviewed in a separate focused
+follow-up; do not merge without passing checks.
+
 ## Codex - S12 bounded clipboard and file-chooser SDK surfaces (2026-11-04)
 
 Added host-tested fixed-capacity `libwoven::clipboard::TextClipboard` and

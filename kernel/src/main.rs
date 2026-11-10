@@ -7614,15 +7614,19 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [
-        Capability::Ai,
-        Capability::Secrets,
-        Capability::Camera,
-        Capability::Microphone,
-    ] {
+    // The system-service ceiling permits Microphone only so explicitly
+    // delegated audio-capture services can operate (Stage 13). A ceiling is
+    // not an actual grant; no service receives it unless requested and
+    // authorized. AI, secret, and camera authority remain excluded.
+    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
+    }
+    if !system.contains(Capability::Microphone)
+        || CapabilitySet::empty().contains(Capability::Microphone)
+    {
+        return fail("microphone delegation ceiling or empty grants invalid");
     }
     true
 }
@@ -9783,14 +9787,37 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1: the launcher's first row is the catalog's application.
-    // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's icon occupies the left margin and its text
-    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
+    // F1 opens the modern full-desktop overview, not the removed
+    // three-row popup. Verify the installed application's real grid label.
+    // Recompute this geometry independently from the shell's layout: search
+    // (14 + 16), dash (40), three 16px margins, then the 48px app icon
+    // and 12px label spacing in the first 96px grid cell at x=16.
+    let name = "Hello";
+    let label_x = 16 + (96 - crate::font::text_width(name) as i32) / 2;
+    let label_y = 16 + (14 + 16) + 16 + 40 + 16 + 48 + 12;
     let listed = key(0x3b)
-        && until(1000, || {
-            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
-        });
+        && until(1000, || text_at(label_x, label_y, name, rgb(255, 255, 255)));
+    if !listed {
+        // The compositor uses the system-font renderer for the app grid.
+        // Record whether the expected bitmap glyph is offset, recolored,
+        // or absent, without weakening the strict assertion.
+        let mut found = None;
+        for dy in [-16, -8, 0, 8, 16] {
+            for dx in [-16, -8, 0, 8, 16] {
+                if text_at(label_x + dx, label_y + dy, name, rgb(255, 255, 255)) {
+                    found = Some((dx, dy));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        serial::write_line(format_args!(
+            "[S20.15] launcher label expected at ({label_x},{label_y}), bitmap offset={found:?}, pixel={:?}",
+            compositor::pixel(label_x, label_y)
+        ));
+    }
     let closed = key(0x3b);
     if !step(
         "the launcher lists the installed application",
@@ -10537,14 +10564,10 @@ fn stage20_13_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -10786,14 +10809,10 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -11269,14 +11288,10 @@ fn stage20_11_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -12363,14 +12378,10 @@ fn stage20_17_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = crate::display::blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = crate::display::blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            crate::display::blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independently verify the current diagonal weave in projected 3D.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        crate::display::blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -12810,14 +12821,10 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13076,14 +13083,10 @@ fn stage20_8_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -13732,14 +13735,10 @@ fn stage20_6_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14020,14 +14019,10 @@ fn stage20_5_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -14478,14 +14473,10 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -14761,14 +14752,10 @@ fn stage20_3_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -15102,14 +15089,10 @@ fn stage20_2_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independent expectation for WovenShell's 220px diagonal weave.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
 
@@ -15911,14 +15894,11 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
-        let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        // Independently mirror WovenShell's current diagonal weave pattern.
+        // Keep a separate pixel oracle; do not call application renderer code.
+        let band = ((x + y) / 220) % 2 == 0;
+        let tint = if band { WHITE } else { BLACK };
+        blend_pixel(tint, base, 6)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -16156,13 +16136,47 @@ fn stage20_1_self_test() -> bool {
     let top = height - TASKBAR_HEIGHT;
     // Wallpaper: corner, centre, both weave lines, and the last row above
     // the taskbar, each a block wide enough to straddle a grid line.
-    let wall = region(0, 0, 40, 40, |x, y| expected_wallpaper(x, y, width, height))
-        && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
-            expected_wallpaper(x, y, width, height)
-        })
-        && region(width - 40, top - 40, 40, 40, |x, y| {
-            expected_wallpaper(x, y, width, height)
-        });
+    // Claiming the compositor precedes the shell's first complete paint.
+    // Wait for the actual wallpaper to arrive rather than sampling the
+    // compositor's initial dark clear color. Retain every pixel assertion
+    // and a bounded timeout for a genuinely broken renderer.
+    let wallpaper_start = timer::ticks();
+    let wall = loop {
+        let matches = region(0, 0, 40, 40, |x, y| expected_wallpaper(x, y, width, height))
+            && region(width / 2 - 20, height / 2 - 20, 40, 40, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            })
+            && region(width - 40, top - 40, 40, 40, |x, y| {
+                expected_wallpaper(x, y, width, height)
+            });
+        if matches || timer::ticks().wrapping_sub(wallpaper_start) > 3000 {
+            break matches;
+        }
+        task::yield_now();
+    };
+    if !wall {
+        // The full-area oracle stays authoritative. Log the first mismatched
+        // pixel and its expected/observed RGB to distinguish a renderer
+        // regression from a stale formula or a foreground overlay.
+        for (x0, y0) in [
+            (0, 0),
+            (width / 2 - 20, height / 2 - 20),
+            (width - 40, top - 40),
+        ] {
+            for y in y0..y0 + 40 {
+                for x in x0..x0 + 40 {
+                    let expected = expected_wallpaper(x, y, width, height);
+                    if compositor::pixel(x, y) != Ok(expected) {
+                        serial::write_line(format_args!(
+                            "[S20.1] wallpaper mismatch at ({x},{y}): expected {expected:#08x}, observed {:?}",
+                            compositor::pixel(x, y)
+                        ));
+                        return step("wallpaper matches its formula", false);
+                    }
+                }
+            }
+        }
+    }
     if !step("wallpaper matches its formula", wall) {
         return false;
     }
