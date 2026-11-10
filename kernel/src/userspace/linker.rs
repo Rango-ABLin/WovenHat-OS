@@ -776,9 +776,15 @@ pub(super) fn load_with_geometry(
         }
     }
     map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
+    // The trampoline lives in the main executable's low-address arena.
+    // Shared libraries occupy the separate LIBRARY_START region; including
+    // their high addresses here would incorrectly push the trampoline past
+    // the mmap arena and reject every valid dependency graph.
     let mut image_end = LIFECYCLE_TRAMPOLINE;
     for mapping in &pending.space.mappings[..pending.space.mapping_count] {
-        image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+        if mapping.start() < LIBRARY_START {
+            image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+        }
     }
     let lifecycle_trampoline = if LIFECYCLE_TRAMPOLINE < image_end {
         image_end.checked_add(4095).map(|address| address & !4095)?
