@@ -9797,6 +9797,27 @@ fn stage20_15_self_test() -> bool {
     let label_y = 16 + (14 + 16) + 16 + 40 + 16 + 48 + 12;
     let listed = key(0x3b)
         && until(1000, || text_at(label_x, label_y, name, rgb(255, 255, 255)));
+    if !listed {
+        // The compositor uses the system-font renderer for the app grid.
+        // Record whether the expected bitmap glyph is offset, recolored,
+        // or absent, without weakening the strict assertion.
+        let mut found = None;
+        for dy in -24..=24 {
+            for dx in -24..=24 {
+                if text_at(label_x + dx, label_y + dy, name, rgb(255, 255, 255)) {
+                    found = Some((dx, dy));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        serial::write_line(format_args!(
+            "[S20.15] launcher label expected at ({label_x},{label_y}), bitmap offset={found:?}, pixel={:?}",
+            compositor::pixel(label_x, label_y)
+        ));
+    }
     let closed = key(0x3b);
     if !step(
         "the launcher lists the installed application",
