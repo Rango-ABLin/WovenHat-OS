@@ -587,7 +587,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 qmp, login_hc, time.monotonic() + args.frame_timeout, timings,
                 "woven_login_high_contrast",
             )
-            timings["frame_woven_login_high_contrast_ms"] = (
+            timings["woven_login_high_contrast_input_ms"] = (
                 time.monotonic() - contrast_started
             ) * 1000.0
             if high_contrast_pixels == login_pixels:
@@ -987,6 +987,7 @@ def main(argv: list[str] | None = None) -> int:
             "desktop_session_startup_ms": args.max_startup_ms,
             "desktop_ready_ms": args.max_startup_ms,
             "sign_in_input_ms": args.max_input_ms,
+            "woven_login_high_contrast_input_ms": args.max_input_ms,
             "keyboard_input_ms": args.max_input_ms,
             "mouse_click_input_ms": args.max_input_ms,
             "files_pointer_cancel_ms": args.max_input_ms,

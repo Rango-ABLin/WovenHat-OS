@@ -1,8 +1,9 @@
 # Boot, login and desktop architecture
 
-Status: IN PROGRESS through Phase E, 2026-11-10. Phase A inventory, Phase B
+Status: IN PROGRESS through Phase F, 2026-11-10. Phase A inventory, Phase B
 software/QEMU boot recovery, Phase C WovenInit readiness, Phase D splash
-handoff, and Phase E authentication infrastructure are accepted.
+handoff, Phase E authentication infrastructure, and Phase F WovenLogin are
+accepted.
 
 Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
 review found no changes since the initial audit in session.rs, accounts.rs,
@@ -56,6 +57,16 @@ state. A production installed boot with missing or invalid account state stops
 before starting WovenShell; only the explicitly feature-gated hardware demo may
 defer account installation. Phase E accepts this authentication substrate, not
 the later graphical login/session/desktop phase behavior.
+
+Phase F keeps the login surface inside WovenShell rather than adding a second
+display stack. The locked compositor owner renders a bounded responsive card
+with UTC date, user selection, masked PIN input, explicit sign-in, pre-auth
+power/restart and high-contrast controls. Both pointer and keyboard paths reach
+the same state transitions and kernel identity calls. Locked repaint exposes
+only the login frame and cursor; window and notification content remains
+suppressed. High-contrast changes are bounded to the opaque card because the
+decorative wallpaper is theme-neutral. Session launch authorization, logout
+and child cleanup remain Phase G.
 
 The fallback `userspace::create_init_process` still provides the diagnostic
 assembly stub as `/init`; it is not used as proof of production readiness.

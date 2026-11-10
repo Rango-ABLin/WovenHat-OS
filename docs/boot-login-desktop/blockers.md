@@ -1,7 +1,7 @@
 # Blockers and remaining prerequisites
 
-Status: IN PROGRESS through Phase E. Phases A-E are accepted in software/QEMU;
-Phase F is the next software gate. Physical firmware, TPM, GPU/input, removable
+Status: IN PROGRESS through Phase F. Phases A-F are accepted in software/QEMU;
+Phase G is the next software gate. Physical firmware, TPM, GPU/input, removable
 media and native qualification remain deferred to the final hardware pass.
 
 ## External qualification prerequisites
@@ -15,8 +15,6 @@ media and native qualification remain deferred to the final hardware pass.
 
 ## Software still required by the directive
 
-- Phase F must qualify the graphical login itself, including input focus,
-  masking, accessibility, failure presentation and real authority use.
 - Phases G/H must prove authenticated session ownership, launch inheritance,
   replay/forgery rejection, logout cleanup and desktop authorization. Existing
   pre-login shell capabilities are not accepted as a completed session model.
