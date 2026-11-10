@@ -1,3 +1,35 @@
+## Codex - PR #143 exact failing-job evidence and bounded repairs (2026-11-10)
+
+Inspected both push and pull-request job logs for workflow runs
+`42783980507` and `42783985719`, plus downloaded QEMU artifacts.
+The nine red checks consolidate to five acceptance areas, not nine distinct
+regressions. The core job ultimately failed WovenImages: its signed WebP
+decoder ELF mapped a writable/BSS segment through offset `0xe1000`,
+overlapping the original anonymous mmap start `0xe0000`. The normal graph
+loader now reserves a page-aligned mmap floor beyond the main executable and
+the lifecycle trampoline; explicit-geometry regression hooks remain unchanged.
+
+Stage 20.1 failed because its independent pixel oracle expected the retired
+96px square/checkerboard wallpaper. Updated all twelve Stage 20 oracles to
+the current 220px diagonal, 6-alpha weave without sharing the application
+renderer or weakening pixel comparisons. Stage 20.15 launched the shell and
+loaded a one-entry catalog, but its launcher panel was placed at y=height,
+fully off-screen. Fixed the overview area above the bottom taskbar, and
+retargeted the live test to the actual modern application-grid label.
+
+Unresolved: Stage 11.5's preserved serial output shows five negative
+dependency-verification checks PASSED, followed by loader failure before
+the positive transitive-graph relocation assertion. Further instrumentation
+of its verified graph load is required before a safe runtime fix. The Stage 31
+randomized four-CPU run passed the storage-write-fault scenario but timed out
+in the following service-supervisor scenario at 600s; the independent
+service-supervisor gate has passed. No test was removed, timeout increased,
+or security guard bypassed.
+
+Changes are CI candidates only, not release/stage acceptance. Hardware
+Qualification has passed on several intermediate commits; the full kernel
+matrix on the new head still needs verification. Keep PR #143 draft.
+
 ## Codex - xHCI stage-gating correction (2026-11-10)
 
 The 2026-11-10 kernel run advanced Stage 13.5 successfully, then Stage
