@@ -16118,6 +16118,29 @@ fn stage20_1_self_test() -> bool {
         && region(width - 40, top - 40, 40, 40, |x, y| {
             expected_wallpaper(x, y, width, height)
         });
+    if !wall {
+        // The full-area oracle stays authoritative. Log the first mismatched
+        // pixel and its expected/observed RGB to distinguish a renderer
+        // regression from a stale formula or a foreground overlay.
+        for (x0, y0) in [
+            (0, 0),
+            (width / 2 - 20, height / 2 - 20),
+            (width - 40, top - 40),
+        ] {
+            for y in y0..y0 + 40 {
+                for x in x0..x0 + 40 {
+                    let expected = expected_wallpaper(x, y, width, height);
+                    if compositor::pixel(x, y) != Ok(expected) {
+                        serial::write_line(format_args!(
+                            "[S20.1] wallpaper mismatch at ({x},{y}): expected {expected:#08x}, observed {:?}",
+                            compositor::pixel(x, y)
+                        ));
+                        return step("wallpaper matches its formula", false);
+                    }
+                }
+            }
+        }
+    }
     if !step("wallpaper matches its formula", wall) {
         return false;
     }
