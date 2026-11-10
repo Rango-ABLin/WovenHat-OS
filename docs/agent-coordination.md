@@ -1,3 +1,20 @@
+## Codex - CI second-pass gate diagnosis (2026-11-10)
+
+The first full kernel run after dependency prefetch reached real acceptance:
+`wovenfs-lint` and `network-security` passed. Remaining failures included
+Stage 13.5 target Clippy E0425 (the xHCI Stage 13.5 self-test referenced
+`keyboard_presses` while its cfg only admitted production/Stage 13.12);
+the keyboard decoder and its `usage_key` helper now explicitly admit
+`stage13-5-test` without enabling runtime input services. Other jobs reached
+Stage 11.5 loader-hardening failure, Stage 20.1 WovenShell desktop exit 35,
+and live FAT32 mutation failure at batch persist. These are NOT declared fixed.
+
+Core packaging and Stage 28 installer lint also attempted uncached independent
+Ring-3 app crates (`cfg-if` download error). CI now prefetches all eleven
+system apps plus `tools/wapp-packager` before offline acceptance. Changes
+are unqualified until a new CI run passes; preserve QEMU evidence and avoid
+weakening assertions/timeouts.
+
 ## Codex - GitHub Actions offline dependency resolution repair (2026-11-10)
 
 Scope: CI-only dependency preparation on `codex/ci-desktop-cache-prefetch-01`;
