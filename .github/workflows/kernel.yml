@@ -37,6 +37,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -165,6 +172,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -621,6 +635,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -862,6 +883,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -976,6 +1004,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1138,6 +1173,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1212,6 +1254,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1299,6 +1348,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1374,6 +1430,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1446,6 +1509,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
@@ -1534,6 +1604,13 @@ jobs:
           sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
           test -f "$sysroot_manifest"
           cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --locked --manifest-path "$manifest"
+            fi
+          done
           # The vendored bootloader build script invokes a separate cargo
           # install for this crate, outside the root workspace lockfile.
           # Warm that registry graph while networking is explicitly enabled.
