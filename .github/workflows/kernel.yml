@@ -44,7 +44,7 @@ jobs:
               # These standalone app workspaces track their own lockfiles.
               # Resolve path-dependency changes (notably libwoven) here and
               # populate the registry before the later offline build steps.
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -179,7 +179,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -642,7 +642,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -890,7 +890,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1011,7 +1011,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1180,7 +1180,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1261,7 +1261,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1355,7 +1355,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1437,7 +1437,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1516,7 +1516,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
@@ -1611,7 +1611,7 @@ jobs:
           # covered by the root Cargo.lock. Prefetch each app and packager lock.
           for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
             if [ -f "$manifest" ]; then
-              cargo fetch --locked --manifest-path "$manifest"
+              cargo fetch --manifest-path "$manifest"
             fi
           done
           # The vendored bootloader build script invokes a separate cargo
