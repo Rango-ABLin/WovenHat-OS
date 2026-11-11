@@ -26,6 +26,35 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              # These standalone app workspaces track their own lockfiles.
+              # Resolve path-dependency changes (notably libwoven) here and
+              # populate the registry before the later offline build steps.
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -135,6 +164,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -572,6 +627,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -794,6 +875,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -889,6 +996,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
@@ -1032,6 +1165,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1087,6 +1246,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1155,6 +1340,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1211,6 +1422,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1264,6 +1501,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1333,6 +1596,32 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      # Hosted runners start with an empty Cargo registry. Both the project
+      # and nightly build-std's rust-src workspace need registry dependencies.
+      # Keep the acceptance builds offline; only this preflight may fetch.
+      - name: Prefetch application and nightly sysroot dependencies
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: |
+          cargo fetch --locked
+          sysroot_manifest="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
+          test -f "$sysroot_manifest"
+          cargo fetch --manifest-path "$sysroot_manifest"
+          # System applications are separate Cargo workspaces and are not
+          # covered by the root Cargo.lock. Prefetch each app and packager lock.
+          for manifest in apps/*/Cargo.toml tools/wapp-packager/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo fetch --manifest-path "$manifest"
+            fi
+          done
+          # The vendored bootloader build script invokes a separate cargo
+          # install for this crate, outside the root workspace lockfile.
+          # Warm that registry graph while networking is explicitly enabled.
+          cargo install bootloader-x86_64-uefi --version 0.11.17 --locked \
+            --target x86_64-unknown-uefi -Zbuild-std=core \
+            -Zbuild-std-features=compiler-builtins-mem \
+            --root "$RUNNER_TEMP/wovenhat-bootloader-prefetch" \
+            --target-dir "$RUNNER_TEMP/wovenhat-bootloader-target"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
