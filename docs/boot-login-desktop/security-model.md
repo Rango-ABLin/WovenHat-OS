@@ -1,6 +1,6 @@
 # Security audit
 
-Status: PHASE F ACCEPTED, 2026-11-10. Later session, recovery and
+Status: PHASE G ACCEPTED, 2026-11-11. Later desktop integration, recovery and
 hardware/trust findings remain open until their own gates pass.
 
 The kernel identity authority is the authentication boundary. Plaintext
@@ -41,11 +41,21 @@ Phase F qualifies the full graphical login path, including keyboard/pointer
 selection, masked PIN entry, failure feedback, high contrast and calls into the
 actual kernel authentication service. The login surface consumes only public
 account names and does not gain verifier access or local session-minting
-authority. Remaining boundaries are deliberately outside Phase F: Phases G/H
-must prove session-owned launch authority, inheritance, logout cleanup and
-desktop authorization; recovery/F12/fallback behavior remains subject to its
-later negative integration gates. Production Secure Boot keys, physical TPM
-and native hardware remain final trust/hardware work.
+authority.
+
+Phase G binds authenticated credentials to a kernel-private session membership
+that userspace cannot manufacture. Spawn/fork inherit it; the production shell
+cannot command-spawn while inactive. Lock suspends all matching members before
+authority state changes, unlock restores them only after valid authentication,
+and logout revokes every member before closing the token. Tracked children are
+then killed and their surfaces/process resources follow existing owner teardown.
+Natural and forced shell termination both release the identity binding.
+
+Remaining boundaries are deliberately outside Phase G: Phase H must qualify
+the complete authenticated desktop functionality and readiness contract;
+recovery/F12/fallback behavior remains subject to Phase I negative integration
+gates. Production Secure Boot keys, physical TPM and native hardware remain
+final trust/hardware work.
 
 The kernel shell authorizes commands against the current kernel task's
 capabilities (`shell::authorize`), not an authenticated desktop session.

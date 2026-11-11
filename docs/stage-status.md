@@ -1,5 +1,24 @@
 # Stage status
 
+## Boot/login/desktop Phase G session management - 2026-11-11 - COMPLETE
+
+Authenticated process identity is now kernel-enforced and inherited through
+spawn/fork with an unforgeable session-membership tag. The production primary
+shell cannot use command spawn before authentication. Lock suspends active
+authority across the session before changing identity state; valid unlock
+restores it. Logout revokes credentials across all members, closes the kernel
+token, terminates tracked applications, wipes credential buffers and returns
+to account selection. Remote owner termination also releases the binding.
+
+The strengthened Stage 20.12 journey passes on 1/2/4 CPUs, including child
+identity equality, lock suspension, unlock restoration, logout revocation,
+surface/process cleanup and display return. App, affected-feature and host
+Clippy pass with warnings denied. The complete Windows preservation chain
+passed at `audit-artifacts/acceptance-20261111-032505-125` (220 host harness
+tests, host Rust tests, build/lints, 60 memory boots, live network and Stage
+10.4-10.7 on 1/2/4 CPUs). Phase H WovenShell integration is next. Physical
+trust/device work remains deferred and is not claimed here.
+
 ## Boot/login/desktop Phase F graphical login - 2026-11-10 - COMPLETE
 
 WovenLogin now provides a complete bounded graphical pre-authentication path

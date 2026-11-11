@@ -53,6 +53,17 @@ complete Windows preservation gate passes at
 `audit-artifacts/acceptance-20261110-172935-815`. Next: Phase G session
 management. Physical firmware/TPM/native qualification remains deferred.
 
+Boot/login/desktop directive - Phase G session management accepted (2026-11-11)
+Kernel-only session membership now accompanies authenticated credentials across
+spawn and fork. The production shell cannot launch applications before
+authentication; lock suspends inherited session authority, valid unlock
+restores it, and logout revokes every inherited credential before closing the
+token and terminating tracked children. Natural and remote owner teardown both
+release identity bindings. The strengthened graphical journey passes at
+1/2/4 CPUs, and the complete Windows preservation gate passes at
+`audit-artifacts/acceptance-20261111-032505-125`. Next: Phase H WovenShell
+integration. Physical firmware/TPM/native qualification remains deferred.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual

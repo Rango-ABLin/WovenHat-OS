@@ -221,3 +221,24 @@ raising a budget. App target, affected kernel target and workspace host Clippy
 pass with warnings denied. The complete Windows preservation chain passed at
 `audit-artifacts/acceptance-20261110-172935-815`. Phase G is next; no session
 management or physical hardware gate is claimed by this entry.
+
+## BLD-G Phase G session-management closure (2026-11-11)
+
+Status: ACCEPTED. `task::Process` now carries kernel-only identity-session
+membership and active state. Authenticated spawn/fork inherit the parent's
+credentials and tag; userspace cannot set either. The production primary shell
+is refused command spawn before authentication. Lock suspends every matching
+member before the authority transition, unlock restores them only after valid
+verification, and close revokes all inherited credentials before retiring the
+token. Natural and remote owner teardown release the binding.
+
+WovenShell's Quick Settings now includes Log out. It sends SIGKILL to its
+bounded child table, closes the kernel session, wipes typed and Change-PIN
+material, resets account state and returns to sign-in. The strengthened Stage
+20.12 journey passed at `target/woven-shell-sign-in-{1,2,4}cpu`, proving a
+launched child's identity equality, lock suspension, unlock restoration,
+logout revocation, child surface/process cleanup and display return. App,
+Stage20.12 target and host-target Clippy passed with warnings denied. The full
+Windows preservation chain passed at
+`audit-artifacts/acceptance-20261111-032505-125`. Phase H is next; no complete
+desktop integration or physical hardware gate is claimed by this entry.

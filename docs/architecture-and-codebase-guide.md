@@ -4847,3 +4847,20 @@ repaints the bounded card region; the wallpaper remains theme-neutral. F2/F3
 use the existing power-control ABI. Locked presentation keeps window and
 notification content hidden while retaining the login pointer. Session
 inheritance, desktop-launch authority and logout teardown remain Phase G.
+
+## Phase G authenticated session architecture (2026-11-11)
+
+`task::Process` carries kernel-private identity-session membership plus an
+active bit. Authentication is the only path that installs them. Ordinary spawn
+and fork copy both credentials and membership from the parent; the production
+primary WovenShell is denied command spawn while membership is inactive.
+
+Lock marks every matching process inactive before changing authority state, so
+a child on another CPU cannot race a final authenticated launch through the
+lock transition. Valid unlock restores active membership only after credential
+verification. Close/logout first revokes membership and resets credentials for
+every member, then retires the authority token. WovenShell separately sends
+SIGKILL to its bounded child table and wipes all PIN/change-PIN buffers before
+returning to sign-in. Process exit and scheduler-driven remote termination both
+release owner bindings; no userspace-provided identifier is trusted as proof
+of authentication.

@@ -1,9 +1,9 @@
 # Handoff
 
-Current directive status: Phases A-F COMPLETE in the worktree based on
-`1ff84dcc`. Phase E and F evidence is recorded in `test-results.md`; Phase G
-session management is next. Physical firmware/TPM/device qualification remains
-deferred; no physical action, commit or push was performed by Codex.
+Current directive status: Phases A-G COMPLETE at source `7e9136e1`. Phase G
+session evidence is recorded in `test-results.md`; Phase H WovenShell
+integration is next. Physical firmware/TPM/device qualification remains
+deferred; no physical action was performed by Codex.
 
 Phase A: COMPLETE (inventory and baseline only). Runtime source a980619e.
 Branch: test/boot-login-baseline. Integration source: d21807ba; local merge

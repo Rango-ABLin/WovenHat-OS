@@ -1,9 +1,9 @@
 # Boot, login and desktop architecture
 
-Status: IN PROGRESS through Phase F, 2026-11-10. Phase A inventory, Phase B
+Status: IN PROGRESS through Phase G, 2026-11-11. Phase A inventory, Phase B
 software/QEMU boot recovery, Phase C WovenInit readiness, Phase D splash
-handoff, Phase E authentication infrastructure, and Phase F WovenLogin are
-accepted.
+handoff, Phase E authentication infrastructure, Phase F WovenLogin, and Phase
+G session management are accepted.
 
 Reconciled with integration d21807ba via local merge aeb9d40a. Direct diff
 review found no changes since the initial audit in session.rs, accounts.rs,
@@ -65,8 +65,19 @@ power/restart and high-contrast controls. Both pointer and keyboard paths reach
 the same state transitions and kernel identity calls. Locked repaint exposes
 only the login frame and cursor; window and notification content remains
 suppressed. High-contrast changes are bounded to the opaque card because the
-decorative wallpaper is theme-neutral. Session launch authorization, logout
-and child cleanup remain Phase G.
+decorative wallpaper is theme-neutral.
+
+Phase G adds a kernel-only session-membership tag to each process. Successful
+authentication binds the shell to the authority token; spawn and fork inherit
+the authenticated credentials and tag, while userspace has no setter for
+either. The production desktop's command-spawn path refuses the primary shell
+until its tag is active. Lock suspends the tag across every session member
+before changing authority state, valid unlock restores it, and logout revokes
+credentials across the membership before closing the token. WovenShell sends
+uncatchable termination to every tracked child, wipes credential buffers and
+returns to account selection. Natural and remote owner teardown both release
+the identity binding. Phase H retains responsibility for the complete desktop
+functionality/readiness gate.
 
 The fallback `userspace::create_init_process` still provides the diagnostic
 assembly stub as `/init`; it is not used as proof of production readiness.
