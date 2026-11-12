@@ -4864,3 +4864,22 @@ SIGKILL to its bounded child table and wipes all PIN/change-PIN buffers before
 returning to sign-in. Process exit and scheduler-driven remote termination both
 release owner bindings; no userspace-provided identifier is trusted as proof
 of authentication.
+
+## Phase H WovenShell desktop architecture (2026-11-12)
+
+The authenticated state of `apps/woven-shell` owns one full-screen compositor
+surface and divides it into a desktop work area plus a fixed 24-pixel bottom
+taskbar. Window placement, resizing, tiling and pointer dragging consume the
+same work-area boundary, so application surfaces cannot be stranded behind the
+bar. WovenStart is a bounded menu immediately above the bar; its filtered app
+rows and pointer hit regions share geometry, and a zero-result query renders a
+localized status instead of a blank panel. It contains no workspace or window
+preview path; workspaces remain explicit taskbar controls.
+
+The shell paints opaque client/window content into its owned surface and uses
+`Painter::blend_rounded` for flat translucent cards. That compositor helper
+clips each rounded row span and performs exactly one alpha blend, while the 3D
+path retains its texture-background rendering. Display and input authority
+remain the existing exclusive compositor lease; desktop readiness is reported
+only after the production surface is presenting. No syscall, capability,
+kernel object, unsafe block or cross-process surface-control path was added.

@@ -64,6 +64,16 @@ release identity bindings. The strengthened graphical journey passes at
 `audit-artifacts/acceptance-20261111-032505-125`. Next: Phase H WovenShell
 integration. Physical firmware/TPM/native qualification remains deferred.
 
+Boot/login/desktop directive - Phase H WovenShell integration accepted (2026-11-12)
+The authenticated production desktop now provides the directive's bottom
+taskbar, bounded WovenStart/search, application/window/input integration,
+corrected rounded/translucent rendering and readiness signaling. Stage
+20.1-20.4, production Stage 20.15 and the preserved Stage 20.12 authenticated
+session journey pass at 1/2/4 CPUs. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-153757-168`. Next: Phase I
+full-system integration. Physical firmware/TPM/native qualification remains
+deferred.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual

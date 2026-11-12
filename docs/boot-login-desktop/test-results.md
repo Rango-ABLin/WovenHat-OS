@@ -1,6 +1,6 @@
 # Test results
 
-Status: IN PROGRESS. Phases A-G are accepted; Phase H is next.
+Status: IN PROGRESS. Phases A-H are accepted; Phase I is next.
 
 ## Windows baseline attempts
 
@@ -177,3 +177,29 @@ Full Windows preservation passes: acceptance-20261104-214457-697/ (exit 0),
 network and isolated Stage10.4-10.7 on 1/2/4 CPUs. Stage15.5 software signed
 handoff and its kernel feature Clippy pass; boot-image-b2/ retains the logs.
 Full Phase B and firmware Secure Boot qualification remain open.
+
+## Phase H WovenShell integration acceptance
+
+Runtime implementation checkpoint: `4558dc28` plus the current focused kernel
+acceptance-oracle corrections.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Desktop, bottom taskbar, readiness and production clock | `target/woven-shell-{1,2,4}cpu` | PASS |
+| Application surfaces, modern chrome and rounded translucent notification | `target/woven-shell-apps-{1,2,4}cpu` | PASS |
+| Bounded WovenStart, keyboard/pointer search, launch, empty-result feedback and focus return | `target/woven-shell-launcher-{1,2,4}cpu` | PASS |
+| Window focus, close and rendering behavior | `target/woven-shell-windows-{1,2,4}cpu` | PASS |
+| Production desktop session, F12 ownership transition and Quick Settings | `audit-artifacts/stage20.15-{1,2,4}cpu-*` | PASS |
+| Phase G sign-in/lock/unlock/logout preservation | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| WovenShell target, affected kernel features and workspace host Clippy | warnings denied | PASS |
+| Full Windows preservation | `audit-artifacts/acceptance-20261112-153757-168` | PASS |
+
+The final source removes the obsolete full-screen Activities/workspace-preview
+path rather than hiding it, renders an explicit localized `No matches` state,
+and uses one rounded compositor blend for flat toast, Quick Settings and
+notification-center cards. Stage 20.12 was updated to use the accepted bottom
+geometry and deterministic absolute-pointer selection for system-menu rows;
+its complete identity and teardown journey passes at 1/2/4 CPUs. The full gate
+ran 220 host harness tests, warning-denying build/lints and host Rust tests, 60
+repeated memory boots, live networking and Stage 10.4-10.7 on 1/2/4 CPUs. No
+timeout, retry budget, security assertion or capability boundary was relaxed.

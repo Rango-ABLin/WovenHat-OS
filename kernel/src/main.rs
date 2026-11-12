@@ -1794,26 +1794,42 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         #[cfg(feature = "system-apps")]
         if !maintenance_boot {
             let persistent_accounts = install_persistent_accounts();
-            match persistent_account_boot_policy(persistent_accounts) {
-                AccountBootPolicy::Proceed => {}
-                AccountBootPolicy::DemoPending => {
-                    serial::write_line(format_args!(
-                        "[SESSION] persistent accounts absent; hardware demo account pending"
-                    ));
-                }
-                AccountBootPolicy::Withhold
-                    if persistent_accounts == PersistentAccounts::Missing =>
-                {
-                    serial::write_line(format_args!(
-                        "[SESSION] SETUP REQUIRED: no provisioned account; desktop withheld"
-                    ));
-                    halt();
-                }
-                AccountBootPolicy::Withhold => {
-                    serial::write_line(format_args!(
-                        "[SESSION] persistent account provisioning failed; desktop withheld"
-                    ));
-                    halt();
+            let account_policy = persistent_account_boot_policy(persistent_accounts);
+            #[cfg(any(
+                feature = "stage31-service-supervisor-test",
+                feature = "woven-init-failure-test"
+            ))]
+            serial::write_line(format_args!(
+                "[SESSION] account gate deferred for pre-session lifecycle fixture state={:?} policy={:?}",
+                persistent_accounts,
+                account_policy
+            ));
+            #[cfg(not(any(
+                feature = "stage31-service-supervisor-test",
+                feature = "woven-init-failure-test"
+            )))]
+            {
+                match account_policy {
+                    AccountBootPolicy::Proceed => {}
+                    AccountBootPolicy::DemoPending => {
+                        serial::write_line(format_args!(
+                            "[SESSION] persistent accounts absent; hardware demo account pending"
+                        ));
+                    }
+                    AccountBootPolicy::Withhold
+                        if persistent_accounts == PersistentAccounts::Missing =>
+                    {
+                        serial::write_line(format_args!(
+                            "[SESSION] SETUP REQUIRED: no provisioned account; desktop withheld"
+                        ));
+                        halt();
+                    }
+                    AccountBootPolicy::Withhold => {
+                        serial::write_line(format_args!(
+                            "[SESSION] persistent account provisioning failed; desktop withheld"
+                        ));
+                        halt();
+                    }
                 }
             }
         }
@@ -10221,10 +10237,9 @@ fn stage24_59_change_pin_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    // WovenShell's production chrome is top-aligned: the 24-pixel taskbar
-    // starts at y=0 and Quick Settings opens immediately below it at y=26.
-    // Keep the oracle independent of shell-private layout helpers.
-    let top = 0;
+    // WovenShell's production chrome uses a 24-pixel bottom taskbar. Keep the
+    // oracle independent of shell-private layout helpers.
+    let top = height - 24;
     let middle = height / 2;
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
@@ -10991,6 +11006,23 @@ fn stage20_12_self_test() -> bool {
     fn click() -> bool {
         packet(0, 0, true) && packet(0, 0, false)
     }
+    fn click_at(x: i32, y: i32, width: i32, height: i32) -> bool {
+        let axis = |position: i32, extent: i32| -> u16 {
+            let end = extent.saturating_sub(1).max(1);
+            ((i64::from(position.clamp(0, end)) * 32767 + i64::from(end - 1)) / i64::from(end))
+                as u16
+        };
+        woven_input::publish(woven_input::Event::PointerAbsolute {
+            x: axis(x, width),
+            y: axis(y, height),
+        }) && woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: true,
+        }) && woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: false,
+        })
+    }
     fn keys(codes: &[u8]) -> bool {
         codes.iter().all(|&code| mouse::keyboard_loopback(code))
     }
@@ -11072,10 +11104,9 @@ fn stage20_12_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    // WovenShell's production chrome is top-aligned: the 24-pixel taskbar
-    // starts at y=0 and Quick Settings opens immediately below it at y=26.
-    // Keep the oracle independent of shell-private layout helpers.
-    let top = 0;
+    // WovenShell's production chrome uses a 24-pixel bottom taskbar. Keep the
+    // oracle independent of shell-private layout helpers.
+    let top = height - 24;
     let middle = height / 2;
     let line = |y0: i32, text: &str| {
         let x0 = (width - crate::font::text_width(text) as i32) / 2;
@@ -11192,21 +11223,16 @@ fn stage20_12_self_test() -> bool {
     // Quick Settings button.
     let name_x = button.0 - 6 - (4 * 14 - 2) - 6 - crate::font::text_width("lin") as i32;
     let name_shown = || {
-        let mut mask = Surface::new(18, 7);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(0, 0, "lin", WHITE);
-        let mut glyph_pixels = 0usize;
-        let glyphs_match = (top + 9..top + 16).all(|y| {
-            (name_x..name_x + 18).all(|x| {
-                if mask.pixel(x - name_x, y - (top + 9)) != Some(WHITE) {
-                    return true;
-                }
-                glyph_pixels += 1;
-                compositor::pixel(x, y) == Ok(WHITE)
+        // Production chrome uses the antialiased system face, so glyph-edge
+        // pixels are blends rather than the kernel bitmap font's pure white.
+        // This region is reserved for the account name and otherwise contains
+        // only the flat taskbar fill.
+        let taskbar = |x, y| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
+        compositor::pixel(name_x - 2, top + 12) == Ok(taskbar(name_x - 2, top + 12))
+            && (top + 9..top + 18).any(|y| {
+                (name_x..name_x + crate::font::text_width("lin") as i32)
+                    .any(|x| compositor::pixel(x, y) != Ok(taskbar(x, y)))
             })
-        });
-        glyphs_match && glyph_pixels > 0
     };
     // A successful verification clears lin's recorded failures.
     let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07])
@@ -11241,16 +11267,17 @@ fn stage20_12_self_test() -> bool {
         return false;
     }
 
-    // Lock through Quick Settings: the lock screen wants lin's PIN. Quick
-    // Settings begins below the top taskbar; row 5 is "Lock screen".
-    let lock_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 5) * 14 + 7);
-    // The graphical submit click leaves the pointer at the sign-in button's
-    // center, not at the initial screen center.
-    let (px, py) = (width / 2, middle + 39);
-    let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
-        && click()
-        && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
-        && click()
+    // Lock through Quick Settings: the lock screen wants lin's PIN. The
+    // twelve-row panel (title plus eleven actions) opens above the taskbar;
+    // action row 5 is "Lock screen".
+    let panel_y = top - 2 - (12 * 14 + 2);
+    let lock_row = (width - 4 - 164 + 28, panel_y + 1 + (1 + 5) * 14 + 7);
+    // Use the public absolute-pointer path for deterministic bottom-edge
+    // selection; the relative PS/2 path above remains covered by account
+    // selection and the graphical submit button.
+    let locked = click_at(button.0 + 8, button.1 + 8, width, height)
+        && until(500, || !woven_input::pending(shell.as_u64()))
+        && click_at(lock_row.0, lock_row.1, width, height)
         && until(1000, || {
             line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
         });
@@ -11286,11 +11313,10 @@ fn stage20_12_self_test() -> bool {
     // Log out through Quick Settings. Row 7 is the new session-termination
     // action. The child must lose its identity immediately and complete
     // scheduler-owned teardown before another account can use the desktop.
-    let logout_row = (width - 4 - 164 + 28, top + 24 + 2 + 1 + (1 + 7) * 14 + 7);
-    let logged_out = move_by(button.0 + 8 - lock_row.0, button.1 + 8 - lock_row.1)
-        && click()
-        && move_by(logout_row.0 - (button.0 + 8), logout_row.1 - (button.1 + 8))
-        && click()
+    let logout_row = (width - 4 - 164 + 28, panel_y + 1 + (1 + 7) * 14 + 7);
+    let logged_out = click_at(button.0 + 8, button.1 + 8, width, height)
+        && until(500, || !woven_input::pending(shell.as_u64()))
+        && click_at(logout_row.0, logout_row.1, width, height)
         && until(1000, || sign_in("> ada", "  lin", "Enter PIN"));
     if !step("logout returns to account selection", logged_out) {
         return false;
@@ -11302,6 +11328,34 @@ fn stage20_12_self_test() -> bool {
             && until(1000, || {
                 task::process_credentials(child).is_none() || task::process_exited(child)
             }),
+    ) {
+        return false;
+    }
+
+    // Phase I integration: repeat the authenticated lifecycle in the same
+    // production shell. This catches stale UI selection, retired-token reuse,
+    // and incomplete logout reset that a fresh process/boot would conceal.
+    let second_login = keys(&[0x0f, 0x0a, 0x09, 0x08, 0x07, 0x1c])
+        && until(PIN_CHECK_TICKS, || {
+            task::process_identity_session(shell).is_some()
+                && task::process_credentials(shell) != Some(task::Credentials::USERSPACE)
+        })
+        && until(1000, name_shown);
+    if !step(
+        "a second login creates fresh authenticated session authority",
+        second_login,
+    ) {
+        return false;
+    }
+    let second_logout = click_at(button.0 + 8, button.1 + 8, width, height)
+        && until(500, || !woven_input::pending(shell.as_u64()))
+        && click_at(logout_row.0, logout_row.1, width, height)
+        && until(1000, || sign_in("> ada", "  lin", "Enter PIN"));
+    if !step(
+        "a second logout revokes the fresh session and resets sign-in",
+        second_logout
+            && task::process_credentials(shell) == Some(task::Credentials::USERSPACE)
+            && task::process_identity_session(shell).is_none(),
     ) {
         return false;
     }

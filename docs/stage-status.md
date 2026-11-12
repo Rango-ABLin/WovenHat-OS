@@ -12895,3 +12895,14 @@ between the retained splash and desktop captures. Full Windows preservation
 passed at `audit-artifacts/acceptance-20261109-142532-913`. No ABI, capability,
 unsafe code, timeout, or alternate graphics stack was introduced. Phase E is
 next and remains unstarted.
+
+## Boot/login/desktop Phase H WovenShell integration (2026-11-12)
+
+Phase H is accepted. The authenticated desktop reaches a functional production
+WovenShell with a bottom taskbar, bounded WovenStart/search, real application
+launching and window/input integration, corrected modern chrome/translucency,
+and readiness/ownership signaling. Stage 20.1-20.4, 20.12 preservation and
+20.15 pass on 1/2/4 CPUs. The full Windows preservation chain passes at
+`audit-artifacts/acceptance-20261112-153757-168`. Phase I full-system
+integration is next; physical firmware, TPM and device qualification remain
+deferred to the final hardware pass.

@@ -242,3 +242,25 @@ Stage20.12 target and host-target Clippy passed with warnings denied. The full
 Windows preservation chain passed at
 `audit-artifacts/acceptance-20261111-032505-125`. Phase H is next; no complete
 desktop integration or physical hardware gate is claimed by this entry.
+
+## BLD-H Phase H WovenShell integration closure (2026-11-12)
+
+Status: ACCEPTED. The production shell uses the directive's bottom taskbar and
+a bounded WovenStart menu rather than a full-screen Activities/workspace
+preview. Search, selection, application launch, focus restoration, window
+management and an explicit localized empty-result state share bounded geometry
+and input hit regions. The current 220-pixel diagonal wallpaper, system font,
+gradient title chrome and rounded translucent cards are reflected by independent
+kernel acceptance oracles. Flat toast, Quick Settings and notification-center
+cards receive one rounded compositor blend, avoiding the former double blend.
+
+Stage 20.1-20.4 pass at `target/woven-shell-{1,2,4}cpu`,
+`target/woven-shell-apps-{1,2,4}cpu`,
+`target/woven-shell-launcher-{1,2,4}cpu` and
+`target/woven-shell-windows-{1,2,4}cpu`. Production Stage 20.15 passes in
+`audit-artifacts/stage20.15-{1,2,4}cpu-*`. The Phase G Stage 20.12 journey was
+rerun at `target/woven-shell-sign-in-{1,2,4}cpu` and preserves authentication,
+identity inheritance, lock/unlock, logout, child cleanup and display return.
+Warning-denying target/host Clippy and formatting pass. The complete Windows
+chain passes at `audit-artifacts/acceptance-20261112-153757-168`. Phase I is
+next; physical firmware, trust and device qualification remain deferred.

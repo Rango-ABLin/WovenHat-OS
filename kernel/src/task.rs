@@ -6871,14 +6871,10 @@ fn complete_process_termination(
     signal: u8,
 ) {
     // Remote/scheduler-driven termination bypasses exit_current_process(), so
-    // it needs the same Stage 10.3 async-owner reclamation guarantee.
+    // it needs the same Stage 10.3 async-owner reclamation guarantee. Identity
+    // authority is revoked before the scheduler request in signal_processes;
+    // taking its lower-ranked locks here would invert SCHEDULER -> identity.
     release_task_runtime_resources(task_id);
-    #[cfg(any(
-        feature = "stage24-4-test",
-        feature = "stage24-5-test",
-        feature = "system-apps"
-    ))]
-    crate::identity_runtime::release_owner(process_id.as_u64());
     // Mutate process-visible state and take ownership of the file table while
     // PROCESS_TABLE is held.  Every operation below can acquire another
     // subsystem lock, so it must run after this guard is dropped; otherwise a
@@ -7177,7 +7173,7 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
             // state/stack hand-off boundary.
             process.pending_signal = sig;
             if process.state != ProcessState::Exited {
-                termination_requests.push((process.task_id, sig as u8));
+                termination_requests.push((process.task_id, process.id, sig as u8));
             }
         } else {
             process.pending_signal = sig;
@@ -7200,9 +7196,22 @@ fn signal_processes(pid: u64, sig: u64, sender: SignalSender) -> Result<(), File
         }
     }
     if !termination_requests.is_empty() {
+        // Revoke kernel identity before acquiring SCHEDULER. Besides closing
+        // the race for a final authenticated operation, this preserves the
+        // global lock order: identity bindings/authority rank below the
+        // scheduler and may themselves request scheduler-side credential
+        // invalidation after their guards are dropped.
+        #[cfg(any(
+            feature = "stage24-4-test",
+            feature = "stage24-5-test",
+            feature = "system-apps"
+        ))]
+        for (_, process_id, _) in &termination_requests {
+            crate::identity_runtime::release_owner(process_id.as_u64());
+        }
         {
             let mut scheduler = SCHEDULER.lock();
-            for (task_id, signal) in termination_requests {
+            for (task_id, _, signal) in termination_requests {
                 if let Some(cpu) = scheduler.request_termination(task_id, signal) {
                     reschedule_mask |= cpu_bit(cpu);
                 }

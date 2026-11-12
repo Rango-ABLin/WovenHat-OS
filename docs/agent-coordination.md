@@ -9118,3 +9118,26 @@ and desktop readiness signaling. Preserve accepted Phase A-G authority and
 logout behavior. Audit and reuse existing Stage 20 gates where they prove the
 directive; implement only missing behavior. Do not begin Phase I or perform
 physical device/trust actions. Cargo/QEMU acceptance remains serialized.
+
+## Codex - Phase H WovenShell integration accepted (2026-11-12)
+
+The authenticated production desktop now satisfies the directive with a
+bottom taskbar, bounded WovenStart menu, explicit empty-search feedback,
+application/window/input integration, rounded translucent cards and production
+desktop readiness. Stage 20.1-20.4 pass at 1/2/4 CPUs, Stage 20.15 passes at
+1/2/4 CPUs, and the strengthened Phase G Stage 20.12 session journey remains
+green at 1/2/4 CPUs. WovenShell target, affected kernel-feature and workspace
+host Clippy pass with warnings denied. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-153757-168`. Earlier focused
+failures remain preserved. No Cargo/QEMU chain is active. Physical
+firmware/TPM/device qualification remains deferred.
+
+## Codex - Phase I full-system integration claim (2026-11-12)
+
+User authorization to continue through all remaining software gates is active.
+Claim Phase I only: end-to-end startup, repeated login/logout and failure
+recovery, multicore behavior, storage persistence, security regressions and
+performance measurements. Preserve accepted Phase A-H behavior and all
+existing budgets. Reuse current acceptance evidence only where it directly
+proves the Phase I matrix, run missing focused integration cases serially, and
+retain failures. Do not begin Phase J or perform physical device/trust actions.
