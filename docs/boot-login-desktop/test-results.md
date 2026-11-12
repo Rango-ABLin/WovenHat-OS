@@ -1,6 +1,6 @@
 # Test results
 
-Status: IN PROGRESS. Phases A-F are accepted; Phase G is next.
+Status: IN PROGRESS. Phases A-G are accepted; Phase H is next.
 
 ## Windows baseline attempts
 
@@ -137,6 +137,28 @@ deadline was increased. The full gate ran 220 host harness tests, host Rust
 tests, warning-denying build/lints, 60 memory boots, live network 1/2/4 and
 Stage 10.4-10.7 on 1/2/4 CPUs. Physical/trust preflight remained read-only and
 not qualified.
+
+## Phase G session-management acceptance
+
+Source: `7e9136e1e14981464da8f757e0c9166e40486b03`.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Authenticated launch and exact inherited kernel identity | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| Lock suspends and valid unlock restores inherited authority | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| Logout revokes credentials, kills child, removes surface/tray and returns to sign-in | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| WovenShell no-std target Clippy | warnings denied | PASS |
+| Stage 20.12 kernel target Clippy | warnings denied | PASS |
+| Workspace host-target Clippy | warnings denied | PASS |
+| Full Windows preservation | `audit-artifacts/acceptance-20261111-032505-125` | PASS |
+
+The full gate ran 220 host harness tests, host Rust tests, warning-denying
+build/lints, 10 one-CPU, 30 two-CPU and 20 four-CPU memory boots, live network
+1/2/4 and Stage 10.4-10.7 on 1/2/4 CPUs. Its physical and virtual-trust
+preflights were read-only and correctly remained not qualified. The earlier
+incomplete run `audit-artifacts/acceptance-20261110-191838-383` is retained; it
+ended during host/network setup without a PASS or FAIL marker and was not used
+as acceptance evidence. No timeout, retry budget or assertion was relaxed.
 
 
 ## B2 accepted bounded unit at 72be85aa

@@ -9097,3 +9097,24 @@ owner teardown. Preserve accepted Phase A-F behavior and ABI. First audit the
 existing identity/process relationships and focused gates, then implement the
 smallest missing security closure. Do not begin Phase H or perform physical
 device/trust actions. Cargo and QEMU acceptance remain serialized.
+
+## Codex - Phase G session management accepted (2026-11-11)
+
+Kernel-private session inheritance, pre-auth production launch denial,
+cross-process lock suspension/unlock restoration, logout revocation and child
+cleanup pass in the strengthened Stage 20.12 journey on 1/2/4 CPUs at
+`target/woven-shell-sign-in-{1,2,4}cpu`. Warning-denying app, affected-feature
+and host-target Clippy pass. The complete Windows preservation chain passes at
+`audit-artifacts/acceptance-20261111-032505-125`; the earlier incomplete
+`acceptance-20261110-191838-383` run remains preserved. No Cargo/QEMU chain is
+active. Phase H is next; physical firmware/TPM/device work remains deferred.
+
+## Codex - Phase H WovenShell integration claim (2026-11-12)
+
+User authorization to continue through every remaining software gate is
+active. Claim Phase H only: authenticated desktop launch, taskbar/start menu,
+application launch, window management, input integration, graphical rendering
+and desktop readiness signaling. Preserve accepted Phase A-G authority and
+logout behavior. Audit and reuse existing Stage 20 gates where they prove the
+directive; implement only missing behavior. Do not begin Phase I or perform
+physical device/trust actions. Cargo/QEMU acceptance remains serialized.

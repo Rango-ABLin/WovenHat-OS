@@ -117,6 +117,43 @@ impl Painter<'_> {
         }
     }
 
+    /// Blend a rounded rectangle directly through the compositor.
+    ///
+    /// A keyed scratch overlay cannot represent partial alpha: blending a
+    /// rounded fill into the transparent key first produces opaque pixels
+    /// that overwrite, rather than blend with, the desktop. Emit one bounded
+    /// horizontal span per row instead. The span calculation matches
+    /// WovenGraphics' rounded-rectangle circle mask.
+    pub fn blend_rounded(&mut self, area: Area, color: u32, opacity: u8, radius: usize) {
+        if area.is_empty() {
+            return;
+        }
+        let radius = (radius as i32).min(area.width.min(area.height) / 2);
+        let radius_squared = i64::from(radius) * i64::from(radius);
+        for row in 0..area.height {
+            let corner_y = if row < radius {
+                radius
+            } else if row > area.height - radius {
+                area.height - radius
+            } else {
+                row
+            };
+            let dy = i64::from(row - corner_y);
+            let mut inset = 0;
+            while inset < radius {
+                let dx = i64::from(inset - radius);
+                if dx * dx + dy * dy <= radius_squared {
+                    break;
+                }
+                inset += 1;
+            }
+            let width = area.width - 2 * inset;
+            if width > 0 {
+                self.blend(Area::new(area.x + inset, area.y + row, width, 1), color, opacity);
+            }
+        }
+    }
+
     /// Render `area` with `render` in chunks no larger than the staging
     /// surface, uploading and blitting each.
     pub fn draw(&mut self, area: Area, render: impl Fn(&mut Canvas<'_>)) {
