@@ -12906,3 +12906,15 @@ and readiness/ownership signaling. Stage 20.1-20.4, 20.12 preservation and
 `audit-artifacts/acceptance-20261112-153757-168`. Phase I full-system
 integration is next; physical firmware, TPM and device qualification remain
 deferred to the final hardware pass.
+
+## Boot/login/desktop Phase I full-system integration (2026-11-12)
+
+Phase I is accepted at source `41a78305`. Repeated authenticated session
+lifecycle, warm reboot, supervisor restart, WovenInit rollback, installed-disk
+persistence, abrupt-shutdown recovery and input isolation pass on 1/2/4 CPUs.
+The integration pass fixed test-fixture account-gate ordering and moved remote
+identity revocation before scheduler acquisition, preserving authority and lock
+order during termination. Affected feature and host Clippy pass with warnings
+denied. The full Windows chain passes at
+`audit-artifacts/acceptance-20261112-164814-197`. Phase J is next; physical
+firmware, TPM and device qualification remain deferred.

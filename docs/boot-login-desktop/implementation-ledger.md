@@ -264,3 +264,19 @@ identity inheritance, lock/unlock, logout, child cleanup and display return.
 Warning-denying target/host Clippy and formatting pass. The complete Windows
 chain passes at `audit-artifacts/acceptance-20261112-153757-168`. Phase I is
 next; physical firmware, trust and device qualification remain deferred.
+
+## BLD-I Phase I full-system integration closure (2026-11-12)
+
+Status: ACCEPTED. Stage 20.12 now executes two complete login/logout cycles in
+one production shell and independently validates the translucent taskbar/font
+readiness pixels. Warm reboot, supervisor crash/restart, WovenInit rollback,
+installed WovenFS persistence, repeated abrupt-shutdown recovery and input
+isolation all pass on 1/2/4 CPUs.
+
+The pass corrected test-only pre-session account-gate ordering and moved remote
+identity-owner revocation ahead of scheduler acquisition. This both prevents a
+last authenticated operation racing termination and removes the observed
+rank-10 to rank-5 lock inversion. Affected feature and host Clippy pass with
+warnings denied. The complete Windows chain passes at
+`audit-artifacts/acceptance-20261112-164814-197`. Phase J is next; physical
+firmware, trust and device qualification remain deferred.

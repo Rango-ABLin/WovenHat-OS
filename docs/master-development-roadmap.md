@@ -74,6 +74,16 @@ passes at `audit-artifacts/acceptance-20261112-153757-168`. Next: Phase I
 full-system integration. Physical firmware/TPM/native qualification remains
 deferred.
 
+Boot/login/desktop directive - Phase I full-system integration accepted (2026-11-12)
+Two-cycle authenticated session teardown, warm reboot, service crash/restart,
+WovenInit failure rollback, installed WovenFS persistence, abrupt-shutdown
+recovery and input isolation pass on 1/2/4 CPUs. Remote termination now revokes
+identity authority before scheduler acquisition, eliminating an observed lock
+inversion and final-operation race. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-164814-197`. Next: Phase J
+release-candidate packaging. Physical firmware/TPM/native qualification remains
+deferred.
+
 Boot/login/desktop B1 strict configuration accepted (2026-11-04)
 Runtime aaeaaf8f rejects invalid configuration before ExitBootServices, with
 preallocation bounds and valid legacy/version-1 compatibility. All 27 actual

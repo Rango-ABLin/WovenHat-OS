@@ -1,6 +1,6 @@
 # Test results
 
-Status: IN PROGRESS. Phases A-H are accepted; Phase I is next.
+Status: IN PROGRESS. Phases A-I are accepted; Phase J is next.
 
 ## Windows baseline attempts
 
@@ -203,3 +203,33 @@ its complete identity and teardown journey passes at 1/2/4 CPUs. The full gate
 ran 220 host harness tests, warning-denying build/lints and host Rust tests, 60
 repeated memory boots, live networking and Stage 10.4-10.7 on 1/2/4 CPUs. No
 timeout, retry budget, security assertion or capability boundary was relaxed.
+
+## Phase I full-system integration acceptance
+
+Source: `41a78305`.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Two consecutive authenticated login/logout cycles | `target/woven-shell-sign-in-{1,2,4}cpu` | PASS |
+| Warm reboot | `audit-artifacts/stage13.20-reboot-{1,2,4}cpu-*` | PASS |
+| Service crash/restart | `target/shell-regression/system-apps-{1,2,4}cpu-{1794493799031614800,1794493857107820100,1794493916080375200}` | PASS |
+| WovenInit readiness-failure rollback | `target/shell-regression/system-apps-{1,2,4}cpu-{1794493974404661900,1794494031692067800,1794494111514118200}` | PASS |
+| Installed WovenFS persistence | `target/installed-disk-release-20261112T143613Z/{1,2,4}cpu` | PASS |
+| Three abrupt shutdowns plus recovery | `audit-artifacts/stage31-sudden-shutdown-{1,2,4}cpu-20261112T14*` | PASS |
+| Cross-window input isolation and teardown | `target/woven-shell-input-isolation-{1,2,4}cpu` | PASS |
+| Affected-feature and workspace Clippy | warnings denied | PASS |
+| Full Windows preservation | `audit-artifacts/acceptance-20261112-164814-197` | PASS |
+
+The integration pass exposed and fixed two real defects. Pre-session lifecycle
+fixtures were incorrectly stopped by the production missing-account gate; only
+the two test-only fixtures now defer that gate and still terminate before a
+desktop session. Remote process termination also released identity authority
+while holding the scheduler lock; revocation now occurs before scheduler
+acquisition, closing the final-operation race and preserving lock order. A
+failed pre-fix supervisor run is retained at
+`target/shell-regression/system-apps-1cpu-1794493446151989400`.
+
+The final full gate ran 220 host harness tests, warning-denying build/lints,
+host Rust and WovenFS crash tests, 10 one-CPU, 30 two-CPU and 20 four-CPU
+boots, live networking and Stage 10.4-10.7 on 1/2/4 CPUs. Physical and virtual
+trust preflights remained read-only and not qualified.

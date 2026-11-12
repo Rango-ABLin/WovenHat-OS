@@ -4883,3 +4883,20 @@ path retains its texture-background rendering. Display and input authority
 remain the existing exclusive compositor lease; desktop readiness is reported
 only after the production surface is presenting. No syscall, capability,
 kernel object, unsafe block or cross-process surface-control path was added.
+
+## Phase I lifecycle and recovery architecture (2026-11-12)
+
+Remote process termination revokes the process-owned identity authority after
+dropping the process table and before acquiring the scheduler. Revocation is
+therefore security-conservative—no final authenticated operation can race the
+termination transition—and it avoids nesting the rank-5 identity lock beneath
+the rank-10 scheduler lock. Natural current-process exit retains its existing
+owner-release path.
+
+The WovenInit and supervisor failure fixtures run before session construction,
+so their feature-isolated boots defer only the missing-account desktop gate and
+exit through the QEMU test device. Production and hardware-demo boots still
+withhold the desktop when durable accounts are missing. Phase I acceptance
+combines this boundary with repeated session teardown, restart/rollback,
+installed-disk persistence, sudden-shutdown recovery and input-isolation gates
+on 1/2/4 CPUs.

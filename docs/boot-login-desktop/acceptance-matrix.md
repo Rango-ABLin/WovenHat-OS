@@ -1,6 +1,6 @@
 # Acceptance matrix
 
-Status: IN PROGRESS. Phases A-H are COMPLETE; Phase I is the next software
+Status: IN PROGRESS. Phases A-I are COMPLETE; Phase J is the next software
 gate. Phase B physical firmware/trust qualification remains explicitly
 deferred to the final hardware pass.
 
@@ -14,7 +14,7 @@ deferred to the final hardware pass.
 | F: login | graphical/input/accessibility evidence through real authority | COMPLETE (responsive login card, date/user/PIN, pointer and keyboard navigation, wrong-credential feedback, power/restart and high-contrast controls, real kernel authentication, visual/performance evidence) |
 | G: session | owner/identity isolation, replay rejection, lock/logout cleanup | COMPLETE (kernel-only session tags, inherited credentials, pre-auth launch denial, lock suspension/unlock restoration, logout revocation and child teardown at 1/2/4 CPUs) |
 | H: desktop | authenticated launch and real taskbar/apps/windows/input | COMPLETE (bottom taskbar, bounded WovenStart/search, application/window/input integration, corrected rendering and readiness at 1/2/4 CPUs) |
-| I: integration | repeated 1/2/4-CPU login/logout/reboot/crash/persistence runs | NOT STARTED |
+| I: integration | repeated 1/2/4-CPU login/logout/reboot/crash/persistence runs | COMPLETE (two-cycle login/logout, reboot, service/init recovery, installed-disk persistence, sudden-shutdown recovery and input isolation) |
 | J: release candidate | reproducible image, interactive launcher, CI, limitations | NOT STARTED |
 
 Existing functionality will be credited only after source and evidence review;

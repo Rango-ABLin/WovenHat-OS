@@ -9141,3 +9141,21 @@ performance measurements. Preserve accepted Phase A-H behavior and all
 existing budgets. Reuse current acceptance evidence only where it directly
 proves the Phase I matrix, run missing focused integration cases serially, and
 retain failures. Do not begin Phase J or perform physical device/trust actions.
+
+## Codex - Phase I full-system integration accepted (2026-11-12)
+
+Repeated login/logout, warm reboot, service crash/restart, WovenInit rollback,
+installed WovenFS persistence, abrupt-shutdown recovery and input isolation
+pass on 1/2/4 CPUs. The run fixed pre-session fixture ordering and a real
+scheduler/identity lock inversion in remote termination. Affected feature and
+host Clippy pass with warnings denied. The complete Windows preservation chain
+passes at `audit-artifacts/acceptance-20261112-164814-197`. No QEMU/Cargo chain
+is active. Physical firmware/TPM/device qualification remains deferred.
+
+## Codex - Phase J release-candidate claim (2026-11-12)
+
+User authorization to continue through every remaining software gate remains
+active. Claim Phase J only: reproducible release image, interactive launcher/CI
+entry points and a complete limitations record. Preserve accepted Phase A-I
+behavior and authority boundaries. Do not perform physical device, firmware or
+trust-state changes. Serialize all build and QEMU acceptance.

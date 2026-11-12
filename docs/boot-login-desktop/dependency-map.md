@@ -12,9 +12,10 @@ Status: IN PROGRESS. This records observed edges, not a proposed second stack.
 7. Account digest -> copied syscall request -> AccountManage check ->
    identity_runtime -> owner-bound session and task credentials -> desktop UI.
 
-Audit missing-account startup, F12 diagnostic console authority, child-process
-launch policy, service/desktop crash handling, and durable account publication
-before treating these edges as a secure end-to-end acceptance result.
+Missing-account startup, F12 diagnostic console authority, child-process launch
+policy, service/desktop crash handling, durable publication and repeated
+session teardown are accepted through Phase I. Phase J must package and publish
+the same graph reproducibly without widening these authorities.
 
 Order: finish Phase A baseline; evaluate Phase B boot handoff; then readiness
 and init. Preserve integration d21807ba's recorded graphics acceptance and

@@ -1,7 +1,7 @@
 # Blockers and remaining prerequisites
 
-Status: IN PROGRESS through Phase G. Phases A-G are accepted in software/QEMU;
-Phase H is the next software gate. Physical firmware, TPM, GPU/input, removable
+Status: IN PROGRESS through Phase I. Phases A-I are accepted in software/QEMU;
+Phase J is the next software gate. Physical firmware, TPM, GPU/input, removable
 media and native qualification remain deferred to the final hardware pass.
 
 ## External qualification prerequisites
@@ -15,11 +15,6 @@ media and native qualification remain deferred to the final hardware pass.
 
 ## Software still required by the directive
 
-- Phase H must qualify the authenticated desktop, taskbar, launcher,
-  applications, window/input integration and readiness signaling as one
-  functional graphical journey.
-- Phase I must cover repeated login/logout/reboot/crash/persistence journeys and
-  recovery/F12/fallback negative cases without an authentication bypass.
 - Phase J must produce the reproducible release candidate, CI/launcher and
   complete limitations record. Physical/trust items remain separate below.
 
