@@ -9635,3 +9635,14 @@ branch tips now match with no merge conflict. The restored coordination note
 and this handoff remain intentionally uncommitted; no source or acceptance
 artifacts were changed by the sync repair.
 
+## Codex - bounded build repair verification (2026-11-15)
+
+The isolated master-reconciliation branch repairs local UEFI source detection
+and duplicate child target arguments. Actual-script regressions reproduce two
+failures on original source and pass all three cases after repair. All 211
+Python tests pass after locked cache prefetch. Build, warning-denying host and
+default/hardware-demo kernel Clippy, and Rust host tests pass. The signed image
+build succeeds and the strict WHPX desktop journey passes on 1/2/4 CPUs.
+One-CPU TCG reaches authentication but times out waiting for Files launch.
+All evidence is retained. Full stage acceptance remains open. The inherited
+Stage 10.7 Windows chain is next, followed by focused Stage 11.5 reproduction.

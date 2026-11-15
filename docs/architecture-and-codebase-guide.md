@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Nested UEFI build source selection (2026-11-15)
+
+The vendored bootloader build script selects a local UEFI runtime only when
+`uefi/Cargo.toml` is a file. Leftover build directories use the pinned published
+runtime path. Both modes supply one child target directory and one intermediate
+build directory beneath `OUT_DIR`, preserving isolation from the parent Cargo
+locks. The actual-script host regression compiles `vendor/bootloader/build.rs`
+and records child arguments for published, leftover-directory and local-source
+inputs. Kernel ABI, runtime authority and object ownership are unaffected.
+Full image and inherited gate qualification are tracked in
+`docs/release-qualification/BUILD-AND-BOOT-REPORT.md`.
+
 ## POSIX static-libc bootstrap (2026-10-28)
 
 The POSIX port uses pinned upstream musl 1.2.6 and keeps WovenHat adaptation

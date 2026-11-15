@@ -69,12 +69,11 @@ fn build_uefi_bootloader() -> PathBuf {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo);
     cmd.arg("install").arg("bootloader-x86_64-uefi");
-    if Path::new("uefi").exists() {
+    if Path::new("uefi/Cargo.toml").is_file() {
         // local build
         cmd.arg("--path").arg("uefi");
         println!("cargo:rerun-if-changed=uefi");
         println!("cargo:rerun-if-changed=common");
-        cmd.arg("--target-dir").arg("target/uefi_target");
     } else {
         cmd.arg("--version").arg(BOOTLOADER_VERSION);
     }

@@ -35,6 +35,20 @@ the instrumentation entered the tree, and requires ≥1 GiB guest RAM + QEMU TCG
 acceleration for the 7.6 memory matrix and 10.7 chain. K-01/K-02/K-03 fixes are
 valid and lint/checked clean; no further code changes are needed from the audit's
 scope. See `docs/audit-kernel-fix-plan-2026-11-20.md` for full details.
+## Live master build reconciliation - 2026-11-15 - FOCUSED REPAIR
+
+Fetched remote refs and inspected live checks for the nine named development
+PRs. The isolated `integration/master-reconciliation-20261115` branch starts
+from master `541dd708` to preserve its ABI and source while reconciling newer
+work. Live master reproduced the nested bootloader duplicate `--target-dir`
+failure. Local-source detection now requires a Cargo manifest and both source
+modes supply one isolated target directory. Three actual-script regressions
+pass, including the two cases failing on original source. The signed image builds and strict desktop/input qualification passes on
+WHPX at 1/2/4 CPUs. All 211 Python tests, the build, warning-denying host and
+default/hardware-demo kernel Clippy, and Rust host tests pass. The one-CPU
+TCG Files-launch timeout remains open. The inherited Windows chain is next. No full stage or
+release acceptance is claimed. The reports in `docs/release-qualification`
+record evidence, branch divergence and remaining prerequisites.
 
 ## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
 
