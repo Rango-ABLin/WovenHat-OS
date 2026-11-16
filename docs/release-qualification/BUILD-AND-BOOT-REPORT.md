@@ -46,3 +46,24 @@ Clippy for the default and hardware-demo features with warnings denied, and
 environment inputs, source base/patch hash and individual logs are retained in
 `audit-artifacts/reconciliation-build-checks-20261115/result.json` in the
 isolated worktree. The inherited Stage 10.7 Windows chain is the next gate.
+
+## Inherited Windows acceptance completed
+
+`RUN-STAGE10.7.ps1` exits 0 at source `a5eec13b4de5b1669642947958740fe1ae5d93ca`
+with host network access. Evidence is retained in
+`audit-artifacts/acceptance-20261115-100412-082`. All 10 one-CPU, 30 two-CPU
+and 20 four-CPU memory runs pass, together with host checks and the inherited
+network, IPC, security and asynchronous I/O/TCP gates at 1/2/4 CPUs.
+The earlier restricted-network chain failed at DNS and remains preserved in
+`audit-artifacts/acceptance-20261115-094032-061`. A focused network rerun with
+host access passed before the complete chain was rerun.
+
+## Accepted loader-preservation build
+
+The combined repair passes build, warning-denying host and affected kernel
+Clippy, 218 root Rust tests, 243 libwoven tests and 211 Python tests. One
+pre-existing locale fixture remains explicitly ignored. The fresh Windows
+gate passes in `audit-artifacts/acceptance-20261115-162204-848`, including all
+60 memory runs and inherited stages through 10.7 on 1/2/4 CPUs. The preceding
+StorageFull attempt is preserved in `acceptance-20261115-155710-542`; only
+regenerable incremental caches were removed before the successful retry.

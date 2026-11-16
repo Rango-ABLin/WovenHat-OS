@@ -29,14 +29,14 @@ fn guard_fixture(mmap_base: u64, guard: u64) -> Option<alloc::vec::Vec<u8>> {
     build_stub_elf(&code)
 }
 
-pub(super) fn run() -> bool {
+fn run_with_displacement(displacement: u64) -> bool {
     // A supported production pair: stack draw 16, mmap draw 0. The final
     // slot ends exactly at the old stack base, without touching mapped stack.
     // The complete 16-slot mmap arena ends at 0x1e_0000.  The guard must be
     // above that arena, not inside its final 64 KiB slot.
-    let stack_base = USER_REGION_START + 0x1e_1000;
-    let guard = USER_REGION_START + 0x1e_0000;
-    let mmap_base = USER_REGION_START + 0xe_0000;
+    let stack_base = USER_REGION_START + 0x1e_1000 + displacement;
+    let guard = USER_REGION_START + 0x1e_0000 + displacement;
+    let mmap_base = USER_REGION_START + 0xe_0000 + displacement;
     let Some(bytes) = guard_fixture(mmap_base, guard) else {
         return false;
     };
@@ -44,7 +44,7 @@ pub(super) fn run() -> bool {
     let frames = crate::memory::stats().allocated_frames;
     let processes = crate::task::process_count();
     let endpoints = crate::ipc::endpoint_count();
-    let Some(program) =
+    let Some(mut program) =
         linker::load_with_geometry(&bytes, &["aslr-guard"], 0, stack_base, mmap_base)
     else {
         return false;
@@ -56,6 +56,58 @@ pub(super) fn run() -> bool {
             UserStack::GUARD_SIZE,
         )
     {
+        let _ = destroy(program.address_space);
+        return false;
+    }
+    // Keep a live dynamic TLS allocation while Ring-3 fills every ordinary
+    // mmap slot. The arenas must coexist without consuming the stack guard.
+    let Some(dynamic) = map_dynamic_anonymous(program.address_space.paging, mmap_base, 0, 4096)
+    else {
+        let _ = destroy(program.address_space);
+        return false;
+    };
+    if dynamic.address != DYNAMIC_TLS_START + displacement
+        || dynamic.address < mmap_base + 16 * 65536
+        || program
+            .address_space
+            .publish_dynamic_module(0, dynamic.address, dynamic.size)
+            .is_none()
+    {
+        let _ = unmap_dynamic_anonymous(program.address_space.paging, dynamic);
+        let _ = destroy(program.address_space);
+        return false;
+    }
+    let Some(mut cloned) =
+        clone_address_space(program.address_space, &[None; MAX_ANONYMOUS_MAPPINGS])
+    else {
+        let _ = destroy(program.address_space);
+        return false;
+    };
+    let mut value = [1_u8];
+    let copied = paging::read_user_bytes_in(cloned.paging, dynamic.address, &mut value).is_ok()
+        && value == [0];
+    if !copied {
+        crate::serial::write_line(format_args!("[S11.ASLR] dynamic TLS fork mapping: FAILED"));
+        // The missing mapping has no child ownership to release.
+        cloned.dynamic_modules[0] = DynamicModule::EMPTY;
+    }
+    let writable = cloned.is_logically_writable(dynamic.address, &[None; MAX_ANONYMOUS_MAPPINGS])
+        && !cloned.is_logically_writable(
+            dynamic.address + dynamic.size as u64,
+            &[None; MAX_ANONYMOUS_MAPPINGS],
+        );
+    let isolated = copied
+        && writable
+        && paging::try_break_cow(cloned.paging, dynamic.address)
+        && paging::write_user_bytes(cloned.paging, dynamic.address, &[42]).is_ok()
+        && paging::read_user_bytes_in(program.address_space.paging, dynamic.address, &mut value)
+            .is_ok()
+        && value == [0];
+    let reclaimed = destroy(cloned);
+    if !isolated || !reclaimed {
+        crate::serial::write_line(format_args!(
+            "[S11.ASLR] dynamic TLS fork isolation/reclaim: FAILED"
+        ));
         let _ = destroy(program.address_space);
         return false;
     }
@@ -77,9 +129,13 @@ pub(super) fn run() -> bool {
         && crate::ipc::endpoint_count() == endpoints
         && crate::thread::reap_owner(pid.as_u64()) == 0;
     crate::serial::write_line(format_args!(
-        "[S11.ASLR] forced stack=16 mmap=0 guard={guard:#x} status={:?} frames={frames}/{after}: {}",
+        "[S11.ASLR] forced mmap displacement={displacement:#x} guard={guard:#x} status={:?} frames={frames}/{after}: {}",
         status.as_ref().ok(),
         if passed { "PASSED" } else { "FAILED" },
     ));
     passed
+}
+
+pub(super) fn run() -> bool {
+    run_with_displacement(0) && run_with_displacement(0x30_000)
 }

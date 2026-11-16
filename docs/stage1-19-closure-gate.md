@@ -24,13 +24,24 @@ Missing evidence is **blocked**, not inferred from an older green run.
 
 ## Current closure ledger
 
+The 2026-11-15 source reconciliation supersedes the older claim that native
+WovenFS system-volume routing is absent. `storage::mount_ata_root` probes
+WovenFS and mounts it at `/mnt`; write-through, native `df`/`fscheck`, root-aware
+service persistence and `installed-wovenfs-test` are present. The dedicated
+installed-image test writes, reads and deletes a file within one boot. That
+case supplies bounded persistence evidence. Reboot/remount and crash recovery
+need their own evidence on the reconciled revision. Historical entries below
+retain their original scope and dates. See
+`docs/filesystem/wovenfs-system-migration-tracker.md` and the current
+`docs/release-qualification/STAGE-1-19-CLOSURE-REPORT.md`.
+
 | Stages | Current result | Remaining production blockers |
 | --- | --- | --- |
 | 1–5 | Software gates and bounded storage transactions pass | Native storage/DMA matrix, arbitrary-size/full-volume rollback, torn-write and unclean-shutdown qualification |
 | 6 | Bounded SMP, TLB, hotplug and lock foundations pass in QEMU | General multicore stress, NUMA/high-APIC-ID and physical hotplug qualification, broader priority-inheritance/low-memory evidence |
 | 7–10 | Core isolation, corrected COW ancestors/child-wait authority/status, IPC with permanent exhausted-handle-slot retirement, capabilities, networking, completion and timer foundations pass bounded gates | Complete signals, dynamic userspace runtime, broader driver/hardware qualification and full cancellation stress |
 | 11 | Processes, scheduler-backed threads, signed wait/join results, join/cancel/teardown, permanent exhausted-thread-record retirement, fixed-ET_EXEC/nonzero-PIE placement, real signed compiler shared-PIE execution, deterministic ASLR candidates, corrected bounded ASLR arena/guard geometry, W^X, RELRO, bounded main-image and shared-library TLS, lifecycle callbacks, REL/PLT tables, symbol versioning, weak symbols, and bounded signed shared-object graph loading with cross-image relocation | Pure-BSS runtime and broader TLS models, entropy/stress qualification, general untested toolchain interoperability, and physical qualification |
-| 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries pass bounded gates | Native WovenFS as the mounted system filesystem, durable crash/power-loss evidence, full rollback and persistent key provisioning |
+| 12 | Typed VFS, metadata, crypto, snapshots and mount boundaries have historical bounded gates. Native WovenFS system-volume routing and disposable installed-image provisioning are implemented, with 2026-11-04 evidence recorded in stage-status | Fresh reconciled-source installed-volume/reboot/crash-recovery qualification, physical power-loss evidence, full rollback and persistent key provisioning |
 | 13 | QEMU driver/input/storage/audio/HID foundations pass their accepted gates | Native PCIe/NVMe/AHCI/xHCI/HDA/Wi-Fi/Bluetooth/input qualification, hotplug and fault recovery |
 | 14 | Bounded IPv4/IPv6, DHCP/DNS, sockets and firewall paths pass QEMU gates | Live IPv6 socket lifecycle, routing/policy breadth and physical NIC/radio qualification |
 | 15 | Permission broker, signed packages, software secure/measured boundaries, volatile vault and ledger ABI pass bounded gates | Firmware Secure Boot/TPM provisioning, persistent vault, key rotation/revocation, graphical consent and durable security retention |

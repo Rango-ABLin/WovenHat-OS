@@ -35,6 +35,22 @@ the instrumentation entered the tree, and requires ≥1 GiB guest RAM + QEMU TCG
 acceleration for the 7.6 memory matrix and 10.7 chain. K-01/K-02/K-03 fixes are
 valid and lint/checked clean; no further code changes are needed from the audit's
 scope. See `docs/audit-kernel-fix-plan-2026-11-20.md` for full details.
+## Stage 11 loader preservation repair - 2026-11-15 - ACCEPTED (FOCUSED)
+
+The graph loader now places its lifecycle trampoline from main-image segments,
+records ownership before fallible initialization, distinguishes borrowed TLS
+subranges from owned mappings, and places dynamic TLS in a bounded ASLR-relative
+arena outside all sixteen ordinary mmap slots. Fork uses COW for owned pages
+and destruction releases each range once.
+
+The combined summary passes 54 checks with one verified patch hash, including
+36 QEMU boots on 1/2/4 CPUs for Stages 10.8, 10.9, 11.1-11.6, exit status,
+ASLR, compiler and TLS variants. Build, warning-denying Clippy, 218 root tests,
+243 libwoven tests and 211 Python tests pass. The fresh full Windows gate also
+passes all 60 memory runs and inherited stages through 10.7 in
+`audit-artifacts/acceptance-20261115-162204-848`. This is focused acceptance,
+not full Stage 1-19 or release closure.
+
 ## Live master build reconciliation - 2026-11-15 - FOCUSED REPAIR
 
 Fetched remote refs and inspected live checks for the nine named development

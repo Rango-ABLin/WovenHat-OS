@@ -7,7 +7,8 @@ Current acceptance applies only to explicitly executed checks.
 ## Decision
 
 NO-GO. Full current-source software acceptance and release qualification remain
-open. The bounded bootloader build repair has focused regression evidence.
+open. The bounded bootloader and Stage 11 loader-preservation repairs have
+focused acceptance evidence.
 
 ## Implemented and tested
 
@@ -16,12 +17,14 @@ covered by actual build-script execution. Locked dependency prefetch succeeds.
 
 ## Accepted
 
-No new full stage or release candidate is accepted by this reconciliation pass.
+The loader-preservation increment passes 54 focused checks, 36 QEMU boots and
+the full inherited Windows chain. This is bounded acceptance, not a newly
+accepted full stage or release candidate.
 
 ## Blocked and not implemented
 
 WHPX build-to-desktop qualification passes on 1/2/4 CPUs. TCG application
-launch, inherited stage matrices, application persistence and required CI need
-further acceptance on the assembled branch. Production trust, physical hardware,
+launch, application persistence and required CI need further acceptance on the
+assembled branch. Production trust, physical hardware,
 power-loss qualification and independent review remain open. The remaining
 software scope is tracked in REMAINING-WORK.md.

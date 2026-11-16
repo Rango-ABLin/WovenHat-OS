@@ -826,8 +826,10 @@ pub(super) fn module_staging_run() -> bool {
 
         // ── 2. failure injection ───────────────────────────────────────────
         let mut bad_bytes = fixture(2)?;
-        write_u64(&mut bad_bytes, 0x1388, 0x99)?;
+        // Parse admitted metadata before corrupting the staged relocation
+        // stream, so this reaches relocate_staged's own validation boundary.
         let bad_image = elf::parse_shared(&bad_bytes).ok()?.relocated(STAGING_BASE)?;
+        write_u64(&mut bad_bytes, 0x1388, 0x99)?;
         let bad_link = LinkImage { name: None, bytes: Cow::Owned(bad_bytes), image: bad_image };
         let bad_scope = elf::SymbolScope::new(&bad_link.image, &bad_link.bytes);
         {

@@ -6678,7 +6678,8 @@ fn run_compiler_fuzzing_campaign() {
             "[S11.FUZZ] Coverage: {} variants exercised",
             campaign.coverage.total_variants()
         ));
-        qemu_test_exit_success();
+        // Continue into the inherited Stage 11.5 loader checks. That block
+        // owns successful exit after both compiler and loader gates finish.
     } else {
         serial::write_line(format_args!("[S11.FUZZ] Success Criteria: FAILED"));
         qemu_test_exit_failure();

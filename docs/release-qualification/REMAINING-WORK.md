@@ -6,14 +6,14 @@ Current acceptance applies only to explicitly executed checks.
 
 ## Current order
 
-1. Finish signed image construction and interactive UEFI boot qualification.
-2. Run build, warning-denying Clippy, Rust host tests and inherited Windows gate.
-3. Reconcile and qualify Stage 11.5 loader repairs with retained failure evidence.
-4. Assemble newer shell/oracle work while preserving accepted ABI and tools.
-5. Implement and qualify missing application operations and persistence.
-6. Close Stage 1-19 software requirements before formal Stage 20 acceptance.
-7. Qualify installation, signed update, rollback and recovery on disposable disks.
-8. Complete release provenance, independent review and hardware support records.
+1. Reconcile the next dependency-ordered Stage 11 executable-layout gap with
+   retained failure evidence and the accepted loader ABI.
+2. Qualify WovenFS across real reboot/remount and interrupted-operation cases.
+3. Assemble newer shell/application work while preserving accepted ABI and tools.
+4. Implement and qualify missing application operations and persistence.
+5. Close Stage 1-19 software requirements before formal Stage 20 acceptance.
+6. Qualify installation, signed update, rollback and recovery on disposable disks.
+7. Complete release provenance, independent review and hardware support records.
 
 ## External release prerequisites
 

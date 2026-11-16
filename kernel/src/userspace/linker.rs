@@ -28,6 +28,9 @@ pub(super) fn module_staging_self_test() -> bool {
 
 const LIBRARY_START: u64 = USER_REGION_START + 0x1000_0000;
 const LIBRARY_STRIDE: u64 = 0x0100_0000;
+const _: () = assert!(
+    LIBRARY_START + elf::MAX_NEEDED_LIBRARIES as u64 * LIBRARY_STRIDE <= DYNAMIC_TLS_START
+);
 const LIFECYCLE_TRAMPOLINE: u64 = USER_REGION_START + 0x0d_0000;
 const LAZY_TRAMPOLINE_BASE: u64 = LIFECYCLE_TRAMPOLINE + 0x100;
 const LAZY_TRAMPOLINE_STRIDE: u64 = 32;
@@ -674,6 +677,9 @@ fn map_initial_tls(
             tls_base.checked_add_signed(tls_tpoff(images, index, &plan)?)?,
             tls.memory_size,
         )?;
+        // This descriptor identifies a subrange of InitialTls, whose complete
+        // page allocation already participates in address-space destruction.
+        pending.space.dynamic_modules[index].owns_mapping = false;
     }
     Some(tls_base)
 }
@@ -772,8 +778,10 @@ pub(super) fn load_with_geometry(
     }
     map_linked_segments(&mut pending, &images, stack.guard_base, mmap_base)?;
     let mut image_end = LIFECYCLE_TRAMPOLINE;
-    for mapping in &pending.space.mappings[..pending.space.mapping_count] {
-        image_end = image_end.max(mapping.start().checked_add(mapping.size() as u64)?);
+    // The trampoline shares the main executable's low-address arena. Shared
+    // libraries occupy a separate arena and cannot raise its placement floor.
+    for segment in main.image.segments() {
+        image_end = image_end.max(segment.mapping_start.checked_add(segment.mapping_size as u64)?);
     }
     let lifecycle_trampoline = if LIFECYCLE_TRAMPOLINE < image_end {
         image_end.checked_add(4095).map(|address| address & !4095)?
@@ -786,6 +794,10 @@ pub(super) fn load_with_geometry(
     let lazy_trampoline_base = lifecycle_trampoline.checked_add(0x100)?;
     let trampoline = UserMapping::new(lifecycle_trampoline, 4096, false, true)?;
     paging::map_user_range_in_inactive(page_table, lifecycle_trampoline, 4096, true, false).ok()?;
+    // Retain ownership before zeroing or writing can fail so Pending reclaims
+    // the trampoline along with the other unpublished mappings on rollback.
+    pending.space.mappings[pending.space.mapping_count] = trampoline;
+    pending.space.mapping_count += 1;
     paging::zero_user_range_in(page_table, lifecycle_trampoline, 4096).ok()?;
     // The exit continuation preserves the status in callee-saved R12 while
     // destructors run, then re-enters the normal exit syscall path.
@@ -796,8 +808,6 @@ pub(super) fn load_with_geometry(
         0x0f, 0x0b, // ud2 if the syscall unexpectedly returns
     ];
     paging::write_user_bytes(page_table, lifecycle_trampoline, &trampoline_code).ok()?;
-    pending.space.mappings[pending.space.mapping_count] = trampoline;
-    pending.space.mapping_count += 1;
     pending.space.lifecycle_trampoline = lifecycle_trampoline;
     // No writable executable page exists during relocation: pages are RW/NX
     // until every fixup is applied, then transitioned to their final W^X mode.

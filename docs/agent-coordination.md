@@ -9646,3 +9646,79 @@ build succeeds and the strict WHPX desktop journey passes on 1/2/4 CPUs.
 One-CPU TCG reaches authentication but times out waiting for Files launch.
 All evidence is retained. Full stage acceptance remains open. The inherited
 Stage 10.7 Windows chain is next, followed by focused Stage 11.5 reproduction.
+
+## Codex - Stage 10.7 preserved, Stage 11.5 reproduction (2026-11-15)
+
+The full Windows chain passes at source a5eec13b with host network access, evidence audit-artifacts/acceptance-20261115-100412-082. All 60 memory stress boots and network/TCP 1/2/4-CPU gates passed. The first restricted-network failure remains preserved. Claim focused Stage 11.5 reproduction and loader repair next. Keep Cargo/QEMU chains serialized.
+
+## Codex - graph loader and TLS regression repairs (2026-11-15)
+
+Stage 10.7 full Windows preservation passed at a5eec13b with host networking.
+The focused Stage 11.5 baseline failed after five negative library checks.
+Working repairs now place the trampoline from main-image segments, register
+its ownership before initialization, and distinguish borrowed static TLS
+subranges from independently owned module mappings during teardown. Compiler
+fuzz success returns to inherited loader checks. Standard and compiler loader
+gates pass on 1/2/4 CPUs, as does compiler TLS lifecycle.
+
+Preservation exposed the pre-existing ordinary-mmap versus reserved dynamic
+TLS slot conflict. Dynamic TLS now has a bounded separate arena, and the
+strengthened ASLR gate retains a live dynamic TLS mapping while allocating
+all sixteen ordinary slots and faulting on the stack guard. It passes on
+1/2/4 CPUs with frame reclamation. Stage 11.6 failure injection now corrupts
+relocation bytes after parsing valid metadata and reaches the intended staged
+rollback boundary. Its 1/2/4 gates pass. Combined-source lints, host tests and
+runtime matrices are active in audit-artifacts/loader-preservation-final-20261115.
+Changes remain uncommitted pending full preservation. Cargo/QEMU is serialized.
+
+## Codex - resumed loader preservation (2026-11-15)
+
+The earlier combined runtime process stopped after Stage 11.1 at two CPUs. Its tool handle is absent and no Cargo/QEMU process remains. Retained results are preserved. Continuing ASLR review found that the separate dynamic-TLS arena must retain process mmap displacement. Adding a forced nonzero-displacement case before correcting placement, then rerunning affected gates and the inherited Windows chain. Cargo/QEMU remains serialized.
+
+## Codex - dynamic TLS displacement and fork review (2026-11-15)
+
+The interrupted runtime process has no surviving handle or Cargo/QEMU child.
+Its partial successes remain preserved. Review added a nonzero-displacement
+ASLR case that reproduced the fixed dynamic-TLS address defect. Placement now
+retains mmap ASLR displacement in the separate arena. A new fork probe then
+reproduced missing independently owned dynamic pages. Fork now copies those
+pages through COW and includes their bounds in logical-write validation. The
+probe verifies child writes preserve parent bytes, all sixteen ordinary mmap
+slots remain available, both ASLR displacements reach their stack guard, and
+frame reclamation is exact. It passes on 1/2/4 CPUs.
+
+Combined validation is running serially under
+`audit-artifacts/loader-preservation-combined-20261115-1422`, including build,
+host/library/Python tests, affected-feature Clippy and the complete runtime
+matrix. Full Windows preservation follows. The source repair remains pending
+acceptance and commit.
+
+## Codex - combined runtime matrix verified (2026-11-15)
+
+The combined kernel patch passes 54 checks, including 36 runtime boots across
+1/2/4 CPUs. The summary verifies identical kernel patch hashes across the
+initial and resumed matrices. Exit-status fixture lockfile/build-std repairs
+were required and are included in the working tree. The full Windows chain
+is now active on the repaired kernel with host networking. Its launcher log
+is reconciliation-stage10-7-loader-repair-launch.log at the original root.
+Keep all Cargo/QEMU work serialized. Commit remains pending inherited gate.
+
+## Codex - host capacity recovery and inherited gate retry (2026-11-15)
+
+The post-repair Windows chain passed sixty memory runs and networking through
+Stage 10.4, then image packaging failed with StorageFull. Only the isolated
+worktree's regenerable Rust incremental caches were removed after path checks.
+All source, images and evidence remain. Stage 10.5 retry passed. A fresh full
+Windows chain is active with CARGO_INCREMENTAL=0 and host networking. Launcher
+log is reconciliation-stage10-7-loader-noincremental-launch.log at the original
+repository root. Keep Cargo/QEMU serialized. No new source change since the
+passing combined runtime matrix.
+
+## Codex - loader preservation accepted (2026-11-15)
+
+The fresh `CARGO_INCREMENTAL=0` Windows chain passed in
+`audit-artifacts/acceptance-20261115-162204-848`, including all sixty memory
+runs and inherited stages through 10.7 at 1/2/4 CPUs. Together with the
+54-check combined matrix and 36 focused runtime boots, this accepts the bounded
+loader/TLS/fork-COW repair. Documentation is being finalized for a separate
+integration-branch commit. No Cargo or QEMU chain is active.

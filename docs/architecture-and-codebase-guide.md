@@ -1,5 +1,54 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Graph-loader trampoline ownership and placement (2026-11-15)
+
+The eager graph loader in `kernel/src/userspace/linker.rs` computes the low
+lifecycle trampoline extent from the main executable's parsed segments.
+Shared-library mappings retain their separate high arena and cannot raise
+that extent beyond the anonymous mmap boundary. Existing overlap, range,
+W^X and RELRO checks still apply to every image. After mapping the trampoline,
+the unpublished `Pending` address space records its range before zeroing or
+writing code. Every subsequent failure therefore reaches the same owned-range
+rollback path used by executable segments, TLS and the stack.
+
+The change adds no syscall, capability or kernel object. The loader retains
+verified dependency snapshots, fixed mapping capacity and unpublished address
+space ownership until commit. The existing Stage 11.5 fixture reproduced the
+valid signed graph failure before repair and passes on 1/2/4 CPUs afterward,
+including cross-image relocation, lifecycle execution, protections and frame
+reclamation. Inherited runtime and affected-feature validation completed on
+1/2/4 CPUs as recorded in the 2026-11-15 qualification reports.
+
+## TLS mapping ownership and arena capacity (2026-11-15)
+
+Static TLS module descriptors identify byte subranges of the initial TLS
+allocation. `DynamicModule::owns_mapping` records whether a descriptor owns
+an independent mapping. Loader-created static descriptors borrow their bytes;
+staged or dynamically allocated mappings own theirs. Destruction releases the
+complete initial allocation and each independently owned mapping once.
+
+Dynamic TLS uses a bounded arena beginning at user offset `0x20000000`,
+with the process mmap ASLR displacement and one existing mmap-stride slot
+per module. A compile-time assertion keeps
+that arena above all bounded shared-library slots. Module bounds, page size,
+maximum allocation size and ordinary paging overlap rejection apply before
+mapping. This restores all sixteen ordinary mmap slots while preserving
+dedicated dynamic TLS storage. Thread-owned cleanup, all-thread rollback and
+module-generation publication retain their existing sequencing. No userspace
+pointer or syscall encoding changes. The ASLR gate retains its sixteen-slot
+expectation and adds a live dynamic TLS allocation during guard-page execution
+and frame-reclamation checks. It runs zero and nonzero displacement cases.
+Fork copies independently owned dynamic allocations through the existing COW
+path. Their bounds participate in logical-write validation so an ordinary
+write fault can break COW. The regression checks child writes leave parent
+bytes intact and that cloning, guard-fault termination and reaping reclaim
+all owned frames.
+
+Compiler acceptance now returns from a successful fuzz campaign to the
+inherited Stage 11.5 checks. Module-staging failure injection parses valid
+metadata before corrupting the relocation bytes passed to staged validation,
+so it reaches the intended rejection and rollback boundary.
+
 ## Nested UEFI build source selection (2026-11-15)
 
 The vendored bootloader build script selects a local UEFI runtime only when

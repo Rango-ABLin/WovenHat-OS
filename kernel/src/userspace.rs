@@ -28,7 +28,8 @@ use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
 pub const MAX_DYNAMIC_MODULES: usize = crate::elf::MAX_SCOPE_IMAGES;
-pub const DYNAMIC_MMAP_SLOT_BASE: usize = MAX_ANONYMOUS_MAPPINGS - MAX_DYNAMIC_MODULES;
+// Dynamic TLS has its own bounded arena beyond the shared-library slots.
+const DYNAMIC_TLS_START: u64 = USER_REGION_START + 0x2000_0000;
 
 const USER_REGION_START: u64 = 0x0000_4000_0000_0000;
 const USER_STACK_OFFSET: u64 = 0x1f_0000;
@@ -4892,10 +4893,19 @@ pub struct DynamicModule {
     pub references: u16,
     pub mapping_start: u64,
     pub mapping_size: usize,
+    // Static TLS descriptors borrow bytes from InitialTls's owned allocation.
+    pub owns_mapping: bool,
 }
 
 impl DynamicModule {
-    pub const EMPTY: Self = Self { generation: 1, live: false, references: 0, mapping_start: 0, mapping_size: 0 };
+    pub const EMPTY: Self = Self {
+        generation: 1,
+        live: false,
+        references: 0,
+        mapping_start: 0,
+        mapping_size: 0,
+        owns_mapping: false,
+    };
 }
 
 /// The dedicated read-only large-asset window installed in an address space.
@@ -4946,6 +4956,7 @@ impl AddressSpace {
         descriptor.references = 1;
         descriptor.mapping_start = mapping_start;
         descriptor.mapping_size = mapping_size;
+        descriptor.owns_mapping = true;
         Some(descriptor.generation)
     }
 
@@ -4967,6 +4978,7 @@ impl AddressSpace {
         descriptor.live = false;
         descriptor.mapping_start = 0;
         descriptor.mapping_size = 0;
+        descriptor.owns_mapping = false;
         descriptor.generation = descriptor.generation.saturating_add(1).max(1);
         Some(true)
     }
@@ -5066,23 +5078,32 @@ impl AddressSpace {
                 return true;
             }
         }
-        false
+        self.dynamic_modules.iter().any(|module| {
+            module.live
+                && module.owns_mapping
+                && address >= module.mapping_start
+                && address - module.mapping_start < module.mapping_size as u64
+        })
     }
 }
 
 pub fn map_dynamic_anonymous(
     address_space: paging::AddressSpace,
     mmap_base: u64,
-    slot: usize,
+    module: usize,
     size: usize,
 ) -> Option<AnonymousMapping> {
-    if !(DYNAMIC_MMAP_SLOT_BASE..MAX_ANONYMOUS_MAPPINGS).contains(&slot)
+    if module >= MAX_DYNAMIC_MODULES
         || size == 0
+        || size > USER_MMAP_MAX_SIZE
         || !size.is_multiple_of(4096)
     {
         return None;
     }
-    let address = mmap_base.checked_add((slot as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+    let displacement = mmap_base.checked_sub(USER_MMAP_START)?;
+    let address = DYNAMIC_TLS_START
+        .checked_add(displacement)?
+        .checked_add((module as u64).checked_mul(USER_MMAP_STRIDE)?)?;
     paging::map_user_range_in(address_space, address, size, true, false).ok()?;
     if paging::zero_user_range_in(address_space, address, size).is_err() {
         let _ = paging::unmap_user_range_in(address_space, address, size);
@@ -6500,7 +6521,7 @@ pub fn destroy(address_space: AddressSpace) -> bool {
             count += 1;
         }
     }
-    for module in address_space.dynamic_modules.iter().filter(|module| module.live) {
+    for module in address_space.dynamic_modules.iter().filter(|module| module.live && module.owns_mapping) {
         ranges[count] = (module.mapping_start, module.mapping_size);
         count += 1;
     }
@@ -6534,7 +6555,7 @@ pub fn clone_address_space(
         lazy_binding_count: source.lazy_binding_count,
         large_mapping: source.large_mapping,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 4 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_DYNAMIC_MODULES + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -6605,6 +6626,26 @@ pub fn clone_address_space(
             completed[completed_count] = (start, size);
             completed_count += 1;
         }
+    }
+
+    // Borrowed static TLS subranges were copied with InitialTls above.
+    // Independently owned dynamic allocations need their own child mappings.
+    for module in source.dynamic_modules.iter().filter(|module| module.live && module.owns_mapping) {
+        if paging::share_user_range_in(
+            source.paging,
+            destination.paging,
+            module.mapping_start,
+            module.mapping_size,
+            true,
+            false,
+        )
+        .is_err()
+        {
+            release_clone(destination.paging, &completed[..completed_count]);
+            return None;
+        }
+        completed[completed_count] = (module.mapping_start, module.mapping_size);
+        completed_count += 1;
     }
 
     for mapping in anonymous.iter().flatten() {

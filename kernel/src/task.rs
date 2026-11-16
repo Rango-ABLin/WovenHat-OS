@@ -2367,13 +2367,12 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
     };
     if threads[0].0.is_none() { return false; }
     let size = match memory_size.checked_add(4095).map(|value| value & !4095) { Some(size) => size, None => return false };
-    let slot = userspace::DYNAMIC_MMAP_SLOT_BASE + module;
     let mut installed = [(None, None); crate::thread::MAX_THREADS];
     let mut count = 0;
     while count < threads.len() && threads[count].0.is_some() {
         let thread = threads[count].0.unwrap();
         let address_space = threads[count].1.unwrap();
-        let Some(mapping) = userspace::map_dynamic_anonymous(address_space, mmap_base, slot, size) else { break };
+        let Some(mapping) = userspace::map_dynamic_anonymous(address_space, mmap_base, module, size) else { break };
         if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err() || !crate::thread::install_dynamic_tls(thread, module, mapping) { let _ = userspace::unmap_dynamic_anonymous(address_space, mapping); break; }
         installed[count] = (Some(thread), Some(mapping));
         count += 1;
@@ -4459,7 +4458,6 @@ pub fn mmap_current(length: u64, writable: bool) -> Result<u64, MemoryError> {
         let process = processes[process_index].ok_or(MemoryError::NoProcess)?;
         let slot = process
             .memory_mappings
-            [..userspace::DYNAMIC_MMAP_SLOT_BASE]
             .iter()
             .position(Option::is_none)
             .ok_or(MemoryError::Full)?;
