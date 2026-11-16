@@ -1,5 +1,12 @@
 # Development status
 
+## Large signed executable geometry accepted
+
+Production mmap placement now accounts for the main image and lifecycle
+trampoline before retaining or raising the ASLR-selected floor. The signed
+WovenImages regression fails before repair and passes after repair on 1/2/4
+CPUs. The affected Stage 11 matrix and fresh full Windows chain pass.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.

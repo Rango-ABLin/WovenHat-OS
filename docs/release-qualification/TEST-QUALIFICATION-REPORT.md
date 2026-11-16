@@ -1,5 +1,18 @@
 # Test qualification report
 
+## Large signed executable geometry, 2026-11-16
+
+The pre-repair WovenImages gate exits 35 after reporting a writable 761,856-byte
+segment and rejecting the signed image. The transcript is
+`reconciliation-large-elf-before.log` at the original repository root. The
+unchanged signed 184,816-byte package passes after repair on 1/2/4 CPUs in
+`audit-artifacts/woven-images-{1,2,4}cpu`.
+
+Stage 11 ASLR, graph-loader, compiler and TLS gates each pass on 1/2/4 CPUs.
+Host all-target Clippy, 218 host tests and affected-feature kernel Clippy pass.
+The fresh inherited chain passes all 60 memory boots and every stage through
+10.7 in `audit-artifacts/acceptance-20261116-073218-890`.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.

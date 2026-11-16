@@ -255,6 +255,14 @@ the visible corruption on the sign-in screen. The fix adds real `hhea`
 ascent/descent/line-gap metrics, per-glyph advances with `kern` pairs, and a
 bearing-corrected glyph cache, while leaving the existing bitmap-compatible
 `draw_text`/`draw_text_system` API in place for callers already accepted.
+## Codex - large signed executable geometry accepted (2026-11-16)
+
+The isolated integration branch reproduces the signed WovenImages loader
+rejection and repairs production mmap-floor selection without changing forced
+geometry or ABI. WovenImages and the affected Stage 11 matrix pass on 1/2/4
+CPUs; host checks and the full Windows chain pass in
+`audit-artifacts/acceptance-20261116-073218-890`. Accidental formatter-only
+changes were restored before this record. No Cargo/QEMU chain is active.
 
 ## Codex - S12 bounded clipboard and file-chooser SDK surfaces (2026-11-04)
 

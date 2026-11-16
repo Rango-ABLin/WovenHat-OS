@@ -1,5 +1,17 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Production mmap floor for large signed executables (2026-11-16)
+
+Production geometry now places the anonymous mmap floor after both the main
+image and its lifecycle trampoline when that is higher than the ASLR draw.
+Forced-geometry acceptance retains its exact inputs. Existing stack planning
+moves the guard, optional TLS and stack above the sixteen-slot arena, with
+checked arithmetic and the existing user-region ceiling failing closed.
+
+The change adds no syscall, capability, capacity or executable page. It allows
+legitimate signed executables whose writable/BSS segment extends beyond the
+historical fixed floor. WovenImages is the real production regression.
+
 ## Graph-loader trampoline ownership and placement (2026-11-15)
 
 The eager graph loader in `kernel/src/userspace/linker.rs` computes the low

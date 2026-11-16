@@ -1,5 +1,12 @@
 # Build and boot report
 
+## Large signed application boot repair
+
+The production WovenImages package now loads and completes its Ring-3 decoder
+gate on 1/2/4 CPUs. Its large writable/BSS mapping no longer collides with the
+anonymous arena. Full inherited preservation passes in
+`audit-artifacts/acceptance-20261116-073218-890`.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.

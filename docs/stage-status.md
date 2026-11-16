@@ -35,6 +35,18 @@ the instrumentation entered the tree, and requires ≥1 GiB guest RAM + QEMU TCG
 acceleration for the 7.6 memory matrix and 10.7 chain. K-01/K-02/K-03 fixes are
 valid and lint/checked clean; no further code changes are needed from the audit's
 scope. See `docs/audit-kernel-fix-plan-2026-11-20.md` for full details.
+## Stage 11 large signed executable geometry - 2026-11-16 - ACCEPTED (FOCUSED)
+
+The production loader now places the complete mmap arena after the main ELF
+image and lifecycle trampoline. Before repair, the signed 184,816-byte
+WovenImages package was rejected with exit 35 after reporting a 761,856-byte
+writable segment. The same gate passes on 1/2/4 CPUs after repair.
+
+Stage 11 ASLR, graph-loader, compiler and TLS gates pass on 1/2/4 CPUs. Host
+all-target Clippy, 218 host tests and affected-feature kernel Clippy pass. The
+full Windows chain passes all 60 memory runs and stages through 10.7 in
+`audit-artifacts/acceptance-20261116-073218-890`. This is focused acceptance.
+
 ## Stage 11 loader preservation repair - 2026-11-15 - ACCEPTED (FOCUSED)
 
 The graph loader now places its lifecycle trampoline from main-image segments,

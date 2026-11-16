@@ -720,12 +720,22 @@ pub(super) fn load_with_candidate_bias(
     args: &[&str],
     candidate_bias: u64,
 ) -> Option<UserProgram> {
+    // Production binaries may extend beyond the original low mmap floor.
+    // Keep the complete anonymous arena after the main image and its
+    // lifecycle trampoline. Forced-geometry tests retain their exact inputs.
+    let image = elf::parse(bytes).ok()?.relocated_for_execution(candidate_bias)?;
+    let image_end = image.segments().try_fold(LIFECYCLE_TRAMPOLINE, |end, segment| {
+        Some(end.max(segment.mapping_start.checked_add(segment.mapping_size as u64)?))
+    })?;
+    let trampoline_base = image_end.checked_add(4095)? & !4095;
+    let minimum_mmap_base = trampoline_base.checked_add(4096)?;
+    let mmap_base = aslr_mmap_base()?.max(minimum_mmap_base);
     load_with_geometry(
         bytes,
         args,
         candidate_bias,
         aslr_stack_base()?,
-        aslr_mmap_base()?,
+        mmap_base,
     )
 }
 
