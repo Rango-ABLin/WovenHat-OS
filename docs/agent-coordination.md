@@ -9316,3 +9316,45 @@ exact `[S15.5] secure boot handoff: PASSED` marker. The final result is
 virtual disposable qualification only, not production-key or physical-platform
 certification.
 
+
+## Codex - live master reconciliation (2026-11-15)
+
+Claim isolated worktree audit-artifacts/master-reconciliation-worktree on integration/master-reconciliation-20261115, based on fetched master 541dd708. Inspect newer Phase J/app/loader changes before adoption. Reproduce nested Cargo bootloader failure and qualify bounded repairs. Serialize Cargo/QEMU chains. Existing sibling worktrees and historical evidence are preserved.
+
+
+## Codex - isolated build repair committed (2026-11-15)
+
+Commit a5eec13b on integration/master-reconciliation-20261115 contains the nested UEFI source/target argument repair, three actual-script regressions and the required release reports. Signed image construction, 211 Python tests, build, warning-denying host/default-kernel/hardware-demo Clippy, Rust tests and strict WHPX desktop 1/2/4-CPU journeys pass. The one-CPU TCG Files-launch timeout remains open. RUN-STAGE10.7.ps1 is active in audit-artifacts/master-reconciliation-worktree; keep Cargo/QEMU acceptance serialized. Evidence is retained in that worktree and root reconciliation audit files. Stage 11.5 reproduction follows the inherited chain.
+
+## Codex - loader preservation repair committed (2026-11-15)
+
+Commit `5e9dd01c` on `integration/master-reconciliation-20261115` accepts the
+bounded graph-loader trampoline, TLS mapping ownership/arena and fork-COW
+repair. The combined matrix passes 54 checks and 36 QEMU boots on 1/2/4 CPUs;
+the fresh full Windows chain passes all sixty memory runs and inherited stages
+through 10.7 in the isolated worktree. Pre-repair, restricted-network and
+StorageFull failures remain preserved. No Cargo/QEMU chain is active. Codex is
+moving to the next dependency-ordered Stage 11 executable-layout gap in the
+same isolated worktree; existing source/worktree claims remain unchanged.
+
+## Codex - large signed executable geometry committed (2026-11-16)
+
+Commit `22f2e750` on `integration/master-reconciliation-20261115` places the
+production mmap arena after the main image and lifecycle trampoline. The
+signed WovenImages gate fails before repair and passes after repair on 1/2/4
+CPUs. Affected Stage 11 gates, host checks and the full Windows chain pass;
+evidence is retained in the isolated worktree, including
+`acceptance-20261116-073218-890`. No Cargo/QEMU chain is active. Codex is
+moving to the next Stage 1-19 closure prerequisite in dependency order.
+
+## Codex - installed WovenFS cold-boot qualification committed (2026-11-16)
+
+Commit `404bf6da` on `integration/master-reconciliation-20261115` upgrades the
+installed-WovenFS gate to three cold boots of the same writable disposable GPT
+image. Payload and tombstone state persist across boots; df/fscheck and cleanup
+pass on 1/2/4 CPUs. All 212 Python tests, 218 host tests, warning-denying lint,
+WovenFS crash tests and the full Windows chain pass. Evidence includes
+`acceptance-20261116-123847-917`. No Cargo/QEMU chain is active. Codex is
+continuing with abrupt installed-path interruption, while physical power-loss
+qualification remains external.
+
