@@ -838,12 +838,10 @@ impl Desktop {
         if !self.launcher_open {
             return Area::new(0, 0, 0, 0);
         }
-        Area::new(
-            0,
-            self.taskbar_top() + TASKBAR_HEIGHT,
-            self.width,
-            self.height - TASKBAR_HEIGHT,
-        )
+        // The overview occupies the desktop ABOVE the bottom taskbar.
+        // Starting it at taskbar_top + TASKBAR_HEIGHT placed the panel
+        // entirely below the screen and made launcher entries invisible.
+        Area::new(0, 0, self.width, self.taskbar_top())
     }
 
     /// The search field, top of the overview.

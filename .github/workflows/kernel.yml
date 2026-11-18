@@ -26,6 +26,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -135,6 +155,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -572,6 +612,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -794,6 +854,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -889,8 +969,40 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
+      # Acceptance builds are offline by policy, but hosted runners start
+      # without the required crates.io index and crate archives.
+      - name: Prefetch locked desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # Standalone app lockfiles currently require refresh. Do not alter
+          # tracked lockfiles: the CI runner resolves them only for this job.
+          (cd apps/hello && cargo --config net.offline=false fetch)
+          (cd apps/hello-gui && cargo --config net.offline=false fetch)
+          (cd apps/woven-files && cargo --config net.offline=false fetch)
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
         shell: bash
         run: |
@@ -1032,6 +1144,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1087,6 +1219,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1155,6 +1307,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1211,6 +1383,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1264,6 +1456,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1333,6 +1545,26 @@ jobs:
           toolchain: nightly-2026-07-10
           targets: x86_64-unknown-none,x86_64-unknown-uefi
           components: clippy,rust-src,llvm-tools-preview
+      - name: Prefetch locked kernel and nested UEFI bootloader dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --config net.offline=false fetch --locked
+          # System-app packaging builds independent workspaces. Prime every
+          # packaged client and its packager before offline acceptance.
+          for app in woven-calculator woven-terminal woven-files woven-monitor \
+                     woven-settings woven-security woven-editor woven-images \
+                     woven-update woven-store woven-installer; do
+            (cd "apps/$app" && cargo --config net.offline=false fetch)
+          done
+          (cd tools/wapp-packager && cargo --config net.offline=false fetch)
+          # The vendored bootloader build.rs invokes a separate cargo install
+          # for this exact version. Prime its independent dependency graph now,
+          # so the actual acceptance build can remain offline.
+          cargo --config net.offline=false install bootloader-x86_64-uefi \
+            --version 0.11.17 --locked --target x86_64-unknown-uefi \
+            -Zbuild-std=core -Zbuild-std-features=compiler-builtins-mem \
+            --root "${RUNNER_TEMP}/wovenhat-uefi-prefetch"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
