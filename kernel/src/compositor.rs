@@ -19,6 +19,7 @@
 
 use crate::display::{Damage, Rect, Surface};
 use crate::irq_lock::PreemptMutex as Mutex;
+use crate::timer::ticks;
 use crate::user_graphics;
 
 #[cfg(feature = "stage20-14-recovery-test")]
@@ -85,6 +86,10 @@ struct State {
     /// Integer display scale: each surface pixel is presented as a
     /// `scale`×`scale` block. The surface is the framebuffer divided by this.
     scale: u32,
+    /// Tick count at the last successful presentation; 0 if none yet.
+    /// Combined with input-event timestamps this yields input-to-present
+    /// latency (the P2 / Phase 7 metrics boundary).
+    last_present_tick: u64,
     /// Monitors on a virtio-gpu, side by side, when one has several heads
     /// (Stage 20.14b); otherwise the boot framebuffer is the one output.
     #[cfg(any(
@@ -124,6 +129,7 @@ impl State {
             console: false,
             holder: None,
             scale: 1,
+            last_present_tick: 0,
             #[cfg(any(
                 not(feature = "qemu-test"),
                 feature = "stage20-14-test",
@@ -264,8 +270,17 @@ pub fn present() -> Result<usize, Error> {
         return Err(Error::NotPresenting);
     }
     let written = present_state(state)?;
+    state.last_present_tick = ticks();
     state.damage.clear();
     Ok(written)
+}
+
+/// Tick count at the last successful presentation; 0 if none yet or the
+/// compositor is not initialised. Callers subtract an input-event timestamp
+/// to measure input-to-present latency.
+pub fn last_present_tick() -> u64 {
+    let guard = STATE.lock();
+    guard.as_ref().map(|state| state.last_present_tick).unwrap_or(0)
 }
 
 /// Copy `state`'s damage to the display at its scale: each monitor of a
