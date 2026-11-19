@@ -392,6 +392,11 @@ pub mod graphics {
         character: u32,
         scale: u16,
         valid: bool,
+        /// Pen advance in pixels at `scale`.
+        advance: i32,
+        /// Cell offset relative to the pen, so a negative left side bearing
+        /// is not clipped by the fixed raster cell.
+        bearing_x: i32,
         alpha: [u8; GLYPH_CACHE_PIXELS],
     }
 
@@ -400,8 +405,18 @@ pub mod graphics {
         character: 0,
         scale: 0,
         valid: false,
+        advance: 0,
+        bearing_x: 0,
         alpha: [0; GLYPH_CACHE_PIXELS],
     };
+
+    /// Metrics returned with a cached glyph: where to place its cell relative
+    /// to the pen, and how far to advance the pen afterwards.
+    #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+    pub struct GlyphCells {
+        pub advance: i32,
+        pub bearing_x: i32,
+    }
 
     struct RasterGlyphCache {
         busy: core::sync::atomic::AtomicBool,
@@ -1314,6 +1329,11 @@ pub mod graphics {
         gpos: Option<(usize, usize)>,
         fvar: Option<(usize, usize)>,
         gvar: Option<(usize, usize)>,
+        /// Vertical metrics from `hhea`, in font units. Used for line layout
+        /// so proportional text no longer shares the bitmap font's cell.
+        ascender: i16,
+        descender: i16,
+        line_gap: i16,
     }
 
     enum GsubSubstitution {
@@ -1376,11 +1396,20 @@ pub mod graphics {
             } else {
                 0
             };
+            // `hhea` carries the vertical metrics used for line layout:
+            // ascender at +4, descender at +6, line gap at +8.
+            let ascender = read_i16(bytes, hhea_offset + 4).ok_or(TrueTypeError::BadTableDirectory)?;
+            let descender =
+                read_i16(bytes, hhea_offset + 6).ok_or(TrueTypeError::BadTableDirectory)?;
+            let line_gap = read_i16(bytes, hhea_offset + 8).ok_or(TrueTypeError::BadTableDirectory)?;
             if units_per_em == 0
                 || glyph_count == 0
                 || horizontal_metrics == 0
                 || (index_to_loc_format != 0 && index_to_loc_format != 1)
                 || usize::from(horizontal_metrics).saturating_mul(4) > hmtx_length
+                || ascender.unsigned_abs() > units_per_em.saturating_mul(4)
+                || descender.unsigned_abs() > units_per_em.saturating_mul(4)
+                || line_gap.unsigned_abs() > units_per_em.saturating_mul(4)
             {
                 return Err(TrueTypeError::BadTableDirectory);
             }
@@ -1503,11 +1532,109 @@ pub mod graphics {
                 gpos,
                 fvar,
                 gvar,
+                ascender,
+                descender,
+                line_gap,
             })
         }
 
         pub const fn units_per_em(&self) -> u16 {
             self.units_per_em
+        }
+
+        /// `hhea` ascender in font units (positive above the baseline).
+        pub const fn ascender(&self) -> i16 {
+            self.ascender
+        }
+
+        /// `hhea` descender in font units (negative below the baseline).
+        pub const fn descender(&self) -> i16 {
+            self.descender
+        }
+
+        /// `hhea` line gap in font units, added between consecutive lines.
+        pub const fn line_gap(&self) -> i16 {
+            self.line_gap
+        }
+
+        /// Distance from the top of a line box to the baseline, in pixels.
+        pub fn ascent_px(&self, size: u16) -> i32 {
+            let units = i32::from(self.units_per_em.max(1));
+            (i32::from(self.ascender).saturating_mul(i32::from(size)) / units).max(1)
+        }
+
+        /// Baseline-to-baseline distance for `size`, in pixels. Falls back to
+        /// a safe 1.35x em when a face reports degenerate vertical metrics.
+        pub fn line_height(&self, size: u16) -> i32 {
+            let units = i32::from(self.units_per_em.max(1));
+            let span = i32::from(self.ascender)
+                .saturating_sub(i32::from(self.descender))
+                .saturating_add(i32::from(self.line_gap));
+            let height = span.saturating_mul(i32::from(size)) / units;
+            if height > 0 {
+                height
+            } else {
+                i32::from(size).saturating_mul(5) / 4
+            }
+        }
+
+        /// Advance width of `character` at `size`, in pixels, rounded to the
+        /// nearest pixel. Returns `None` when the face cannot map the glyph.
+        pub fn advance_px(&self, character: char, size: u16) -> Option<i32> {
+            let advance = i32::from(self.advance_width(character)?);
+            let units = i32::from(self.units_per_em.max(1));
+            Some(
+                advance
+                    .saturating_mul(i32::from(size))
+                    .saturating_add(units / 2)
+                    / units,
+            )
+        }
+
+        /// Horizontal ink bounds of `character` in font units, as
+        /// `(x_min, x_max)`. Used to place a rasterized glyph in its cell
+        /// without clipping a negative left side bearing.
+        pub fn glyph_x_bounds(&self, character: char) -> Option<(i16, i16)> {
+            let glyph = usize::from(self.glyph_index(character)?);
+            let (glyf_offset, glyf_length) = self.glyf?;
+            let (loca_offset, loca_length) = self.loca?;
+            if glyph >= usize::from(self.glyph_count) {
+                return None;
+            }
+            let read_loca = |index: usize| -> Option<usize> {
+                let offset = if self.index_to_loc_format == 0 {
+                    loca_offset.checked_add(index.checked_mul(2)?)?
+                } else {
+                    loca_offset.checked_add(index.checked_mul(4)?)?
+                };
+                if offset.checked_add(if self.index_to_loc_format == 0 {
+                    2
+                } else {
+                    4
+                })? > loca_offset.checked_add(loca_length)?
+                {
+                    return None;
+                }
+                Some(if self.index_to_loc_format == 0 {
+                    usize::from(read_u16(self.bytes, offset)?).checked_mul(2)?
+                } else {
+                    usize::try_from(read_u32(self.bytes, offset)?).ok()?
+                })
+            };
+            let start = read_loca(glyph)?;
+            let end = read_loca(glyph + 1)?;
+            if end <= start {
+                return None;
+            }
+            let glyph_offset = glyf_offset.checked_add(start)?;
+            if glyph_offset.checked_add(10)? > glyf_offset.checked_add(glyf_length)?
+                || end - start < 10
+            {
+                return None;
+            }
+            let x_min = read_i16(self.bytes, glyph_offset + 2)?;
+            let x_max = read_i16(self.bytes, glyph_offset + 6)?;
+            (x_min <= x_max).then_some((x_min, x_max))
         }
 
         pub const fn glyph_count(&self) -> u16 {
@@ -7142,7 +7269,7 @@ pub mod graphics {
         character: char,
         scale: u16,
         output: &mut [u8; GLYPH_CACHE_PIXELS],
-    ) -> bool {
+    ) -> Option<GlyphCells> {
         let font_id = face.bytes.as_ptr() as usize;
         if RASTER_GLYPH_CACHE
             .busy
@@ -7158,11 +7285,25 @@ pub mod graphics {
                     && entry.scale == scale
             }) {
                 output.copy_from_slice(&entry.alpha);
+                let cells = GlyphCells {
+                    advance: entry.advance,
+                    bearing_x: entry.bearing_x,
+                };
                 RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
-                return true;
+                return Some(cells);
             }
             RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
         }
+
+        let advance = face.advance_px(character, scale)?;
+        let units = i32::from(face.units_per_em().max(1));
+        let bearing_x = face
+            .glyph_x_bounds(character)
+            .map(|(x_min, _)| {
+                let scaled = i32::from(x_min).saturating_mul(i32::from(scale)) / units;
+                (-scaled).max(0)
+            })
+            .unwrap_or(0);
 
         let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
         let Some(mut canvas) = super::Canvas::new(
@@ -7172,21 +7313,25 @@ pub mod graphics {
             GLYPH_CACHE_WIDTH,
             GLYPH_CACHE_HEIGHT,
         ) else {
-            return false;
+            return None;
         };
-        let ascent = i32::from(scale) * 4 / 5;
+        let ascent = face.ascent_px(scale);
         let mut renderer = Renderer::new(&mut canvas);
         if face
             .render_glyph(
                 character,
-                Point::new(0, ascent),
+                Point::new(bearing_x, ascent),
                 scale,
                 Color::WHITE,
                 &mut renderer,
             )
             .is_err()
         {
-            return false;
+            // A whitespace glyph has no outline; it still advances the pen.
+            return Some(GlyphCells {
+                advance,
+                bearing_x: 0,
+            });
         }
         let mut alpha = [0_u8; GLYPH_CACHE_PIXELS];
         for (index, pixel) in canvas.pixels().iter().copied().enumerate() {
@@ -7207,13 +7352,18 @@ pub mod graphics {
                     character: character as u32,
                     scale,
                     valid: true,
+                    advance,
+                    bearing_x,
                     alpha,
                 };
             }
             RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
         }
         output.copy_from_slice(&alpha);
-        true
+        Some(GlyphCells {
+            advance,
+            bearing_x,
+        })
     }
 
     pub(crate) fn load_system_font_face() -> Option<&'static TrueTypeFace<'static>> {
@@ -14095,17 +14245,22 @@ impl<'a> Canvas<'a> {
         let Some((column, row, columns, rows)) = self.clip(x, y, width, height) else {
             return;
         };
-        let source_column = column.saturating_add(
-            usize::try_from(i128::from(self.x) - i128::from(x))
-                .unwrap_or(0),
-        );
-        let source_row = row.saturating_add(
-            usize::try_from(i128::from(self.y) - i128::from(y))
-                .unwrap_or(0),
-        );
-        for mask_row in 0..rows {
-            let mask_start = (source_row + mask_row) * width + source_column;
-            let target_start = (row + mask_row) * self.width + column;
+        // `clip` reports canvas-local coordinates. Convert the first visible
+        // canvas pixel back into the mask's own coordinates, then clamp the
+        // run to the mask so a blit whose origin is offset from the canvas
+        // origin cannot read past `alpha`.
+        let mask_column = i128::try_from(column).unwrap_or(0) - (i128::from(x) - i128::from(self.x));
+        let mask_row = i128::try_from(row).unwrap_or(0) - (i128::from(y) - i128::from(self.y));
+        let source_column = usize::try_from(mask_column.max(0)).unwrap_or(0);
+        let source_row = usize::try_from(mask_row.max(0)).unwrap_or(0);
+        if source_column >= width || source_row >= height {
+            return;
+        }
+        let columns = columns.min(width - source_column);
+        let rows = rows.min(height - source_row);
+        for offset_row in 0..rows {
+            let mask_start = (source_row + offset_row) * width + source_column;
+            let target_start = (row + offset_row) * self.width + column;
             for (target, opacity) in self.pixels[target_start..target_start + columns]
                 .iter_mut()
                 .zip(&alpha[mask_start..mask_start + columns])
@@ -14213,9 +14368,9 @@ impl<'a> Canvas<'a> {
                 continue;
             }
             let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
-            if crate::graphics::cached_glyph(face, character, scale, &mut alpha) {
+            if let Some(cells) = crate::graphics::cached_glyph(face, character, scale, &mut alpha) {
                 self.blend_alpha_mask(
-                    cursor_x,
+                    cursor_x.saturating_add(cells.bearing_x),
                     cursor_y,
                     crate::graphics::GLYPH_CACHE_WIDTH,
                     crate::graphics::GLYPH_CACHE_HEIGHT,
@@ -14237,6 +14392,106 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Draw one line of proportional text through `face` at `size`, returning
+    /// the pen position after the last glyph. Unlike [`Self::draw_text_ttf`],
+    /// which keeps the bitmap font's fixed advance for layout compatibility,
+    /// this uses each glyph's real advance, `kern` pairs, and the face's
+    /// `hhea` line height, so proportional text neither collides nor
+    /// overlaps the following line.
+    pub fn draw_text_proportional(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        color: u32,
+        face: &crate::graphics::TrueTypeFace<'_>,
+        size: u16,
+    ) -> i32 {
+        let line_height = face.line_height(size);
+        let units = i32::from(face.units_per_em().max(1));
+        let (mut pen_x, mut pen_y) = (x, y);
+        let mut previous: Option<char> = None;
+        for character in text.chars() {
+            if character == '\n' {
+                pen_x = x;
+                pen_y = pen_y.saturating_add(line_height);
+                previous = None;
+                continue;
+            }
+            if let Some(left) = previous
+                && let Some(kern) = face.kerning(left, character)
+            {
+                pen_x = pen_x.saturating_add(
+                    i32::from(kern).saturating_mul(i32::from(size)) / units,
+                );
+            }
+            let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
+            match crate::graphics::cached_glyph(face, character, size, &mut alpha) {
+                Some(cells) => {
+                    self.blend_alpha_mask(
+                        pen_x.saturating_add(cells.bearing_x),
+                        pen_y,
+                        crate::graphics::GLYPH_CACHE_WIDTH,
+                        crate::graphics::GLYPH_CACHE_HEIGHT,
+                        &alpha,
+                        color,
+                    );
+                    pen_x = pen_x.saturating_add(cells.advance);
+                }
+                None => {
+                    if let Some(advance) = face.advance_px(character, size) {
+                        pen_x = pen_x.saturating_add(advance);
+                    }
+                }
+            }
+            previous = Some(character);
+        }
+        pen_x
+    }
+
+    /// Measure the widest line of proportional text at `size`, in pixels.
+    pub fn measure_text_proportional(
+        face: &crate::graphics::TrueTypeFace<'_>,
+        text: &str,
+        size: u16,
+    ) -> i32 {
+        let units = i32::from(face.units_per_em().max(1));
+        let mut widest = 0;
+        let mut line_width: i32 = 0;
+        let mut previous: Option<char> = None;
+        for character in text.chars() {
+            if character == '\n' {
+                widest = widest.max(line_width);
+                line_width = 0;
+                previous = None;
+                continue;
+            }
+            if let Some(left) = previous
+                && let Some(kern) = face.kerning(left, character)
+            {
+                line_width = line_width
+                    .saturating_add(i32::from(kern).saturating_mul(i32::from(size)) / units);
+            }
+            if let Some(advance) = face.advance_px(character, size) {
+                line_width = line_width.saturating_add(advance);
+            }
+            previous = Some(character);
+        }
+        widest.max(line_width)
+    }
+
+    /// Draw through the staged system TrueType face with proportional layout,
+    /// falling back to the bitmap font when the optional VFS asset is absent.
+    /// `size` is the em size in pixels; returns the resulting pen x.
+    pub fn draw_ui_text(&mut self, x: i32, y: i32, text: &str, color: u32, size: u16) -> i32 {
+        if let Some(face) = crate::graphics::load_system_font_face() {
+            self.draw_text_proportional(x, y, text, color, face, size)
+        } else {
+            self.draw_text(x, y, text, color);
+            x.saturating_add(font::text_width(text) as i32)
+        }
+    }
+
     /// Draw through the staged system TrueType face when available, falling
     /// back to the bounded bitmap font if the optional VFS asset is absent.
     /// The fixed-cell advance remains identical to [`Self::draw_text`], so
@@ -14248,6 +14503,24 @@ impl<'a> Canvas<'a> {
         } else {
             self.draw_text(x, y, text, color);
         }
+    }
+}
+
+/// Measure text with the same face and size contract as
+/// [`Canvas::draw_ui_text`], so proportional layout can be centred, wrapped,
+/// or truncated without guessing a fixed cell width.
+pub fn ui_text_width(text: &str, size: u16) -> i32 {
+    match crate::graphics::load_system_font_face() {
+        Some(face) => Canvas::measure_text_proportional(face, text, size),
+        None => font::text_width(text) as i32,
+    }
+}
+
+/// Baseline-to-baseline distance for [`Canvas::draw_ui_text`] at `size`.
+pub fn ui_line_height(size: u16) -> i32 {
+    match crate::graphics::load_system_font_face() {
+        Some(face) => face.line_height(size),
+        None => font::LINE_HEIGHT,
     }
 }
 

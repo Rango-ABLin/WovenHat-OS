@@ -1,3 +1,22 @@
+## OpenCode - GUI modernization: proportional typography and design tokens (2026-11-19)
+
+Scope claimed: `libwoven` typography primitives (`graphics::TrueTypeFace`
+metrics, proportional draw/measure on `Canvas`) and `libwoven::ui` design
+tokens, then `apps/woven-shell` chrome/lock-screen migration onto them. No
+kernel ABI, compositor, input-routing, or client-surface change is planned in
+this increment, and no application crate is touched until the shell pass is
+accepted. Do not concurrently edit `libwoven/src/lib.rs` graphics text paths,
+`libwoven/src/ui.rs` tokens, or `apps/woven-shell/src/{main,tokens}.rs`.
+
+Rationale: the accepted text path draws every glyph on the kernel's fixed
+`font::ADVANCE` (6 px) cell while rasterizing TrueType outlines at a 12 px em,
+and keeps `font::LINE_HEIGHT` (9 px) for multi-line text. That squeezes
+proportional glyphs into a fixed pitch and overlaps adjacent lines, which is
+the visible corruption on the sign-in screen. The fix adds real `hhea`
+ascent/descent/line-gap metrics, per-glyph advances with `kern` pairs, and a
+bearing-corrected glyph cache, while leaving the existing bitmap-compatible
+`draw_text`/`draw_text_system` API in place for callers already accepted.
+
 ## Codex - S12 bounded clipboard and file-chooser SDK surfaces (2026-11-04)
 
 Added host-tested fixed-capacity `libwoven::clipboard::TextClipboard` and

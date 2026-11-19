@@ -11,40 +11,69 @@ use crate::{Canvas, InputEvent, Key, layout::Frame};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
     pub surface: u32,
+    /// A surface one elevation step above `surface`: cards, menus, dialogs.
+    pub surface_raised: u32,
+    /// A one-pixel separator/outline color that stays visible on both
+    /// surfaces without looking like a hard border.
+    pub border: u32,
     pub accent: u32,
+    /// Foreground color that stays legible when drawn on `accent`.
+    pub on_accent: u32,
     pub text: u32,
+    /// Secondary/placeholder text.
+    pub muted: u32,
     pub disabled: u32,
     pub focus: u32,
+    pub danger: u32,
+    pub success: u32,
 }
 
 impl Theme {
     pub const DARK: Self = Self {
         surface: crate::rgb(45, 65, 90),
+        surface_raised: crate::rgb(30, 41, 56),
+        border: crate::rgb(62, 82, 104),
         // The WovenHat Overview brand teal (apps/woven-shell's ACCENT),
         // not the earlier unrelated mint-green: this is the one color
         // every first-party app should now agree on, since it is what
         // the shell itself (top bar, buttons, focus rings) is already
         // built and QEMU-verified against.
         accent: crate::rgb(76, 190, 188),
+        on_accent: crate::rgb(8, 24, 28),
         text: crate::rgb(235, 240, 250),
+        muted: crate::rgb(150, 164, 184),
         disabled: crate::rgb(76, 84, 100),
         focus: crate::rgb(255, 205, 96),
+        danger: crate::rgb(226, 96, 96),
+        success: crate::rgb(104, 202, 138),
     };
 
     pub const LIGHT: Self = Self {
         surface: crate::rgb(239, 243, 248),
+        surface_raised: crate::rgb(255, 255, 255),
+        border: crate::rgb(206, 214, 226),
         accent: crate::rgb(22, 128, 122),
+        on_accent: crate::rgb(255, 255, 255),
         text: crate::rgb(25, 32, 44),
+        muted: crate::rgb(96, 108, 126),
         disabled: crate::rgb(132, 143, 158),
         focus: crate::rgb(160, 92, 0),
+        danger: crate::rgb(178, 44, 44),
+        success: crate::rgb(22, 118, 70),
     };
 
     pub const HIGH_CONTRAST: Self = Self {
         surface: crate::rgb(0, 0, 0),
+        surface_raised: crate::rgb(0, 0, 0),
+        border: crate::rgb(255, 255, 255),
         accent: crate::rgb(255, 255, 0),
+        on_accent: crate::rgb(0, 0, 0),
         text: crate::rgb(255, 255, 255),
+        muted: crate::rgb(255, 255, 255),
         disabled: crate::rgb(160, 160, 160),
         focus: crate::rgb(0, 255, 255),
+        danger: crate::rgb(255, 128, 128),
+        success: crate::rgb(128, 255, 128),
     };
 
     /// Select the application palette from the shared accessibility policy.
@@ -71,10 +100,22 @@ pub struct DesignTokens {
     pub space_6: i32,
     pub radius_small: i32,
     pub radius_large: i32,
+    /// Fully rounded ends for pills, chips, and search fields.
+    pub radius_pill: i32,
+    /// Hairline separator width in pixels.
+    pub border_width: i32,
     pub elevation_low: i32,
     pub elevation_high: i32,
     pub motion_fast_ms: u32,
     pub motion_normal_ms: u32,
+    pub motion_slow_ms: u32,
+    /// Type scale in em pixels, for [`crate::Canvas::draw_ui_text`].
+    pub type_caption: u16,
+    pub type_body: u16,
+    pub type_subtitle: u16,
+    pub type_title: u16,
+    pub type_headline: u16,
+    pub type_display: u16,
 }
 
 impl DesignTokens {
@@ -86,10 +127,19 @@ impl DesignTokens {
         space_6: 24,
         radius_small: 4,
         radius_large: 10,
+        radius_pill: 999,
+        border_width: 1,
         elevation_low: 2,
         elevation_high: 8,
         motion_fast_ms: 120,
         motion_normal_ms: 220,
+        motion_slow_ms: 320,
+        type_caption: 10,
+        type_body: 12,
+        type_subtitle: 14,
+        type_title: 16,
+        type_headline: 20,
+        type_display: 28,
     };
 
     pub const REDUCED_MOTION: Self = Self {

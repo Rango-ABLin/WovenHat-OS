@@ -143,9 +143,10 @@ use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
 use libwoven::graphics::{
-    Camera, Color, DepthBuffer, Rect, Renderer, TrueTypeFace, Vertex3, Vertex3Field, Vertex3Tex,
+    Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
 use libwoven::layout::{self, Frame};
+use libwoven::ui::DesignTokens;
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
     InputEvent, Key, Spring,
@@ -417,7 +418,29 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
     length
 }
 
-/// A one-pixel outline of `area` in `color`.
+/// `bytes` as text, cut to the longest prefix that fits `max_width` at the
+/// body size, with the same printable-ASCII substitution as [`label`].
+fn truncate_to_width(bytes: &[u8], max_width: i32, buffer: &mut [u8; 64]) -> usize {
+    let mut length = bytes.len().min(buffer.len());
+    while length > 0 {
+        let Ok(candidate) = core::str::from_utf8(&bytes[..length]) else {
+            length -= 1;
+            continue;
+        };
+        if libwoven::ui_text_width(candidate, BODY_TEXT) <= max_width {
+            break;
+        }
+        length -= 1;
+    }
+    for (slot, byte) in buffer.iter_mut().zip(&bytes[..length]) {
+        *slot = if (b' '..=b'~').contains(byte) {
+            *byte
+        } else {
+            b'?'
+        };
+    }
+    length
+}
 fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
     let (width, height) = (area.width as usize, area.height as usize);
     canvas.fill_rect(area.x, area.y, width, 1, color);
@@ -437,6 +460,16 @@ const CHROME_RADIUS_SMALL: usize = 3;
 const CHROME_CARD_RADIUS: usize = 14;
 /// Diameter of the sign-in screen's account avatar circle.
 const AVATAR_DIAMETER: i32 = 48;
+
+/// The shared type scale. Sizes come from `libwoven::ui::DesignTokens` so the
+/// shell's sign-in, taskbar, and window chrome agree with every WovenUI app.
+const TOKENS: DesignTokens = DesignTokens::DEFAULT;
+const CAPTION_TEXT: u16 = TOKENS.type_caption;
+const BODY_TEXT: u16 = TOKENS.type_body;
+const SUBTITLE_TEXT: u16 = TOKENS.type_subtitle;
+const TITLE_TEXT: u16 = TOKENS.type_title;
+const HEADLINE_TEXT: u16 = TOKENS.type_headline;
+const DISPLAY_TEXT: u16 = TOKENS.type_display;
 
 fn rect_of(area: Area) -> Rect {
     Rect {
@@ -470,15 +503,6 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
 fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
     let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
     fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
-}
-
-/// Borrow the staged system face through its read-only lazy file mapping.
-/// Parsing the bounded table directory is cheap; glyph outlines remain
-/// demand-paged from the shared mapping and never inflate this ELF's `.bss`.
-fn system_font_face() -> Option<TrueTypeFace<'static>> {
-    libwoven::graphics::load_system_font_mapping()
-        .ok()
-        .and_then(|bytes| TrueTypeFace::from_bytes(bytes).ok())
 }
 
 /// `color`, lightened toward white by `amount` (0..=255) -- used to derive a
@@ -1572,12 +1596,13 @@ impl Desktop {
             blend(rgb(0, 0, 0), wallpaper(x, y, height), LOCK_DIM)
         });
         let middle = self.height / 2;
-        let centred = |text: &str| (self.width - font::text_width(text) as i32) / 2;
         let catalog = shell_catalog(self.language);
 
         // A frosted card behind the sign-in/lock content, Windows-11-style,
-        // instead of text floating directly on the dimmed wallpaper.
-        let card = Area::new(self.width / 2 - 140, middle - 120, 280, 170);
+        // instead of text floating directly on the dimmed wallpaper. The card
+        // and the type scale below come from the shared design tokens so the
+        // sign-in surface matches settings, menus, and window chrome.
+        let card = Area::new(self.width / 2 - 160, middle - 132, 320, 210);
         fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, rgb(10, 14, 24), 170);
 
         if self.mode == LockMode::SignIn {
@@ -1587,54 +1612,74 @@ impl Desktop {
                 .map(|account| account.name().first().copied().unwrap_or(b'?'))
                 .unwrap_or(b'?')
                 .to_ascii_uppercase();
-            let avatar_y = middle - 85;
+            let avatar_y = middle - 92;
             fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, theme_accent());
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
-            canvas.draw_text_system(
-                self.width / 2 - font::text_width(glyph) as i32 / 2,
-                avatar_y - 3,
+            let avatar_size = (AVATAR_DIAMETER as u16 / 2).max(BODY_TEXT);
+            canvas.draw_ui_text(
+                self.width / 2 - libwoven::ui_text_width(glyph, avatar_size) / 2,
+                avatar_y - libwoven::ui_line_height(avatar_size) / 2,
                 glyph,
                 rgb(255, 255, 255),
+                avatar_size,
             );
 
-            // The sign-in prompt, then the accounts, the chosen one marked.
+            // The sign-in prompt, then the accounts, the chosen one marked
+            // with an accent pill rather than an ASCII caret.
             let text = catalog.lookup("sign_in", "Sign in");
-            if let Some(face) = system_font_face() {
-                canvas.draw_text_ttf(
-                    centred(text),
-                    middle - 52,
-                    text,
-                    theme_text(),
-                    &face,
-                    12,
-                );
-            } else {
-                canvas.draw_text_system(centred(text), middle - 52, text, theme_text());
-            }
-            for (index, account) in self.accounts.iter().flatten().enumerate() {
-                let mut line = [b' '; 2 + libwoven::accounts::MAX_NAME];
+            canvas.draw_ui_text(
+                self.width / 2 - libwoven::ui_text_width(text, HEADLINE_TEXT) / 2,
+                middle - 56,
+                text,
+                theme_text(),
+                HEADLINE_TEXT,
+            );
+            let account_line = libwoven::ui_line_height(BODY_TEXT).max(18);
+            for (index, account) in self.accounts.iter().enumerate() {
+                let Some(account) = account else { continue };
+                let name = core::str::from_utf8(account.name()).unwrap_or("");
+                let width = libwoven::ui_text_width(name, BODY_TEXT);
+                let x = self.width / 2 - width / 2;
+                let y = middle - 24 + (index as i32) * account_line;
                 if index == self.chosen {
-                    line[0] = b'>';
+                    let pill = Area::new(
+                        x - 10,
+                        y - 3,
+                        width + 20,
+                        libwoven::ui_line_height(BODY_TEXT) + 6,
+                    );
+                    fill_rounded(canvas, pill, (pill.height / 2).max(0) as usize, theme_start_fill());
                 }
-                line[2..2 + account.name().len()].copy_from_slice(account.name());
-                let text = core::str::from_utf8(&line[..2 + account.name().len()]).unwrap_or("");
-                canvas.draw_text_system(
-                    centred(text),
-                    middle - 38 + index as i32 * 10,
-                    text,
-                    theme_text(),
-                );
+                canvas.draw_ui_text(x, y, name, theme_text(), BODY_TEXT);
             }
         } else if self.mode == LockMode::ChangePin {
             let text = catalog.lookup("change_pin", "Change PIN");
-            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
+            canvas.draw_ui_text(
+                self.width / 2 - libwoven::ui_text_width(text, HEADLINE_TEXT) / 2,
+                middle - 44,
+                text,
+                theme_text(),
+                HEADLINE_TEXT,
+            );
         } else {
             let text = catalog.lookup("locked", "Locked");
-            canvas.draw_text_system(centred(text), middle - 34, text, theme_text());
+            canvas.draw_ui_text(
+                self.width / 2 - libwoven::ui_text_width(text, BODY_TEXT) / 2,
+                middle - 60,
+                text,
+                theme_muted(),
+                BODY_TEXT,
+            );
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-            canvas.draw_text_system(centred(clock), middle - 20, clock, theme_text());
+            canvas.draw_ui_text(
+                self.width / 2 - libwoven::ui_text_width(clock, DISPLAY_TEXT) / 2,
+                middle - 48,
+                clock,
+                theme_text(),
+                DISPLAY_TEXT,
+            );
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
             match self.change_pin {
@@ -1652,16 +1697,22 @@ impl Desktop {
                 LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
-        canvas.draw_text_system(centred(prompt), middle - 4, prompt, theme_text());
+        canvas.draw_ui_text(
+            self.width / 2 - libwoven::ui_text_width(prompt, BODY_TEXT) / 2,
+            middle + 26,
+            prompt,
+            theme_muted(),
+            BODY_TEXT,
+        );
         let dots = self.entry_length as i32;
         if dots > 0 {
             let left = (self.width - (dots * 10 - 4)) / 2;
             // A rounded pill behind the dots, Windows-11-style, instead of
             // the digits floating bare on the card.
-            let pill = Area::new(left - 10, middle + 6, dots * 10 - 4 + 20, 20);
+            let pill = Area::new(left - 10, middle + 48, dots * 10 - 4 + 20, 20);
             fill_rounded(canvas, pill, 10, rgb(24, 30, 44));
             for index in 0..dots {
-                fill_circle(canvas, left + index * 10 + 3, middle + 15, 6, theme_text());
+                fill_circle(canvas, left + index * 10 + 3, middle + 57, 6, theme_text());
             }
         }
     }
@@ -2491,18 +2542,18 @@ impl Desktop {
         let close = window.close_area();
         if !close.is_empty() {
             fill_rounded(canvas, close, CHROME_RADIUS_SMALL, CLOSE_FILL);
-            canvas.draw_text_system(close.x + 3, close.y + 2, "x", theme_text());
+            canvas.draw_ui_text(close.x + 2, close.y - 1, "x", theme_text(), BODY_TEXT);
         }
-        let mut buffer = [0u8; 32];
         let reserved = if close.is_empty() {
             8
         } else {
             8 + CLOSE_SIZE + 4
         };
-        let chars = ((window.width - reserved) / font::ADVANCE).max(0) as usize;
-        let length = label(&window.title[..window.title_length], chars, &mut buffer);
+        let available = (window.width - reserved).max(0);
+        let mut buffer = [0u8; 64];
+        let length = truncate_to_width(&window.title[..window.title_length], available, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-        canvas.draw_text_system(area.x + 4, area.y + 4, text, theme_text());
+        canvas.draw_ui_text(area.x + 8, area.y + 2, text, theme_text(), BODY_TEXT);
     }
 
     /// A window's title-bar fill, perspective-projected as a card tilted
