@@ -7,6 +7,96 @@ use libwoven::{process, Spring};
 use crate::geometry::Area;
 use crate::tokens::{CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT};
 
+/// Animation state for a window transition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowTransition {
+    /// Window is closing/fading out
+    Closing,
+    /// Window is opening/fading in
+    Opening,
+    /// Window is sliding to a new position/workspace
+    Sliding,
+    /// Window is stationary (no animation)
+    Idle,
+}
+
+/// Animation parameters for a window transition.
+#[derive(Clone, Copy)]
+pub struct WindowAnimation {
+    /// The transition type
+    pub transition: WindowTransition,
+    /// Current progress 0.0 to 1.0 (inclusive)
+    pub progress: f32,
+    /// Target opacity (0-255)
+    pub target_alpha: u8,
+    /// Whether reduced-motion is enabled
+    pub reduced_motion: bool,
+}
+
+impl WindowAnimation {
+    pub const fn idle() -> Self {
+        Self {
+            transition: WindowTransition::Idle,
+            progress: 1.0,
+            target_alpha: 255,
+            reduced_motion: false,
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        match self.transition {
+            WindowTransition::Idle => true,
+            WindowTransition::Opening | WindowTransition::Closing => {
+                self.progress >= 1.0 || self.target_alpha == 0
+            }
+            WindowTransition::Sliding => self.progress >= 1.0,
+        }
+    }
+
+    /// Update the window animation based on frame progress.
+    /// Returns the area that needs repainting.
+    pub fn update_animation(&mut self, frames: u64, reduced_motion: bool) -> Area {
+        self.animation.reduced_motion = reduced_motion;
+
+        let mut dirty = Area::new(0, 0, 0, 0);
+
+        // Handle fade/spring-based animation
+        if !reduced_motion {
+            self.fade.set_target(self.animation.target_alpha as i32);
+            self.fade.step(frames);
+        } else {
+            // In reduced-motion mode, instantly set the target alpha
+            self.fade.set_target(self.animation.target_alpha as i32);
+        }
+
+        // Handle transition progress
+        match self.animation.transition {
+            WindowTransition::Opening => {
+                // progress goes from 0 to 1 as window opens
+                self.animation.progress = self.fade.value() as f32 / 255.0;
+            }
+            WindowTransition::Closing => {
+                // progress goes from 1 to 0 as window closes
+                self.animation.progress = 1.0 - (self.fade.value() as f32 / 255.0);
+            }
+            WindowTransition::Sliding => {
+                // sliding progress based on spring or direct animation
+                self.animation.progress = self.fade.value() as f32 / 255.0;
+            }
+            WindowTransition::Idle => {
+                self.animation.progress = 1.0;
+            }
+        }
+
+        // Mark the window as needing repaint if animation is active
+        if !self.animation.is_complete() {
+            dirty = dirty.union(self.footprint());
+        }
+
+        dirty
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Window {
     pub owner: process::Id,
@@ -22,6 +112,8 @@ pub struct Window {
     pub title_length: usize,
     /// Opacity, 0 to 255: animated from 0 as the window opens.
     pub fade: Spring,
+    /// Window transition animation state
+    pub animation: WindowAnimation,
     /// The workspace the window belongs to.
     pub workspace: usize,
     /// Until this tick, a resize has been requested and the owner may be
@@ -33,6 +125,15 @@ pub struct Window {
 impl Window {
     pub fn alpha(&self) -> u8 {
         self.fade.value().clamp(0, 255) as u8
+    }
+
+    /// Get the animation-based alpha value, respecting reduced-motion.
+    pub fn animation_alpha(&self, reduced_motion: bool) -> u8 {
+        if reduced_motion {
+            self.animation.target_alpha
+        } else {
+            self.fade.value().clamp(0, 255) as u8
+        }
     }
 
     pub fn title_area(&self) -> Area {

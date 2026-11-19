@@ -10,6 +10,39 @@ use crate::graphics::Color;
 /// saturating edges that the widget version never had.
 pub use crate::display::Rect;
 
+/// Color scheme for high-contrast mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HighContrastScheme {
+    /// Default: cyan on white
+    Default,
+    /// Inverted: white on cyan
+    Inverted,
+    /// Solarized: dark yellow on blue-brown
+    Solarized,
+    /// Custom user scheme
+    Custom(u32, u32), // (text, background)
+}
+
+impl HighContrastScheme {
+    pub fn text_color(self, base: Color) -> u32 {
+        match self {
+            HighContrastScheme::Default => Color::CYAN.packed(),
+            HighContrastScheme::Inverted => Color::WHITE.packed(),
+            HighContrastScheme::Solarized => Color::rgb(220, 170, 90).packed(),
+            HighContrastScheme::Custom(text, _) => text,
+        }
+    }
+
+    pub fn background_color(self, base: Color) -> u32 {
+        match self {
+            HighContrastScheme::Default => Color::WHITE.packed(),
+            HighContrastScheme::Inverted => Color::CYAN.packed(),
+            HighContrastScheme::Solarized => Color::rgb(30, 10, 50).packed(),
+            HighContrastScheme::Custom(_, background) => background,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum InputEvent {
     PointerDown { x: i32, y: i32 },
@@ -20,8 +53,10 @@ pub struct Button {
     pub bounds: Rect,
     pub label: &'static str,
     pub color: Color,
+    pub radius: i32,
     pub pressed: bool,
     pub focused: bool,
+    pub high_contrast: HighContrastScheme,
 }
 
 impl Button {
@@ -30,32 +65,107 @@ impl Button {
             bounds,
             label,
             color,
+            radius: 0,
             pressed: false,
             focused: false,
+            high_contrast: HighContrastScheme::Default,
         }
+    }
+
+    pub const fn with_radius(mut self, radius: i32) -> Self {
+        self.radius = radius;
+        self
     }
 
     /// Draw into `surface`, returning the region touched.
     fn render(&self, surface: &mut Surface) -> Rect {
-        let color = if self.pressed || self.focused {
-            Color::WHITE
+        let bg_color = self.high_contrast.background_color(self.color);
+        let text_color = self.high_contrast.text_color(self.color);
+
+        let display_color = if self.pressed {
+            //pressed color is slightly darker
+            Color::rgb(
+                self.color.r().saturating_sub(50),
+                self.color.g().saturating_sub(50),
+                self.color.b().saturating_sub(50),
+            )
+        } else if self.focused {
+            //focused color with brighter border
+            surface.fill_rect(self.bounds, bg_color);
+            // Draw focus ring - a larger rectangle behind the button
+            let focus_ring = Rect::new(
+                self.bounds.x - 3,
+                self.bounds.y - 3,
+                self.bounds.width + 6,
+                self.bounds.height + 6,
+            );
+            surface.fill_rect(focus_ring, Color::rgb(100, 150, 255).packed());
+            // Draw the button on top with slightly different color
+            let focused_color = Color::rgb(
+                min(self.color.r() + 30, 255),
+                min(self.color.g() + 30, 255),
+                min(self.color.b() + 30, 255),
+            );
+            surface.fill_rect(self.bounds, focused_color.packed());
+            // Draw focus outline
+            surface.stroke_rect(
+                Rect::new(
+                    self.bounds.x - 2,
+                    self.bounds.y - 2,
+                    self.bounds.width + 4,
+                    self.bounds.height + 4,
+                ),
+                Color::WHITE.packed(),
+            );
+            // Draw label with focus colors
+            let label_width = crate::font::text_width(self.label) as i32;
+            let label_height = (crate::font::line_count(self.label) as i32 * crate::font::LINE_HEIGHT)
+                - (crate::font::LINE_HEIGHT - crate::font::HEIGHT as i32);
+            return surface.draw_text(
+                self.bounds.x + (self.bounds.width as i32 - label_width).max(0) / 2,
+                self.bounds.y + ((self.bounds.height as i32 - (crate::font::LINE_HEIGHT as i32 - crate::font::HEIGHT as i32)) / 2).max(0),
+                self.label,
+                text_color,
+            );
         } else {
-            self.color
+            bg_color
         };
-        let mut touched = surface.fill_rect(self.bounds, color.packed());
-        // Centre the label by measuring it rather than assuming a width. A
-        // fixed offset left long labels overflowing the button and short ones
-        // hugging its left edge.
+
+        // Draw the button background with optional rounded corners
+        if self.radius > 0 {
+            // Draw rounded rectangle by filling then drawing edges
+            // Simple approach: fill the bounds, then draw corner arcs manually
+            surface.fill_rect(self.bounds, display_color);
+            // Draw corner highlights for gradient effect
+            if self.radius > 0 {
+                let r = self.radius as usize;
+                // Top-left corner highlight
+                surface.set_pixel(self.bounds.x + r as i32 - 1, self.bounds.y, Color::WHITE.packed());
+                surface.set_pixel(self.bounds.x, self.bounds.y + r as i32 - 1, Color::WHITE.packed());
+                // Bottom-right corner shadow
+                surface.set_pixel(self.bounds.x + self.bounds.width - r as i32, self.bounds.y + self.bounds.height, Color::BLACK.packed());
+                surface.set_pixel(self.bounds.x + self.bounds.width - 1, self.bounds.y + self.bounds.height - r as i32, Color::BLACK.packed());
+            }
+        } else {
+            surface.fill_rect(self.bounds, display_color);
+        }
+
+        // Centre the label with better vertical alignment
         let label_width = crate::font::text_width(self.label) as i32;
-        let label_height = (crate::font::line_count(self.label) as i32 * crate::font::LINE_HEIGHT)
-            - (crate::font::LINE_HEIGHT - crate::font::HEIGHT as i32);
-        touched = touched.union(surface.draw_text(
-            self.bounds.x + (self.bounds.width as i32 - label_width).max(0) / 2,
-            self.bounds.y + (self.bounds.height as i32 - label_height).max(0) / 2,
+        let label_lines = crate::font::line_count(self.label) as i32;
+        // Calculate the total text height including line spacing
+        let text_height = label_lines * (crate::font::LINE_HEIGHT as i32 - crate::font::HEIGHT as i32) + crate::font::HEIGHT as i32;
+        // Center the text block within the button bounds
+        let text_x = self.bounds.x + (self.bounds.width as i32 - label_width).max(0) / 2;
+        let text_y = self.bounds.y + (self.bounds.height as i32 - text_height) / 2 + crate::font::HEIGHT as i32 / 2;
+        let touched = surface.draw_text(
+            text_x,
+            text_y,
             self.label,
-            Color::DARK_BLUE.packed(),
-        ));
-        if self.focused {
+            text_color,
+        );
+
+        if self.focused && self.radius == 0 && self.high_contrast == HighContrastScheme::Default {
             touched = touched.union(surface.stroke_rect(
                 Rect::new(
                     self.bounds.x - 2,
@@ -66,6 +176,7 @@ impl Button {
                 Color::WHITE.packed(),
             ));
         }
+
         touched
     }
 
