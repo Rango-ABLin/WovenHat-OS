@@ -277,7 +277,12 @@ pub fn present() -> Result<usize, Error> {
 
 /// Tick count at the last successful presentation; 0 if none yet or the
 /// compositor is not initialised. Callers subtract an input-event timestamp
-/// to measure input-to-present latency.
+/// to measure input-to-present latency (GUI recommendation P2).
+///
+/// Not yet wired to any caller; the latency pipeline (Stage 20.x / Phase 7)
+/// will consume this. Kept `#[allow(dead_code)]` so the warning-denying
+/// build does not reject the foundation before its consumer exists.
+#[allow(dead_code)]
 pub fn last_present_tick() -> u64 {
     let guard = STATE.lock();
     guard.as_ref().map(|state| state.last_present_tick).unwrap_or(0)
