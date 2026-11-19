@@ -81,6 +81,11 @@ pub const fn domain_ceiling(domain: SecurityDomain) -> CapabilitySet {
             .with(Capability::DisplayIo)
             .with(Capability::InputIo)
             .with(Capability::NetworkAdmin)
+            // Input injection (for trusted services: shell compositor, screen
+            // reader, input remapper) is a SystemService authority, not a user
+            // one. Ordinary applications cannot forge keystrokes or pointer
+            // events into another window.
+            .with(Capability::InputInject)
             // Audio capture is available only to explicitly delegated system
             // services; ordinary user processes remain outside this ceiling.
             .with(Capability::Microphone)
