@@ -376,7 +376,13 @@ pub mod graphics {
     use core::sync::atomic::{AtomicU64, Ordering};
 
     const SYSTEM_FONT_BYTES: usize = 621_572;
-    const SYSTEM_FONT_MAPPING_BYTES: u64 = 622_592;
+    /// The mapping request is the file's exact length, not its page-rounded
+    /// size: the kernel's file-mapping validation rejects any `offset +
+    /// length` past end-of-file (`file_mapping::mapped_size`), while the
+    /// returned mapping itself is still rounded up to whole pages. Requesting
+    /// 622,592 here made every system-font mapping fail and silently fell
+    /// back to the 5x7 bitmap font on the real desktop.
+    const SYSTEM_FONT_MAPPING_BYTES: u64 = SYSTEM_FONT_BYTES as u64;
     static SYSTEM_FONT_BASE: AtomicU64 = AtomicU64::new(0);
 
     // Keeps the fixed userspace image within the established loader-size
@@ -7306,15 +7312,13 @@ pub mod graphics {
             .unwrap_or(0);
 
         let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
-        let Some(mut canvas) = super::Canvas::new(
+        let mut canvas = super::Canvas::new(
             &mut pixels,
             0,
             0,
             GLYPH_CACHE_WIDTH,
             GLYPH_CACHE_HEIGHT,
-        ) else {
-            return None;
-        };
+        )?;
         let ascent = face.ascent_px(scale);
         let mut renderer = Renderer::new(&mut canvas);
         if face

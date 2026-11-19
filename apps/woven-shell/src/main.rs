@@ -441,6 +441,8 @@ fn truncate_to_width(bytes: &[u8], max_width: i32, buffer: &mut [u8; 64]) -> usi
     }
     length
 }
+
+/// A one-pixel outline of `area` in `color`.
 fn outline(canvas: &mut Canvas<'_>, area: Area, color: u32) {
     let (width, height) = (area.width as usize, area.height as usize);
     canvas.fill_rect(area.x, area.y, width, 1, color);
@@ -464,10 +466,7 @@ const AVATAR_DIAMETER: i32 = 48;
 /// The shared type scale. Sizes come from `libwoven::ui::DesignTokens` so the
 /// shell's sign-in, taskbar, and window chrome agree with every WovenUI app.
 const TOKENS: DesignTokens = DesignTokens::DEFAULT;
-const CAPTION_TEXT: u16 = TOKENS.type_caption;
 const BODY_TEXT: u16 = TOKENS.type_body;
-const SUBTITLE_TEXT: u16 = TOKENS.type_subtitle;
-const TITLE_TEXT: u16 = TOKENS.type_title;
 const HEADLINE_TEXT: u16 = TOKENS.type_headline;
 const DISPLAY_TEXT: u16 = TOKENS.type_display;
 
@@ -711,20 +710,26 @@ impl Desktop {
         Area::new(0, 0, self.desktop_width, self.height)
     }
 
+    /// The sign-in card: one bounded region that owns every lock-screen
+    /// element (avatar, title, account pills, prompt, entry dots). All lock
+    /// damage is unioned with this rect because the content is re-laid-out
+    /// per state change, not incrementally repainted.
+    fn lock_card_area(&self) -> Area {
+        let middle = self.height / 2;
+        self.screen()
+            .intersect(Area::new(self.width / 2 - 160, middle - 132, 320, 210))
+    }
+
     /// The lock-screen account rows and PIN prompt are the only pixels that
     /// change while choosing an account. Keeping this damage bounded avoids
     /// repainting the full 1280x800 wallpaper for every key on SMP boots.
     fn lock_account_area(&self) -> Area {
-        let middle = self.height / 2;
-        self.screen()
-            .intersect(Area::new(0, middle - 50, self.desktop_width, 80))
+        self.lock_card_area()
     }
 
     /// The prompt and masked PIN dots change independently of the wallpaper.
     fn lock_input_area(&self) -> Area {
-        let middle = self.height / 2;
-        self.screen()
-            .intersect(Area::new(0, middle - 8, self.desktop_width, 32))
+        self.lock_card_area()
     }
 
     /// The taskbar sits flush at the top of the screen. Keep this as a
@@ -1602,7 +1607,7 @@ impl Desktop {
         // instead of text floating directly on the dimmed wallpaper. The card
         // and the type scale below come from the shared design tokens so the
         // sign-in surface matches settings, menus, and window chrome.
-        let card = Area::new(self.width / 2 - 160, middle - 132, 320, 210);
+        let card = self.lock_card_area();
         fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, rgb(10, 14, 24), 170);
 
         if self.mode == LockMode::SignIn {
@@ -2786,8 +2791,13 @@ impl Desktop {
             return None;
         }
         // Locked, nothing but the lock screen is drawn: no window, no
-        // notification, no pointer.
+        // notification, no pointer. Repaint the whole card, not just the
+        // damaged sub-region: the sign-in content is re-laid-out on every
+        // state change (prompt, account selection, entry dots), so a
+        // smaller damage rect would leave pixels from the previous layout
+        // behind.
         if self.locked {
+            let area = area.union(self.lock_card_area()).intersect(self.screen());
             painter.draw(area, |canvas| self.render_lock(canvas));
             return None;
         }
@@ -3905,6 +3915,30 @@ fn main(args: Args) -> ! {
     let mut catalog_digits = [0u8; 20];
     let catalog_count = libwoven::format_u64(desktop.app_count as u64, &mut catalog_digits);
     log(&[b"woven-shell: catalog entries=", catalog_count]);
+    // Typography diagnostics: report whether the staged system face is
+    // reachable from this process, so a bitmap fallback is visible in serial
+    // evidence instead of only in screenshots.
+    match libwoven::graphics::load_system_font_mapping() {
+        Ok(bytes) => {
+            let mut length_digits = [0u8; 20];
+            let length = libwoven::format_u64(bytes.len() as u64, &mut length_digits);
+            match libwoven::graphics::TrueTypeFace::from_bytes(bytes) {
+                Ok(face) => {
+                    let mut unit_digits = [0u8; 20];
+                    let units =
+                        libwoven::format_u64(u64::from(face.units_per_em()), &mut unit_digits);
+                    log(&[
+                        b"woven-shell: system font parsed bytes=",
+                        length,
+                        b" units_per_em=",
+                        units,
+                    ]);
+                }
+                Err(_) => log(&[b"woven-shell: system font failed to parse"]),
+            }
+        }
+        Err(_) => log(&[b"woven-shell: system font mapping unavailable"]),
+    }
     // M6: a real, measured full-recompose frame time (not assumed). This
     // first paint is a genuine full-screen recompose by construction, so
     // no extra bookkeeping is needed to pick that case out, unlike the
