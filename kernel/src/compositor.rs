@@ -40,6 +40,18 @@ pub const DEFAULT_HEIGHT: u32 = 480;
 /// Two 1280-pixel monitors side by side (Stage 20.14b).
 pub const MAX_WIDTH: u32 = 2560;
 pub const MAX_HEIGHT: u32 = 1200;
+
+/// The syscall 31 (Getticks) tick rate is 100 Hz, so one tick is 10 ms.
+pub const TICKS_PER_SECOND: u64 = 100;
+
+/// Default refresh rate used to compute the minimum present interval when no
+/// display mode information is available.
+pub const DEFAULT_FPS: u32 = 60;
+
+/// Maximum swap interval allowed. Prevents a misbehaving caller from pacing
+/// frames so slowly the desktop appears frozen.
+pub const MAX_SWAP_INTERVAL: u32 = 8;
+
 const MAX_GPU_OUTPUT_WIDTH: u32 = 1920;
 const MAX_GPU_OUTPUT_HEIGHT: u32 = 1080;
 
@@ -90,6 +102,23 @@ struct State {
     /// Combined with input-event timestamps this yields input-to-present
     /// latency (the P2 / Phase 7 metrics boundary).
     last_present_tick: u64,
+    /// How many refresh intervals to wait between presentations. 0 means no
+    /// pacing (present as fast as possible); 1 means present at most once per
+    /// refresh interval (vsync on); higher values throttle to every Nth frame.
+    swap_interval: u32,
+    /// Minimum tick count between presentations when `swap_interval` is 1.
+    /// Derived from the display refresh rate; defaults to a 60 Hz budget over
+    /// the 100 Hz tick clock.
+    min_present_interval_ticks: u64,
+    /// The tick at or after which the next presentation is allowed. Zero means
+    /// present immediately.
+    next_present_tick: u64,
+    /// Count of frames skipped because a presentation was not yet due.
+    /// Saturating — never wraps.
+    skipped_frames: u64,
+    /// Count of presentations that occurred after the deadline elapsed (a
+    /// missed VBlank). Saturating — never wraps.
+    missed_vblanks: u64,
     /// Monitors on a virtio-gpu, side by side, when one has several heads
     /// (Stage 20.14b); otherwise the boot framebuffer is the one output.
     #[cfg(any(
@@ -130,6 +159,11 @@ impl State {
             holder: None,
             scale: 1,
             last_present_tick: 0,
+            swap_interval: 1,
+            min_present_interval_ticks: TICKS_PER_SECOND.div_ceil(DEFAULT_FPS as u64),
+            next_present_tick: 0,
+            skipped_frames: 0,
+            missed_vblanks: 0,
             #[cfg(any(
                 not(feature = "qemu-test"),
                 feature = "stage20-14-test",
@@ -269,8 +303,39 @@ pub fn present() -> Result<usize, Error> {
     if !state.presenting {
         return Err(Error::NotPresenting);
     }
+
+    // Frame pacing: when a swap interval is set and the next presentation is
+    // not yet due, skip this frame rather than spinning. Damage is retained
+    // so the next attempt redraws the same region. A presentation that occurs
+    // more than one interval after its deadline counts as a missed VBlank.
+    if state.swap_interval > 0 {
+        let now = ticks();
+        if now < state.next_present_tick {
+            state.skipped_frames = state.skipped_frames.saturating_add(1);
+            if now
+                > state
+                    .next_present_tick
+                    .saturating_add(state.min_present_interval_ticks)
+            {
+                state.missed_vblanks = state.missed_vblanks.saturating_add(1);
+            }
+            return Ok(0);
+        }
+    }
+
     let written = present_state(state)?;
     state.last_present_tick = ticks();
+
+    // Schedule the next permitted presentation. When pacing is disabled there
+    // is no deadline and every present() is allowed immediately.
+    if state.swap_interval > 0 {
+        state.next_present_tick = state
+            .last_present_tick
+            .saturating_add(state.min_present_interval_ticks.saturating_mul(state.swap_interval as u64));
+    } else {
+        state.next_present_tick = 0;
+    }
+
     state.damage.clear();
     Ok(written)
 }
@@ -286,6 +351,66 @@ pub fn present() -> Result<usize, Error> {
 pub fn last_present_tick() -> u64 {
     let guard = STATE.lock();
     guard.as_ref().map(|state| state.last_present_tick).unwrap_or(0)
+}
+
+/// How many refresh intervals to wait between presentations. 0 means no
+/// pacing; 1 (the default) means present at most once per refresh interval;
+/// higher values throttle to every Nth frame.
+///
+/// Not yet wired to a syscall; the pacing pipeline (Stage 20.x / Phase 7)
+/// will consume this. Kept `#[allow(dead_code)]` so the warning-denying
+/// build does not reject the foundation before its consumer exists.
+#[allow(dead_code)]
+pub fn swap_interval() -> u32 {
+    let guard = STATE.lock();
+    guard.as_ref().map(|state| state.swap_interval).unwrap_or(1)
+}
+
+/// Set the swap interval. Values above [`MAX_SWAP_INTERVAL`] are clamped.
+/// A value of 0 disables frame pacing entirely; every `present()` is allowed
+/// immediately. The next permitted presentation is scheduled from the last
+/// successful presentation tick.
+///
+/// Not yet wired to a syscall; kept `#[allow(dead_code)]` for the same reason
+/// as [`swap_interval`].
+#[allow(dead_code)]
+pub fn set_swap_interval(interval: u32) {
+    let interval = interval.min(MAX_SWAP_INTERVAL);
+    let mut guard = STATE.lock();
+    if let Some(state) = guard.as_mut() {
+        state.swap_interval = interval;
+        if interval == 0 {
+            state.next_present_tick = 0;
+        } else if state.last_present_tick > 0 {
+            state.next_present_tick = state
+                .last_present_tick
+                .saturating_add(state.min_present_interval_ticks.saturating_mul(interval as u64));
+        }
+    }
+}
+
+/// Count of frames skipped because a presentation was not yet due.
+/// Saturating — never wraps.
+#[allow(dead_code)]
+pub fn skipped_frames() -> u64 {
+    let guard = STATE.lock();
+    guard.as_ref().map(|state| state.skipped_frames).unwrap_or(0)
+}
+
+/// Count of presentations that occurred after the deadline elapsed (a missed
+/// VBlank). Saturating — never wraps.
+#[allow(dead_code)]
+pub fn missed_vblanks() -> u64 {
+    let guard = STATE.lock();
+    guard.as_ref().map(|state| state.missed_vblanks).unwrap_or(0)
+}
+
+/// The tick at or after which the next presentation is allowed. Zero means
+/// present immediately.
+#[allow(dead_code)]
+pub fn next_present_tick() -> u64 {
+    let guard = STATE.lock();
+    guard.as_ref().map(|state| state.next_present_tick).unwrap_or(0)
 }
 
 /// Copy `state`'s damage to the display at its scale: each monitor of a
