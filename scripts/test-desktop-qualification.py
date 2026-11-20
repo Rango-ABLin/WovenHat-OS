@@ -534,6 +534,14 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             # allow the guest a full settling interval before injecting the
             # PIN, especially under host CPU contention.
             time.sleep(8.0)
+
+            # Capture the sign-in card before any input is injected. This is
+            # the baseline for design-system visual comparisons; it adds only
+            # evidence and a normal frame-capture timing sample.
+            sign_in = output / "sign-in.ppm"
+            capture_frame(qmp, sign_in, time.monotonic() + args.frame_timeout, timings, "sign_in")
+            screenshots.append(sign_in.name)
+
             input_started = time.monotonic()
             for attempt in range(3):
                 for key in ("1", "2", "3", "4", "ret"):
@@ -544,7 +552,14 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
                 time.sleep(0.5)
             wait_marker(serial, "woven-shell: signed in: ada", time.monotonic() + args.input_timeout,
                         process, "sign_in_input_ms", timings, input_started)
-            time.sleep(2.0)
+            # The sign-in marker is published before the first unlocked frame
+            # reaches the scanout. Waiting for the shell's explicit first-frame
+            # marker avoids capturing a stale lock-screen baseline and sending
+            # F1/PIN keys that the still-locked shell cannot act on.
+            frame_ready_started = time.monotonic()
+            wait_marker(serial, "woven-shell: desktop frame ready",
+                        frame_ready_started + args.input_timeout, process,
+                        "desktop_frame_ready_ms", timings, frame_ready_started)
 
             baseline = output / "desktop-signed-in.ppm"
             capture_frame(qmp, baseline, time.monotonic() + args.frame_timeout, timings, "desktop")
