@@ -18,7 +18,10 @@ Current acceptance applies only to explicitly executed checks.
 6. Extend the accepted disposable-image installation, signed update, rollback
    and recovery gates to physical media, firmware integration and power-loss
    qualification; the bounded regular-file/QEMU scope passes on current source.
-7. Complete release provenance, independent review and hardware support records.
+7. Obtain the external inputs documented in
+   `EXTERNAL-REVIEW-AND-HARDWARE.md`: signed independent review, production
+   signing custody and named native-lab results. Local clean-room provenance
+   and conservative blocked-category hardware records now pass validation.
 
 ## External release prerequisites
 

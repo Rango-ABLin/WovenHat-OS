@@ -1,3 +1,13 @@
+## Codex - local provenance passed; external release inputs blocked (2026-11-20)
+
+The isolated locked/offline git-archive build passes 256 libwoven tests with one
+pre-declared ignored fixture. Eight policy contracts pass. The schema-valid
+hardware record classifies as incomplete Tier 2 with zero native-passed and all
+17 categories blocked. Production provenance verification correctly refuses
+absent custody variables. No production signature, independent attestation or
+native result was fabricated; external review, signing custody and hardware
+certification remain blocked. No physical device was accessed.
+
 ## Codex - disposable install/update/recovery accepted (2026-11-20)
 
 Twenty-six installer contracts and the deterministic Stage 28 disposable

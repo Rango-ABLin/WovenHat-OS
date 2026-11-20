@@ -1,5 +1,22 @@
 # Stage status
 
+## Release provenance and hardware record - 2026-11-20 - LOCAL PASS / EXTERNAL BLOCKED
+
+The locked offline clean-room build from an isolated `git archive` passes 256
+libwoven tests with one pre-declared ignored fixture. Eight release-package and
+hardware-report policy contracts pass. The conservative hardware record is
+schema-valid and classifies as incomplete Tier 2 with zero native-passed and
+all 17 required categories explicitly blocked. Production provenance
+verification correctly refuses to run without separately managed production
+seed and trusted-public-key inputs.
+
+Evidence is retained at `audit-artifacts/clean-room-build-20261120.json` and
+`audit-artifacts/hardware-support-classification-20261120.json`; governing
+records are in `docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md` and
+`hardware-support-record.json`. Independent review, production signing custody
+and native hardware certification remain blocked. No physical device was
+accessed and no production signature was created.
+
 ## Disposable install/update/rollback/recovery - 2026-11-20 - ACCEPTED (BOUNDED)
 
 Twenty-six focused installer contracts pass, followed by the complete Stage 28

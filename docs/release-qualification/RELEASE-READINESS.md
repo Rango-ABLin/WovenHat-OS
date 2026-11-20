@@ -10,6 +10,12 @@ WovenRecovery gates pass on current source, including 1/2/4-CPU execution.
 They access regular-file images only. Physical installation, firmware state,
 power-loss durability and production signing custody remain NO-GO items.
 
+Local clean-room provenance and hardware-record policy validation pass. The
+native support record intentionally contains zero passed categories, and
+production provenance verification refuses absent custody inputs. Independent
+review, production signatures and complete native lab evidence therefore keep
+the release decision at NO-GO.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.
