@@ -174,7 +174,7 @@ const DESKTOP_ICON_STEP: i32 = 76;
 const DESKTOP_ICON_SIZE: i32 = 32;
 
 mod icons;
-use icons::{app_icon, draw_app_icon};
+use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 
 /// Notifications remembered for the Notification Center.
 const MAX_NOTES: usize = 8;
@@ -640,6 +640,9 @@ struct Desktop {
     apps: [Option<App>; MAX_APPS],
     app_count: usize,
     launcher_open: bool,
+    /// The first overview frame publishes the panel and search field; the
+    /// app grid follows on the next frame so a cold paint cannot stall input.
+    overview_detail: bool,
     query: [u8; MAX_QUERY],
     query_length: usize,
     selected: usize,
@@ -699,6 +702,7 @@ impl Desktop {
         apps: [None; MAX_APPS],
         app_count: 0,
         launcher_open: false,
+        overview_detail: false,
         query: [0; MAX_QUERY],
         query_length: 0,
         selected: 0,
@@ -998,6 +1002,7 @@ impl Desktop {
             self.qs_open = false;
         }
         self.launcher_open = !self.launcher_open;
+        self.overview_detail = !self.launcher_open;
         self.query_length = 0;
         self.selected = 0;
         // A close must restore every pixel under the projected card. The
@@ -1428,29 +1433,41 @@ impl Desktop {
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
         fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 248);
+        // The shell paints in small tiles and calls this for every tile. Skip
+        // items whose own footprint misses the tile: the canvas would clip
+        // their pixels anyway, but redrawing every icon and label in all ~76
+        // tiles made the first overview frame take several seconds on TCG.
+        let visible = Area::new(
+            canvas.x(),
+            canvas.y(),
+            canvas.width() as i32,
+            canvas.height() as i32,
+        );
 
         // Search field.
         let catalog = shell_catalog(self.language);
         let search = self.overview_search_area();
-        fill_rounded(canvas, search, CHROME_RADIUS, theme_taskbar());
-        let query = &self.query[..self.query_length];
-        if query.is_empty() {
-            canvas.draw_text_system(
-                search.x + 6,
-                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
-                catalog.lookup("type_to_search", "Type to search"),
-                theme_muted(),
-            );
-        } else {
-            let mut buffer = [0u8; 32];
-            let length = label(query, MAX_QUERY, &mut buffer);
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            canvas.draw_text_system(
-                search.x + 6,
-                search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
-                text,
-                theme_text(),
-            );
+        if !visible.intersect(search).is_empty() {
+            fill_rounded(canvas, search, CHROME_RADIUS, theme_taskbar());
+            let query = &self.query[..self.query_length];
+            if query.is_empty() {
+                canvas.draw_text_system(
+                    search.x + 6,
+                    search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                    catalog.lookup("type_to_search", "Type to search"),
+                    theme_muted(),
+                );
+            } else {
+                let mut buffer = [0u8; 32];
+                let length = label(query, MAX_QUERY, &mut buffer);
+                let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+                canvas.draw_text_system(
+                    search.x + 6,
+                    search.y + (OVERVIEW_SEARCH_HEIGHT - font::WIDTH as i32) / 2 - 2,
+                    text,
+                    theme_text(),
+                );
+            }
         }
 
         // The Dash: favorites and running apps, icon-only.
@@ -1458,9 +1475,21 @@ impl Desktop {
         for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
             let Some(app) = self.apps[app_index] else { continue };
             let area = self.overview_dash_area(index);
-            draw_app_icon(canvas, area.x, area.y, app_icon(app.name()), OVERVIEW_DASH_ICON, false);
+            if visible.intersect(area).is_empty() {
+                continue;
+            }
+            draw_app_icon_light(
+                canvas,
+                area.x,
+                area.y,
+                app_icon(app.name()),
+                OVERVIEW_DASH_ICON,
+            );
         }
 
+        // The first frame only publishes the panel and search field. The
+        // window cards and app grid are filled on the following frame.
+        if self.overview_detail {
         // This workspace's window cards: a title-card placeholder per
         // window, not a live thumbnail -- the compositor ABI has no scaled
         // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
@@ -1484,6 +1513,9 @@ impl Desktop {
             for (index, window) in entries.iter().enumerate() {
                 let Some(window) = window else { continue };
                 let card = self.overview_thumb_area(index);
+                if visible.intersect(card).is_empty() {
+                    continue;
+                }
                 fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
                 outline(canvas, card, theme_accent());
                 let mut buffer = [0u8; 32];
@@ -1502,6 +1534,9 @@ impl Desktop {
         for (index, &app_index) in found[..count].iter().enumerate() {
             let Some(app) = self.apps[app_index] else { continue };
             let cell = self.overview_cell_area(index);
+            if visible.intersect(cell).is_empty() {
+                continue;
+            }
             if index == self.selected {
                 fill_rounded(
                     canvas,
@@ -1510,13 +1545,12 @@ impl Desktop {
                     lighten(theme_taskbar(), 18),
                 );
             }
-            draw_app_icon(
+            draw_app_icon_light(
                 canvas,
                 cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
                 cell.y + 2,
                 app_icon(app.name()),
                 OVERVIEW_APP_ICON_SIZE,
-                index == self.selected,
             );
             // Catalog names are "Woven<App>"; the grid already shows the
             // WovenHat-branded icon beside each one, so the repeated
@@ -1537,6 +1571,7 @@ impl Desktop {
                 text,
                 theme_text(),
             );
+        }
         }
     }
 
@@ -4009,6 +4044,8 @@ fn main(args: Args) -> ! {
     // Published once the first unlocked frame is actually on the scanout, so
     // harnesses can stop guessing when the sign-in transition has settled.
     let mut desktop_frame_ready = false;
+    let mut overview_frame_ready = false;
+    let mut overview_refresh_pending = false;
     loop {
         // Switch frame rate as animations start and finish.
         if desktop.animating() != fast {
@@ -4016,6 +4053,10 @@ fn main(args: Args) -> ! {
             clock = libwoven::FrameClock::new(if fast { ANIMATION_PERIOD } else { FRAME_PERIOD });
         }
         let mut dirty = Dirty::new();
+        if overview_refresh_pending {
+            overview_refresh_pending = false;
+            dirty.add(desktop.overview_area());
+        }
         match clock.wait(sources) {
             Ok(FrameEvent::Frame { skipped }) => {
                 dirty.add(desktop.animate(skipped + 1));
@@ -4081,6 +4122,16 @@ fn main(args: Args) -> ! {
         if !desktop_frame_ready && !desktop.locked {
             desktop_frame_ready = true;
             log(&[b"woven-shell: desktop frame ready"]);
+        }
+        // Publish the first presented overview frame so harnesses can wait for
+        // the real state instead of racing a slow cold-cache paint.
+        if desktop.launcher_open && !overview_frame_ready {
+            overview_frame_ready = true;
+            log(&[b"woven-shell: overview frame ready"]);
+            desktop.overview_detail = true;
+            overview_refresh_pending = true;
+        } else if !desktop.launcher_open {
+            overview_frame_ready = false;
         }
         if timed {
             let present_ticks = libwoven::ticks().saturating_sub(present_start);

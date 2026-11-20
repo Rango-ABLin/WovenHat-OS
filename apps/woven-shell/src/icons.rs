@@ -20,6 +20,15 @@ pub fn app_icon(name: &[u8]) -> AppIcon {
     libwoven::icons::IconId::from_app_name(name)
 }
 
+/// Minimal tile for dense grids: the app's own colour. The overview repeats
+/// every icon across many small tiles, so the full detailed painter is reserved
+/// for the desktop and taskbar where each icon is drawn far fewer times. The
+/// grid's own highlight behind this tile shows selection.
+pub fn draw_app_icon_light(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i32) {
+    let IconAppearance { fill, .. } = IconAppearance::for_id(icon);
+    fill_rounded(canvas, Area::new(x, y, size, size), (size / 4).max(1) as usize, fill);
+}
+
 /// Draw a compact Fluent-inspired app tile. The icon is composed from
 /// antialiased rounded primitives; the former low-resolution bitmap overlay
 /// made every launcher icon read as jagged pixel art at desktop scale.
