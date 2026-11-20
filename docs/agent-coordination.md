@@ -1,3 +1,47 @@
+## OpenCode - Desktop gate repair and large-asset font mapping (2026-11-20)
+
+The desktop qualification was timing out because the first unlocked frame
+arrived roughly seven seconds late under TCG. Serial metrics showed 6-8 guest
+seconds of repaint with almost no process CPU time: every `draw_text_system`
+call was retrying `open("/share/fonts/NotoSans-Regular.ttf")` plus a rejected
+64 KiB-capped `mmap`, so the 621,572-byte font never loaded and the bitmap
+fallback was used. The kernel now maps oversized read-only asset requests into
+one bounded 1 MiB `AddressSpace`-owned window (committed concurrently as
+`d7f42637`); the font parses at boot and repaint fell to ~0.2-0.25 s.
+Also reverted the unbuildable `fa2b220c` GUI patch (it did not compile and
+dropped icon offsets) and removed the temporary desktop paint trace.
+Evidence: `audit-artifacts/font-map-1cpu` (PASS, 1 CPU); 2/4-CPU runs pending.
+
+Do not concurrently edit `libwoven/src/design_system.rs`: another owner is
+actively writing it. `libwoven/src/lib.rs` also contains that owner's
+in-progress `pub mod design_system;` line alongside this session's font
+documentation correction; stage it only with their agreement.
+
+## OpenCode - WovenHat Design System foundation (2026-11-20)
+
+User authorized a full graphics/font/icon design role and chose: refine the
+existing weave identity, build the design-system foundation first, keep the
+first pass isolated and validated. Added the new `libwoven::design_system`
+module (`libwoven/src/design_system.rs`) plus one `pub mod design_system;`
+declaration in `lib.rs`, and the spec at `docs/graphics/design-system.md`.
+
+Deliberately did NOT touch `libwoven/src/ui.rs`, `libwoven/src/lib.rs` graphics
+text paths, `apps/woven-shell/src/{main,tokens}.rs` (the prior OpenCode
+typography scope), the kernel, or the three files with uncommitted changes
+(`kernel/src/{task,userspace,linker}.rs`). No kernel ABI, compositor, input
+routing, VFS or accepted gate changed; no QEMU claim is made.
+
+The module is additive: it reads shared roles from `ui::Theme::*` and em sizes
+from `ui::DesignTokens` so it cannot drift, and adds background/warning roles,
+a type scale with real leading, an icon grammar, and exact integer WCAG
+contrast checks. It records a measured finding for later gated work:
+`Theme::DARK.surface` gives muted text only 4.12:1 and danger 3.01:1 (both
+below AA 4.5:1); the design-system dark surface fixes both.
+
+Validation: 7/7 new host tests, 250 total libwoven lib tests (1 pre-existing
+ignored), warning-denying Clippy for host all-targets and the
+`x86_64-unknown-none` freestanding target all pass.
+
 ## OpenCode - GUI modernization: proportional typography and design tokens (2026-11-19)
 
 Scope claimed: `libwoven` typography primitives (`graphics::TrueTypeFace`

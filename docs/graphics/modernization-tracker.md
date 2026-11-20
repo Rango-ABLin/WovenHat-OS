@@ -1304,3 +1304,28 @@ The Phase 7 report now separates zero-tick idle polls from active repaint
 samples and reports active min/median/p95/max values. Guest CPU and memory
 remain explicitly unavailable through the current ABI; no host measurement is
 misreported as a guest result.
+
+## OpenCode - Real TTF delivery and desktop gate repair (2026-11-20)
+
+The proportional typography landed earlier, but every real desktop still fell
+back to the 5x7 bitmap font: `load_system_font_mapping()` requests 621,572
+bytes while the only per-slot file mapping accepted at most 64 KiB. Every text
+draw therefore retried a failing font open and rejected mmap, making the first
+unlocked frame arrive about seven seconds late under TCG. The harness captured
+a stale sign-in baseline, so its F1 and PIN-to-launch keys were consumed before
+the desktop appeared and qualification failed at the overview step.
+
+The kernel now provides one bounded read-only large-asset window (1 MiB cap)
+owned by `AddressSpace`; oversized `mmap_file_lazy` requests use it, writable
+or shared oversized requests fail closed, fork shares its read-only frames, and
+teardown/munmap reclaim it. `mapped_bytes` now includes the window. The staged
+NotoSans face parses on the real desktop (`system font parsed
+bytes=621572 units_per_em=1000`) and interactive repaint samples fell from
+6-8 guest seconds to roughly 0.15-0.25 s with no timeout or assertion change.
+
+Also reverted unbuildable commit `fa2b220c` (23 compile errors, plus icon
+offsets dropped from the glyph path) and removed the temporary paint trace.
+
+Evidence: `audit-artifacts/font-map-1cpu` passed the full real QEMU desktop,
+keyboard, pointer and repaint journey on 1 CPU with default limits. 2/4-CPU
+evidence is being collected; no multi-CPU claim until those runs finish.
