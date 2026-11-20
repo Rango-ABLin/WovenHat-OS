@@ -216,9 +216,11 @@ pub fn mount_ata_root() -> MountStatus {
         // A sized handle for the generic mount helpers.
         let mut disk = disk;
         let disk = &mut disk;
+        #[cfg(feature = "stage12-5-test")]
         if crate::wfs::Volume::probe(disk).is_ok() {
             return mount_wovenfs_aliases(disk);
         }
+        #[cfg(feature = "stage12-5-test")]
         if let Some(partition) = wovenfs_partition(disk) {
             let mut view = match partition::PartitionDevice::new(disk, partition) {
                 Ok(view) => view,

@@ -1217,9 +1217,16 @@ pub fn zero_user_range_in(
         let virtual_address = start
             .checked_add(cleared as u64)
             .ok_or(MapRangeError::InvalidRange)?;
-        let physical_address = mapper
-            .translate_addr(VirtAddr::new(virtual_address))
-            .ok_or(MapRangeError::NotMapped)?;
+        let physical_address = match mapper.translate_addr(VirtAddr::new(virtual_address)) {
+            Some(frame) => frame,
+            None => {
+                crate::serial::write_line(format_args!(
+                    "ZERO-NM addr={:#x} cleared={} size={}",
+                    virtual_address, cleared, size
+                ));
+                return Err(MapRangeError::NotMapped);
+            }
+        };
         let page_remaining =
             Size4KiB::SIZE as usize - virtual_address as usize % Size4KiB::SIZE as usize;
         let count = core::cmp::min(page_remaining, size - cleared);
