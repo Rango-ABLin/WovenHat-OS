@@ -14550,6 +14550,26 @@ pub fn ui_text_width(text: &str, size: u16) -> i32 {
     }
 }
 
+/// Rasterise the glyphs used by a bounded set of strings into the fixed
+/// process-lifetime cache. Callers with a known first-paint deadline (the
+/// desktop overview) use this at boot so a cold cache cannot be mistaken for
+/// an input or presentation stall. Unsupported contours are cached as blank
+/// masks just like an ordinary draw.
+pub fn warm_system_glyphs(texts: &[&[u8]], scale: u16) {
+    let Some(face) = crate::graphics::load_system_font_face() else {
+        return;
+    };
+    let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
+    for text in texts {
+        let Ok(text) = core::str::from_utf8(text) else {
+            continue;
+        };
+        for character in text.chars() {
+            let _ = crate::graphics::cached_glyph(face, character, scale, &mut alpha);
+        }
+    }
+}
+
 /// Baseline-to-baseline distance for [`Canvas::draw_ui_text`] at `size`.
 pub fn ui_line_height(size: u16) -> i32 {
     match crate::graphics::load_system_font_face() {
