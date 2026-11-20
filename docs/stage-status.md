@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 6 current-source SMP/hotplug gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+At baseline `b3db4c90`, warning-denying freestanding Clippy for
+`stage6-hotplug-test` passes. The dedicated lifecycle gate passes twice-cycled
+2→1→2 and 4→3→4 CPU transitions, including cancellation, task evacuation,
+rejection recovery, timeout recovery, offline/online masks, and the 4-CPU
+middle-CPU hole worker. Evidence is retained in
+`audit-artifacts/stage6-hotplug-{2,4}cpu-1795199*`.
+
+This refreshes the already accepted bounded Stage 6 software/QEMU scope on
+current source. Physical CPU hotplug, APIC IDs above 255, native multi-node
+NUMA, general multicore soak, and broader low-memory/priority-inheritance
+qualification remain outside this closure.
+
 ## Stage 1-5 current-source software gate - 2026-11-20 - VERIFIED (BOUNDED)
 
 At baseline `caf19a9d`, warning-denying freestanding Clippy for

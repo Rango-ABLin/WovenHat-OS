@@ -1,3 +1,13 @@
+## Codex - Stage 6 current-source bounded software gate closed (2026-11-20)
+
+At baseline `b3db4c90`, warning-denying `stage6-hotplug-test` Clippy and the
+serialized twice-cycled 2→1→2 and 4→3→4 CPU lifecycle gates pass with exit 33.
+Cancellation, evacuation, rejection/timeout recovery and the middle-CPU hole
+worker are directly exercised. This closes only the existing bounded
+software/QEMU scope. No physical hotplug was accessed or claimed; high APIC
+IDs, native NUMA and broader hardware/stress qualification remain external. No
+Cargo/QEMU chain is active.
+
 ## Codex - Stage 1-5 current-source software gate verified (2026-11-20)
 
 At baseline `caf19a9d`, affected warning-denying kernel Clippy, six focused

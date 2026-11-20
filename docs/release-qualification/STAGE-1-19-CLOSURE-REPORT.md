@@ -13,6 +13,14 @@ source. Stage 1-5 remains blocked from closure by native storage/DMA, physical
 power-loss/torn-write evidence and independent review; no hardware claim is
 inferred from the software marker.
 
+## Stage 6 current-source bounded software closure
+
+The dedicated Stage 6 feature lint and twice-cycled 2/4-CPU hotplug matrix pass
+on current source. Cancellation, evacuation, rejected/timeout recovery,
+offline/online masks and middle-CPU lifecycle are directly required. This
+closes the bounded software/QEMU contract only; physical hotplug, high APIC
+IDs, native NUMA and broader stress remain production blockers.
+
 ## Implemented and historical evidence
 
 The authoritative `docs/stage1-19-closure-gate.md` records bounded foundation,
