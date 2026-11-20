@@ -605,7 +605,10 @@ pub mod graphics {
         }
     }
 
-    const MAX_CONTOURS: usize = 8;
+    // Four contours cover the bundled face's Latin glyphs. Keeping this small
+    // matters: `CompoundPath` lives on the short userspace stack, and eight
+    // 192-point paths overflowed it on the first real desktop repaint.
+    const MAX_CONTOURS: usize = 6;
 
     /// A bounded collection of closed contours. Even-odd filling treats
     /// nested contours as holes without allocating or changing `Path`'s
