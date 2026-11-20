@@ -30,8 +30,12 @@ and `cargo clippy ... --features stage13-14-test -- -D warnings`.
 M5 DMA gate still passes at 1/2/4 CPUs.
 
 Note: AHCI command lists, FIS receive rings and command tables are
-device-shared forever, so `hand_to_device` is not called for them. Only the
-transfer page could use it, and it keeps the old release/acquire fences.
+device-shared forever, so `hand_to_device` is not called for them. The transfer
+page uses it: `issue`/`issue_claimed` and `rw` claim before touching the buffer,
+write the FIS, submit, and release on completion or error. `OwnedDmaBuffer`
+lives on `AhciDisk`. The old release/acquire fences are kept.
+`prepare_command` now returns `Result` because the physical address is read
+while CPU-owned.
 
 ## OpenCode - M5 hardware qualification: shared DMA slice (2026-11-20)
 
