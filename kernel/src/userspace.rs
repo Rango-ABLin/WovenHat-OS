@@ -5015,10 +5015,12 @@ impl AddressSpace {
             .flatten()
             .map(|mapping| mapping.size)
             .fold(0usize, usize::saturating_add);
+        let large_bytes = self.large_mapping.map_or(0, |mapping| mapping.size);
         image_bytes
             .saturating_add(stack_bytes)
             .saturating_add(tls_bytes)
             .saturating_add(anonymous_bytes)
+            .saturating_add(large_bytes)
     }
 
     pub fn dynamic_tls_address(self, module: u64, offset: u64, tls_base: u64) -> Option<u64> {

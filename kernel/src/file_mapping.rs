@@ -1,4 +1,6 @@
-//! Bounds for the private file mapping ABIs.
+//! Bounds for the private per-slot file mapping ABIs. Read-only staged assets
+//! larger than one slot use the dedicated window in
+//! [`crate::userspace::map_file_large_readonly`] instead.
 pub const MAX_SIZE: usize = 64 * 1024;
 pub fn mapped_size(file_size: usize, offset: usize, length: usize) -> Option<usize> {
     if length == 0
