@@ -7324,8 +7324,6 @@ pub fn file_mmap_self_test() -> bool {
     passed &= crate::vfs::write_file(PATH, b"changed").is_ok();
     passed &= crate::vfs::close_open_file(file).is_ok();
     passed &= paging::read_user_bytes_in(root, mapping.address, &mut byte).is_ok() && byte == [5];
-    passed &= paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]).is_ok();
-    passed &= crate::vfs::remove(PATH).is_ok();
 
     // The read-only large-asset window: the real system-font path requests
     // more than one mapping slot and must get one contiguous, non-writable
@@ -7368,6 +7366,9 @@ pub fn file_mmap_self_test() -> bool {
     };
     passed &= large_ok;
     let _ = crate::vfs::remove(LARGE_PATH);
+    // The large window maps into `root`, so `root` is destroyed only after it.
+    passed &= paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]).is_ok();
+    passed &= crate::vfs::remove(PATH).is_ok();
     passed
 }
 
