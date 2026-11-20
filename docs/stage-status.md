@@ -1,5 +1,17 @@
 # Stage status
 
+## Stage 11 pure-BSS compiler TLS - 2026-11-20 - ACCEPTED (BOUNDED)
+
+Commit `b9829f62` adds a compiler/LLD local-exec TLS executable with PT_TLS
+`p_filesz=0`, `p_memsz=8`. The loader must materialize zero-filled TLS, execute
+the image on every online CPU, preserve its protected template/TCB and reject
+malformed geometry. The dedicated Stage 11.2 TLS gate passes on 1/2/4 CPUs
+with exit 33 and exact process/IPC/frame teardown. Build, warning-denying host
+and affected-feature Clippy, Rust tests and 212 Python tests pass. The complete
+serialized Stage 10.7 Windows chain passes all 60 memory boots, network gates
+and isolated Stages 10.4-10.7. Broader TLS models, entropy/interoperability
+stress, physical qualification and collective Stage 1-19 closure remain open.
+
 ## Real system font delivery and desktop gate repair - 2026-11-20 - PASS (1/2/4 CPUs)
 
 The staged 621,572-byte NotoSans TTF now loads through one bounded read-only

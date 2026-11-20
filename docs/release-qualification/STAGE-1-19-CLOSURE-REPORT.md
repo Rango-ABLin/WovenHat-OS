@@ -52,3 +52,14 @@ including 36 QEMU boots on 1/2/4 CPUs, and the complete fresh Windows chain in
 isolation, all sixteen mmap slots, ASLR displacement and exact teardown are
 directly exercised. Full Stage 1-19 closure remains open for the inventory's
 remaining storage, application, integration, hardware and trust gates.
+
+## Stage 11 pure-BSS TLS increment accepted
+
+At commit `b9829f62`, a real compiler/LLD local-exec TLS image with zero
+file-backed TLS bytes and eight zero-initialized runtime bytes executes through
+the production loader on every online CPU. The dedicated gate passes on 1/2/4
+CPUs with exact teardown. Build, warning-denying host and feature Clippy, Rust
+tests, 212 Python tests and the complete serialized Stage 10.7 Windows chain
+pass. This removes the ledger's pure-BSS TLS software gap only. Broader TLS
+models, toolchain/entropy stress, storage recovery, hardware, trust and
+independent review continue to block collective Stage 1-19 closure.

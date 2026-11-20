@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Pure-BSS compiler TLS execution (2026-11-20)
+
+The Stage 11 compiler fixture inventory includes a real Rust/LLD local-exec
+TLS executable with a PT_TLS segment whose file size is zero and memory size
+is eight bytes. The production loader creates the immutable zero-filled
+template, initializes per-thread storage and the Variant-II FS:0 self pointer,
+and preserves the existing fork, cancellation, owner-exit, rollback and exact
+frame-reclamation contracts. The fixture verifies zero initialization before
+writing and returning 42. It adds no ABI or capacity and runs through the same
+loader and scheduler paths as the initialized compiler TLS fixtures.
+
 ## Production mmap floor for large signed executables (2026-11-16)
 
 Production geometry now places the anonymous mmap floor after both the main

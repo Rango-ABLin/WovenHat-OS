@@ -1,15 +1,22 @@
-## Codex - Stage 11 pure-BSS compiler TLS gate active (2026-11-20)
+## Codex - Stage 11 pure-BSS compiler TLS accepted (2026-11-20)
 
-Current bounded scope: `tools/loader-fixtures/`,
+Bounded scope: `tools/loader-fixtures/`,
 `scripts/build-loader-fixtures.py`, `scripts/test-stage10-runtime.py`,
 `tests/test_loader_fixture_builder.py`, `kernel/src/userspace/tls_acceptance.rs`,
-and directly related architecture/status/closure records. The goal is to
-execute an unmodified compiler/LLD image whose PT_TLS has zero file bytes and
-nonzero memory bytes, on every online CPU, through the existing protected
-template/TCB, rollback and exact-teardown gate. No loader ABI, syscall,
-capability or capacity expansion is planned. Do not concurrently edit these
-paths. Broader TLS models, entropy stress and physical qualification remain
-out of scope; no Stage 11 or Stage 1-19 closure claim is implied.
+and directly related architecture/status/closure records. Commit `b9829f62`
+adds an unmodified compiler/LLD image whose PT_TLS has zero file bytes and
+eight memory bytes. The existing protected template/TCB, rollback and exact-
+teardown gate executes it on every online CPU and passes on 1/2/4 CPUs in
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-*`.
+
+Build, warning-denying host and affected-feature Clippy, Rust tests and all 212
+Python tests pass. The serialized full Stage 10.7 Windows chain passes all 60
+memory boots, networking and isolated 10.4-10.7 gates; its transcript is
+`audit-artifacts/stage11-pure-bss-stage10-7-serial.log`. Two earlier attempts
+failed before testing because Windows exhausted disk/paging resources; their
+logs and compiler ICE are preserved. No loader ABI, syscall, capability or
+capacity changed. Broader TLS models, entropy/toolchain stress and physical
+qualification remain open; this is not full Stage 11 or Stage 1-19 closure.
 
 ## Codex - paused Stage 11 cherry-pick reconciled (2026-11-20)
 
