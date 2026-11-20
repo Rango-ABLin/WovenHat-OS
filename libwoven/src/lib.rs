@@ -14435,7 +14435,16 @@ impl<'a> Canvas<'a> {
                 );
             }
             let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
-            match crate::graphics::cached_glyph(face, character, size, &mut alpha) {
+            let mut cells = crate::graphics::cached_glyph(face, character, size, &mut alpha);
+            // A contour that overflows the fixed path budget is cached as a
+            // blank mask. Treat an inkless real glyph as a miss so the bounded
+            // bitmap fallback below still draws it, exactly as
+            // `draw_text_ttf` does. Without this, complex glyphs silently
+            // vanish from every `draw_ui_text` call site.
+            if cells.is_some() && !alpha.iter().any(|opacity| *opacity != 0) {
+                cells = None;
+            }
+            match cells {
                 Some(cells) => {
                     self.blend_alpha_mask(
                         pen_x.saturating_add(cells.bearing_x),
@@ -14448,6 +14457,15 @@ impl<'a> Canvas<'a> {
                     pen_x = pen_x.saturating_add(cells.advance);
                 }
                 None => {
+                    // Substitute one bounded bitmap glyph; keep the real
+                    // advance so proportional layout does not shift.
+                    let mut encoded = [0_u8; 4];
+                    self.draw_text(
+                        pen_x,
+                        pen_y,
+                        character.encode_utf8(&mut encoded),
+                        color,
+                    );
                     if let Some(advance) = face.advance_px(character, size) {
                         pen_x = pen_x.saturating_add(advance);
                     }
