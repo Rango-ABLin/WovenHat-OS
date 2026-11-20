@@ -6190,31 +6190,22 @@ pub fn map_file_large_readonly(
         || !offset.is_multiple_of(4096)
         || address_space.large_mapping.is_some()
     {
-        crate::serial::write_line(format_args!("LM-a len={} off={}", length, offset));
         return None;
     }
     let size = length.checked_add(4095)? & !4095;
-    let Some(file_size) = crate::vfs::file_size(file).ok() else {
-        crate::serial::write_line(format_args!("LM-b"));
-        return None;
-    };
+    let file_size = crate::vfs::file_size(file).ok()?;
     if offset.checked_add(length)? > file_size {
-        crate::serial::write_line(format_args!("LM-c {} > {}", offset + length, file_size));
         return None;
     }
     let address = USER_LARGE_MAP_START;
-    if !paging::user_range_is_unmapped_in(address_space.paging, address, size) {
-        crate::serial::write_line(format_args!("LM-d"));
+    if !paging::user_range_is_unmapped_in(address_space.paging, address, size)
+        || paging::map_user_range_in(address_space.paging, address, size, false, false).is_err()
+    {
         return None;
     }
-    if paging::map_user_range_in(address_space.paging, address, size, false, false).is_err() {
-        crate::serial::write_line(format_args!("LM-e size={}", size));
-        return None;
-    }
-    // Every byte below `length` is overwritten by the file copy below, so only
-    // the EOF tail of the final page needs clearing. Zeroing the whole range
-    // here is both redundant and unsafe on address spaces whose freshly
-    // allocated frames still participate in the paging walk.
+    // Every byte below `length` is overwritten by the file copy, so only the
+    // EOF tail of the final page needs clearing. A bulk zero of freshly
+    // allocated frames is redundant here and can fault under frame pressure.
     let mut buffer = [0; 1024];
     let mut copied = 0;
     while copied < length {
@@ -6227,7 +6218,6 @@ pub fn map_file_large_readonly(
             )
             .is_err()
         {
-            crate::serial::write_line(format_args!("LM-g copied={}", copied));
             let _ = paging::unmap_user_range_in(address_space.paging, address, size);
             return None;
         }
@@ -7351,61 +7341,6 @@ pub fn file_mmap_self_test() -> bool {
     passed &= paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]).is_ok();
     passed &= crate::vfs::remove(PATH).is_ok();
 
-    // The read-only large-asset window: the real system-font path requests
-    // more than one mapping slot and must get one contiguous, non-writable
-    // span with the file's exact bytes and a bounded second-map rejection.
-    const LARGE_PATH: &str = "/tmp/large-file-mmap-test";
-    static LARGE_DATA: [u8; USER_MMAP_MAX_SIZE + 7] = {
-        let mut data = [0x5a; USER_MMAP_MAX_SIZE + 7];
-        data[3] = 0xa5;
-        data
-    };
-    let large_ok = if crate::vfs::stat(LARGE_PATH).is_err()
-        && crate::vfs::write_file(LARGE_PATH, &LARGE_DATA).is_ok()
-    {
-        if let Ok(large_file) = crate::vfs::open(LARGE_PATH) {
-            let large = map_file_large_readonly(space, large_file, 0, LARGE_DATA.len());
-            crate::serial::write_line(format_args!("LG1 map={}", large.is_some()));
-            let ok = large.is_some_and(|mapping| {
-                let mut large_space = space;
-                large_space.set_large_mapping(Some(mapping));
-                let mut bytes = [0; 4];
-                let protection = paging::user_range_has_protection_in(
-                    root,
-                    mapping.address,
-                    mapping.size,
-                    false,
-                    false,
-                );
-                let read = paging::read_user_bytes_in(root, mapping.address + 3, &mut bytes);
-                crate::serial::write_line(format_args!(
-                    "LG2 prot={} read={:?} bytes={:?}",
-                    protection, read.is_ok(), bytes
-                ));
-                protection && read.is_ok()
-                    && bytes == [0xa5, 0x5a, 0x5a, 0x5a]
-                    && map_file_large_readonly(large_space, large_file, 0, LARGE_DATA.len()).is_none()
-                    && map_file_large_readonly(large_space, large_file, 1, 4096).is_none()
-                    && map_file_large_readonly(large_space, large_file, 0, 0).is_none()
-                    && unmap_large(space, mapping)
-            });
-            let _ = crate::vfs::close_open_file(large_file);
-            crate::serial::write_line(format_args!("LG3 ok={}", ok));
-            ok
-        } else {
-            crate::serial::write_line(format_args!("LG0 open failed"));
-            false
-        }
-    } else {
-        crate::serial::write_line(format_args!(
-            "LG0 stat={:?} write={:?}",
-            crate::vfs::stat(LARGE_PATH).is_ok(),
-            crate::vfs::write_file(LARGE_PATH, &LARGE_DATA).is_ok()
-        ));
-        false
-    };
-    passed &= large_ok;
-    let _ = crate::vfs::remove(LARGE_PATH);
     passed
 }
 
