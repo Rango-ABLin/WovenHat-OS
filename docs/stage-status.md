@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 9 current-source WovenGuard gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+Added a dedicated `stage9-test` acceptance route rather than relying on
+incidental markers from the shared boot path. The fail-closed harness requires
+all twelve WovenGuard layers: domain ceilings, generation-tagged lineage,
+recursive revocation, task and IPC enforcement, SMP lineage closure, the audit
+ledger, sandbox capability/service/filesystem/lifecycle policy, and final
+resource/device gates. Fourteen harness contracts and warning-denying
+freestanding Clippy pass. Dedicated 1/2/4-CPU boots pass with exit 33 under
+`audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
+
+This closes the existing bounded Stage 9 software/QEMU security policy on
+current source. Native device policy, broader adversarial stress, external
+security review, and collective Stage 1-19 release closure remain separate.
+
 ## Release provenance and hardware record - 2026-11-20 - LOCAL PASS / EXTERNAL BLOCKED
 
 The locked offline clean-room build from an isolated `git archive` passes 256

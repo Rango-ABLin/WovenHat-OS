@@ -2720,6 +2720,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         halt();
     }
+    #[cfg(feature = "stage9-test")]
+    qemu_test_exit_success();
     // The root `network-test` mode always enables `qemu-test`.  Cargo artifact
     // dependencies can keep a nested kernel-only feature isolated, so key the
     // runtime probe from the qemu-test feature that is known to reach this

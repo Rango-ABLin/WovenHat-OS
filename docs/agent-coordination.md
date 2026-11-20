@@ -9832,3 +9832,19 @@ runs and inherited stages through 10.7 at 1/2/4 CPUs. Together with the
 54-check combined matrix and 36 focused runtime boots, this accepts the bounded
 loader/TLS/fork-COW repair. Documentation is being finalized for a separate
 integration-branch commit. No Cargo or QEMU chain is active.
+
+## Codex - Stage 9-19, Stage 11 breadth, and WovenFS recovery closure active (2026-11-20)
+
+User requested complete closure of the first three remaining software tracks.
+Work is proceeding in roadmap dependency order. The first identified gap is
+Stage 9: production WovenGuard probes run in the shared boot path, but no
+dedicated feature/harness can independently require the complete marker chain.
+Codex owns the focused Stage 9 gate, its harness contracts, and directly
+related status/architecture/remaining-work records. No Cargo/QEMU acceptance
+chain is active at handoff time; future chains will remain serialized. Do not
+edit these focused files concurrently without coordination.
+Stage 9 is now closed for bounded software scope: fourteen harness tests,
+warning-denying `stage9-test` Clippy, and dedicated 1/2/4-CPU boots pass with
+exit 33. Evidence is under `audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
+No Cargo/QEMU chain is active. Codex is finalizing the required separate stage
+commit before proceeding in roadmap order.

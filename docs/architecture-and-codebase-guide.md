@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 9 independent WovenGuard acceptance boundary
+
+The `stage9-test` feature exits immediately after the production boot path has
+completed every Stage 9 WovenGuard probe. `scripts/test-stage10-runtime.py`
+requires the complete marker chain and the requested SMP count, and does not
+incorrectly require later Stage 10 markers. This gate adds no policy,
+capability, object, syscall, or ABI; it makes the existing security boundary
+independently testable and fail-closed.
+
 ## Stage 1-5 bounded storage durability gate (2026-11-20)
 
 The `stage1-5-test` artifact runs the production storage journal structural
