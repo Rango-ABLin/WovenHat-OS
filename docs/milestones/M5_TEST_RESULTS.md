@@ -1,11 +1,14 @@
 # M5 Test Results
 
-Status: **M5_INCOMPLETE.** The first M5 slice (shared DMA ownership) passes its
-own QEMU gate at 1, 2 and 4 CPUs. The M5 milestone as a whole is not
-implemented. Only the DMA slice and one regression fix were done.
+Status: **M5_INCOMPLETE.** Implemented so far: shared DMA ownership (1/2/4 CPU
+QEMU PASS), file-mmap ordering fix, NVMe on the shared DMA page, AHCI on the
+shared DMA page with transfer ownership, and a PCI/MSI-X interrupt hardening
+pass. The M5 milestone as a whole is not accepted; remaining slices and
+deliverables are open (see `docs/milestones/M5_IMPLEMENTATION_REPORT.md` and
+`docs/milestones/M5_RELEASE_READINESS.md`).
 
-Branch: `m5/hardware-qualification`, based on `master` `10740a4f`. Changes are
-uncommitted in the worktree `C:\Users\banda\Documents\GitHub\WovenHat-OS-m5`.
+Branch: `m5/hardware-qualification`, based on `master` `10740a4f`, now at
+commit `5ca5b9b3` on the branch worktree `C:\Users\banda\Documents\GitHub\WovenHat-OS-m5`.
 
 ## Results
 
@@ -24,13 +27,24 @@ uncommitted in the worktree `C:\Users\banda\Documents\GitHub\WovenHat-OS-m5`.
 | M5 DMA QEMU gate, 1 / 2 / 4 CPUs | `python scripts/test-m5-dma-qemu.py --cpus {1,2,4} --memory 4G` | PASS |
 
 The file-mmap regression on `master` is fixed in `kernel/src/userspace.rs`
-(commit `6d6a0b2b`). The NVMe migration is commit `6b8d793f`, the AHCI
-migration is in progress (`git log -1 --format=%H -- kernel/src/ahci.rs`).
+(commit `6d6a0b2b`). The NVMe migration is commit `6b8d793f`, and the AHCI
+migration plus transfer ownership are commits `da5bed49`/`c849b409`.
 
 Not run in this slice: the 2 and 4 CPU runs of the Stage 13.12 gate,
-host `cargo test` for the full suite, `cargo clippy --all-targets`,
-`RUN-STAGE10.7.ps1`, and any device gate (AHCI, xHCI, network, Wi-Fi,
-Bluetooth). No physical hardware was used.
+`RUN-STAGE10.7.ps1`, and any physical-hardware gate. No physical hardware was
+used.
+
+## Results added by the PCI/MSI-X hardening pass (2026-11-20)
+
+| Check | Command | Result |
+|---|---|---|
+| Freestanding kernel checks, `stage13-12-test` / `stage13-13-test` | `cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test` (and `stage13-13-test`) | PASS |
+| Warning-denying Clippy, freestanding, `stage13-12-test` | `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-12-test -- -D warnings` | PASS |
+| Warning-denying Clippy, all targets | `cargo clippy --all-targets -- -D warnings` | PASS (unused NVMe DMA imports removed) |
+| Host test suite | `cargo test` | PASS |
+| Stage 13.13 USB input, 1 CPU | `python scripts/test-stage13-13-usb-input.py --cpus 1` | PASS, exit 33. Evidence: `audit-artifacts/stage13.13-1cpu-1795174725331633400/` |
+| Stage 13.12 driver bring-up, devices, 1 CPU | `python scripts/test-stage13-12-drivers.py --mode devices --cpus 1` | PASS, exit 33. Evidence: `audit-artifacts/stage13.12-devices-1cpu-1795175121814678400/` |
+| Stage 13.14 storage, NVMe, 1 CPU | `python scripts/test-stage13-14-storage.py --mode nvme --cpus 1` | PASS, exit 33. Evidence: `audit-artifacts/stage13.14-nvme-1cpu-1795175407564438300/` |
 
 ## Regression fixed: FILE MMAP self-test
 
