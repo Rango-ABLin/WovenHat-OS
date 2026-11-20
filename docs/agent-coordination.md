@@ -10,7 +10,8 @@ one bounded 1 MiB `AddressSpace`-owned window (committed concurrently as
 `d7f42637`); the font parses at boot and repaint fell to ~0.2-0.25 s.
 Also reverted the unbuildable `fa2b220c` GUI patch (it did not compile and
 dropped icon offsets) and removed the temporary desktop paint trace.
-Evidence: `audit-artifacts/font-map-1cpu` (PASS, 1 CPU); 2/4-CPU runs pending.
+Evidence: `audit-artifacts/font-map-{1,2,4}cpu` (PASS on 1, 2 and 4 CPUs with
+default timing limits).
 
 Do not concurrently edit `libwoven/src/design_system.rs`: another owner is
 actively writing it. `libwoven/src/lib.rs` also contains that owner's

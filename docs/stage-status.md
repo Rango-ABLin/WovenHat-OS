@@ -1,6 +1,6 @@
 # Stage status
 
-## Real system font delivery and desktop gate repair - 2026-11-20 - PASS (1 CPU, 2/4 PENDING)
+## Real system font delivery and desktop gate repair - 2026-11-20 - PASS (1/2/4 CPUs)
 
 The staged 621,572-byte NotoSans TTF now loads through one bounded read-only
 large-asset mapping in the kernel instead of failing every 64 KiB-capped mmap
@@ -8,8 +8,7 @@ attempt. `system font parsed bytes=621572 units_per_em=1000` appears on the
 real desktop; interactive repaint fell from 6-8 guest seconds to ~0.15-0.25 s.
 The unbuildable `fa2b220c` GUI patch was reverted and temporary paint tracing
 removed. The full real QEMU desktop/input/repaint qualification passes on 1 CPU
-(`audit-artifacts/font-map-1cpu`) with default timing limits; 2- and 4-CPU runs
-are pending before a matrix claim.
+(`audit-artifacts/font-map-{1,2,4}cpu`) with default timing limits.
 
 ## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
 
