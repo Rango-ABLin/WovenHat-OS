@@ -9616,3 +9616,22 @@ WovenFS crash tests and the full Windows chain pass. Evidence includes
 continuing with abrupt installed-path interruption, while physical power-loss
 qualification remains external.
 
+## Codex - installed WovenFS interruption recovery committed (2026-11-17)
+
+Commit `360797d2` on `integration/master-reconciliation-20261115` adds a
+feature-isolated stop after the flushed journal commit and before target-block
+writes. Normal replay, overwrite and cleanup on the unchanged installed disk
+pass at 1/2/4 CPUs. Evidence is retained under
+`audit-artifacts/master-reconciliation-worktree/audit-artifacts/installed-wovenfs-interruption-{1,2,4}cpu-20261117`;
+the full Windows chain passes in `acceptance-20261117-073725-737`. Physical
+power loss, torn sectors, volatile caches, other installed cut positions and
+native media remain open. No Cargo/QEMU chain is active.
+
+## Codex - repository sync repaired (2026-11-20)
+
+Preserved the existing uncommitted coordination note, fetched `origin`, and
+fast-forwarded `master` from `de4696a4` to `e6ae60a8`. The local and remote
+branch tips now match with no merge conflict. The restored coordination note
+and this handoff remain intentionally uncommitted; no source or acceptance
+artifacts were changed by the sync repair.
+
