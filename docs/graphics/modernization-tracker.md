@@ -1329,3 +1329,7 @@ offsets dropped from the glyph path) and removed the temporary paint trace.
 Evidence: `audit-artifacts/font-map-1cpu` passed the full real QEMU desktop,
 keyboard, pointer and repaint journey on 1 CPU with default limits. 2/4-CPU evidence: `audit-artifacts/font-map-2cpu` and `audit-artifacts/font-map-4cpu`, both PASS with default timing limits.
 
+With a real face loaded, the 64-point bounded `Path` overflowed on complex
+contours ('S', 'g', '@') and silently omitted them; raising it to 192 points
+keeps the path allocation-free and makes every printable ASCII glyph render.
+Host typography coverage now enforces that for the production font.

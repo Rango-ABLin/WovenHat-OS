@@ -11,7 +11,10 @@ one bounded 1 MiB `AddressSpace`-owned window (committed concurrently as
 Also reverted the unbuildable `fa2b220c` GUI patch (it did not compile and
 dropped icon offsets) and removed the temporary desktop paint trace.
 Evidence: `audit-artifacts/font-map-{1,2,4}cpu` (PASS on 1, 2 and 4 CPUs with
-default timing limits).
+default timing limits). Once the font really loaded, the 64-point bounded
+`Path` silently dropped complex glyphs (`S`, `g`, `@`); it is now 192 points
+with a host test over all printable ASCII. `audit-artifacts/glyph-fix-1cpu`
+rechecks the real desktop after that change.
 
 Do not concurrently edit `libwoven/src/design_system.rs`: another owner is
 actively writing it. `libwoven/src/lib.rs` also contains that owner's

@@ -8,7 +8,10 @@ attempt. `system font parsed bytes=621572 units_per_em=1000` appears on the
 real desktop; interactive repaint fell from 6-8 guest seconds to ~0.15-0.25 s.
 The unbuildable `fa2b220c` GUI patch was reverted and temporary paint tracing
 removed. The full real QEMU desktop/input/repaint qualification passes on 1 CPU
-(`audit-artifacts/font-map-{1,2,4}cpu`) with default timing limits.
+(`audit-artifacts/font-map-{1,2,4}cpu`) with default timing limits. Real-font
+glyph rasterisation also exposed a 64-point `Path` overflow that dropped `S`,
+`g` and `@`; the bounded path is now 192 points with host coverage for every
+printable ASCII glyph.
 
 ## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
 
