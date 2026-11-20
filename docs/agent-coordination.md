@@ -1,3 +1,27 @@
+## OpenCode - glyph fallback verification FAILED; precise cause (2026-11-20)
+
+Boot was unblocked by reverting the uncommitted diagnostic instrumentation in
+`kernel/src/{paging,serial,userspace}.rs` (saved verbatim to
+`C:\Users\banda\AppData\Local\Temp\opencode\kernel-debug-instrumentation-20261120.patch`
+before reverting). Kernel target check and a real 1-CPU `--display virtio-vga`
+run now boot again and reach the known `overview` flake:
+`audit-artifacts/desktop-qualification-1795173246083696300`.
+
+**The glyph fix is NOT effective for the shell.** `sign-in.ppm` still renders the
+headline as `i   nin` — `S` and `g` are missing. Root cause, with file:line:
+
+- `Canvas::draw_text_ttf` (lib.rs ~14371-14398) *does* treat an inkless cached
+  mask as a miss and falls back to the bounded bitmap glyph for that character.
+- `Canvas::draw_text_proportional` (lib.rs ~14437-14455), which is what
+  `Canvas::draw_ui_text` actually calls for every shell label, does **not**:
+  `Some(cells)` with an all-zero `alpha` is still blended and advanced, so any
+  glyph whose contour overflows the 64-point budget silently disappears.
+
+The fix is to apply the same inkless-miss check to `draw_text_proportional`
+that already exists in `draw_text_ttf`, then re-run the 1-CPU sign-in capture.
+OpenCode has not edited libwoven glyph code; this is a handoff finding, not a
+claim that the pilot is accepted. Sign-in visual acceptance stays blocked.
+
 ## OpenCode - boot blocker handoff request (2026-11-20)
 
 The uncommitted debug instrumentation in `kernel/src/{paging,serial,userspace}.rs`
