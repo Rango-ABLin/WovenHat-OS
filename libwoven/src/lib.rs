@@ -564,6 +564,19 @@ pub mod graphics {
             true
         }
 
+        /// Coarse two-segment variant for small cached glyph masks: at 12 px
+        /// the extra subdivisions cost far more than they contribute.
+        pub fn quadratic_to_coarse(&mut self, control: Point, end: Point) -> bool {
+            if self.length == 0 || self.closed || self.length + 2 > MAX_PATH_POINTS {
+                return false;
+            }
+            let start = self.points[self.length - 1];
+            let points = [Self::quadratic_sample(start, control, end, 1, 10, 5), end];
+            self.points[self.length..self.length + points.len()].copy_from_slice(&points);
+            self.length += points.len();
+            true
+        }
+
         fn quadratic_sample(
             start: Point,
             control: Point,
@@ -652,6 +665,14 @@ pub mod graphics {
         fn paths(&self) -> &[Path] {
             &self.paths[..self.length]
         }
+    }
+
+    /// Shared options for contour extraction. Bundling variation coordinates
+    /// and the coarse flag keeps the outline helpers within the argument cap.
+    #[derive(Clone, Copy)]
+    struct OutlineOptions<'a> {
+        variation: Option<&'a [i16]>,
+        coarse: bool,
     }
 
     /// Scratch contour storage for glyph rasterisation. A `CompoundPath` is
@@ -3203,7 +3224,14 @@ pub mod graphics {
             scale: u16,
             output: &mut Path,
         ) -> Result<usize, TrueTypeError> {
-            self.outline_contour_glyph_variation(glyph, contour, origin, scale, output, None)
+            self.outline_contour_glyph_variation(
+                glyph,
+                contour,
+                origin,
+                scale,
+                output,
+                OutlineOptions { variation: None, coarse: false },
+            )
         }
 
         /// Assemble one contour from a glyph ID with normalized variation
@@ -3223,7 +3251,7 @@ pub mod graphics {
                 origin,
                 scale,
                 output,
-                Some(normalized_coordinates),
+                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
             )
         }
 
@@ -3234,7 +3262,7 @@ pub mod graphics {
             origin: Point,
             scale: u16,
             output: &mut Path,
-            variation: Option<&[i16]>,
+            options: OutlineOptions<'_>,
         ) -> Result<usize, TrueTypeError> {
             let mut points = [OutlinePoint {
                 x: 0,
@@ -3246,7 +3274,7 @@ pub mod graphics {
                 usize::from(glyph),
                 &mut points,
                 0,
-                variation,
+                options.variation,
             )?;
             if point_count == 0 {
                 *output = Path::new();
@@ -3311,14 +3339,21 @@ pub mod graphics {
                 }
                 let next_index = if index == end { start } else { index + 1 };
                 let next = points[next_index];
+                let curve = |path: &mut Path, control: Point, end: Point| -> bool {
+                    if options.coarse {
+                        path.quadratic_to_coarse(control, end)
+                    } else {
+                        path.quadratic_to(control, end)
+                    }
+                };
                 if next.on_curve {
-                    if !path.quadratic_to(map(point), map(next)) {
+                    if !curve(&mut path, map(point), map(next)) {
                         return Err(TrueTypeError::TooLarge);
                     }
                     index += 2;
                 } else {
                     let implied = midpoint(point, next);
-                    if !path.quadratic_to(map(point), map(implied)) {
+                    if !curve(&mut path, map(point), map(implied)) {
                         return Err(TrueTypeError::TooLarge);
                     }
                     index += 1;
@@ -3354,7 +3389,13 @@ pub mod graphics {
             scale: u16,
             output: &mut CompoundPath,
         ) -> Result<usize, TrueTypeError> {
-            self.outline_compound_glyph_variation(glyph, origin, scale, output, None)
+            self.outline_compound_glyph_variation(
+                glyph,
+                origin,
+                scale,
+                output,
+                OutlineOptions { variation: None, coarse: false },
+            )
         }
 
         /// Assemble all contours from a glyph ID with normalized variation
@@ -3372,7 +3413,7 @@ pub mod graphics {
                 origin,
                 scale,
                 output,
-                Some(normalized_coordinates),
+                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
             )
         }
 
@@ -3382,13 +3423,13 @@ pub mod graphics {
             origin: Point,
             scale: u16,
             output: &mut CompoundPath,
-            variation: Option<&[i16]>,
+            options: OutlineOptions<'_>,
         ) -> Result<usize, TrueTypeError> {
             let mut compound = CompoundPath::new();
             for contour in 0..=MAX_CONTOURS {
                 let mut path = Path::new();
                 match self.outline_contour_glyph_variation(
-                    glyph, contour, origin, scale, &mut path, variation,
+                    glyph, contour, origin, scale, &mut path, options,
                 ) {
                     Ok(0) if contour == 0 => {
                         *output = compound;
@@ -3437,7 +3478,14 @@ pub mod graphics {
             color: Color,
             renderer: &mut Renderer<'_, '_>,
         ) -> Result<usize, TrueTypeError> {
-            self.render_outline(glyph, origin, scale, color, renderer, None, false)
+            self.render_outline(
+                glyph,
+                origin,
+                scale,
+                color,
+                renderer,
+                OutlineOptions { variation: None, coarse: false },
+            )
         }
 
         /// Rasterise one glyph using the bounded shared scratch path.
@@ -3448,8 +3496,7 @@ pub mod graphics {
             scale: u16,
             color: Color,
             renderer: &mut Renderer<'_, '_>,
-            variation: Option<&[i16]>,
-            small: bool,
+            options: OutlineOptions<'_>,
         ) -> Result<usize, TrueTypeError> {
             if GLYPH_PATH
                 .busy
@@ -3467,10 +3514,10 @@ pub mod graphics {
                     origin,
                     scale,
                     compound,
-                    variation,
+                    options,
                 )?;
                 if contours != 0 {
-                    let filled = if small {
+                    let filled = if options.coarse {
                         renderer.fill_compound_path_antialiased_small(compound, color)
                     } else {
                         renderer.fill_compound_path_antialiased(compound, color)
@@ -3501,8 +3548,7 @@ pub mod graphics {
                 scale,
                 color,
                 renderer,
-                Some(normalized_coordinates),
-                false,
+                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
             )
         }
 
@@ -3518,7 +3564,14 @@ pub mod graphics {
             let glyph = self
                 .glyph_index(character)
                 .ok_or(TrueTypeError::UnsupportedGlyph)?;
-            self.render_outline(glyph, origin, scale, color, renderer, None, true)
+            self.render_outline(
+                glyph,
+                origin,
+                scale,
+                color,
+                renderer,
+                OutlineOptions { variation: None, coarse: true },
+            )
         }
 
         /// Lay out one single-line string using checked horizontal metrics.
@@ -12269,7 +12322,7 @@ pub mod graphics {
             path: &CompoundPath,
             color: Color,
         ) -> bool {
-            self.fill_compound_path_samples(path, color, u8::MAX, 2)
+            self.fill_compound_path_samples(path, color, u8::MAX, 1)
         }
 
         fn fill_compound_path_samples(

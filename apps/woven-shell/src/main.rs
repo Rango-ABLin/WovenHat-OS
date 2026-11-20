@@ -3971,6 +3971,9 @@ fn main(args: Args) -> ! {
     let mut message = [0u8; 256];
     // Whether the clock is running at the animation rate.
     let mut fast = false;
+    // Published once the first unlocked frame is actually on the scanout, so
+    // harnesses can stop guessing when the sign-in transition has settled.
+    let mut desktop_frame_ready = false;
     loop {
         // Switch frame rate as animations start and finish.
         if desktop.animating() != fast {
@@ -4039,6 +4042,10 @@ fn main(args: Args) -> ! {
         let present_start = if timed { libwoven::ticks() } else { 0 };
         if libwoven::compositor_present().is_err() {
             fail(7);
+        }
+        if !desktop_frame_ready && !desktop.locked {
+            desktop_frame_ready = true;
+            log(&[b"woven-shell: desktop frame ready"]);
         }
         if timed {
             let present_ticks = libwoven::ticks().saturating_sub(present_start);
