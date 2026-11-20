@@ -82,7 +82,13 @@ bounded bitmap fallback for any real glyph whose mask has no ink, so no
 character disappears without enlarging the stack frame. A shell marker
 `woven-shell: desktop frame ready` now lets the harness wait for the real
 first unlocked frame instead of a fixed 2 s sleep (all timing assertions
-unchanged). A final gate rerun is pending while another owner finishes CI work.
+unchanged). A final gate rerun is pending while another owner finishes CI work. The
+latest rerun (`audit-artifacts/final-1cpu`) never reached WovenShell:
+`[APPS] woven-images loader rejected` / `production catalog install failed`,
+following the concurrent design-system pilot commit `f5f0b32a` and an
+uncommitted kernel debug edit in `map_file_large_readonly`. That is not a
+verdict on the glyph fallback; do not claim final acceptance until those
+changes settle and the gate boots again.
 
 Do not concurrently edit `libwoven/src/design_system.rs`: another owner is
 actively writing it. `libwoven/src/lib.rs` also contains that owner's
