@@ -1,5 +1,23 @@
 # Stage status
 
+## Stage 12 installed WovenFS reboot/replay - 2026-11-20 - ACCEPTED (FOCUSED)
+
+Current `master` now mounts native WovenFS independently of Stage 12 self-test
+features. Normal and post-commit/pre-target interruption gates each perform
+three cold boots of one unchanged disposable image and pass on 1/2/4 CPUs.
+Payload, shorter overwrite, cleanup, native `df`/`fscheck`, and journal replay
+are directly verified. Evidence is retained under
+`audit-artifacts/installed-wovenfs-coldboot-pass2-current-20261120` and
+`audit-artifacts/installed-wovenfs-interruption-pass-current-20261120`.
+
+Nine focused harness contracts, all 20 WovenFS crash tests, host all-target
+Clippy and both feature-specific freestanding Clippy gates pass with warnings
+denied. The final serialized Windows chain passes build/lint/tests, all 60
+memory boots, live networking and Stages 10.4-10.7 on 1/2/4 CPUs in
+`audit-artifacts/stage12-installed-wovenfs-current-stage10-7-final.log`.
+Physical power loss, volatile caches, torn sectors, other installed cut points,
+native media, and broader application persistence remain open.
+
 ## Stage 11 pure-BSS compiler TLS - 2026-11-20 - ACCEPTED (BOUNDED)
 
 Commit `b9829f62` adds a compiler/LLD local-exec TLS executable with PT_TLS

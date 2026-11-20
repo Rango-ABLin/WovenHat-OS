@@ -1,5 +1,10 @@
 # Release readiness
 
+Installed WovenFS now passes normal cold-reboot persistence and deterministic
+post-commit/pre-target journal recovery on 1/2/4-CPU disposable images. This is
+focused virtual-disk evidence; physical storage behavior and remaining
+application migrations keep the release decision unchanged.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.

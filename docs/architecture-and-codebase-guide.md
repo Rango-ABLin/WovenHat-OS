@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Installed WovenFS cold-boot and commit-interruption recovery (2026-11-20)
+
+Native WovenFS probing in `mount_ata_root()` is a production mount decision,
+not a Stage 12.5 self-test dependency. The installed-disk harness provisions a
+regular-file GPT image and cold-boots that same writable image three times per
+CPU profile. Boot 1 writes a payload, boot 2 verifies and overwrites it, and
+boot 3 verifies the shorter tombstone, runs native `df`/`fscheck`, and removes
+the file. Distinct serial markers prevent one boot from satisfying another.
+
+The isolated interruption feature arms a one-shot exit after the journal commit
+sector is flushed and before any target block is written. The next two cold
+boots must replay and verify that transaction, overwrite it, and clean it up.
+The hook is absent from production and ordinary qualification builds. These
+gates access disposable regular files only; they do not claim physical cache,
+torn-sector, power-loss, or native-media qualification.
+
 ## Pure-BSS compiler TLS execution (2026-11-20)
 
 The Stage 11 compiler fixture inventory includes a real Rust/LLD local-exec

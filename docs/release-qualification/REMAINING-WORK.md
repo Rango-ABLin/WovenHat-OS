@@ -8,9 +8,12 @@ Current acceptance applies only to explicitly executed checks.
 
 1. Reconcile the next dependency-ordered Stage 11 executable-layout gap with
    retained failure evidence and the accepted loader ABI.
-2. Qualify WovenFS across real reboot/remount and interrupted-operation cases.
+2. Extend installed WovenFS beyond the accepted disposable-image cold reboot
+   and post-commit/pre-target cut to other write boundaries, volatile-cache and
+   torn-sector behavior; physical power-loss/native-media evidence is external.
 3. Assemble newer shell/application work while preserving accepted ABI and tools.
-4. Implement and qualify missing application operations and persistence.
+4. Implement and qualify the remaining application operations and service data
+   migrations now that the bounded native WovenFS reboot/replay gate passes.
 5. Close Stage 1-19 software requirements before formal Stage 20 acceptance.
 6. Qualify installation, signed update, rollback and recovery on disposable disks.
 7. Complete release provenance, independent review and hardware support records.

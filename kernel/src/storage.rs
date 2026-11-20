@@ -218,11 +218,9 @@ pub fn mount_ata_root() -> MountStatus {
         // A sized handle for the generic mount helpers.
         let mut disk = disk;
         let disk = &mut disk;
-        #[cfg(feature = "stage12-5-test")]
         if crate::wfs::Volume::probe(disk).is_ok() {
             return mount_wovenfs_aliases(disk);
         }
-        #[cfg(feature = "stage12-5-test")]
         if let Some(partition) = wovenfs_partition(disk) {
             let mut view = match partition::PartitionDevice::new(disk, partition) {
                 Ok(view) => view,
@@ -287,7 +285,6 @@ fn wovenfs_partition(
     })
 }
 
-#[allow(dead_code)]
 fn mount_wovenfs_aliases(device: &mut impl crate::block::BlockDevice) -> MountStatus {
     let count = match crate::wfs::mount_device_into_vfs(&mut *device, "/mnt") {
         crate::wfs::MountOutcome::Mounted(count) => count,
@@ -3309,22 +3306,73 @@ pub fn system_volume_writable() -> bool {
 }
 
 #[cfg(feature = "installed-wovenfs-qualification")]
-pub fn installed_wovenfs_self_test() -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstalledWovenfsPhase {
+    Written,
+    VerifiedOverwritten,
+    CleanupCommitted,
+}
+
+#[cfg(feature = "installed-wovenfs-qualification")]
+pub fn installed_wovenfs_self_test() -> Option<InstalledWovenfsPhase> {
     if !mnt_wovenfs() || !system_volume_writable() {
-        return false;
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: native writable mount unavailable"
+        ));
+        return None;
     }
     const PATH: &str = "/mnt/INSTALL.JSON";
-    const DATA: &[u8] = b"WovenFS installed boot qualification\n";
-    if persist_paths_atomic(&[(PATH, DATA)]).is_err() {
-        return false;
+    const WRITTEN: &[u8] = b"written\nWovenFS installed boot qualification\n";
+    const DELETED: &[u8; 8] = b"deleted\n";
+    let healthy = || {
+        df_mnt().is_ok()
+            && matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches)
+    };
+
+    let mut current = [0u8; 64];
+    let Ok(length) = read_disk_file(PATH, 0, &mut current) else {
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: initial read failed"
+        ));
+        return None;
+    };
+    if length == WRITTEN.len() && &current[..length] == WRITTEN {
+        if persist_paths_atomic(&[(PATH, DELETED)]).is_err() || !healthy() {
+            crate::serial::write_line(format_args!(
+                "[INSTALLED WOVENFS] diagnostic: overwrite or health check failed"
+            ));
+            return None;
+        }
+        return Some(InstalledWovenfsPhase::VerifiedOverwritten);
     }
-    let mut readback = [0u8; DATA.len()];
-    let persisted = read_disk_file(PATH, 0, &mut readback) == Ok(DATA.len())
-        && readback == DATA;
-    let space = df_mnt().is_ok();
-    let consistent = matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches);
-    let removed = delete_path(PATH).is_ok();
-    persisted && space && consistent && removed
+    if length == WRITTEN.len()
+        && current[..DELETED.len()] == *DELETED
+        && delete_path(PATH).is_ok()
+        && healthy()
+    {
+        return Some(InstalledWovenfsPhase::CleanupCommitted);
+    }
+    #[cfg(feature = "installed-wovenfs-interruption-qualification")]
+    crate::wfs::arm_interrupt_after_journal_commit();
+    if persist_paths_atomic(&[(PATH, WRITTEN)]).is_err() {
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: initial persist failed"
+        ));
+        return None;
+    }
+    if df_mnt().is_err() {
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: df failed after persist"
+        ));
+        return None;
+    }
+    if !matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches) {
+        crate::serial::write_line(format_args!(
+            "[INSTALLED WOVENFS] diagnostic: fscheck failed after persist"
+        ));
+        return None;
+    }
+    Some(InstalledWovenfsPhase::Written)
 }
 
 pub fn remount_mnt() -> MountStatus {

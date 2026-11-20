@@ -1,3 +1,15 @@
+## Codex - installed WovenFS reboot/replay accepted (2026-11-20)
+
+Reconciled the previously accepted three-cold-boot and journal-commit
+interruption gates onto current `master` and repaired the discovered regression
+that incorrectly tied native WovenFS probing to `stage12-5-test`. Normal and
+interruption modes each pass three boots on 1/2/4 CPUs. Nine harness contracts,
+20 WovenFS crash tests, warning-denying host/feature Clippy and the final full
+Windows chain pass; evidence is recorded in the Stage 12 status entry. No
+physical device was accessed. Physical power loss, torn sectors, volatile
+caches, other cut points and broader application migrations remain open. No
+Cargo/QEMU chain is active.
+
 ## Codex - Stage 11 pure-BSS compiler TLS accepted (2026-11-20)
 
 Bounded scope: `tools/loader-fixtures/`,

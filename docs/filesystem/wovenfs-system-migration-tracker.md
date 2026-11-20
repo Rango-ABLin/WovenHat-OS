@@ -1,5 +1,15 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
+## Current-source cold reboot and commit replay accepted — 2026-11-20
+
+The disposable installed-volume gate now passes three distinct cold boots on
+1/2/4 CPUs for both normal persistence and a deterministic stop after the
+flushed journal commit but before target writes. The same image carries the
+payload and tombstone across boots; replay, native consistency checks, and
+cleanup pass. `mount_ata_root()` once again probes WovenFS without requiring an
+unrelated Stage 12.5 feature. Physical cache durability, torn sectors, native
+media, physical power loss, and additional cut positions remain open.
+
 ## Bounded increment complete — 2026-11-04
 
 WovenFS-backed `df`/`fscheck` now report native bitmap/tree state, and the

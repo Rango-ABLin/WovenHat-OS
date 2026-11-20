@@ -6575,15 +6575,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let _ = vfs::mkdir("/mnt");
         let _ = ata::init();
         let _ = storage::mount_ata_root();
-        if !storage::installed_wovenfs_self_test() {
-            serial::write_line(format_args!(
-                "[INSTALLED WOVENFS] df/fscheck/persistence: FAILED"
-            ));
-            qemu_test_exit_failure();
+        match storage::installed_wovenfs_self_test() {
+            Some(storage::InstalledWovenfsPhase::Written) => serial::write_line(format_args!(
+                "[INSTALLED WOVENFS] reboot phase write: PASSED"
+            )),
+            Some(storage::InstalledWovenfsPhase::VerifiedOverwritten) => serial::write_line(
+                format_args!("[INSTALLED WOVENFS] reboot phase verify-overwrite: PASSED"),
+            ),
+            Some(storage::InstalledWovenfsPhase::CleanupCommitted) => {
+                serial::write_line(format_args!(
+                    "[INSTALLED WOVENFS] reboot phase cleanup: PASSED"
+                ));
+                serial::write_line(format_args!(
+                    "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+                ));
+            }
+            None => {
+                serial::write_line(format_args!(
+                    "[INSTALLED WOVENFS] df/fscheck/persistence: FAILED"
+                ));
+                qemu_test_exit_failure();
+            }
         }
-        serial::write_line(format_args!(
-            "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
-        ));
     }
     #[cfg(feature = "qemu-test")]
     qemu_test_exit_success();
@@ -6767,7 +6780,7 @@ fn stage27_5_recovery_self_test(image: &[u8]) -> bool {
     feature = "stage31-service-supervisor-test",
     feature = "stage31-driver-restart-test"
 ))]
-fn qemu_test_exit_success() {
+pub(crate) fn qemu_test_exit_success() {
     unsafe {
         core::arch::asm!(
             "out dx, al",

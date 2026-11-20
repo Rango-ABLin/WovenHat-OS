@@ -81,6 +81,7 @@ class InstalledDiskQemuContracts(unittest.TestCase):
             self.assertNotIn("media", joined.lower())
             self.assertEqual(command.count("-drive"), 2)
             self.assertIn("readonly=on", joined)
+            self.assertNotIn("-qmp", command)
             self.assertNotIn("-no-shutdown", command)
 
     def test_guest_execution_requires_uefi_kernel_and_debug_exit(self):
@@ -94,6 +95,41 @@ class InstalledDiskQemuContracts(unittest.TestCase):
             (33, "[BOOT] ALL VALIDATIONS PASSED\n"),
         ):
             self.assertFalse(MODULE.guest_execution_status(code, serial)["guest_execution"])
+
+    def test_wovenfs_reboot_markers_are_phase_specific(self):
+        phases = (
+            "[INSTALLED WOVENFS] reboot phase write: PASSED",
+            "[INSTALLED WOVENFS] reboot phase verify-overwrite: PASSED",
+            "[INSTALLED WOVENFS] reboot phase cleanup: PASSED",
+        )
+        for expected in phases:
+            serial = f"{expected}\n"
+            self.assertTrue(
+                MODULE.wovenfs_qualification_status(serial, "wovenfs", expected)["passed"]
+            )
+            for other in phases:
+                if other != expected:
+                    self.assertFalse(
+                        MODULE.wovenfs_qualification_status(serial, "wovenfs", other)["passed"]
+                    )
+
+    def test_interruption_marker_is_distinct_from_normal_write(self):
+        interrupted = "[INSTALLED WOVENFS] journal commit interruption: PASSED"
+        normal = "[INSTALLED WOVENFS] reboot phase write: PASSED"
+        self.assertTrue(
+            MODULE.wovenfs_qualification_status(interrupted, "wovenfs", interrupted)["passed"]
+        )
+        self.assertFalse(
+            MODULE.wovenfs_qualification_status(normal, "wovenfs", interrupted)["passed"]
+        )
+
+    def test_interruption_mode_requires_wovenfs(self):
+        MODULE.validate_qualification_mode("wovenfs", True)
+        MODULE.validate_qualification_mode("fat32", False)
+        with self.assertRaisesRegex(
+            MODULE.InstalledDiskGateError, "requires --filesystem wovenfs"
+        ):
+            MODULE.validate_qualification_mode("fat32", True)
 
     def test_only_requested_cpu_profiles_are_accepted(self):
         with self.assertRaises(MODULE.InstalledDiskGateError):

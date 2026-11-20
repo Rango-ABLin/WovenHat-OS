@@ -1,5 +1,19 @@
 # Test qualification report
 
+## Installed WovenFS reboot and journal replay, 2026-11-20
+
+Normal and post-commit/pre-target interruption modes each pass three cold boots
+of one writable disposable image at 1/2/4 CPUs. The harness requires distinct
+write, verify-overwrite, cleanup, and interruption markers. Results and serial
+logs are retained in `audit-artifacts/installed-wovenfs-coldboot-pass2-current-20261120`
+and `audit-artifacts/installed-wovenfs-interruption-pass-current-20261120`.
+
+Nine Python contracts, all 20 host WovenFS crash/replay tests, warning-denying
+host and feature Clippy, and the complete inherited Stage 10.7 Windows chain
+pass. The final chain transcript is
+`audit-artifacts/stage12-installed-wovenfs-current-stage10-7-final.log`.
+This is virtual regular-file evidence, not physical power-loss qualification.
+
 ## Large signed executable geometry, 2026-11-16
 
 The pre-repair WovenImages gate exits 35 after reporting a writable 761,856-byte

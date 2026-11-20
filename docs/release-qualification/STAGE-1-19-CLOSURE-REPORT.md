@@ -37,11 +37,14 @@ and mounts `/mnt` through the native VFS adapter. Native `df`/`fscheck` and
 root-aware service persistence are present. Historical 1/2/4-CPU installed
 image evidence is recorded on 2026-11-04 in stage-status.
 
-The dedicated `installed-wovenfs-test` performs a write/read/delete within
-one guest boot. Fresh reboot/remount and interrupted-operation evidence are
-required to satisfy the directive's broader persistence requirement. The
-closure ledger now reflects the implemented routing and keeps qualification
-open. This prevents treating existing routing as missing implementation.
+The dedicated installed-volume gates now cold-boot the same writable image
+three times on 1/2/4 CPUs. The normal gate proves payload, shorter overwrite,
+native consistency checks and cleanup across boots. The isolated interruption
+gate stops after the flushed journal commit but before target writes; later
+boots replay, verify, overwrite and clean up the same transaction. This closes
+that bounded virtual-disk gap. Other cut positions, volatile-cache/torn-sector
+behavior, physical power loss, native media, and broader application data
+migration remain required.
 
 ## Stage 11 loader-preservation increment accepted
 

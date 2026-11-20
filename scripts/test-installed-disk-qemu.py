@@ -263,7 +263,7 @@ def build_qemu_command(
     firmware_vars: Path | None,
     installed_disk: Path,
     serial: Path,
-    qmp: Path,
+    _qmp: Path,
     cpus: int,
     filesystem: str = "fat32",
 ) -> list[str]:
@@ -291,8 +291,6 @@ def build_qemu_command(
         "none",
         "-serial",
         f"file:{serial}",
-        "-qmp",
-        f"unix:{qmp},server=on,wait=off",
         "-no-reboot",
         "-device",
         "isa-debug-exit,iobase=0xf4,iosize=0x04",
@@ -339,9 +337,11 @@ def guest_execution_status(exit_code: int, serial_text: str) -> dict[str, object
     }
 
 
-def wovenfs_qualification_status(serial_text: str, filesystem: str) -> dict[str, object]:
+def wovenfs_qualification_status(
+    serial_text: str, filesystem: str, expected_marker: str | None = None
+) -> dict[str, object]:
     """Require the filesystem-specific installed-image marker when selected."""
-    required = "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
+    required = expected_marker or "[INSTALLED WOVENFS] df/fscheck/persistence: PASSED"
     return {
         "required": filesystem == "wovenfs",
         "passed": filesystem != "wovenfs" or required in serial_text,
@@ -408,36 +408,77 @@ def run_profile(
     cpus: int,
     timeout: float,
     filesystem: str,
+    interrupt_after_commit: bool = False,
 ) -> dict[str, object]:
     profile = output_root / f"{cpus}cpu"
     profile.mkdir(parents=True, exist_ok=False)
     installed = profile / "installed-disk.img"
-    serial = profile / "serial.log"
-    qemu_log = profile / "qemu.log"
-    qmp = profile / "qmp.sock"
     install = install_exact_disk_image(source, installed, filesystem=filesystem)
     vars_copy = None
     if firmware_vars is not None:
         vars_copy = _copy_vars(firmware_vars, profile / "OVMF_VARS.fd")
-    command = build_qemu_command(qemu, firmware, vars_copy, installed, serial, qmp, cpus, filesystem)
     started = time.monotonic()
-    timeout_error = None
-    try:
-        with qemu_log.open("w", encoding="utf-8") as log:
-            completed = subprocess.run(
-                command,
-                cwd=ROOT,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                timeout=timeout,
-                check=False,
-            )
-    except subprocess.TimeoutExpired as exc:
-        timeout_error = str(exc)
-        completed = None
-    serial_text = serial.read_text(encoding="utf-8", errors="replace") if serial.exists() else ""
-    status = guest_execution_status(-1 if completed is None else completed.returncode, serial_text)
-    filesystem_status = wovenfs_qualification_status(serial_text, filesystem)
+    first_marker = (
+        "[INSTALLED WOVENFS] journal commit interruption: PASSED"
+        if interrupt_after_commit
+        else "[INSTALLED WOVENFS] reboot phase write: PASSED"
+    )
+    markers = (
+        first_marker,
+        "[INSTALLED WOVENFS] reboot phase verify-overwrite: PASSED",
+        "[INSTALLED WOVENFS] reboot phase cleanup: PASSED",
+    ) if filesystem == "wovenfs" else (None,)
+    boots = []
+    for index, marker in enumerate(markers, start=1):
+        serial = profile / f"serial-boot{index}.log"
+        qemu_log = profile / f"qemu-boot{index}.log"
+        qmp = profile / f"qmp-boot{index}.sock"
+        command = build_qemu_command(
+            qemu, firmware, vars_copy, installed, serial, qmp, cpus, filesystem
+        )
+        timeout_error = None
+        try:
+            with qemu_log.open("w", encoding="utf-8") as log:
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    timeout=timeout,
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            timeout_error = str(exc)
+            completed = None
+        serial_text = serial.read_text(encoding="utf-8", errors="replace") if serial.exists() else ""
+        boot_status = guest_execution_status(
+            -1 if completed is None else completed.returncode, serial_text
+        )
+        filesystem_status = wovenfs_qualification_status(serial_text, filesystem, marker)
+        boots.append({
+            "boot": index,
+            "guest": boot_status,
+            "filesystem_qualification": filesystem_status,
+            "serial": str(serial),
+            "qemu_log": str(qemu_log),
+            "command": command,
+            "timeout_error": timeout_error,
+        })
+        if timeout_error is not None or not boot_status["guest_execution"] or not filesystem_status["passed"]:
+            break
+    all_boots_passed = len(boots) == len(markers) and all(
+        bool(boot["guest"]["guest_execution"])
+        and bool(boot["filesystem_qualification"]["passed"])
+        for boot in boots
+    )
+    status = dict(boots[-1]["guest"])
+    status["guest_execution"] = all_boots_passed
+    filesystem_status = dict(boots[-1]["filesystem_qualification"])
+    filesystem_status["passed"] = all_boots_passed
+    serial = Path(boots[-1]["serial"])
+    qemu_log = Path(boots[-1]["qemu_log"])
+    command = boots[-1]["command"]
+    timeout_error = boots[-1]["timeout_error"]
     status["filesystem_qualification"] = filesystem_status
     result = {
         "cpus": cpus,
@@ -448,6 +489,7 @@ def run_profile(
         "serial": str(serial),
         "qemu_log": str(qemu_log),
         "command": command,
+        "boots": boots,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "physical_device_access": "none",
     }
@@ -487,6 +529,7 @@ def run_gate(
     cpus: Iterable[int],
     timeout: float,
     filesystem: str,
+    interrupt_after_commit: bool = False,
 ) -> dict[str, object]:
     source_info = validate_source_image(source)
     if DEVICE_PATH_RE.search(str(output_root)):
@@ -496,7 +539,10 @@ def run_gate(
     output_root.mkdir(parents=True, exist_ok=False)
     results = []
     for profile in cpus:
-        results.append(run_profile(source_info_path(source_info), qemu, firmware, firmware_vars, output_root, profile, timeout, filesystem))
+        results.append(run_profile(
+            source_info_path(source_info), qemu, firmware, firmware_vars,
+            output_root, profile, timeout, filesystem, interrupt_after_commit,
+        ))
     passed = all(
         bool(item["guest"]["guest_execution"])
         and bool(item["guest"]["filesystem_qualification"]["passed"])
@@ -509,6 +555,7 @@ def run_gate(
         "guest_execution": passed,
         "media_attached": False,
         "filesystem": filesystem,
+        "interrupt_after_commit": interrupt_after_commit,
         "profiles": results,
     }
     (output_root / "result.json").write_text(json_dumps(result) + "\n", encoding="utf-8")
@@ -523,6 +570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--firmware-vars", type=Path)
     parser.add_argument("--filesystem", choices=("fat32", "wovenfs"), default="fat32")
+    parser.add_argument("--interrupt-after-commit", action="store_true")
     cpu_group = parser.add_mutually_exclusive_group()
     cpu_group.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     cpu_group.add_argument("--all-cpus", action="store_true")
@@ -530,10 +578,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args(argv)
     try:
+        validate_qualification_mode(args.filesystem, args.interrupt_after_commit)
         qemu, firmware = resolve_qemu_and_firmware(args.qemu, args.firmware)
         feature = args.feature
         if args.filesystem == "wovenfs" and feature == "stage28-installer-test":
-            feature = "installed-wovenfs-test"
+            feature = (
+                "installed-wovenfs-interruption-test"
+                if args.interrupt_after_commit
+                else "installed-wovenfs-test"
+            )
         source = args.kernel_image or build_kernel_image(ROOT, feature, args.timeout)
         source = validate_source_image(source)["path"]
         source_path = Path(source)
@@ -549,12 +602,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             cpus=profiles,
             timeout=args.timeout,
             filesystem=args.filesystem,
+            interrupt_after_commit=args.interrupt_after_commit,
         )
     except (InstalledDiskGateError, OSError, ValueError) as exc:
         print(f"INSTALLED-DISK-RELEASE: FAIL: {exc}", file=sys.stderr)
         return 2
     print(json_dumps(result))
     return 0 if result["valid"] else 1
+
+
+def validate_qualification_mode(filesystem: str, interrupt_after_commit: bool) -> None:
+    if interrupt_after_commit and filesystem != "wovenfs":
+        raise InstalledDiskGateError(
+            "--interrupt-after-commit requires --filesystem wovenfs"
+        )
 
 
 def json_dumps(value: object) -> str:
