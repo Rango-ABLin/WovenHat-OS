@@ -37,6 +37,7 @@ def check(output):
         "library": root / "tools" / "loader-fixtures" / "library.rs",
         "static-tls": root / "tools" / "loader-fixtures" / "static-tls.rs",
         "tls-threads": root / "tools" / "loader-fixtures" / "tls-threads.rs",
+        "pure-bss-tls": root / "tools" / "loader-fixtures" / "pure-bss-tls.rs",
     }
     text = source.read_text(encoding="utf-8")
     transport_text = transport.read_text(encoding="utf-8")

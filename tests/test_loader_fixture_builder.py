@@ -55,6 +55,12 @@ class LoaderFixtureBuilderTests(unittest.TestCase):
             self.assertFalse((output / 'manifest.json').exists())
             self.assertTrue((output / 'commands.json').is_file())
 
+    def test_fixture_inventory_includes_pure_bss_tls(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts' /
+                  'build-loader-fixtures.py').read_text(encoding='utf-8')
+        self.assertIn("'pure-bss-tls.rs'", source)
+        self.assertIn("'pure-bss-tls-demo'", source)
+
 
 if __name__ == '__main__':
     unittest.main()

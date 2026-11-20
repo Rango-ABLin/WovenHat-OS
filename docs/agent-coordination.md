@@ -1,3 +1,16 @@
+## Codex - Stage 11 pure-BSS compiler TLS gate active (2026-11-20)
+
+Current bounded scope: `tools/loader-fixtures/`,
+`scripts/build-loader-fixtures.py`, `scripts/test-stage10-runtime.py`,
+`tests/test_loader_fixture_builder.py`, `kernel/src/userspace/tls_acceptance.rs`,
+and directly related architecture/status/closure records. The goal is to
+execute an unmodified compiler/LLD image whose PT_TLS has zero file bytes and
+nonzero memory bytes, on every online CPU, through the existing protected
+template/TCB, rollback and exact-teardown gate. No loader ABI, syscall,
+capability or capacity expansion is planned. Do not concurrently edit these
+paths. Broader TLS models, entropy stress and physical qualification remain
+out of scope; no Stage 11 or Stage 1-19 closure claim is implied.
+
 ## Codex - paused Stage 11 cherry-pick reconciled (2026-11-20)
 
 Resolved the additive conflicts from cherry-picking `22f2e750` onto the

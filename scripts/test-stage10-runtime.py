@@ -118,6 +118,7 @@ def required_markers(stage, cpus):
     if stage == '11.2-tls':
         required.extend([
             '[S11.TLS] static compiler TLS: PASSED',
+            '[S11.TLS] pure-BSS compiler TLS: PASSED',
             '[S11.TLS] fresh child TLS: PASSED',
             '[S11.TLS] relocated pointer initializer: PASSED',
             '[S11.TLS] biased PIE initializer relocation: PASSED',
@@ -254,6 +255,7 @@ def main():
             env['WOVENHAT_COMPILER_LIBRARY_ELF'] = manifest['outputs']['libwoven-demo.so']['path']
             env['WOVENHAT_TLS_STATIC_ELF'] = manifest['outputs']['static-tls-demo']['path']
             env['WOVENHAT_TLS_THREADS_ELF'] = manifest['outputs']['tls-threads-demo']['path']
+            env['WOVENHAT_TLS_PURE_BSS_ELF'] = manifest['outputs']['pure-bss-tls-demo']['path']
         except RuntimeError as error:
             print(str(error), file=sys.stderr)
             return 1

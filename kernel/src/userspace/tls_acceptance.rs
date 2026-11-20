@@ -124,6 +124,10 @@ fn run_on(cpu: usize) -> bool {
             "fresh child TLS",
             include_bytes!(env!("WOVENHAT_TLS_THREADS_ELF")).as_slice(),
         ),
+        (
+            "pure-BSS compiler TLS",
+            include_bytes!(env!("WOVENHAT_TLS_PURE_BSS_ELF")).as_slice(),
+        ),
         ("nonzero congruence TLS", nonzero.as_slice()),
         ("page-edge TCB", page_edge.as_slice()),
     ] {
@@ -136,6 +140,13 @@ fn run_on(cpu: usize) -> bool {
         };
         if name == "fresh child TLS"
             && (!parsed.is_position_independent() || !has_relative_tls_initializer(&parsed, bytes))
+        {
+            return false;
+        }
+        if name == "pure-BSS compiler TLS"
+            && !parsed
+                .tls()
+                .is_some_and(|tls| tls.file_size == 0 && tls.memory_size >= 8)
         {
             return false;
         }
