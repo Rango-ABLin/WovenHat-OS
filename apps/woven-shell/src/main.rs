@@ -469,9 +469,6 @@ const TOKENS: DesignTokens = DesignTokens::DEFAULT;const BODY_TEXT: u16 = TOKENS
 const HEADLINE_TEXT: u16 = TOKENS.type_headline;
 const DISPLAY_TEXT: u16 = TOKENS.type_display;
 
-/// Temporary diagnostic counter for the first-desktop-paint hang.
-static DESKTOP_PAINT_TRACE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-
 fn rect_of(area: Area) -> Rect {
     Rect {
         x: area.x,
@@ -1292,24 +1289,9 @@ impl Desktop {
     /// The desktop layer: wallpaper and taskbar, with its start button,
     /// window entries and clock.
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
-        // Temporary diagnostic: the first desktop paint after sign-in froze
-        // without a panic, so trace which tile and which phase stops.
-        let trace = DESKTOP_PAINT_TRACE.fetch_add(1, Ordering::Relaxed);
-        if trace < 400 {
-            log(&[b"woven-shell: paint begin"]);
-        }
         self.render_desktop_background(canvas);
-        if trace < 400 {
-            log(&[b"woven-shell: paint background done"]);
-        }
         self.paint_desktop_icons(canvas);
-        if trace < 400 {
-            log(&[b"woven-shell: paint icons done"]);
-        }
         self.paint_taskbar_content(canvas);
-        if trace < 400 {
-            log(&[b"woven-shell: paint taskbar done"]);
-        }
     }
 
     /// The taskbar content: its translucent fill and bottom accent line, the
@@ -2819,10 +2801,6 @@ impl Desktop {
             return None;
         }
         painter.draw(area, |canvas| self.render_desktop(canvas));
-        let trace = DESKTOP_PAINT_TRACE.load(Ordering::Relaxed);
-        if (1..100).contains(&trace) {
-            log(&[b"woven-shell: desktop layer done"]);
-        }
 
         for (index, icon) in self.tray.iter().enumerate() {
             let Some(icon) = icon else { continue };
@@ -2950,9 +2928,6 @@ impl Desktop {
         let cursor = self.cursor_area().intersect(area);
         if !cursor.is_empty() {
             painter.overlay(cursor, |canvas| self.render_cursor(canvas));
-        }
-        if (1..100).contains(&DESKTOP_PAINT_TRACE.load(Ordering::Relaxed)) {
-            log(&[b"woven-shell: overlays done"]);
         }
         None
     }
@@ -4062,14 +4037,8 @@ fn main(args: Args) -> ! {
             0
         };
         let present_start = if timed { libwoven::ticks() } else { 0 };
-        if (1..100).contains(&DESKTOP_PAINT_TRACE.load(Ordering::Relaxed)) {
-            log(&[b"woven-shell: pre-present"]);
-        }
         if libwoven::compositor_present().is_err() {
             fail(7);
-        }
-        if (1..100).contains(&DESKTOP_PAINT_TRACE.load(Ordering::Relaxed)) {
-            log(&[b"woven-shell: post-present"]);
         }
         if timed {
             let present_ticks = libwoven::ticks().saturating_sub(present_start);
