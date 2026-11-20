@@ -119,16 +119,41 @@ blew the 2-CPU Files-launch IPC bound; a correct migration must use the bounded
 
 ## 5. Icon grammar
 
-`ICON_GRAMMAR` fixes one geometry for all future icon artwork: a 24 px grid, a
-20 px keyline, a 2 px stroke, a 5 px corner radius and a 32 px minimum touch
-target. The four geometry invariants are asserted in a `const` block, so a
-malformed grammar cannot compile into a guest image.
+`ICON_GRAMMAR` fixes one geometry for all icon artwork: a 24 px grid, a 20 px
+keyline, a 2 px stroke, a 6 px corner radius (grid/4, chosen so the shell tile's
+established `size / 4` rounding is reproduced exactly) and a 32 px minimum
+touch target. It also owns the tile's internal proportions (3 px inner inset,
+and divisors of 5/10/4/3/2 for inner height, inner radius and glyph origin/span).
+All invariants are asserted in a `const` block, so a malformed grammar cannot
+compile into a guest image.
+
+`IconGrammar::metrics(size)` derives one `IconMetrics` value from those rules.
+A regression test locks the four sizes actually used by WovenShell (14, 32, 40
+and 48 px) to their pre-convergence numbers, so this is a *single-source*
+refactor, not a visual redesign.
 
 `SemanticPalette::icon_ink` maps `icons::IconState` to one ink per state:
-Normal → `text`, Active → `accent`, Disabled → `disabled`. WovenHat currently
-has two icon producers — the shared 8×8 code-native `libwoven::icons` pack and
-the shell-local 12-app vector tile painter — with different colors and grids.
-This grammar is the convergence target; neither producer is changed in v1.
+Normal → `text`, Active → `accent`, Disabled → `disabled`.
+
+### Convergence completed 2026-11-20
+
+The two producers now share one contract:
+
+| Concern | Shared source | Previous duplication |
+|---|---|---|
+| Identity | `icons::IconId` (13 variants, pack v2) | shell-local 13-variant `AppIcon` enum |
+| Name mapping | `IconId::from_app_name` | shell-local `app_icon()` match |
+| Tile colors | `icons::IconAppearance::for_id` | shell-local `icon_colors()` table |
+| Geometry | `design_system::ICON_GRAMMAR::metrics` | shell-local ad-hoc division |
+| State ink | `SemanticPalette::icon_ink` | `IconTheme::ink` hard-coded values |
+
+The shell's `AppIcon` is now a type alias of `IconId`, its `app_icon()` delegates
+to the shared mapping, and `draw_app_icon()` reads the shared appearance and
+geometry. `libwoven::icons` gained masks for the five identities that were
+previously shell-only (Editor, Update, Ai, Monitor, Installer), so the 8×8 pack
+covers the whole catalog. `IconTheme::ink` now delegates to the palette contract.
+`main.rs` and every call site are unchanged, and the accepted tile pixels are
+locked by tests.
 
 The code-native, no-untrusted-SVG boundary is retained: there is no parser for
 external icon files at this layer.
@@ -141,22 +166,41 @@ is requested. Motion is ordered and asserted in host tests.
 
 ## Validation evidence (2026-11-20)
 
+Foundation increment:
+
 - `cargo test -p libwoven --lib design_system` — 7/7 new tests passed.
-- `cargo test -p libwoven --lib` — 250 passed, 0 failed, 1 pre-existing ignored.
-- `cargo clippy -p libwoven --all-targets -- -D warnings` — clean.
+- `cargo clippy -p libwoven --all-targets -- -D warnings` — clean at that time.
 - `cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings` —
   clean (confirms `no_std`/freestanding compatibility).
 
-No QEMU run was performed because no rendering behavior changed. Desktop
-integration will require the normal 1/2/4-CPU qualification chain.
+Icon convergence increment:
+
+- `cargo test -p libwoven --lib` — 253 passed, 0 failed, 1 pre-existing ignored
+  (6 new tests across `icons` and `design_system`).
+- `cargo clippy -p libwoven --lib -- -D warnings` — clean.
+- `cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings` — clean.
+- `cargo build --target x86_64-unknown-none` in `apps/woven-shell` — clean.
+- `cargo clippy --target x86_64-unknown-none -- -D warnings` in
+  `apps/woven-shell` — clean.
+
+`cargo clippy -p libwoven --all-targets -- -D warnings` is currently blocked by
+three pre-existing `unnecessary_cast` errors in `libwoven/tests/ttf_visual.rs`,
+a file introduced by concurrent font work after the foundation increment. It is
+not part of this change and was left for its owner.
+
+No QEMU run was performed for the design system or icon convergence: no call
+site changed behavior and the accepted tile geometry is pinned by exact-value
+tests. The concurrent owner recorded independent 1/2/4-CPU desktop qualification
+results separately. Desktop integration of new visual values still requires the
+normal qualification chain.
 
 ## Next prerequisites
 
-1. Converge the 8×8 pack and shell tile painter onto `ICON_GRAMMAR` and one
-   `icon_ink` source (isolated, host-testable).
-2. Generate weave-family wallpaper variants as bounded BMPs for the existing
+1. Generate weave-family wallpaper variants as bounded BMPs for the existing
    VFS staging path (no new syscall or decoder).
-3. Migrate type call sites to `TypeRole` leading with the bounded glyph cache,
+2. Migrate type call sites to `TypeRole` leading with the bounded glyph cache,
    then re-run the full 1/2/4-CPU desktop qualification.
-4. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
+3. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
    gated change with its own pixel-reference evidence.
+4. Resolve the `ttf_visual.rs` all-targets Clippy errors in the font work before
+   the full gate is used as a release claim again.

@@ -18,6 +18,28 @@ actively writing it. `libwoven/src/lib.rs` also contains that owner's
 in-progress `pub mod design_system;` line alongside this session's font
 documentation correction; stage it only with their agreement.
 
+## OpenCode - Icon grammar convergence (2026-11-20)
+
+Converged both icon producers onto one contract, scoped to `libwoven/src/icons.rs`,
+`libwoven/src/design_system.rs`, `apps/woven-shell/src/icons.rs` and the design
+system docs. `main.rs` was NOT touched: `app_icon()` and `draw_app_icon()` keep
+their signatures and all four call sites are unchanged.
+
+`IconId` is now the single 13-variant catalog (pack v2) with `from_app_name`;
+`IconAppearance` is the single tile-color table; `IconGrammar::metrics()` is the
+single geometry source; `SemanticPalette::icon_ink` is the single state-ink map
+(and `IconTheme::ink` now delegates to it). The shell `AppIcon` is an alias of
+`IconId`. The 8×8 pack gained masks for the five previously shell-only apps.
+
+This is a pixel-preserving refactor, not a redesign: an exact-value test locks
+the accepted tile geometry at sizes 14/32/40/48 to its pre-change numbers.
+
+Validation: 253 libwoven lib tests pass; lib-only and freestanding target Clippy
+clean; woven-shell target build and Clippy clean. `libwoven --all-targets` Clippy
+is currently blocked by three pre-existing `unnecessary_cast` errors in
+`libwoven/tests/ttf_visual.rs` from the concurrent font work — left for its owner.
+No QEMU claim is made from this increment.
+
 ## OpenCode - WovenHat Design System foundation (2026-11-20)
 
 User authorized a full graphics/font/icon design role and chose: refine the

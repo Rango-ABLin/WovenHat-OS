@@ -329,16 +329,32 @@ pub struct IconGrammar {
     pub grid: i32,
     pub keyline: i32,
     pub stroke: i32,
+    /// Corner radius in grid units. 6 of 24 reproduces the shell tile's
+    /// established `size / 4` rounding exactly.
     pub corner_radius: i32,
     pub touch_target: i32,
+    /// Fixed-pixel inset of the tile's top ink bar.
+    pub inner_inset: i32,
+    /// Divisors that express the tile's internal proportions.
+    pub inner_height_divisor: i32,
+    pub inner_radius_divisor: i32,
+    pub glyph_left_divisor: i32,
+    pub glyph_top_divisor: i32,
+    pub glyph_span_divisor: i32,
 }
 
 pub const ICON_GRAMMAR: IconGrammar = IconGrammar {
     grid: 24,
     keyline: 20,
     stroke: 2,
-    corner_radius: 5,
+    corner_radius: 6,
     touch_target: 32,
+    inner_inset: 3,
+    inner_height_divisor: 5,
+    inner_radius_divisor: 10,
+    glyph_left_divisor: 4,
+    glyph_top_divisor: 3,
+    glyph_span_divisor: 2,
 };
 
 // Geometry invariants are checked at compile time, so no malformed grammar
@@ -348,7 +364,59 @@ const _: () = {
     assert!(ICON_GRAMMAR.stroke > 0 && ICON_GRAMMAR.stroke * 2 <= ICON_GRAMMAR.keyline);
     assert!(ICON_GRAMMAR.corner_radius * 2 <= ICON_GRAMMAR.grid);
     assert!(ICON_GRAMMAR.touch_target >= ICON_GRAMMAR.grid);
+    assert!(ICON_GRAMMAR.inner_inset > 0);
+    assert!(ICON_GRAMMAR.inner_height_divisor > 0);
+    assert!(ICON_GRAMMAR.inner_radius_divisor > 0);
+    assert!(ICON_GRAMMAR.glyph_left_divisor > 0);
+    assert!(ICON_GRAMMAR.glyph_top_divisor > 0);
+    assert!(ICON_GRAMMAR.glyph_span_divisor > 0);
 };
+
+/// Concrete tile geometry for one pixel size, derived solely from
+/// [`ICON_GRAMMAR`]. Both icon producers use this instead of private ad-hoc
+/// division, so they cannot drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IconMetrics {
+    pub size: i32,
+    pub radius: usize,
+    pub inner_inset: i32,
+    pub inner_height: i32,
+    pub inner_radius: usize,
+    pub glyph_left: i32,
+    pub glyph_top: i32,
+    pub glyph_span: i32,
+}
+
+impl IconGrammar {
+    /// Derive tile geometry for `size`, preserving the shell's accepted pixel
+    /// layout (saturating math keeps degenerate sizes fail-closed).
+    pub const fn metrics(self, size: i32) -> IconMetrics {
+        // Explicit branches instead of Ord::min/max: this toolchain does not
+        // allow conditionally-const comparison methods in const functions.
+        let raw_radius = size.saturating_mul(self.corner_radius) / self.grid;
+        let radius = if raw_radius < 1 { 1 } else { raw_radius } as usize;
+        let half = size / 2;
+        let inset = if self.inner_inset < half { self.inner_inset } else { half };
+        let raw_height = size / self.inner_height_divisor;
+        let floored_height = if raw_height < 3 { 3 } else { raw_height };
+        let inner_height = if floored_height > size { size } else { floored_height };
+        let raw_radius_inner = size / self.inner_radius_divisor;
+        let inner_radius = if raw_radius_inner < 2 { 2 } else { raw_radius_inner } as usize;
+        let raw_span = size / self.glyph_span_divisor;
+        let floored_span = if raw_span < 4 { 4 } else { raw_span };
+        let glyph_span = if floored_span > size { size } else { floored_span };
+        IconMetrics {
+            size,
+            radius,
+            inner_inset: inset,
+            inner_height,
+            inner_radius,
+            glyph_left: size / self.glyph_left_divisor,
+            glyph_top: size / self.glyph_top_divisor,
+            glyph_span,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 6. Motion
@@ -484,6 +552,29 @@ mod tests {
         assert_eq!(p.icon_ink(crate::icons::IconState::Normal), p.text);
         assert_eq!(p.icon_ink(crate::icons::IconState::Active), p.accent);
         assert_eq!(p.icon_ink(crate::icons::IconState::Disabled), p.disabled);
+
+        // The four sizes actually used by WovenShell. These numbers are the
+        // accepted tile layout; a future refactor must not silently shift them.
+        let expected = [
+            (14, 3, 3, 2, 3, 4, 7),
+            (32, 8, 6, 3, 8, 10, 16),
+            (40, 10, 8, 4, 10, 13, 20),
+            (48, 12, 9, 4, 12, 16, 24),
+        ];
+        for (size, radius, inner_h, inner_r, left, top, span) in expected {
+            let m = ICON_GRAMMAR.metrics(size);
+            assert_eq!(m.size, size);
+            assert_eq!(m.radius, radius);
+            assert_eq!(m.inner_height, inner_h);
+            assert_eq!(m.inner_radius, inner_r);
+            assert_eq!(m.glyph_left, left);
+            assert_eq!(m.glyph_top, top);
+            assert_eq!(m.glyph_span, span);
+            assert!(m.inner_height <= m.size && m.glyph_span <= m.size);
+        }
+        // Degenerate sizes stay bounded rather than underflowing.
+        let tiny = ICON_GRAMMAR.metrics(2);
+        assert!(tiny.inner_inset <= 1 && tiny.inner_height <= 2 && tiny.glyph_span <= 2);
     }
 
     #[test]
