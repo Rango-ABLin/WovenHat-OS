@@ -213,16 +213,28 @@ surface only (`render_lock` in `apps/woven-shell`):
 - The chosen account row uses accent fill with `on_accent` ink.
 
 The qualification harness now captures `sign-in.ppm` before PIN injection as a
-reusable visual baseline. Real 1-CPU VirtIO-GPU captures confirmed the legibility
-improvements, **but the headline "Sign in" loses glyphs at 20 px in the current
-libwoven glyph state**. A control run with the pilot changes stashed shows the
-identical corruption, so it is not caused by this pilot. All three evidence runs
-reach sign-in and then hit the pre-existing `overview` framebuffer flake.
+reusable visual baseline. Early captures exposed a separate defect: `S` and `g`
+vanished from the 20 px headline because `Canvas::draw_text_proportional` did
+not treat an inkless cached real glyph as a miss, unlike `draw_text_ttf`. That
+fallback has now been added and baseline-aligned to the real face's ascent
+(commits `487eb003`, `dcf21259`). All characters render on one line; complex
+outlines that still overflow the accepted 64-point `Path` budget use the bounded
+bitmap substitute, which is the project's accepted design.
 
-Visual acceptance of the pilot is therefore **blocked on the glyph owner**
-restoring 20 px outlines; no pixel oracle has been approved and no QEMU pass is
-claimed. The pilot is committed as implementation plus evidence, not as an
-accepted visual change. See `docs/agent-coordination.md` for evidence paths.
+The verified capture was approved as the gate reference and is enforced by
+`docs/graphics/reference-screenshots/baseline-manifest.json`. Evidence:
+
+- Fresh 1-CPU `--display virtio-vga` run: `sign-in.ppm` vs approved reference —
+  **0 / 1,024,000 changed pixels at 0.1% tolerance (PASS)**. The only gate failure
+  is the pre-existing `overview` framebuffer flake.
+- Negative control: the pre-fix capture differs by **25.54%** (261,508 pixels),
+  which the comparator rejects — so the baseline is a real regression gate, not
+  a decorative report.
+
+Other scenes are explicitly deferred in the manifest: the signed-in desktop has
+a live clock, the overview capture is timing-flaky, and later frames are
+input-dependent. The baseline set is therefore one deterministic, approved
+scene plus a mechanism ready for more.
 
 ## Validation evidence (2026-11-20)
 
@@ -266,16 +278,16 @@ values still requires the normal qualification chain.
 
 ## Next prerequisites
 
-1. Unblock the sign-in pilot: restore the missing 20 px glyph outlines in
-   libwoven, re-capture `sign-in.ppm`, and only then approve a visual oracle and
-   run the full 1/2/4-CPU desktop qualification. Do not treat the current
-   corrupted captures as an accepted baseline.
-2. Migrate further type call sites to `TypeRole` leading with the bounded glyph
+1. Resolve the pre-existing `overview` framebuffer flake so the full desktop
+   journey can pass 1/2/4 CPUs with the sign-in baseline enforced.
+2. Approve further deterministic scenes when available (for example a fixed-time
+   lock screen) and add them to `baseline-manifest.json`.
+3. Migrate further type call sites to `TypeRole` leading with the bounded glyph
    cache, then re-run the full 1/2/4-CPU desktop qualification.
-3. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
+4. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
    gated change with its own pixel-reference evidence.
-4. When a wallpaper selector is wanted, stage these CC0 assets through the
+5. When a wallpaper selector is wanted, stage these CC0 assets through the
    existing `vfs::create_read_only` path and add a gated shell pick-list; that
    is a separate, QEMU-qualified integration, not part of this asset increment.
-5. Keep the all-targets Clippy check in the full gate; the transient
+6. Keep the all-targets Clippy check in the full gate; the transient
    `ttf_visual.rs` errors from concurrent font work are resolved.

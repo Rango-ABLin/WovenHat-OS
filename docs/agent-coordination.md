@@ -1,3 +1,24 @@
+## OpenCode - glyph fallback fixed and sign-in baseline approved (2026-11-20)
+
+Applied the inkless-mask miss check to `Canvas::draw_text_proportional` and
+baseline-aligned the bitmap substitute to the face's ascent (commits `487eb003`,
+`dcf21259`). Verified in a clean worktree at HEAD because the owner's kernel
+edits were transiently unbuildable. Real 1-CPU `--display virtio-vga` capture:
+all headline characters render on one line; `S` and `g` use the bounded bitmap
+substitute because their outlines still exceed the accepted 64-point `Path`.
+
+Approved that verified capture as `docs/graphics/reference-screenshots/
+sign-in-1280x800-virtio-vga.ppm` with a `baseline-manifest.json` of approved and
+deferred scenes. `scripts/test-desktop-qualification.py` now enforces every
+approved baseline by default (debug opt-out `--no-reference`), persists
+per-scene results, and fails on matching-dimension pixel differences.
+
+Evidence: fresh run `desktop-qualification-1795175770416163600` (in the now
+removed verification worktree) reported `sign-in.ppm` **0/1,024,000 changed
+pixels, PASS**; the only gate failure was the pre-existing `overview` flake.
+Negative control: the pre-fix capture differs by 25.54% and is rejected.
+No QEMU pass is claimed for the full journey while the overview flake remains.
+
 ## OpenCode - glyph fallback verification FAILED; precise cause (2026-11-20)
 
 Boot was unblocked by reverting the uncommitted diagnostic instrumentation in
