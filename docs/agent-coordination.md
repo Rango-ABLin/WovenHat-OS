@@ -1,3 +1,22 @@
+## OpenCode - F1/overview flake resolved (2026-11-20)
+
+Root cause: F1 delivery was never lost (IRQ scancode 0x3b, publish to the
+focus queue and shell receipt were all traced). The first overview paint
+re-rendered every app icon and label in every 320x40 tile and took 9-14 s
+under TCG, past the 5 s changed-frame budget, so the harness captured a stale
+frame and sent the search keys before the overview existed.
+
+Fix (commit `8811edac`, no timeout, pixel threshold or assertion changed):
+tile-intersection culling for the overview items; a lightweight app-coloured
+icon tile for the dense grid; a two-phase paint whose first frame publishes
+the panel/search and whose next frame fills the grid; a shell marker
+`woven-shell: overview frame ready` that the harness waits for before its
+unchanged materially-changed-frame assertion; separate input budgets for the
+app-launch and shell-compose phases. The harness's committed limits (20 s
+input, 60 s startup, 5 s frame) were restored after a concurrent edit raised
+them. Full real-QEMU journey **PASS on 1, 2 and 4 CPUs** with default limits:
+`audit-artifacts/progressive-1cpu`, `progressive-2cpu-r2`, `progressive-4cpu`.
+
 ## OpenCode - desktop qualification full journey repair (2026-11-20)
 
 Continuing my own desktop work on the three desktop-owned files

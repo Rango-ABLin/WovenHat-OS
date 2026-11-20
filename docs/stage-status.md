@@ -13290,3 +13290,14 @@ generation/replay-protected journal, rejects missing arguments, and has clean
 warning-denying check/Clippy results. Freestanding OS service deployment,
 policy authority integration, and independent security review remain open.
 
+
+## F1/overview desktop journey - 2026-11-20 - PASS (1/2/4 CPUs)
+
+Resolved the long-standing F1/overview flake without weakening any gate: the
+shell publishes `woven-shell: overview frame ready`, paints the dense app grid
+only after that first panel frame, culls overview items outside each tile, and
+uses lightweight app-coloured tiles in the grid. The harness waits for the
+marker before its unchanged frame-change assertion and budgets the client
+launch and shell compose phases separately. Committed timing limits remain
+20 s input / 60 s startup / 5 s frame. Full real QEMU desktop journey passes
+at 1, 2 and 4 CPUs (`audit-artifacts/progressive-{1cpu,2cpu-r2,4cpu}`).
