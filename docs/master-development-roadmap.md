@@ -13,8 +13,9 @@ shared DMA page with checked CPU/device ownership (`kernel/src/dma.rs`,
 `kernel/src/dma/ownership.rs`, gate `m5-dma-test`) and NVMe on the shared page
 (commit `6b8d793f`). NVMe migration is verified by the 1-CPU Stage 13.14
 storage gate. The file-mmap regression on master (`10740a4f`) is fixed in
-`kernel/src/userspace.rs` (commit `6d6a0b2b`). The rest of M5 is not started
-(see `docs/milestones/M5_TEST_RESULTS.md`).
+`kernel/src/userspace.rs` (commit `6d6a0b2b`). NVMe (`6b8d793f`) and AHCI
+(`da5bed49`) are on the shared page. 1-CPU AHCI storage gate PASS. The rest of
+M5 is not started (see `docs/milestones/M5_TEST_RESULTS.md`).
 
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
