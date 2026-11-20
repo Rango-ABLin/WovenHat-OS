@@ -72,43 +72,38 @@ pub fn draw_app_icon(
     icon: AppIcon,
     size: i32,
     selected: bool,
-    dpi_scale: f32,
 ) {
     let (fill, ink) = icon_colors(icon);
-    let effective_size = (size as f32 * dpi_scale) as i32;
-    let radius = ((effective_size / 4) as f32.max(1.0) as i32 / 4).max(1) as usize;
     // A rounded tile with a soft offset shadow, Fluent-style, instead of a
     // hard-edged square with a flat black square behind it. Uses the
     // shared `Renderer::shadow` primitive rather than a second hand-offset
     // `fill_rounded` call.
+    let radius = (size / 4).max(1) as usize;
     Renderer::new(canvas).shadow(
-        rect_of(Area::new(x, y, effective_size, effective_size)),
+        rect_of(Area::new(x, y, size, size)),
         1,
         2,
         radius,
         color_of(rgb(0, 0, 0)),
         72,
     );
-    fill_rounded(canvas, Area::new(x, y, effective_size, effective_size), radius, fill);
-    // Scale the inner icon proportionally for high-DPI
-    let effective_size = (size as f32 * dpi_scale) as i32;
-    let inner_size = ((effective_size / 5) as f32.max(3.0) as i32 / 10).max(2) as usize;
+    fill_rounded(canvas, Area::new(x, y, size, size), radius, fill);
     fill_rounded(
         canvas,
-        Area::new(x + 3 * dpi_scale as i32, y + 3 * dpi_scale as i32, effective_size - 6 * dpi_scale as i32, (effective_size / 5).max(3)),
-        inner_size,
+        Area::new(x + 3, y + 3, size - 6, (size / 5).max(3)),
+        (size / 10).max(2) as usize,
         ink,
     );
     if selected {
         outline(
             canvas,
-            Area::new(x - 1, y - 1, effective_size + 2, effective_size + 2),
+            Area::new(x - 1, y - 1, size + 2, size + 2),
             theme_accent(),
         );
     }
-    let left = (effective_size / 4) as i32;
-    let top = (effective_size / 3) as i32;
-    let span = (effective_size / 2).max(4);
+    let left = x + size / 4;
+    let top = y + size / 3;
+    let span = (size / 2).max(4);
     match icon {
         AppIcon::Files => {
             fill_rounded(canvas, Area::new(left, top - 2, span / 2 + 2, 5), 2, ink);
