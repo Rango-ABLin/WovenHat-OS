@@ -1,0 +1,30 @@
+{
+  "schema": "WOVENHAT-VISUAL-BASELINE-V1",
+  "description": "Approved-correct captures checked by scripts/test-desktop-qualification.py. Every listed entry becomes a hard gate failure on a matching-dimension pixel difference.",
+  "references": [
+    {
+      "capture": "sign-in.ppm",
+      "file": "sign-in-1280x800-virtio-vga.ppm",
+      "scene": "locked sign-in card before any input",
+      "display": "virtio-vga",
+      "resolution": "1280x800",
+      "tolerance_percent": 0.1,
+      "approved_utc": "2026-11-20",
+      "rationale": "Deterministic: no clock, no animation, no input-dependent state. Verified after restoring the inkless-glyph bitmap fallback in Canvas::draw_text_proportional; all headline characters render on one baseline."
+    }
+  ],
+  "deferred": [
+    {
+      "capture": "desktop-signed-in.ppm",
+      "reason": "Taskbar clock is wall-clock time, so the pixels are not deterministic across runs."
+    },
+    {
+      "capture": "activities-overview.ppm",
+      "reason": "Pre-existing materially-changed-framebuffer flake; the capture is timing-sensitive and not yet a stable oracle."
+    },
+    {
+      "capture": "files-window-open.ppm, files-pointer-click.ppm, files-keyboard-refresh.ppm, settings-window-open.ppm, settings-keyboard-refresh.ppm, terminal-window-open.ppm, terminal-keyboard-input.ppm, desktop-after-window-close.ppm",
+      "reason": "Input- and animation-dependent frames reached only after the overview step; approve individually once that flake is resolved."
+    }
+  ]
+}

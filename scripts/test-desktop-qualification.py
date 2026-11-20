@@ -34,6 +34,8 @@ from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REFERENCE_DIR = ROOT / "docs" / "graphics" / "reference-screenshots"
+BASELINE_MANIFEST = REFERENCE_DIR / "baseline-manifest.json"
 DEFAULT_QEMU = shutil.which("qemu-system-x86_64") or (
     r"C:\Program Files\qemu\qemu-system-x86_64.exe"
 )
@@ -462,6 +464,37 @@ def reap_process(process: subprocess.Popen[Any] | None) -> None:
         process.wait(timeout=10)
 
 
+def load_baseline_manifest() -> list[dict[str, Any]]:
+    """Read the committed visual-baseline list. A missing or malformed
+    manifest is not silently ignored: it produces a blocking reference result
+    below so an unapproved tree cannot quietly pass the gate."""
+    if not BASELINE_MANIFEST.is_file():
+        return [{
+            "capture": "sign-in.ppm",
+            "file": "",
+            "tolerance_percent": 0.1,
+            "reason": f"baseline manifest not found: {BASELINE_MANIFEST}",
+        }]
+    try:
+        document = json.loads(BASELINE_MANIFEST.read_text(encoding="utf-8"))
+        entries = document.get("references", [])
+    except (OSError, ValueError) as error:
+        return [{
+            "capture": "sign-in.ppm",
+            "file": "",
+            "tolerance_percent": 0.1,
+            "reason": f"baseline manifest unreadable: {error}",
+        }]
+    if not isinstance(entries, list):
+        return [{
+            "capture": "sign-in.ppm",
+            "file": "",
+            "tolerance_percent": 0.1,
+            "reason": "baseline manifest references is not a list",
+        }]
+    return entries
+
+
 def compare_against_reference(
     candidate: Path, reference: Path | None, tolerance_percent: float
 ) -> dict[str, Any] | None:
@@ -565,12 +598,26 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             baseline = output / "desktop-signed-in.ppm"
             capture_frame(qmp, baseline, time.monotonic() + args.frame_timeout, timings, "desktop")
             screenshots.append(baseline.name)
-            # Compare the sign-in baseline, not the signed-in desktop: that is
-            # the stable, locked surface the reference image documents.
-            reference_comparison = compare_against_reference(
-                sign_in, args.reference_image, args.reference_tolerance_percent
-            )
-            if reference_comparison is not None:
+            # Visual regressions are gate failures, not manual screenshots.
+            # Approved scenes come from the committed baseline manifest; an
+            # explicit --reference-image overrides it for focused experiments.
+            reference_comparison: dict[str, dict[str, Any]] = {}
+            if not args.no_reference:
+                if args.reference_image is not None:
+                    reference_comparison[sign_in.name] = compare_against_reference(
+                        sign_in, args.reference_image, args.reference_tolerance_percent
+                    )
+                else:
+                    for entry in load_baseline_manifest():
+                        candidate = output / entry["capture"]
+                        if not candidate.is_file():
+                            continue
+                        reference = REFERENCE_DIR / entry["file"]
+                        reference_comparison[entry["capture"]] = compare_against_reference(
+                            candidate, reference,
+                            entry.get("tolerance_percent", args.reference_tolerance_percent),
+                        )
+            if reference_comparison:
                 (output / "reference-comparison.json").write_text(
                     json.dumps(reference_comparison, indent=2) + "\n",
                     encoding="utf-8",
@@ -987,15 +1034,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--reference-image", type=Path, default=None,
-        help="optional approved reference image (PPM/PNG) to compare the captured "
-             "sign-in.ppm baseline against via scripts/compare-against-reference.py; "
-             "dimension mismatch is recorded but does not fail the gate, since a -vga std "
-             "capture and a virtio-gpu-captured reference may not share a resolution",
+        help="focused-experiment override: compare sign-in.ppm against this one "
+             "PPM/PNG instead of the committed baseline manifest",
+    )
+    parser.add_argument(
+        "--no-reference", action="store_true",
+        help="skip all visual baseline comparisons (debug only; a normal gate "
+             "enforces every approved scene in baseline-manifest.json)",
     )
     parser.add_argument(
         "--reference-tolerance-percent", type=float, default=0.1,
-        help="maximum fraction of differing pixels, as a percentage, still considered a pass "
-             "when --reference-image is given (default: 0.1)",
+        help="default tolerance for manifest entries without their own value "
+             "(default: 0.1 percent)",
     )
     args = parser.parse_args(argv)
     if args.timeout <= 0 or args.input_timeout <= 0 or args.frame_timeout <= 0:
@@ -1045,12 +1095,19 @@ def main(argv: list[str] | None = None) -> int:
             for name, value in evidence["timings_ms"].items()
             if name.startswith("frame_") and value > args.max_frame_ms
         ]
-        reference_comparison = evidence.get("reference_comparison")
+        reference_comparison = evidence.get("reference_comparison", {})
         reference_failures = []
-        if reference_comparison is not None and not reference_comparison["pass"] and (
-            "reason" not in reference_comparison or "dimension mismatch" not in reference_comparison["reason"]
-        ):
-            reference_failures = [f"reference image comparison failed: {reference_comparison}"]
+        for capture, comparison in reference_comparison.items():
+            if comparison["pass"]:
+                continue
+            reason = comparison.get("reason", "")
+            if "dimension mismatch" in reason:
+                # Recorded as an explicit incompatibility, not a regression:
+                # a -vga std capture cannot match a virtio-vga reference.
+                continue
+            reference_failures.append(
+                f"visual baseline failed for {capture}: {comparison}"
+            )
         failures = timing_failures + frame_failures + reference_failures
         base.update(evidence)
         base.update({"status": "FAIL" if failures else "PASS", "pass": not failures, "failures": failures})

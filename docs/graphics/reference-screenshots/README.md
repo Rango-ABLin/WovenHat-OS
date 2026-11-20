@@ -8,7 +8,8 @@ just manual inspection).
 
 ## Convention
 
-- One file per named scene, `<scene>-<capture-method>-<width>x<height>.png`.
+- One file per named scene, `<scene>-<width>x<height>-<capture-method>.png`
+  (or `.ppm` for P6 captures; the comparator accepts both).
 - Commit the image itself (small, bounded size — these are 640x480 or
   smaller desktop captures, not photographs).
 - When a change intentionally alters a captured scene's appearance
@@ -24,6 +25,14 @@ just manual inspection).
 
 ## Current references
 
+- `sign-in-1280x800-virtio-vga.ppm` — the locked sign-in card at 1280×800,
+  captured through a single `virtio-vga,id=gpu0` device with QMP
+  `screendump(device=gpu0, head=0)` before any input is injected. Approved
+  2026-11-20 after the proportional-text bitmap fallback was verified: every
+  headline character renders on one baseline. This is the active gate
+  reference listed in `baseline-manifest.json`; a matching-dimension pixel
+  difference fails the desktop qualification. PPM (P6) is used rather than PNG
+  so the comparator needs no Pillow installation.
 - `sign-in-virtio-gpu-640x480.png` — the WovenHat sign-in screen
   (navy-to-teal wallpaper with the diagonal weave motif, account picker,
   PIN prompt), captured 2026-11-03 through the virtio-gpu 2D presentation
