@@ -91,6 +91,10 @@ pub fn allocation_failed(remaining: u64, total: u64) {
     ALLOCATION_FAILURES.fetch_add(1, Ordering::Relaxed);
     if let Some(victim) = crate::task::select_oom_victim() {
         LAST_VICTIM.store(victim, Ordering::Release);
+        // Execute the deterministic OOM decision: terminate the selected victim.
+        // The allocator lock is not held on this path, and the victim is always
+        // a non-current task, so the kill cannot target the allocating context.
+        let _ = crate::task::kill_process(victim, 9);
     }
 }
 

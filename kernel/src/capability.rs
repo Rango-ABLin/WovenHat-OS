@@ -63,7 +63,6 @@ impl CapabilitySet {
             .with(Capability::FileRead)
             .with(Capability::FileWrite)
             .with(Capability::Ipc)
-            .with(Capability::TimerRead)
             .with(Capability::ProcessCreate)
             .with(Capability::NetworkIo)
             .with(Capability::StorageIo)

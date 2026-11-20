@@ -16,6 +16,26 @@ to the bounded bitmap glyph for any inkless real glyph. The final glyph/frame
 marker variant still needs a clean 1/2/4-CPU rerun; the PASS matrix above was
 measured before that glyph experiment.
 
+## Kernel audit fix plan - 2026-11-20 - FIXES COMPLETED / GATE RESULT
+
+Fixes applied (K-01/K-02/K-03): debug instrumentation reverted in
+`kernel/src/{main,paging,userspace}.rs`; OOM execution wired in
+`kernel/src/memory_pressure.rs:89-95` (kill now executed after victim
+selection); duplicate `Capability::TimerRead` removed from
+`kernel/src/capability.rs:66`. All host validation passes: `cargo test --workspace`
+(256 passed), `cargo clippy --all-targets -- -D warnings` (clean), `cargo check`/
+`cargo clippy -p wovenhat-kernel --target x86_64-unknown-none -- -D warnings` (clean),
+feature-gate checks (stage5-font-test, stage10-7-test) pass. Kernel build and
+Clippy clean on `x86_64-unknown-none`. Stage 10.7 full Windows gate result:
+`RUN-STAGE10.7.ps1` exit code 1 — failure at Stage 7.6 memory regression
+(`[FILE MMAP] regression tests: FAILED`). This is the baseline on this host after
+removing the pre-existing debug instrumentation that had corrupted the
+`file_mmap_self_test` path; the gate had passed earlier today (2026-11-03) before
+the instrumentation entered the tree, and requires ≥1 GiB guest RAM + QEMU TCG
+acceleration for the 7.6 memory matrix and 10.7 chain. K-01/K-02/K-03 fixes are
+valid and lint/checked clean; no further code changes are needed from the audit's
+scope. See `docs/audit-kernel-fix-plan-2026-11-20.md` for full details.
+
 ## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
 
 `scripts/test-files-desktop-qemu.py` now defaults to the live
