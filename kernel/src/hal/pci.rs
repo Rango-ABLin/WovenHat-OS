@@ -2946,7 +2946,7 @@ fn ecam_address_for(allocation: McfgAllocation, address: Address, offset: u16) -
 /// # Safety
 /// `port` must be a valid x86 I/O port (callers pass the fixed PCI
 /// CONFIG_ADDRESS/CONFIG_DATA ports). The read may have device-visible effects.
-unsafe fn inl(port: u16) -> u32 {
+pub(super) unsafe fn inl(port: u16) -> u32 {
     let value: u32;
     // SAFETY: `in eax, dx` reads one dword from the valid I/O port in `dx`;
     // `nomem` is correct as it touches no memory.
@@ -2959,7 +2959,7 @@ unsafe fn inl(port: u16) -> u32 {
 /// # Safety
 /// See [`inl`]: `port` must be a valid I/O port; the write may have
 /// device-visible effects.
-unsafe fn outl(port: u16, value: u32) {
+pub(super) unsafe fn outl(port: u16, value: u32) {
     // SAFETY: `out dx, eax` writes one dword to the valid I/O port in `dx`.
     unsafe {
         asm!("out dx, eax", in("dx") port, in("eax") value, options(nomem, nostack, preserves_flags));

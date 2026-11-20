@@ -12,7 +12,7 @@ use core::{
 
 use crate::{
     block::{BlockDevice, Error, SECTOR_SIZE},
-    dma::{DmaPage, NVME_ADMIN_PAGE_SIZE, NVME_NAMESPACE_PAGE_SIZE},
+    dma::DmaPage,
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
     paging,

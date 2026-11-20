@@ -64,6 +64,24 @@ was unreachable. It now has no `qemu-test` dependency, like
   denies warnings. The self-test now uses `len`, `is_empty` and
   `virtual_address`.
 
+## PCI/MSI-X interrupt hardening pass (2026-11-20)
+
+Findings and closed gaps from the M5 PCI/MSI-X baseline audit plus this pass:
+
+- End-of-interrupt: LAPIC EOI via the local IDT handler (`smp::eoi`) is the
+  delivery acknowledgement. `hal/pci/msi::ack_msi` no longer writes a PCI
+  config/MMIO EOI from a worker context.
+- MSI masking: added owned mask/unmask (`hal/pci/msi::mask_owned_msi`,
+  `hal/pci/msi::unmask_owned_msi`) with ownership, capability and per-vector
+  checks; capability-level enable mask for devices without per-vector masking.
+- MSI-X: enable path already programs masked entries then unmasked, and
+  disables/masks on quiesce; no code change required.
+- xHCI interrupt lifecycle: `xhci::start_input` stores the acquired lease,
+  unmask before enabling the interrupter, rolls back vector/waiter/lease on
+  failure; `xhci::shutdown` masks delivery, clears waiter and lease before
+  halting the controller.
+- Lint fix: removed unused NVMe DMA page-size imports in `kernel/src/nvme.rs`.
+
 ## Environment limits observed
 
 - C: drive ran out of space twice during builds. I removed only my own build

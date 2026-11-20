@@ -14,8 +14,13 @@ shared DMA page with checked CPU/device ownership (`kernel/src/dma.rs`,
 (commit `6b8d793f`). NVMe migration is verified by the 1-CPU Stage 13.14
 storage gate. The file-mmap regression on master (`10740a4f`) is fixed in
 `kernel/src/userspace.rs` (commit `6d6a0b2b`). NVMe (`6b8d793f`) and AHCI
-(`da5bed49`) are on the shared page. 1-CPU AHCI storage gate PASS. The rest of
-M5 is not started (see `docs/milestones/M5_TEST_RESULTS.md`).
+(`da5bed49`) are on the shared page. 1-CPU AHCI storage gate PASS. The
+PCI/MSI-X baseline audit landed
+(`docs/milestones/M5_PCI_MSIX_BASELINE_AUDIT.md`); this pass closed the EOI
+ack path (LAPIC EOI via the IDT stub), added owned MSI mask/unmask, and
+hardened the xHCI interrupt lifecycle. Stage 13.13 USB-input and Stage 13.12
+driver gates PASS at 1 CPU after the change. The rest of M5 is not started (see
+`docs/milestones/M5_TEST_RESULTS.md`).
 
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
