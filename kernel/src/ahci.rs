@@ -12,9 +12,10 @@ use core::{
 
 use crate::{
     block::{BlockDevice, Error, SECTOR_SIZE},
+    dma::DmaPage,
     hal::pci::{self, Address, BarKind},
     irq_lock::IrqMutex as Mutex,
-    memory, paging,
+    paging,
 };
 
 const AHCI_CLASS: u8 = 0x01;
@@ -72,50 +73,6 @@ pub enum InitError {
     UnsupportedDevice,
 }
 
-struct DmaPage {
-    physical: u64,
-    virtual_address: u64,
-}
-
-impl Drop for DmaPage {
-    fn drop(&mut self) {
-        if let Ok(frame) = x86_64::structures::paging::PhysFrame::from_start_address(
-            x86_64::PhysAddr::new(self.physical),
-        ) {
-            // A failed controller initialization must not permanently consume
-            // allocator frames.  Once the page owner is dropped, no command
-            // has been submitted that can still reference it.
-            let _ = memory::deallocate_frame(frame);
-        }
-    }
-}
-
-impl DmaPage {
-    fn allocate_zeroed() -> Option<Self> {
-        let frame = memory::allocate_contiguous_frames(1)?;
-        let physical = frame.start_address().as_u64();
-        let Some(offset) = paging::physical_memory_offset() else {
-            let _ = memory::deallocate_frame(frame);
-            return None;
-        };
-        let Some(virtual_address) = offset.checked_add(physical) else {
-            let _ = memory::deallocate_frame(frame);
-            return None;
-        };
-        // SAFETY: this page is exclusively owned by the AHCI driver.
-        unsafe { ptr::write_bytes(virtual_address as *mut u8, 0, PAGE_SIZE) };
-        Some(Self {
-            physical,
-            virtual_address,
-        })
-    }
-
-    fn bytes_mut(&mut self) -> &mut [u8; PAGE_SIZE] {
-        // SAFETY: controller access is serialized by CONTROLLER.
-        unsafe { &mut *(self.virtual_address as *mut [u8; PAGE_SIZE]) }
-    }
-}
-
 pub struct AhciDisk {
     address: Address,
     original_command: u16,
@@ -147,10 +104,17 @@ impl AhciDisk {
         mmio_write32(hba + HBA_GHC, ghc | GHC_AE)?;
         let implemented = mmio_read32(hba + HBA_PI)?;
 
-        let command_list = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let received_fis = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let command_table = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let transfer = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
+        let command_list = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let received_fis = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let command_table = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+        let transfer = DmaPage::allocate_zeroed().map_err(|_| InitError::DmaUnavailable)?;
+
+        // The controller, not Rust, writes the received FIS ring and command
+        // table, so those pages are device-shared throughout the controller's
+        // lifetime. The shared page has an explicit CPU-only owner, so hand them
+        // back with `hand_to_device` and note that teardown is needed.
+        let command_list_address = command_list.physical_address();
+        let received_fis_address = received_fis.physical_address();
 
         // Take each port over from the firmware, which may have stopped it
         // (so its signature reads all ones) or left its link in a
@@ -169,10 +133,10 @@ impl AhciDisk {
             if stop_engine(port).is_err() {
                 continue;
             }
-            mmio_write32(port + PX_CLB, command_list.physical as u32)?;
-            mmio_write32(port + PX_CLBU, (command_list.physical >> 32) as u32)?;
-            mmio_write32(port + PX_FB, received_fis.physical as u32)?;
-            mmio_write32(port + PX_FBU, (received_fis.physical >> 32) as u32)?;
+            mmio_write32(port + PX_CLB, command_list_address as u32)?;
+            mmio_write32(port + PX_CLBU, (command_list_address >> 32) as u32)?;
+            mmio_write32(port + PX_FB, received_fis_address as u32)?;
+            mmio_write32(port + PX_FBU, (received_fis_address >> 32) as u32)?;
             mmio_write32(port + PX_CMD, mmio_read32(port + PX_CMD)? | CMD_FRE)?;
             if !(link_active(port)? && mmio_read32(port + PX_SIG)? == SATA_SIG_ATA) {
                 reset_port(port)?;
@@ -227,12 +191,14 @@ impl AhciDisk {
         let flags = cfl | if write { 1 << 6 } else { 0 };
         header[0..2].copy_from_slice(&flags.to_le_bytes());
         header[2..4].copy_from_slice(&1_u16.to_le_bytes());
-        header[8..12].copy_from_slice(&(self.command_table.physical as u32).to_le_bytes());
-        header[12..16].copy_from_slice(&((self.command_table.physical >> 32) as u32).to_le_bytes());
+        let command_table_address = self.command_table.physical_address();
+        let transfer_address = self.transfer.physical_address();
+        header[8..12].copy_from_slice(&(command_table_address as u32).to_le_bytes());
+        header[12..16].copy_from_slice(&((command_table_address >> 32) as u32).to_le_bytes());
 
         let table = self.command_table.bytes_mut();
-        table[0x80..0x84].copy_from_slice(&(self.transfer.physical as u32).to_le_bytes());
-        table[0x84..0x88].copy_from_slice(&((self.transfer.physical >> 32) as u32).to_le_bytes());
+        table[0x80..0x84].copy_from_slice(&(transfer_address as u32).to_le_bytes());
+        table[0x84..0x88].copy_from_slice(&((transfer_address >> 32) as u32).to_le_bytes());
         table[0x8c..0x90].copy_from_slice(&((byte_count as u32).saturating_sub(1)).to_le_bytes());
     }
 

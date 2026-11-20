@@ -19,11 +19,13 @@ uncommitted in the worktree `C:\Users\banda\Documents\GitHub\WovenHat-OS-m5`.
 | Freestanding kernel check, Wi-Fi gate | `cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage13-9-test` | PASS (exit 0) on `10740a4f` with the change applied |
 | Warning-denying Clippy, M5 gate | `cargo clippy ... --features m5-dma-test -- -D warnings` | PASS |
 | Warning-denying Clippy, kernel `stage13-14-test` gate | `cargo clippy -p wovenhat-kernel ... --features stage13-14-test -- -D warnings` | PASS |
-| 1-CPU Stage 13.14 storage gate | `python scripts/test-stage13-14-storage.py --cpus 1` | PASS, exit 33, `[S13.14] NVMe/AHCI storage: PASSED`. Evidence: `audit-artifacts/stage13.14-nvme-1cpu-1795172062694030900/` |
-| M5 DMA QEMU gate, 1 / 2 / 4 CPUs (rerun after the NVMe migration) | `python scripts/test-m5-dma-qemu.py --cpus {1,2,4} --memory 4G` | PASS |
+| 1-CPU Stage 13.14 storage gate, NVMe | `python scripts/test-stage13-14-storage.py --cpus 1 --mode nvme` | PASS, exit 33, `[S13.14] NVMe/AHCI storage: PASSED`. Evidence: `audit-artifacts/stage13.14-nvme-1cpu-1795172062694030900/` |
+| 1-CPU Stage 13.14 storage gate, AHCI | `python scripts/test-stage13-14-storage.py --cpus 1 --mode ahci` | PASS, exit 33. Evidence: `audit-artifacts/stage13.14-ahci-1cpu-1795172451277936500/` |
+| M5 DMA QEMU gate, 1 / 2 / 4 CPUs | `python scripts/test-m5-dma-qemu.py --cpus {1,2,4} --memory 4G` | PASS |
 
 The file-mmap regression on `master` is fixed in `kernel/src/userspace.rs`
-(commit `6d6a0b2b`). The NVMe migration is commit `6b8d793f`.
+(commit `6d6a0b2b`). The NVMe migration is commit `6b8d793f`, the AHCI
+migration is in progress (`git log -1 --format=%H -- kernel/src/ahci.rs`).
 
 Not run in this slice: the 2 and 4 CPU runs of the Stage 13.12 gate,
 host `cargo test` for the full suite, `cargo clippy --all-targets`,

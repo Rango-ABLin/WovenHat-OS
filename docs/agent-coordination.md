@@ -13,6 +13,26 @@ QEMU: 1-CPU Stage 13.14 storage gate PASS, evidence
 M5 DMA gate still passes at 1/2/4 CPUs (`audit-artifacts/m5-dma-{1,2,4}cpu-*`).
 Claim of the M5 DMA slice from the older note is superseded.
 
+## OpenCode - M5AHCIQ: AHCI onto the shared DMA page (2026-11-20)
+
+Mechanical type swap on `kernel/src/ahci.rs`. The local `DmaPage` type is
+removed. `AhciDisk` now holds four `dma::DmaPage` values: `command_list`,
+`_received_fis`, `command_table`, `transfer`. Doorbell writes use
+`physical_address()`; `prepare_command` and the FIS writes use
+`bytes_mut()` and `physical_address()`.
+
+Result, both commands pass on this branch (exit 0):
+`cargo check -p wovenhat-kernel ... --features stage13-14-test`
+and `cargo clippy ... --features stage13-14-test -- -D warnings`.
+1-CPU Stage 13.14 storage gate PASS, evidence
+`audit-artifacts/stage13.14-ahci-1cpu-1795172451277936500`
+(mount, write, remount, read-back from the disk).
+M5 DMA gate still passes at 1/2/4 CPUs.
+
+Note: AHCI command lists, FIS receive rings and command tables are
+device-shared forever, so `hand_to_device` is not called for them. Only the
+transfer page could use it, and it keeps the old release/acquire fences.
+
 ## OpenCode - M5 hardware qualification: shared DMA slice (2026-11-20)
 
 Claimed for M5 (branch `m5/hardware-qualification`, worktree
