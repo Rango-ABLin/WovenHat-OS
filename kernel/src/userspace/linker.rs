@@ -759,6 +759,7 @@ pub(super) fn load_with_geometry(
             lifecycle_trampoline: 0,
             lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
             lazy_binding_count: 0,
+            large_mapping: None,
         },
         stack_mapped: false,
         template_mapped: None,

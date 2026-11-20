@@ -4731,8 +4731,17 @@ pub fn setup_argv_stack(
 
 const USER_MMAP_START: u64 = USER_REGION_START + 0x0e_0000;
 const USER_MMAP_STRIDE: u64 = 0x10_000;
-const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
+pub(crate) const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
 const USER_MMAP_ARENA_SIZE: u64 = MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE;
+
+/// A single read-only window for staged assets that are larger than one mmap
+/// slot (the bundled NotoSans TTF is ~607 KiB). It sits well above the stack's
+/// bounded `USER_REGION_START + 256 MiB` ceiling, so no ASLR draw can overlap
+/// it, and no other mapping path allocates from this range.
+const USER_LARGE_MAP_START: u64 = USER_REGION_START + 0x2000_0000;
+/// Hard bound on the one large mapping a process may install. Chosen to cover
+/// the staged font with headroom while keeping the copy and teardown bounded.
+pub const LARGE_MAP_MAX_SIZE: usize = 1024 * 1024;
 
 /// Keep the mmap arena, optional TLS reservation, guard page and stack
 /// disjoint. Independent ASLR draws must not be allowed to overlap.
@@ -4889,6 +4898,13 @@ impl DynamicModule {
     pub const EMPTY: Self = Self { generation: 1, live: false, references: 0, mapping_start: 0, mapping_size: 0 };
 }
 
+/// The dedicated read-only large-asset window installed in an address space.
+#[derive(Clone, Copy)]
+pub struct LargeFileMapping {
+    pub address: u64,
+    pub size: usize,
+}
+
 #[derive(Clone, Copy)]
 pub struct AddressSpace {
     paging: paging::AddressSpace,
@@ -4907,10 +4923,15 @@ pub struct AddressSpace {
     pub(crate) lifecycle_trampoline: u64,
     pub(crate) lazy_bindings: [LazyBinding; MAX_LAZY_BINDINGS],
     pub(crate) lazy_binding_count: usize,
+    large_mapping: Option<LargeFileMapping>,
 }
 
 impl AddressSpace {
     pub fn mmap_base(self) -> u64 { self.mmap_base }
+    pub fn large_mapping(self) -> Option<LargeFileMapping> { self.large_mapping }
+    pub fn set_large_mapping(&mut self, mapping: Option<LargeFileMapping>) {
+        self.large_mapping = mapping;
+    }
     pub fn dynamic_tls_module_range(self, module: u64, _tls_base: u64) -> Option<(u64, usize)> {
         let index = usize::try_from(module.checked_sub(1)?).ok()?;
         let descriptor = self.dynamic_modules.get(index)?;
@@ -6151,6 +6172,65 @@ pub fn map_file_lazy(
     })
 }
 
+/// Install one bounded, read-only window for a staged asset larger than an
+/// ordinary mapping slot (the system font). The bytes are copied once, so no
+/// lazy fault record or file reference outlives the call; the window is owned
+/// by the address space and reclaimed with it. A second large mapping is
+/// rejected rather than silently replacing the first.
+pub fn map_file_large_readonly(
+    address_space: AddressSpace,
+    file: crate::vfs::OpenFileId,
+    offset: usize,
+    length: usize,
+) -> Option<LargeFileMapping> {
+    if length == 0
+        || length > LARGE_MAP_MAX_SIZE
+        || !offset.is_multiple_of(4096)
+        || address_space.large_mapping.is_some()
+    {
+        return None;
+    }
+    let size = length.checked_add(4095)? & !4095;
+    let file_size = crate::vfs::file_size(file).ok()?;
+    if offset.checked_add(length)? > file_size {
+        return None;
+    }
+    let address = USER_LARGE_MAP_START;
+    if !paging::user_range_is_unmapped_in(address_space.paging, address, size)
+        || paging::map_user_range_in(address_space.paging, address, size, false, false).is_err()
+    {
+        return None;
+    }
+    if paging::zero_user_range_in(address_space.paging, address, size).is_err() {
+        let _ = paging::unmap_user_range_in(address_space.paging, address, size);
+        return None;
+    }
+    let mut buffer = [0; 1024];
+    let mut copied = 0;
+    while copied < length {
+        let count = buffer.len().min(length - copied);
+        if crate::vfs::read_at(file, offset + copied, &mut buffer[..count]) != Ok(count)
+            || paging::write_user_bytes(
+                address_space.paging,
+                address + copied as u64,
+                &buffer[..count],
+            )
+            .is_err()
+        {
+            let _ = paging::unmap_user_range_in(address_space.paging, address, size);
+            return None;
+        }
+        copied += count;
+    }
+    Some(LargeFileMapping { address, size })
+}
+
+/// Release a large mapping explicitly. Process teardown also reclaims it via
+/// `destroy`, but an explicit munmap must not leave it mapped.
+pub fn unmap_large(address_space: AddressSpace, mapping: LargeFileMapping) -> bool {
+    paging::unmap_user_range_in(address_space.paging, mapping.address, mapping.size).is_ok()
+}
+
 pub fn map_file_shared(
     space: AddressSpace,
     slot: usize,
@@ -6386,7 +6466,7 @@ pub fn destroy_process_address_space(
     destroy(address_space)
 }
 pub fn destroy(address_space: AddressSpace) -> bool {
-    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 3 + MAX_DYNAMIC_MODULES];
+    let mut ranges = [(0, 0); MAX_IMAGE_MAPPINGS + 4 + MAX_DYNAMIC_MODULES];
     ranges[0] = (address_space.stack_base, UserStack::SIZE);
     for (range, mapping) in ranges[1..].iter_mut().zip(
         address_space.mappings[..address_space.mapping_count]
@@ -6406,6 +6486,10 @@ pub fn destroy(address_space: AddressSpace) -> bool {
     }
     for module in address_space.dynamic_modules.iter().filter(|module| module.live) {
         ranges[count] = (module.mapping_start, module.mapping_size);
+        count += 1;
+    }
+    if let Some(large) = address_space.large_mapping {
+        ranges[count] = (large.address, large.size);
         count += 1;
     }
     paging::destroy_user_address_space(address_space.paging, &ranges[..count]).is_ok()
@@ -6432,8 +6516,9 @@ pub fn clone_address_space(
         lifecycle_trampoline: source.lifecycle_trampoline,
         lazy_bindings: source.lazy_bindings,
         lazy_binding_count: source.lazy_binding_count,
+        large_mapping: source.large_mapping,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 4 + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -6564,6 +6649,23 @@ pub fn clone_address_space(
         }
         release_clone(destination.paging, &completed[..completed_count]);
         return None;
+    }
+    // The large asset window is read-only in both spaces; share its frames
+    // instead of copying a second font image on fork.
+    if let Some(large) = source.large_mapping {
+        if paging::share_user_range_in(
+            source.paging,
+            destination_paging,
+            large.address,
+            large.size,
+            false,
+            false,
+        )
+        .is_err()
+        {
+            release_clone(destination_paging, &completed[..completed_count]);
+            return None;
+        }
     }
     Some(destination)
 }
@@ -6788,6 +6890,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             lifecycle_trampoline: 0,
             lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
             lazy_binding_count: 0,
+            large_mapping: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6851,6 +6954,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             lifecycle_trampoline: 0,
             lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
             lazy_binding_count: 0,
+            large_mapping: None,
         };
         let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
         if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6905,6 +7009,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         lifecycle_trampoline: 0,
         lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
         lazy_binding_count: 0,
+        large_mapping: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -6999,6 +7104,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         lifecycle_trampoline: 0,
         lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
         lazy_binding_count: 0,
+        large_mapping: None,
     };
     // Keep a teardown anchor while sparse mapping pages are removed individually.
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
@@ -7094,6 +7200,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         lifecycle_trampoline: 0,
         lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
         lazy_binding_count: 0,
+        large_mapping: None,
     };
     let anchor = USER_MMAP_START + 15 * USER_MMAP_STRIDE;
     if paging::map_user_range_in(root, anchor, 4096, false, false).is_err() {
@@ -7173,6 +7280,7 @@ pub fn file_mmap_self_test() -> bool {
         lifecycle_trampoline: 0,
         lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
         lazy_binding_count: 0,
+        large_mapping: None,
     };
     let _ = crate::vfs::seek(file, 3);
     let Some(mapping) = map_file_private(space, 0, file, 0, DATA.len(), false) else {
@@ -7216,6 +7324,48 @@ pub fn file_mmap_self_test() -> bool {
     passed &= paging::read_user_bytes_in(root, mapping.address, &mut byte).is_ok() && byte == [5];
     passed &= paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]).is_ok();
     passed &= crate::vfs::remove(PATH).is_ok();
+
+    // The read-only large-asset window: the real system-font path requests
+    // more than one mapping slot and must get one contiguous, non-writable
+    // span with the file's exact bytes and a bounded second-map rejection.
+    const LARGE_PATH: &str = "/tmp/large-file-mmap-test";
+    static LARGE_DATA: [u8; USER_MMAP_MAX_SIZE + 7] = {
+        let mut data = [0x5a; USER_MMAP_MAX_SIZE + 7];
+        data[3] = 0xa5;
+        data
+    };
+    let large_ok = if crate::vfs::stat(LARGE_PATH).is_err()
+        && crate::vfs::write_file(LARGE_PATH, &LARGE_DATA).is_ok()
+    {
+        if let Ok(large_file) = crate::vfs::open(LARGE_PATH) {
+            let large = map_file_large_readonly(space, large_file, 0, LARGE_DATA.len());
+            let ok = large.is_some_and(|mapping| {
+                let mut large_space = space;
+                large_space.set_large_mapping(Some(mapping));
+                let mut bytes = [0; 4];
+                paging::user_range_has_protection_in(
+                    root,
+                    mapping.address,
+                    mapping.size,
+                    false,
+                    false,
+                ) && paging::read_user_bytes_in(root, mapping.address + 3, &mut bytes).is_ok()
+                    && bytes == [0xa5, 0x5a, 0x5a, 0x5a]
+                    && map_file_large_readonly(large_space, large_file, 0, LARGE_DATA.len()).is_none()
+                    && map_file_large_readonly(large_space, large_file, 1, 4096).is_none()
+                    && map_file_large_readonly(large_space, large_file, 0, 0).is_none()
+                    && unmap_large(space, mapping)
+            });
+            let _ = crate::vfs::close_open_file(large_file);
+            ok
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    passed &= large_ok;
+    let _ = crate::vfs::remove(LARGE_PATH);
     passed
 }
 

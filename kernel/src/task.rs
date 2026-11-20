@@ -4496,6 +4496,13 @@ pub fn mmap_file_current(
     let descriptor = usize::try_from(descriptor).map_err(|_| MemoryError::BadDescriptor)?;
     let length = usize::try_from(length).map_err(|_| MemoryError::InvalidLength)?;
     let offset = usize::try_from(offset).map_err(|_| MemoryError::InvalidLength)?;
+    // A mapping larger than one slot goes through the dedicated read-only
+    // asset window. Never let a writable or shared request silently use it:
+    // that would bypass the per-slot dirty/swap bookkeeping.
+    let large = length > userspace::USER_MMAP_MAX_SIZE;
+    if large && (!lazy || writable || shared) {
+        return Err(MemoryError::InvalidLength);
+    }
     let (index, slot, address_space, file, file_scope) = {
         let processes = process_table_lock();
         let index = processes
@@ -4512,11 +4519,17 @@ pub fn mmap_file_current(
             return Err(MemoryError::PermissionDenied);
         };
 
-        let slot = process
-            .memory_mappings
-            .iter()
-            .position(Option::is_none)
-            .ok_or(MemoryError::Full)?;
+        let slot = if large {
+            None
+        } else {
+            Some(
+                process
+                    .memory_mappings
+                    .iter()
+                    .position(Option::is_none)
+                    .ok_or(MemoryError::Full)?,
+            )
+        };
         (
             index,
             slot,
@@ -4525,6 +4538,25 @@ pub fn mmap_file_current(
             scope,
         )
     };
+    if large {
+        let mapping = userspace::map_file_large_readonly(address_space, file, offset, length)
+            .ok_or(MemoryError::MappingFailed)?;
+        let mut processes = process_table_lock();
+        if let Some(process) = processes[index]
+            .as_mut()
+            .filter(|p| p.id.as_u64() == current_process_id())
+        {
+            let mut space = process.address_space.ok_or(MemoryError::NoProcess)?;
+            if space.large_mapping().is_none() {
+                space.set_large_mapping(Some(mapping));
+                process.address_space = Some(space);
+                return Ok(mapping.address);
+            }
+        }
+        let _ = userspace::unmap_large(address_space, mapping);
+        return Err(MemoryError::Full);
+    }
+    let slot = slot.ok_or(MemoryError::Full)?;
     let mapping = if shared {
         userspace::map_file_shared(address_space, slot, file, offset, length)
     } else if lazy {
@@ -4597,6 +4629,35 @@ pub fn munmap_current(address: u64, length: u64) -> Result<(), MemoryError> {
         .map(|size| size & !4095)
         .filter(|size| *size != 0)
         .ok_or(MemoryError::InvalidLength)?;
+    let (large_index, large_address_space, large_mapping) = {
+        let processes = process_table_lock();
+        let index = processes
+            .iter()
+            .position(|process| {
+                process.is_some_and(|process| process.id.as_u64() == current_process_id())
+            })
+            .ok_or(MemoryError::NoProcess)?;
+        let space = processes[index]
+            .and_then(|process| process.address_space)
+            .ok_or(MemoryError::NoProcess)?;
+        let large = space
+            .large_mapping()
+            .filter(|mapping| mapping.address == address && mapping.size == size);
+        (index, space, large)
+    };
+    if let Some(mapping) = large_mapping {
+        if !userspace::unmap_large(large_address_space, mapping) {
+            return Err(MemoryError::MappingFailed);
+        }
+        let mut processes = process_table_lock();
+        let process = processes[large_index]
+            .as_mut()
+            .ok_or(MemoryError::NoProcess)?;
+        let mut space = process.address_space.ok_or(MemoryError::NoProcess)?;
+        space.set_large_mapping(None);
+        process.address_space = Some(space);
+        return Ok(());
+    }
     let (process_index, slot, address_space, mapping) = {
         let processes = process_table_lock();
         let process_index = processes
