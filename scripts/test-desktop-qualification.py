@@ -467,10 +467,11 @@ def compare_against_reference(
 ) -> dict[str, Any] | None:
     """Wire the Phase 9 reference-image tool into the real journey.
 
-    Dimension mismatch is recorded, not raised, because this harness's
-    plain `-vga std` capture and a reference captured through the
-    virtio-gpu display path are not guaranteed to share a resolution; a
-    pixel-content regression at matching dimensions is a real failure.
+    The candidate is the locked sign-in baseline captured before any input.
+    Dimension mismatch is recorded, not raised, because a plain `-vga std`
+    capture and a reference captured through the virtio-gpu display path are
+    not guaranteed to share a resolution; a pixel-content regression at
+    matching dimensions is a real failure.
     """
     if reference is None:
         return None
@@ -564,8 +565,10 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             baseline = output / "desktop-signed-in.ppm"
             capture_frame(qmp, baseline, time.monotonic() + args.frame_timeout, timings, "desktop")
             screenshots.append(baseline.name)
+            # Compare the sign-in baseline, not the signed-in desktop: that is
+            # the stable, locked surface the reference image documents.
             reference_comparison = compare_against_reference(
-                baseline, args.reference_image, args.reference_tolerance_percent
+                sign_in, args.reference_image, args.reference_tolerance_percent
             )
             if reference_comparison is not None:
                 (output / "reference-comparison.json").write_text(
@@ -984,10 +987,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--reference-image", type=Path, default=None,
-        help="optional approved reference image (PPM/PNG) to compare the sign-in baseline "
-             "capture against via scripts/compare-against-reference.py; dimension mismatch "
-             "is recorded but does not fail the gate, since this harness's -vga std capture "
-             "and a virtio-gpu-captured reference are not guaranteed to share a resolution",
+        help="optional approved reference image (PPM/PNG) to compare the captured "
+             "sign-in.ppm baseline against via scripts/compare-against-reference.py; "
+             "dimension mismatch is recorded but does not fail the gate, since a -vga std "
+             "capture and a virtio-gpu-captured reference may not share a resolution",
     )
     parser.add_argument(
         "--reference-tolerance-percent", type=float, default=0.1,
