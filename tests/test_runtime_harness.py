@@ -12,6 +12,14 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_stage7_environment_marker_is_explicit(self):
+        required = harness.required_markers('7', 4)
+        self.assertIn(
+            '[S7] process environment: PASSED bounded defaults/inheritance/capacity',
+            required,
+        )
+        self.assertIn('[SMP] online=4 expected=4', required)
+
     def test_aslr_requires_guard_and_original_thread_gate(self):
         required = harness.required_markers('11.2-aslr', 1)
         self.assertIn('[S11.ASLR] arena and stack guard: PASSED', required)

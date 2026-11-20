@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 7 current-source process-environment gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+The shared runtime harness now has an explicit Stage 7 feature and marker
+contract. Twelve harness tests and warning-denying `stage7-test` freestanding
+Clippy pass. Dedicated 1/2/4-CPU boots verify deterministic defaults,
+copy-on-inheritance, update semantics, bounded capacity and malformed ASCII/
+key/value rejection with exit 33. Evidence is retained under
+`audit-artifacts/stage7-{1,2,4}cpu-1795199*`.
+
+This refreshes only the existing bounded process-environment scope. Complete
+signals, dynamic libc/runtime behavior, unrestricted environment sizing,
+broader teardown/fault stress and native hardware qualification remain open.
+
 ## Stage 6 current-source SMP/hotplug gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
 
 At baseline `b3db4c90`, warning-denying freestanding Clippy for

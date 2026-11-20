@@ -1,3 +1,12 @@
+## Codex - Stage 7 current-source bounded software gate closed (2026-11-20)
+
+Added the missing explicit Stage 7 route to the shared runtime harness and a
+contract that requires its marker plus the requested SMP profile. Twelve
+harness tests, warning-denying `stage7-test` Clippy, and dedicated 1/2/4-CPU
+boots pass with exit 33. This closes only the bounded process-environment ABI;
+broader libc/runtime, complete signals, unrestricted sizing and native
+qualification remain open. No Cargo/QEMU chain is active.
+
 ## Codex - Stage 6 current-source bounded software gate closed (2026-11-20)
 
 At baseline `b3db4c90`, warning-denying `stage6-hotplug-test` Clippy and the

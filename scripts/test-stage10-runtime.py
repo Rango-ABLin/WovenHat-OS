@@ -95,6 +95,7 @@ def required_markers(stage, cpus):
                   '13.9': '[S13.9H] GTK + encrypted key data: PASSED',
                   '13.10': '[S13.10T] Bluetooth LE notification minimum key size: PASSED',
                   '13.11': '[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED',
+                  '7': '[S7] process environment: PASSED bounded defaults/inheritance/capacity',
                   '1-5': '[S1-5] storage journal: PASSED',
                   '15.1': '[S15.1] WovenFS native filesystem: PASSED',
                   '15.3': '[S15.3] permission broker: PASSED',
@@ -213,7 +214,7 @@ def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('5-font', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('5-font', '7', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)

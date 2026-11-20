@@ -21,6 +21,14 @@ offline/online masks and middle-CPU lifecycle are directly required. This
 closes the bounded software/QEMU contract only; physical hotplug, high APIC
 IDs, native NUMA and broader stress remain production blockers.
 
+## Stage 7 current-source bounded software closure
+
+An explicit runtime-harness route now requires the Stage 7 environment marker
+and SMP profile. Harness contracts, affected feature lint and dedicated 1/2/4
+CPU boots pass on current source. This closes the bounded environment ABI only;
+complete signals, dynamic userspace runtime, unrestricted sizing and broader
+fault/teardown qualification remain open Stage 7-10 software work.
+
 ## Implemented and historical evidence
 
 The authoritative `docs/stage1-19-closure-gate.md` records bounded foundation,
