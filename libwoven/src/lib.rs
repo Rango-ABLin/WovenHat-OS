@@ -502,7 +502,10 @@ pub mod graphics {
         }
     }
 
-    const MAX_PATH_POINTS: usize = 64;
+    // A 12 px NotoSans contour such as 'S' or 'g' expands past 64 points once
+    // every quadratic is subdivided into four segments. Keep the buffer fixed
+    // and allocation-free, but large enough for the real bundled face.
+    pub const MAX_PATH_POINTS: usize = 192;
 
     /// A bounded open or closed path. The fixed storage keeps scene geometry
     /// allocation-free and makes the renderer's worst-case work explicit.
@@ -12519,11 +12522,11 @@ pub mod graphics {
         ((sum + total / 2) / total).clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
     }
 
-    /// Map the staged NotoSans TTF read-only and demand-paged. The mapping is
-    /// backed by the VFS file rather than a large per-process static buffer,
-    /// so every GUI process keeps only the pages it actually touches. The
-    /// kernel validates the file mapping and owns its lifetime through process
-    /// teardown; this function exposes only the fixed, validated font span.
+    /// Map the staged NotoSans TTF through the kernel's bounded read-only
+    /// large-asset window. The font is larger than a single mmap slot, so the
+    /// kernel copies it once into a dedicated non-writable window and owns the
+    /// mapping's lifetime through process teardown. This function exposes only
+    /// the fixed, validated font span; callers must not write through it.
     pub fn load_system_font_mapping() -> Result<&'static [u8], crate::Error> {
         let mut base = SYSTEM_FONT_BASE.load(Ordering::Acquire);
         if base == 0 {
@@ -12546,9 +12549,9 @@ pub mod graphics {
     }
 
     /// Copy the staged font into caller-owned storage for bounded callers that
-    /// cannot use a lazy mapping. Prefer [`load_system_font_mapping`] for GUI
-    /// rendering so large font pages remain demand-paged and shared by the
-    /// kernel's file mapping cache.
+    /// cannot use the large-asset window. Prefer [`load_system_font_mapping`]
+    /// for GUI rendering so the kernel owns one read-only copy per process
+    /// instead of a second userspace buffer.
     pub fn load_system_font_bytes(buffer: &mut [u8]) -> Result<usize, crate::Error> {
         let descriptor = crate::open("/share/fonts/NotoSans-Regular.ttf")?;
         let result = crate::read_all(descriptor, buffer);
@@ -19290,8 +19293,10 @@ mod tests {
         let mut path = Path::new();
         assert!(path.move_to(Point::new(0, 0)));
         assert!(path.quadratic_to(Point::new(8, 16), Point::new(16, 0)));
-        for index in 0..57 {
-            assert!(path.line_to(Point::new(index, 0)));
+        // Fill close to the bounded capacity; one more four-point quadratic
+        // must still be rejected atomically rather than partially appended.
+        for index in 0..crate::graphics::MAX_PATH_POINTS - 7 {
+            assert!(path.line_to(Point::new(index as i32, 0)));
         }
         assert!(!path.quadratic_to(Point::new(24, 16), Point::new(32, 0)));
     }
