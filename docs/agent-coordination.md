@@ -11,6 +11,13 @@ Six nested lockfiles (`apps/hello`, `apps/woven-ai`, `apps/woven-recovery`,
 were stale against their manifests; they gained only added entries (1825 lines,
 0 removed). All 29 lockfiles pass `cargo fetch --locked` locally.
 
+The next failure was `vendor/bootloader/build.rs`, which runs a nested
+`cargo install bootloader-x86_64-uefi --version <pkg version>`. Inside the repo
+that inherits offline mode, so the crate must already be cached. The prefetch
+step now also fetches that exact version through a throwaway crate in
+`$RUNNER_TEMP`. Verified in an empty `CARGO_HOME`: online prefetch, then
+`cargo fetch --offline` succeeds.
+
 Not fixed here: `libwoven` does not compile for `x86_64-unknown-none`
 (`E0015` in the `GLYPH_PATH` static), which blocks kernel and installer lints
 until the in-progress glyph-path change in `libwoven/src/lib.rs` lands.

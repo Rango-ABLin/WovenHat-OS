@@ -39,6 +39,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -161,6 +171,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -611,6 +631,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -846,6 +876,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -954,6 +994,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
@@ -1110,6 +1160,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1178,6 +1238,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1259,6 +1329,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1328,6 +1408,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1394,6 +1484,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1476,6 +1576,16 @@ jobs:
             [ -f "$dir/Cargo.toml" ] || continue
             cargo fetch --locked --manifest-path "$dir/Cargo.toml"
           done < <(git ls-files '*Cargo.lock')
+          # vendor/bootloader builds its UEFI loader with a nested `cargo install
+          # bootloader-x86_64-uefi --version <pkg version>`, which offline mode
+          # cannot resolve from an empty registry. Prefetch that exact version
+          # via a throwaway crate so the offline nested install finds it cached.
+          boot_version=$(sed -n 's/^version = "\(.*\)"/\1/p' vendor/bootloader/Cargo.toml | head -1)
+          prefetch="$RUNNER_TEMP/uefi-bootloader-prefetch"
+          mkdir -p "$prefetch/src"
+          printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
+          : > "$prefetch/src/lib.rs"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
