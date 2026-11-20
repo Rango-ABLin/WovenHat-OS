@@ -8,11 +8,12 @@ Authorized by the user on 2026-11-20 and inserted here so the stage order in
 AGENTS.md is respected. Full requirements: `docs/milestones/M5_BASELINE_AUDIT.md`
 (baseline) and the M5 specification supplied with the request. Gate: all
 supported-device tests pass on 1/2/4 CPUs in QEMU; physical-hardware tests
-are reported as BLOCKED until real hardware evidence exists. Current slice:
+are reported as BLOCKED until real hardware evidence exists. Current slices:
 shared DMA page with checked CPU/device ownership (`kernel/src/dma.rs`,
-`kernel/src/dma/ownership.rs`, gate `m5-dma-test`). Host tests 8/8 pass and
-the QEMU gate passes at 1/2/4 CPUs. The file-mmap regression on master
-(`10740a4f`) was fixed in `kernel/src/userspace.rs`. The rest of M5 is not started
+`kernel/src/dma/ownership.rs`, gate `m5-dma-test`) and NVMe on the shared page
+(commit `6b8d793f`). NVMe migration is verified by the 1-CPU Stage 13.14
+storage gate. The file-mmap regression on master (`10740a4f`) is fixed in
+`kernel/src/userspace.rs` (commit `6d6a0b2b`). The rest of M5 is not started
 (see `docs/milestones/M5_TEST_RESULTS.md`).
 
 Stage 24.59 - Deterministic Change-PIN acceptance

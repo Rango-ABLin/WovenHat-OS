@@ -17,11 +17,17 @@ uncommitted in the worktree `C:\Users\banda\Documents\GitHub\WovenHat-OS-m5`.
 | M5 DMA QEMU gate, 4 CPUs, 4 GiB | `... --cpus 4 --memory 4G` | PASS. Evidence: `audit-artifacts/m5-dma-4cpu-1795170996773351200/` |
 | Existing `qemu-test` chain through FILE MMAP, 1 CPU | `python scripts/test-stage13-12-drivers.py --mode devices --cpus 1` | PASS, exit 33. Evidence: `audit-artifacts/stage13.12-devices-1cpu-1795171016784483200/` |
 | Freestanding kernel check, Wi-Fi gate | `cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage13-9-test` | PASS (exit 0) on `10740a4f` with the change applied |
-| Warning-denying Clippy, M5 gate | `cargo clippy ... --features m5-dma-test -- -D warnings` | **BLOCKED** by a `libwoven` lint (`too_many_arguments`, `render_outline`), not this slice. Diagnostic run with that one lint allowed: PASS. |
+| Warning-denying Clippy, M5 gate | `cargo clippy ... --features m5-dma-test -- -D warnings` | PASS |
+| Warning-denying Clippy, kernel `stage13-14-test` gate | `cargo clippy -p wovenhat-kernel ... --features stage13-14-test -- -D warnings` | PASS |
+| 1-CPU Stage 13.14 storage gate | `python scripts/test-stage13-14-storage.py --cpus 1` | PASS, exit 33, `[S13.14] NVMe/AHCI storage: PASSED`. Evidence: `audit-artifacts/stage13.14-nvme-1cpu-1795172062694030900/` |
+| M5 DMA QEMU gate, 1 / 2 / 4 CPUs (rerun after the NVMe migration) | `python scripts/test-m5-dma-qemu.py --cpus {1,2,4} --memory 4G` | PASS |
 
-Not run in this slice: the 2 and 4 CPU runs of the existing Stage 13.12 gate,
+The file-mmap regression on `master` is fixed in `kernel/src/userspace.rs`
+(commit `6d6a0b2b`). The NVMe migration is commit `6b8d793f`.
+
+Not run in this slice: the 2 and 4 CPU runs of the Stage 13.12 gate,
 host `cargo test` for the full suite, `cargo clippy --all-targets`,
-`RUN-STAGE10.7.ps1`, and any device gate (NVMe, AHCI, xHCI, network, Wi-Fi,
+`RUN-STAGE10.7.ps1`, and any device gate (AHCI, xHCI, network, Wi-Fi,
 Bluetooth). No physical hardware was used.
 
 ## Regression fixed: FILE MMAP self-test
