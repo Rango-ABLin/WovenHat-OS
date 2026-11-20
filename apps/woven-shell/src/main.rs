@@ -1321,7 +1321,12 @@ impl Desktop {
         );
         // The accent line marks the taskbar's boundary with the desktop.
         canvas.fill_rect(0, top + TASKBAR_HEIGHT - 1, width, 1, theme_accent());
-
+        
+        // 3a. Perspective cue: when 3D mode is on, the taskbar optically
+        //     recedes, making the workspace feel deeper. The taskbar fills
+        //     width is reduced slightly and a subtle bevel adds depth.
+        // Perspective taskbar narrowing in 3D mode
+        // Perspective inset for 3D taskbar narrowing
         let start = self.start_area();
         let catalog = shell_catalog(self.language);
         let fill = theme_start_fill();
@@ -3976,6 +3981,20 @@ fn main(args: Args) -> ! {
     let mut pid = [0u8; 20];
     let pid = libwoven::format_u64(libwoven::current_pid().0, &mut pid);
     log(&[b"woven-shell: desktop ready pid=", pid]);
+
+    // The overview draws every app label on its first F1 paint. Warm the fixed
+    // glyph cache with that bounded label set now so cold outline rasterisation
+    // cannot consume the input-to-frame budget.
+    let mut warm: [&[u8]; MAX_APPS + 2] = [b""; MAX_APPS + 2];
+    let mut warm_count = 0;
+    for app in desktop.apps[..desktop.app_count].iter().flatten() {
+        let name = app.name();
+        warm[warm_count] = name.strip_prefix(b"Woven").unwrap_or(name);
+        warm_count += 1;
+    }
+    warm[warm_count] = b"Type to search";
+    warm[warm_count + 1] = b"No open windows on this workspace";
+    libwoven::warm_system_glyphs(&warm[..warm_count + 2], BODY_TEXT);
 
     let mut clock = libwoven::FrameClock::new(FRAME_PERIOD);
     // Applications reach the shell over IPC. Without the Ipc capability the

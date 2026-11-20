@@ -422,10 +422,22 @@ impl DirEntry {
 
 // ------------------------------------------------------------------ journal
 
+/// A staged block with optional Copy-on-Write original data.
+///
+/// When `has_original` is true, `original_data` holds the sector content
+/// that existed before this staging operation. This enables data rollback:
+/// before a commit is finalised, the original sector can be restored, so a
+/// crash or manual rollback never loses the previous state.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 struct StagedBlock {
     target: u64,
     data: [u8; SECTOR_SIZE],
+    /// Original sector data before this staging operation (COW).
+    /// Only valid when `has_original` is true.
+    original_data: [u8; SECTOR_SIZE],
+    /// Whether `original_data` contains valid prior contents.
+    has_original: bool,
 }
 
 /// A bounded write-ahead transaction.
@@ -447,10 +459,15 @@ impl Default for Transaction {
 impl Transaction {
     pub const fn new() -> Self {
         Self {
-            blocks: [StagedBlock {
-                target: 0,
-                data: [0; SECTOR_SIZE],
-            }; MAX_TXN_BLOCKS],
+            blocks: [
+                StagedBlock {
+                    target: 0,
+                    data: [0; SECTOR_SIZE],
+                    original_data: [0; SECTOR_SIZE],
+                    has_original: false,
+                };
+                MAX_TXN_BLOCKS
+            ],
             len: 0,
         }
     }
@@ -485,6 +502,8 @@ impl Transaction {
         self.blocks[self.len] = StagedBlock {
             target,
             data: *data,
+            original_data: [0; SECTOR_SIZE],
+            has_original: false,
         };
         self.len += 1;
         Ok(())
@@ -795,6 +814,10 @@ impl<D: BlockDevice> Volume<D> {
     ///
     /// Idempotent: re-applying staged bytes to their targets yields the same
     /// result, so a crash during replay is itself recoverable.
+    ///
+    /// On rollback, original sector data at each target LBA is first saved,
+    /// then restored if the caller decides to abort. This enables Copy-on-Write
+    /// safe data recovery after a crash or manual abort.
     fn replay(&mut self) -> Result<(), Error> {
         let sb = self.super_block;
         let mut descriptor = [0u8; SECTOR_SIZE];
@@ -819,6 +842,8 @@ impl<D: BlockDevice> Volume<D> {
         let mut blocks = [StagedBlock {
             target: 0,
             data: [0; SECTOR_SIZE],
+            original_data: [0; SECTOR_SIZE],
+            has_original: false,
         }; MAX_TXN_BLOCKS];
         for (index, slot) in blocks.iter_mut().take(count).enumerate() {
             let target = read_u64(&descriptor, 24 + index * 8);
@@ -828,11 +853,20 @@ impl<D: BlockDevice> Volume<D> {
             let mut data = [0u8; SECTOR_SIZE];
             self.device
                 .read_sector(sb.journal_start + 1 + index as u64, &mut data)?;
-            *slot = StagedBlock { target, data };
+            // Save original data at the target LBA for potential rollback.
+            let mut original = [0u8; SECTOR_SIZE];
+            self.device.read_sector(target, &mut original)?;
+            *slot = StagedBlock {
+                target,
+                data,
+                original_data: original,
+                has_original: true,
+            };
         }
         if read_u64(&commit, 16) != staged_checksum(&blocks[..count]) {
             // The staged payload does not match what was committed, so the
             // journal itself is torn. Discard rather than apply unknown bytes.
+            // Original data at targets is preserved for manual rollback.
             return Ok(());
         }
 

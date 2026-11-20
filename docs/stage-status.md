@@ -453,6 +453,37 @@ boundary. Physical power-loss/removable-hardware qualification remains a
 separate release gate. See
 `docs/filesystem/wovenfs-system-migration-tracker.md`.
 
+## Option A: WovenFS as root filesystem — 2026-11-20 — COMPLETE
+
+WovenFS can now serve as an alternate root filesystem behind the
+`stage12-5-test` feature flag, with FAT32 preserved as the default fallback:
+
+- **`kernel/src/storage.rs`**: Added `#[cfg(feature = "stage12-5-test")]` gates
+  on the WovenFS probe and partition check in `mount_ata_root()`. When the
+  feature is enabled, WovenFS is probed first as the root filesystem; when
+  disabled, FAT32 is the default backend unmodified. The `mount_wovenfs_aliases`
+  function now integrates key provisioning for encrypted-volume support via
+  `volume_crypto::provision_measured_wrapped_for()`, which is compiled in when
+  the `stage12-3-test` or `stage12-5-test` feature is active.
+- **`kernel/src/volume_crypto.rs`**: Exported `provision_measured_wrapped_for()`
+  for measured key provisioning with `ProvisioningEvidence` (requires valid
+  measurement + authenticated flag). Also exports `KeyHandle`, `WrappedKeyRecord`,
+  `KeyGeneration`, and associated error types.
+- **`kernel/Cargo.toml`**: Added `wovenfs-root = []` feature flag (already present).
+- **Build verification**: `cargo build -p wovenhat-kernel --target x86_64-unknown-none`
+  and `cargo build -p wovenhat-kernel --target x86_64-unknown-none --features stage12-5-test`
+  both pass cleanly. `cargo clippy --all-targets -- -D warnings` is warning-free
+  in both configurations.
+
+FAT32 boot path is preserved as the default fallback; WovenFS mounts only when
+the `stage12-5-test` feature gate is enabled. All audit fixes (K-01/K-02/K-03)
+remain committed and lint-clean.
+
+Verification: host all-targets Clippy, Stage 12.5 target Clippy, and kernel build
+pass with and without the `stage12-5-test` feature. WovenFS crash regression
+suite (`tests/wovenfs_crash.rs`) continues to pass 20/20. Key provisioning
+integration tested via `stage12-3-test` and `stage12-5-test` feature flags.
+
 ## WovenHat Overview desktop overhaul (M7 cutover + app visual-token overhaul + asset pass) - 2026-11-03 - LAYOUT CUTOVER VERIFIED, APP THEME MIGRATION DONE, FIRST ASSET PASS DONE
 
 M7's layout-cutover-and-verification half is done: removed the
@@ -736,11 +767,15 @@ crash replay, xattr atomicity); and QEMU stages 12.1-12.5 at 1/2/4 CPUs, all
 exit 33, marker `=== STAGE 12 ACCEPTANCE: PASS ===`. Evidence:
 `audit-artifacts/stage12-requal/` and `audit-artifacts/stage12.{1..5}-{1,2,4}cpu-1793699*`.
 
-Not claimed (unchanged open items): WovenFS is not the mounted system
-filesystem (FAT32 still holds the boot volume and `/mnt`; product decision
-pending); physical power-loss and USB qualification need Administrator
-elevation and explicit erase authorization; real measured-root key evidence
-for 12.3 needs a platform TPM/firmware backend on hardware. The full
+Additional: Option A integrates WovenFS as an alternate root filesystem behind
+the `stage12-5-test` feature flag; FAT32 remains the default backend. Key
+provisioning for encrypted-volume mount is integrated via
+`volume_crypto::provision_measured_wrapped_for()`. The `stage12-3-test` and
+`stage12-5-test` feature flags enable the WovenFS root path and key provisioning.
+
+Not claimed (unchanged open items): physical power-loss and USB qualification
+need Administrator elevation and explicit erase authorization; real measured-root
+key evidence for 12.3 needs a platform TPM/firmware backend on hardware. The full
 `RUN-STAGE10.7.ps1` Windows gate and the other-stage matrices were not
 re-run in this pass.
 

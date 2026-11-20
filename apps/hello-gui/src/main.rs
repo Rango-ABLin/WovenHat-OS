@@ -585,6 +585,15 @@ fn run(input: Input) -> ! {
     {
         let mut renderer = Renderer::new(&mut canvas);
         depth.clear(u16::MAX);
+        // 3b. Render meaningful text in the content area using the
+        //    fixed proportional text path. The inkless-miss check ensures
+        //    text won't silently vanish at 20px (commits 487eb003, dcf21259).
+        let _ = renderer.text_box(
+            libwoven::graphics::Rect::new(8, 8, 32, 24),
+            "WovenHat GUI Demo",
+            libwoven::graphics::Color::BLACK,
+            14,   // Subtitle size (post-fix)
+        );
         renderer.vertical_gradient(
             Rect::new(10, 10, 32, 16),
             Color::TITLE,
