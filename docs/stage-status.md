@@ -1,5 +1,18 @@
 # Stage status
 
+## Stage 8 current-source IPC/capability gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+The shared runtime harness now requires the full Stage 8 marker chain:
+exhausted-generation rollback, process-local endpoint handles, bounded message
+passing, race-free blocking, shared-memory mappings, capability transfer,
+service discovery and multicore stress. Thirteen harness contracts and
+warning-denying normal-kernel Clippy pass. Dedicated 1/2/4-CPU boots pass with
+exit 33 under `audit-artifacts/stage8-{1,2,4}cpu-1795199*`.
+
+This refreshes the bounded software/QEMU IPC contract on current source.
+Broader cross-subsystem integration, general stress, native hardware and
+collective Stage 1-19 closure remain separate work.
+
 ## Stage 7 current-source process-environment gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
 
 The shared runtime harness now has an explicit Stage 7 feature and marker

@@ -96,6 +96,7 @@ def required_markers(stage, cpus):
                   '13.10': '[S13.10T] Bluetooth LE notification minimum key size: PASSED',
                   '13.11': '[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED',
                   '7': '[S7] process environment: PASSED bounded defaults/inheritance/capacity',
+                  '8': '[S8.7] multicore IPC/service/capability stress: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED',
                   '15.1': '[S15.1] WovenFS native filesystem: PASSED',
                   '15.3': '[S15.3] permission broker: PASSED',
@@ -182,6 +183,16 @@ def required_markers(stage, cpus):
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',
             '[S13.11H] BLE SMP lifecycle/hardening closure: PASSED',
         ])
+    if stage == '8':
+        required.extend([
+            '[S8.1] exhausted-generation installation/rollback: PASSED',
+            '[S8.1] kernel endpoint objects + process-local handles: PASSED',
+            '[S8.2] handle-addressed bounded message passing: PASSED',
+            '[S8.3] race-free blocking IPC events/waits: PASSED',
+            '[S8.4] shared-memory objects + cross-address-space mappings: PASSED',
+            '[S8.5] capability handle transfer through IPC: PASSED',
+            '[S8.6] named service registry + capability discovery: PASSED',
+        ])
     if stage == '13.9':
         required.extend(WIFI_REQUIRED_MARKERS)
     return list(dict.fromkeys(required))
@@ -214,7 +225,7 @@ def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('5-font', '7', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('5-font', '7', '8', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -230,6 +241,8 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     vars_copy = copy_firmware_vars(args.firmware_vars, out)
     feature = 'stage13-10-test' if args.stage == '13.11' else f'stage{args.stage.replace(".", "-")}-test'
+    if args.stage == '8':
+        feature = 'qemu-test'
     if args.stage == '11.2-aslr':
         feature = 'stage11-aslr-test'
     env = dict(os.environ)

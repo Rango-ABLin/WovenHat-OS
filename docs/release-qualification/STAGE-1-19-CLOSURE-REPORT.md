@@ -29,6 +29,14 @@ CPU boots pass on current source. This closes the bounded environment ABI only;
 complete signals, dynamic userspace runtime, unrestricted sizing and broader
 fault/teardown qualification remain open Stage 7-10 software work.
 
+## Stage 8 current-source bounded software closure
+
+An explicit fail-closed harness contract now requires all Stage 8 IPC, shared-
+memory, capability-transfer, service-discovery and multicore-stress markers.
+Harness tests, warning-denying Clippy and 1/2/4-CPU boots pass. This closes the
+bounded IPC software gate only; broader integration, stress and hardware
+qualification remain open.
+
 ## Implemented and historical evidence
 
 The authoritative `docs/stage1-19-closure-gate.md` records bounded foundation,

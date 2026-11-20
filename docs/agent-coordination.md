@@ -1,3 +1,13 @@
+## Codex - Stage 8 current-source bounded software gate closed (2026-11-20)
+
+Added an explicit normal-kernel harness route requiring the complete Stage 8
+IPC/object/capability marker chain. Thirteen harness contracts, warning-denying
+Clippy and dedicated 1/2/4-CPU boots pass with exit 33. Exhausted-generation
+rollback, owner-local handles, blocking IPC, shared memory, capability
+transfer, service discovery and SMP stress are directly required. Broader
+integration and native qualification remain open. No Cargo/QEMU chain is
+active.
+
 ## Codex - Stage 7 current-source bounded software gate closed (2026-11-20)
 
 Added the missing explicit Stage 7 route to the shared runtime harness and a

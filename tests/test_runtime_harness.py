@@ -20,6 +20,20 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         )
         self.assertIn('[SMP] online=4 expected=4', required)
 
+    def test_stage8_ipc_contract_requires_every_layer(self):
+        required = harness.required_markers('8', 4)
+        for marker in (
+            '[S8.1] exhausted-generation installation/rollback: PASSED',
+            '[S8.1] kernel endpoint objects + process-local handles: PASSED',
+            '[S8.2] handle-addressed bounded message passing: PASSED',
+            '[S8.3] race-free blocking IPC events/waits: PASSED',
+            '[S8.4] shared-memory objects + cross-address-space mappings: PASSED',
+            '[S8.5] capability handle transfer through IPC: PASSED',
+            '[S8.6] named service registry + capability discovery: PASSED',
+            '[S8.7] multicore IPC/service/capability stress: PASSED',
+        ):
+            self.assertIn(marker, required)
+
     def test_aslr_requires_guard_and_original_thread_gate(self):
         required = harness.required_markers('11.2-aslr', 1)
         self.assertIn('[S11.ASLR] arena and stack guard: PASSED', required)
