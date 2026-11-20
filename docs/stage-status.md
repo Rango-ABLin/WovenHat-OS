@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 1-5 current-source software gate - 2026-11-20 - VERIFIED (BOUNDED)
+
+At baseline `caf19a9d`, warning-denying freestanding Clippy for
+`stage1-5-test` and all six FAT32/page-cache host tests pass. The dedicated
+storage-journal gate passes with exit 33 on 1/2/4 CPUs in
+`audit-artifacts/stage1-5-{1,2,4}cpu-1795199*`. The same source already passed
+the complete serialized Stage 10.7 Windows chain in
+`audit-artifacts/stage12-installed-wovenfs-current-stage10-7-final.log`.
+
+This verifies the current bounded boot/paging/scheduler/VFS/FAT32 software
+contract. It does not close Stage 1-5: native storage/DMA coverage, arbitrary
+physical-device behavior, torn writes below the modeled sector boundary,
+physical power loss, and independent review remain external blockers.
+
 ## Stage 12 installed WovenFS reboot/replay - 2026-11-20 - ACCEPTED (FOCUSED)
 
 Current `master` now mounts native WovenFS independently of Stage 12 self-test

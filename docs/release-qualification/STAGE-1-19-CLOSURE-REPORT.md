@@ -4,6 +4,15 @@ Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.
 
+## Stage 1-5 current-source software verification
+
+The bounded Stage 1-5 storage-journal gate passes on 1/2/4 CPUs at current
+source, together with affected warning-denying Clippy and six FAT32/page-cache
+host tests. The inherited full Windows chain also passes at the same kernel
+source. Stage 1-5 remains blocked from closure by native storage/DMA, physical
+power-loss/torn-write evidence and independent review; no hardware claim is
+inferred from the software marker.
+
 ## Implemented and historical evidence
 
 The authoritative `docs/stage1-19-closure-gate.md` records bounded foundation,

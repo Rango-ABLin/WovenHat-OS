@@ -1,3 +1,13 @@
+## Codex - Stage 1-5 current-source software gate verified (2026-11-20)
+
+At baseline `caf19a9d`, affected warning-denying kernel Clippy, six focused
+FAT32/page-cache host tests, and the dedicated storage-journal gate pass on
+1/2/4 CPUs with exit 33. The inherited full Windows chain already passes at
+the same kernel source. This verifies only the bounded Stage 1-5 software gate;
+native storage/DMA, physical power loss, external review, and collective Stage
+20 unlock remain blocked. No physical device was accessed and no Cargo/QEMU
+chain is active.
+
 ## Codex - installed WovenFS reboot/replay accepted (2026-11-20)
 
 Reconciled the previously accepted three-cold-boot and journal-commit

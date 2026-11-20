@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 1-5 bounded storage durability gate (2026-11-20)
+
+The `stage1-5-test` artifact runs the production storage journal structural
+checks and `storage::self_test()` behind its own feature guard, then exits only
+after the `[S1-5] storage journal: PASSED` marker. Host FAT32/page-cache tests
+cover cross-page EOF, unaligned ranges, invalidation during load, failed-load
+rollback, LRU behavior, and the existing FAT32 regression set. This is bounded
+software evidence; it models no physical controller cache or power removal.
+
 ## Installed WovenFS cold-boot and commit-interruption recovery (2026-11-20)
 
 Native WovenFS probing in `mount_ata_root()` is a production mount decision,
