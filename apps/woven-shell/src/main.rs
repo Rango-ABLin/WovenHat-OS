@@ -145,6 +145,7 @@ use core::sync::atomic::Ordering;
 use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
+use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::layout::{self, Frame};
 use libwoven::ui::DesignTokens;
 use libwoven::{
@@ -465,9 +466,8 @@ const AVATAR_DIAMETER: i32 = 48;
 
 /// The shared type scale. Sizes come from `libwoven::ui::DesignTokens` so the
 /// shell's sign-in, taskbar, and window chrome agree with every WovenUI app.
-const TOKENS: DesignTokens = DesignTokens::DEFAULT;const BODY_TEXT: u16 = TOKENS.type_body;
-const HEADLINE_TEXT: u16 = TOKENS.type_headline;
-const DISPLAY_TEXT: u16 = TOKENS.type_display;
+const TOKENS: DesignTokens = DesignTokens::DEFAULT;
+const BODY_TEXT: u16 = TOKENS.type_body;
 
 fn rect_of(area: Area) -> Rect {
     Rect {
@@ -1601,13 +1601,16 @@ impl Desktop {
         });
         let middle = self.height / 2;
         let catalog = shell_catalog(self.language);
+        // The sign-in pilot consumes the shared design system directly: one
+        // palette for every role here and one type scale for every label, so
+        // this surface cannot drift from the documented identity.
+        let palette = SemanticPalette::resolve(high_contrast(), false);
 
         // A frosted card behind the sign-in/lock content, Windows-11-style,
-        // instead of text floating directly on the dimmed wallpaper. The card
-        // and the type scale below come from the shared design tokens so the
-        // sign-in surface matches settings, menus, and window chrome.
+        // instead of text floating directly on the dimmed wallpaper. Its fill
+        // is the design-system surface role rather than a local color literal.
         let card = self.lock_card_area();
-        fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, rgb(10, 14, 24), 170);
+        fill_rounded_blended(canvas, card, CHROME_CARD_RADIUS, palette.surface, 170);
 
         if self.mode == LockMode::SignIn {
             // A circular avatar for the selected account: its initial inside
@@ -1617,7 +1620,7 @@ impl Desktop {
                 .unwrap_or(b'?')
                 .to_ascii_uppercase();
             let avatar_y = middle - 92;
-            fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, theme_accent());
+            fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, palette.accent);
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
             let avatar_size = (AVATAR_DIAMETER as u16 / 2).max(BODY_TEXT);
@@ -1625,64 +1628,73 @@ impl Desktop {
                 self.width / 2 - libwoven::ui_text_width(glyph, avatar_size) / 2,
                 avatar_y - libwoven::ui_line_height(avatar_size) / 2,
                 glyph,
-                rgb(255, 255, 255),
+                palette.on_accent,
                 avatar_size,
             );
 
             // The sign-in prompt, then the accounts, the chosen one marked
-            // with an accent pill rather than an ASCII caret.
+            // with an accent pill rather than an ASCII caret. The shared type
+            // scale is used for both size and leading, and the selected row
+            // uses `on_accent` ink so the label stays legible on the pill.
             let text = catalog.lookup("sign_in", "Sign in");
+            let headline = TypeRole::Headline;
             canvas.draw_ui_text(
-                self.width / 2 - libwoven::ui_text_width(text, HEADLINE_TEXT) / 2,
+                self.width / 2 - libwoven::ui_text_width(text, headline.em_px()) / 2,
                 middle - 56,
                 text,
-                theme_text(),
-                HEADLINE_TEXT,
+                palette.text,
+                headline.em_px(),
             );
-            let account_line = libwoven::ui_line_height(BODY_TEXT).max(18);
+            let account_role = TypeRole::Subtitle;
+            let account_line = account_role.line_height_px() as i32;
             for (index, account) in self.accounts.iter().enumerate() {
                 let Some(account) = account else { continue };
                 let name = core::str::from_utf8(account.name()).unwrap_or("");
-                let width = libwoven::ui_text_width(name, BODY_TEXT);
+                let width = libwoven::ui_text_width(name, account_role.em_px());
                 let x = self.width / 2 - width / 2;
                 let y = middle - 24 + (index as i32) * account_line;
-                if index == self.chosen {
+                let chosen = index == self.chosen;
+                if chosen {
                     let pill = Area::new(
                         x - 10,
                         y - 3,
                         width + 20,
-                        libwoven::ui_line_height(BODY_TEXT) + 6,
+                        account_line + 6,
                     );
-                    fill_rounded(canvas, pill, (pill.height / 2).max(0) as usize, theme_start_fill());
+                    fill_rounded(canvas, pill, (pill.height / 2).max(0) as usize, palette.accent);
                 }
-                canvas.draw_ui_text(x, y, name, theme_text(), BODY_TEXT);
+                let ink = if chosen { palette.on_accent } else { palette.text };
+                canvas.draw_ui_text(x, y, name, ink, account_role.em_px());
             }
         } else if self.mode == LockMode::ChangePin {
             let text = catalog.lookup("change_pin", "Change PIN");
+            let headline = TypeRole::Headline;
             canvas.draw_ui_text(
-                self.width / 2 - libwoven::ui_text_width(text, HEADLINE_TEXT) / 2,
+                self.width / 2 - libwoven::ui_text_width(text, headline.em_px()) / 2,
                 middle - 44,
                 text,
-                theme_text(),
-                HEADLINE_TEXT,
+                palette.text,
+                headline.em_px(),
             );
         } else {
+            let muted = TypeRole::Subtitle;
             let text = catalog.lookup("locked", "Locked");
             canvas.draw_ui_text(
-                self.width / 2 - libwoven::ui_text_width(text, BODY_TEXT) / 2,
+                self.width / 2 - libwoven::ui_text_width(text, muted.em_px()) / 2,
                 middle - 60,
                 text,
-                theme_muted(),
-                BODY_TEXT,
+                palette.text_muted,
+                muted.em_px(),
             );
             let (bytes, length) = clock_text(self.time, false);
             let clock = core::str::from_utf8(&bytes[..length]).unwrap_or("");
+            let display = TypeRole::Display;
             canvas.draw_ui_text(
-                self.width / 2 - libwoven::ui_text_width(clock, DISPLAY_TEXT) / 2,
+                self.width / 2 - libwoven::ui_text_width(clock, display.em_px()) / 2,
                 middle - 48,
                 clock,
-                theme_text(),
-                DISPLAY_TEXT,
+                palette.text,
+                display.em_px(),
             );
         }
         let prompt = if self.mode == LockMode::ChangePin && self.prompt == LockPrompt::Enter {
@@ -1701,12 +1713,13 @@ impl Desktop {
                 LockPrompt::LockedOut => catalog.lookup("try_again_shortly", "Try again shortly"),
             }
         };
+        let prompt_role = TypeRole::Subtitle;
         canvas.draw_ui_text(
-            self.width / 2 - libwoven::ui_text_width(prompt, BODY_TEXT) / 2,
+            self.width / 2 - libwoven::ui_text_width(prompt, prompt_role.em_px()) / 2,
             middle + 26,
             prompt,
-            theme_muted(),
-            BODY_TEXT,
+            palette.text_muted,
+            prompt_role.em_px(),
         );
         let dots = self.entry_length as i32;
         if dots > 0 {
@@ -1714,9 +1727,9 @@ impl Desktop {
             // A rounded pill behind the dots, Windows-11-style, instead of
             // the digits floating bare on the card.
             let pill = Area::new(left - 10, middle + 48, dots * 10 - 4 + 20, 20);
-            fill_rounded(canvas, pill, 10, rgb(24, 30, 44));
+            fill_rounded(canvas, pill, 10, palette.surface_raised);
             for index in 0..dots {
-                fill_circle(canvas, left + index * 10 + 3, middle + 57, 6, theme_text());
+                fill_circle(canvas, left + index * 10 + 3, middle + 57, 6, palette.text);
             }
         }
     }
@@ -3470,7 +3483,10 @@ impl Desktop {
                 self.focus(slot)
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
-            InputEvent::Key(Key::F1) => self.toggle_launcher(),
+            InputEvent::Key(Key::F1) => {
+                log(&[b"woven-shell: F1 received"]);
+                self.toggle_launcher()
+            }
             InputEvent::Key(Key::Escape) => {
                 self.cancel_pointer_gesture();
                 let Some(slot) = self.focused() else { return empty };

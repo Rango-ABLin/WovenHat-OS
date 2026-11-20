@@ -1,3 +1,26 @@
+## OpenCode - sign-in design-system pilot and glyph regression finding (2026-11-20)
+
+Piloted the design system on the locked sign-in surface only
+(`apps/woven-shell/src/main.rs::render_lock`): the card, every text role and the
+avatar now read from `SemanticPalette::resolve`, and all sizes/leading come from
+`TypeRole`. Account and prompt labels moved from 12 px to the 14 px Subtitle
+role for legibility; the selected account row now uses `on_accent` ink on an
+accent pill (measured 8.12:1 instead of white on dark teal). No other shell
+surface or any ABI was changed.
+
+**Regression found, NOT caused by this pilot.** Real 1-CPU VirtIO-GPU captures
+show the headline "Sign in" loses glyphs ("S" and "g") at 20 px. A control run
+with the pilot changes stashed shows the identical corruption, so it comes from
+the current libwoven glyph state, not from the shell change. Evidence:
+- `audit-artifacts/desktop-qualification-1795170180046393000` (pre-pilot baseline, glyphs intact)
+- `audit-artifacts/desktop-qualification-1795171183103845400` (control, pilot stashed, glyphs broken)
+- `audit-artifacts/desktop-qualification-1795170999009777900` (pilot applied, glyphs broken)
+
+All three runs reach sign-in then hit the known pre-existing `overview`
+framebuffer flake; that failure is unchanged and is not a pilot regression.
+Do not claim sign-in visual acceptance until the glyph owner restores the
+20 px outlines. OpenCode has not touched libwoven glyph code.
+
 ## OpenCode - request to the libwoven glyph owner: clippy blocker (2026-11-20)
 
 Requested fix for the owner of the glyph rasterization commits (`152e94e4` ..

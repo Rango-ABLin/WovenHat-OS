@@ -199,6 +199,31 @@ were found to overwhelm the navy→teal gradient.
 These assets are staged data only. Nothing in the kernel VFS bootstrap, the
 shell, or the wallpaper decoder was changed, so no QEMU claim is made.
 
+## 8. Sign-in pilot (in progress — visual acceptance blocked)
+
+The first integration pilot applies the design system to the locked sign-in
+surface only (`render_lock` in `apps/woven-shell`):
+
+- Card fill and every text role come from `SemanticPalette::resolve`;
+  avatar ink uses `on_accent` (8.12:1 on teal, versus white's ~2:1).
+- Headline, account, prompt and clock sizes come from `TypeRole`, with
+  `line_height_px()` supplying account-row leading.
+- Account and prompt labels moved from 12 px to 14 px (Subtitle) after the
+  baseline capture showed them too small at 1280×800.
+- The chosen account row uses accent fill with `on_accent` ink.
+
+The qualification harness now captures `sign-in.ppm` before PIN injection as a
+reusable visual baseline. Real 1-CPU VirtIO-GPU captures confirmed the legibility
+improvements, **but the headline "Sign in" loses glyphs at 20 px in the current
+libwoven glyph state**. A control run with the pilot changes stashed shows the
+identical corruption, so it is not caused by this pilot. All three evidence runs
+reach sign-in and then hit the pre-existing `overview` framebuffer flake.
+
+Visual acceptance of the pilot is therefore **blocked on the glyph owner**
+restoring 20 px outlines; no pixel oracle has been approved and no QEMU pass is
+claimed. The pilot is committed as implementation plus evidence, not as an
+accepted visual change. See `docs/agent-coordination.md` for evidence paths.
+
 ## Validation evidence (2026-11-20)
 
 Foundation increment:
@@ -241,12 +266,16 @@ values still requires the normal qualification chain.
 
 ## Next prerequisites
 
-1. Migrate type call sites to `TypeRole` leading with the bounded glyph cache,
-   then re-run the full 1/2/4-CPU desktop qualification.
-2. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
+1. Unblock the sign-in pilot: restore the missing 20 px glyph outlines in
+   libwoven, re-capture `sign-in.ppm`, and only then approve a visual oracle and
+   run the full 1/2/4-CPU desktop qualification. Do not treat the current
+   corrupted captures as an accepted baseline.
+2. Migrate further type call sites to `TypeRole` leading with the bounded glyph
+   cache, then re-run the full 1/2/4-CPU desktop qualification.
+3. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
    gated change with its own pixel-reference evidence.
-3. When a wallpaper selector is wanted, stage these CC0 assets through the
+4. When a wallpaper selector is wanted, stage these CC0 assets through the
    existing `vfs::create_read_only` path and add a gated shell pick-list; that
    is a separate, QEMU-qualified integration, not part of this asset increment.
-4. Keep the all-targets Clippy check in the full gate; the transient
+5. Keep the all-targets Clippy check in the full gate; the transient
    `ttf_visual.rs` errors from concurrent font work are resolved.
