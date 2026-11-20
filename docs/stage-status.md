@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 29 hardware qualification — design + read-only run - 2026-11-20 - READ-ONLY COMPLETE / NATIVE OPEN
+
+Designed the Stage 29 hardware-compatibility-lab architecture (three zones:
+read-only preflight, emulated/software matrix, native destructive) in
+`docs/hardware-qualification-stage29-2026-11-20.md`, then ran the read-only
+gates on this machine. Preflight: 17/17 categories `PHYSICAL_NOT_TESTED`. Host
+inventory: HP 290 G4 Microtower (Intel, not elevated — Secure Boot/BCD fail
+closed), SK hynix BC901 NVMe boot + ST500DM002 RAID/SATA + Wi-Fi/GbE. TPM not
+visible, 0 USB targets. Virtual matrix 108/108 PASS (`PHYSICAL_NOT_TESTED`);
+physical-probe QEMU smoke PASS at 1/2/4 CPUs; 18/18 tooling tests.
+Classifier result: **Tier 2** (0 native-passed, 17 blocked/missing-native, 0
+failures). No device was opened, written, or rebooted. Native (Z3) qualification
+remains open pending a spare non-boot device, Administrator elevation, and
+signed destructive authorization. Evidence under
+`audit-artifacts/physical-*` and `audit-artifacts/hardware-qualification-*`.
+
 ## Real system font delivery and desktop gate repair - 2026-11-20 - PASS (1/2/4 CPUs)
 
 The staged 621,572-byte NotoSans TTF now loads through one bounded read-only

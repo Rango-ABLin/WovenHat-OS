@@ -1,3 +1,15 @@
+## OpenCode - Stage 11 closure verification serialized (2026-11-20)
+
+With user approval, local `master` fast-forwarded to `origin/master` at
+`b9829f62`, preserving the three existing uncommitted desktop files. Taking
+read-only/independent Stage 11 acceptance and closure-ledger work now: verify
+every affected feature and the inherited runtime matrix on the exact reconciled
+source, diagnose failures without weakening checks, and record evidence. No
+planned edits to the active Codex pure-BSS fixture/loader paths, the desktop
+owner's three files, or the new hardware-qualification document. QEMU/Cargo
+acceptance will be serialized; only disposable file images will be used.
+Focused passes are not full Stage 11, Stage 1-19, or release closure.
+
 ## Codex - Stage 11 pure-BSS compiler TLS gate active (2026-11-20)
 
 Current bounded scope: `tools/loader-fixtures/`,
@@ -21,6 +33,38 @@ architecture note and focused qualification reports landed together as
 `764091a1`. `git diff --check` passed before continuation. No new build, Clippy
 or QEMU result is claimed by this conflict-resolution pass; the next work item
 remains exact-current-source acceptance.
+
+## OpenCode - Stage 29 hardware qualification: design + read-only run (2026-11-20)
+
+User asked to "design and use this machine to test the hardware qualifications";
+confirmed scope as **Design + safe read-only run** (no native/raw/TPM/reboot
+access). Designed the Stage 29 qualification architecture and executed the
+read-only gates only.
+
+- Design doc: `docs/hardware-qualification-stage29-2026-11-20.md` (three safety
+  zones Z1 read-only preflight / Z2 emulated matrix / Z3 native destructive).
+- Z1 preflight (`physical-qualification-preflight.py`): 17/17 categories
+  `PHYSICAL_NOT_TESTED`; host `Apeirova`, Windows 11, Intel64, 12 logical CPUs,
+  ~21.3 GB RAM.
+- Z1 host inventory (`physical-host-preflight.ps1`): HP 290 G4 Microtower,
+  **not elevated** (Secure Boot / `bcdedit` fail closed); disks = SK hynix BC901
+  256 GB NVMe (boot) + ST500DM002 500 GB RAID/SATA + 100 GB file-backed virtual;
+  adapters = RTL8821CE Wi-Fi (enabled) + Realtek GbE (disabled).
+- Z1 TPM readiness (`test-physical-tpm-readiness.ps1`): TPM not visible/ready,
+  no swtpm, no signed provisioning record, 0 USB targets.
+- Z2 matrix (`run-hardware-qualification-matrix.py`): 108/108 PASS, all
+  `PHYSICAL_NOT_TESTED`.
+- Z2 probe (`test-physical-probe.py` 1/2/4 CPUs): inventory QEMU smoke PASS at
+  all three CPU counts (read-only, no disk I/O).
+- Tooling unit tests: 18/18 pass.
+- Classifier (`qualify-hardware-report.py`) → valid, **Tier 2**, 0 native
+  passed, 17 blocked/missing-native, 0 failed.
+
+Native (Z3) qualification remains open and requires a spare non-boot device +
+Administrator elevation + signed destructive authorization. Evidence under
+`audit-artifacts/physical-*`, `audit-artifacts/hardware-qualification-*`. Did
+not touch the uncommitted shell/desktop edits (`apps/woven-shell/src/{icons,main}.rs`,
+`scripts/test-desktop-qualification.py`).
 
 ## OpenCode - glyph fallback fixed and sign-in baseline approved (2026-11-20)
 
