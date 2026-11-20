@@ -82,6 +82,19 @@ framebuffer flake; that failure is unchanged and is not a pilot regression.
 Do not claim sign-in visual acceptance until the glyph owner restores the
 20 px outlines. OpenCode has not touched libwoven glyph code.
 
+## OpenCode - Stage 7.6 file-mmap self-test repaired (2026-11-20)
+
+The `[FILE MMAP] regression tests` failure introduced by my large-mapping
+self-test extension was diagnosed under the focused memory gate: bulk
+`zero_user_range_in` on freshly allocated frames faulted a paging structure
+under frame pressure, so the second page became unmapped. The extension was
+removed (the real desktop gate already exercises the font mapping) and
+`map_file_large_readonly` now clears only the EOF tail after copying the file.
+Focused `scripts/test-memory-qemu.py` now passes on 1, 2 and 4 CPUs; warning-
+denying kernel target and host Clippy are clean. The earlier `woven-images
+loader rejected` boot blocker is gone. The full desktop journey still hits the
+pre-existing F1/overview flake, which is unrelated to this fix.
+
 ## OpenCode - request to the libwoven glyph owner: clippy blocker (2026-11-20)
 
 Requested fix for the owner of the glyph rasterization commits (`152e94e4` ..
