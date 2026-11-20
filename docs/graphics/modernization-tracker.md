@@ -1330,6 +1330,11 @@ Evidence: `audit-artifacts/font-map-1cpu` passed the full real QEMU desktop,
 keyboard, pointer and repaint journey on 1 CPU with default limits. 2/4-CPU evidence: `audit-artifacts/font-map-2cpu` and `audit-artifacts/font-map-4cpu`, both PASS with default timing limits.
 
 With a real face loaded, the 64-point bounded `Path` overflowed on complex
-contours ('S', 'g', '@') and silently omitted them; raising it to 192 points
-keeps the path allocation-free and makes every printable ASCII glyph render.
-Host typography coverage now enforces that for the production font.
+contours ('S', 'g', '@') and silently omitted them. Raising it to 192 points
+was tried and reverted: the larger static path overflowed the short userspace
+stack on the first desktop repaint, and the extra rasterisation pushed the
+first overview paint past the gate's input budget. The accepted fix keeps the
+64-point budget and draws the bounded bitmap glyph whenever the real glyph's
+mask has no ink, with host coverage for that fallback. A shell marker now
+publishes the first unlocked frame so the harness can wait for the real state
+instead of a fixed sleep; a final 1/2/4-CPU rerun of that variant is pending.

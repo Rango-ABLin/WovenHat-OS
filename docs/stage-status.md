@@ -10,8 +10,11 @@ The unbuildable `fa2b220c` GUI patch was reverted and temporary paint tracing
 removed. The full real QEMU desktop/input/repaint qualification passes on 1 CPU
 (`audit-artifacts/font-map-{1,2,4}cpu`) with default timing limits. Real-font
 glyph rasterisation also exposed a 64-point `Path` overflow that dropped `S`,
-`g` and `@`; the bounded path is now 192 points with host coverage for every
-printable ASCII glyph.
+`g` and `@`; enlarging it faulted the short userspace stack and blew the
+interactive frame budget, so the final design keeps 64 points and falls back
+to the bounded bitmap glyph for any inkless real glyph. The final glyph/frame
+marker variant still needs a clean 1/2/4-CPU rerun; the PASS matrix above was
+measured before that glyph experiment.
 
 ## Packaged-client GPU capture correction - 2026-11-06 - HARNESS UPDATED / ACCEPTANCE DEFERRED
 

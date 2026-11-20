@@ -8,6 +8,9 @@ kernel jobs that depend on libwoven. Please refactor the arguments into a
 parameter struct (no `#[allow]`, per AGENTS.md) and re-run the freestanding
 libwoven and kernel Clippy plus the host `cargo clippy --all-targets -- -D warnings`.
 OpenCode has not touched `libwoven` and will not until this is resolved.
+RESOLVED: the glyph experiments were reverted to the pre-`152e94e4` renderer,
+so `render_outline` no longer exists; warning-denying libwoven and kernel
+Clippy pass again (commit `e7bf9b18`).
 
 ## OpenCode - kernel CI offline dependency prefetch (2026-11-20)
 
@@ -46,10 +49,17 @@ one bounded 1 MiB `AddressSpace`-owned window (committed concurrently as
 Also reverted the unbuildable `fa2b220c` GUI patch (it did not compile and
 dropped icon offsets) and removed the temporary desktop paint trace.
 Evidence: `audit-artifacts/font-map-{1,2,4}cpu` (PASS on 1, 2 and 4 CPUs with
-default timing limits). Once the font really loaded, the 64-point bounded
-`Path` silently dropped complex glyphs (`S`, `g`, `@`); it is now 192 points
-with a host test over all printable ASCII. `audit-artifacts/glyph-fix-1cpu`
-rechecks the real desktop after that change.
+default timing limits). Once the font really loaded, the 64-point bounded `Path` silently dropped
+complex glyphs (`S`, `g`, `@`). Raising it to 192 points is NOT the fix: it
+overflowed the short userspace stack (`glyph-fix-1cpu` page fault at RSP), and
+the larger rasterisation made the first overview paint exceed the gate's
+input budget (`glyph-fix-3-1cpu`, `glyph-fast-1cpu`). Those experiments were
+reverted. The accepted design keeps the original 64-point budget and adds a
+bounded bitmap fallback for any real glyph whose mask has no ink, so no
+character disappears without enlarging the stack frame. A shell marker
+`woven-shell: desktop frame ready` now lets the harness wait for the real
+first unlocked frame instead of a fixed 2 s sleep (all timing assertions
+unchanged). A final gate rerun is pending while another owner finishes CI work.
 
 Do not concurrently edit `libwoven/src/design_system.rs`: another owner is
 actively writing it. `libwoven/src/lib.rs` also contains that owner's
