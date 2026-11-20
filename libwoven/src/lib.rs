@@ -374,7 +374,7 @@ pub mod time {
     pub const TICKS_PER_SECOND: u64 = 100;
 }
 pub mod graphics {
-    use core::sync::atomic::{AtomicU64, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     const SYSTEM_FONT_BYTES: usize = 621_572;
     /// The mapping request is the file's exact length, not its page-rounded
@@ -605,9 +605,9 @@ pub mod graphics {
         }
     }
 
-    // Four contours cover the bundled face's Latin glyphs. Keeping this small
-    // matters: `CompoundPath` lives on the short userspace stack, and eight
-    // 192-point paths overflowed it on the first real desktop repaint.
+    // Six contours cover every printable ASCII glyph in the bundled face;
+    // '%' needs more than four. Scratch storage is static (see GLYPH_PATH)
+    // so this stays bounded without a large userspace stack frame.
     const MAX_CONTOURS: usize = 6;
 
     /// A bounded collection of closed contours. Even-odd filling treats
@@ -625,9 +625,9 @@ pub mod graphics {
     }
 
     impl CompoundPath {
-        pub fn new() -> Self {
+        pub const fn new() -> Self {
             Self {
-                paths: core::array::from_fn(|_| Path::new()),
+                paths: [const { Path::new() }; MAX_CONTOURS],
                 length: 0,
             }
         }
@@ -653,6 +653,25 @@ pub mod graphics {
             &self.paths[..self.length]
         }
     }
+
+    /// Scratch contour storage for glyph rasterisation. A `CompoundPath` is
+    /// several KiB; keeping it in static storage avoids a large stack frame on
+    /// the short userspace stack (a stack-clash page fault killed WovenShell
+    /// when the path buffer lived on the stack). The busy flag makes a nested
+    /// or concurrent request fail closed instead of tearing shared state.
+    struct GlyphPathBuffer {
+        path: core::cell::UnsafeCell<CompoundPath>,
+        busy: AtomicBool,
+    }
+
+    // SAFETY: the only access is through `busy`, acquired with Acquire and
+    // released with Release; no caller keeps a reference after release.
+    unsafe impl Sync for GlyphPathBuffer {}
+
+    static GLYPH_PATH: GlyphPathBuffer = GlyphPathBuffer {
+        path: core::cell::UnsafeCell::new(CompoundPath::new()),
+        busy: AtomicBool::new(false),
+    };
 
     /// A fixed-point 2D affine transform. Values use signed 16.16 format so
     /// transformed geometry remains deterministic in freestanding userspace
@@ -3418,12 +3437,52 @@ pub mod graphics {
             color: Color,
             renderer: &mut Renderer<'_, '_>,
         ) -> Result<usize, TrueTypeError> {
-            let mut compound = CompoundPath::new();
-            let contours = self.outline_compound_glyph(glyph, origin, scale, &mut compound)?;
-            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
-                return Err(TrueTypeError::BadTableDirectory);
+            self.render_outline(glyph, origin, scale, color, renderer, None, false)
+        }
+
+        /// Rasterise one glyph using the bounded shared scratch path.
+        fn render_outline(
+            &self,
+            glyph: u16,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+            variation: Option<&[i16]>,
+            small: bool,
+        ) -> Result<usize, TrueTypeError> {
+            if GLYPH_PATH
+                .busy
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                return Err(TrueTypeError::TooLarge);
             }
-            Ok(contours)
+            let result = (|| {
+                // SAFETY: `busy` is held exclusively until the closure ends.
+                let compound = unsafe { &mut *GLYPH_PATH.path.get() };
+                *compound = CompoundPath::new();
+                let contours = self.outline_compound_glyph_variation(
+                    glyph,
+                    origin,
+                    scale,
+                    compound,
+                    variation,
+                )?;
+                if contours != 0 {
+                    let filled = if small {
+                        renderer.fill_compound_path_antialiased_small(compound, color)
+                    } else {
+                        renderer.fill_compound_path_antialiased(compound, color)
+                    };
+                    if !filled {
+                        return Err(TrueTypeError::BadTableDirectory);
+                    }
+                }
+                Ok(contours)
+            })();
+            GLYPH_PATH.busy.store(false, Ordering::Release);
+            result
         }
 
         /// Rasterize a direct glyph ID with normalized variation coordinates.
@@ -3436,18 +3495,30 @@ pub mod graphics {
             color: Color,
             renderer: &mut Renderer<'_, '_>,
         ) -> Result<usize, TrueTypeError> {
-            let mut compound = CompoundPath::new();
-            let contours = self.outline_compound_glyph_with_variation(
+            self.render_outline(
                 glyph,
                 origin,
                 scale,
-                normalized_coordinates,
-                &mut compound,
-            )?;
-            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
-                return Err(TrueTypeError::BadTableDirectory);
-            }
-            Ok(contours)
+                color,
+                renderer,
+                Some(normalized_coordinates),
+                false,
+            )
+        }
+
+        /// Rasterise a glyph into a small cached mask with 2x2 supersampling.
+        pub fn render_glyph_small(
+            &self,
+            character: char,
+            origin: Point,
+            scale: u16,
+            color: Color,
+            renderer: &mut Renderer<'_, '_>,
+        ) -> Result<usize, TrueTypeError> {
+            let glyph = self
+                .glyph_index(character)
+                .ok_or(TrueTypeError::UnsupportedGlyph)?;
+            self.render_outline(glyph, origin, scale, color, renderer, None, true)
         }
 
         /// Lay out one single-line string using checked horizontal metrics.
@@ -7329,7 +7400,7 @@ pub mod graphics {
         let ascent = face.ascent_px(scale);
         let mut renderer = Renderer::new(&mut canvas);
         if face
-            .render_glyph(
+            .render_glyph_small(
                 character,
                 Point::new(bearing_x, ascent),
                 scale,
@@ -12187,6 +12258,27 @@ pub mod graphics {
             color: Color,
             opacity: u8,
         ) -> bool {
+            self.fill_compound_path_samples(path, color, opacity, 4)
+        }
+
+        /// Two-by-two supersampling for small cached glyph masks. The full
+        /// 4x4 renderer is unchanged; this cuts edge work by four for the
+        /// hundreds of 12 px glyphs rasterised on a first desktop repaint.
+        pub fn fill_compound_path_antialiased_small(
+            &mut self,
+            path: &CompoundPath,
+            color: Color,
+        ) -> bool {
+            self.fill_compound_path_samples(path, color, u8::MAX, 2)
+        }
+
+        fn fill_compound_path_samples(
+            &mut self,
+            path: &CompoundPath,
+            color: Color,
+            opacity: u8,
+            samples: u8,
+        ) -> bool {
             let contours = path.paths();
             let contour_count = contours.len();
             if contour_count == 0
@@ -12216,13 +12308,20 @@ pub mod graphics {
             if min_x > max_x || min_y > max_y {
                 return true;
             }
+            let step = 16 / samples;
+            let offset = i128::from(step / 2);
+            let coverage_unit = u8::try_from(256 / (samples * samples) as u16).unwrap_or(255);
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
                     let mut covered = 0u8;
-                    for sample_y in 0..4 {
-                        for sample_x in 0..4 {
-                            let point_x = i128::from(x) * 16 + i128::from(sample_x * 4 + 2);
-                            let point_y = i128::from(y) * 16 + i128::from(sample_y * 4 + 2);
+                    for sample_y in 0..samples {
+                        for sample_x in 0..samples {
+                            let point_x = i128::from(x) * 16
+                                + i128::from(sample_x) * i128::from(step)
+                                + offset;
+                            let point_y = i128::from(y) * 16
+                                + i128::from(sample_y) * i128::from(step)
+                                + offset;
                             let inside = contours.iter().fold(false, |inside, contour| {
                                 inside ^ path_contains_sample(contour.points(), point_x, point_y)
                             });
@@ -12236,7 +12335,7 @@ pub mod graphics {
                             x,
                             y,
                             color.packed(),
-                            combine_opacity(opacity, covered.saturating_mul(16)),
+                            combine_opacity(opacity, covered.saturating_mul(coverage_unit)),
                         );
                     }
                 }
