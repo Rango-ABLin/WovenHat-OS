@@ -1,3 +1,21 @@
+## OpenCode - M5 hardware qualification: shared DMA slice (2026-11-20)
+
+Claimed for M5 (branch `m5/hardware-qualification`, worktree
+`WovenHat-OS-m5`): `docs/milestones/M5_*`, `kernel/src/dma.rs`,
+`kernel/src/dma/ownership.rs`, `tests/dma_ownership.rs`,
+`scripts/test-m5-dma-qemu.py`, the `m5-dma-test` feature in both Cargo manifests,
+and the `mod dma` / gate call in `kernel/src/main.rs`. `DmaPage` moved out of
+`kernel/src/wifi_hw.rs` into `dma.rs` and is re-exported there unchanged for callers.
+Not touched: `libwoven/**`, `apps/woven-shell/**`, the main checkout.
+
+FILE MMAP regression on `master` (`10740a4f`), fixed on this branch, uncommitted:
+`file_mmap_self_test` destroyed its address space before the large-asset window
+from `d7f42637` used it. The fix moves the destroy after that section in
+`kernel/src/userspace.rs` (5 lines). Verified: the Stage 13.12 `devices` gate
+passes on 1 CPU, and the M5 DMA gate passes on 1/2/4 CPUs. The font/mapping owner
+should review it before it lands on `master`. Warning-denying Clippy still fails
+in `libwoven` (`render_outline`, `too_many_arguments`).
+
 ## OpenCode - request to the libwoven glyph owner: clippy blocker (2026-11-20)
 
 Requested fix for the owner of the glyph rasterization commits (`152e94e4` ..
