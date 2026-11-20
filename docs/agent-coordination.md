@@ -1,3 +1,14 @@
+## OpenCode - request to the libwoven glyph owner: clippy blocker (2026-11-20)
+
+Requested fix for the owner of the glyph rasterization commits (`152e94e4` ..
+`d212959b`): `cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings`
+fails on `render_outline` in `libwoven/src/lib.rs` (`too_many_arguments`, 8/7).
+This blocks the CI `Default and physical-probe configuration lint` step and the
+kernel jobs that depend on libwoven. Please refactor the arguments into a
+parameter struct (no `#[allow]`, per AGENTS.md) and re-run the freestanding
+libwoven and kernel Clippy plus the host `cargo clippy --all-targets -- -D warnings`.
+OpenCode has not touched `libwoven` and will not until this is resolved.
+
 ## OpenCode - kernel CI offline dependency prefetch (2026-11-20)
 
 The `kernel` workflow has been red because `.cargo/config.toml` sets
