@@ -183,10 +183,9 @@ Icon convergence increment:
 - `cargo clippy --target x86_64-unknown-none -- -D warnings` in
   `apps/woven-shell` — clean.
 
-`cargo clippy -p libwoven --all-targets -- -D warnings` is currently blocked by
-three pre-existing `unnecessary_cast` errors in `libwoven/tests/ttf_visual.rs`,
-a file introduced by concurrent font work after the foundation increment. It is
-not part of this change and was left for its owner.
+`cargo clippy -p libwoven --all-targets -- -D warnings` was transiently blocked
+by three `unnecessary_cast` errors in `libwoven/tests/ttf_visual.rs` from
+concurrent font work; that owner resolved them and the command is clean again.
 
 No QEMU run was performed for the design system or icon convergence: no call
 site changed behavior and the accepted tile geometry is pinned by exact-value
@@ -202,5 +201,5 @@ normal qualification chain.
    then re-run the full 1/2/4-CPU desktop qualification.
 3. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
    gated change with its own pixel-reference evidence.
-4. Resolve the `ttf_visual.rs` all-targets Clippy errors in the font work before
-   the full gate is used as a release claim again.
+4. Keep the all-targets Clippy check in the full gate; the transient
+   `ttf_visual.rs` errors from concurrent font work are resolved.

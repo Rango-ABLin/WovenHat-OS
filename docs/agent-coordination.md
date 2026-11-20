@@ -36,9 +36,9 @@ the accepted tile geometry at sizes 14/32/40/48 to its pre-change numbers.
 
 Validation: 253 libwoven lib tests pass; lib-only and freestanding target Clippy
 clean; woven-shell target build and Clippy clean. `libwoven --all-targets` Clippy
-is currently blocked by three pre-existing `unnecessary_cast` errors in
-`libwoven/tests/ttf_visual.rs` from the concurrent font work — left for its owner.
-No QEMU claim is made from this increment.
+was transiently blocked by `unnecessary_cast` errors in
+`libwoven/tests/ttf_visual.rs` from the concurrent font work; that owner resolved
+them and the command is clean again. No QEMU claim is made from this increment.
 
 ## OpenCode - WovenHat Design System foundation (2026-11-20)
 
