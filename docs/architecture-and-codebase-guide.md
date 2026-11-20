@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 10 exact-source acceptance boundary
+
+Stage 10 acceptance combines the serialized `RUN-STAGE10.7.ps1` preservation
+chain with dedicated `stage10-8-test` and `stage10-9-test` boots on 1/2/4 CPUs.
+The latter pair jointly exercises the Stage 10.10 unified completion runtime.
+Focused passes do not replace the inherited chain; all three boundaries must
+refer to the same source baseline.
+
 ## Stage 9 independent WovenGuard acceptance boundary
 
 The `stage9-test` feature exits immediately after the production boot path has

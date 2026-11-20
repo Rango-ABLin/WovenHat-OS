@@ -1,5 +1,21 @@
 # Stage status
 
+## Stage 10 exact-current-source acceptance - 2026-11-20 - CLOSED (SOFTWARE/QEMU)
+
+At `b7c27cb5`, the complete Windows Stage 10.7 preservation chain passes host
+build/lint/tests, all 60 memory boots, live network exchange, and isolated
+Stages 10.1-10.7 on 1/2/4 CPUs. The durable transcript is
+`audit-artifacts/stage10-current-source-full-20261120.log`. Dedicated Stage
+10.8 completion-port and Stage 10.9 timer/event gates also pass on 1/2/4 CPUs
+with exit 33; together they execute the accepted Stage 10.10 aggregate runtime
+boundary. Evidence is under `audit-artifacts/stage10.{8,9}-*cpu-1795207*`.
+
+The initial Stage 10.9 build stopped before execution because the volume had
+zero free bytes. Only the verified project-local `.cargo-build` cache was
+cleared; source and evidence were preserved. The clean rebuild and all three
+boots then passed. This closes Stage 10's bounded software/QEMU requirements,
+not native network/storage hardware qualification.
+
 ## Stage 9 current-source WovenGuard gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
 
 Added a dedicated `stage9-test` acceptance route rather than relying on

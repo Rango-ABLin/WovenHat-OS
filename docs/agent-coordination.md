@@ -9848,3 +9848,18 @@ warning-denying `stage9-test` Clippy, and dedicated 1/2/4-CPU boots pass with
 exit 33. Evidence is under `audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
 No Cargo/QEMU chain is active. Codex is finalizing the required separate stage
 commit before proceeding in roadmap order.
+
+## Codex - exact-current-source Stage 10 acceptance active (2026-11-20)
+
+Stage 9 landed as `b7c27cb5`. Codex now owns the exact-current-source Stage 10
+preservation and focused 10.8/10.9/10.10 acceptance, followed by Stage 11 and
+the remaining dependency-ordered stages. The full Windows chain and all focused
+QEMU gates will be serialized because their ports and output paths collide.
+Do not start another Cargo/QEMU acceptance chain until this entry records that
+the active chain has ended.
+
+Stage 10 is closed on exact current source. The full Windows chain passes all
+60 memory boots, live networking and Stages 10.1-10.7; dedicated 10.8 and 10.9
+gates pass on 1/2/4 CPUs. The first 10.9 compilation hit zero free disk space;
+after exact-path verification, only `.cargo-build` was cleared and the clean
+rerun passed. No Cargo/QEMU chain is active. Stage 11 is next.
