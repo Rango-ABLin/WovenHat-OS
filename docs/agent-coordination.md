@@ -1,3 +1,19 @@
+## OpenCode - boot blocker handoff request (2026-11-20)
+
+The uncommitted debug instrumentation in `kernel/src/{paging,serial,userspace}.rs`
+(`map_file_large_readonly` DBG prints and the `[u32; 6]` probe) currently prevents
+any QEMU boot: `audit-artifacts/final-1cpu/serial.log` stops at
+`[APPS] woven-images loader rejected` / `production catalog install failed`
+before WovenShell starts. This is not a verdict on the design-system pilot,
+which only changes shell rendering. Please revert or commit that instrumentation
+once the diagnosis is complete so the desktop gate can boot again. OpenCode will
+not touch those kernel files.
+
+Verification sequence once boot works: (1) 1-CPU `--display virtio-vga` capture
+of `sign-in.ppm` to confirm the bitmap fallback restores the `S`/`g` glyphs;
+(2) approve that capture as the visual reference; (3) 1/2/4-CPU qualification
+with `--reference-image`, now wired to `sign-in.ppm` (commit `d8654b8c`).
+
 ## OpenCode - sign-in design-system pilot and glyph regression finding (2026-11-20)
 
 Piloted the design system on the locked sign-in surface only
