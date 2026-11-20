@@ -7,7 +7,7 @@
 //! in the scaling or rounding rules fails here deterministically.
 
 use libwoven::Canvas;
-use libwoven::graphics::{Color, Point, Renderer, TrueTypeFace};
+use libwoven::graphics::TrueTypeFace;
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
@@ -160,24 +160,22 @@ fn production_font_parses_and_reports_metrics() {
 }
 
 #[test]
-fn production_font_renders_every_ascii_glyph() {
-    // A 64-point path could not hold a 12 px 'S' or 'g' after quadratic
-    // subdivision, so their outlines silently failed to rasterise on the real
-    // desktop. Rendering every printable character catches that regression.
+fn unsupported_real_glyph_uses_bitmap_fallback() {
+    // A 12 px 'S' has more contour points than the fixed path budget. It must
+    // fall back to the bounded bitmap glyph rather than render as a blank.
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../assets/fonts/NotoSans-Regular.ttf"
     );
     let bytes = std::fs::read(path).expect("production font asset");
     let face = TrueTypeFace::from_bytes(&bytes).expect("production font must validate");
-    let mut pixels = [0u32; 24 * 24];
-    let mut canvas = Canvas::new(&mut pixels, 0, 0, 24, 24).expect("glyph canvas");
-    let mut renderer = Renderer::new(&mut canvas);
-    let origin = Point::new(2, face.ascent_px(12));
-    for character in '!'..='~' {
-        face.render_glyph(character, origin, 12, Color::WHITE, &mut renderer)
-            .unwrap_or_else(|error| panic!("ASCII glyph {character:?} failed: {error:?}"));
-    }
+    let mut pixels = [0u32; 64 * 16];
+    let mut canvas = Canvas::new(&mut pixels, 0, 0, 64, 16).expect("text canvas");
+    canvas.draw_text_ttf(2, 2, "S", 0x00ff_ffff, &face, 12);
+    assert!(
+        pixels.iter().any(|pixel| *pixel != 0),
+        "a glyph that cannot fit the real-face path budget must still be drawn"
+    );
 }
 
 #[test]

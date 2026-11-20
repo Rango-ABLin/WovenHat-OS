@@ -374,7 +374,7 @@ pub mod time {
     pub const TICKS_PER_SECOND: u64 = 100;
 }
 pub mod graphics {
-    use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use core::sync::atomic::{AtomicU64, Ordering};
 
     const SYSTEM_FONT_BYTES: usize = 621_572;
     /// The mapping request is the file's exact length, not its page-rounded
@@ -502,10 +502,7 @@ pub mod graphics {
         }
     }
 
-    // A 12 px NotoSans contour such as 'S' or 'g' expands past 64 points once
-    // every quadratic is subdivided into four segments. Keep the buffer fixed
-    // and allocation-free, but large enough for the real bundled face.
-    pub const MAX_PATH_POINTS: usize = 192;
+    const MAX_PATH_POINTS: usize = 64;
 
     /// A bounded open or closed path. The fixed storage keeps scene geometry
     /// allocation-free and makes the renderer's worst-case work explicit.
@@ -564,19 +561,6 @@ pub mod graphics {
             true
         }
 
-        /// Coarse two-segment variant for small cached glyph masks: at 12 px
-        /// the extra subdivisions cost far more than they contribute.
-        pub fn quadratic_to_coarse(&mut self, control: Point, end: Point) -> bool {
-            if self.length == 0 || self.closed || self.length + 2 > MAX_PATH_POINTS {
-                return false;
-            }
-            let start = self.points[self.length - 1];
-            let points = [Self::quadratic_sample(start, control, end, 1, 10, 5), end];
-            self.points[self.length..self.length + points.len()].copy_from_slice(&points);
-            self.length += points.len();
-            true
-        }
-
         fn quadratic_sample(
             start: Point,
             control: Point,
@@ -618,10 +602,7 @@ pub mod graphics {
         }
     }
 
-    // Six contours cover every printable ASCII glyph in the bundled face;
-    // '%' needs more than four. Scratch storage is static (see GLYPH_PATH)
-    // so this stays bounded without a large userspace stack frame.
-    const MAX_CONTOURS: usize = 6;
+    const MAX_CONTOURS: usize = 8;
 
     /// A bounded collection of closed contours. Even-odd filling treats
     /// nested contours as holes without allocating or changing `Path`'s
@@ -638,9 +619,9 @@ pub mod graphics {
     }
 
     impl CompoundPath {
-        pub const fn new() -> Self {
+        pub fn new() -> Self {
             Self {
-                paths: [const { Path::new() }; MAX_CONTOURS],
+                paths: core::array::from_fn(|_| Path::new()),
                 length: 0,
             }
         }
@@ -666,33 +647,6 @@ pub mod graphics {
             &self.paths[..self.length]
         }
     }
-
-    /// Shared options for contour extraction. Bundling variation coordinates
-    /// and the coarse flag keeps the outline helpers within the argument cap.
-    #[derive(Clone, Copy)]
-    struct OutlineOptions<'a> {
-        variation: Option<&'a [i16]>,
-        coarse: bool,
-    }
-
-    /// Scratch contour storage for glyph rasterisation. A `CompoundPath` is
-    /// several KiB; keeping it in static storage avoids a large stack frame on
-    /// the short userspace stack (a stack-clash page fault killed WovenShell
-    /// when the path buffer lived on the stack). The busy flag makes a nested
-    /// or concurrent request fail closed instead of tearing shared state.
-    struct GlyphPathBuffer {
-        path: core::cell::UnsafeCell<CompoundPath>,
-        busy: AtomicBool,
-    }
-
-    // SAFETY: the only access is through `busy`, acquired with Acquire and
-    // released with Release; no caller keeps a reference after release.
-    unsafe impl Sync for GlyphPathBuffer {}
-
-    static GLYPH_PATH: GlyphPathBuffer = GlyphPathBuffer {
-        path: core::cell::UnsafeCell::new(CompoundPath::new()),
-        busy: AtomicBool::new(false),
-    };
 
     /// A fixed-point 2D affine transform. Values use signed 16.16 format so
     /// transformed geometry remains deterministic in freestanding userspace
@@ -3224,14 +3178,7 @@ pub mod graphics {
             scale: u16,
             output: &mut Path,
         ) -> Result<usize, TrueTypeError> {
-            self.outline_contour_glyph_variation(
-                glyph,
-                contour,
-                origin,
-                scale,
-                output,
-                OutlineOptions { variation: None, coarse: false },
-            )
+            self.outline_contour_glyph_variation(glyph, contour, origin, scale, output, None)
         }
 
         /// Assemble one contour from a glyph ID with normalized variation
@@ -3251,7 +3198,7 @@ pub mod graphics {
                 origin,
                 scale,
                 output,
-                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
+                Some(normalized_coordinates),
             )
         }
 
@@ -3262,7 +3209,7 @@ pub mod graphics {
             origin: Point,
             scale: u16,
             output: &mut Path,
-            options: OutlineOptions<'_>,
+            variation: Option<&[i16]>,
         ) -> Result<usize, TrueTypeError> {
             let mut points = [OutlinePoint {
                 x: 0,
@@ -3274,7 +3221,7 @@ pub mod graphics {
                 usize::from(glyph),
                 &mut points,
                 0,
-                options.variation,
+                variation,
             )?;
             if point_count == 0 {
                 *output = Path::new();
@@ -3339,21 +3286,14 @@ pub mod graphics {
                 }
                 let next_index = if index == end { start } else { index + 1 };
                 let next = points[next_index];
-                let curve = |path: &mut Path, control: Point, end: Point| -> bool {
-                    if options.coarse {
-                        path.quadratic_to_coarse(control, end)
-                    } else {
-                        path.quadratic_to(control, end)
-                    }
-                };
                 if next.on_curve {
-                    if !curve(&mut path, map(point), map(next)) {
+                    if !path.quadratic_to(map(point), map(next)) {
                         return Err(TrueTypeError::TooLarge);
                     }
                     index += 2;
                 } else {
                     let implied = midpoint(point, next);
-                    if !curve(&mut path, map(point), map(implied)) {
+                    if !path.quadratic_to(map(point), map(implied)) {
                         return Err(TrueTypeError::TooLarge);
                     }
                     index += 1;
@@ -3389,13 +3329,7 @@ pub mod graphics {
             scale: u16,
             output: &mut CompoundPath,
         ) -> Result<usize, TrueTypeError> {
-            self.outline_compound_glyph_variation(
-                glyph,
-                origin,
-                scale,
-                output,
-                OutlineOptions { variation: None, coarse: false },
-            )
+            self.outline_compound_glyph_variation(glyph, origin, scale, output, None)
         }
 
         /// Assemble all contours from a glyph ID with normalized variation
@@ -3413,7 +3347,7 @@ pub mod graphics {
                 origin,
                 scale,
                 output,
-                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
+                Some(normalized_coordinates),
             )
         }
 
@@ -3423,13 +3357,13 @@ pub mod graphics {
             origin: Point,
             scale: u16,
             output: &mut CompoundPath,
-            options: OutlineOptions<'_>,
+            variation: Option<&[i16]>,
         ) -> Result<usize, TrueTypeError> {
             let mut compound = CompoundPath::new();
             for contour in 0..=MAX_CONTOURS {
                 let mut path = Path::new();
                 match self.outline_contour_glyph_variation(
-                    glyph, contour, origin, scale, &mut path, options,
+                    glyph, contour, origin, scale, &mut path, variation,
                 ) {
                     Ok(0) if contour == 0 => {
                         *output = compound;
@@ -3478,58 +3412,12 @@ pub mod graphics {
             color: Color,
             renderer: &mut Renderer<'_, '_>,
         ) -> Result<usize, TrueTypeError> {
-            self.render_outline(
-                glyph,
-                origin,
-                scale,
-                color,
-                renderer,
-                OutlineOptions { variation: None, coarse: false },
-            )
-        }
-
-        /// Rasterise one glyph using the bounded shared scratch path.
-        fn render_outline(
-            &self,
-            glyph: u16,
-            origin: Point,
-            scale: u16,
-            color: Color,
-            renderer: &mut Renderer<'_, '_>,
-            options: OutlineOptions<'_>,
-        ) -> Result<usize, TrueTypeError> {
-            if GLYPH_PATH
-                .busy
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_err()
-            {
-                return Err(TrueTypeError::TooLarge);
+            let mut compound = CompoundPath::new();
+            let contours = self.outline_compound_glyph(glyph, origin, scale, &mut compound)?;
+            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
+                return Err(TrueTypeError::BadTableDirectory);
             }
-            let result = (|| {
-                // SAFETY: `busy` is held exclusively until the closure ends.
-                let compound = unsafe { &mut *GLYPH_PATH.path.get() };
-                *compound = CompoundPath::new();
-                let contours = self.outline_compound_glyph_variation(
-                    glyph,
-                    origin,
-                    scale,
-                    compound,
-                    options,
-                )?;
-                if contours != 0 {
-                    let filled = if options.coarse {
-                        renderer.fill_compound_path_antialiased_small(compound, color)
-                    } else {
-                        renderer.fill_compound_path_antialiased(compound, color)
-                    };
-                    if !filled {
-                        return Err(TrueTypeError::BadTableDirectory);
-                    }
-                }
-                Ok(contours)
-            })();
-            GLYPH_PATH.busy.store(false, Ordering::Release);
-            result
+            Ok(contours)
         }
 
         /// Rasterize a direct glyph ID with normalized variation coordinates.
@@ -3542,36 +3430,18 @@ pub mod graphics {
             color: Color,
             renderer: &mut Renderer<'_, '_>,
         ) -> Result<usize, TrueTypeError> {
-            self.render_outline(
+            let mut compound = CompoundPath::new();
+            let contours = self.outline_compound_glyph_with_variation(
                 glyph,
                 origin,
                 scale,
-                color,
-                renderer,
-                OutlineOptions { variation: Some(normalized_coordinates), coarse: false },
-            )
-        }
-
-        /// Rasterise a glyph into a small cached mask with 2x2 supersampling.
-        pub fn render_glyph_small(
-            &self,
-            character: char,
-            origin: Point,
-            scale: u16,
-            color: Color,
-            renderer: &mut Renderer<'_, '_>,
-        ) -> Result<usize, TrueTypeError> {
-            let glyph = self
-                .glyph_index(character)
-                .ok_or(TrueTypeError::UnsupportedGlyph)?;
-            self.render_outline(
-                glyph,
-                origin,
-                scale,
-                color,
-                renderer,
-                OutlineOptions { variation: None, coarse: true },
-            )
+                normalized_coordinates,
+                &mut compound,
+            )?;
+            if contours != 0 && !renderer.fill_compound_path_antialiased(&compound, color) {
+                return Err(TrueTypeError::BadTableDirectory);
+            }
+            Ok(contours)
         }
 
         /// Lay out one single-line string using checked horizontal metrics.
@@ -7453,7 +7323,7 @@ pub mod graphics {
         let ascent = face.ascent_px(scale);
         let mut renderer = Renderer::new(&mut canvas);
         if face
-            .render_glyph_small(
+            .render_glyph(
                 character,
                 Point::new(bearing_x, ascent),
                 scale,
@@ -12311,27 +12181,6 @@ pub mod graphics {
             color: Color,
             opacity: u8,
         ) -> bool {
-            self.fill_compound_path_samples(path, color, opacity, 4)
-        }
-
-        /// Two-by-two supersampling for small cached glyph masks. The full
-        /// 4x4 renderer is unchanged; this cuts edge work by four for the
-        /// hundreds of 12 px glyphs rasterised on a first desktop repaint.
-        pub fn fill_compound_path_antialiased_small(
-            &mut self,
-            path: &CompoundPath,
-            color: Color,
-        ) -> bool {
-            self.fill_compound_path_samples(path, color, u8::MAX, 1)
-        }
-
-        fn fill_compound_path_samples(
-            &mut self,
-            path: &CompoundPath,
-            color: Color,
-            opacity: u8,
-            samples: u8,
-        ) -> bool {
             let contours = path.paths();
             let contour_count = contours.len();
             if contour_count == 0
@@ -12361,20 +12210,13 @@ pub mod graphics {
             if min_x > max_x || min_y > max_y {
                 return true;
             }
-            let step = 16 / samples;
-            let offset = i128::from(step / 2);
-            let coverage_unit = u8::try_from(256 / (samples * samples) as u16).unwrap_or(255);
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
                     let mut covered = 0u8;
-                    for sample_y in 0..samples {
-                        for sample_x in 0..samples {
-                            let point_x = i128::from(x) * 16
-                                + i128::from(sample_x) * i128::from(step)
-                                + offset;
-                            let point_y = i128::from(y) * 16
-                                + i128::from(sample_y) * i128::from(step)
-                                + offset;
+                    for sample_y in 0..4 {
+                        for sample_x in 0..4 {
+                            let point_x = i128::from(x) * 16 + i128::from(sample_x * 4 + 2);
+                            let point_y = i128::from(y) * 16 + i128::from(sample_y * 4 + 2);
                             let inside = contours.iter().fold(false, |inside, contour| {
                                 inside ^ path_contains_sample(contour.points(), point_x, point_y)
                             });
@@ -12388,7 +12230,7 @@ pub mod graphics {
                             x,
                             y,
                             color.packed(),
-                            combine_opacity(opacity, covered.saturating_mul(coverage_unit)),
+                            combine_opacity(opacity, covered.saturating_mul(16)),
                         );
                     }
                 }
@@ -14519,11 +14361,6 @@ impl<'a> Canvas<'a> {
         scale: u16,
     ) {
         let (mut cursor_x, mut cursor_y) = (x, y);
-        let unpacked = crate::graphics::Color::rgb(
-            (color >> 16) as u8,
-            (color >> 8) as u8,
-            color as u8,
-        );
         for character in text.chars() {
             if character == '\n' {
                 cursor_x = x;
@@ -14531,7 +14368,14 @@ impl<'a> Canvas<'a> {
                 continue;
             }
             let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
-            if let Some(cells) = crate::graphics::cached_glyph(face, character, scale, &mut alpha) {
+            let mut cells = crate::graphics::cached_glyph(face, character, scale, &mut alpha);
+            // A contour that overflows the fixed path budget is cached as a
+            // blank mask. Treat any inkless real glyph as a miss so the bitmap
+            // fallback below still draws the character.
+            if cells.is_some() && !alpha.iter().any(|opacity| *opacity != 0) {
+                cells = None;
+            }
+            if let Some(cells) = cells {
                 self.blend_alpha_mask(
                     cursor_x.saturating_add(cells.bearing_x),
                     cursor_y,
@@ -14541,14 +14385,16 @@ impl<'a> Canvas<'a> {
                     color,
                 );
             } else {
-                let ascent = i32::from(scale) * 4 / 5;
-                let mut renderer = crate::graphics::Renderer::new(self);
-                let _ = face.render_glyph(
-                    character,
-                    crate::graphics::Point::new(cursor_x, cursor_y.saturating_add(ascent)),
-                    scale,
-                    unpacked,
-                    &mut renderer,
+                // A contour that does not fit the fixed path budget must not
+                // silently vanish. Draw that one character with the bounded
+                // bitmap glyph so every string stays complete and legible;
+                // the rest of the string remains on the real face.
+                let mut encoded = [0_u8; 4];
+                self.draw_text(
+                    cursor_x,
+                    cursor_y,
+                    character.encode_utf8(&mut encoded),
+                    color,
                 );
             }
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
@@ -19448,10 +19294,8 @@ mod tests {
         let mut path = Path::new();
         assert!(path.move_to(Point::new(0, 0)));
         assert!(path.quadratic_to(Point::new(8, 16), Point::new(16, 0)));
-        // Fill close to the bounded capacity; one more four-point quadratic
-        // must still be rejected atomically rather than partially appended.
-        for index in 0..crate::graphics::MAX_PATH_POINTS - 7 {
-            assert!(path.line_to(Point::new(index as i32, 0)));
+        for index in 0..57 {
+            assert!(path.line_to(Point::new(index, 0)));
         }
         assert!(!path.quadratic_to(Point::new(24, 16), Point::new(32, 0)));
     }
