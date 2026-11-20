@@ -447,6 +447,177 @@ impl Motion {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 7. Weave wallpaper assets
+// ---------------------------------------------------------------------------
+
+/// Procedural wallpapers built from the same weave identity as the live
+/// desktop. This is a pure, bounded renderer: it writes a complete 24-bit BMP
+/// into caller-owned storage, with no allocation, float math or file I/O.
+pub mod wallpaper {
+    /// The three accessibility variants of the weave family.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Variant {
+        Dark,
+        Light,
+        HighContrast,
+    }
+
+    impl Variant {
+        pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::HighContrast];
+
+        pub const fn name(self) -> &'static str {
+            match self {
+                Self::Dark => "dark",
+                Self::Light => "light",
+                Self::HighContrast => "high-contrast",
+            }
+        }
+
+        /// Build a spec at sample-asset resolution. The weave pitch scales
+        /// with the width (14 px at the established 160 px sample width), the
+        /// same motif as the live 220 px pitch on a 1280 px desktop.
+        pub const fn spec(self, width: u16, height: u16) -> Spec {
+            let scaled = (width as i32) * 14 / 160;
+            let pitch = if scaled < 4 { 4 } else { scaled };
+            match self {
+                Self::Dark => Spec {
+                    width,
+                    height,
+                    top: super::WEAVE.canvas_top,
+                    bottom: super::WEAVE.canvas_bottom,
+                    // 6/255 is the documented weave tint opacity: enough to
+                    // read as fabric, faint enough to keep the gradient clear.
+                    weave_delta: 6,
+                    pitch,
+                },
+                Self::Light => Spec {
+                    width,
+                    height,
+                    top: crate::rgb(214, 230, 242),
+                    bottom: crate::rgb(235, 244, 246),
+                    weave_delta: 6,
+                    pitch,
+                },
+                Self::HighContrast => Spec {
+                    width,
+                    height,
+                    top: crate::rgb(0, 0, 0),
+                    bottom: crate::rgb(10, 10, 10),
+                    weave_delta: 28,
+                    pitch,
+                },
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Spec {
+        pub width: u16,
+        pub height: u16,
+        pub top: u32,
+        pub bottom: u32,
+        /// Brightness added/subtracted on alternating diagonal bands.
+        pub weave_delta: i16,
+        pub pitch: i32,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WallpaperError {
+        TooLarge,
+        BufferTooSmall,
+    }
+
+    const HEADER_BYTES: usize = 54;
+    const MAX_DIMENSION: usize = 8192;
+    const MAX_PIXELS: usize = 16 * 1024 * 1024;
+
+    /// Exact byte length of the BMP for `width` x `height`, or `None` when the
+    /// geometry is invalid or exceeds the bounded asset contract.
+    pub fn bmp_len(width: u16, height: u16) -> Option<usize> {
+        let w = width as usize;
+        let h = height as usize;
+        if w == 0 || h == 0 || w > MAX_DIMENSION || h > MAX_DIMENSION {
+            return None;
+        }
+        if w.checked_mul(h)? > MAX_PIXELS {
+            return None;
+        }
+        let row = w.checked_mul(3)?.checked_add(3)? & !3;
+        row.checked_mul(h)?.checked_add(HEADER_BYTES)
+    }
+
+    fn put_u16(out: &mut [u8], offset: usize, value: u16) {
+        out[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_u32(out: &mut [u8], offset: usize, value: u32) {
+        out[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_i32(out: &mut [u8], offset: usize, value: i32) {
+        out[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn channels(color: u32) -> (i32, i32, i32) {
+        (
+            ((color >> 16) & 0xff) as i32,
+            ((color >> 8) & 0xff) as i32,
+            (color & 0xff) as i32,
+        )
+    }
+
+    fn channel(top: i32, bottom: i32, t: i32) -> u8 {
+        let value = top + (bottom - top) * t / 255;
+        value.clamp(0, 255) as u8
+    }
+
+    /// Render `spec` as a complete bottom-up 24-bit BMP. Returns the number of
+    /// bytes written. Existing bytes beyond that length are left untouched.
+    pub fn render_bmp(spec: &Spec, out: &mut [u8]) -> Result<usize, WallpaperError> {
+        let len = bmp_len(spec.width, spec.height).ok_or(WallpaperError::TooLarge)?;
+        if out.len() < len {
+            return Err(WallpaperError::BufferTooSmall);
+        }
+        if spec.pitch <= 0 {
+            return Err(WallpaperError::TooLarge);
+        }
+        let out = &mut out[..len];
+        out.fill(0);
+        out[..2].copy_from_slice(b"BM");
+        put_u32(out, 2, len as u32);
+        put_u32(out, 10, HEADER_BYTES as u32);
+        put_u32(out, 14, 40);
+        put_i32(out, 18, spec.width as i32);
+        put_i32(out, 22, spec.height as i32);
+        put_u16(out, 26, 1);
+        put_u16(out, 28, 24);
+        put_u32(out, 34, (len - HEADER_BYTES) as u32);
+
+        let width = spec.width as usize;
+        let height = spec.height as usize;
+        let row_bytes = (width * 3 + 3) & !3;
+        let (top_r, top_g, top_b) = channels(spec.top);
+        let (bottom_r, bottom_g, bottom_b) = channels(spec.bottom);
+        for y in 0..height {
+            let t = (y * 255 / height) as i32;
+            let r = channel(top_r, bottom_r, t) as i32;
+            let g = channel(top_g, bottom_g, t) as i32;
+            let b = channel(top_b, bottom_b, t) as i32;
+            let row = HEADER_BYTES + (height - 1 - y) * row_bytes;
+            for x in 0..width {
+                let band = ((x as i32 + y as i32) / spec.pitch) % 2 == 0;
+                let delta = (if band { spec.weave_delta } else { -spec.weave_delta }) as i32;
+                let offset = row + x * 3;
+                out[offset] = (b + delta).clamp(0, 255) as u8;
+                out[offset + 1] = (g + delta).clamp(0, 255) as u8;
+                out[offset + 2] = (r + delta).clamp(0, 255) as u8;
+            }
+        }
+        Ok(len)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,5 +777,102 @@ mod tests {
         assert!(Motion::Instant.duration_ms(false) < Motion::Fast.duration_ms(false));
         assert!(Motion::Fast.duration_ms(false) < Motion::Normal.duration_ms(false));
         assert!(Motion::Normal.duration_ms(false) < Motion::Slow.duration_ms(false));
+    }
+
+    #[test]
+    fn weave_wallpaper_bmp_is_well_formed_and_deterministic() {
+        use wallpaper::{self, Variant};
+
+        let spec = Variant::Dark.spec(160, 90);
+        let len = wallpaper::bmp_len(160, 90).unwrap();
+        assert_eq!(len, 43_254);
+        let mut first = vec![0u8; len];
+        let mut second = vec![0u8; len];
+        assert_eq!(wallpaper::render_bmp(&spec, &mut first), Ok(len));
+        assert_eq!(wallpaper::render_bmp(&spec, &mut second), Ok(len));
+        assert_eq!(first, second);
+
+        assert_eq!(&first[..2], b"BM");
+        assert_eq!(u32::from_le_bytes(first[2..6].try_into().unwrap()), len as u32);
+        assert_eq!(u32::from_le_bytes(first[10..14].try_into().unwrap()), 54);
+        assert_eq!(u32::from_le_bytes(first[14..18].try_into().unwrap()), 40);
+        assert_eq!(i32::from_le_bytes(first[18..22].try_into().unwrap()), 160);
+        assert_eq!(i32::from_le_bytes(first[22..26].try_into().unwrap()), 90);
+        assert_eq!(u16::from_le_bytes(first[26..28].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(first[28..30].try_into().unwrap()), 24);
+        assert_eq!(
+            u32::from_le_bytes(first[34..38].try_into().unwrap()),
+            (len - 54) as u32
+        );
+        // Bottom-up row 0 is the last logical row; the top-left pixel lands
+        // in the final row. Top colour + the +6 weave tint, stored as BGR.
+        let top_left = len - 480;
+        assert_eq!(&first[top_left..top_left + 3], &[64, 35, 17]);
+    }
+
+    #[test]
+    fn weave_wallpaper_variants_are_distinct_and_bounded() {
+        use wallpaper::{self, Variant, WallpaperError};
+
+        let len = wallpaper::bmp_len(320, 200).unwrap();
+        assert_eq!(len, 192_054);
+        let mut images: Vec<Vec<u8>> = Vec::new();
+        for variant in Variant::ALL {
+            let mut image = vec![0u8; len];
+            assert_eq!(wallpaper::render_bmp(&variant.spec(320, 200), &mut image), Ok(len));
+            images.push(image);
+        }
+        assert_ne!(images[0], images[1]);
+        assert_ne!(images[1], images[2]);
+        assert_ne!(images[0], images[2]);
+
+        assert_eq!(wallpaper::bmp_len(0, 10), None);
+        assert_eq!(wallpaper::bmp_len(10, 0), None);
+        assert_eq!(wallpaper::bmp_len(8193, 10), None);
+        assert_eq!(wallpaper::bmp_len(8192, 8192), None);
+        let spec = Variant::Dark.spec(320, 200);
+        assert_eq!(
+            wallpaper::render_bmp(&spec, &mut [0u8; 16]),
+            Err(WallpaperError::BufferTooSmall)
+        );
+        let mut bad_pitch = spec;
+        bad_pitch.pitch = 0;
+        assert_eq!(
+            wallpaper::render_bmp(&bad_pitch, &mut vec![0u8; len]),
+            Err(WallpaperError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn committed_wallpaper_assets_match_the_renderer_and_manifests() {
+        use sha2::{Digest, Sha256};
+        use wallpaper::{self, Variant};
+
+        let names = ["dark", "light", "high-contrast"];
+        for (variant, name) in Variant::ALL.iter().zip(names) {
+            let bytes: &[u8] = match variant {
+                Variant::Dark => include_bytes!("../../assets/wallpapers/wovenhat-weave-dark-320x200.bmp"),
+                Variant::Light => include_bytes!("../../assets/wallpapers/wovenhat-weave-light-320x200.bmp"),
+                Variant::HighContrast => include_bytes!("../../assets/wallpapers/wovenhat-weave-high-contrast-320x200.bmp"),
+            };
+            let len = wallpaper::bmp_len(320, 200).unwrap();
+            let mut expected = vec![0u8; len];
+            assert_eq!(wallpaper::render_bmp(&variant.spec(320, 200), &mut expected), Ok(len));
+            assert_eq!(bytes, expected, "asset drift for {name}");
+
+            let digest = Sha256::digest(bytes);
+            let mut hex = [0u8; 64];
+            for (index, byte) in digest.iter().enumerate() {
+                hex[index * 2] = b"0123456789abcdef"[(byte >> 4) as usize];
+                hex[index * 2 + 1] = b"0123456789abcdef"[(byte & 0xf) as usize];
+            }
+            let manifest: &[u8] = match variant {
+                Variant::Dark => include_bytes!("../../assets/wallpapers/weave-dark-320x200.manifest.toml"),
+                Variant::Light => include_bytes!("../../assets/wallpapers/weave-light-320x200.manifest.toml"),
+                Variant::HighContrast => include_bytes!("../../assets/wallpapers/weave-high-contrast-320x200.manifest.toml"),
+            };
+            assert!(manifest.windows(64).any(|window| window == hex), "digest mismatch for {name}");
+            assert!(manifest.windows(b"CC0-1.0".len()).any(|window| window == b"CC0-1.0"));
+        }
     }
 }

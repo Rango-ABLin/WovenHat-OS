@@ -164,6 +164,41 @@ external icon files at this layer.
 `ui::DesignTokens` (0/120/220/320 ms) and collapses to zero when reduced motion
 is requested. Motion is ordered and asserted in host tests.
 
+## 7. Weave wallpaper family
+
+`design_system::wallpaper` is a pure, bounded 24-bit BMP renderer. It derives
+each design from the same `WEAVE` identity as the live desktop, writes only into
+caller-owned storage, uses integer math, and rejects zero/oversized geometry or
+a short output buffer. Its worst case is bounded to 8192×8192 and 16 megapixels,
+matching the image decoder's existing asset limits.
+
+Three CC0-1.0 variants were generated at 320×200 (192,054 bytes each, well
+inside the 256 KiB VFS node capacity, so no new kernel capability is needed):
+
+| Variant | Palette | Weave | Intent |
+|---|---|---|---|
+| Dark | navy `(11,29,58)` → teal `(16,78,82)` | ±6 | Mirrors the live desktop; faint fabric over a clear gradient |
+| Light | `(214,230,242)` → `(235,244,246)` | ±6 | Airy light-theme companion |
+| High contrast | black → `(10,10,10)` | ±28 | Bold diagonal bands on black, behind high-contrast text |
+
+The weave pitch scales with asset width (14 px at the established 160 px sample
+width, 28 px at 320 px), the sample-scale analogue of the live 220 px pitch.
+
+`libwoven/examples/generate_wallpapers.rs` is the **only** producer of the
+committed BMPs and their manifests. It calls the same renderer the host tests
+call, so the bytes cannot drift. Each manifest records id, CC0-1.0 license,
+provenance, dimensions, `BMP24` format and SHA-256. A host test includes all
+three assets, re-renders each from its spec and compares byte-for-byte, then
+checks each manifest digest and license — so a hand-edited asset or stale digest
+fails the test suite.
+
+Visual QA was performed by converting the BMPs to PNG previews and inspecting
+them; the dark variant's initial ±10 tint was reduced to ±6 after the stripes
+were found to overwhelm the navy→teal gradient.
+
+These assets are staged data only. Nothing in the kernel VFS bootstrap, the
+shell, or the wallpaper decoder was changed, so no QEMU claim is made.
+
 ## Validation evidence (2026-11-20)
 
 Foundation increment:
@@ -187,19 +222,31 @@ Icon convergence increment:
 by three `unnecessary_cast` errors in `libwoven/tests/ttf_visual.rs` from
 concurrent font work; that owner resolved them and the command is clean again.
 
-No QEMU run was performed for the design system or icon convergence: no call
-site changed behavior and the accepted tile geometry is pinned by exact-value
-tests. The concurrent owner recorded independent 1/2/4-CPU desktop qualification
-results separately. Desktop integration of new visual values still requires the
-normal qualification chain.
+Weave wallpaper increment:
+
+- `cargo run -p libwoven --example generate_wallpapers` — generated all three
+  BMPs and manifests from the spec.
+- `cargo test -p libwoven --lib` — 256 passed, 0 failed, 1 pre-existing ignored
+  (3 new wallpaper tests, including byte-for-byte asset and digest checks).
+- `cargo clippy -p libwoven --all-targets -- -D warnings` — clean (includes the
+  host generator example).
+- `cargo clippy -p libwoven --target x86_64-unknown-none -- -D warnings` —
+  clean (the renderer is `no_std`).
+
+No QEMU run was performed for the design system, icon convergence or wallpaper
+assets: no call site changed behavior and the accepted tile geometry is pinned
+by exact-value tests. The concurrent owner recorded independent 1/2/4-CPU
+desktop qualification results separately. Desktop integration of new visual
+values still requires the normal qualification chain.
 
 ## Next prerequisites
 
-1. Generate weave-family wallpaper variants as bounded BMPs for the existing
-   VFS staging path (no new syscall or decoder).
-2. Migrate type call sites to `TypeRole` leading with the bounded glyph cache,
+1. Migrate type call sites to `TypeRole` leading with the bounded glyph cache,
    then re-run the full 1/2/4-CPU desktop qualification.
-3. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
+2. Only then propose the `ui::Theme::DARK.surface` correction as a separate,
    gated change with its own pixel-reference evidence.
+3. When a wallpaper selector is wanted, stage these CC0 assets through the
+   existing `vfs::create_read_only` path and add a gated shell pick-list; that
+   is a separate, QEMU-qualified integration, not part of this asset increment.
 4. Keep the all-targets Clippy check in the full gate; the transient
    `ttf_visual.rs` errors from concurrent font work are resolved.

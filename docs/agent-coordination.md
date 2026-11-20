@@ -38,6 +38,27 @@ actively writing it. `libwoven/src/lib.rs` also contains that owner's
 in-progress `pub mod design_system;` line alongside this session's font
 documentation correction; stage it only with their agreement.
 
+## OpenCode - Weave wallpaper family assets (2026-11-20)
+
+Added `design_system::wallpaper`: a pure, bounded, `no_std` 24-bit BMP renderer
+derived from the same WEAVE identity as the live desktop. Three CC0-1.0 variants
+(dark / light / high-contrast) at 320x200 were generated into `assets/wallpapers/`
+with per-variant manifests and SHA-256 digests. Each BMP is 192,054 bytes, under
+the 256 KiB VFS node cap, so no new syscall or kernel capability is involved.
+
+`libwoven/examples/generate_wallpapers.rs` is the single producer: it calls the
+same renderer the tests call, so code and assets cannot drift. A host test
+includes all three BMPs, re-renders and compares them byte-for-byte, and checks
+each manifest's digest and license. Visual QA found the dark variant's initial
++/-10 weave overwhelmed the navy-to-teal gradient; reduced to +/-6 (matching
+the documented 6/255 weave opacity) and regenerated.
+
+Touched only `libwoven/src/design_system.rs`, the new example, and new files in
+`assets/wallpapers/`. No kernel ABI, VFS bootstrap, shell call site or decoder
+change; no QEMU claim. Validation: 256 libwoven lib tests, all-targets Clippy and
+freestanding Clippy all pass. Did not touch the concurrent owner's lib.rs,
+Cargo.lock files or workflow changes.
+
 ## OpenCode - Icon grammar convergence (2026-11-20)
 
 Converged both icon producers onto one contract, scoped to `libwoven/src/icons.rs`,
