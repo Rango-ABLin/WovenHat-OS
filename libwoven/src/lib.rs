@@ -155,6 +155,7 @@ pub mod remote_admin;
 pub mod keyboard_layout;
 pub mod unicode_data;
 pub mod icons;
+pub mod design_system;
 pub mod identity;
 pub mod installer_ipc;
 pub mod media;
