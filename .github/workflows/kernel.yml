@@ -49,6 +49,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Lint, host regressions, and 1/2/4-core boot matrix
@@ -181,6 +188,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 13.3 NVMe 1/2/4-core acceptance
@@ -641,6 +655,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 14.1 WovenNet IPv4 live 1/2/4-core acceptance
@@ -886,6 +907,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 10.8-11.5 runtime 1/2/4-core acceptance
@@ -1004,6 +1032,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 16.1 out-of-kernel application 1/2/4-core acceptance
@@ -1170,6 +1205,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Stage 15 WovenFS acceptance
@@ -1248,6 +1290,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1339,6 +1388,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1418,6 +1474,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1494,6 +1557,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
@@ -1586,6 +1656,13 @@ jobs:
           printf '[package]\nname = "uefi-prefetch"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nbootloader-x86_64-uefi = "=%s"\n' "$boot_version" > "$prefetch/Cargo.toml"
           : > "$prefetch/src/lib.rs"
           cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # The nested install resolves with the crate's own Cargo.lock, which
+          # pins different versions than a fresh resolve; fetch that exact graph.
+          published_lock=$(ls "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"bootloader-x86_64-uefi-$boot_version"/Cargo.lock | head -1)
+          cp "$published_lock" "$prefetch/Cargo.lock"
+          cargo fetch --manifest-path "$prefetch/Cargo.toml"
+          # -Zbuild-std resolves the standard library from rust-src's lockfile.
+          cargo fetch --locked --manifest-path "$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
       - name: Install QEMU and OVMF
         run: sudo apt-get update && sudo apt-get install --yes qemu-system-x86 ovmf
       - name: Discover OVMF CODE
