@@ -15,7 +15,9 @@ Current acceptance applies only to explicitly executed checks.
 4. Implement and qualify the remaining application operations and service data
    migrations now that the bounded native WovenFS reboot/replay gate passes.
 5. Close Stage 1-19 software requirements before formal Stage 20 acceptance.
-6. Qualify installation, signed update, rollback and recovery on disposable disks.
+6. Extend the accepted disposable-image installation, signed update, rollback
+   and recovery gates to physical media, firmware integration and power-loss
+   qualification; the bounded regular-file/QEMU scope passes on current source.
 7. Complete release provenance, independent review and hardware support records.
 
 ## External release prerequisites

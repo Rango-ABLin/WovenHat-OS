@@ -1,5 +1,24 @@
 # Stage status
 
+## Disposable install/update/rollback/recovery - 2026-11-20 - ACCEPTED (BOUNDED)
+
+Twenty-six focused installer contracts pass, followed by the complete Stage 28
+regular-file pipeline: deterministic GPT layout, FAT32-compatible system
+partition, EFI artifact placement, settings readback, whole-file transaction
+and injected rollback. The deterministic summary reports `valid: true`,
+`physical_access: none`, and `release_certification: not-performed`.
+
+Stage 27.1 A/B activation/rollback, Stage 27.2 durable update records on fresh
+16 MiB ATA images, and the signed WovenRecovery application each pass on
+1/2/4 CPUs with exit 33. Evidence is retained under
+`audit-artifacts/stage27.1-*`, `audit-artifacts/stage27.2-{1,2,4}cpu`, and
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu`.
+
+This accepts remaining-work item 6 only for disposable regular-file/QEMU
+scope. Physical installation, firmware boot-entry changes, native media,
+volatile caches, physical power loss, production signing custody, and release
+certification were not performed.
+
 ## Stage 8 current-source IPC/capability gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
 
 The shared runtime harness now requires the full Stage 8 marker chain:

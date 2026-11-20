@@ -1,3 +1,13 @@
+## Codex - disposable install/update/recovery accepted (2026-11-20)
+
+Twenty-six installer contracts and the deterministic Stage 28 disposable
+pipeline pass, including GPT/FAT32/EFI assembly, settings readback and injected
+rollback. Stage 27.1 A/B rollback, Stage 27.2 durable update records, and the
+signed WovenRecovery path pass on 1/2/4 CPUs. Only repository-created regular
+files were written. This accepts item 6 for bounded virtual-disk scope only;
+physical install, firmware state, power loss and production signing remain
+external. No Cargo/QEMU chain is active.
+
 ## Codex - Stage 8 current-source bounded software gate closed (2026-11-20)
 
 Added an explicit normal-kernel harness route requiring the complete Stage 8
