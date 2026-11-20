@@ -1,3 +1,20 @@
+## OpenCode - kernel CI offline dependency prefetch (2026-11-20)
+
+The `kernel` workflow has been red because `.cargo/config.toml` sets
+`[net] offline = true` (commit `a3616418`) while no job fetched crates, so
+every job that resolved `bootloader_api` or `hmac` failed on a clean runner.
+Each of the 11 `kernel` jobs now runs a "Fetch locked Cargo dependencies" step
+with `CARGO_NET_OFFLINE=false` for fetch only; builds stay offline. The step
+fetches the root lockfile and every tracked nested `Cargo.lock` with `--locked`.
+Six nested lockfiles (`apps/hello`, `apps/woven-ai`, `apps/woven-recovery`,
+`tools/codec-fuzz`, `tools/exit-status-fixture`, `tools/webp-allocation-cert`)
+were stale against their manifests; they gained only added entries (1825 lines,
+0 removed). All 29 lockfiles pass `cargo fetch --locked` locally.
+
+Not fixed here: `libwoven` does not compile for `x86_64-unknown-none`
+(`E0015` in the `GLYPH_PATH` static), which blocks kernel and installer lints
+until the in-progress glyph-path change in `libwoven/src/lib.rs` lands.
+
 ## OpenCode - Desktop gate repair and large-asset font mapping (2026-11-20)
 
 The desktop qualification was timing out because the first unlocked frame
