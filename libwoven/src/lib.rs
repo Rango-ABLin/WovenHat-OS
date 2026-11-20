@@ -14460,9 +14460,16 @@ impl<'a> Canvas<'a> {
                     // Substitute one bounded bitmap glyph; keep the real
                     // advance so proportional layout does not shift.
                     let mut encoded = [0_u8; 4];
+                    // The real face positions glyphs by baseline (`ascent`),
+                    // while the bitmap font is drawn from its top-left. Offset
+                    // the substitute so it sits on the same baseline instead
+                    // of floating a line above its neighbours.
+                    let bitmap_y = pen_y
+                        .saturating_add(face.ascent_px(size))
+                        .saturating_sub(font::HEIGHT as i32);
                     self.draw_text(
                         pen_x,
-                        pen_y,
+                        bitmap_y,
                         character.encode_utf8(&mut encoded),
                         color,
                     );
