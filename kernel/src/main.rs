@@ -104,10 +104,12 @@ pub mod memory_pressure;
 mod mouse;
 mod network;
 mod notifications;
+mod dma;
 #[cfg(any(
     not(feature = "qemu-test"),
     feature = "stage13-12-test",
-    feature = "stage13-3-test"
+    feature = "stage13-3-test",
+    feature = "stage13-14-test"
 ))]
 mod nvme;
 mod page_cache;

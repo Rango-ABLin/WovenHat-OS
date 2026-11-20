@@ -31,6 +31,10 @@ pub use ownership::Owner;
 use ownership::{Ownership, check_access, check_device_range};
 
 pub const DMA_PAGE_SIZE: usize = 4096;
+/// NVMe namespace page size and admin doorbell size, kept in the shared API
+/// so every caller shares one source of truth.
+pub const NVME_NAMESPACE_PAGE_SIZE: usize = 4096;
+pub const NVME_ADMIN_PAGE_SIZE: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmaMemoryError {
@@ -95,6 +99,17 @@ impl DmaPage {
     }
     pub const fn owner(&self) -> Owner {
         self.ownership.owner()
+    }
+
+    /// The complete page as a contiguous byte buffer, for callers that write
+    /// and then fence the range themselves. Returns the direct-mapped view, so
+    /// the guard is on the buffer, not the page. The buffer is only valid while
+    /// the page is CPU-owned.
+    pub fn bytes_mut(&mut self) -> &mut [u8; DMA_PAGE_SIZE] {
+        // SAFETY: The frame is exclusively owned by this DmaPage and is
+        // reachable through the bootloader direct-mapped virtual address while
+        // the page is CPU-owned.
+        unsafe { &mut *(self.virtual_address as *mut [u8; DMA_PAGE_SIZE]) }
     }
 
     /// Give the page to the device. Returns the device-visible physical address.

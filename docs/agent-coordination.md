@@ -1,3 +1,18 @@
+## OpenCode - M5NVMEQ: NVMe onto the shared DMA page (2026-11-20)
+
+Mechanical type swap done. `kernel/src/nvme.rs` now imports `DmaPage` from
+`kernel/src/dma.rs`; the local page type is removed and every call site uses the
+shared alloc/address methods. The read/write/flush behavior is unchanged, with the
+same release/acquire fences. `mod nvme` is now gated with `stage13-14-test`.
+
+Result, both commands pass on this branch (exit 0):
+`cargo check -p wovenhat-kernel --target x86_64-unknown-none --features stage13-14-test`
+and `cargo clippy ... --features stage13-14-test -- -D warnings`.
+QEMU: 1-CPU Stage 13.14 storage gate PASS, evidence
+`audit-artifacts/stage13.14-nvme-1cpu-1795172062694030900`.
+M5 DMA gate still passes at 1/2/4 CPUs (`audit-artifacts/m5-dma-{1,2,4}cpu-*`).
+Claim of the M5 DMA slice from the older note is superseded.
+
 ## OpenCode - M5 hardware qualification: shared DMA slice (2026-11-20)
 
 Claimed for M5 (branch `m5/hardware-qualification`, worktree
