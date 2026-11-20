@@ -1,3 +1,14 @@
+## Codex - paused Stage 11 cherry-pick reconciled (2026-11-20)
+
+Resolved the additive conflicts from cherry-picking `22f2e750` onto the
+reconciled master. Both the newer November 20 font/kernel records and the
+November 16 large-signed-executable acceptance record were retained without
+upgrading either acceptance claim. The production mmap-floor implementation,
+architecture note and focused qualification reports landed together as
+`764091a1`. `git diff --check` passed before continuation. No new build, Clippy
+or QEMU result is claimed by this conflict-resolution pass; the next work item
+remains exact-current-source acceptance.
+
 ## OpenCode - glyph fallback fixed and sign-in baseline approved (2026-11-20)
 
 Applied the inkless-mask miss check to `Canvas::draw_text_proportional` and
