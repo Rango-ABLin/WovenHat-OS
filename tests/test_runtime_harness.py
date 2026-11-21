@@ -142,6 +142,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         required = harness.required_markers('11.6', 4)
         self.assertIn('[S11.6] module staging rollback: PASSED', required)
         self.assertIn('[S11.6] generation-safe unload/reload: PASSED', required)
+        self.assertIn('[S11.6] per-thread dynamic TLS isolation: PASSED', required)
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)

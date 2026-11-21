@@ -900,6 +900,49 @@ pub(super) fn module_staging_run() -> bool {
         crate::serial::write_line(format_args!(
             "[S11.6] generation-safe unload/reload: PASSED"
         ));
+        let mmap_base = space.mmap_base();
+        let Some(first_tls) = super::super::map_dynamic_anonymous(
+            space.paging(),
+            mmap_base,
+            1,
+            0,
+            4096,
+        ) else {
+            let _ = destroy(space);
+            return None;
+        };
+        let Some(second_tls) = super::super::map_dynamic_anonymous(
+            space.paging(),
+            mmap_base,
+            1,
+            1,
+            4096,
+        ) else {
+            let _ = super::super::unmap_dynamic_anonymous(space.paging(), first_tls);
+            let _ = destroy(space);
+            return None;
+        };
+        let isolated = first_tls.address != second_tls.address
+            && paging::write_user_bytes(space.paging(), first_tls.address, &[0x11]).is_ok()
+            && paging::write_user_bytes(space.paging(), second_tls.address, &[0x22]).is_ok()
+            && {
+                let mut first = [0u8; 1];
+                let mut second = [0u8; 1];
+                paging::read_user_bytes_in(space.paging(), first_tls.address, &mut first).is_ok()
+                    && paging::read_user_bytes_in(space.paging(), second_tls.address, &mut second)
+                        .is_ok()
+                    && first == [0x11]
+                    && second == [0x22]
+            };
+        let tls_unmapped = super::super::unmap_dynamic_anonymous(space.paging(), first_tls)
+            && super::super::unmap_dynamic_anonymous(space.paging(), second_tls);
+        if !isolated || !tls_unmapped {
+            let _ = destroy(space);
+            return None;
+        }
+        crate::serial::write_line(format_args!(
+            "[S11.6] per-thread dynamic TLS isolation: PASSED"
+        ));
         let _ = destroy(space);
         Some(true)
     })()

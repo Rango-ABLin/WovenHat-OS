@@ -1,5 +1,13 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Per-thread dynamic TLS address geometry
+
+The runtime TLS arena is indexed by `(thread slot, module slot)` after the
+process mmap ASLR displacement. Thread generations prevent a live slot from
+being reused, module generations protect publication, and each 64 KiB cell is
+bounded by `USER_MMAP_MAX_SIZE`. Current-thread lookup uses the mapping owned
+by that thread; startup TLS remains a separate fallback path.
+
 ## Runtime module generation boundary
 
 Dynamic-module descriptors remain valid at any nonzero current generation;

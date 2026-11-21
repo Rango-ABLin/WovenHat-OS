@@ -1,5 +1,24 @@
 # Stage status
 
+## Stage 11 per-thread runtime TLS arena - 2026-11-21 - ACCEPTED (BOUNDED)
+
+Runtime TLS mappings now include the generation-safe thread slot in their
+virtual address calculation. Two live threads in one shared process address
+space therefore receive distinct blocks for the same dynamic module instead
+of colliding at one address. Current-thread TLS start/size/address resolution
+checks the thread-owned runtime mapping before falling back to startup TLS.
+
+The Stage 11.6 gate writes distinct bytes into two runtime-TLS blocks in one
+address space, verifies isolation, and unmaps both before module teardown. The
+strengthened 11.6 and neighboring 11.2-ASLR gates pass on 1/2/4 CPUs, alongside
+15 harness contracts and warning-denying affected-feature Clippy. Evidence is
+under `audit-artifacts/stage11.6-*cpu-17952329*` and
+`audit-artifacts/stage11.2-aslr-*cpu-17952330*`.
+
+This still does not claim the full runtime loader: generation-tagged TLS ABI,
+final-reference all-thread unmap/quiescence, symbol publication and lifecycle
+callback ownership remain open.
+
 ## Stage 11 runtime module generation and pure-BSS TLS - 2026-11-21 - ACCEPTED (BOUNDED)
 
 The exact Stage 10 baseline passes the complete existing Stage 11 matrix: 30

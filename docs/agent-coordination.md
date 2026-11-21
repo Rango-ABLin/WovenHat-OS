@@ -9879,3 +9879,9 @@ pure-BSS dynamic-TLS admission and generation-safe module reload, strengthens
 Stage 11.6 to require stale-handle rejection plus generation-2 reuse, and
 passes host/feature Clippy and 1/2/4-CPU boots. No QEMU chain is active. Full
 post-start mapping/unmap remains in progress and is not yet claimed.
+
+The second runtime increment separates dynamic TLS by thread slot and routes
+lookup through the current thread's owned mapping. Strengthened Stage 11.6 and
+neighboring ASLR gates pass on 1/2/4 CPUs. No QEMU chain is active. Final-
+reference all-thread teardown and the generation-tagged userspace ABI remain
+next; do not treat this as full Stage 11 acceptance.

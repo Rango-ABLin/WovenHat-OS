@@ -5091,9 +5091,11 @@ pub fn map_dynamic_anonymous(
     address_space: paging::AddressSpace,
     mmap_base: u64,
     module: usize,
+    thread_slot: usize,
     size: usize,
 ) -> Option<AnonymousMapping> {
     if module >= MAX_DYNAMIC_MODULES
+        || thread_slot >= crate::thread::MAX_THREADS
         || size == 0
         || size > USER_MMAP_MAX_SIZE
         || !size.is_multiple_of(4096)
@@ -5103,7 +5105,12 @@ pub fn map_dynamic_anonymous(
     let displacement = mmap_base.checked_sub(USER_MMAP_START)?;
     let address = DYNAMIC_TLS_START
         .checked_add(displacement)?
-        .checked_add((module as u64).checked_mul(USER_MMAP_STRIDE)?)?;
+        .checked_add(
+            (thread_slot as u64)
+                .checked_mul(MAX_DYNAMIC_MODULES as u64)?
+                .checked_add(module as u64)?
+                .checked_mul(USER_MMAP_STRIDE)?,
+        )?;
     paging::map_user_range_in(address_space, address, size, true, false).ok()?;
     if paging::zero_user_range_in(address_space, address, size).is_err() {
         let _ = paging::unmap_user_range_in(address_space, address, size);

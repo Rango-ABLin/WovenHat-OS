@@ -2273,6 +2273,20 @@ pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
     let Some(thread) = current_thread_id() else {
         return u64::MAX;
     };
+    if let Some(index) = module
+        .checked_sub(1)
+        .and_then(|value| usize::try_from(value).ok())
+    {
+        if let Some(mapping) = crate::thread::resources(current_process_id(), thread)
+            .and_then(|resources| resources.dynamic_tls.get(index).copied().flatten())
+        {
+            return usize::try_from(offset)
+                .ok()
+                .filter(|offset| *offset < mapping.size)
+                .and_then(|offset| mapping.address.checked_add(offset as u64))
+                .unwrap_or(u64::MAX);
+        }
+    }
     let Some(tls_base) = crate::thread::tls(thread) else {
         return u64::MAX;
     };
@@ -2288,6 +2302,16 @@ pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
 
 pub fn dynamic_tls_module_range(module: u64) -> Option<(u64, usize)> {
     let thread = current_thread_id()?;
+    if let Some(index) = module
+        .checked_sub(1)
+        .and_then(|value| usize::try_from(value).ok())
+    {
+        if let Some(mapping) = crate::thread::resources(current_process_id(), thread)
+            .and_then(|resources| resources.dynamic_tls.get(index).copied().flatten())
+        {
+            return Some((mapping.address, mapping.size));
+        }
+    }
     let tls_base = crate::thread::tls(thread)?;
     let processes = process_table_lock();
     processes
@@ -2378,7 +2402,14 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
     while count < threads.len() && threads[count].0.is_some() {
         let thread = threads[count].0.unwrap();
         let address_space = threads[count].1.unwrap();
-        let Some(mapping) = userspace::map_dynamic_anonymous(address_space, mmap_base, module, size) else { break };
+        let thread_slot = (thread.raw() & 0xffff_ffff) as usize;
+        let Some(mapping) = userspace::map_dynamic_anonymous(
+            address_space,
+            mmap_base,
+            module,
+            thread_slot,
+            size,
+        ) else { break };
         if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err() || !crate::thread::install_dynamic_tls(thread, module, mapping) { let _ = userspace::unmap_dynamic_anonymous(address_space, mapping); break; }
         installed[count] = (Some(thread), Some(mapping));
         count += 1;
