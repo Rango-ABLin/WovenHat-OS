@@ -2341,7 +2341,13 @@ pub fn dynamic_module_transaction_owned() -> bool {
 }
 
 pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) -> bool {
-    if !dynamic_module_transaction_owned() || initializer.is_empty() || initializer.len() > memory_size || memory_size > 4096 { return false; }
+    if !dynamic_module_transaction_owned()
+        || memory_size == 0
+        || initializer.len() > memory_size
+        || memory_size > 4096
+    {
+        return false;
+    }
     let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return false; };
     if module >= userspace::MAX_DYNAMIC_MODULES { return false; }
     let owner = current_process_id();

@@ -138,6 +138,15 @@ class RuntimeAcceptanceTests(unittest.TestCase):
                 log = '\n'.join(marker for marker in required if marker != missing)
                 self.assertTrue(harness.validation_errors(33, log, required))
 
+    def test_stage11_6_requires_generation_safe_reload(self):
+        required = harness.required_markers('11.6', 4)
+        self.assertIn('[S11.6] module staging rollback: PASSED', required)
+        self.assertIn('[S11.6] generation-safe unload/reload: PASSED', required)
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_complete_wifi_evidence_passes(self):
         required = harness.required_markers('13.9', 4)
         self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))

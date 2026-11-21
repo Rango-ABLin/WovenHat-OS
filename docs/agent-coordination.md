@@ -9863,3 +9863,19 @@ Stage 10 is closed on exact current source. The full Windows chain passes all
 gates pass on 1/2/4 CPUs. The first 10.9 compilation hit zero free disk space;
 after exact-path verification, only `.cargo-build` was cleared and the clean
 rerun passed. No Cargo/QEMU chain is active. Stage 11 is next.
+
+## Codex - Stage 11 full-breadth closure active (2026-11-21)
+
+Stage 10 landed as `38fd6d6c`. Codex owns the dependency-ordered Stage 11
+runtime-loading, dynamic-TLS and compiler-interoperability closure. The first
+step is the complete existing Stage 11 matrix on the exact accepted Stage 10
+baseline; QEMU runs remain serialized. Do not concurrently edit
+`kernel/src/userspace*`, `kernel/src/{task,thread,syscall}.rs`,
+`libwoven/src/{runtime_modules,dynamic_tls,module_namespace,elf_loader}.rs`, or
+the Stage 11 fixture/harness files without coordination.
+
+The existing 30-boot Stage 11 matrix passes. The first runtime increment fixes
+pure-BSS dynamic-TLS admission and generation-safe module reload, strengthens
+Stage 11.6 to require stale-handle rejection plus generation-2 reuse, and
+passes host/feature Clippy and 1/2/4-CPU boots. No QEMU chain is active. Full
+post-start mapping/unmap remains in progress and is not yet claimed.

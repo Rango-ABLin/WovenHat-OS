@@ -876,6 +876,30 @@ pub(super) fn module_staging_run() -> bool {
             let _ = destroy(space);
             return None;
         }
+        if !space.retain_dynamic_module(plan.slot, generation)
+            || space.release_dynamic_module(plan.slot, generation) != Some(false)
+            || space.release_dynamic_module(plan.slot, generation) != Some(true)
+            || space.retain_dynamic_module(plan.slot, generation)
+            || space.dynamic_tls_module_range(1, 0).is_some()
+        {
+            let _ = destroy(space);
+            return None;
+        }
+        let Some(next_generation) = space.publish_dynamic_module(
+            plan.slot,
+            plan.mapping_start,
+            plan.mapping_size,
+        ) else {
+            let _ = destroy(space);
+            return None;
+        };
+        if next_generation != 2 || space.dynamic_tls_module_range(1, 0).is_none() {
+            let _ = destroy(space);
+            return None;
+        }
+        crate::serial::write_line(format_args!(
+            "[S11.6] generation-safe unload/reload: PASSED"
+        ));
         let _ = destroy(space);
         Some(true)
     })()

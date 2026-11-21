@@ -180,6 +180,8 @@ def required_markers(stage, cpus):
             '[S11.5] shared libraries unresolved import rollback: PASSED',
             '[S11.5] shared libraries argv failure rollback: PASSED',
         ])
+    if stage == '11.6':
+        required.append('[S11.6] generation-safe unload/reload: PASSED')
     if stage == '13.11':
         required.extend([
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',

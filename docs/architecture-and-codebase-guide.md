@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Runtime module generation boundary
+
+Dynamic-module descriptors remain valid at any nonzero current generation;
+generation 1 is not special. Releasing the final reference invalidates the old
+handle before a slot can be republished. Dynamic TLS modules may have an empty
+file initializer when their declared memory size is nonzero; mapping allocates
+and zero-fills the full block. The Stage 11.6 gate directly enforces both
+contracts on 1/2/4 CPUs.
+
 ## Stage 10 exact-source acceptance boundary
 
 Stage 10 acceptance combines the serialized `RUN-STAGE10.7.ps1` preservation

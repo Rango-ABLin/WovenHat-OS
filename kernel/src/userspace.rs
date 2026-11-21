@@ -4945,7 +4945,7 @@ impl AddressSpace {
     pub fn dynamic_tls_module_range(self, module: u64, _tls_base: u64) -> Option<(u64, usize)> {
         let index = usize::try_from(module.checked_sub(1)?).ok()?;
         let descriptor = self.dynamic_modules.get(index)?;
-        (descriptor.generation == 1 && descriptor.live && descriptor.references != 0)
+        (descriptor.live && descriptor.references != 0)
             .then_some((descriptor.mapping_start, descriptor.mapping_size))
     }
 

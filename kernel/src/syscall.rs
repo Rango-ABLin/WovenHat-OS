@@ -3296,7 +3296,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             let (Some(initializer_len), Some(memory_size)) = (initializer_len, memory_size) else {
                 return SYSCALL_ERROR;
             };
-            if initializer_len == 0 || initializer_len > memory_size || initializer_len > 4096 {
+            if memory_size == 0 || initializer_len > memory_size || initializer_len > 4096 {
                 return SYSCALL_ERROR;
             }
             let mut initializer = [0u8; 4096];

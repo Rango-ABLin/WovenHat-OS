@@ -1,5 +1,25 @@
 # Stage status
 
+## Stage 11 runtime module generation and pure-BSS TLS - 2026-11-21 - ACCEPTED (BOUNDED)
+
+The exact Stage 10 baseline passes the complete existing Stage 11 matrix: 30
+focused boots across process, thread/TLS, exit status, ASLR, notifications,
+libwoven, graph-loader, compiler-interoperability and staging gates on 1/2/4
+CPUs. During the post-start runtime audit, two uncovered defects were repaired:
+dynamic TLS mapping now admits valid pure-BSS templates with zero initializer
+bytes, and dynamic-module range lookup no longer rejects every generation
+after the first unload/reload.
+
+The strengthened Stage 11.6 gate now requires final-reference unload,
+stale-generation rejection, same-slot publication at generation 2, and exact
+teardown in addition to staged mapping/relocation rollback. Fifteen harness
+contracts, warning-denying host and feature Clippy, and the 1/2/4-CPU gate pass;
+evidence is under `audit-artifacts/stage11.6-{1,2,4}cpu-17952327*`.
+
+This is not full Stage 11 closure. Live-process image mapping, symbol
+publication, per-thread runtime TLS lookup, destructor/quiescent unmap and the
+remaining runtime/allocator compiler matrix still follow in design order.
+
 ## Stage 10 exact-current-source acceptance - 2026-11-20 - CLOSED (SOFTWARE/QEMU)
 
 At `b7c27cb5`, the complete Windows Stage 10.7 preservation chain passes host
