@@ -124,6 +124,49 @@ fn set(value: u64, zero: u64, aligned: u64) {
     }
 }
 
+fn runtime_tls_lifecycle() -> u64 {
+    const ERROR: u64 = u64::MAX;
+    let initializer = [0x31_u8, 0x32, 0x33];
+    if invoke(146, 0, 0, 0) != 1 {
+        return 1;
+    }
+    let first = invoke(
+        149,
+        2,
+        initializer.as_ptr() as u64,
+        ((initializer.len() as u64) << 32) | 8,
+    );
+    let first_generation = first >> 32;
+    let first_slot = first & 0xffff_ffff;
+    let first_address = invoke(141, first, 0, 0);
+    let initialized = if first == ERROR { 2 }
+        else if first_generation != 1 { 3 }
+        else if first_slot != 2 { 4 }
+        else if first_address == ERROR { 5 }
+        else if unsafe { core::ptr::read_volatile(first_address as *const u8) } != 0x31 { 6 }
+        else if invoke(144, first_slot, first_generation, 0) != 1 { 7 }
+        else if invoke(145, first_slot, first_generation, 0) != 0 { 8 }
+        else if invoke(145, first_slot, first_generation, 0) != 1 { 9 }
+        else if invoke(141, first, 0, 0) != ERROR { 10 }
+        else { 0 };
+    if initialized != 0 {
+        let _ = invoke(147, 0, 0, 0);
+        return initialized;
+    }
+    let second = invoke(149, 2, initializer.as_ptr() as u64, 8);
+    let second_generation = second >> 32;
+    let second_address = invoke(141, second, 7, 0);
+    if second == ERROR { 11 }
+    else if second_generation != 2 { 12 }
+    else if (second & 0xffff_ffff) != 2 { 13 }
+    else if second_address == ERROR { 14 }
+    else if unsafe { core::ptr::read_volatile(second_address as *const u8) } != 0 { 15 }
+    else if invoke(145, 2, second_generation, 0) != 1 { 16 }
+    else if invoke(141, second, 0, 0) != ERROR { 17 }
+    else if invoke(147, 0, 0, 0) != 1 { 18 }
+    else { 0 }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn thread_main() -> u64 {
     if !matches(42, 0, 17) {
@@ -140,6 +183,13 @@ pub extern "C" fn demo_main() -> u64 {
     }
     if !report(b"[S11.TLS] relocated pointer initializer: PASSED\n") {
         return 7;
+    }
+    let runtime_tls = runtime_tls_lifecycle();
+    if runtime_tls != 0
+        || !report(b"[S11.TLS] runtime generation handle and unload: PASSED\n")
+        || !report(b"[S11.TLS] runtime pure-BSS reload: PASSED\n")
+    {
+        return 30 + runtime_tls;
     }
     set(99, 23, 19);
     let pid = syscall(16, 0, 0);

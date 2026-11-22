@@ -1110,6 +1110,7 @@ struct Scheduler {
     /// means no outgoing runnable task is awaiting finalization.
     switching_out: [usize; crate::smp::MAX_CPUS],
     dynamic_module_owner: Option<u64>,
+    dynamic_module_task: Option<TaskId>,
     dynamic_module_depth: u16,
 }
 
@@ -1123,6 +1124,7 @@ impl Scheduler {
             last_selected: [[0; 3]; crate::smp::MAX_CPUS],
             switching_out: [MAX_TASKS; crate::smp::MAX_CPUS],
             dynamic_module_owner: None,
+            dynamic_module_task: None,
             dynamic_module_depth: 0,
         }
     }
@@ -1278,8 +1280,7 @@ impl Scheduler {
 
     fn dynamic_module_task_allowed(&self, task: &TaskControlBlock) -> bool {
         let Some(owner) = self.dynamic_module_owner else { return true; };
-        task.process_id.as_u64() != owner
-            || task.id == self.tasks[self.current_slot[crate::smp::cpu_index()]].id
+        task.process_id.as_u64() != owner || Some(task.id) == self.dynamic_module_task
     }
     fn finalize_switch(&mut self) {
         let cpu = crate::smp::cpu_index();
@@ -2233,13 +2234,15 @@ pub fn current_thread_id() -> Option<crate::thread::ThreadId> {
 pub fn begin_dynamic_module_transaction() -> bool {
     let owner = current_process_id();
     let mut scheduler = SCHEDULER.lock();
+    let task = scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id;
     match scheduler.dynamic_module_owner {
         None => {
             scheduler.dynamic_module_owner = Some(owner);
+            scheduler.dynamic_module_task = Some(task);
             scheduler.dynamic_module_depth = 1;
             true
         }
-        Some(existing) if existing == owner => {
+        Some(existing) if existing == owner && scheduler.dynamic_module_task == Some(task) => {
             let Some(depth) = scheduler.dynamic_module_depth.checked_add(1) else { return false; };
             scheduler.dynamic_module_depth = depth;
             true
@@ -2252,8 +2255,12 @@ pub fn begin_dynamic_module_transaction() -> bool {
 pub fn end_dynamic_module_transaction() -> bool {
     let owner = current_process_id();
     let mut scheduler = SCHEDULER.lock();
-    if scheduler.dynamic_module_owner != Some(owner) { return false; }
     let current = scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id;
+    if scheduler.dynamic_module_owner != Some(owner)
+        || scheduler.dynamic_module_task != Some(current)
+    {
+        return false;
+    }
     if scheduler.tasks.iter().any(|task| {
         task.id != current
             && task.process_id.as_u64() == owner
@@ -2262,7 +2269,10 @@ pub fn end_dynamic_module_transaction() -> bool {
         return false;
     }
     scheduler.dynamic_module_depth = scheduler.dynamic_module_depth.saturating_sub(1);
-    if scheduler.dynamic_module_depth == 0 { scheduler.dynamic_module_owner = None; }
+    if scheduler.dynamic_module_depth == 0 {
+        scheduler.dynamic_module_owner = None;
+        scheduler.dynamic_module_task = None;
+    }
     true
 }
 
@@ -2270,23 +2280,42 @@ pub fn end_dynamic_module_transaction() -> bool {
 /// initial TLS image. The loader records one checked TP-relative offset per
 /// PT_TLS image; this path never accepts an address outside that mapping.
 pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
+    if let Some((index, generation)) = decode_runtime_module_handle(module) {
+        let owner = current_process_id();
+        let mapping = current_thread_id()
+            .and_then(|thread| crate::thread::resources(owner, thread))
+            .and_then(|resources| resources.dynamic_tls.get(index).copied().flatten())
+            .map(|mapping| (mapping.address, mapping.size))
+            .or_else(|| {
+                let processes = process_table_lock();
+                processes
+                    .iter()
+                    .flatten()
+                    .find(|process| process.id.as_u64() == owner)
+                    .and_then(|process| process.address_space)
+                    .and_then(|space| space.dynamic_module_mapping(index, generation))
+            });
+        if let Some((address, size)) = mapping {
+            let processes = process_table_lock();
+            let live = processes
+                .iter()
+                .flatten()
+                .find(|process| process.id.as_u64() == current_process_id())
+                .and_then(|process| process.address_space)
+                .is_some_and(|space| space.dynamic_module_live(index, generation));
+            if live {
+                return usize::try_from(offset)
+                    .ok()
+                    .filter(|offset| *offset < size)
+                    .and_then(|offset| address.checked_add(offset as u64))
+                    .unwrap_or(u64::MAX);
+            }
+        }
+        return u64::MAX;
+    }
     let Some(thread) = current_thread_id() else {
         return u64::MAX;
     };
-    if let Some(index) = module
-        .checked_sub(1)
-        .and_then(|value| usize::try_from(value).ok())
-    {
-        if let Some(mapping) = crate::thread::resources(current_process_id(), thread)
-            .and_then(|resources| resources.dynamic_tls.get(index).copied().flatten())
-        {
-            return usize::try_from(offset)
-                .ok()
-                .filter(|offset| *offset < mapping.size)
-                .and_then(|offset| mapping.address.checked_add(offset as u64))
-                .unwrap_or(u64::MAX);
-        }
-    }
     let Some(tls_base) = crate::thread::tls(thread) else {
         return u64::MAX;
     };
@@ -2301,17 +2330,34 @@ pub fn dynamic_tls_address(module: u64, offset: u64) -> u64 {
 }
 
 pub fn dynamic_tls_module_range(module: u64) -> Option<(u64, usize)> {
-    let thread = current_thread_id()?;
-    if let Some(index) = module
-        .checked_sub(1)
-        .and_then(|value| usize::try_from(value).ok())
-    {
-        if let Some(mapping) = crate::thread::resources(current_process_id(), thread)
+    if let Some((index, generation)) = decode_runtime_module_handle(module) {
+        let owner = current_process_id();
+        let mapping = current_thread_id()
+            .and_then(|thread| crate::thread::resources(owner, thread))
             .and_then(|resources| resources.dynamic_tls.get(index).copied().flatten())
-        {
-            return Some((mapping.address, mapping.size));
+            .map(|mapping| (mapping.address, mapping.size))
+            .or_else(|| {
+                let processes = process_table_lock();
+                processes
+                    .iter()
+                    .flatten()
+                    .find(|process| process.id.as_u64() == owner)
+                    .and_then(|process| process.address_space)
+                    .and_then(|space| space.dynamic_module_mapping(index, generation))
+            });
+        if let Some(mapping) = mapping {
+            let processes = process_table_lock();
+            let live = processes
+                .iter()
+                .flatten()
+                .find(|process| process.id.as_u64() == current_process_id())
+                .and_then(|process| process.address_space)
+                .is_some_and(|space| space.dynamic_module_live(index, generation));
+            return live.then_some(mapping);
         }
+        return None;
     }
+    let thread = current_thread_id()?;
     let tls_base = crate::thread::tls(thread)?;
     let processes = process_table_lock();
     processes
@@ -2337,6 +2383,71 @@ pub fn retain_dynamic_module(module: u64, generation: u64) -> bool {
 pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
     let index = usize::try_from(module.checked_sub(1)?).ok()?;
     let generation = u32::try_from(generation).ok()?;
+    let owner = current_process_id();
+    let final_reference = {
+        let processes = process_table_lock();
+        processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)
+            .and_then(|process| process.address_space)
+            .is_some_and(|space| space.dynamic_module_final_reference(index, generation))
+    };
+    if final_reference {
+        if !dynamic_module_transaction_owned() {
+            return None;
+        }
+        let tasks = {
+            let scheduler = SCHEDULER.lock();
+            let mut tasks = [(0usize, None, None); MAX_TASKS];
+            let mut count = 0;
+            for (task_slot, task) in scheduler.tasks.iter().enumerate() {
+                if task.process_id.as_u64() == owner
+                    && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+                {
+                    if count == tasks.len() {
+                        return None;
+                    }
+                    tasks[count] = (task_slot, task.thread_id, task.address_space);
+                    count += 1;
+                }
+            }
+            tasks
+        };
+        let leader_mapping = {
+            let processes = process_table_lock();
+            processes
+                .iter()
+                .flatten()
+                .find(|process| process.id.as_u64() == owner)
+                .and_then(|process| process.address_space)
+                .and_then(|space| space.dynamic_module_mapping(index, generation))
+        };
+        for (_, thread, address_space) in tasks
+            .into_iter()
+            .take_while(|entry| entry.2.is_some())
+        {
+            let address_space = address_space?;
+            let mapping = if let Some(thread) = thread {
+                crate::thread::resources(owner, thread)?
+                    .dynamic_tls
+                    .get(index)
+                    .copied()
+                    .flatten()?
+            } else {
+                let (address, size) = leader_mapping?;
+                userspace::dynamic_mapping_descriptor(address, size)?
+            };
+            if !userspace::unmap_dynamic_anonymous(address_space, mapping) {
+                return None;
+            }
+            if let Some(thread) = thread {
+                if !crate::thread::clear_dynamic_tls(thread, index, mapping.address) {
+                    return None;
+                }
+            }
+        }
+    }
     let mut processes = process_table_lock();
     processes
         .iter_mut()
@@ -2344,6 +2455,18 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
         .find(|process| process.id.as_u64() == current_process_id())
         .and_then(|process| process.address_space.as_mut())
         .and_then(|space| space.release_dynamic_module(index, generation))
+}
+
+fn encode_runtime_module_handle(index: usize, generation: u32) -> Option<u64> {
+    let slot = u32::try_from(index.checked_add(1)?).ok()?;
+    Some(((generation as u64) << 32) | slot as u64)
+}
+
+fn decode_runtime_module_handle(handle: u64) -> Option<(usize, u32)> {
+    let generation = u32::try_from(handle >> 32).ok().filter(|generation| *generation != 0)?;
+    let slot = u32::try_from(handle & 0xffff_ffff).ok()?;
+    let index = usize::try_from(slot.checked_sub(1)?).ok()?;
+    (index < userspace::MAX_DYNAMIC_MODULES).then_some((index, generation))
 }
 
 /// Copy and validate a dynamic TLS initializer before any address-space
@@ -2364,82 +2487,114 @@ pub fn dynamic_module_transaction_owned() -> bool {
     SCHEDULER.lock().dynamic_module_owner == Some(current_process_id())
 }
 
-pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) -> bool {
+pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) -> Option<u64> {
     if !dynamic_module_transaction_owned()
         || memory_size == 0
         || initializer.len() > memory_size
         || memory_size > 4096
     {
-        return false;
+        return None;
     }
-    let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return false; };
-    if module >= userspace::MAX_DYNAMIC_MODULES { return false; }
+    let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return None; };
+    if module >= userspace::MAX_DYNAMIC_MODULES { return None; }
     let owner = current_process_id();
     let mmap_base = {
         let processes = process_table_lock();
-        let Some(process) = processes.iter().flatten().find(|process| process.id.as_u64() == owner) else { return false; };
-        let Some(space) = process.address_space else { return false; };
-        if space.dynamic_tls_module_range((module as u64) + 1, 0).is_some() { return false; }
+        let process = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)?;
+        let space = process.address_space?;
+        if space.dynamic_tls_module_range((module as u64) + 1, 0).is_some() {
+            return None;
+        }
         space.mmap_base()
     };
-    let threads = {
+    let tasks = {
         let scheduler = SCHEDULER.lock();
-        let mut threads = [(None, None); crate::thread::MAX_THREADS];
+        let mut tasks = [(0usize, None, None); MAX_TASKS];
         let mut count = 0;
-        for task in &scheduler.tasks {
-            if task.process_id.as_u64() == owner && task.thread_id.is_some() && !matches!(task.state, TaskState::Empty | TaskState::Dead) {
-                if count == threads.len() { return false; }
-                threads[count] = (task.thread_id, task.address_space);
+        for (task_slot, task) in scheduler.tasks.iter().enumerate() {
+            if task.process_id.as_u64() == owner
+                && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+            {
+                if count == tasks.len() { return None; }
+                tasks[count] = (task_slot, task.thread_id, task.address_space);
                 count += 1;
             }
         }
-        threads
+        tasks
     };
-    if threads[0].0.is_none() { return false; }
-    let size = match memory_size.checked_add(4095).map(|value| value & !4095) { Some(size) => size, None => return false };
-    let mut installed = [(None, None); crate::thread::MAX_THREADS];
+    tasks[0].2?;
+    let size = memory_size.checked_add(4095).map(|value| value & !4095)?;
+    let mut installed = [(None, None); MAX_TASKS];
     let mut count = 0;
-    while count < threads.len() && threads[count].0.is_some() {
-        let thread = threads[count].0.unwrap();
-        let address_space = threads[count].1.unwrap();
-        let thread_slot = (thread.raw() & 0xffff_ffff) as usize;
+    while count < tasks.len() && tasks[count].2.is_some() {
+        let task_slot = tasks[count].0;
+        let thread = tasks[count].1;
+        let address_space = tasks[count].2.unwrap();
         let Some(mapping) = userspace::map_dynamic_anonymous(
             address_space,
             mmap_base,
             module,
-            thread_slot,
+            task_slot,
             size,
-        ) else { break };
-        if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err() || !crate::thread::install_dynamic_tls(thread, module, mapping) { let _ = userspace::unmap_dynamic_anonymous(address_space, mapping); break; }
-        installed[count] = (Some(thread), Some(mapping));
+        ) else {
+            break;
+        };
+        if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err()
+            || thread.is_some_and(|thread| !crate::thread::install_dynamic_tls(thread, module, mapping))
+        {
+            let _ = userspace::unmap_dynamic_anonymous(address_space, mapping);
+            break;
+        }
+        installed[count] = (thread, Some(mapping));
         count += 1;
     }
-    if count != threads.iter().filter(|entry| entry.0.is_some()).count() {
-        for index in 0..count { if let (Some(thread), Some(mapping)) = installed[index] { let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address); let _ = userspace::unmap_dynamic_anonymous(threads[index].1.unwrap(), mapping); } }
-        return false;
+    if count != tasks.iter().filter(|entry| entry.2.is_some()).count() {
+        for index in 0..count {
+            if let Some(mapping) = installed[index].1 {
+                if let Some(thread) = installed[index].0 {
+                    let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address);
+                }
+                let _ = userspace::unmap_dynamic_anonymous(tasks[index].2.unwrap(), mapping);
+            }
+        }
+        return None;
     }
     let published = {
         let mut processes = process_table_lock();
         match processes.iter_mut().flatten().find(|process| process.id.as_u64() == owner) {
             Some(process) => match process.address_space.as_mut() {
-                Some(space) => space.publish_dynamic_module(module, installed[0].1.unwrap().address, size).is_some(),
-                None => false,
+                Some(space) => {
+                    let leader = installed[..count]
+                        .iter()
+                        .find(|entry| entry.0.is_none())
+                        .and_then(|entry| entry.1)
+                        .or(installed[0].1)?;
+                    space.publish_dynamic_module(module, leader.address, size)
+                }
+                None => None,
             },
-            None => false,
+            None => None,
         }
     };
-    if published { return true; }
+    if let Some(generation) = published {
+        return encode_runtime_module_handle(module, generation);
+    }
 
     // Descriptor publication is the commit point.  If the process vanished or
     // rejected the slot, undo every per-thread installation just as the
     // earlier mapping failures do.
     for index in 0..count {
-        if let (Some(thread), Some(mapping)) = installed[index] {
-            let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address);
-            let _ = userspace::unmap_dynamic_anonymous(threads[index].1.unwrap(), mapping);
+        if let Some(mapping) = installed[index].1 {
+            if let Some(thread) = installed[index].0 {
+                let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address);
+            }
+            let _ = userspace::unmap_dynamic_anonymous(tasks[index].2.unwrap(), mapping);
         }
     }
-    false
+    None
 }
 
 /// Reclaim a terminated userspace thread's stack/TLS mappings before its

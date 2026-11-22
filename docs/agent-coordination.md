@@ -9885,3 +9885,16 @@ lookup through the current thread's owned mapping. Strengthened Stage 11.6 and
 neighboring ASLR gates pass on 1/2/4 CPUs. No QEMU chain is active. Final-
 reference all-thread teardown and the generation-tagged userspace ABI remain
 next; do not treat this as full Stage 11 acceptance.
+
+## Codex - generation-tagged runtime TLS accepted (2026-11-22)
+
+The third runtime increment returns generation-tagged mapping handles, resolves
+them per task, rejects stale generations, supports pure-BSS reload, and performs
+final-reference all-task unmap before descriptor retirement. The first 2-CPU
+run exposed an SMP scheduler self-deadlock: transaction ownership was inferred
+from the current CPU slot, so a preempted loader could never run again. The gate
+now records the exact owner task and the clean exact-source TLS matrix passes on
+1/2/4 CPUs. Neighboring ASLR and Stage 11.6 matrices, affected-feature and host
+Clippy, and 19 host harness tests pass. No Cargo or QEMU chain is active. Live
+runtime image/symbol/callback integration remains open; do not claim full Stage
+11 closure from this bounded acceptance.

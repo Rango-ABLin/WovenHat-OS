@@ -4949,6 +4949,30 @@ impl AddressSpace {
             .then_some((descriptor.mapping_start, descriptor.mapping_size))
     }
 
+    pub fn dynamic_module_live(self, index: usize, generation: u32) -> bool {
+        self.dynamic_modules.get(index).is_some_and(|descriptor| {
+            descriptor.live
+                && descriptor.generation == generation
+                && descriptor.references != 0
+        })
+    }
+
+    pub fn dynamic_module_final_reference(self, index: usize, generation: u32) -> bool {
+        self.dynamic_modules.get(index).is_some_and(|descriptor| {
+            descriptor.live
+                && descriptor.generation == generation
+                && descriptor.references == 1
+        })
+    }
+
+    pub fn dynamic_module_mapping(self, index: usize, generation: u32) -> Option<(u64, usize)> {
+        let descriptor = self.dynamic_modules.get(index)?;
+        (descriptor.live
+            && descriptor.generation == generation
+            && descriptor.references != 0)
+            .then_some((descriptor.mapping_start, descriptor.mapping_size))
+    }
+
     pub fn publish_dynamic_module(&mut self, index: usize, mapping_start: u64, mapping_size: usize) -> Option<u32> {
         let descriptor = self.dynamic_modules.get_mut(index)?;
         if descriptor.live || mapping_size == 0 { return None; }
@@ -5091,11 +5115,11 @@ pub fn map_dynamic_anonymous(
     address_space: paging::AddressSpace,
     mmap_base: u64,
     module: usize,
-    thread_slot: usize,
+    task_slot: usize,
     size: usize,
 ) -> Option<AnonymousMapping> {
     if module >= MAX_DYNAMIC_MODULES
-        || thread_slot >= crate::thread::MAX_THREADS
+        || task_slot >= crate::config::MAX_TASKS
         || size == 0
         || size > USER_MMAP_MAX_SIZE
         || !size.is_multiple_of(4096)
@@ -5106,7 +5130,7 @@ pub fn map_dynamic_anonymous(
     let address = DYNAMIC_TLS_START
         .checked_add(displacement)?
         .checked_add(
-            (thread_slot as u64)
+            (task_slot as u64)
                 .checked_mul(MAX_DYNAMIC_MODULES as u64)?
                 .checked_add(module as u64)?
                 .checked_mul(USER_MMAP_STRIDE)?,
@@ -5121,6 +5145,21 @@ pub fn map_dynamic_anonymous(
 
 pub fn unmap_dynamic_anonymous(address_space: paging::AddressSpace, mapping: AnonymousMapping) -> bool {
     paging::unmap_user_range_in(address_space, mapping.address, mapping.size).is_ok()
+}
+
+pub fn dynamic_mapping_descriptor(address: u64, size: usize) -> Option<AnonymousMapping> {
+    if size == 0 || size > USER_MMAP_MAX_SIZE || !size.is_multiple_of(4096) {
+        return None;
+    }
+    Some(AnonymousMapping {
+        address,
+        size,
+        writable: true,
+        lazy: None,
+        resident: 0,
+        dirty: 0,
+        swap_slots: [None; USER_MMAP_PAGES],
+    })
 }
 
 #[derive(Clone, Copy)]

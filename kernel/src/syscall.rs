@@ -3302,15 +3302,15 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             let mut initializer = [0u8; 4096];
             if crate::paging::copy_from_current_user(arg1, &mut initializer[..initializer_len])
                 .is_err()
-                || !crate::task::map_dynamic_tls_all(
+            {
+                SYSCALL_ERROR
+            } else {
+                crate::task::map_dynamic_tls_all(
                     arg0,
                     &initializer[..initializer_len],
                     memory_size,
                 )
-            {
-                SYSCALL_ERROR
-            } else {
-                0
+                .unwrap_or(SYSCALL_ERROR)
             }
         }
         value if value == Number::ThreadRobustRegister as u64 => {

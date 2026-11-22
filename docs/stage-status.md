@@ -1,5 +1,27 @@
 # Stage status
 
+## Stage 11 generation-tagged runtime TLS lifecycle - 2026-11-22 - ACCEPTED (BOUNDED)
+
+Runtime TLS mapping now returns a generation-tagged module handle, resolves
+that handle against the calling task's block, rejects stale generations, and
+supports zero-initializer pure-BSS reloads. Final-reference release, while the
+process-wide module transaction is held, unmaps every live task's block before
+retiring the descriptor. The transaction records the exact owning task so an
+SMP preemption cannot permanently exclude that loader task from scheduling.
+
+The strengthened compiler fixture exercises initialized generation 1,
+retain/release, final unload, stale-handle rejection, generation-2 same-slot
+pure-BSS reload, and final teardown through the syscall ABI. Exact-final-source
+Stage 11.2 TLS boots pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795350*`. Neighboring ASLR and Stage
+11.6 rollback gates pass on 1/2/4 CPUs, all affected feature and host-target
+Clippy runs pass with warnings denied, and 19 loader/harness host tests pass.
+
+This closes the bounded runtime-TLS generation, lookup, quiescence and teardown
+slice. Full Stage 11 remains open for live runtime image mapping, symbol-scope
+publication, constructor/destructor ownership and the remaining documented
+compiler/runtime interoperability breadth.
+
 ## Stage 11 per-thread runtime TLS arena - 2026-11-21 - ACCEPTED (BOUNDED)
 
 Runtime TLS mappings now include the generation-safe thread slot in their

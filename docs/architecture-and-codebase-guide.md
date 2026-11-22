@@ -1,5 +1,16 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Generation-tagged runtime TLS transaction boundary
+
+`DynamicTlsMapAll` publishes only after every live process task has received a
+distinct bounded block and returns `(generation << 32) | (module_slot + 1)`.
+Address and range syscalls validate that generation before returning a task's
+mapping. A final release is permitted only to the exact task that owns the
+process-wide dynamic-module transaction; it unmaps leader and auxiliary-thread
+blocks before the descriptor generation can be reused. Recording the owner
+task explicitly is required on SMP: deriving ownership from a CPU's current
+slot would strand a preempted loader forever.
+
 ## Per-thread dynamic TLS address geometry
 
 The runtime TLS arena is indexed by `(thread slot, module slot)` after the
