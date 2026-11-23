@@ -17,9 +17,11 @@ shell target and workspace all-targets Clippy, and 6/6 isolated model/glyph
 host tests pass. The full `RUN-STAGE10.7.ps1` chain passed, and baseline-
 enforced desktop qualification passed at 1/2/4 CPUs
 (`audit-artifacts/volume-readback-1cpu`, `volume-readback-2cpu-r2`,
-`volume-readback-4cpu-r2`). One 2-CPU run missed the fixed startup limit by
-265 ms under TCG; it was rerun with unchanged limits and passed. No assertion,
-timeout or baseline was changed. Battery remains explicitly unavailable: there
+`volume-readback-4cpu-r2`, and after merging the upstream runtime-TLS commits,
+`volume-readback-merged-{1,2}cpu` / `volume-readback-merged-4cpu-r2`). One
+2-CPU run missed the fixed startup limit by 265 ms and one 4-CPU run missed the
+`WovenFiles: pointer cancelled` input marker; both were reruns with unchanged
+limits and passed. No assertion, timeout or baseline was changed. Battery remains explicitly unavailable: there
 is no ACPI battery driver, so no charge level is fabricated.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
