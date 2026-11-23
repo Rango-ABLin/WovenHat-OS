@@ -1475,25 +1475,32 @@ impl Desktop {
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.taskbar_entry_area(index);
             let active = self.focused() == Some(slot);
-            fill_rounded(
-                canvas,
-                area,
-                CHROME_RADIUS_SMALL,
-                if active {
-                    lighten(theme_entry(true), 12)
-                } else {
-                    theme_entry(false)
-                },
-            );
-            // Win11-style running/active indicator.
-            let indicator_w = if active { 16 } else { 6 };
+            let minimized = self.is_minimized(slot);
+            let fill = if active {
+                lighten(theme_entry(true), 12)
+            } else if minimized {
+                blend(theme_entry(false), theme_taskbar(), 90)
+            } else {
+                theme_entry(false)
+            };
+            fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
+            // Win11-style running/active indicator: a wide accent bar for the
+            // focused window, a short muted bar for a running one, and a short
+            // dim bar for a minimized one.
+            let (indicator_w, indicator_color) = if active {
+                (16, theme_accent())
+            } else if minimized {
+                (6, blend(theme_muted(), theme_taskbar(), 100))
+            } else {
+                (6, theme_muted())
+            };
             let indicator_x = area.x + (area.width - indicator_w) / 2;
             let indicator_y = area.y + area.height - 3;
             fill_rounded(
                 canvas,
                 Area::new(indicator_x, indicator_y, indicator_w, 3),
                 1,
-                if active { theme_accent() } else { theme_muted() },
+                indicator_color,
             );
             draw_app_icon(
                 canvas,
@@ -1501,12 +1508,17 @@ impl Desktop {
                 area.y + 1,
                 app_icon(&window.title[..window.title_length]),
                 14,
-                false,
+                minimized,
             );
             let mut title = [0u8; 32];
             let length = label(&window.title[..window.title_length], 5, &mut title);
             let text = core::str::from_utf8(&title[..length]).unwrap_or("");
-            canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+            let ink = if minimized {
+                blend(theme_text(), theme_taskbar(), 110)
+            } else {
+                theme_text()
+            };
+            canvas.draw_text_system(area.x + 18, self.text_y(), text, ink);
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
@@ -3723,6 +3735,60 @@ impl Desktop {
             .union(self.taskbar())
     }
 
+    /// A window is minimized while its slot is outside the visual stack: it
+    /// is then never painted, focused or hit-tested, but it keeps its taskbar
+    /// entry so it can be restored.
+    fn is_minimized(&self, slot: usize) -> bool {
+        self.windows[slot].is_some() && !self.stack[..self.stacked].contains(&slot)
+    }
+
+    /// Minimize `slot`, handing focus to the next window down the stack.
+    fn minimize(&mut self, slot: usize) -> Area {
+        let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) else {
+            return Area::new(0, 0, 0, 0);
+        };
+        self.cancel_pointer_gesture();
+        let hidden = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[position..self.stacked].rotate_left(1);
+        self.stacked -= 1;
+        let next = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        log(&[b"woven-shell: window minimized"]);
+        hidden.union(next).union(self.taskbar())
+    }
+
+    /// Restore a minimized window to the top of the stack and focus it.
+    fn restore(&mut self, slot: usize) -> Area {
+        if !self.is_minimized(slot) || self.stacked >= self.stack.len() {
+            return Area::new(0, 0, 0, 0);
+        }
+        let previous = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[self.stacked] = slot;
+        self.stacked += 1;
+        log(&[b"woven-shell: window restored"]);
+        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        previous.union(current).union(self.taskbar())
+    }
+
+    /// Taskbar button policy: the focused window's button minimizes it, a
+    /// minimized window's button restores it, and any other focuses it.
+    fn taskbar_activate(&mut self, slot: usize) -> Area {
+        if self.focused() == Some(slot) {
+            self.minimize(slot)
+        } else if self.is_minimized(slot) {
+            self.restore(slot)
+        } else {
+            self.focus(slot)
+        }
+    }
+
     /// Open a window for `owner`. Returns the areas to repaint.
     fn open(&mut self, owner: process::Id, message: &[u8]) -> Dirty {
         if message.len() < 16 {
@@ -4040,7 +4106,7 @@ impl Desktop {
                     self.taskbar_entry_area(index).contains(x, y).then_some(slot)
                 });
                 if let Some(slot) = taskbar_slot {
-                    return self.focus(slot);
+                    return self.taskbar_activate(slot);
                 }
                 // The three status glyphs own their own slots; they are not
                 // client tray surfaces and cannot be hit-tested as one.
