@@ -1,5 +1,6 @@
 # Stage status
 
+<<<<<<< HEAD
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in
@@ -103,6 +104,56 @@ failures). No device was opened, written, or rebooted. Native (Z3) qualification
 remains open pending a spare non-boot device, Administrator elevation, and
 signed destructive authorization. Evidence under
 `audit-artifacts/physical-*` and `audit-artifacts/hardware-qualification-*`.
+
+## Stage 11 runtime transaction owner-death recovery - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Runtime-module authorization now requires both the recorded process and exact
+scheduler task. If that task dies or disappears, the scheduler releases the
+global gate so unrelated processes retain loader service. The abandoned
+process enters a fixed-capacity quarantine: surviving siblings cannot begin a
+new module transaction and advance past a callback the dead owner may never
+have executed. Quarantine ends only after no executable task remains.
+
+The Stage 11.6 probe requires live-owner depth retention, sibling denial,
+dead-owner release, surviving-process quarantine, and final reclamation. Stage
+11.6 and the real Stage 11.2 TLS/lifecycle gate pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954334*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795433*`. Build, affected-feature and
+all-target warning-denying Clippy, 19 fixture contracts, 33 ELF tests, 256
+libwoven tests (one existing ignored fixture), and `cargo fmt --all --check`
+pass.
+
+The unrelated shared-source rustfmt failure in `kernel/src/block.rs` was fixed
+by fully qualifying allocator APIs, avoiding contradictory import ordering when
+different workspace edition contexts visit the file. No ABI, capability,
+callback ordering, or timeout changed.
+
+## Stage 11 live runtime lifecycle ownership - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Live runtime images now publish their validated `DT_INIT`, `DT_INIT_ARRAY`,
+`DT_FINI_ARRAY`, and `DT_FINI` schedule into a fixed-capacity kernel lifecycle
+table keyed by address-space root, module slot, and generation. The process-wide
+runtime transaction must remain owned while userspace requests each callback.
+Once initialization starts, final unload fails closed until initialization has
+completed and the reverse-order finalization schedule has been consumed. A
+never-started image remains rollback-safe, and final release clears lifecycle
+state before the module generation can be reused.
+
+The Ring-3 Rust/LLD fixture executes a real `DT_INIT`, observes its mapped state,
+requires premature unload rejection, executes `DT_FINI`, then verifies final
+unload, stale symbol lookup, stale lifecycle lookup, and exact frame recovery.
+Stage 11.2 and neighboring Stage 11.6 gates pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795432*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795432*`. Warning-denying affected-feature
+and all-target Clippy pass, as do 33 ELF tests, 256 libwoven tests (one existing
+ignored fixture), and 19 fixture/harness contracts.
+
+The callback ABI deliberately advances its kernel cursor before returning an
+address, so a task killed between retrieval and invocation leaves the image
+non-unloadable rather than guessing that user code ran. Recovery for that
+abandoned initialized transaction, dependency-local PT_TLS, and broader
+compiler/runtime interoperability remain open; this is not full Stage 11
+closure.
 
 ## Stage 11 runtime dependency graphs and TLS coupling - 2026-11-23 - ACCEPTED (BOUNDED)
 

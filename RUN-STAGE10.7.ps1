@@ -3,15 +3,24 @@ $ErrorActionPreference = "Stop"
 # Keep Cargo/bootloader intermediates inside the project. Windows cleanup of
 # %TEMP% previously removed cargo-install* directories during the bootloader
 # build and falsely failed the entire preservation chain.
-$env:CARGO_BUILD_BUILD_DIR = Join-Path $PSScriptRoot ".cargo-build"
-$env:CARGO_TARGET_DIR = Join-Path $PSScriptRoot "target"
+$outputRoot = if ($env:WOVENHAT_OUTPUT_ROOT) {
+    $env:WOVENHAT_OUTPUT_ROOT
+} else {
+    'D:\WovenHat-OS-output'
+}
+if (-not (Test-Path -LiteralPath 'D:\')) {
+    throw 'WovenHat test output drive D: is unavailable'
+}
+$env:WOVENHAT_OUTPUT_ROOT = $outputRoot
+$env:CARGO_BUILD_BUILD_DIR = Join-Path $outputRoot "cargo-build"
+$env:CARGO_TARGET_DIR = Join-Path $outputRoot "target"
 New-Item -ItemType Directory -Force -Path $env:CARGO_BUILD_BUILD_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 
 Write-Host "Cargo build dir: $env:CARGO_BUILD_BUILD_DIR"
 Write-Host "Cargo target dir: $env:CARGO_TARGET_DIR"
 
-$auditRoot = Join-Path $PSScriptRoot ('audit-artifacts/acceptance-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+$auditRoot = Join-Path $outputRoot ('audit-artifacts/acceptance-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Force -Path $auditRoot | Out-Null
 Start-Transcript -Path (Join-Path $auditRoot 'acceptance.txt') | Out-Null
 Push-Location $PSScriptRoot

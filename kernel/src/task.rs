@@ -1112,6 +1112,7 @@ struct Scheduler {
     dynamic_module_owner: Option<u64>,
     dynamic_module_task: Option<TaskId>,
     dynamic_module_depth: u16,
+    abandoned_dynamic_module_owners: [Option<u64>; MAX_PROCESSES],
 }
 
 impl Scheduler {
@@ -1126,6 +1127,7 @@ impl Scheduler {
             dynamic_module_owner: None,
             dynamic_module_task: None,
             dynamic_module_depth: 0,
+            abandoned_dynamic_module_owners: [None; MAX_PROCESSES],
         }
     }
 
@@ -1191,6 +1193,8 @@ impl Scheduler {
 
     fn prepare_switch(&mut self) -> Option<ContextSwitch> {
         self.reap_dead();
+        self.reclaim_abandoned_dynamic_module_transaction();
+        self.reclaim_retired_dynamic_module_quarantines();
         self.validate_affinity_invariants();
 
         let best_policy = self
@@ -1284,6 +1288,58 @@ impl Scheduler {
         };
         task.process_id.as_u64() != owner || Some(task.id) == self.dynamic_module_task
     }
+
+    fn dynamic_module_transaction_owned_by(&self, owner: u64, task: TaskId) -> bool {
+        self.dynamic_module_owner == Some(owner) && self.dynamic_module_task == Some(task)
+    }
+
+    /// Drop the process-wide module gate only after its exact owning task can
+    /// no longer execute. Runtime lifecycle state stays intact: if the owner
+    /// died after receiving a callback, unload must remain fail-closed rather
+    /// than assuming that userspace invoked it.
+    fn reclaim_abandoned_dynamic_module_transaction(&mut self) {
+        let Some(owner_task) = self.dynamic_module_task else {
+            return;
+        };
+        if self.tasks.iter().any(|task| {
+            task.id == owner_task && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+        }) {
+            return;
+        }
+        if !self
+            .abandoned_dynamic_module_owners
+            .contains(&self.dynamic_module_owner)
+        {
+            let slot = self
+                .abandoned_dynamic_module_owners
+                .iter_mut()
+                .find(|entry| entry.is_none())
+                .expect("live abandoned module owners fit the process bound");
+            *slot = self.dynamic_module_owner;
+        }
+        self.dynamic_module_owner = None;
+        self.dynamic_module_task = None;
+        self.dynamic_module_depth = 0;
+    }
+
+    fn reclaim_retired_dynamic_module_quarantines(&mut self) {
+        for entry in &mut self.abandoned_dynamic_module_owners {
+            let Some(owner) = *entry else {
+                continue;
+            };
+            if !self.tasks.iter().any(|task| {
+                task.process_id.as_u64() == owner
+                    && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+            }) {
+                *entry = None;
+            }
+        }
+    }
+
+    fn dynamic_module_transaction_admitted(&self, owner: u64) -> bool {
+        !self.abandoned_dynamic_module_owners.contains(&Some(owner))
+    }
+
     fn finalize_switch(&mut self) {
         let cpu = crate::smp::cpu_index();
         let outgoing = self.switching_out[cpu];
@@ -2239,6 +2295,9 @@ pub fn current_thread_id() -> Option<crate::thread::ThreadId> {
 pub fn begin_dynamic_module_transaction() -> bool {
     let owner = current_process_id();
     let mut scheduler = SCHEDULER.lock();
+    if !scheduler.dynamic_module_transaction_admitted(owner) {
+        return false;
+    }
     let task = scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id;
     match scheduler.dynamic_module_owner {
         None => {
@@ -2743,7 +2802,57 @@ pub fn validate_dynamic_tls_initializer(
 }
 
 pub fn dynamic_module_transaction_owned() -> bool {
-    SCHEDULER.lock().dynamic_module_owner == Some(current_process_id())
+    let owner = current_process_id();
+    let scheduler = SCHEDULER.lock();
+    let current = scheduler.tasks[scheduler.current_slot[crate::smp::cpu_index()]].id;
+    scheduler.dynamic_module_transaction_owned_by(owner, current)
+}
+
+#[cfg(feature = "stage11-6-test")]
+pub fn dynamic_module_transaction_recovery_self_test() -> bool {
+    let owner = ProcessId(7);
+    let owner_task = TaskId::from_u64(41);
+    let sibling_task = TaskId::from_u64(42);
+    let mut scheduler = Scheduler::empty();
+    scheduler.tasks[0].id = owner_task;
+    scheduler.tasks[0].process_id = owner;
+    scheduler.tasks[0].state = TaskState::Ready;
+    scheduler.tasks[1].id = sibling_task;
+    scheduler.tasks[1].process_id = owner;
+    scheduler.tasks[1].state = TaskState::Running;
+    scheduler.dynamic_module_owner = Some(owner.as_u64());
+    scheduler.dynamic_module_task = Some(owner_task);
+    scheduler.dynamic_module_depth = 2;
+
+    let exact_owner_only = scheduler
+        .dynamic_module_transaction_owned_by(owner.as_u64(), owner_task)
+        && !scheduler.dynamic_module_transaction_owned_by(owner.as_u64(), sibling_task)
+        && scheduler.dynamic_module_task_allowed(&scheduler.tasks[0])
+        && !scheduler.dynamic_module_task_allowed(&scheduler.tasks[1]);
+    scheduler.reclaim_abandoned_dynamic_module_transaction();
+    let live_owner_retained = scheduler.dynamic_module_owner == Some(owner.as_u64())
+        && scheduler.dynamic_module_task == Some(owner_task)
+        && scheduler.dynamic_module_depth == 2;
+
+    scheduler.tasks[0].state = TaskState::Dead;
+    scheduler.reclaim_abandoned_dynamic_module_transaction();
+    let abandoned_owner_quarantined = !scheduler
+        .dynamic_module_transaction_admitted(owner.as_u64())
+        && scheduler
+            .abandoned_dynamic_module_owners
+            .contains(&Some(owner.as_u64()));
+    scheduler.reclaim_retired_dynamic_module_quarantines();
+    let live_process_retained = !scheduler.dynamic_module_transaction_admitted(owner.as_u64());
+    scheduler.tasks[1].state = TaskState::Dead;
+    scheduler.reclaim_retired_dynamic_module_quarantines();
+    exact_owner_only
+        && live_owner_retained
+        && abandoned_owner_quarantined
+        && live_process_retained
+        && scheduler.dynamic_module_owner.is_none()
+        && scheduler.dynamic_module_task.is_none()
+        && scheduler.dynamic_module_depth == 0
+        && scheduler.dynamic_module_transaction_admitted(owner.as_u64())
 }
 
 pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) -> Option<u64> {
