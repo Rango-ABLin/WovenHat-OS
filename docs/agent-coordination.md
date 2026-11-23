@@ -8,9 +8,13 @@ again from `edfa0ee8` to `0d82a3be` (Stage 11 runtime transaction owner-death,
 D: drive build output, related docs); merged as `6fa26cd6`, keeping both sides
 of the one status-document conflict. Clippy (all targets, kernel target, shell
 target) and `cargo test --workspace` pass on that tree; the serialized full
-Stage 10.7 gate and 1/2/4-CPU baseline-enforced desktop matrix are running
-before pushing `master`. The `phase-b` branch remains based on `fe56bef7`;
-its owner should merge the updated `master` when their work settles.
+Stage 10.7 gate and 1/2/4-CPU baseline-enforced desktop matrix passed on that
+tree. A C:-disk-full failure in the per-app packager was resolved by moving the
+isolated worktree to `D:\WovenHat-build\status-indicators-master`; the baseline-
+enforced matrix then passed at 1/2/4 CPUs
+(`audit-artifacts/push-final-d-{1,2,4}cpu`). `master` has been pushed:
+`0d82a3be..e6d3d1d1 master -> master`. The `phase-b` branch remains based on
+`fe56bef7`; its owner should merge the updated `master` when their work settles.
 
 ## OpenCode - integrating origin/master before push (2026-11-23)
 
