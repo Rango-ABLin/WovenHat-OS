@@ -115,13 +115,34 @@ timed out on a boot-log race rather than an indicator defect. The 4-CPU rerun
 **PASSED** under `audit-artifacts/status-indicators-final-4cpu-r2`. All three
 final runs report `pass: true`, `failures: []`, and contain the
 `status indicators initialized` serial marker, closing the baseline-enforced
-1/2/4-CPU desktop matrix on the current source.
+1/2/4-CPU desktop matrix on the current source. After merging the upstream
+Stage 10/11 commits (merge `659fac0b`, two stale test expectations aligned in
+`a01e1781`), the full gate and the baseline-enforced 1/2/4-CPU desktop matrix
+passed again on the merged tree (`audit-artifacts/merged-final-{1,2,4}cpu`).
 
 An earlier isolated `cargo test -p libwoven --lib` showed one failure in the
 other owner's in-progress quadratic-path work
 (`wovengraphics_quadratic_path_flattens_deterministically_and_is_atomic`, 255
 passed / 1 failed / 1 ignored); the full gate's own test phase passed. No pixel
 baseline, timing limit or assertion was weakened by this increment.
+
+## Phase A Stage 11 runtime/kernel stabilization validation - 2026-11-23 - PARTIALLY ACCEPTED (BOUNDED QEMU)
+
+Executed existing Stage 11 and preservation QEMU gates at current exact source (HEAD `fe56bef7`, dirty worktree with unrelated concurrent edits; no kernel/runtime code changes made in this validation pass). All executed gates passed with exit 33 and required markers:
+
+- Stage 11.1 1/2/4 CPU: `audit-artifacts/stage11.1-{1,2,4}cpu-1795435059374662600,1795435523774807200,1795435556368165300`
+- Stage 11.2 1/2/4 CPU: `audit-artifacts/stage11.2-{1,2,4}cpu-1795435126191614800,1795435602606659900,1795435642180310700`
+- Stage 11.3 1/2/4 CPU: `audit-artifacts/stage11.3-{1,2,4}cpu-1795435207198245900,1795435680759142300,1795435714878517900`
+- Stage 11.4 1/2/4 CPU: `audit-artifacts/stage11.4-{1,2,4}cpu-1795435276765795900,1795435745653776800,1795435775653170600`
+- Stage 11.5 1/2/4 CPU: `audit-artifacts/stage11.5-{1,2,4}cpu-1795435365457389800,1795435443936818500,1795435481553212400`
+- Stage 11.6 1/2/4 CPU: `audit-artifacts/stage11.6-{1,2,4}cpu-1795434437414831200,1795434506784565200,1795434541989328100`
+- Stage 11.2-status 1/2/4 CPU: `audit-artifacts/stage11.2-status-{1,2,4}cpu-1795434583497873900,1795434677524004600,1795434714189442000`
+- Stage 11.2-tls 1/2/4 CPU: `audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795434273005931900,1795434362843422200,1795434394019144000`
+- Stage 11.2-aslr 1/2/4 CPU: `audit-artifacts/stage11.2-aslr-{1,2,4}cpu-1795434761732084400,1795434834577558100,1795434863297577700`
+- Stage 11.5-compiler 1/2/4 CPU: `audit-artifacts/stage11.5-compiler-{1,2,4}cpu-1795434900678298600,1795434973023303800,1795435016690161700`
+- Preservation Stage 8/9/10.8/10.9 1/2/4 CPU: `audit-artifacts/stage8-*`, `stage9-*`, `stage10.8-*`, `stage10.9-*` (1795435917040629900-1795436522128951300 range)
+
+Additional checks: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-tls-test -- -D warnings` PASS with fixture env vars from stage11.2-tls-1cpu fixture. Not completed: `cargo fmt --all -- --check` fails on unrelated dirty/pre-existing files (`libwoven/src/lib.rs`, `kernel/src/block.rs` not modified here); full workspace host tests, full Clippy matrix, 8/16 CPU, fuzz/property, and independent hardware qualification not run. No production-readiness claim.
 
 ## Windows 11 desktop polish - 2026-11-23 - IN PROGRESS / DESKTOP QUAL PASS (1/2/4 CPU)
 

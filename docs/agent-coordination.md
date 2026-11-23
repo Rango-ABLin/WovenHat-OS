@@ -29,8 +29,14 @@ expectations were then aligned with the accepted palette/path budget in
 `a01e1781` (no runtime behavior or assertion strength changed). Warning-denying
 host/kernel/shell Clippy and the full `cargo test --workspace` suite pass on the
 merged tree. The serialized full Stage 10.7 gate followed by the baseline-
-enforced 1/2/4-CPU desktop matrix is running under
-`audit-artifacts/merged-final-{1,2,4}cpu`; push only after all of it passes.
+enforced 1/2/4-CPU desktop matrix then PASSED at every profile
+(`audit-artifacts/merged-final-{1,2,4}cpu`), as did the full serialized
+`RUN-STAGE10.7.ps1` gate on the merged tree. All merge validation is complete;
+the branch is being pushed to `origin/master`.
+
+## OpenCode - Phase A Stage 11 validation pass (2026-11-23)
+
+Ran bounded Phase A validation at HEAD `fe56bef7` (dirty worktree). No kernel/runtime/libwoven source changes. Stage 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, 11.5-compiler, and preservation Stage 8/9/10.8/10.9 all PASS on 1/2/4 CPUs (exit 33); evidence in `audit-artifacts/stage11.*`, `stage8-*`, `stage9-*`, `stage10.8-*`, `stage10.9-*` (1795434273005931900-1795436522128951300). `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-tls-test -- -D warnings` PASS with fixture env. Not run: full fmt/host test/complete clippy matrix/8-16 CPU/fuzz. `cargo fmt --all -- --check` blocked by unrelated dirty/pre-existing formatting in `libwoven/src/lib.rs`, `kernel/src/block.rs`.
 
 ## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
 
