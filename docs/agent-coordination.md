@@ -1,3 +1,21 @@
+## OpenCode - Phase B bottom-taskbar core (IN PROGRESS, 2026-11-23)
+
+Branch `phase-b/bottom-taskbar-core` from `master` (`fe56bef7`). Claimed scope:
+`apps/woven-shell/src/main.rs` (taskbar group/entry geometry, Quick Settings
+radio rows, settings loader), new `apps/woven-shell/src/taskbar_prefs.rs` and
+`apps/woven-shell/tests/taskbar_prefs.rs`, and the Phase B status records.
+Changes so far: Wi-Fi/Bluetooth/Airplane no longer invent state (they read
+"Unavailable" and say so when pressed); the Quick Settings summary is driven
+only by real network status; taskbar alignment (center/left) and icon size
+(small/medium/large) are read from the installed settings record with safe
+per-field fallback. Auto-hide, pinning persistence, minimize/Alt+Tab and the
+keyboard_refresh root cause are NOT done. Host: 6/6 taskbar-preference tests
+pass (run via `rustc --test`, because the shell's `build-std` config breaks
+host cargo builds). Freestanding `cargo clippy --target x86_64-unknown-none -- -D warnings`
+passes. No QEMU claim yet. I deferred moving the repo's `target/` and
+`.cargo-build/` to D: because another chain (memory-regression QEMU and a
+kernel `cargo run`) was active under them at 13:55.
+
 ## OpenCode - integrating origin/master before push (2026-11-23)
 
 Per owner direction I am reconciling the accepted local branch (`b25a6d3e`,

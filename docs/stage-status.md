@@ -1,5 +1,41 @@
 # Stage status
 
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (HOST/CLIPPY ONLY, NO QEMU YET)
+
+Phase B is **not accepted**. This is the first increment toward M2 (bottom
+taskbar) and M7 (honest desktop controls), on branch
+`phase-b/bottom-taskbar-core`. The taskbar is anchored to the bottom edge: that
+is the default shell layout and it has been since the shell's bottom-taskbar
+polish. The former top-bar concept is retired; stale "flush at the top" wording
+in `apps/woven-shell/src/main.rs` was corrected.
+
+Implemented in this increment:
+
+- `apps/woven-shell/src/taskbar_prefs.rs`: a pure, bounded model for taskbar
+  alignment (`center` default, `left`) and icon size (`small`/`medium`/`large`,
+  40/48/56 px entries; `medium` is the already accepted 48 px). Unknown or
+  malformed values fall back per field. Read from the installed settings record
+  through the existing `--settings` loader, alongside locale and accessibility.
+- Quick Settings Wi-Fi, Bluetooth and Airplane mode no longer invent state. The
+  shell had defaulted Wi-Fi to "Connected" with no wireless driver. They now read
+  "Unavailable" and show a toast when pressed. The summary line reports only the
+  real `NetworkStatus` from the tray model.
+
+Validation so far: `apps/woven-shell/tests/taskbar_prefs.rs` 6/6 pass, compiled
+with `rustc --test` because the shell's `[unstable] build-std` config makes host
+`cargo test` fail with a duplicate `core` (pre-existing; the same config breaks
+`status_model`'s host build). Freestanding `cargo clippy --target
+x86_64-unknown-none -- -D warnings` passes for the shell.
+
+Not done, and therefore not claimed: a QEMU desktop boot and visual check of
+the changed taskbar, auto-hide, pinned-app persistence, minimize/restore,
+maximize/fullscreen geometry, Alt+Tab, an in-shell taskbar settings editor,
+the `keyboard_refresh` root-cause fix, Quick Settings Battery saver and Night
+light (still local toggles with no effect), and the stale `#![allow(dead_code)]`
+at the top of `main.rs`. The Desktop QEMU run is blocked on a concurrent
+acceptance chain that uses `target/` and `.cargo-build/`; those directories
+are to be redirected to D: once it finishes.
+
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in

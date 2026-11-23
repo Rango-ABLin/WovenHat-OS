@@ -178,6 +178,8 @@ mod icons;
 use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
+mod taskbar_prefs;
+use taskbar_prefs::{Alignment, TaskbarPrefs};
 
 /// Bounded system-status indicators in the taskbar tray. The module only
 /// reads existing status calls and never adds a capability; see `status.rs`.
@@ -615,7 +617,6 @@ use painter::Painter;
 const START_LABEL: &str = "Start";
 const START_BUTTON_WIDTH: i32 = 58;
 const START_ICON_SIZE: i32 = 14;
-const TASKBAR_ENTRY_WIDTH: i32 = 48;
 const TASKBAR_ENTRY_GAP: i32 = 4;
 
 /// Launcher overview layout (M3). Reuses `launcher_open`/`query`/
@@ -670,10 +671,9 @@ struct Desktop {
     qs_open: bool,
     /// Do Not Disturb: notifications are remembered but raise no toast.
     dnd: bool,
-    /// Simulated quick-action connectivity/power states.
-    wifi: bool,
-    bluetooth: bool,
-    airplane: bool,
+    /// Bottom taskbar placement and entry size, from the installed settings.
+    taskbar: TaskbarPrefs,
+    /// Local quick-action preference state.
     battery_saver: bool,
     night_light: bool,
     /// Brightness percentage for the quick-settings slider (0-100).
@@ -768,9 +768,7 @@ impl Desktop {
         center_open: false,
         qs_open: false,
         dnd: false,
-        wifi: true,
-        bluetooth: false,
-        airplane: false,
+        taskbar: TaskbarPrefs::DEFAULT,
         battery_saver: false,
         night_light: false,
         brightness: 80,
@@ -845,7 +843,7 @@ impl Desktop {
         self.lock_card_area()
     }
 
-    /// The taskbar sits flush at the top of the screen. Keep this as a
+    /// The taskbar sits flush at the bottom edge of the screen. Keep this as a
     /// function so every layout calculation shares one chrome origin.
     fn taskbar_top(&self) -> i32 {
         (self.height - TASKBAR_HEIGHT).max(0)
@@ -937,11 +935,16 @@ impl Desktop {
         ]);
     }
 
-    /// Win11-style centered taskbar group: Start + running/pinned entries.
+    fn taskbar_entry_width(&self) -> i32 {
+        self.taskbar.icon_size.entry_width()
+    }
+
+    /// Win11-style application group: Start + running/pinned entries. It is
+    /// centred by default, or pinned to the left edge when the preference says so.
     fn taskbar_group_width(&self) -> i32 {
         let entries = self.stacked as i32;
         let entries_width = if entries > 0 {
-            8 + entries * TASKBAR_ENTRY_WIDTH + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
+            8 + entries * self.taskbar_entry_width() + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
         } else {
             0
         };
@@ -949,7 +952,10 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        let group_x = (self.width - self.taskbar_group_width()) / 2;
+        let group_x = match self.taskbar.alignment {
+            Alignment::Center => (self.width - self.taskbar_group_width()) / 2,
+            Alignment::Left => 8,
+        };
         Area::new(
             group_x.max(4),
             self.taskbar_top() + 4,
@@ -960,8 +966,9 @@ impl Desktop {
 
     fn taskbar_entry_area(&self, index: usize) -> Area {
         let start = self.start_area();
-        let x = start.x + start.width + 8 + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TASKBAR_ENTRY_WIDTH, START_HEIGHT as i32)
+        let width = self.taskbar_entry_width();
+        let x = start.x + start.width + 8 + index as i32 * (width + TASKBAR_ENTRY_GAP);
+        Area::new(x, self.taskbar_top() + 4, width, START_HEIGHT as i32)
     }
 
     /// The full-screen launcher has no projected halo; its bounded overview
@@ -1784,9 +1791,7 @@ impl Desktop {
     /// taskbar's right end; empty while closed.
     fn qs_action_active(&self, action: QsAction) -> bool {
         match action {
-            QsAction::Wifi => self.wifi && !self.airplane,
-            QsAction::Bluetooth => self.bluetooth && !self.airplane,
-            QsAction::Airplane => self.airplane,
+            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => false,
             QsAction::BatterySaver => self.battery_saver,
             QsAction::FocusAssist => self.dnd,
             QsAction::NightLight => self.night_light,
@@ -1818,9 +1823,7 @@ impl Desktop {
 
     fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
         match action {
-            QsAction::Wifi => if self.airplane { "Unavailable" } else if self.wifi { "Connected" } else { "Off" },
-            QsAction::Bluetooth => if self.airplane { "Unavailable" } else if self.bluetooth { "On" } else { "Off" },
-            QsAction::Airplane => if self.airplane { "On" } else { "Off" },
+            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => "Unavailable",
             QsAction::BatterySaver => if self.battery_saver { "On" } else { "Off" },
             QsAction::FocusAssist => if self.dnd { "On" } else { "Off" },
             QsAction::NightLight => if self.night_light { "On" } else { "Off" },
@@ -2425,23 +2428,11 @@ impl Desktop {
     fn qs_activate_action(&mut self, action: QsAction) -> Area {
         let panel = self.qs_area();
         match action {
-            QsAction::Wifi => {
-                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
-                self.wifi = !self.wifi;
-                log(if self.wifi { &[b"woven-shell: wifi on"] } else { &[b"woven-shell: wifi off"] });
-                panel
-            }
-            QsAction::Bluetooth => {
-                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
-                self.bluetooth = !self.bluetooth;
-                log(if self.bluetooth { &[b"woven-shell: bluetooth on"] } else { &[b"woven-shell: bluetooth off"] });
-                panel
-            }
-            QsAction::Airplane => {
-                self.airplane = !self.airplane;
-                if self.airplane { self.wifi = false; self.bluetooth = false; }
-                log(if self.airplane { &[b"woven-shell: airplane on"] } else { &[b"woven-shell: airplane off"] });
-                panel
+            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => {
+                // No radio or airplane backend exists on this device. Say so
+                // instead of toggling a state that changes nothing.
+                log(&[b"woven-shell: radio unavailable"]);
+                panel.union(self.toast_message("No wireless hardware is available"))
             }
             QsAction::BatterySaver => {
                 self.battery_saver = !self.battery_saver;
@@ -2519,7 +2510,6 @@ impl Desktop {
     fn qs_summary<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
         let mut len = 0usize;
         let net: &[u8] = match self.status.network {
-            NetworkStatus::Online { .. } if self.wifi && !self.airplane => b"Wi-Fi",
             NetworkStatus::Online { .. } => b"Online",
             NetworkStatus::Offline => b"Offline",
             NetworkStatus::Unavailable => b"No net",
@@ -4569,6 +4559,10 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     {
         desktop.language = locale.language;
     }
+    desktop.taskbar = TaskbarPrefs::from_values(
+        json_string(data, b"taskbar_alignment"),
+        json_string(data, b"taskbar_icon_size"),
+    );
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
     if settings.high_contrast {
