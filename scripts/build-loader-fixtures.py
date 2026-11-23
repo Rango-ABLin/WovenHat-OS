@@ -72,7 +72,8 @@ def build(output, rustc='rustc'):
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', library.name, '-z', 'now', '-o', library, output / 'library.o'])
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
-         '-soname', runtime_library.name, '-z', 'now', '-o', runtime_library,
+         '-soname', runtime_library.name, '-z', 'now', '-init', 'woven_runtime_init',
+         '-fini', 'woven_runtime_fini', '-o', runtime_library,
          output / 'runtime-library.o'])
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', runtime_tls_library.name, '-z', 'now', '-o', runtime_tls_library,

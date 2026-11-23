@@ -183,10 +183,10 @@ fn runtime_image_lifecycle() -> u64 {
     let result = if handle == ERROR { 2 }
         else if generation != 1 || slot != 3 { 3 }
         else if address == ERROR || state == ERROR { 4 }
-        else if invoke(145, slot, generation, 0) != ERROR { 5 }
         else {
             let init = invoke(158, handle, 0, 0);
-            if init == 0 || init == ERROR { return 6; }
+            if init == 0 || init == ERROR { return 5; }
+            if invoke(145, slot, generation, 0) != ERROR { return 6; }
             let init_function: extern "C" fn() = unsafe { core::mem::transmute(init) };
             init_function();
             if invoke(158, handle, 0, 0) != 0

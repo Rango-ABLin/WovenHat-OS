@@ -9932,3 +9932,9 @@ cursors to the generation and exact transaction owner, reject premature final
 unload after initialization begins, and preserve rollback for callbacks that
 were never started. Cargo and QEMU work remains serialized; do not concurrently
 edit the Stage 11 runtime loader, task/syscall ABI, or loader fixtures.
+
+Codex resumed this exact in-progress slice at `dae1582a` on 2026-11-23. The
+four existing lifecycle edits are retained as the active working set; no other
+owner's files will be staged or overwritten. Focused compile and fixture
+contracts run before any serialized QEMU acceptance chain. No Cargo/QEMU chain
+is active at this handoff update.

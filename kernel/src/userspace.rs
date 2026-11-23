@@ -40,6 +40,7 @@ pub const MAX_RUNTIME_SYMBOLS: usize = 32;
 pub const MAX_RUNTIME_SYMBOL_NAME: usize = 64;
 pub const MAX_RUNTIME_LIFECYCLE_FUNCTIONS: usize =
     crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS;
+const MAX_RUNTIME_LIFECYCLES: usize = crate::config::MAX_PROCESSES * MAX_DYNAMIC_MODULES;
 // Dynamic TLS has its own bounded arena beyond the shared-library slots.
 const DYNAMIC_TLS_START: u64 = USER_REGION_START + 0x2000_0000;
 
@@ -4909,13 +4910,6 @@ pub struct DynamicModule {
     pub runtime_image: bool,
     pub image_mapping_start: u64,
     pub image_mapping_size: usize,
-    pub init: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
-    pub init_count: usize,
-    pub init_cursor: usize,
-    pub initialized: bool,
-    pub fini: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
-    pub fini_count: usize,
-    pub fini_cursor: usize,
 }
 
 impl DynamicModule {
@@ -4929,6 +4923,28 @@ impl DynamicModule {
         runtime_image: false,
         image_mapping_start: 0,
         image_mapping_size: 0,
+    };
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeLifecycle {
+    root: u64,
+    module: usize,
+    generation: u32,
+    init: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+    init_count: u8,
+    init_cursor: u8,
+    initialized: bool,
+    fini: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+    fini_count: u8,
+    fini_cursor: u8,
+}
+
+impl RuntimeLifecycle {
+    const EMPTY: Self = Self {
+        root: 0,
+        module: 0,
+        generation: 0,
         init: [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
         init_count: 0,
         init_cursor: 0,
@@ -4938,6 +4954,9 @@ impl DynamicModule {
         fini_cursor: 0,
     };
 }
+
+static RUNTIME_LIFECYCLES: spin::Mutex<[RuntimeLifecycle; MAX_RUNTIME_LIFECYCLES]> =
+    spin::Mutex::new([RuntimeLifecycle::EMPTY; MAX_RUNTIME_LIFECYCLES]);
 
 #[derive(Clone, Copy)]
 pub struct RuntimeSymbol {
@@ -5030,13 +5049,6 @@ impl AddressSpace {
         descriptor.runtime_image = true;
         descriptor.image_mapping_start = mapping_start;
         descriptor.image_mapping_size = mapping_size;
-        descriptor.init = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
-        descriptor.init_count = 0;
-        descriptor.init_cursor = 0;
-        descriptor.initialized = false;
-        descriptor.fini = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
-        descriptor.fini_count = 0;
-        descriptor.fini_cursor = 0;
         Some(descriptor.generation)
     }
 
@@ -5052,22 +5064,32 @@ impl AddressSpace {
         {
             return false;
         }
-        let Some(descriptor) = self.dynamic_modules.get_mut(index) else {
+        let Some(descriptor) = self.dynamic_modules.get(index) else {
             return false;
         };
-        if !descriptor.live
-            || descriptor.generation != generation
-            || !descriptor.runtime_image
-            || descriptor.init_count != 0
-            || descriptor.fini_count != 0
-        {
+        if !descriptor.live || descriptor.generation != generation || !descriptor.runtime_image {
             return false;
         }
-        descriptor.init[..init.len()].copy_from_slice(init);
-        descriptor.init_count = init.len();
-        descriptor.initialized = init.is_empty();
-        descriptor.fini[..fini.len()].copy_from_slice(fini);
-        descriptor.fini_count = fini.len();
+        let root = self.root_address();
+        let mut lifecycles = RUNTIME_LIFECYCLES.lock();
+        if lifecycles.iter().any(|lifecycle| {
+            lifecycle.root == root
+                && lifecycle.module == index
+                && lifecycle.generation == generation
+        }) {
+            return false;
+        }
+        let Some(lifecycle) = lifecycles.iter_mut().find(|lifecycle| lifecycle.root == 0) else {
+            return false;
+        };
+        lifecycle.root = root;
+        lifecycle.module = index;
+        lifecycle.generation = generation;
+        lifecycle.init[..init.len()].copy_from_slice(init);
+        lifecycle.init_count = init.len() as u8;
+        lifecycle.initialized = init.is_empty();
+        lifecycle.fini[..fini.len()].copy_from_slice(fini);
+        lifecycle.fini_count = fini.len() as u8;
         true
     }
 
@@ -5077,42 +5099,61 @@ impl AddressSpace {
         generation: u32,
         fini: bool,
     ) -> Option<u64> {
-        let descriptor = self.dynamic_modules.get_mut(index)?;
+        let descriptor = self.dynamic_modules.get(index)?;
         if !descriptor.live || descriptor.generation != generation || !descriptor.runtime_image {
             return None;
         }
+        let root = self.root_address();
+        let mut lifecycles = RUNTIME_LIFECYCLES.lock();
+        let lifecycle = lifecycles.iter_mut().find(|lifecycle| {
+            lifecycle.root == root
+                && lifecycle.module == index
+                && lifecycle.generation == generation
+        })?;
         if fini {
-            if !descriptor.initialized || descriptor.references != 1 {
+            if !lifecycle.initialized || descriptor.references != 1 {
                 return None;
             }
-            if descriptor.fini_cursor == descriptor.fini_count {
+            if lifecycle.fini_cursor == lifecycle.fini_count {
                 return Some(0);
             }
-            let callback = descriptor.fini[descriptor.fini_cursor];
-            descriptor.fini_cursor += 1;
+            let callback = lifecycle.fini[lifecycle.fini_cursor as usize];
+            lifecycle.fini_cursor += 1;
             Some(callback)
         } else {
-            if descriptor.initialized || descriptor.fini_cursor != 0 {
+            if lifecycle.initialized || lifecycle.fini_cursor != 0 {
                 return None;
             }
-            if descriptor.init_cursor == descriptor.init_count {
-                descriptor.initialized = true;
+            if lifecycle.init_cursor == lifecycle.init_count {
+                lifecycle.initialized = true;
                 return Some(0);
             }
-            let callback = descriptor.init[descriptor.init_cursor];
-            descriptor.init_cursor += 1;
+            let callback = lifecycle.init[lifecycle.init_cursor as usize];
+            lifecycle.init_cursor += 1;
             Some(callback)
         }
     }
 
     pub fn runtime_lifecycle_release_ready(self, index: usize, generation: u32) -> bool {
-        self.dynamic_modules.get(index).is_some_and(|descriptor| {
-            descriptor.live
-                && descriptor.generation == generation
-                && descriptor.runtime_image
-                && (descriptor.init_cursor == 0
-                    || (descriptor.initialized && descriptor.fini_cursor == descriptor.fini_count))
-        })
+        let Some(descriptor) = self.dynamic_modules.get(index) else {
+            return false;
+        };
+        if !descriptor.live || descriptor.generation != generation || !descriptor.runtime_image {
+            return false;
+        }
+        let root = self.root_address();
+        let lifecycles = RUNTIME_LIFECYCLES.lock();
+        lifecycles
+            .iter()
+            .find(|lifecycle| {
+                lifecycle.root == root
+                    && lifecycle.module == index
+                    && lifecycle.generation == generation
+            })
+            .is_some_and(|lifecycle| {
+                lifecycle.init_cursor == 0
+                    || (lifecycle.initialized && lifecycle.fini_cursor == lifecycle.fini_count)
+            })
     }
 
     pub fn publish_dynamic_tls_module(
@@ -5248,6 +5289,7 @@ impl AddressSpace {
     }
 
     pub fn release_dynamic_module(&mut self, index: usize, generation: u32) -> Option<bool> {
+        let root = self.root_address();
         let descriptor = self.dynamic_modules.get_mut(index)?;
         if !descriptor.live || descriptor.generation != generation || descriptor.references == 0 {
             return None;
@@ -5256,6 +5298,7 @@ impl AddressSpace {
         if descriptor.references != 0 {
             return Some(false);
         }
+        let runtime_image = descriptor.runtime_image;
         descriptor.live = false;
         descriptor.mapping_start = 0;
         descriptor.mapping_size = 0;
@@ -5263,14 +5306,17 @@ impl AddressSpace {
         descriptor.runtime_image = false;
         descriptor.image_mapping_start = 0;
         descriptor.image_mapping_size = 0;
-        descriptor.init = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
-        descriptor.init_count = 0;
-        descriptor.init_cursor = 0;
-        descriptor.initialized = false;
-        descriptor.fini = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
-        descriptor.fini_count = 0;
-        descriptor.fini_cursor = 0;
         descriptor.generation = descriptor.generation.saturating_add(1).max(1);
+        if runtime_image {
+            let mut lifecycles = RUNTIME_LIFECYCLES.lock();
+            if let Some(lifecycle) = lifecycles.iter_mut().find(|lifecycle| {
+                lifecycle.root == root
+                    && lifecycle.module == index
+                    && lifecycle.generation == generation
+            }) {
+                *lifecycle = RuntimeLifecycle::EMPTY;
+            }
+        }
         Some(true)
     }
 
