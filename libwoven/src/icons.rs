@@ -402,8 +402,14 @@ mod tests {
     fn mask_pack_and_tile_painter_share_the_state_ink_contract() {
         use crate::design_system::SemanticPalette;
         for state in [IconState::Normal, IconState::Active, IconState::Disabled] {
-            assert_eq!(IconTheme::Light.ink(state), SemanticPalette::LIGHT.icon_ink(state));
-            assert_eq!(IconTheme::Dark.ink(state), SemanticPalette::DARK.icon_ink(state));
+            assert_eq!(
+                IconTheme::Light.ink(state),
+                SemanticPalette::LIGHT.icon_ink(state)
+            );
+            assert_eq!(
+                IconTheme::Dark.ink(state),
+                SemanticPalette::DARK.icon_ink(state)
+            );
         }
     }
 

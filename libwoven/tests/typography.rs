@@ -155,7 +155,10 @@ fn production_font_parses_and_reports_metrics() {
     assert!(face.ascender() > 0);
     assert!(face.descender() < 0);
     let advance = face.advance_px('M', 12).expect("'M' must be mapped");
-    assert!((6..=12).contains(&advance), "12px 'M' advance was {advance}");
+    assert!(
+        (6..=12).contains(&advance),
+        "12px 'M' advance was {advance}"
+    );
     assert!(face.line_height(12) >= 14);
 }
 

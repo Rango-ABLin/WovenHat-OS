@@ -38,6 +38,8 @@ pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
 pub const MAX_DYNAMIC_MODULES: usize = crate::elf::MAX_SCOPE_IMAGES;
 pub const MAX_RUNTIME_SYMBOLS: usize = 32;
 pub const MAX_RUNTIME_SYMBOL_NAME: usize = 64;
+pub const MAX_RUNTIME_LIFECYCLE_FUNCTIONS: usize =
+    crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS;
 // Dynamic TLS has its own bounded arena beyond the shared-library slots.
 const DYNAMIC_TLS_START: u64 = USER_REGION_START + 0x2000_0000;
 
@@ -4893,7 +4895,6 @@ impl InitialTls {
             && address.checked_add(1)? <= self.start + self.layout.mapping_size as u64)
             .then_some(address)
     }
-
 }
 
 #[derive(Clone, Copy)]
@@ -4908,6 +4909,13 @@ pub struct DynamicModule {
     pub runtime_image: bool,
     pub image_mapping_start: u64,
     pub image_mapping_size: usize,
+    pub init: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+    pub init_count: usize,
+    pub init_cursor: usize,
+    pub initialized: bool,
+    pub fini: [u64; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+    pub fini_count: usize,
+    pub fini_cursor: usize,
 }
 
 impl DynamicModule {
@@ -4921,6 +4929,13 @@ impl DynamicModule {
         runtime_image: false,
         image_mapping_start: 0,
         image_mapping_size: 0,
+        init: [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+        init_count: 0,
+        init_cursor: 0,
+        initialized: false,
+        fini: [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS],
+        fini_count: 0,
+        fini_cursor: 0,
     };
 }
 
@@ -4963,8 +4978,12 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
-    pub fn mmap_base(self) -> u64 { self.mmap_base }
-    pub fn large_mapping(self) -> Option<LargeFileMapping> { self.large_mapping }
+    pub fn mmap_base(self) -> u64 {
+        self.mmap_base
+    }
+    pub fn large_mapping(self) -> Option<LargeFileMapping> {
+        self.large_mapping
+    }
     pub fn set_large_mapping(&mut self, mapping: Option<LargeFileMapping>) {
         self.large_mapping = mapping;
     }
@@ -4977,31 +4996,32 @@ impl AddressSpace {
 
     pub fn dynamic_module_live(self, index: usize, generation: u32) -> bool {
         self.dynamic_modules.get(index).is_some_and(|descriptor| {
-            descriptor.live
-                && descriptor.generation == generation
-                && descriptor.references != 0
+            descriptor.live && descriptor.generation == generation && descriptor.references != 0
         })
     }
 
     pub fn dynamic_module_final_reference(self, index: usize, generation: u32) -> bool {
         self.dynamic_modules.get(index).is_some_and(|descriptor| {
-            descriptor.live
-                && descriptor.generation == generation
-                && descriptor.references == 1
+            descriptor.live && descriptor.generation == generation && descriptor.references == 1
         })
     }
 
     pub fn dynamic_module_mapping(self, index: usize, generation: u32) -> Option<(u64, usize)> {
         let descriptor = self.dynamic_modules.get(index)?;
-        (descriptor.live
-            && descriptor.generation == generation
-            && descriptor.references != 0)
+        (descriptor.live && descriptor.generation == generation && descriptor.references != 0)
             .then_some((descriptor.mapping_start, descriptor.mapping_size))
     }
 
-    pub fn publish_dynamic_module(&mut self, index: usize, mapping_start: u64, mapping_size: usize) -> Option<u32> {
+    pub fn publish_dynamic_module(
+        &mut self,
+        index: usize,
+        mapping_start: u64,
+        mapping_size: usize,
+    ) -> Option<u32> {
         let descriptor = self.dynamic_modules.get_mut(index)?;
-        if descriptor.live || mapping_size == 0 { return None; }
+        if descriptor.live || mapping_size == 0 {
+            return None;
+        }
         descriptor.live = true;
         descriptor.references = 1;
         descriptor.mapping_start = mapping_start;
@@ -5010,7 +5030,89 @@ impl AddressSpace {
         descriptor.runtime_image = true;
         descriptor.image_mapping_start = mapping_start;
         descriptor.image_mapping_size = mapping_size;
+        descriptor.init = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
+        descriptor.init_count = 0;
+        descriptor.init_cursor = 0;
+        descriptor.initialized = false;
+        descriptor.fini = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
+        descriptor.fini_count = 0;
+        descriptor.fini_cursor = 0;
         Some(descriptor.generation)
+    }
+
+    pub fn publish_runtime_lifecycle(
+        &mut self,
+        index: usize,
+        generation: u32,
+        init: &[u64],
+        fini: &[u64],
+    ) -> bool {
+        if init.len() > MAX_RUNTIME_LIFECYCLE_FUNCTIONS
+            || fini.len() > MAX_RUNTIME_LIFECYCLE_FUNCTIONS
+        {
+            return false;
+        }
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else {
+            return false;
+        };
+        if !descriptor.live
+            || descriptor.generation != generation
+            || !descriptor.runtime_image
+            || descriptor.init_count != 0
+            || descriptor.fini_count != 0
+        {
+            return false;
+        }
+        descriptor.init[..init.len()].copy_from_slice(init);
+        descriptor.init_count = init.len();
+        descriptor.initialized = init.is_empty();
+        descriptor.fini[..fini.len()].copy_from_slice(fini);
+        descriptor.fini_count = fini.len();
+        true
+    }
+
+    pub fn next_runtime_lifecycle(
+        &mut self,
+        index: usize,
+        generation: u32,
+        fini: bool,
+    ) -> Option<u64> {
+        let descriptor = self.dynamic_modules.get_mut(index)?;
+        if !descriptor.live || descriptor.generation != generation || !descriptor.runtime_image {
+            return None;
+        }
+        if fini {
+            if !descriptor.initialized || descriptor.references != 1 {
+                return None;
+            }
+            if descriptor.fini_cursor == descriptor.fini_count {
+                return Some(0);
+            }
+            let callback = descriptor.fini[descriptor.fini_cursor];
+            descriptor.fini_cursor += 1;
+            Some(callback)
+        } else {
+            if descriptor.initialized || descriptor.fini_cursor != 0 {
+                return None;
+            }
+            if descriptor.init_cursor == descriptor.init_count {
+                descriptor.initialized = true;
+                return Some(0);
+            }
+            let callback = descriptor.init[descriptor.init_cursor];
+            descriptor.init_cursor += 1;
+            Some(callback)
+        }
+    }
+
+    pub fn runtime_lifecycle_release_ready(self, index: usize, generation: u32) -> bool {
+        self.dynamic_modules.get(index).is_some_and(|descriptor| {
+            descriptor.live
+                && descriptor.generation == generation
+                && descriptor.runtime_image
+                && (descriptor.init_cursor == 0
+                    || (descriptor.initialized && descriptor.fini_cursor == descriptor.fini_count))
+        })
     }
 
     pub fn publish_dynamic_tls_module(
@@ -5026,9 +5128,7 @@ impl AddressSpace {
 
     pub fn dynamic_module_is_runtime_image(self, index: usize, generation: u32) -> bool {
         self.dynamic_modules.get(index).is_some_and(|descriptor| {
-            descriptor.live
-                && descriptor.generation == generation
-                && descriptor.runtime_image
+            descriptor.live && descriptor.generation == generation && descriptor.runtime_image
         })
     }
 
@@ -5042,7 +5142,10 @@ impl AddressSpace {
             && descriptor.generation == generation
             && descriptor.runtime_image
             && descriptor.image_mapping_size != 0)
-            .then_some((descriptor.image_mapping_start, descriptor.image_mapping_size))
+            .then_some((
+                descriptor.image_mapping_start,
+                descriptor.image_mapping_size,
+            ))
     }
 
     pub fn attach_runtime_tls_mapping(
@@ -5052,7 +5155,9 @@ impl AddressSpace {
         mapping_start: u64,
         mapping_size: usize,
     ) -> bool {
-        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else {
+            return false;
+        };
         if !descriptor.live
             || descriptor.generation != generation
             || !descriptor.runtime_image
@@ -5071,9 +5176,15 @@ impl AddressSpace {
         generation: u32,
         symbols: &[RuntimeSymbol],
     ) -> bool {
-        if !self.can_publish_runtime_symbols(symbols) { return false; }
+        if !self.can_publish_runtime_symbols(symbols) {
+            return false;
+        }
         for symbol in symbols {
-            let Some(slot) = self.runtime_symbols.iter_mut().find(|entry| entry.is_none()) else {
+            let Some(slot) = self
+                .runtime_symbols
+                .iter_mut()
+                .find(|entry| entry.is_none())
+            else {
                 return false;
             };
             let mut published = *symbol;
@@ -5085,41 +5196,53 @@ impl AddressSpace {
     }
 
     pub fn can_publish_runtime_symbols(self, symbols: &[RuntimeSymbol]) -> bool {
-        symbols.len() <= self.runtime_symbols.iter().filter(|entry| entry.is_none()).count()
+        symbols.len()
+            <= self
+                .runtime_symbols
+                .iter()
+                .filter(|entry| entry.is_none())
+                .count()
             && symbols.iter().enumerate().all(|(index, symbol)| {
                 let name = &symbol.name[..symbol.name_len as usize];
                 !name.is_empty()
-                    && !symbols[..index].iter().any(|prior| {
-                        prior.name[..prior.name_len as usize] == *name
-                    })
-                    && !self.runtime_symbols.iter().flatten().any(|published| {
-                        published.name[..published.name_len as usize] == *name
-                    })
+                    && !symbols[..index]
+                        .iter()
+                        .any(|prior| prior.name[..prior.name_len as usize] == *name)
+                    && !self
+                        .runtime_symbols
+                        .iter()
+                        .flatten()
+                        .any(|published| published.name[..published.name_len as usize] == *name)
             })
     }
 
     pub fn lookup_runtime_symbol(self, name: &[u8]) -> Option<u64> {
         self.runtime_symbols.iter().flatten().find_map(|symbol| {
             let live = self.dynamic_module_live(symbol.module, symbol.generation);
-            (live && symbol.name[..symbol.name_len as usize] == *name)
-                .then_some(symbol.address)
+            (live && symbol.name[..symbol.name_len as usize] == *name).then_some(symbol.address)
         })
     }
 
     pub fn remove_runtime_symbols(&mut self, module: usize, generation: u32) {
         for symbol in &mut self.runtime_symbols {
-            if symbol.is_some_and(|symbol| {
-                symbol.module == module && symbol.generation == generation
-            }) {
+            if symbol
+                .is_some_and(|symbol| symbol.module == module && symbol.generation == generation)
+            {
                 *symbol = None;
             }
         }
     }
 
     pub fn retain_dynamic_module(&mut self, index: usize, generation: u32) -> bool {
-        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
-        if !descriptor.live || descriptor.generation != generation { return false; }
-        let Some(references) = descriptor.references.checked_add(1) else { return false; };
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else {
+            return false;
+        };
+        if !descriptor.live || descriptor.generation != generation {
+            return false;
+        }
+        let Some(references) = descriptor.references.checked_add(1) else {
+            return false;
+        };
         descriptor.references = references;
         true
     }
@@ -5130,7 +5253,9 @@ impl AddressSpace {
             return None;
         }
         descriptor.references -= 1;
-        if descriptor.references != 0 { return Some(false); }
+        if descriptor.references != 0 {
+            return Some(false);
+        }
         descriptor.live = false;
         descriptor.mapping_start = 0;
         descriptor.mapping_size = 0;
@@ -5138,6 +5263,13 @@ impl AddressSpace {
         descriptor.runtime_image = false;
         descriptor.image_mapping_start = 0;
         descriptor.image_mapping_size = 0;
+        descriptor.init = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
+        descriptor.init_count = 0;
+        descriptor.init_cursor = 0;
+        descriptor.initialized = false;
+        descriptor.fini = [0; MAX_RUNTIME_LIFECYCLE_FUNCTIONS];
+        descriptor.fini_count = 0;
+        descriptor.fini_cursor = 0;
         descriptor.generation = descriptor.generation.saturating_add(1).max(1);
         Some(true)
     }
@@ -5262,23 +5394,32 @@ pub fn map_dynamic_anonymous(
         return None;
     }
     let displacement = mmap_base.checked_sub(USER_MMAP_START)?;
-    let address = DYNAMIC_TLS_START
-        .checked_add(displacement)?
-        .checked_add(
-            (task_slot as u64)
-                .checked_mul(MAX_DYNAMIC_MODULES as u64)?
-                .checked_add(module as u64)?
-                .checked_mul(USER_MMAP_STRIDE)?,
-        )?;
+    let address = DYNAMIC_TLS_START.checked_add(displacement)?.checked_add(
+        (task_slot as u64)
+            .checked_mul(MAX_DYNAMIC_MODULES as u64)?
+            .checked_add(module as u64)?
+            .checked_mul(USER_MMAP_STRIDE)?,
+    )?;
     paging::map_user_range_in(address_space, address, size, true, false).ok()?;
     if paging::zero_user_range_in(address_space, address, size).is_err() {
         let _ = paging::unmap_user_range_in(address_space, address, size);
         return None;
     }
-    Some(AnonymousMapping { address, size, writable: true, lazy: None, resident: 0, dirty: 0, swap_slots: [None; USER_MMAP_PAGES] })
+    Some(AnonymousMapping {
+        address,
+        size,
+        writable: true,
+        lazy: None,
+        resident: 0,
+        dirty: 0,
+        swap_slots: [None; USER_MMAP_PAGES],
+    })
 }
 
-pub fn unmap_dynamic_anonymous(address_space: paging::AddressSpace, mapping: AnonymousMapping) -> bool {
+pub fn unmap_dynamic_anonymous(
+    address_space: paging::AddressSpace,
+    mapping: AnonymousMapping,
+) -> bool {
     paging::unmap_user_range_in(address_space, mapping.address, mapping.size).is_ok()
 }
 
@@ -6702,7 +6843,11 @@ pub fn destroy(address_space: AddressSpace) -> bool {
             count += 1;
         }
     }
-    for module in address_space.dynamic_modules.iter().filter(|module| module.live && module.owns_mapping) {
+    for module in address_space
+        .dynamic_modules
+        .iter()
+        .filter(|module| module.live && module.owns_mapping)
+    {
         ranges[count] = (module.mapping_start, module.mapping_size);
         count += 1;
     }
@@ -6737,7 +6882,8 @@ pub fn clone_address_space(
         lazy_binding_count: source.lazy_binding_count,
         large_mapping: source.large_mapping,
     };
-    let mut completed = [(0_u64, 0_usize); MAX_IMAGE_MAPPINGS + 3 + MAX_DYNAMIC_MODULES + MAX_ANONYMOUS_MAPPINGS * 16];
+    let mut completed = [(0_u64, 0_usize);
+        MAX_IMAGE_MAPPINGS + 3 + MAX_DYNAMIC_MODULES + MAX_ANONYMOUS_MAPPINGS * 16];
     let mut completed_count = 0;
 
     // Copy-on-write: share physical frames and mark writable ranges read-only.
@@ -6812,7 +6958,11 @@ pub fn clone_address_space(
 
     // Borrowed static TLS subranges were copied with InitialTls above.
     // Independently owned dynamic allocations need their own child mappings.
-    for module in source.dynamic_modules.iter().filter(|module| module.live && module.owns_mapping) {
+    for module in source
+        .dynamic_modules
+        .iter()
+        .filter(|module| module.live && module.owns_mapping)
+    {
         if paging::share_user_range_in(
             source.paging,
             destination.paging,

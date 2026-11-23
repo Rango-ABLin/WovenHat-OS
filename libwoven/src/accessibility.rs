@@ -708,7 +708,10 @@ mod tests {
             .unwrap();
         let announcement = announce_focus(&tree).unwrap();
         let mut encoded = [0u8; ANNOUNCEMENT_BYTES];
-        assert_eq!(announcement.encode(&mut encoded).unwrap(), ANNOUNCEMENT_BYTES);
+        assert_eq!(
+            announcement.encode(&mut encoded).unwrap(),
+            ANNOUNCEMENT_BYTES
+        );
         assert_eq!(&encoded[..4], b"WAA1");
         assert_eq!(encoded[6], Role::Button as u8);
         assert_eq!(encoded[7], 4);

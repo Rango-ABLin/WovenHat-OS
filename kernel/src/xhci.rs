@@ -3278,8 +3278,7 @@ pub fn self_test() -> bool {
             .map(|entry| entry.protocol == USB_PROTOCOL_KEYBOARD && entry.endpoint_address == 0x81)
             == Some(true)
         && decode_boot_keyboard([0, 0, 4, 0, 0, 0, 0, 0]) == Some(4)
-        && keyboard_presses([0, 0, 0x29, 0, 0, 0, 0, 0], &mut [0; 6])[0]
-            == Some(Key::Escape)
+        && keyboard_presses([0, 0, 0x29, 0, 0, 0, 0, 0], &mut [0; 6])[0] == Some(Key::Escape)
         && mouse_path
         && mouse_release
 }

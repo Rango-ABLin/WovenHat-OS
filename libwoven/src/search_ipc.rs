@@ -211,7 +211,7 @@ fn validate_query(query: &[u8]) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, Operation, Request, Response, RESPONSE_LEN, SEARCH_ABI};
+    use super::{Error, Operation, RESPONSE_LEN, Request, Response, SEARCH_ABI};
     use crate::semantic_search::{Hit, Kind, MAX_HITS};
 
     #[test]

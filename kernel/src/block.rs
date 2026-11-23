@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::{
-    alloc::{alloc_zeroed, Layout},
+    alloc::{Layout, alloc_zeroed},
     boxed::Box,
 };
 

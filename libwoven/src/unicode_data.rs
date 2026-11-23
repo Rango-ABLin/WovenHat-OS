@@ -50,9 +50,7 @@ pub fn complete_script(scalar: u32) -> Option<unicode_script::Script> {
 }
 
 /// Complete generated UAX #44 General_Category data for a scalar.
-pub fn complete_general_category(
-    scalar: u32,
-) -> Option<unicode_properties::GeneralCategory> {
+pub fn complete_general_category(scalar: u32) -> Option<unicode_properties::GeneralCategory> {
     let character = char::from_u32(scalar)?;
     use unicode_properties::UnicodeGeneralCategory;
     Some(character.general_category())
@@ -61,7 +59,9 @@ pub fn complete_general_category(
 /// Complete generated canonical-combining-class data used by NFC/NFD.
 pub fn canonical_combining_class(scalar: u32) -> Option<u8> {
     let character = char::from_u32(scalar)?;
-    Some(unicode_normalization::char::canonical_combining_class(character))
+    Some(unicode_normalization::char::canonical_combining_class(
+        character,
+    ))
 }
 
 pub fn is_public_assigned(scalar: u32) -> Option<bool> {
@@ -88,8 +88,7 @@ pub const fn category(s: u32) -> GeneralCategory {
     match s {
         0x0009..=0x000d | 0x0020 | 0x00a0 | 0x2000..=0x200a => GeneralCategory::Separator,
         0x30..=0x39 | 0xff10..=0xff19 => GeneralCategory::Number,
-        0x0300..=0x036f | 0x064b..=0x065f | 0x1ab0..=0x1aff | 0x1dc0..=0x1dff
-        | 0x20d0..=0x20ff => {
+        0x0300..=0x036f | 0x064b..=0x065f | 0x1ab0..=0x1aff | 0x1dc0..=0x1dff | 0x20d0..=0x20ff => {
             GeneralCategory::Mark
         }
         0x0021..=0x002f | 0x003a..=0x0040 | 0x005b..=0x0060 | 0x007b..=0x007e | 0x2000..=0x206f => {

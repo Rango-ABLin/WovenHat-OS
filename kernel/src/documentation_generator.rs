@@ -106,10 +106,7 @@ impl ArchitectureGraph {
         ArchitectureGraph {
             modules: [""; 32],
             module_count: 0,
-            dependencies: [ModuleDependency {
-                from: "",
-                to: "",
-            }; 64],
+            dependencies: [ModuleDependency { from: "", to: "" }; 64],
             dep_count: 0,
         }
     }
@@ -217,7 +214,7 @@ impl DocumentationRenderer {
         crate::serial::write_line(format_args!("{}", api_doc.description));
         crate::serial::write_line(format_args!(""));
         crate::serial::write_line(format_args!("## Functions"));
-        
+
         for i in 0..api_doc.function_count {
             let func = api_doc.functions[i];
             crate::serial::write_line(format_args!(""));
@@ -226,7 +223,7 @@ impl DocumentationRenderer {
             crate::serial::write_line(format_args!("```rust"));
             crate::serial::write_line(format_args!("{}", func.signature));
             crate::serial::write_line(format_args!("```"));
-            
+
             let safety_str = match func.safety {
                 FunctionSafety::Safe => "Safe",
                 FunctionSafety::Unsafe => "Unsafe",
@@ -240,12 +237,12 @@ impl DocumentationRenderer {
         crate::serial::write_line(format_args!("# Architecture"));
         crate::serial::write_line(format_args!(""));
         crate::serial::write_line(format_args!("## Modules ({})", graph.module_count));
-        
+
         for i in 0..graph.module_count {
             let mod_name = graph.modules[i];
             let deps = graph.find_dependencies(mod_name);
             let dependents = graph.find_dependents(mod_name);
-            
+
             crate::serial::write_line(format_args!(
                 "- {}: {} dependencies, {} dependents",
                 mod_name, deps, dependents
@@ -256,13 +253,12 @@ impl DocumentationRenderer {
     pub fn render_capabilities(&self, matrix: &CapabilityMatrix) {
         crate::serial::write_line(format_args!("# Capability Matrix"));
         crate::serial::write_line(format_args!(""));
-        
+
         for s in 0..matrix.subsys_count {
             let cap_count = matrix.get_subsystem_capabilities(s);
             crate::serial::write_line(format_args!(
                 "- {}: {} capabilities",
-                matrix.subsystems[s],
-                cap_count
+                matrix.subsystems[s], cap_count
             ));
         }
     }
@@ -300,7 +296,9 @@ mod tests {
     #[test]
     fn test_api_documentation() {
         let mut api = ApiDocumentation::new("test_mod", "Test module");
-        assert!(api.add_function("foo", "fn foo() -> i32", FunctionSafety::Safe).is_ok());
+        assert!(api
+            .add_function("foo", "fn foo() -> i32", FunctionSafety::Safe)
+            .is_ok());
         assert_eq!(api.function_count, 1);
     }
 

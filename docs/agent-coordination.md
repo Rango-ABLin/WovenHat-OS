@@ -9923,3 +9923,12 @@ combined graph TLS layout. Exact-source Stage 11.2 TLS and Stage 11.6 gates pass
 on 1/2/4 CPUs; affected-feature/all-target Clippy, 33 ELF tests, 263
 libwoven/typography tests (one ignored), and 19 harness tests pass. No Cargo or
 QEMU chain is active. Runtime lifecycle callbacks remain next.
+
+## Codex - live runtime lifecycle ownership active (2026-11-23)
+
+Codex owns the focused runtime `DT_INIT`/`DT_FINI` and array lifecycle slice.
+The implementation will reuse startup dependency ordering, bind callback
+cursors to the generation and exact transaction owner, reject premature final
+unload after initialization begins, and preserve rollback for callbacks that
+were never started. Cargo and QEMU work remains serialized; do not concurrently
+edit the Stage 11 runtime loader, task/syscall ABI, or loader fixtures.

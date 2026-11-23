@@ -1279,7 +1279,9 @@ impl Scheduler {
     }
 
     fn dynamic_module_task_allowed(&self, task: &TaskControlBlock) -> bool {
-        let Some(owner) = self.dynamic_module_owner else { return true; };
+        let Some(owner) = self.dynamic_module_owner else {
+            return true;
+        };
         task.process_id.as_u64() != owner || Some(task.id) == self.dynamic_module_task
     }
     fn finalize_switch(&mut self) {
@@ -2212,11 +2214,14 @@ pub fn create_user_thread(
     scheduler.task_count += 1;
     drop(processes);
     drop(scheduler);
-    if !crate::thread::attach_resources(thread_id, crate::thread::Resources {
-        stack,
-        tls,
-        dynamic_tls: [None; userspace::MAX_DYNAMIC_MODULES],
-    }) {
+    if !crate::thread::attach_resources(
+        thread_id,
+        crate::thread::Resources {
+            stack,
+            tls,
+            dynamic_tls: [None; userspace::MAX_DYNAMIC_MODULES],
+        },
+    ) {
         return Err(ThreadError::Full);
     }
     if parent_cpu != crate::smp::cpu_index() {
@@ -2243,7 +2248,9 @@ pub fn begin_dynamic_module_transaction() -> bool {
             true
         }
         Some(existing) if existing == owner && scheduler.dynamic_module_task == Some(task) => {
-            let Some(depth) = scheduler.dynamic_module_depth.checked_add(1) else { return false; };
+            let Some(depth) = scheduler.dynamic_module_depth.checked_add(1) else {
+                return false;
+            };
             scheduler.dynamic_module_depth = depth;
             true
         }
@@ -2369,8 +2376,12 @@ pub fn dynamic_tls_module_range(module: u64) -> Option<(u64, usize)> {
 }
 
 pub fn retain_dynamic_module(module: u64, generation: u64) -> bool {
-    let Ok(index) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return false; };
-    let Ok(generation) = u32::try_from(generation) else { return false; };
+    let Ok(index) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else {
+        return false;
+    };
+    let Ok(generation) = u32::try_from(generation) else {
+        return false;
+    };
     let mut processes = process_table_lock();
     processes
         .iter_mut()
@@ -2407,6 +2418,18 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
                 .is_some_and(|space| space.dynamic_module_is_runtime_image(index, generation))
         };
         if runtime_image {
+            let lifecycle_ready = {
+                let processes = process_table_lock();
+                processes
+                    .iter()
+                    .flatten()
+                    .find(|process| process.id.as_u64() == owner)
+                    .and_then(|process| process.address_space)
+                    .is_some_and(|space| space.runtime_lifecycle_release_ready(index, generation))
+            };
+            if !lifecycle_ready {
+                return None;
+            }
             let (address_space, image_mapping, tls_mapping) = {
                 let processes = process_table_lock();
                 let process = processes
@@ -2462,10 +2485,7 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
                 .and_then(|process| process.address_space)
                 .and_then(|space| space.dynamic_module_mapping(index, generation))
         };
-        for (_, thread, address_space) in tasks
-            .into_iter()
-            .take_while(|entry| entry.2.is_some())
-        {
+        for (_, thread, address_space) in tasks.into_iter().take_while(|entry| entry.2.is_some()) {
             let address_space = address_space?;
             let mapping = if let Some(thread) = thread {
                 crate::thread::resources(owner, thread)?
@@ -2530,8 +2550,7 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
             .iter()
             .flatten()
             .find(|process| process.id.as_u64() == owner)?
-            .address_space
-            ?
+            .address_space?
     };
     let generation = userspace::load_runtime_module(&mut space, bytes, index)?;
     {
@@ -2554,6 +2573,21 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
         }
     }
     encode_runtime_module_handle(index, generation)
+}
+
+pub fn next_runtime_lifecycle(handle: u64, phase: u64) -> Option<u64> {
+    if !dynamic_module_transaction_owned() || phase > 1 {
+        return None;
+    }
+    let (index, generation) = decode_runtime_module_handle(handle)?;
+    let mut processes = process_table_lock();
+    processes
+        .iter_mut()
+        .flatten()
+        .find(|process| process.id.as_u64() == current_process_id())?
+        .address_space
+        .as_mut()?
+        .next_runtime_lifecycle(index, generation, phase == 1)
 }
 
 fn map_runtime_tls_existing(
@@ -2607,20 +2641,17 @@ fn map_runtime_tls_existing(
     let mut installed = [(None, None); MAX_TASKS];
     let mut count = 0;
     while count < tasks.len() && tasks[count].2.is_some() {
-        let (task_slot, thread, Some(address_space)) = tasks[count] else { break };
-        let Some(mapping) = userspace::map_dynamic_anonymous(
-            address_space,
-            mmap_base,
-            module,
-            task_slot,
-            size,
-        ) else {
+        let (task_slot, thread, Some(address_space)) = tasks[count] else {
+            break;
+        };
+        let Some(mapping) =
+            userspace::map_dynamic_anonymous(address_space, mmap_base, module, task_slot, size)
+        else {
             break;
         };
         if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err()
-            || thread.is_some_and(|thread| {
-                !crate::thread::install_dynamic_tls(thread, module, mapping)
-            })
+            || thread
+                .is_some_and(|thread| !crate::thread::install_dynamic_tls(thread, module, mapping))
         {
             let _ = userspace::unmap_dynamic_anonymous(address_space, mapping);
             break;
@@ -2633,17 +2664,18 @@ fn map_runtime_tls_existing(
         .iter()
         .find(|entry| entry.0.is_none())
         .and_then(|entry| entry.1);
-    let attached = count == expected && leader.is_some_and(|leader| {
-        let mut processes = process_table_lock();
-        processes
-            .iter_mut()
-            .flatten()
-            .find(|process| process.id.as_u64() == owner)
-            .and_then(|process| process.address_space.as_mut())
-            .is_some_and(|space| {
-                space.attach_runtime_tls_mapping(module, generation, leader.address, size)
-            })
-    });
+    let attached = count == expected
+        && leader.is_some_and(|leader| {
+            let mut processes = process_table_lock();
+            processes
+                .iter_mut()
+                .flatten()
+                .find(|process| process.id.as_u64() == owner)
+                .and_then(|process| process.address_space.as_mut())
+                .is_some_and(|space| {
+                    space.attach_runtime_tls_mapping(module, generation, leader.address, size)
+                })
+        });
     if attached {
         return true;
     }
@@ -2677,7 +2709,9 @@ fn encode_runtime_module_handle(index: usize, generation: u32) -> Option<u64> {
 }
 
 fn decode_runtime_module_handle(handle: u64) -> Option<(usize, u32)> {
-    let generation = u32::try_from(handle >> 32).ok().filter(|generation| *generation != 0)?;
+    let generation = u32::try_from(handle >> 32)
+        .ok()
+        .filter(|generation| *generation != 0)?;
     let slot = u32::try_from(handle & 0xffff_ffff).ok()?;
     let index = usize::try_from(slot.checked_sub(1)?).ok()?;
     (index < userspace::MAX_DYNAMIC_MODULES).then_some((index, generation))
@@ -2685,13 +2719,24 @@ fn decode_runtime_module_handle(handle: u64) -> Option<(usize, u32)> {
 
 /// Copy and validate a dynamic TLS initializer before any address-space
 /// mutation. The returned length is zero on invalid input or copy failure.
-pub fn validate_dynamic_tls_initializer(user_ptr: u64, initializer_len: u64, memory_size: u64) -> u64 {
+pub fn validate_dynamic_tls_initializer(
+    user_ptr: u64,
+    initializer_len: u64,
+    memory_size: u64,
+) -> u64 {
     const MAX_DYNAMIC_TLS_BYTES: usize = 4096;
-    let Ok(initializer_len) = usize::try_from(initializer_len) else { return 0; };
-    let Ok(memory_size) = usize::try_from(memory_size) else { return 0; };
-    if initializer_len > memory_size || memory_size > MAX_DYNAMIC_TLS_BYTES { return 0; }
+    let Ok(initializer_len) = usize::try_from(initializer_len) else {
+        return 0;
+    };
+    let Ok(memory_size) = usize::try_from(memory_size) else {
+        return 0;
+    };
+    if initializer_len > memory_size || memory_size > MAX_DYNAMIC_TLS_BYTES {
+        return 0;
+    }
     let mut initializer = [0u8; MAX_DYNAMIC_TLS_BYTES];
-    if crate::paging::copy_from_current_user(user_ptr, &mut initializer[..initializer_len]).is_err() {
+    if crate::paging::copy_from_current_user(user_ptr, &mut initializer[..initializer_len]).is_err()
+    {
         return 0;
     }
     initializer_len as u64
@@ -2709,8 +2754,12 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
     {
         return None;
     }
-    let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else { return None; };
-    if module >= userspace::MAX_DYNAMIC_MODULES { return None; }
+    let Ok(module) = usize::try_from(module.checked_sub(1).unwrap_or(u64::MAX)) else {
+        return None;
+    };
+    if module >= userspace::MAX_DYNAMIC_MODULES {
+        return None;
+    }
     let owner = current_process_id();
     let mmap_base = {
         let processes = process_table_lock();
@@ -2719,7 +2768,10 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
             .flatten()
             .find(|process| process.id.as_u64() == owner)?;
         let space = process.address_space?;
-        if space.dynamic_tls_module_range((module as u64) + 1, 0).is_some() {
+        if space
+            .dynamic_tls_module_range((module as u64) + 1, 0)
+            .is_some()
+        {
             return None;
         }
         space.mmap_base()
@@ -2732,7 +2784,9 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
             if task.process_id.as_u64() == owner
                 && !matches!(task.state, TaskState::Empty | TaskState::Dead)
             {
-                if count == tasks.len() { return None; }
+                if count == tasks.len() {
+                    return None;
+                }
                 tasks[count] = (task_slot, task.thread_id, task.address_space);
                 count += 1;
             }
@@ -2747,17 +2801,14 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
         let task_slot = tasks[count].0;
         let thread = tasks[count].1;
         let address_space = tasks[count].2.unwrap();
-        let Some(mapping) = userspace::map_dynamic_anonymous(
-            address_space,
-            mmap_base,
-            module,
-            task_slot,
-            size,
-        ) else {
+        let Some(mapping) =
+            userspace::map_dynamic_anonymous(address_space, mmap_base, module, task_slot, size)
+        else {
             break;
         };
         if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err()
-            || thread.is_some_and(|thread| !crate::thread::install_dynamic_tls(thread, module, mapping))
+            || thread
+                .is_some_and(|thread| !crate::thread::install_dynamic_tls(thread, module, mapping))
         {
             let _ = userspace::unmap_dynamic_anonymous(address_space, mapping);
             break;
@@ -2778,7 +2829,11 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
     }
     let published = {
         let mut processes = process_table_lock();
-        match processes.iter_mut().flatten().find(|process| process.id.as_u64() == owner) {
+        match processes
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)
+        {
             Some(process) => match process.address_space.as_mut() {
                 Some(space) => {
                     let leader = installed[..count]
@@ -2848,9 +2903,10 @@ pub fn join_user_thread(raw_id: u64) -> Result<i32, ThreadJoinError> {
         let mut dynamic_slots = [None; userspace::MAX_DYNAMIC_MODULES];
         for (index, dynamic) in resources.dynamic_tls.iter().enumerate() {
             dynamic_slots[index] = dynamic.and_then(|mapping| {
-                process.memory_mappings.iter().position(|slot| {
-                    slot.is_some_and(|slot| slot.address == mapping.address)
-                })
+                process
+                    .memory_mappings
+                    .iter()
+                    .position(|slot| slot.is_some_and(|slot| slot.address == mapping.address))
             });
         }
         (address_space, stack_slot, tls_slot, dynamic_slots)
@@ -5159,8 +5215,7 @@ fn open_current_with_access(
         return Err(FileError::PermissionDenied);
     }
     let path = resolve_path_for_current(path)?;
-    if (path.starts_with("/wfs/")
-        || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs()))
+    if (path.starts_with("/wfs/") || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs()))
         && !crate::wfs::vfs_mounted()
     {
         return Err(FileError::NotFound);
@@ -7839,9 +7894,7 @@ pub fn rename_current(old: &str, new: &str) -> Result<(), FileError> {
     let old = resolve_path_for_current(old)?;
     let new = resolve_path_for_current(new)?;
     if (native_wfs_path(&old) || native_wfs_path(&new))
-        && (!native_wfs_path(&old)
-            || !native_wfs_path(&new)
-            || !crate::wfs::vfs_mounted())
+        && (!native_wfs_path(&old) || !native_wfs_path(&new) || !crate::wfs::vfs_mounted())
     {
         return Err(FileError::NotFound);
     }
@@ -7910,8 +7963,7 @@ fn map_persist_file_error(error: crate::storage::PersistError) -> FileError {
     }
 }
 fn native_wfs_path(path: &str) -> bool {
-    path.starts_with("/wfs/")
-        || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs())
+    path.starts_with("/wfs/") || (path.starts_with("/mnt/") && crate::storage::mnt_wovenfs())
 }
 
 fn is_mnt_child(path: &str) -> bool {

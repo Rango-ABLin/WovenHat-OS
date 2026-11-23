@@ -35,9 +35,15 @@ impl TextClipboard {
         }
     }
 
-    pub const fn is_empty(self) -> bool { self.len == 0 }
-    pub const fn len(self) -> usize { self.len }
-    pub const fn generation(self) -> u64 { self.generation }
+    pub const fn is_empty(self) -> bool {
+        self.len == 0
+    }
+    pub const fn len(self) -> usize {
+        self.len
+    }
+    pub const fn generation(self) -> u64 {
+        self.generation
+    }
 
     pub fn set(&mut self, text: &str) -> Result<(), Error> {
         if text.is_empty() {

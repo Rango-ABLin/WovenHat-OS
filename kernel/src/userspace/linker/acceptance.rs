@@ -775,10 +775,18 @@ pub(super) fn module_staging_run() -> bool {
     // Install the shared-library fixtures that fixture(0) depends on via
     // DT_NEEDED (stage11-5 teardown removes them).  We reinstall here and
     // clean up before exiting.
-    let scope_bytes = match fixture(1) { Some(b) => b, None => return false };
-    let base_bytes_vfs = match fixture(2) { Some(b) => b, None => return false };
+    let scope_bytes = match fixture(1) {
+        Some(b) => b,
+        None => return false,
+    };
+    let base_bytes_vfs = match fixture(2) {
+        Some(b) => b,
+        None => return false,
+    };
     let made_lib = crate::vfs::stat("/lib").is_err();
-    if made_lib && crate::vfs::mkdir("/lib").is_err() { return false; }
+    if made_lib && crate::vfs::mkdir("/lib").is_err() {
+        return false;
+    }
     let mut owned_scope = false;
     let mut owned_base = false;
 
@@ -817,7 +825,9 @@ pub(super) fn module_staging_run() -> bool {
         {
             let mut probe = [0u8; 1];
             if paging::read_user_bytes_in(space.paging(), plan.mapping_start, &mut probe).is_ok() {
-                crate::serial::write_line(format_args!("[S11.6-D] rollback1 probe fail: still mapped"));
+                crate::serial::write_line(format_args!(
+                    "[S11.6-D] rollback1 probe fail: still mapped"
+                ));
                 let _ = destroy(space);
                 return None;
             }
@@ -828,15 +838,24 @@ pub(super) fn module_staging_run() -> bool {
         let mut bad_bytes = fixture(2)?;
         // Parse admitted metadata before corrupting the staged relocation
         // stream, so this reaches relocate_staged's own validation boundary.
-        let bad_image = elf::parse_shared(&bad_bytes).ok()?.relocated(STAGING_BASE)?;
+        let bad_image = elf::parse_shared(&bad_bytes)
+            .ok()?
+            .relocated(STAGING_BASE)?;
         write_u64(&mut bad_bytes, 0x1388, 0x99)?;
-        let bad_link = LinkImage { name: None, bytes: Cow::Owned(bad_bytes), image: bad_image };
+        let bad_link = LinkImage {
+            name: None,
+            bytes: Cow::Owned(bad_bytes),
+            image: bad_image,
+        };
         let bad_scope = elf::SymbolScope::new(&bad_link.image, &bad_link.bytes);
         {
             let mut staged = stage_module_segments(&mut space, &plan)?;
             crate::serial::write_line(format_args!("[S11.6-D] staged2 ok"));
             let ok = staged.relocate_staged(core::slice::from_ref(&bad_link), &bad_scope, None);
-            crate::serial::write_line(format_args!("[S11.6-D] relocate_staged bad result: {}", ok.is_some()));
+            crate::serial::write_line(format_args!(
+                "[S11.6-D] relocate_staged bad result: {}",
+                ok.is_some()
+            ));
             if ok.is_some() {
                 drop(staged);
                 let _ = destroy(space);
@@ -849,7 +868,9 @@ pub(super) fn module_staging_run() -> bool {
         {
             let mut probe = [0u8; 1];
             if paging::read_user_bytes_in(space.paging(), plan.mapping_start, &mut probe).is_ok() {
-                crate::serial::write_line(format_args!("[S11.6-D] rollback2 probe fail: still mapped"));
+                crate::serial::write_line(format_args!(
+                    "[S11.6-D] rollback2 probe fail: still mapped"
+                ));
                 let _ = destroy(space);
                 return None;
             }
@@ -859,7 +880,11 @@ pub(super) fn module_staging_run() -> bool {
         // ── 3. success path ────────────────────────────────────────────────
         let ok_bytes = fixture(2)?;
         let ok_image = elf::parse_shared(&ok_bytes).ok()?.relocated(STAGING_BASE)?;
-        let ok_link = LinkImage { name: None, bytes: Cow::Owned(ok_bytes), image: ok_image };
+        let ok_link = LinkImage {
+            name: None,
+            bytes: Cow::Owned(ok_bytes),
+            image: ok_image,
+        };
         let ok_scope = elf::SymbolScope::new(&ok_link.image, &ok_link.bytes);
         let generation = {
             let mut staged = stage_module_segments(&mut space, &plan)?;
@@ -885,11 +910,9 @@ pub(super) fn module_staging_run() -> bool {
             let _ = destroy(space);
             return None;
         }
-        let Some(next_generation) = space.publish_dynamic_module(
-            plan.slot,
-            plan.mapping_start,
-            plan.mapping_size,
-        ) else {
+        let Some(next_generation) =
+            space.publish_dynamic_module(plan.slot, plan.mapping_start, plan.mapping_size)
+        else {
             let _ = destroy(space);
             return None;
         };
@@ -901,23 +924,15 @@ pub(super) fn module_staging_run() -> bool {
             "[S11.6] generation-safe unload/reload: PASSED"
         ));
         let mmap_base = space.mmap_base();
-        let Some(first_tls) = super::super::map_dynamic_anonymous(
-            space.paging(),
-            mmap_base,
-            1,
-            0,
-            4096,
-        ) else {
+        let Some(first_tls) =
+            super::super::map_dynamic_anonymous(space.paging(), mmap_base, 1, 0, 4096)
+        else {
             let _ = destroy(space);
             return None;
         };
-        let Some(second_tls) = super::super::map_dynamic_anonymous(
-            space.paging(),
-            mmap_base,
-            1,
-            1,
-            4096,
-        ) else {
+        let Some(second_tls) =
+            super::super::map_dynamic_anonymous(space.paging(), mmap_base, 1, 1, 4096)
+        else {
             let _ = super::super::unmap_dynamic_anonymous(space.paging(), first_tls);
             let _ = destroy(space);
             return None;

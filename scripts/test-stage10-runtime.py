@@ -136,6 +136,7 @@ def required_markers(stage, cpus):
             '[S11.TLS] runtime pure-BSS reload: PASSED',
                        '[S11.RUNTIME] live ELF mapping and execution: PASSED',
                        '[S11.RUNTIME] symbol publication and unload: PASSED',
+                       '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
                        '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',

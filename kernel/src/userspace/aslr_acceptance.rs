@@ -61,13 +61,7 @@ fn run_with_displacement(displacement: u64) -> bool {
     }
     // Keep a live dynamic TLS allocation while Ring-3 fills every ordinary
     // mmap slot. The arenas must coexist without consuming the stack guard.
-    let Some(dynamic) = map_dynamic_anonymous(
-        program.address_space.paging,
-        mmap_base,
-        0,
-        0,
-        4096,
-    )
+    let Some(dynamic) = map_dynamic_anonymous(program.address_space.paging, mmap_base, 0, 0, 4096)
     else {
         let _ = destroy(program.address_space);
         return false;

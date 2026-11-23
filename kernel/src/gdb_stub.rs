@@ -115,7 +115,11 @@ pub fn decode(input: &[u8]) -> Option<Packet> {
 // ── Hex helpers ───────────────────────────────────────────────────────────────
 
 fn hex_nibble(v: u8) -> u8 {
-    if v < 10 { b'0' + v } else { b'a' + (v - 10) }
+    if v < 10 {
+        b'0' + v
+    } else {
+        b'a' + (v - 10)
+    }
 }
 
 fn from_hex_nibble(c: u8) -> Option<u8> {
@@ -136,61 +140,119 @@ fn from_hex_nibble(c: u8) -> Option<u8> {
 pub fn self_test() -> bool {
     // ── Checksum ──────────────────────────────────────────────────────────────
     // Empty data → 0.
-    if checksum(b"") != 0 { return false; }
+    if checksum(b"") != 0 {
+        return false;
+    }
     // Known value: 'g' = 0x67.
-    if checksum(b"g") != 0x67 { return false; }
+    if checksum(b"g") != 0x67 {
+        return false;
+    }
     // Wrap-around: 0xFF + 0x01 = 0x00.
-    if checksum(&[0xFF, 0x01]) != 0x00 { return false; }
+    if checksum(&[0xFF, 0x01]) != 0x00 {
+        return false;
+    }
     // Multi-byte: sum of 'O', 'K' = 0x4f + 0x4b = 0x9a.
-    if checksum(b"OK") != 0x9a { return false; }
+    if checksum(b"OK") != 0x9a {
+        return false;
+    }
 
     // ── Encode ────────────────────────────────────────────────────────────────
     let mut buf = [0u8; 16];
     // "?" encodes to "$?#3f" (checksum of '?' = 0x3f).
-    let Some(n) = encode(b"?", &mut buf) else { return false; };
-    if n != 5 { return false; }
-    if &buf[..5] != b"$?#3f" { return false; }
+    let Some(n) = encode(b"?", &mut buf) else {
+        return false;
+    };
+    if n != 5 {
+        return false;
+    }
+    if &buf[..5] != b"$?#3f" {
+        return false;
+    }
 
     // "OK" → "$OK#9a".
-    let Some(n) = encode(b"OK", &mut buf) else { return false; };
-    if n != 6 { return false; }
-    if &buf[..6] != b"$OK#9a" { return false; }
+    let Some(n) = encode(b"OK", &mut buf) else {
+        return false;
+    };
+    if n != 6 {
+        return false;
+    }
+    if &buf[..6] != b"$OK#9a" {
+        return false;
+    }
 
     // Buffer too small → None.
     let mut tiny = [0u8; 3];
-    if encode(b"?", &mut tiny).is_some() { return false; }
+    if encode(b"?", &mut tiny).is_some() {
+        return false;
+    }
 
     // ── Decode ────────────────────────────────────────────────────────────────
     // Round-trip: encode then decode.
     let mut enc = [0u8; 8];
-    let Some(_) = encode(b"g", &mut enc) else { return false; };
-    let Some(pkt) = decode(&enc) else { return false; };
-    if pkt.data() != b"g" { return false; }
+    let Some(_) = encode(b"g", &mut enc) else {
+        return false;
+    };
+    let Some(pkt) = decode(&enc) else {
+        return false;
+    };
+    if pkt.data() != b"g" {
+        return false;
+    }
 
     // "OK" round-trip.
     let mut enc2 = [0u8; 8];
-    let Some(_) = encode(b"OK", &mut enc2) else { return false; };
-    let Some(pkt2) = decode(&enc2) else { return false; };
-    if pkt2.as_str() != Some("OK") { return false; }
+    let Some(_) = encode(b"OK", &mut enc2) else {
+        return false;
+    };
+    let Some(pkt2) = decode(&enc2) else {
+        return false;
+    };
+    if pkt2.as_str() != Some("OK") {
+        return false;
+    }
 
     // Trailing bytes after checksum are ignored.
-    let Some(pkt3) = decode(b"$OK#9aXXXX") else { return false; };
-    if pkt3.data() != b"OK" { return false; }
+    let Some(pkt3) = decode(b"$OK#9aXXXX") else {
+        return false;
+    };
+    if pkt3.data() != b"OK" {
+        return false;
+    }
 
     // ── Rejection cases ───────────────────────────────────────────────────────
-    if decode(b"!OK#9a").is_some() { return false; }  // wrong leading byte
-    if decode(b"$OK#00").is_some() { return false; }  // checksum mismatch
-    if decode(b"$?#").is_some()    { return false; }  // too short
-    if decode(b"$?#zz").is_some()  { return false; }  // invalid hex
-    if decode(b"$OK").is_some()    { return false; }  // no '#'
+    if decode(b"!OK#9a").is_some() {
+        return false;
+    } // wrong leading byte
+    if decode(b"$OK#00").is_some() {
+        return false;
+    } // checksum mismatch
+    if decode(b"$?#").is_some() {
+        return false;
+    } // too short
+    if decode(b"$?#zz").is_some() {
+        return false;
+    } // invalid hex
+    if decode(b"$OK").is_some() {
+        return false;
+    } // no '#'
 
     // ── Empty packet ──────────────────────────────────────────────────────────
     let mut ebuf = [0u8; 8];
-    let Some(en) = encode(b"", &mut ebuf) else { return false; };
-    if en != 4 { return false; }
-    if &ebuf[..4] != b"$#00" { return false; }
-    let Some(epkt) = decode(&ebuf[..4]) else { return false; };
-    if !epkt.data().is_empty() { return false; }
+    let Some(en) = encode(b"", &mut ebuf) else {
+        return false;
+    };
+    if en != 4 {
+        return false;
+    }
+    if &ebuf[..4] != b"$#00" {
+        return false;
+    }
+    let Some(epkt) = decode(&ebuf[..4]) else {
+        return false;
+    };
+    if !epkt.data().is_empty() {
+        return false;
+    }
 
     true
 }

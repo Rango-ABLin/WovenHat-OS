@@ -384,6 +384,9 @@ pub enum Number {
     RuntimeModuleMap = 156,
     /// symbol-name pointer and length -> resolved address.
     RuntimeSymbolLookup = 157,
+    /// tagged runtime-module handle, phase (0 init, 1 fini) -> next callback,
+    /// zero when drained, or ERROR.
+    RuntimeLifecycleNext = 158,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3309,12 +3312,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             {
                 SYSCALL_ERROR
             } else {
-                crate::task::map_dynamic_tls_all(
-                    arg0,
-                    &initializer[..initializer_len],
-                    memory_size,
-                )
-                .unwrap_or(SYSCALL_ERROR)
+                crate::task::map_dynamic_tls_all(arg0, &initializer[..initializer_len], memory_size)
+                    .unwrap_or(SYSCALL_ERROR)
             }
         }
         value if value == Number::RuntimeModuleMap as u64 => {
@@ -3333,10 +3332,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             }
         }
         value if value == Number::RuntimeSymbolLookup as u64 => {
-            let Some(length) = usize::try_from(arg1)
-                .ok()
-                .filter(|length| *length != 0 && *length <= crate::userspace::MAX_RUNTIME_SYMBOL_NAME)
-            else {
+            let Some(length) = usize::try_from(arg1).ok().filter(|length| {
+                *length != 0 && *length <= crate::userspace::MAX_RUNTIME_SYMBOL_NAME
+            }) else {
                 return SYSCALL_ERROR;
             };
             let mut name = [0; crate::userspace::MAX_RUNTIME_SYMBOL_NAME];
@@ -3345,6 +3343,9 @@ pub extern "C" fn wovenhat_syscall_dispatch(
             } else {
                 crate::task::lookup_runtime_symbol(&name[..length]).unwrap_or(SYSCALL_ERROR)
             }
+        }
+        value if value == Number::RuntimeLifecycleNext as u64 => {
+            crate::task::next_runtime_lifecycle(arg0, arg1).unwrap_or(SYSCALL_ERROR)
         }
         value if value == Number::ThreadRobustRegister as u64 => {
             let Some(thread) = crate::task::current_thread_id() else {

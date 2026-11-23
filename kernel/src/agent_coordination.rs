@@ -259,7 +259,11 @@ impl WorkloadBalancer {
 
     pub fn average_load(&self) -> u32 {
         let total: u32 = self.agent_loads[..self.agent_count].iter().sum();
-        if self.agent_count == 0 { 0 } else { total / self.agent_count as u32 }
+        if self.agent_count == 0 {
+            0
+        } else {
+            total / self.agent_count as u32
+        }
     }
 }
 
@@ -322,7 +326,10 @@ impl CoordinationDashboard {
     pub fn all_dependencies_complete(&self, task: &Task) -> bool {
         for i in 0..task.dep_count {
             let dep_id = task.dependencies[i];
-            if let Some(dep_task) = self.tasks[..self.task_count].iter().find(|t| t.task_id == dep_id) {
+            if let Some(dep_task) = self.tasks[..self.task_count]
+                .iter()
+                .find(|t| t.task_id == dep_id)
+            {
                 if dep_task.status != TaskStatus::Completed {
                     return false;
                 }
@@ -363,7 +370,8 @@ impl CoordinationDashboard {
         for task in self.tasks[..self.task_count].iter_mut() {
             if task.task_id == task_id {
                 task.status = TaskStatus::Completed;
-                if let Ok(agent) = self.agents[..self.agent_count].iter_mut()
+                if let Ok(agent) = self.agents[..self.agent_count]
+                    .iter_mut()
                     .find(|a| a.agent_id == task.assigned_to)
                     .ok_or(())
                 {
@@ -388,17 +396,18 @@ impl CoordinationDashboard {
             .iter()
             .filter(|t| t.status == TaskStatus::Queued || t.status == TaskStatus::Blocked)
             .count();
-        
+
         if queued_count == 0 {
             return false;
         }
 
         let idle_count = self.count_idle_agents();
         let working_count = self.count_working_agents();
-        
-        idle_count > 0 && !self.tasks[..self.task_count]
-            .iter()
-            .any(|t| self.can_start_task(t))
+
+        idle_count > 0
+            && !self.tasks[..self.task_count]
+                .iter()
+                .any(|t| self.can_start_task(t))
     }
 }
 
@@ -412,10 +421,10 @@ mod agent_tests {
         let mut task1 = Task::new(1, 5);
         let mut task2 = Task::new(2, 5);
         task2.add_dependency(1).ok();
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
-        
+
         assert!(!dash.all_dependencies_complete(&task2));
         dash.mark_task_completed(1).ok();
         assert!(dash.all_dependencies_complete(&task2));
@@ -438,10 +447,10 @@ mod agent_tests {
         assert!(detector.try_acquire("file2.rs").is_ok());
         assert!(detector.try_acquire("file3.rs").is_ok());
         assert_eq!(detector.file_count, 3);
-        
+
         assert!(detector.try_acquire("file1.rs").is_err());
         assert!(detector.is_in_use("file2.rs"));
-        
+
         detector.release("file1.rs");
         assert!(detector.try_acquire("file1.rs").is_ok());
     }
@@ -451,10 +460,10 @@ mod agent_tests {
         let mut balancer = WorkloadBalancer::new(3);
         let agent1 = balancer.assign_task_to_least_busy();
         balancer.record_task_assignment(agent1);
-        
+
         let agent2 = balancer.assign_task_to_least_busy();
         assert_ne!(agent1, agent2);
-        
+
         balancer.record_task_assignment(agent2);
         let agent3 = balancer.assign_task_to_least_busy();
         assert_eq!(balancer.average_load(), 1);
@@ -463,28 +472,28 @@ mod agent_tests {
     #[test]
     fn test_critical_file_registry() {
         assert!(CriticalFileLockRegistry::CRITICAL_FILES.len() >= 12);
-        assert!(CriticalFileLockRegistry::CRITICAL_FILES
-            .contains(&"kernel/src/memory_safety_audit.rs"));
+        assert!(
+            CriticalFileLockRegistry::CRITICAL_FILES.contains(&"kernel/src/memory_safety_audit.rs")
+        );
     }
 
     #[test]
     fn test_deadlock_detection() {
         let mut dash = CoordinationDashboard::new();
         dash.register_agent(1).ok();
-        
+
         let mut task1 = Task::new(1, 5);
         let mut task2 = Task::new(2, 5);
         task2.add_dependency(1).ok();
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
         dash.assign_task(1, 1).ok();
         dash.assign_task(2, 1).ok();
-        
+
         assert!(!dash.detect_deadlock());
     }
 }
-
 
 // Integration Tests for Multi-Agent Coordination
 
@@ -497,25 +506,25 @@ mod integration_tests {
         let mut dash = CoordinationDashboard::new();
         dash.register_agent(1).ok();
         dash.register_agent(2).ok();
-        
+
         let task1 = Task::new(1, 10);
         let mut task2 = Task::new(2, 5);
         task2.add_dependency(1).ok();
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
-        
+
         assert!(dash.assign_task(1, 1).is_ok());
         assert!(dash.assign_task(2, 2).is_ok());
-        
+
         let task2_ref = &dash.tasks[1];
         assert!(!dash.can_start_task(task2_ref));
-        
+
         assert!(dash.mark_task_completed(1).is_ok());
-        
+
         let task2_ref = &dash.tasks[1];
         assert!(dash.can_start_task(task2_ref));
-        
+
         assert_eq!(dash.agent_count, 2);
     }
 
@@ -523,19 +532,19 @@ mod integration_tests {
     fn test_priority_scheduling_behavior() {
         let mut dash = CoordinationDashboard::new();
         dash.register_agent(1).ok();
-        
+
         let task_low = Task::new(1, 1);
         let task_high = Task::new(2, 10);
         let task_medium = Task::new(3, 5);
-        
+
         dash.add_task(task_low).ok();
         dash.add_task(task_high).ok();
         dash.add_task(task_medium).ok();
-        
+
         dash.assign_task(1, 1).ok();
         dash.assign_task(2, 1).ok();
         dash.assign_task(3, 1).ok();
-        
+
         if let Some(next_task_id) = dash.find_next_ready_task() {
             assert_eq!(next_task_id, 2);
         }
@@ -546,18 +555,18 @@ mod integration_tests {
         let mut dash = CoordinationDashboard::new();
         dash.register_agent(1).ok();
         dash.register_agent(2).ok();
-        
+
         assert_eq!(dash.count_idle_agents(), 2);
         assert_eq!(dash.count_working_agents(), 0);
-        
+
         dash.update_agent_status(1, AgentStatus::Working).ok();
         assert_eq!(dash.count_idle_agents(), 1);
         assert_eq!(dash.count_working_agents(), 1);
-        
+
         dash.update_agent_status(1, AgentStatus::Blocked).ok();
         assert_eq!(dash.count_working_agents(), 0);
         assert_eq!(dash.count_blocked_agents(), 1);
-        
+
         dash.update_agent_status(1, AgentStatus::Complete).ok();
         let agent = &dash.agents[0];
         assert_eq!(agent.status, AgentStatus::Complete);
@@ -566,43 +575,43 @@ mod integration_tests {
     #[test]
     fn test_end_to_end_coordination_complex_graph() {
         let mut dash = CoordinationDashboard::new();
-        
+
         for i in 1..=3 {
             dash.register_agent(i).ok();
         }
-        
+
         let task1 = Task::new(1, 10);
         let mut task2 = Task::new(2, 8);
         let mut task3 = Task::new(3, 8);
         let mut task4 = Task::new(4, 5);
-        
+
         task2.add_dependency(1).ok();
         task3.add_dependency(1).ok();
         task4.add_dependency(2).ok();
         task4.add_dependency(3).ok();
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
         dash.add_task(task3).ok();
         dash.add_task(task4).ok();
-        
+
         for task_id in 1..=4 {
             let agent_id = ((task_id - 1) % 3) + 1;
             dash.assign_task(task_id, agent_id).ok();
         }
-        
+
         assert_eq!(dash.find_next_ready_task(), Some(1));
-        
+
         dash.mark_task_completed(1).ok();
-        
+
         let ready_task = dash.find_next_ready_task();
         assert!(ready_task == Some(2) || ready_task == Some(3));
-        
+
         dash.mark_task_completed(2).ok();
         dash.mark_task_completed(3).ok();
-        
+
         assert_eq!(dash.find_next_ready_task(), Some(4));
-        
+
         assert!(dash.mark_task_in_progress(4).is_ok());
         assert_eq!(dash.tasks[3].status, TaskStatus::InProgress);
     }
@@ -610,15 +619,15 @@ mod integration_tests {
     #[test]
     fn test_workload_balancing_across_agents() {
         let mut balancer = WorkloadBalancer::new(4);
-        
+
         for _ in 0..10 {
             let agent = balancer.assign_task_to_least_busy();
             balancer.record_task_assignment(agent);
         }
-        
+
         let avg = balancer.average_load();
         assert!(avg >= 2);
-        
+
         for i in 0..4 {
             assert!(balancer.agent_loads[i] <= 3);
         }
@@ -629,19 +638,19 @@ mod integration_tests {
         let mut dash = CoordinationDashboard::new();
         dash.register_agent(1).ok();
         dash.register_agent(2).ok();
-        
+
         let task1 = Task::new(1, 5);
         let task2 = Task::new(2, 5);
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
-        
+
         dash.assign_task(1, 1).ok();
         dash.assign_task(2, 2).ok();
-        
+
         dash.mark_task_in_progress(1).ok();
         dash.mark_task_completed(1).ok();
-        
+
         let report = DashboardReport {
             total_agents: dash.agent_count,
             working_agents: dash.count_working_agents(),
@@ -654,7 +663,7 @@ mod integration_tests {
                 .filter(|t| t.status == TaskStatus::InProgress)
                 .count(),
         };
-        
+
         assert_eq!(report.total_agents, 2);
         assert_eq!(report.total_tasks, 2);
         assert_eq!(report.tasks_completed, 1);
@@ -663,32 +672,32 @@ mod integration_tests {
     #[test]
     fn test_multiple_agents_same_task_dependency() {
         let mut dash = CoordinationDashboard::new();
-        
+
         for i in 1..=3 {
             dash.register_agent(i).ok();
         }
-        
+
         let task1 = Task::new(1, 10);
         let mut task2 = Task::new(2, 5);
         let mut task3 = Task::new(3, 5);
         let mut task4 = Task::new(4, 5);
-        
+
         task2.add_dependency(1).ok();
         task3.add_dependency(1).ok();
         task4.add_dependency(1).ok();
-        
+
         dash.add_task(task1).ok();
         dash.add_task(task2).ok();
         dash.add_task(task3).ok();
         dash.add_task(task4).ok();
-        
+
         dash.assign_task(1, 1).ok();
         dash.assign_task(2, 2).ok();
         dash.assign_task(3, 3).ok();
         dash.assign_task(4, 1).ok();
-        
+
         dash.mark_task_completed(1).ok();
-        
+
         assert!(dash.can_start_task(&dash.tasks[1]));
         assert!(dash.can_start_task(&dash.tasks[2]));
         assert!(dash.can_start_task(&dash.tasks[3]));

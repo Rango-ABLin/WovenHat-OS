@@ -171,6 +171,7 @@ fn runtime_image_lifecycle() -> u64 {
     const ERROR: u64 = u64::MAX;
     const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RUNTIME_MODULE_ELF"));
     const SYMBOL: &[u8] = b"woven_runtime_answer";
+    const STATE: &[u8] = b"WOVEN_RUNTIME_LIFECYCLE_STATE";
     if invoke(146, 0, 0, 0) != 1 {
         return 1;
     }
@@ -178,16 +179,36 @@ fn runtime_image_lifecycle() -> u64 {
     let generation = handle >> 32;
     let slot = handle & 0xffff_ffff;
     let address = invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0);
+    let state = invoke(157, STATE.as_ptr() as u64, STATE.len() as u64, 0);
     let result = if handle == ERROR { 2 }
         else if generation != 1 || slot != 3 { 3 }
-        else if address == ERROR { 4 }
+        else if address == ERROR || state == ERROR { 4 }
+        else if invoke(145, slot, generation, 0) != ERROR { 5 }
         else {
+            let init = invoke(158, handle, 0, 0);
+            if init == 0 || init == ERROR { return 6; }
+            let init_function: extern "C" fn() = unsafe { core::mem::transmute(init) };
+            init_function();
+            if invoke(158, handle, 0, 0) != 0
+                || unsafe { core::ptr::read_volatile(state as *const u64) } != 0xa5
+            {
+                return 7;
+            }
             let function: extern "C" fn() -> u64 = unsafe { core::mem::transmute(address) };
-            if function() != 77 { 5 }
-            else if invoke(145, slot, generation, 0) != 1 { 6 }
-            else if invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0) != ERROR { 7 }
-            else if invoke(147, 0, 0, 0) != 1 { 8 }
-            else { 0 }
+            let fini = invoke(158, handle, 1, 0);
+            if function() != 77 { 8 }
+            else if fini == 0 || fini == ERROR { 9 }
+            else {
+                let fini_function: extern "C" fn() = unsafe { core::mem::transmute(fini) };
+                fini_function();
+                if unsafe { core::ptr::read_volatile(state as *const u64) } != 0x5a { 10 }
+                else if invoke(158, handle, 1, 0) != 0 { 11 }
+                else if invoke(145, slot, generation, 0) != 1 { 12 }
+                else if invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0) != ERROR { 13 }
+                else if invoke(158, handle, 1, 0) != ERROR { 14 }
+                else if invoke(147, 0, 0, 0) != 1 { 15 }
+                else { 0 }
+            }
         };
     if result != 0 {
         let _ = invoke(147, 0, 0, 0);
@@ -246,6 +267,7 @@ pub extern "C" fn demo_main() -> u64 {
     if runtime_image != 0
         || !report(b"[S11.RUNTIME] live ELF mapping and execution: PASSED\n")
         || !report(b"[S11.RUNTIME] symbol publication and unload: PASSED\n")
+        || !report(b"[S11.RUNTIME] constructor/destructor generation ownership: PASSED\n")
     {
         return 60 + runtime_image;
     }

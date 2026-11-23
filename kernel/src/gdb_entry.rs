@@ -43,7 +43,7 @@ global_asm!(
     "push rcx",
     "push rdx",
     "push rsi",
-    "push rdi",   // ← rdi is saved here with its original value
+    "push rdi", // ← rdi is saved here with its original value
     "push rbp",
     "push r8",
     "push r9",
@@ -66,7 +66,7 @@ global_asm!(
     "pop r15",
     "pop r14",
     "pop r13",
-    "pop r12",   // ← restores r12 from the stack frame, not the saved-rsp value
+    "pop r12", // ← restores r12 from the stack frame, not the saved-rsp value
     "pop r11",
     "pop r10",
     "pop r9",
@@ -92,27 +92,27 @@ global_asm!(
 #[derive(Clone, Copy)]
 pub struct DebugFrame {
     // Saved GPRs — last-pushed first
-    pub r15:    u64,
-    pub r14:    u64,
-    pub r13:    u64,
-    pub r12:    u64,
-    pub r11:    u64,
-    pub r10:    u64,
-    pub r9:     u64,
-    pub r8:     u64,
-    pub rbp:    u64,
-    pub rdi:    u64,
-    pub rsi:    u64,
-    pub rdx:    u64,
-    pub rcx:    u64,
-    pub rbx:    u64,
-    pub rax:    u64,
+    pub r15: u64,
+    pub r14: u64,
+    pub r13: u64,
+    pub r12: u64,
+    pub r11: u64,
+    pub r10: u64,
+    pub r9: u64,
+    pub r8: u64,
+    pub rbp: u64,
+    pub rdi: u64,
+    pub rsi: u64,
+    pub rdx: u64,
+    pub rcx: u64,
+    pub rbx: u64,
+    pub rax: u64,
     // CPU-pushed exception frame (no error code for INT3 / #DB)
-    pub rip:    u64,
-    pub cs:     u64,
+    pub rip: u64,
+    pub cs: u64,
     pub rflags: u64,
-    pub rsp:    u64,
-    pub ss:     u64,
+    pub rsp: u64,
+    pub ss: u64,
 }
 
 impl DebugFrame {
@@ -124,16 +124,16 @@ impl DebugFrame {
     /// frame; their slots are zeroed.
     pub fn to_register_context(&self) -> RegisterContext {
         let mut ctx = RegisterContext::ZERO;
-        ctx.values[0]  = self.rax;
-        ctx.values[1]  = self.rbx;
-        ctx.values[2]  = self.rcx;
-        ctx.values[3]  = self.rdx;
-        ctx.values[4]  = self.rsi;
-        ctx.values[5]  = self.rdi;
-        ctx.values[6]  = self.rbp;
-        ctx.values[7]  = self.rsp;
-        ctx.values[8]  = self.r8;
-        ctx.values[9]  = self.r9;
+        ctx.values[0] = self.rax;
+        ctx.values[1] = self.rbx;
+        ctx.values[2] = self.rcx;
+        ctx.values[3] = self.rdx;
+        ctx.values[4] = self.rsi;
+        ctx.values[5] = self.rdi;
+        ctx.values[6] = self.rbp;
+        ctx.values[7] = self.rsp;
+        ctx.values[8] = self.r8;
+        ctx.values[9] = self.r9;
         ctx.values[10] = self.r10;
         ctx.values[11] = self.r11;
         ctx.values[12] = self.r12;
@@ -403,30 +403,71 @@ pub fn debug_entry_address() -> u64 {
 ///
 /// The handler times out immediately when no GDB client is connected and
 /// returns to the instruction after `int3`, so the self-test does not hang.
-#[cfg(any(test, feature = "stage32-17-test", feature = "stage32-18-test", feature = "stage32-19-test"))]
+#[cfg(any(
+    test,
+    feature = "stage32-17-test",
+    feature = "stage32-18-test",
+    feature = "stage32-19-test"
+))]
 pub fn self_test() -> bool {
     // ── Pure mapping test ─────────────────────────────────────────────────────
     let frame = DebugFrame {
-        rax: 0xaaaa, rbx: 0xbbbb, rcx: 0xcccc, rdx: 0xdddd,
-        rsi: 0x5555, rdi: 0x6666, rbp: 0x7777,
-        r8: 0x0808, r9: 0x0909, r10: 0x1010, r11: 0x1111,
-        r12: 0x1212, r13: 0x1313, r14: 0x1414, r15: 0x1515,
-        rip: 0xffff_8000_0001_0000, rflags: 0x0202,
-        cs: 0x08, rsp: 0x7fff_e000, ss: 0x10,
+        rax: 0xaaaa,
+        rbx: 0xbbbb,
+        rcx: 0xcccc,
+        rdx: 0xdddd,
+        rsi: 0x5555,
+        rdi: 0x6666,
+        rbp: 0x7777,
+        r8: 0x0808,
+        r9: 0x0909,
+        r10: 0x1010,
+        r11: 0x1111,
+        r12: 0x1212,
+        r13: 0x1313,
+        r14: 0x1414,
+        r15: 0x1515,
+        rip: 0xffff_8000_0001_0000,
+        rflags: 0x0202,
+        cs: 0x08,
+        rsp: 0x7fff_e000,
+        ss: 0x10,
     };
     let ctx = frame.to_register_context();
-    if ctx.values[0] != 0xaaaa { return false; }   // rax
-    if ctx.values[1] != 0xbbbb { return false; }   // rbx
-    if ctx.values[3] != 0xdddd { return false; }   // rdx
-    if ctx.values[7] != 0x7fff_e000 { return false; } // rsp
-    if ctx.values[15] != 0x1515 { return false; }  // r15
-    if ctx.values[16] != 0xffff_8000_0001_0000 { return false; } // rip
-    if ctx.values[17] != 0x0202 { return false; }  // rflags
-    if ctx.values[18] != 0x08 { return false; }    // cs
-    if ctx.values[19] != 0x10 { return false; }    // ss
-    // ds/es/fs/gs (values[20..24]) must be zero
-    if ctx.values[20] != 0 { return false; }
-    if ctx.values[23] != 0 { return false; }
+    if ctx.values[0] != 0xaaaa {
+        return false;
+    } // rax
+    if ctx.values[1] != 0xbbbb {
+        return false;
+    } // rbx
+    if ctx.values[3] != 0xdddd {
+        return false;
+    } // rdx
+    if ctx.values[7] != 0x7fff_e000 {
+        return false;
+    } // rsp
+    if ctx.values[15] != 0x1515 {
+        return false;
+    } // r15
+    if ctx.values[16] != 0xffff_8000_0001_0000 {
+        return false;
+    } // rip
+    if ctx.values[17] != 0x0202 {
+        return false;
+    } // rflags
+    if ctx.values[18] != 0x08 {
+        return false;
+    } // cs
+    if ctx.values[19] != 0x10 {
+        return false;
+    } // ss
+      // ds/es/fs/gs (values[20..24]) must be zero
+    if ctx.values[20] != 0 {
+        return false;
+    }
+    if ctx.values[23] != 0 {
+        return false;
+    }
 
     // ── Live INT3 test (QEMU only; skipped in host unit-test builds) ─────────
     #[cfg(not(test))]
@@ -443,7 +484,9 @@ pub fn self_test() -> bool {
         HANDLER_FIRED.store(false, Ordering::SeqCst);
         // SAFETY: INT3 is a standard debug instruction; the GDB entry handler
         // has been installed in `interrupts::init` before this self-test runs.
-        unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+        unsafe {
+            core::arch::asm!("int3", options(nomem, nostack));
+        }
         // The handler fires, polls COM2 briefly (no client → timeout), returns.
         if !HANDLER_FIRED.load(Ordering::SeqCst) {
             return false;
@@ -523,7 +566,9 @@ pub fn live_task_entry() -> ! {
     HANDLER_FIRED.store(false, Ordering::SeqCst);
     // SAFETY: this is the qualification breakpoint; the installed IDT entry
     // returns through the task's interrupt frame after the RSP client sends c.
-    unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("int3", options(nomem, nostack));
+    }
     LIVE_TASK_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
     loop {
         crate::task::yield_now();
@@ -541,9 +586,13 @@ pub fn live_detach_task_entry() -> ! {
     for _ in 0..2_000_000 {
         core::hint::spin_loop();
     }
-    unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("int3", options(nomem, nostack));
+    }
     LIVE_DETACH_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
-    loop { crate::task::yield_now(); }
+    loop {
+        crate::task::yield_now();
+    }
 }
 
 #[cfg(feature = "stage32-20-test")]
@@ -554,10 +603,16 @@ pub fn live_detach_task_done() -> bool {
 #[cfg(any(feature = "stage32-21-test", feature = "stage32-22-test"))]
 pub fn live_kill_task_entry() -> ! {
     HANDLER_FIRED.store(false, Ordering::SeqCst);
-    for _ in 0..2_000_000 { core::hint::spin_loop(); }
-    unsafe { core::arch::asm!("int3", options(nomem, nostack)); }
+    for _ in 0..2_000_000 {
+        core::hint::spin_loop();
+    }
+    unsafe {
+        core::arch::asm!("int3", options(nomem, nostack));
+    }
     LIVE_KILL_DONE.store(HANDLER_FIRED.load(Ordering::SeqCst), Ordering::SeqCst);
-    loop { crate::task::yield_now(); }
+    loop {
+        crate::task::yield_now();
+    }
 }
 
 #[cfg(any(feature = "stage32-21-test", feature = "stage32-22-test"))]
@@ -573,19 +628,34 @@ mod tests {
 
     fn make_frame() -> DebugFrame {
         DebugFrame {
-            rax: 1, rbx: 2, rcx: 3, rdx: 4,
-            rsi: 5, rdi: 6, rbp: 7,
-            r8: 8, r9: 9, r10: 10, r11: 11,
-            r12: 12, r13: 13, r14: 14, r15: 15,
-            rip: 0x1000, rflags: 0x202, cs: 0x08, rsp: 0xf000, ss: 0x10,
+            rax: 1,
+            rbx: 2,
+            rcx: 3,
+            rdx: 4,
+            rsi: 5,
+            rdi: 6,
+            rbp: 7,
+            r8: 8,
+            r9: 9,
+            r10: 10,
+            r11: 11,
+            r12: 12,
+            r13: 13,
+            r14: 14,
+            r15: 15,
+            rip: 0x1000,
+            rflags: 0x202,
+            cs: 0x08,
+            rsp: 0xf000,
+            ss: 0x10,
         }
     }
 
     #[test]
     fn gpr_mapping() {
         let ctx = make_frame().to_register_context();
-        assert_eq!(ctx.values[0], 1);   // rax
-        assert_eq!(ctx.values[1], 2);   // rbx
+        assert_eq!(ctx.values[0], 1); // rax
+        assert_eq!(ctx.values[1], 2); // rbx
         assert_eq!(ctx.values[7], 0xf000); // rsp (from exception frame)
         assert_eq!(ctx.values[15], 15); // r15
     }
@@ -594,10 +664,10 @@ mod tests {
     fn rip_rflags_segs() {
         let ctx = make_frame().to_register_context();
         assert_eq!(ctx.values[16], 0x1000); // rip
-        assert_eq!(ctx.values[17], 0x202);  // rflags
-        assert_eq!(ctx.values[18], 0x08);   // cs
-        assert_eq!(ctx.values[19], 0x10);   // ss
-        // ds/es/fs/gs zeroed
+        assert_eq!(ctx.values[17], 0x202); // rflags
+        assert_eq!(ctx.values[18], 0x08); // cs
+        assert_eq!(ctx.values[19], 0x10); // ss
+                                          // ds/es/fs/gs zeroed
         for i in 20..24 {
             assert_eq!(ctx.values[i], 0, "register {i} should be zero");
         }

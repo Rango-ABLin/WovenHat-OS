@@ -27,7 +27,6 @@
 //! their own QEMU acceptance (the accepted `serial`/`panic` output is left
 //! unchanged here).
 
-
 use core::fmt::{self, Write};
 
 /// Maximum number of `key=value` fields serialised per record. Extra fields are
@@ -278,7 +277,13 @@ pub fn self_test() -> bool {
 
     // An over-long record is truncated with the marker and never overflows.
     let mut small = [0u8; 20];
-    let f = format_record(&mut small, Level::Warn, "net", "a very long message here", &[]);
+    let f = format_record(
+        &mut small,
+        Level::Warn,
+        "net",
+        "a very long message here",
+        &[],
+    );
     if !f.truncated || f.written > small.len() || !ends_with_marker(&small[..f.written]) {
         return false;
     }
