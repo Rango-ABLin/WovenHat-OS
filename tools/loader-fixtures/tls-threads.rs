@@ -239,6 +239,41 @@ fn runtime_image_tls_coupling() -> u64 {
     result
 }
 
+fn runtime_compiler_dependency_tls() -> u64 {
+    const ERROR: u64 = u64::MAX;
+    const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RUNTIME_TLS_ROOT_ELF"));
+    const SYMBOL: &[u8] = b"woven_runtime_compiler_tls_probe";
+    if invoke(146, 0, 0, 0) != 1 {
+        return 1;
+    }
+    let handle = invoke(156, IMAGE.as_ptr() as u64, IMAGE.len() as u64, 5);
+    let address = invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0);
+    let result = if handle == ERROR {
+        2
+    } else if (handle >> 32) != 1 || (handle & 0xffff_ffff) != 5 {
+        3
+    } else if address == ERROR {
+        4
+    } else {
+        let probe: extern "C" fn() -> u64 = unsafe { core::mem::transmute(address) };
+        if probe() != 91 {
+            5
+        } else if invoke(145, 5, 1, 0) != 1 {
+            6
+        } else if invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0) != ERROR {
+            7
+        } else if invoke(147, 0, 0, 0) != 1 {
+            8
+        } else {
+            0
+        }
+    };
+    if result != 0 {
+        let _ = invoke(147, 0, 0, 0);
+    }
+    result
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn thread_main() -> u64 {
     if !matches(42, 0, 17) {
@@ -276,6 +311,12 @@ pub extern "C" fn demo_main() -> u64 {
         || !report(b"[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED\n")
     {
         return 80 + runtime_tls;
+    }
+    let compiler_dependency = runtime_compiler_dependency_tls();
+    if compiler_dependency != 0
+        || !report(b"[S11.RUNTIME] compiler dependency TLS execution: PASSED\n")
+    {
+        return 100 + compiler_dependency;
     }
     set(99, 23, 19);
     let pid = syscall(16, 0, 0);

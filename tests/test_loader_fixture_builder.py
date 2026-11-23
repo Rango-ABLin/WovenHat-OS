@@ -61,6 +61,14 @@ class LoaderFixtureBuilderTests(unittest.TestCase):
         self.assertIn("'pure-bss-tls.rs'", source)
         self.assertIn("'pure-bss-tls-demo'", source)
 
+    def test_fixture_inventory_includes_runtime_tls_dependency_graph(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts' /
+                  'build-loader-fixtures.py').read_text(encoding='utf-8')
+        self.assertIn("'runtime-tls-dependency.rs'", source)
+        self.assertIn("'runtime-tls-root.rs'", source)
+        self.assertIn("'libwoven-runtime-tls-dependency.so'", source)
+        self.assertIn("'libwoven-runtime-tls-root.so'", source)
+
 
 if __name__ == '__main__':
     unittest.main()

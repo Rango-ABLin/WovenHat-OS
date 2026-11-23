@@ -1,5 +1,23 @@
 use super::*;
 
+const SIGNING_SEED: [u8; 32] = [
+    0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+    0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
+];
+
+fn signed_package(bytes: &[u8]) -> alloc::vec::Vec<u8> {
+    let pair = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new(SIGNING_SEED));
+    let signature = pair.sk.sign(bytes, None);
+    let mut package = alloc::vec::Vec::with_capacity(bytes.len() + 80);
+    package.extend_from_slice(b"WAPP");
+    package.extend_from_slice(&1_u16.to_le_bytes());
+    package.extend_from_slice(&80_u16.to_le_bytes());
+    package.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    package.extend_from_slice(&*signature);
+    package.extend_from_slice(bytes);
+    package
+}
+
 fn edge_fixture(
     offset: usize,
     memory: u64,
@@ -223,11 +241,27 @@ fn run_on(cpu: usize) -> bool {
 }
 
 pub(super) fn run() -> bool {
+    const DEPENDENCY_PATH: &str = "/lib/libwoven-runtime-tls-dependency.so";
+    let made_lib = crate::vfs::stat("/lib").is_err();
+    if made_lib && crate::vfs::mkdir("/lib").is_err() {
+        return false;
+    }
+    let dependency = include_bytes!(env!("WOVENHAT_RUNTIME_TLS_DEPENDENCY_ELF"));
+    if crate::vfs::create_read_only(DEPENDENCY_PATH, &signed_package(dependency)).is_err() {
+        if made_lib {
+            let _ = crate::vfs::remove("/lib");
+        }
+        return false;
+    }
+    let mut passed = true;
     for cpu in 0..crate::smp::online_count() {
         if !run_on(cpu) {
-            return false;
+            passed = false;
+            break;
         }
         crate::serial::write_line(format_args!("[S11.TLS] lifecycle CPU {cpu}: PASSED"));
     }
-    true
+    let dependency_removed = crate::vfs::remove(DEPENDENCY_PATH).is_ok();
+    let lib_removed = !made_lib || crate::vfs::remove("/lib").is_ok();
+    passed && dependency_removed && lib_removed
 }

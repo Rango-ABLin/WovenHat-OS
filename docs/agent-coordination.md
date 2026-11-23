@@ -10220,3 +10220,13 @@ generation-tagged module value; its clean 1/2/4-CPU matrix exits 33 under
 warning-denying Clippy and `cargo test --workspace` pass. Compiler-generated
 live dependency execution and general-dynamic/TLSDESC remain open. Ownership
 is released; no Cargo or QEMU chain remains active.
+
+## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
+
+Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD
+runtime root plus TLS-bearing `DT_NEEDED` dependency, feed both through the
+existing signed read-only runtime graph path, and require compiler-produced TLS
+relocations and live generation-safe publication in focused acceptance. Scope
+is loader-fixture sources/builder, Stage 11 runtime harness, linker acceptance,
+and directly related documentation. General-dynamic/TLSDESC implementation is
+not included unless this fixture closes first. No Cargo/QEMU chain is active.

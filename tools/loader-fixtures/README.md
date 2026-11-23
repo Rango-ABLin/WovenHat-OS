@@ -24,6 +24,16 @@ and owner exit with an initialized sleeping sibling. Timer sleeps coordinate
 readiness. The dedicated kernel TLS gate loads it at a nonzero bias and runs
 on every online test CPU. Compiling this fixture alone is not runtime proof.
 
+`runtime-tls-root.rs` and `runtime-tls-dependency.rs` form an unmodified
+Rust/LLD live-loader graph. The dependency is compiled with the x86-64
+global-dynamic TLS model and must contain `DTPMOD64`, `DTPOFF64`, and a PLT
+reference to `__tls_get_addr`; the root supplies that ABI through WovenHat's
+checked dynamic-TLS address syscall and carries the dependency in `DT_NEEDED`.
+The fixture builder fails closed if any of those compiler/linker records is
+missing. The Stage 11.2 TLS gate installs only the signed dependency package,
+then Ring 3 maps the root, executes the compiler TLS read, unloads the graph,
+and verifies stale lookup rejection.
+
 At the initial 2026-10-15 probe, the shared PIE is rejected for LLD's null
 `DT_DEBUG`, while the static TLS image parses but exposes the missing TCB and
 incorrect TLS-template placement. The kernel acceptance gate still needs to
