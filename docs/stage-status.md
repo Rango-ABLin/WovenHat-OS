@@ -201,6 +201,14 @@ tests (one existing ignored fixture), and 19 fixture/harness tests.
 Runtime constructor/destructor ownership remains the next live-loader Stage 11
 requirement; this acceptance does not claim dependency-local TLS support.
 
+Dependency-local TLS now has a bounded follow-up: the combined template keeps
+aligned per-image offsets, and runtime `DTPMOD64`/`DTPOFF64` relocations receive
+the generation-tagged graph handle and checked defining-image offset. The
+strengthened Stage 11.6 gate exercises two TLS dependencies (offsets 0 and 16)
+and passes on 1/2/4 CPUs with exit 33 under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
+dependency execution and general-dynamic/TLSDESC remain open and fail closed.
+
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 
 The production syscall boundary now copies and validates a bounded ELF shared

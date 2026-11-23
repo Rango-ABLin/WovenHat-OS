@@ -90,6 +90,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
                        '[S11.RUNTIME] symbol publication and unload: PASSED',
                        '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
                        '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
+                       '[S11.RUNTIME] compiler dependency TLS execution: PASSED',
                        '[S11.TLS] compiler TLS lifecycle: PASSED',
                        '[S11.2] threads/TLS/join: PASSED'):
             self.assertIn(marker, required)

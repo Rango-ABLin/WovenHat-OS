@@ -47,6 +47,21 @@ struct TlsPlan {
     total: usize,
 }
 
+struct RuntimeTlsTemplate {
+    initializer: Vec<u8>,
+    memory_size: usize,
+    offsets: [Option<usize>; elf::MAX_SCOPE_IMAGES],
+}
+
+#[derive(Clone, Copy)]
+enum TlsRelocationPlan<'a> {
+    Initial(&'a TlsPlan),
+    Runtime {
+        offsets: &'a [Option<usize>; elf::MAX_SCOPE_IMAGES],
+        handle: u64,
+    },
+}
+
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
     value
         .checked_add(alignment - 1)
@@ -306,7 +321,7 @@ impl Pending {
             scope,
             self.space.paging(),
             &mut self.space,
-            tls_plan,
+            tls_plan.map(TlsRelocationPlan::Initial),
         )
     }
 }
@@ -421,7 +436,13 @@ impl<'a> StagedSegments<'a> {
         tls_plan: Option<&TlsPlan>,
     ) -> Option<()> {
         validate_relocation_plan(images)?;
-        relocate_linked_images(images, scope, self.space.paging(), self.space, tls_plan)
+        relocate_linked_images(
+            images,
+            scope,
+            self.space.paging(),
+            self.space,
+            tls_plan.map(TlsRelocationPlan::Initial),
+        )
     }
 
     /// Publish the module generation only after all staged pages are confirmed.
@@ -543,7 +564,9 @@ pub(super) fn load_runtime_module(
             .checked_mul(LIBRARY_STRIDE)?,
     )?;
     let images = prepare_runtime_graph(bytes, bias)?;
-    let (tls_initializer, tls_memory_size) = runtime_tls_template(&images)?;
+    let tls = runtime_tls_template(&images)?;
+    let generation = space.dynamic_module_next_generation(slot)?;
+    let handle = ((u64::from(generation)) << 32) | u64::try_from(slot.checked_add(1)?).ok()?;
     let first = images
         .iter()
         .flat_map(|image| image.image.segments())
@@ -568,7 +591,16 @@ pub(super) fn load_runtime_module(
     }
     scope.validate_dependencies().ok()?;
     validate_relocation_plan(&images)?;
-    relocate_linked_images(&images, &scope, staged.space.paging(), staged.space, None)?;
+    relocate_linked_images(
+        &images,
+        &scope,
+        staged.space.paging(),
+        staged.space,
+        Some(TlsRelocationPlan::Runtime {
+            offsets: &tls.offsets,
+            handle,
+        }),
+    )?;
     for linked in &images {
         for segment in linked.image.segments() {
             paging::protect_user_range_in(
@@ -586,14 +618,17 @@ pub(super) fn load_runtime_module(
         }
     }
     let generation = staged.commit(&images)?;
+    if generation != u32::try_from(handle >> 32).ok()? {
+        return None;
+    }
     Some(RuntimeModuleLoad {
         generation,
-        tls_initializer,
-        tls_memory_size,
+        tls_initializer: tls.initializer,
+        tls_memory_size: tls.memory_size,
     })
 }
 
-fn runtime_tls_template(images: &[LinkImage<'_>]) -> Option<(Vec<u8>, usize)> {
+fn runtime_tls_template(images: &[LinkImage<'_>]) -> Option<RuntimeTlsTemplate> {
     let mut offsets = [None; elf::MAX_SCOPE_IMAGES];
     let mut memory_size = 0usize;
     for (index, linked) in images.iter().enumerate() {
@@ -606,7 +641,11 @@ fn runtime_tls_template(images: &[LinkImage<'_>]) -> Option<(Vec<u8>, usize)> {
         memory_size = memory_size.checked_add(tls.memory_size)?;
     }
     if memory_size == 0 {
-        return Some((Vec::new(), 0));
+        return Some(RuntimeTlsTemplate {
+            initializer: Vec::new(),
+            memory_size: 0,
+            offsets,
+        });
     }
     if memory_size > 4096 {
         return None;
@@ -623,7 +662,11 @@ fn runtime_tls_template(images: &[LinkImage<'_>]) -> Option<(Vec<u8>, usize)> {
             .get_mut(offset..target_end)?
             .copy_from_slice(linked.bytes.get(tls.file_offset..file_end)?);
     }
-    Some((initializer, memory_size))
+    Some(RuntimeTlsTemplate {
+        initializer,
+        memory_size,
+        offsets,
+    })
 }
 
 fn prepare_runtime_graph(root: Vec<u8>, base: u64) -> Option<Vec<LinkImage<'static>>> {
@@ -971,7 +1014,7 @@ fn relocate_linked_images(
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
     space: &mut AddressSpace,
-    tls_plan: Option<&TlsPlan>,
+    tls_plan: Option<TlsRelocationPlan<'_>>,
 ) -> Option<()> {
     for (image_index, linked) in images.iter().enumerate() {
         relocate(
@@ -1376,7 +1419,7 @@ fn relocate(
     scope: &SymbolScope<'_>,
     page_table: paging::AddressSpace,
     space: &mut AddressSpace,
-    tls_plan: Option<&TlsPlan>,
+    tls_plan: Option<TlsRelocationPlan<'_>>,
     images: &[LinkImage<'_>],
 ) -> Option<()> {
     let Some(dynamic) = linked.image.dynamic() else {
@@ -1541,7 +1584,7 @@ fn tls_relocation_value(
     symbol_index: usize,
     relocation_type: u32,
     scope: &SymbolScope<'_>,
-    tls_plan: Option<&TlsPlan>,
+    tls_plan: Option<TlsRelocationPlan<'_>>,
     images: &[LinkImage<'_>],
 ) -> Option<u64> {
     let (symbol_offset, provider) =
@@ -1549,13 +1592,21 @@ fn tls_relocation_value(
             .image
             .tls_symbol_resolution(&linked.bytes, symbol_index, scope)?;
     let module_index = provider.unwrap_or(image_index);
-    let plan = tls_plan?;
-    let tpoff = tls_tpoff(images, module_index, plan)?;
-    match relocation_type {
-        elf::R_X86_64_DTPMOD64 => Some((module_index + 1) as u64),
-        elf::R_X86_64_DTPOFF64 => Some(symbol_offset),
-        elf::R_X86_64_TPOFF64 | elf::R_X86_64_GOTTPOFF | elf::R_X86_64_TPOFF32 => {
-            let value = tpoff.checked_add(i64::try_from(symbol_offset).ok()?)?;
+    match (relocation_type, tls_plan?) {
+        (elf::R_X86_64_DTPMOD64, TlsRelocationPlan::Initial(_)) => Some((module_index + 1) as u64),
+        (elf::R_X86_64_DTPMOD64, TlsRelocationPlan::Runtime { handle, .. }) => Some(handle),
+        (elf::R_X86_64_DTPOFF64, TlsRelocationPlan::Initial(_)) => Some(symbol_offset),
+        (elf::R_X86_64_DTPOFF64, TlsRelocationPlan::Runtime { offsets, .. }) => {
+            u64::try_from(offsets.get(module_index).copied().flatten()?)
+                .ok()?
+                .checked_add(symbol_offset)
+        }
+        (
+            elf::R_X86_64_TPOFF64 | elf::R_X86_64_GOTTPOFF | elf::R_X86_64_TPOFF32,
+            TlsRelocationPlan::Initial(plan),
+        ) => {
+            let value = tls_tpoff(images, module_index, plan)?
+                .checked_add(i64::try_from(symbol_offset).ok()?)?;
             Some(value as u64)
         }
         _ => None,

@@ -5025,6 +5025,11 @@ impl AddressSpace {
         })
     }
 
+    pub fn dynamic_module_next_generation(self, index: usize) -> Option<u32> {
+        let descriptor = self.dynamic_modules.get(index)?;
+        (!descriptor.live && descriptor.generation != 0).then_some(descriptor.generation)
+    }
+
     pub fn dynamic_module_final_reference(self, index: usize, generation: u32) -> bool {
         self.dynamic_modules.get(index).is_some_and(|descriptor| {
             descriptor.live && descriptor.generation == generation && descriptor.references == 1
