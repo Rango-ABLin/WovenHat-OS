@@ -178,7 +178,7 @@ use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
-use taskbar_prefs::{Alignment, TaskbarPrefs};
+use taskbar_prefs::{Alignment, AutoHide, TaskbarPrefs, AUTO_HIDE_HOLD};
 mod pinned_apps;
 use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
 
@@ -691,6 +691,11 @@ struct Desktop {
     dnd: bool,
     /// Bottom taskbar placement and entry size, from the installed settings.
     taskbar: TaskbarPrefs,
+    /// Taskbar auto-hide state: the settings-seeded preference plus its
+    /// reveal/hide timing. In-session state like pins: the shell holds
+    /// `FileRead` and no settings-write path exists, so it resets to the
+    /// record's value on the next boot.
+    auto_hide: AutoHide,
     /// Pinned taskbar applications, in pin order. Seeded from the installed
     /// settings record's `pinned_apps` value (absent: the curated defaults;
     /// empty: nothing pinned) and changed in-session by right-clicking a
@@ -794,6 +799,7 @@ impl Desktop {
         qs_open: false,
         dnd: false,
         taskbar: TaskbarPrefs::DEFAULT,
+        auto_hide: AutoHide::off(),
         pinned: PinnedApps::defaults_const(),
         battery_saver: false,
         night_light: false,
@@ -879,12 +885,18 @@ impl Desktop {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
     }
 
-    /// The screen's usable band, excluding the bottom taskbar: `(top, height)`.
-    /// Shared by every window-placement/clamp site that needs to keep
-    /// windows clear of the bar (`work_area`, `open`, `resized`,
-    /// `toggle_scale`, `drag_to_pointer`).
+    /// The screen's usable band for windows: everything when the bar is
+    /// hidden, everything above the bar when it is not. Shared by every
+    /// window-placement/clamp site (`work_area`, `open`, `resized`,
+    /// `toggle_scale`, `drag_to_pointer`); the revealed bar simply draws
+    /// over whatever a window placed in the freed strip.
     fn usable_band(&self) -> (i32, i32) {
-        (0, (self.height - TASKBAR_HEIGHT).max(0))
+        let height = if self.auto_hide.is_hidden() {
+            self.height
+        } else {
+            (self.height - TASKBAR_HEIGHT).max(0)
+        };
+        (0, height)
     }
 
     /// Row for taskbar text, centered vertically in the bar.
@@ -981,12 +993,23 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        let group_x = match self.taskbar.alignment {
-            Alignment::Center => (self.width - self.taskbar_group_width()) / 2,
+        let width = self.taskbar_group_width();
+        // The group may not run under the right-side controls (workspace
+        // boxes, tray, status icons, clock). Centre it inside the free band
+        // between the left margin and those controls -- not the whole screen,
+        // which the pinned defaults already fill past their left edge. When
+        // the group cannot fit even there, clamp it to the left margin so
+        // only the excess, never the whole group, overlaps.
+        let controls_left = self.workspace_area(0).x - 8;
+        let left = match self.taskbar.alignment {
+            Alignment::Center => {
+                let free = (controls_left - 8).max(0);
+                (8 + free / 2 - width / 2).clamp(8, (controls_left - width).max(8))
+            }
             Alignment::Left => 8,
         };
         Area::new(
-            group_x.max(4),
+            left.max(4),
             self.taskbar_top() + 4,
             START_BUTTON_WIDTH,
             START_HEIGHT as i32,
@@ -1505,7 +1528,9 @@ impl Desktop {
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
         self.paint_desktop_icons(canvas);
-        self.paint_taskbar_content(canvas);
+        if !self.auto_hide.is_hidden() {
+            self.paint_taskbar_content(canvas);
+        }
     }
 
     /// The taskbar content: its translucent fill and bottom accent line, the
@@ -3881,6 +3906,24 @@ impl Desktop {
         Some((buffer, name.len()))
     }
 
+    /// Right-click on an empty part of the strip: flip the auto-hide
+    /// preference in-session, with a toast saying which way it went.
+    /// Enabling hides the bar immediately; disabling reveals it. Like
+    /// pins, the preference resets on the next boot to whatever the
+    /// installed settings record says; no write path is pretended.
+    fn toggle_auto_hide(&mut self) -> Area {
+        let changed = self.auto_hide.toggle();
+        let text = if self.auto_hide.enabled() {
+            "Taskbar auto-hide on"
+        } else {
+            "Taskbar auto-hide off"
+        };
+        log(&[b"woven-shell: ", text.as_bytes()]);
+        let toast = self.toast_message(text);
+        let strip = if changed { self.taskbar() } else { Area::new(0, 0, 0, 0) };
+        strip.union(toast)
+    }
+
     /// Open a window for `owner`. Returns the areas to repaint.
     fn open(&mut self, owner: process::Id, message: &[u8]) -> Dirty {
         if message.len() < 16 {
@@ -4186,39 +4229,44 @@ impl Desktop {
                 pressed: true,
             } => {
                 let (x, y) = self.pointer;
-                if let Some(index) =
-                    (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
-                {
-                    return self.switch_workspace(index);
-                }
-                if self.start_area().contains(x, y) {
-                    return self.toggle_launcher();
-                }
-                let (taskbar_entries, entry_count) = self.taskbar_entries();
-                let entry_hit = (0..entry_count)
-                    .find(|&index| self.taskbar_entry_area(index).contains(x, y))
-                    .map(|index| taskbar_entries[index]);
-                if let Some(entry) = entry_hit {
-                    return match entry {
-                        // A window entry behaves as before: focus, minimize
-                        // when already focused, restore when minimized.
-                        TaskbarEntry::Window(slot) => self.taskbar_activate(slot),
-                        // A pinned app with no window on this workspace
-                        // starts one, like a Dash icon. This does not open
-                        // the launcher.
-                        TaskbarEntry::PinnedApp(app) => self.start_app(app),
-                    };
-                }
-                // The three status glyphs own their own slots; they are not
-                // client tray surfaces and cannot be hit-tested as one.
-                if let Some(index) =
-                    (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
-                {
-                    return self.status_click(index);
-                }
-                // The Quick Settings button, and its panel's rows.
-                if self.qs_button().contains(x, y) {
-                    return self.toggle_qs();
+                // The strip's controls exist only while the bar is painted.
+                // Hidden, none of them may capture: the reveal happens on
+                // pointer motion, not on a press.
+                if !self.auto_hide.is_hidden() {
+                    if let Some(index) =
+                        (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
+                    {
+                        return self.switch_workspace(index);
+                    }
+                    if self.start_area().contains(x, y) {
+                        return self.toggle_launcher();
+                    }
+                    let (taskbar_entries, entry_count) = self.taskbar_entries();
+                    let entry_hit = (0..entry_count)
+                        .find(|&index| self.taskbar_entry_area(index).contains(x, y))
+                        .map(|index| taskbar_entries[index]);
+                    if let Some(entry) = entry_hit {
+                        return match entry {
+                            // A window entry behaves as before: focus, minimize
+                            // when already focused, restore when minimized.
+                            TaskbarEntry::Window(slot) => self.taskbar_activate(slot),
+                            // A pinned app with no window on this workspace
+                            // starts one, like a Dash icon. This does not open
+                            // the launcher.
+                            TaskbarEntry::PinnedApp(app) => self.start_app(app),
+                        };
+                    }
+                    // The three status glyphs own their own slots; they are not
+                    // client tray surfaces and cannot be hit-tested as one.
+                    if let Some(index) =
+                        (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
+                    {
+                        return self.status_click(index);
+                    }
+                    // The Quick Settings button, and its panel's rows.
+                    if self.qs_button().contains(x, y) {
+                        return self.toggle_qs();
+                    }
                 }
                 if self.qs_open {
                     let panel = self.qs_area();
@@ -4286,9 +4334,11 @@ impl Desktop {
                     }
                     return empty;
                 }
-                // The clock opens and closes the Notification Center.
-                if self.clock_area().contains(x, y)
-                    || (self.unread > 0 && self.badge_area().contains(x, y))
+                // The clock opens and closes the Notification Center; it is a
+                // strip control, so it exists only while the bar is painted.
+                if !self.auto_hide.is_hidden()
+                    && (self.clock_area().contains(x, y)
+                        || (self.unread > 0 && self.badge_area().contains(x, y)))
                 {
                     return self.toggle_center();
                 }
@@ -4419,6 +4469,11 @@ impl Desktop {
                     .find(|&index| self.taskbar_entry_area(index).contains(x, y))
                     .map(|index| taskbar_entries[index])
                 else {
+                    // An empty part of the strip flips the auto-hide
+                    // preference; the toast says which way it went.
+                    if self.taskbar().contains(x, y) && !self.auto_hide.is_hidden() {
+                        return self.toggle_auto_hide();
+                    }
                     return empty;
                 };
                 self.toggle_pin(entry)
@@ -4488,9 +4543,22 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         self.pointer_visible = true;
-        let moved = self.drag_to_pointer();
+        let mut moved = self.drag_to_pointer();
         if self.drag.is_none() {
             self.forward_pointer_move();
+        }
+        // Auto-hide: the screen's bottom row reveals a hidden bar, and any
+        // position inside the strip refreshes the hold on a revealed one.
+        let (_, pointer_y) = self.pointer;
+        if self.auto_hide.pointer(
+            pointer_y,
+            self.height - 1,
+            self.taskbar_top(),
+            libwoven::ticks(),
+            AUTO_HIDE_HOLD,
+        ) {
+            log(&[b"woven-shell: taskbar revealed"]);
+            moved = moved.union(self.taskbar());
         }
         moved
     }
@@ -4703,6 +4771,17 @@ impl Desktop {
             self.toast = None;
             dirty = dirty.union(self.toast_area());
         }
+        // Auto-hide: past the hold, the bar goes back down. Panels that hang
+        // off the strip (Quick Settings, Notification Center, the overview)
+        // hold it up until they close.
+        if self.auto_hide.tick(now)
+            && !self.qs_open
+            && !self.center_open
+            && !self.launcher_open
+        {
+            log(&[b"woven-shell: taskbar hidden"]);
+            dirty = dirty.union(self.taskbar());
+        }
         dirty
     }
 }
@@ -4747,6 +4826,7 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
         json_string(data, b"taskbar_alignment"),
         json_string(data, b"taskbar_icon_size"),
     );
+    desktop.auto_hide = AutoHide::from_setting(json_string(data, b"taskbar_auto_hide"));
     desktop.pinned = PinnedApps::from_setting(json_string(data, b"pinned_apps"));
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);

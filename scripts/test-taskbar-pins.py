@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Fail-closed, real-QEMU taskbar pinning qualification.
+"""Fail-closed, real-QEMU taskbar pinning and auto-hide qualification.
 
-Exercises the Phase B pinned-application wiring end to end on the same
-hardware-demo image the desktop qualification uses: a left-click on a
-pinned entry launches its app, a right-click on any taskbar entry pins or
-unpins that app in-session, a pinned app keeps its taskbar slot after its
-window closes, and the group re-flows on every state change.
+Exercises the Phase B pinned-application wiring and auto-hide end to end on
+the same hardware-demo image the desktop qualification uses: a left-click
+on a pinned entry launches its app, a right-click on any taskbar entry
+pins or unpins that app in-session, a pinned app keeps its taskbar slot
+after its window closes, and the group re-flows on every state change.
+Auto-hide then follows in the same boot: right-clicking an empty part of
+the strip enables it, the hidden bar's controls stop capturing clicks,
+the screen's bottom row reveals it, the hold timer hides it again once
+the pointer leaves, and a final right-click turns it back off with the
+bar staying up.
 
 Journey (PS/2 pointer moves are in the guest's logical 640x400 space; the
 scanout is 1280x800, the logical 2x scale):
@@ -20,13 +25,30 @@ scanout is 1280x800, the logical 2x scale):
   5. right-click the pinned-not-running
      Files entry                          -> "Unpinned WovenFiles" again,
                                               proving the pin survived
+  6. right-click an empty part of the
+     strip                                -> "Taskbar auto-hide on", the
+                                              strip vanishes
+  7. left-click where the hidden Start
+     button would be                      -> nothing happens: hidden
+                                              controls capture nothing
+  8. move to the bottom screen row        -> "taskbar revealed", the
+                                              strip repaints
+  9. move away and wait past the hold     -> "taskbar hidden", the strip
+                                              vanishes on its own
+ 10. reveal, then right-click empty strip -> "Taskbar auto-hide off", and
+                                              the bar stays up past the
+                                              old hold (negative check)
 
-Every step must publish its serial marker, and steps 1, 2, 4 and 5 must
+Every step must publish its serial marker, and the re-flow steps must
 also repaint the taskbar strip on the scanout within the frame budget.
 Marker waits are occurrence-counted, so a repeated "Unpinned WovenFiles"
-cannot pass on its earlier occurrence. Nothing here asserts a pin
-survives a reboot: the shell holds no settings-write path, and this gate
-does not pretend otherwise.
+cannot pass on its earlier occurrence. The two negative steps compare
+the strip pixel-for-pixel (minus the wall-clock clock, which legitimately
+changes on a minute boundary) and fail on any difference.
+
+Nothing here asserts a pin or the auto-hide preference survives a
+reboot: the shell holds no settings-write path, and this gate does not
+pretend otherwise.
 
 Return codes: 0 pass, 1 a guest check failed, 2 unsupported environment.
 
@@ -79,10 +101,35 @@ def group_width(entries: int) -> int:
     return START_WIDTH + 8 + entries * ENTRY_WIDTH + (entries - 1) * ENTRY_GAP
 
 
+def controls_left() -> int:
+    """The left edge (minus its 8 px margin) of the strip's right-side
+    controls, mirroring the shell's `start_area` bound: workspace boxes,
+    then the tray, status icons and clock anchored at the right edge."""
+    clock_x = LOGICAL_WIDTH - (8 * 6 + 6) - 4
+    qs_x = clock_x - (4 + 3 + 1) * (16 + 4)
+    span = 4 * (12 + 2) - 2
+    return qs_x - 6 - span - 8
+
+
+def group_left(width: int) -> int:
+    """The shell's centered-group placement inside the free band between
+    the left margin and the right-side controls, mirrored so this gate
+    clicks where the shell actually draws."""
+    controls = controls_left()
+    free = max(controls - 8, 0)
+    candidate = 8 + free // 2 - width // 2
+    return max(8, min(candidate, max(controls - width, 8)))
+
+
 def entry_center(index: int, entries: int) -> tuple[int, int]:
     """Logical center of taskbar entry `index` when the group has `entries`."""
-    start_x = (LOGICAL_WIDTH - group_width(entries)) // 2
-    x = start_x + START_WIDTH + 8 + index * (ENTRY_WIDTH + ENTRY_GAP) + ENTRY_WIDTH // 2
+    x = (
+        group_left(group_width(entries))
+        + START_WIDTH
+        + 8
+        + index * (ENTRY_WIDTH + ENTRY_GAP)
+        + ENTRY_WIDTH // 2
+    )
     y = LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2
     return x, y
 
@@ -143,6 +190,44 @@ def wait_strip_change(
         qmp, frame, reference, deadline, timings, name, 20,
         dq.region_changed(reference, 0, STRIP_TOP, 1280, STRIP_HEIGHT, 20),
     )
+
+
+# The strip's wall clock legitimately repaints on a minute boundary, so the
+# negative checks mask its columns instead of trusting a short settle window
+# never to cross one.
+CLOCK_X0, CLOCK_X1 = 2 * 582, 2 * 636
+
+
+def strip_equal_ignoring_clock(left: bytes, right: bytes) -> bool:
+    for y in range(STRIP_TOP, STRIP_TOP + STRIP_HEIGHT):
+        row = y * 1280 * 3
+        for x in range(0, 1280):
+            if CLOCK_X0 <= x < CLOCK_X1:
+                continue
+            offset = row + x * 3
+            if left[offset:offset + 3] != right[offset:offset + 3]:
+                return False
+    return True
+
+
+def capture_and_require_unchanged(
+    qmp: dq.Qmp,
+    output: Path,
+    reference: bytes,
+    name: str,
+    timings: dict[str, float],
+    deadline: float,
+    settle: float,
+) -> tuple[int, int, bytes]:
+    """Settle, capture, and fail if the strip changed at all outside the
+    clock columns. The negative half of the auto-hide assertions: a hidden
+    bar must capture nothing, and a bar with auto-hide off must stay up."""
+    time.sleep(settle)
+    frame = output / f"{name}.ppm"
+    width, height, pixels = dq.capture_frame(qmp, frame, deadline, timings, name)
+    if not strip_equal_ignoring_clock(reference, pixels):
+        raise dq.GateFailure(f"{name}: taskbar strip changed when it must not have")
+    return width, height, pixels
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -340,11 +425,125 @@ def main(argv: list[str] | None = None) -> int:
                 serial, "woven-shell: Unpinned WovenFiles", 2, step + args.input_timeout,
                 process, "pins_unpin_again_ms", timings, step,
             )
-            wait_strip_change(
+            _, _, after_unpin_again = wait_strip_change(
                 qmp, output, after_close, "pins-step5-unpinned-again", timings,
                 time.monotonic() + args.frame_timeout,
             )
             screenshots.append("pins-step5-unpinned-again.ppm")
+
+            # Step 6: right-click an empty part of the strip: auto-hide on,
+            # and the bar goes down immediately. With the two remaining
+            # pins the group ends at 264, and the right-side controls start
+            # at 362, so x=330 is empty strip.
+            step = time.monotonic()
+            move_to((330, LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2))
+            right_click(qmp)
+            wait_marker_count(
+                serial, "woven-shell: Taskbar auto-hide on", 1, step + args.input_timeout,
+                process, "autohide_on_ms", timings, step,
+            )
+            _, _, hidden_frame = wait_strip_change(
+                qmp, output, after_unpin_again, "autohide-step6-on", timings,
+                time.monotonic() + args.frame_timeout,
+            )
+            screenshots.append("autohide-step6-on.ppm")
+
+            # Step 7: the hidden bar must capture nothing. Move to where the
+            # hidden Start button would be and wait until the drawn cursor
+            # has actually arrived there, so the reference frame and the
+            # comparison frame show the same cursor; then click, and
+            # require no change at all.
+            step = time.monotonic()
+            target = (group_left(group_width(2)) + START_WIDTH // 2,
+                      LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2)
+            move_to(target)
+            arrived = output / "autohide-step7-arrived.ppm"
+            # The box must stay inside the 800-row framebuffer: the cursor
+            # glyph spans roughly 776..795, so rows 768..800 cover it.
+            _, _, settled_frame = dq.capture_until_changed(
+                qmp, arrived, hidden_frame,
+                time.monotonic() + args.frame_timeout, timings, "autohide_arrived", 20,
+                dq.region_changed(hidden_frame, 2 * target[0] - 8, 2 * target[1] - 8, 48, 32, 20),
+            )
+            screenshots.append(arrived.name)
+            qmp.click()
+            capture_and_require_unchanged(
+                qmp, output, settled_frame, "autohide-step7-blocked", timings,
+                time.monotonic() + args.frame_timeout, 1.0,
+            )
+            screenshots.append("autohide-step7-blocked.ppm")
+
+            # Step 8: the screen's bottom row reveals the bar.
+            step = time.monotonic()
+            move_to((LOGICAL_WIDTH // 2, LOGICAL_HEIGHT - 1))
+            wait_marker_count(
+                serial, "woven-shell: taskbar revealed", 1, step + args.input_timeout,
+                process, "autohide_reveal_ms", timings, step,
+            )
+            _, _, revealed_frame = wait_strip_change(
+                qmp, output, settled_frame, "autohide-step8-revealed", timings,
+                time.monotonic() + args.frame_timeout,
+            )
+            screenshots.append("autohide-step8-revealed.ppm")
+
+            # Step 9: away from the strip, the hold runs out and the bar
+            # hides on its own.
+            step = time.monotonic()
+            move_to((LOGICAL_WIDTH // 2, LOGICAL_HEIGHT // 2))
+            wait_marker_count(
+                serial, "woven-shell: taskbar hidden", 1, step + args.input_timeout,
+                process, "autohide_hide_ms", timings, step,
+            )
+            wait_strip_change(
+                qmp, output, revealed_frame, "autohide-step9-hidden", timings,
+                time.monotonic() + args.frame_timeout,
+            )
+            screenshots.append("autohide-step9-hidden.ppm")
+
+            # Step 10: reveal once more, then right-click the empty strip to
+            # turn auto-hide off. The bar must stay up past the old hold
+            # with the pointer far away.
+            step = time.monotonic()
+            move_to((LOGICAL_WIDTH // 2, LOGICAL_HEIGHT - 1))
+            wait_marker_count(
+                serial, "woven-shell: taskbar revealed", 2, step + args.input_timeout,
+                process, "autohide_reveal_again_ms", timings, step,
+            )
+            # Moving to the empty strip refreshes the hold on the way.
+            move_to((330, LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2))
+            right_click(qmp)
+            wait_marker_count(
+                serial, "woven-shell: Taskbar auto-hide off", 1, step + args.input_timeout,
+                process, "autohide_off_ms", timings, step,
+            )
+            # Capture with the cursor still at the click, then park the
+            # pointer and wait until the cursor has actually left that
+            # spot before using a frame as the stay-up reference: the
+            # comparison must never race the cursor's own repaint.
+            off = output / "autohide-step10-off.ppm"
+            _, _, off_frame = dq.capture_frame(
+                qmp, off, time.monotonic() + args.frame_timeout, timings, "autohide_off"
+            )
+            screenshots.append(off.name)
+            parked_target = (LOGICAL_WIDTH // 2, LOGICAL_HEIGHT // 2)
+            parked_from = (330, LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2)
+            move_to(parked_target)
+            parked = output / "autohide-step10-parked.ppm"
+            # Same bounds discipline: the departure box watches the cursor's
+            # old spot inside the framebuffer, rows 768..800.
+            _, _, parked_frame = dq.capture_until_changed(
+                qmp, parked, off_frame,
+                time.monotonic() + args.frame_timeout, timings, "autohide_parked", 20,
+                dq.region_changed(
+                    off_frame, 2 * parked_from[0] - 8, 2 * parked_from[1] - 8, 48, 32, 20
+                ),
+            )
+            screenshots.append(parked.name)
+            capture_and_require_unchanged(
+                qmp, output, parked_frame, "autohide-step10-stays-up", timings,
+                time.monotonic() + args.frame_timeout, 2.5,
+            )
+            screenshots.append("autohide-step10-stays-up.ppm")
 
             result = dict(base)
             result.update({
@@ -357,12 +556,13 @@ def main(argv: list[str] | None = None) -> int:
                 "pins_persistence": {
                     "across_reboot": False,
                     "reason": "the shell process holds FileRead only; no settings-write path exists",
+                    "applies_to": ["pins", "taskbar_auto_hide preference"],
                 },
             })
             (output / "result.json").write_text(
                 json.dumps(result, indent=2) + "\n", encoding="utf-8"
             )
-            print(f"Taskbar pinning: PASS ({args.cpus} CPU). Evidence: {output}")
+            print(f"Taskbar pins + auto-hide: PASS ({args.cpus} CPU). Evidence: {output}")
             return 0
     except dq.GateFailure as failure:
         result = dict(base)
@@ -377,6 +577,23 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(result, indent=2) + "\n", encoding="utf-8"
         )
         print(f"FAILED: {failure}; evidence: {output}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        # A harness bug is still a failed gate with preserved evidence,
+        # never a silent crash: the same convention as the desktop
+        # qualification harness's unexpected-error arm.
+        result = dict(base)
+        result.update({
+            "status": "FAIL",
+            "pass": False,
+            "failures": [f"unexpected harness error: {error}"],
+            "screenshots": screenshots,
+            "timings_ms": {**timings},
+        })
+        (output / "result.json").write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"FAILED: unexpected harness error: {error}; evidence: {output}", file=sys.stderr)
         return 1
     except dq.UnsupportedQualification as unsupported:
         result = dict(base)
