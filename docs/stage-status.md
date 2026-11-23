@@ -16,6 +16,155 @@ remains open pending a spare non-boot device, Administrator elevation, and
 signed destructive authorization. Evidence under
 `audit-artifacts/physical-*` and `audit-artifacts/hardware-qualification-*`.
 
+## Stage 9 current-source WovenGuard gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+Added a dedicated `stage9-test` acceptance route rather than relying on
+incidental markers from the shared boot path. The fail-closed harness requires
+all twelve WovenGuard layers: domain ceilings, generation-tagged lineage,
+recursive revocation, task and IPC enforcement, SMP lineage closure, the audit
+ledger, sandbox capability/service/filesystem/lifecycle policy, and final
+resource/device gates. Fourteen harness contracts and warning-denying
+freestanding Clippy pass. Dedicated 1/2/4-CPU boots pass with exit 33 under
+`audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
+
+This closes the existing bounded Stage 9 software/QEMU security policy on
+current source. Native device policy, broader adversarial stress, external
+security review, and collective Stage 1-19 release closure remain separate.
+
+## Release provenance and hardware record - 2026-11-20 - LOCAL PASS / EXTERNAL BLOCKED
+
+The locked offline clean-room build from an isolated `git archive` passes 256
+libwoven tests with one pre-declared ignored fixture. Eight release-package and
+hardware-report policy contracts pass. The conservative hardware record is
+schema-valid and classifies as incomplete Tier 2 with zero native-passed and
+all 17 required categories explicitly blocked. Production provenance
+verification correctly refuses to run without separately managed production
+seed and trusted-public-key inputs.
+
+Evidence is retained at `audit-artifacts/clean-room-build-20261120.json` and
+`audit-artifacts/hardware-support-classification-20261120.json`; governing
+records are in `docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md` and
+`hardware-support-record.json`. Independent review, production signing custody
+and native hardware certification remain blocked. No physical device was
+accessed and no production signature was created.
+
+## Disposable install/update/rollback/recovery - 2026-11-20 - ACCEPTED (BOUNDED)
+
+Twenty-six focused installer contracts pass, followed by the complete Stage 28
+regular-file pipeline: deterministic GPT layout, FAT32-compatible system
+partition, EFI artifact placement, settings readback, whole-file transaction
+and injected rollback. The deterministic summary reports `valid: true`,
+`physical_access: none`, and `release_certification: not-performed`.
+
+Stage 27.1 A/B activation/rollback, Stage 27.2 durable update records on fresh
+16 MiB ATA images, and the signed WovenRecovery application each pass on
+1/2/4 CPUs with exit 33. Evidence is retained under
+`audit-artifacts/stage27.1-*`, `audit-artifacts/stage27.2-{1,2,4}cpu`, and
+`audit-artifacts/stage27.5-recovery-{1,2,4}cpu`.
+
+This accepts remaining-work item 6 only for disposable regular-file/QEMU
+scope. Physical installation, firmware boot-entry changes, native media,
+volatile caches, physical power loss, production signing custody, and release
+certification were not performed.
+
+## Stage 8 current-source IPC/capability gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+The shared runtime harness now requires the full Stage 8 marker chain:
+exhausted-generation rollback, process-local endpoint handles, bounded message
+passing, race-free blocking, shared-memory mappings, capability transfer,
+service discovery and multicore stress. Thirteen harness contracts and
+warning-denying normal-kernel Clippy pass. Dedicated 1/2/4-CPU boots pass with
+exit 33 under `audit-artifacts/stage8-{1,2,4}cpu-1795199*`.
+
+This refreshes the bounded software/QEMU IPC contract on current source.
+Broader cross-subsystem integration, general stress, native hardware and
+collective Stage 1-19 closure remain separate work.
+
+## Stage 7 current-source process-environment gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+The shared runtime harness now has an explicit Stage 7 feature and marker
+contract. Twelve harness tests and warning-denying `stage7-test` freestanding
+Clippy pass. Dedicated 1/2/4-CPU boots verify deterministic defaults,
+copy-on-inheritance, update semantics, bounded capacity and malformed ASCII/
+key/value rejection with exit 33. Evidence is retained under
+`audit-artifacts/stage7-{1,2,4}cpu-1795199*`.
+
+This refreshes only the existing bounded process-environment scope. Complete
+signals, dynamic libc/runtime behavior, unrestricted environment sizing,
+broader teardown/fault stress and native hardware qualification remain open.
+
+## Stage 6 current-source SMP/hotplug gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
+
+At baseline `b3db4c90`, warning-denying freestanding Clippy for
+`stage6-hotplug-test` passes. The dedicated lifecycle gate passes twice-cycled
+2→1→2 and 4→3→4 CPU transitions, including cancellation, task evacuation,
+rejection recovery, timeout recovery, offline/online masks, and the 4-CPU
+middle-CPU hole worker. Evidence is retained in
+`audit-artifacts/stage6-hotplug-{2,4}cpu-1795199*`.
+
+This refreshes the already accepted bounded Stage 6 software/QEMU scope on
+current source. Physical CPU hotplug, APIC IDs above 255, native multi-node
+NUMA, general multicore soak, and broader low-memory/priority-inheritance
+qualification remain outside this closure.
+
+## Stage 1-5 current-source software gate - 2026-11-20 - VERIFIED (BOUNDED)
+
+At baseline `caf19a9d`, warning-denying freestanding Clippy for
+`stage1-5-test` and all six FAT32/page-cache host tests pass. The dedicated
+storage-journal gate passes with exit 33 on 1/2/4 CPUs in
+`audit-artifacts/stage1-5-{1,2,4}cpu-1795199*`. The same source already passed
+the complete serialized Stage 10.7 Windows chain in
+`audit-artifacts/stage12-installed-wovenfs-current-stage10-7-final.log`.
+
+This verifies the current bounded boot/paging/scheduler/VFS/FAT32 software
+contract. It does not close Stage 1-5: native storage/DMA coverage, arbitrary
+physical-device behavior, torn writes below the modeled sector boundary,
+physical power loss, and independent review remain external blockers.
+
+## Stage 12 installed WovenFS reboot/replay - 2026-11-20 - ACCEPTED (FOCUSED)
+
+Current `master` now mounts native WovenFS independently of Stage 12 self-test
+features. Normal and post-commit/pre-target interruption gates each perform
+three cold boots of one unchanged disposable image and pass on 1/2/4 CPUs.
+Payload, shorter overwrite, cleanup, native `df`/`fscheck`, and journal replay
+are directly verified. Evidence is retained under
+`audit-artifacts/installed-wovenfs-coldboot-pass2-current-20261120` and
+`audit-artifacts/installed-wovenfs-interruption-pass-current-20261120`.
+
+Nine focused harness contracts, all 20 WovenFS crash tests, host all-target
+Clippy and both feature-specific freestanding Clippy gates pass with warnings
+denied. The final serialized Windows chain passes build/lint/tests, all 60
+memory boots, live networking and Stages 10.4-10.7 on 1/2/4 CPUs in
+`audit-artifacts/stage12-installed-wovenfs-current-stage10-7-final.log`.
+Physical power loss, volatile caches, torn sectors, other installed cut points,
+native media, and broader application persistence remain open.
+
+## Stage 11 pure-BSS compiler TLS - 2026-11-20 - ACCEPTED (BOUNDED)
+
+Commit `b9829f62` adds a compiler/LLD local-exec TLS executable with PT_TLS
+`p_filesz=0`, `p_memsz=8`. The loader must materialize zero-filled TLS, execute
+the image on every online CPU, preserve its protected template/TCB and reject
+malformed geometry. The dedicated Stage 11.2 TLS gate passes on 1/2/4 CPUs
+with exit 33 and exact process/IPC/frame teardown. Build, warning-denying host
+and affected-feature Clippy, Rust tests and 212 Python tests pass. The complete
+serialized Stage 10.7 Windows chain passes all 60 memory boots, network gates
+and isolated Stages 10.4-10.7. Broader TLS models, entropy/interoperability
+stress, physical qualification and collective Stage 1-19 closure remain open.
+
+## Stage 11 focused runtime matrix - 2026-11-20 - VERIFIED (FOCUSED)
+
+On kernel sources `b9829f62` (unchanged by later shell/docs commits), the
+focused Stage 11 QEMU matrix is 30/30: `11.1-11.6`, `11.2-status`, `11.2-tls`
+(including pure-BSS compiler TLS), `11.2-aslr` and `11.5-compiler`, each on
+1/2/4 CPUs, exit 33. Three transient host-resource failures (`rustc-LLVM` OOM,
+no-space, missing concurrent build-script path during competing 5 GiB desktop
+QEMU) were rerun serially and passed. Warning-denying target Clippy for all
+affected Stage 11 features, host all-targets Clippy, 212 Python tests and 256
+workspace tests also passed. Evidence:
+`audit-artifacts/stage11-closure-*`. This is focused software evidence only;
+Stage 11/1-19 closure still requires full chain reconciliation and unaffected
+gate evidence.
+
 ## Real system font delivery and desktop gate repair - 2026-11-20 - PASS (1/2/4 CPUs)
 
 The staged 621,572-byte NotoSans TTF now loads through one bounded read-only

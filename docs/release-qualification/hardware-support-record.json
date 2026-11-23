@@ -1,0 +1,26 @@
+{
+  "schema": "wovenhat.hardware-qualification/v1",
+  "host": {
+    "host_id": "release-record-20261120",
+    "environment": "native"
+  },
+  "observations": [
+    {"id":"blocked-intel-pc","category":"intel-pc","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-amd-pc","category":"amd-pc","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-laptop","category":"laptop","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-desktop","category":"desktop","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-nvme","category":"nvme","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-sata","category":"sata","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-usb","category":"usb","device":"unassigned non-boot target","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-ethernet","category":"ethernet","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-wifi","category":"wifi","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-audio","category":"audio","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-intel-graphics","category":"intel-graphics","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-amd-graphics","category":"amd-graphics","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-nvidia-graphics","category":"nvidia-graphics","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-touchpad","category":"touchpad","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-webcam","category":"webcam","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-bluetooth","category":"bluetooth","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"},
+    {"id":"blocked-multi-monitor","category":"multi-monitor","device":"unassigned native lab device","environment":"native","result":"blocked","evidence":"docs/release-qualification/EXTERNAL-REVIEW-AND-HARDWARE.md"}
+  ]
+}

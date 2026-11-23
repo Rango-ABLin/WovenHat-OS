@@ -11,8 +11,26 @@
 //! capacity, eight direct blocks per inode, and no heap allocation.
 
 use crate::block::{BlockDevice, Error as BlockError, SECTOR_SIZE};
-#[cfg(not(test))]
+#[cfg(any(
+    not(test),
+    feature = "installed-wovenfs-interruption-qualification",
+    feature = "installed-wovenfs-interruption-test"
+))]
 use core::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(any(
+    feature = "installed-wovenfs-interruption-qualification",
+    feature = "installed-wovenfs-interruption-test"
+))]
+static INTERRUPT_AFTER_JOURNAL_COMMIT: AtomicBool = AtomicBool::new(false);
+
+#[cfg(any(
+    feature = "installed-wovenfs-interruption-qualification",
+    feature = "installed-wovenfs-interruption-test"
+))]
+pub fn arm_interrupt_after_journal_commit() {
+    INTERRUPT_AFTER_JOURNAL_COMMIT.store(true, Ordering::Release);
+}
 
 #[cfg(not(test))]
 use alloc::string::String;
@@ -921,6 +939,17 @@ impl<D: BlockDevice> Volume<D> {
         self.device
             .write_sector(sb.journal_start + 1 + count as u64, &commit)?;
         self.device.flush()?;
+
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        if INTERRUPT_AFTER_JOURNAL_COMMIT.swap(false, Ordering::AcqRel) {
+            crate::serial::write_line(format_args!(
+                "[INSTALLED WOVENFS] journal commit interruption: PASSED"
+            ));
+            crate::qemu_test_exit_success();
+        }
 
         for block in txn.blocks[..count].iter() {
             self.device.write_sector(block.target, &block.data)?;

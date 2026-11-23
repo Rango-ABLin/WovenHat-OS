@@ -68,9 +68,10 @@ WIFI_REQUIRED_MARKERS = (
 )
 
 def required_markers(stage, cpus):
-    required = [f'[SMP] online={cpus} expected={cpus}',
-                '[S10.3] userspace async completion ABI + cancellation/teardown: PASSED',
-                ({'10.8': '[S10.8] completion ports + batch/cancel/timeout/teardown/SMP: PASSED',
+    required = [f'[SMP] online={cpus} expected={cpus}']
+    if stage != '9':
+        required.append('[S10.3] userspace async completion ABI + cancellation/teardown: PASSED')
+    required.append(({'10.8': '[S10.8] completion ports + batch/cancel/timeout/teardown/SMP: PASSED',
                   '10.9': '[S10.9] timers/events/deadlines/cancellation/teardown: PASSED',
                   '11.1': '[S11.1] production process model: PASSED',
                   '11.2': '[S11.2] threads/TLS/join: PASSED',
@@ -95,6 +96,9 @@ def required_markers(stage, cpus):
                   '13.9': '[S13.9H] GTK + encrypted key data: PASSED',
                   '13.10': '[S13.10T] Bluetooth LE notification minimum key size: PASSED',
                   '13.11': '[S13.11-AUDIT] BLE SMP persistent authentication authority: PASSED',
+                  '7': '[S7] process environment: PASSED bounded defaults/inheritance/capacity',
+                  '8': '[S8.7] multicore IPC/service/capability stress: PASSED',
+                  '9': '[S9.5] WovenGuard resource/device capability gates: PASSED',
                   '1-5': '[S1-5] storage journal: PASSED',
                   '15.1': '[S15.1] WovenFS native filesystem: PASSED',
                   '15.3': '[S15.3] permission broker: PASSED',
@@ -109,7 +113,7 @@ def required_markers(stage, cpus):
                   '18.1': '[S18.1] client surface registry: PASSED',
                   '19.1': '[S19.1] compositor surface: PASSED',
                   '19.3': '[S19.3] compositor presentation: PASSED',
-                  '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage])]
+                  '19.10': '[S19.10] display geometry and single writer: PASSED'}[stage]))
     if stage == '11.2-aslr':
         required.extend([
             '[S11.2] scheduler-backed thread: PASSED',
@@ -181,6 +185,30 @@ def required_markers(stage, cpus):
             '[S13.11G] BLE SMP identity/privacy foundation: PASSED',
             '[S13.11H] BLE SMP lifecycle/hardening closure: PASSED',
         ])
+    if stage == '8':
+        required.extend([
+            '[S8.1] exhausted-generation installation/rollback: PASSED',
+            '[S8.1] kernel endpoint objects + process-local handles: PASSED',
+            '[S8.2] handle-addressed bounded message passing: PASSED',
+            '[S8.3] race-free blocking IPC events/waits: PASSED',
+            '[S8.4] shared-memory objects + cross-address-space mappings: PASSED',
+            '[S8.5] capability handle transfer through IPC: PASSED',
+            '[S8.6] named service registry + capability discovery: PASSED',
+        ])
+    if stage == '9':
+        required.extend([
+            '[S9.1] WovenGuard domains + least-privilege policy: PASSED',
+            '[S9.2A] WovenGuard capability lineage foundation: PASSED',
+            '[S9.2B] WovenGuard recursive capability revocation: PASSED',
+            '[S9.2C] WovenGuard task capability lineage enforcement: PASSED',
+            '[S9.2D] WovenGuard IPC/object capability lineage: PASSED',
+            '[S9.2E] WovenGuard SMP revocation + lineage closure: PASSED',
+            '[S9.3] WovenGuard security audit ledger: PASSED',
+            '[S9.4A] WovenGuard sandbox profile + capability ceiling: PASSED',
+            '[S9.4B] WovenGuard IPC/service exposure policy: PASSED',
+            '[S9.4C] WovenGuard filesystem/resource sandbox: PASSED',
+            '[S9.4D] WovenGuard sandbox lifecycle + SMP closure: PASSED',
+        ])
     if stage == '13.9':
         required.extend(WIFI_REQUIRED_MARKERS)
     return list(dict.fromkeys(required))
@@ -213,7 +241,7 @@ def firmware_drives(code: Path, vars_copy: Path | None) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('5-font', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
+    parser.add_argument('--stage', choices=('5-font', '7', '8', '9', '10.8', '10.9', '11.1', '11.2', '11.2-status', '11.2-tls', '11.2-aslr', '11.3', '11.4', '11.5', '11.5-compiler', '11.6', '12.1', '12.2', '12.3', '12.4', '12.5', '13.1', '13.2', '13.3', '13.4', '13.5', '13.6', '13.7', '13.8', '13.9', '13.10', '13.11', '1-5', '15.1', '15.3', '15.4', '15.5', '15.6', '15.7', '15.8', '15.9', '17.1', '18.1', '19.1', '19.3', '19.10'), default='10.8')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     parser.add_argument('--firmware', type=Path)
@@ -229,6 +257,8 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     vars_copy = copy_firmware_vars(args.firmware_vars, out)
     feature = 'stage13-10-test' if args.stage == '13.11' else f'stage{args.stage.replace(".", "-")}-test'
+    if args.stage == '8':
+        feature = 'qemu-test'
     if args.stage == '11.2-aslr':
         feature = 'stage11-aslr-test'
     env = dict(os.environ)

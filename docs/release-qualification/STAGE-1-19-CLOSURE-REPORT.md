@@ -4,6 +4,39 @@ Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.
 
+## Stage 1-5 current-source software verification
+
+The bounded Stage 1-5 storage-journal gate passes on 1/2/4 CPUs at current
+source, together with affected warning-denying Clippy and six FAT32/page-cache
+host tests. The inherited full Windows chain also passes at the same kernel
+source. Stage 1-5 remains blocked from closure by native storage/DMA, physical
+power-loss/torn-write evidence and independent review; no hardware claim is
+inferred from the software marker.
+
+## Stage 6 current-source bounded software closure
+
+The dedicated Stage 6 feature lint and twice-cycled 2/4-CPU hotplug matrix pass
+on current source. Cancellation, evacuation, rejected/timeout recovery,
+offline/online masks and middle-CPU lifecycle are directly required. This
+closes the bounded software/QEMU contract only; physical hotplug, high APIC
+IDs, native NUMA and broader stress remain production blockers.
+
+## Stage 7 current-source bounded software closure
+
+An explicit runtime-harness route now requires the Stage 7 environment marker
+and SMP profile. Harness contracts, affected feature lint and dedicated 1/2/4
+CPU boots pass on current source. This closes the bounded environment ABI only;
+complete signals, dynamic userspace runtime, unrestricted sizing and broader
+fault/teardown qualification remain open Stage 7-10 software work.
+
+## Stage 8 current-source bounded software closure
+
+An explicit fail-closed harness contract now requires all Stage 8 IPC, shared-
+memory, capability-transfer, service-discovery and multicore-stress markers.
+Harness tests, warning-denying Clippy and 1/2/4-CPU boots pass. This closes the
+bounded IPC software gate only; broader integration, stress and hardware
+qualification remain open.
+
 ## Implemented and historical evidence
 
 The authoritative `docs/stage1-19-closure-gate.md` records bounded foundation,
@@ -37,11 +70,14 @@ and mounts `/mnt` through the native VFS adapter. Native `df`/`fscheck` and
 root-aware service persistence are present. Historical 1/2/4-CPU installed
 image evidence is recorded on 2026-11-04 in stage-status.
 
-The dedicated `installed-wovenfs-test` performs a write/read/delete within
-one guest boot. Fresh reboot/remount and interrupted-operation evidence are
-required to satisfy the directive's broader persistence requirement. The
-closure ledger now reflects the implemented routing and keeps qualification
-open. This prevents treating existing routing as missing implementation.
+The dedicated installed-volume gates now cold-boot the same writable image
+three times on 1/2/4 CPUs. The normal gate proves payload, shorter overwrite,
+native consistency checks and cleanup across boots. The isolated interruption
+gate stops after the flushed journal commit but before target writes; later
+boots replay, verify, overwrite and clean up the same transaction. This closes
+that bounded virtual-disk gap. Other cut positions, volatile-cache/torn-sector
+behavior, physical power loss, native media, and broader application data
+migration remain required.
 
 ## Stage 11 loader-preservation increment accepted
 
@@ -52,3 +88,14 @@ including 36 QEMU boots on 1/2/4 CPUs, and the complete fresh Windows chain in
 isolation, all sixteen mmap slots, ASLR displacement and exact teardown are
 directly exercised. Full Stage 1-19 closure remains open for the inventory's
 remaining storage, application, integration, hardware and trust gates.
+
+## Stage 11 pure-BSS TLS increment accepted
+
+At commit `b9829f62`, a real compiler/LLD local-exec TLS image with zero
+file-backed TLS bytes and eight zero-initialized runtime bytes executes through
+the production loader on every online CPU. The dedicated gate passes on 1/2/4
+CPUs with exact teardown. Build, warning-denying host and feature Clippy, Rust
+tests, 212 Python tests and the complete serialized Stage 10.7 Windows chain
+pass. This removes the ledger's pure-BSS TLS software gap only. Broader TLS
+models, toolchain/entropy stress, storage recovery, hardware, trust and
+independent review continue to block collective Stage 1-19 closure.

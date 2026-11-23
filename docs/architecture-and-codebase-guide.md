@@ -1,5 +1,50 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 9 independent WovenGuard acceptance boundary
+
+The `stage9-test` feature exits immediately after the production boot path has
+completed every Stage 9 WovenGuard probe. `scripts/test-stage10-runtime.py`
+requires the complete marker chain and the requested SMP count, and does not
+incorrectly require later Stage 10 markers. This gate adds no policy,
+capability, object, syscall, or ABI; it makes the existing security boundary
+independently testable and fail-closed.
+
+## Stage 1-5 bounded storage durability gate (2026-11-20)
+
+The `stage1-5-test` artifact runs the production storage journal structural
+checks and `storage::self_test()` behind its own feature guard, then exits only
+after the `[S1-5] storage journal: PASSED` marker. Host FAT32/page-cache tests
+cover cross-page EOF, unaligned ranges, invalidation during load, failed-load
+rollback, LRU behavior, and the existing FAT32 regression set. This is bounded
+software evidence; it models no physical controller cache or power removal.
+
+## Installed WovenFS cold-boot and commit-interruption recovery (2026-11-20)
+
+Native WovenFS probing in `mount_ata_root()` is a production mount decision,
+not a Stage 12.5 self-test dependency. The installed-disk harness provisions a
+regular-file GPT image and cold-boots that same writable image three times per
+CPU profile. Boot 1 writes a payload, boot 2 verifies and overwrites it, and
+boot 3 verifies the shorter tombstone, runs native `df`/`fscheck`, and removes
+the file. Distinct serial markers prevent one boot from satisfying another.
+
+The isolated interruption feature arms a one-shot exit after the journal commit
+sector is flushed and before any target block is written. The next two cold
+boots must replay and verify that transaction, overwrite it, and clean it up.
+The hook is absent from production and ordinary qualification builds. These
+gates access disposable regular files only; they do not claim physical cache,
+torn-sector, power-loss, or native-media qualification.
+
+## Pure-BSS compiler TLS execution (2026-11-20)
+
+The Stage 11 compiler fixture inventory includes a real Rust/LLD local-exec
+TLS executable with a PT_TLS segment whose file size is zero and memory size
+is eight bytes. The production loader creates the immutable zero-filled
+template, initializes per-thread storage and the Variant-II FS:0 self pointer,
+and preserves the existing fork, cancellation, owner-exit, rollback and exact
+frame-reclamation contracts. The fixture verifies zero initialization before
+writing and returning 42. It adds no ABI or capacity and runs through the same
+loader and scheduler paths as the initialized compiler TLS fixtures.
+
 ## Production mmap floor for large signed executables (2026-11-16)
 
 Production geometry now places the anonymous mmap floor after both the main

@@ -12,6 +12,55 @@ spec.loader.exec_module(harness)
 
 
 class RuntimeAcceptanceTests(unittest.TestCase):
+    def test_stage7_environment_marker_is_explicit(self):
+        required = harness.required_markers('7', 4)
+        self.assertIn(
+            '[S7] process environment: PASSED bounded defaults/inheritance/capacity',
+            required,
+        )
+        self.assertIn('[SMP] online=4 expected=4', required)
+
+    def test_stage8_ipc_contract_requires_every_layer(self):
+        required = harness.required_markers('8', 4)
+        for marker in (
+            '[S8.1] exhausted-generation installation/rollback: PASSED',
+            '[S8.1] kernel endpoint objects + process-local handles: PASSED',
+            '[S8.2] handle-addressed bounded message passing: PASSED',
+            '[S8.3] race-free blocking IPC events/waits: PASSED',
+            '[S8.4] shared-memory objects + cross-address-space mappings: PASSED',
+            '[S8.5] capability handle transfer through IPC: PASSED',
+            '[S8.6] named service registry + capability discovery: PASSED',
+            '[S8.7] multicore IPC/service/capability stress: PASSED',
+        ):
+            self.assertIn(marker, required)
+
+    def test_stage9_wovenguard_contract_requires_every_layer(self):
+        required = harness.required_markers('9', 4)
+        self.assertNotIn(
+            '[S10.3] userspace async completion ABI + cancellation/teardown: PASSED',
+            required,
+        )
+        for marker in (
+            '[S9.1] WovenGuard domains + least-privilege policy: PASSED',
+            '[S9.2A] WovenGuard capability lineage foundation: PASSED',
+            '[S9.2B] WovenGuard recursive capability revocation: PASSED',
+            '[S9.2C] WovenGuard task capability lineage enforcement: PASSED',
+            '[S9.2D] WovenGuard IPC/object capability lineage: PASSED',
+            '[S9.2E] WovenGuard SMP revocation + lineage closure: PASSED',
+            '[S9.3] WovenGuard security audit ledger: PASSED',
+            '[S9.4A] WovenGuard sandbox profile + capability ceiling: PASSED',
+            '[S9.4B] WovenGuard IPC/service exposure policy: PASSED',
+            '[S9.4C] WovenGuard filesystem/resource sandbox: PASSED',
+            '[S9.4D] WovenGuard sandbox lifecycle + SMP closure: PASSED',
+            '[S9.5] WovenGuard resource/device capability gates: PASSED',
+        ):
+            self.assertIn(marker, required)
+        self.assertFalse(harness.validation_errors(33, '\n'.join(required), required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
     def test_aslr_requires_guard_and_original_thread_gate(self):
         required = harness.required_markers('11.2-aslr', 1)
         self.assertIn('[S11.ASLR] arena and stack guard: PASSED', required)

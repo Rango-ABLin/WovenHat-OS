@@ -1,3 +1,19 @@
+## OpenCode - Stage 11 focused matrix complete (2026-11-20)
+
+The three host-resource failures were rerun serially after the competing QEMU
+process exited. `11.2-status` passed on 1 and 4 CPUs, and `11.2-tls` passed on
+2 CPUs, all with QEMU exit 33. Combined with the earlier 27 passes, the focused
+Stage 11 matrix is 30/30 on kernel sources `b9829f62`: stages 11.1-11.6,
+11.2-status, 11.2-tls (including pure-BSS compiler TLS), 11.2-aslr and
+11.5-compiler, each on 1/2/4 CPUs. Warning-denying feature Clippy, host
+all-targets Clippy, 212 Python tests and 256 workspace tests also passed.
+This is focused software evidence, not Stage 11, Stage 1-19, or release
+closure. Retained host-failure logs remain under
+`audit-artifacts/stage11-closure-qemu-11.2-*`; successful retries are
+`stage11.2-status-1cpu-1795188934182564700`,
+`stage11.2-status-4cpu-1795188990440889800` and
+`stage11.2-tls-2cpu-1795189049579095800`.
+
 ## OpenCode - F1/overview flake resolved (2026-11-20)
 
 Root cause: F1 delivery was never lost (IRQ scancode 0x3b, publish to the
@@ -59,16 +75,96 @@ Focused passes are not full Stage 11, Stage 1-19, or release closure.
 
 ## Codex - Stage 11 pure-BSS compiler TLS gate active (2026-11-20)
 
-Current bounded scope: `tools/loader-fixtures/`,
+## Codex - local provenance passed; external release inputs blocked (2026-11-20)
+
+The isolated locked/offline git-archive build passes 256 libwoven tests with one
+pre-declared ignored fixture. Eight policy contracts pass. The schema-valid
+hardware record classifies as incomplete Tier 2 with zero native-passed and all
+17 categories blocked. Production provenance verification correctly refuses
+absent custody variables. No production signature, independent attestation or
+native result was fabricated; external review, signing custody and hardware
+certification remain blocked. No physical device was accessed.
+
+## Codex - disposable install/update/recovery accepted (2026-11-20)
+
+Twenty-six installer contracts and the deterministic Stage 28 disposable
+pipeline pass, including GPT/FAT32/EFI assembly, settings readback and injected
+rollback. Stage 27.1 A/B rollback, Stage 27.2 durable update records, and the
+signed WovenRecovery path pass on 1/2/4 CPUs. Only repository-created regular
+files were written. This accepts item 6 for bounded virtual-disk scope only;
+physical install, firmware state, power loss and production signing remain
+external. No Cargo/QEMU chain is active.
+
+## Codex - Stage 8 current-source bounded software gate closed (2026-11-20)
+
+Added an explicit normal-kernel harness route requiring the complete Stage 8
+IPC/object/capability marker chain. Thirteen harness contracts, warning-denying
+Clippy and dedicated 1/2/4-CPU boots pass with exit 33. Exhausted-generation
+rollback, owner-local handles, blocking IPC, shared memory, capability
+transfer, service discovery and SMP stress are directly required. Broader
+integration and native qualification remain open. No Cargo/QEMU chain is
+active.
+
+## Codex - Stage 7 current-source bounded software gate closed (2026-11-20)
+
+Added the missing explicit Stage 7 route to the shared runtime harness and a
+contract that requires its marker plus the requested SMP profile. Twelve
+harness tests, warning-denying `stage7-test` Clippy, and dedicated 1/2/4-CPU
+boots pass with exit 33. This closes only the bounded process-environment ABI;
+broader libc/runtime, complete signals, unrestricted sizing and native
+qualification remain open. No Cargo/QEMU chain is active.
+
+## Codex - Stage 6 current-source bounded software gate closed (2026-11-20)
+
+At baseline `b3db4c90`, warning-denying `stage6-hotplug-test` Clippy and the
+serialized twice-cycled 2→1→2 and 4→3→4 CPU lifecycle gates pass with exit 33.
+Cancellation, evacuation, rejection/timeout recovery and the middle-CPU hole
+worker are directly exercised. This closes only the existing bounded
+software/QEMU scope. No physical hotplug was accessed or claimed; high APIC
+IDs, native NUMA and broader hardware/stress qualification remain external. No
+Cargo/QEMU chain is active.
+
+## Codex - Stage 1-5 current-source software gate verified (2026-11-20)
+
+At baseline `caf19a9d`, affected warning-denying kernel Clippy, six focused
+FAT32/page-cache host tests, and the dedicated storage-journal gate pass on
+1/2/4 CPUs with exit 33. The inherited full Windows chain already passes at
+the same kernel source. This verifies only the bounded Stage 1-5 software gate;
+native storage/DMA, physical power loss, external review, and collective Stage
+20 unlock remain blocked. No physical device was accessed and no Cargo/QEMU
+chain is active.
+
+## Codex - installed WovenFS reboot/replay accepted (2026-11-20)
+
+Reconciled the previously accepted three-cold-boot and journal-commit
+interruption gates onto current `master` and repaired the discovered regression
+that incorrectly tied native WovenFS probing to `stage12-5-test`. Normal and
+interruption modes each pass three boots on 1/2/4 CPUs. Nine harness contracts,
+20 WovenFS crash tests, warning-denying host/feature Clippy and the final full
+Windows chain pass; evidence is recorded in the Stage 12 status entry. No
+physical device was accessed. Physical power loss, torn sectors, volatile
+caches, other cut points and broader application migrations remain open. No
+Cargo/QEMU chain is active.
+
+## Codex - Stage 11 pure-BSS compiler TLS accepted (2026-11-20)
+
+Bounded scope: `tools/loader-fixtures/`,
 `scripts/build-loader-fixtures.py`, `scripts/test-stage10-runtime.py`,
 `tests/test_loader_fixture_builder.py`, `kernel/src/userspace/tls_acceptance.rs`,
-and directly related architecture/status/closure records. The goal is to
-execute an unmodified compiler/LLD image whose PT_TLS has zero file bytes and
-nonzero memory bytes, on every online CPU, through the existing protected
-template/TCB, rollback and exact-teardown gate. No loader ABI, syscall,
-capability or capacity expansion is planned. Do not concurrently edit these
-paths. Broader TLS models, entropy stress and physical qualification remain
-out of scope; no Stage 11 or Stage 1-19 closure claim is implied.
+and directly related architecture/status/closure records. Commit `b9829f62`
+adds an unmodified compiler/LLD image whose PT_TLS has zero file bytes and
+eight memory bytes. The existing protected template/TCB, rollback and exact-
+teardown gate executes it on every online CPU and passes on 1/2/4 CPUs in
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-*`.
+
+Build, warning-denying host and affected-feature Clippy, Rust tests and all 212
+Python tests pass. The serialized full Stage 10.7 Windows chain passes all 60
+memory boots, networking and isolated 10.4-10.7 gates; its transcript is
+`audit-artifacts/stage11-pure-bss-stage10-7-serial.log`. Two earlier attempts
+failed before testing because Windows exhausted disk/paging resources; their
+logs and compiler ICE are preserved. No loader ABI, syscall, capability or
+capacity changed. Broader TLS models, entropy/toolchain stress and physical
+qualification remain open; this is not full Stage 11 or Stage 1-19 closure.
 
 ## Codex - paused Stage 11 cherry-pick reconciled (2026-11-20)
 
@@ -9845,3 +9941,19 @@ runs and inherited stages through 10.7 at 1/2/4 CPUs. Together with the
 54-check combined matrix and 36 focused runtime boots, this accepts the bounded
 loader/TLS/fork-COW repair. Documentation is being finalized for a separate
 integration-branch commit. No Cargo or QEMU chain is active.
+
+## Codex - Stage 9-19, Stage 11 breadth, and WovenFS recovery closure active (2026-11-20)
+
+User requested complete closure of the first three remaining software tracks.
+Work is proceeding in roadmap dependency order. The first identified gap is
+Stage 9: production WovenGuard probes run in the shared boot path, but no
+dedicated feature/harness can independently require the complete marker chain.
+Codex owns the focused Stage 9 gate, its harness contracts, and directly
+related status/architecture/remaining-work records. No Cargo/QEMU acceptance
+chain is active at handoff time; future chains will remain serialized. Do not
+edit these focused files concurrently without coordination.
+Stage 9 is now closed for bounded software scope: fourteen harness tests,
+warning-denying `stage9-test` Clippy, and dedicated 1/2/4-CPU boots pass with
+exit 33. Evidence is under `audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
+No Cargo/QEMU chain is active. Codex is finalizing the required separate stage
+commit before proceeding in roadmap order.
