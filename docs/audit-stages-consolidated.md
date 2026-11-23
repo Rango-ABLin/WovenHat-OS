@@ -4351,6 +4351,30 @@ death. Dependency-local TLS and full Stage 11 breadth also remain open.
 
 ---
 
+## Stage 11 runtime transaction owner-death audit - 2026-11-23
+
+The exact-owner scheduler record was not enforced at every syscall: the common
+predicate compared only the process ID. It also had no recovery when the task
+died, leaving the global gate permanently owned. The repair checks the exact
+task, releases a dead owner's global gate, and quarantines the abandoned
+process while a sibling can execute. This prevents cross-task entry and false
+lifecycle completion.
+
+State is fixed-capacity (`MAX_PROCESSES`), scheduler-lock-owned, and reclaimed
+after process task retirement. No ABI or capability was added, and recovery
+does not change a callback cursor. Exact-final-source Stage 11.6 and Stage 11.2
+pass on 1/2/4 CPUs under `audit-artifacts/stage11.6-{1,2,4}cpu-17954334*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795433*`. Build, warning-denying affected
+and all-target Clippy, formatter checks, 19 fixture contracts, 33 ELF tests,
+and 256 libwoven tests with one existing ignored fixture pass.
+
+The shared `kernel/src/block.rs` source is visited through different workspace
+edition contexts. Fully qualifying `Layout` and `alloc_zeroed` removes their
+edition-dependent import-order conflict, so `cargo fmt --all --check` is stable
+without a formatting suppression.
+
+---
+
 ## Source: docs/audit-stage11-lifecycle-2026-10-20.md
 
 # Stage 11 lifecycle callback audit â€” 2026-10-20

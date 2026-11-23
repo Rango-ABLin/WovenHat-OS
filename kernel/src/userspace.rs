@@ -6399,7 +6399,8 @@ pub fn compiler_loader_self_test() -> bool {
 #[cfg(feature = "stage11-6-test")]
 #[inline(never)]
 pub fn module_staging_self_test() -> bool {
-    linker::module_staging_self_test()
+    crate::task::dynamic_module_transaction_recovery_self_test()
+        && linker::module_staging_self_test()
 }
 
 /// Load an ELF and place a custom argv vector on the user stack.

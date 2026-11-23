@@ -9945,3 +9945,20 @@ tests (one existing ignored fixture), and exact-source Stage 11.2 plus 11.6
 boots on 1/2/4 CPUs. Evidence is under `audit-artifacts/stage11.2-*cpu-1795432*`
 and `audit-artifacts/stage11.6-*cpu-1795432*`. No Cargo/QEMU chain is active.
 Documentation and the separate accepted-stage commit are being finalized.
+
+## Codex - runtime transaction owner-death repair active (2026-11-23)
+
+Codex owns the focused Stage 11 scheduler transaction repair plus the unrelated
+`kernel/src/block.rs` rustfmt correction requested by the user. The repair will
+require exact task identity for runtime-module operations and release the global
+gate only after its recorded task is dead or absent; lifecycle callback cursors
+remain fail-closed. Focused tests and serialized Stage 11.2/11.6 QEMU follow.
+No Cargo/QEMU chain is active.
+
+The final repair enforces exact-task ownership, releases a dead owner's global
+gate, quarantines its still-live process against skipped lifecycle callbacks,
+and reclaims that quarantine after all process tasks die. The unrelated
+`block.rs` cross-edition rustfmt conflict is fixed without an allow. Exact-source
+Stage 11.6 and 11.2 pass on 1/2/4 CPUs under the `17954334*` and `1795433*`
+evidence sets respectively. Host build/lint/test/format gates pass. No
+Cargo/QEMU chain is active; documentation and commit are being finalized.

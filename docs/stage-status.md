@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 11 runtime transaction owner-death recovery - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Runtime-module authorization now requires both the recorded process and exact
+scheduler task. If that task dies or disappears, the scheduler releases the
+global gate so unrelated processes retain loader service. The abandoned
+process enters a fixed-capacity quarantine: surviving siblings cannot begin a
+new module transaction and advance past a callback the dead owner may never
+have executed. Quarantine ends only after no executable task remains.
+
+The Stage 11.6 probe requires live-owner depth retention, sibling denial,
+dead-owner release, surviving-process quarantine, and final reclamation. Stage
+11.6 and the real Stage 11.2 TLS/lifecycle gate pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954334*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795433*`. Build, affected-feature and
+all-target warning-denying Clippy, 19 fixture contracts, 33 ELF tests, 256
+libwoven tests (one existing ignored fixture), and `cargo fmt --all --check`
+pass.
+
+The unrelated shared-source rustfmt failure in `kernel/src/block.rs` was fixed
+by fully qualifying allocator APIs, avoiding contradictory import ordering when
+different workspace edition contexts visit the file. No ABI, capability,
+callback ordering, or timeout changed.
+
 ## Stage 11 live runtime lifecycle ownership - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Live runtime images now publish their validated `DT_INIT`, `DT_INIT_ARRAY`,

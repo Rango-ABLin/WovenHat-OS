@@ -3184,6 +3184,25 @@ state visibility, stale lookup and frame recovery on 1/2/4 CPUs. This slice does
 not recover an owner killed between callback retrieval and execution and does
 not add dependency-local TLS.
 
+### Runtime transaction owner-death recovery
+
+The scheduler gate is authorized by `(process_id, task_id)`, not process
+identity alone. This prevents an already-running sibling on another CPU from
+entering another task's transaction. During scheduler hand-off, a dead or
+absent owner releases the global gate so other processes can continue. The
+abandoned process ID enters a `MAX_PROCESSES`-bounded quarantine while any of
+its tasks remains live; transaction begin rejects that process until all its
+tasks are dead. This preserves at-most-once lifecycle semantics when death
+occurs after a callback address is returned but before userspace invokes it.
+
+All transitions occur under the rank-10 scheduler IRQ lock. They allocate no
+memory, retain no userspace pointer, sleep nowhere, and acquire neither the
+process-table nor paging lock. Capacity follows the process bound, and entries
+are reclaimed only when no task can execute with that process ID. Stage 11.6
+checks exact-owner admission, nested depth, sibling exclusion, owner-death
+release, quarantine, and retirement; Stage 11.2 preserves real runtime TLS and
+lifecycle execution on 1/2/4 CPUs.
+
 ## Stage 11.5 bounded symbol relocation (2026-10-14; scope groundwork 2026-10-15)
 
 `elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
