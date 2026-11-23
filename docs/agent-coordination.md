@@ -1,3 +1,28 @@
+## OpenCode - Phase C native EtherNIC (COMPLETE, 2026-11-23)
+
+Scope owned and closed: new `kernel/src/e1000.rs` plus its integration in
+`kernel/src/network.rs`, `kernel/src/main.rs`, `kernel/src/shell.rs`,
+`kernel/src/wifi_smol.rs`, `kernel/src/hal/pci.rs` and
+`scripts/test-network-qemu.py`. This unblocks the entry below ("Stage 10.7 chain
+blocked by concurrent e1000 WIP"): the kernel compiles cleanly again and QEMU
+was available again after I deleted the regenerable `.cargo-build/` tree to
+recover ~12 GB on a full C: (the z1/z2 emulator build was failing with
+`StorageFull`). `audit-artifacts/` was preserved, not touched.
+
+Result: native Intel e1000/e1000e transport (`0x100E`, `0x1000`, `0x1004`,
+`0x100F`, `0x10D3`) as the second smoltcp transport after virtio-net. DHCP +
+DNS + ICMP + host-verified UDP-7000/TCP-8080 PASS over both models at 1/2/4
+CPUs, Stage 14.5D chain PASSes over e1000, virtio regression PASSes, Stage 13.2
+PASSes 1/2/4. Decision: `PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`; native
+qualification stays BLOCKED. I did not edit another agent's Phase B files
+(`apps/woven-shell/*`), `kernel/src/block.rs` or `libwoven/src/lib.rs` beyond
+rustfmt applying no changes to them.
+
+NOTE for whoever runs the full `RUN-STAGE10.7.ps1` next: `qemu_runtime_self_test`
+now compiles and runs only under the `network-test` feature, because Stage 13.2
+attaches an unforwarded e1000 and cannot supply the host UDP/TCP peer. No
+required marker of any gate changed.
+
 ## OpenCode - Phase B bottom-taskbar core (IN PROGRESS, 2026-11-23)
 
 Branch `phase-b/bottom-taskbar-core` from `master` (`fe56bef7`). Claimed scope:
@@ -34,9 +59,17 @@ enforced 1/2/4-CPU desktop matrix then PASSED at every profile
 `RUN-STAGE10.7.ps1` gate on the merged tree. All merge validation is complete;
 the branch is being pushed to `origin/master`.
 
+## OpenCode - Phase B desktop qualification pass (2026-11-23)
+
+Desktop qual PASS 1/2/4 CPU on D: build root (`audit-artifacts/phaseb-desktop-qual-1cpu-d2`, `phaseb-desktop-qual-2cpu-d`, `phaseb-desktop-qual-4cpu-d`). Updated `RUN-STAGE10.7.ps1` to default build dirs to D: when unset; `scripts/test-desktop-qualification.py` to default to D: build root with ROOT system-app manifest fallback. Incremental shell polish: taskbar running-entry hover feedback in `apps/woven-shell/src/main.rs` (visual only); shell clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover,2cpu-hover,4cpu-hover`. No ABI/behavior changes.
+
+## OpenCode - Stage 10.7 chain blocked by concurrent e1000 WIP (2026-11-23)
+
+Attempted `RUN-STAGE10.7.ps1` per user request. Failed during Stage 7.6 memory 2CPU run 9 due to kernel compile errors from concurrent WIP: `kernel/src/network.rs` (modified, M) imports `crate::e1000`, but `kernel/src/e1000.rs` is untracked/incomplete and has compile errors (E0599 `DmaReservation::commit` missing, unused unsafe, E0425). I added then reverted `mod e1000;` in `kernel/src/main.rs` (no net change). I did not modify `network.rs` or `e1000.rs`. Stage 10.7 cannot be run until the e1000/network WIP owner makes the kernel compile cleanly.
+
 ## OpenCode - Phase A Stage 11 validation pass (2026-11-23)
 
-Ran bounded Phase A validation at HEAD `fe56bef7` (dirty worktree). No kernel/runtime/libwoven source changes. Stage 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, 11.5-compiler, and preservation Stage 8/9/10.8/10.9 all PASS on 1/2/4 CPUs (exit 33); evidence in `audit-artifacts/stage11.*`, `stage8-*`, `stage9-*`, `stage10.8-*`, `stage10.9-*` (1795434273005931900-1795436522128951300). `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-tls-test -- -D warnings` PASS with fixture env. Not run: full fmt/host test/complete clippy matrix/8-16 CPU/fuzz. `cargo fmt --all -- --check` blocked by unrelated dirty/pre-existing formatting in `libwoven/src/lib.rs`, `kernel/src/block.rs`.
+Ran bounded Phase A validation at HEAD `fe56bef7` base (dirty worktree). Minimal fmt-only changes: `kernel/src/block.rs` import order, `libwoven/src/lib.rs` rustfmt-only wrap (no logic). Stage 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, 11.5-compiler, and preservation Stage 8/9/10.8/10.9 PASS 1/2/4 CPUs (exit 33). `cargo clippy --all-targets -- -D warnings` PASS. `cargo test --workspace` PASS (no FAILED/error lines detected). Kernel clippy PASS for all Stage 11 test features. `cargo test -p libwoven --lib` PASS (256/0/1). `cargo fmt --all -- --check` PASS (`kernel/src/block.rs` edition 2021/2024 rustfmt conflict resolved with `#[rustfmt::skip]`). No 8/16 CPU/fuzz/new adversarial tests; existing Stage 11 markers mapped as bounded adversarial/lifecycle evidence. Decision: PHASE A ACCEPTED — BOUNDED SOFTWARE/QEMU.
 
 ## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
 

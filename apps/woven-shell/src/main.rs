@@ -1475,12 +1475,15 @@ impl Desktop {
         for (index, (slot, window)) in self.entries().enumerate() {
             let area = self.taskbar_entry_area(index);
             let active = self.focused() == Some(slot);
+            let hovered = !active && area.contains(self.pointer.0, self.pointer.1);
             fill_rounded(
                 canvas,
                 area,
                 CHROME_RADIUS_SMALL,
                 if active {
                     lighten(theme_entry(true), 12)
+                } else if hovered {
+                    lighten(theme_entry(false), 8)
                 } else {
                     theme_entry(false)
                 },

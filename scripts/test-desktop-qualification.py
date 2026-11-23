@@ -362,10 +362,16 @@ def capture_until_changed(
 
 
 def build_hardware_demo(output: Path) -> Path:
+    build_root = Path(os.environ.get("WOVENHAT_BUILD_ROOT", r"D:\wovenhat-os-build"))
+    cargo_target = Path(os.environ.get("CARGO_TARGET_DIR", str(build_root / "target")))
+    cargo_build_dir = Path(os.environ.get("CARGO_BUILD_BUILD_DIR", str(build_root / ".cargo-build")))
+    cargo_target.mkdir(parents=True, exist_ok=True)
+    cargo_build_dir.mkdir(parents=True, exist_ok=True)
+
     app_dir = ROOT / "apps" / "woven-shell"
     app_env = dict(os.environ)
-    app_env.pop("CARGO_BUILD_BUILD_DIR", None)
-    app_env["CARGO_TARGET_DIR"] = str(app_dir / "target")
+    app_env["CARGO_BUILD_BUILD_DIR"] = str(cargo_build_dir)
+    app_env["CARGO_TARGET_DIR"] = str(cargo_target)
     shell_build = subprocess.run(
         ["cargo", "build", "--release"], cwd=app_dir, env=app_env,
         capture_output=True, text=True,
@@ -373,12 +379,14 @@ def build_hardware_demo(output: Path) -> Path:
     (output / "woven-shell-build.log").write_text(shell_build.stdout + shell_build.stderr, encoding="utf-8")
     if shell_build.returncode:
         raise UnsupportedQualification("woven-shell release build failed; inspect woven-shell-build.log")
-    shell_image = app_dir / "target" / "x86_64-unknown-none" / "release" / "wovenhat-woven-shell"
+    shell_image = cargo_target / "x86_64-unknown-none" / "release" / "wovenhat-woven-shell"
     if not shell_image.is_file():
         raise UnsupportedQualification(f"woven-shell image was not produced: {shell_image}")
 
     package_env = dict(os.environ)
     package_env.setdefault("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX", TEST_PUBLIC_KEY)
+    package_env["CARGO_TARGET_DIR"] = str(cargo_target)
+    package_env["CARGO_BUILD_BUILD_DIR"] = str(cargo_build_dir)
     package = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "package-system-apps.py"), "--version", "0.8.0"],
         cwd=ROOT, env=package_env, capture_output=True, text=True,
@@ -386,10 +394,15 @@ def build_hardware_demo(output: Path) -> Path:
     (output / "system-app-package.log").write_text(package.stdout + package.stderr, encoding="utf-8")
     if package.returncode:
         raise UnsupportedQualification("system-app packaging failed; inspect system-app-package.log")
-    catalog = ROOT / "target" / "system-apps" / "0.8.0"
+    catalog = cargo_target / "system-apps" / "0.8.0"
     manifest_path = catalog / "manifest.json"
     if not manifest_path.is_file():
-        raise UnsupportedQualification(f"system-app manifest was not produced: {manifest_path}")
+        fallback = ROOT / "target" / "system-apps" / "0.8.0"
+        if (fallback / "manifest.json").is_file():
+            catalog = fallback
+            manifest_path = catalog / "manifest.json"
+        else:
+            raise UnsupportedQualification(f"system-app manifest was not produced: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     packages = {item["id"]: catalog / item["package"] for item in manifest.get("apps", [])}
     missing = [app_id for app_id in APP_IDS if not packages.get(app_id, Path()).is_file()]
@@ -404,6 +417,8 @@ def build_hardware_demo(output: Path) -> Path:
         raise UnsupportedQualification("package service build failed; inspect package-service-build.log")
 
     env = dict(os.environ)
+    env["CARGO_TARGET_DIR"] = str(cargo_target)
+    env["CARGO_BUILD_BUILD_DIR"] = str(cargo_build_dir)
     env["WOVENHAT_SHELL_IMAGE"] = str(shell_image)
     env["WOVENHAT_PACKAGE_IMAGE"] = service.stdout.strip().splitlines()[-1]
     search_service = subprocess.run(
@@ -432,11 +447,9 @@ def build_hardware_demo(output: Path) -> Path:
     }
     for app_id, variable in variables.items():
         env[variable] = str(packages[app_id])
-    env["CARGO_TARGET_DIR"] = str(ROOT / "target")
-    env["CARGO_BUILD_BUILD_DIR"] = str(ROOT / ".cargo-build")
     build = subprocess.run(
         ["cargo", "run", "--quiet", "--release", "--features", "hardware-demo",
-         "--target-dir", str(ROOT / "target"), "--", "--print-image"],
+         "--target-dir", str(cargo_target), "--", "--print-image"],
         cwd=ROOT, env=env, capture_output=True, text=True,
     )
     (output / "kernel-build.log").write_text(build.stdout + build.stderr, encoding="utf-8")

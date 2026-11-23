@@ -1,5 +1,37 @@
 # Stage status
 
+## Phase C native EtherNIC reconciliation - 2026-11-23 - ACCEPTED (BOUNDED SOFTWARE/QEMU ONLY)
+
+**Decision**: `PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`. Native (Tier 1)
+qualification remains **BLOCKED** and is not relabelled; no physical device,
+disk, firmware setting or boot entry was touched.
+
+Delivered: `kernel/src/e1000.rs`, a native polling-first legacy-descriptor
+driver for Intel `8086` functions `0x100E` (82540EM, QEMU `-device e1000`),
+`0x1000`, `0x1004`, `0x100F` and `0x10D3` (82574L, `-device e1000e`),
+integrated as the second smoltcp transport (`NicKind::E1000`) behind
+virtio-net, plus a `--nic e1000|e1000e` option in
+`scripts/test-network-qemu.py`.
+
+Validated: DHCP/DNS/ICMP plus host-verified UDP-7000 and TCP-8080 round trips
+PASS over both device models at 1/2/4 CPUs; the Stage 14.1-14.5D chain PASSes
+over e1000 at 1 CPU; the virtio-net regression still PASSes; Stage 13.2 PASSes
+1/2/4 CPUs with the e1000 attached; warning-denying Clippy for default,
+`qemu-test`, `network-test`, `stage13-2-test`, `stage14-1-test` and
+`stage14-5d-test`, `--all-targets` Clippy, `cargo test --workspace` and
+`cargo fmt --all -- --check` all pass.
+
+Two real defects were found and fixed while bringing it up: the MMIO window is
+pre-mapped so the dataplane never takes the rank-10 paging lock under the
+rank-30 transport lock, and `RDT`/`TDT` are written as modulo ring indices
+because absolute counters made the device replay stale descriptors after the
+first wrap.
+
+Details, gap matrix, limits and remaining work:
+`docs/PHASE-C-NATIVE-HARDWARE-RECONCILIATION.md`. Evidence:
+`audit-artifacts/phase-c-e1000-network-20261123/` and
+`audit-artifacts/stage13.2-{1,2,4}cpu-*/`.
+
 ## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (HOST/CLIPPY ONLY, NO QEMU YET)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
@@ -126,7 +158,13 @@ other owner's in-progress quadratic-path work
 passed / 1 failed / 1 ignored); the full gate's own test phase passed. No pixel
 baseline, timing limit or assertion was weakened by this increment.
 
-## Phase A Stage 11 runtime/kernel stabilization validation - 2026-11-23 - PARTIALLY ACCEPTED (BOUNDED QEMU)
+## Phase B desktop qualification - 2026-11-23 - PASS (1/2/4 CPU, D: build)
+
+Desktop qualification rerun on D: build root (`D:\wovenhat-os-build`) due to C: disk exhaustion. `RUN-STAGE10.7.ps1` defaults build dirs to D: when unset; `scripts/test-desktop-qualification.py` defaults to D: build root with ROOT system-app manifest fallback. Results: 1 CPU baseline PASS `audit-artifacts/phaseb-desktop-qual-1cpu-d2`, 2 CPU `--no-reference` PASS `audit-artifacts/phaseb-desktop-qual-2cpu-d`, 4 CPU `--no-reference` PASS `audit-artifacts/phaseb-desktop-qual-4cpu-d`. Phase A bounded gates remain green (Stage 11 matrix, Stage 8/9/10.8/10.9, Stage 10.7 chain, clippy, workspace tests, fmt).
+
+Incremental polish (2026-11-23): taskbar running-entry hover feedback added in `apps/woven-shell/src/main.rs` (visual only; no ABI/behavior change). `cargo clippy --manifest-path apps/woven-shell/Cargo.toml --target x86_64-unknown-none -- -D warnings` PASS. Desktop qual PASS: 1 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover`, 2 CPU `audit-artifacts/phaseb-desktop-qual-2cpu-hover`, 4 CPU `audit-artifacts/phaseb-desktop-qual-4cpu-hover`.
+
+## Phase A Stage 11 runtime/kernel stabilization validation - 2026-11-23 - ACCEPTED — BOUNDED SOFTWARE/QEMU
 
 Executed existing Stage 11 and preservation QEMU gates at current exact source (HEAD `fe56bef7`, dirty worktree with unrelated concurrent edits; no kernel/runtime code changes made in this validation pass). All executed gates passed with exit 33 and required markers:
 
@@ -142,7 +180,9 @@ Executed existing Stage 11 and preservation QEMU gates at current exact source (
 - Stage 11.5-compiler 1/2/4 CPU: `audit-artifacts/stage11.5-compiler-{1,2,4}cpu-1795434900678298600,1795434973023303800,1795435016690161700`
 - Preservation Stage 8/9/10.8/10.9 1/2/4 CPU: `audit-artifacts/stage8-*`, `stage9-*`, `stage10.8-*`, `stage10.9-*` (1795435917040629900-1795436522128951300 range)
 
-Additional checks: `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage11-tls-test -- -D warnings` PASS with fixture env vars from stage11.2-tls-1cpu fixture. Not completed: `cargo fmt --all -- --check` fails on unrelated dirty/pre-existing files (`libwoven/src/lib.rs`, `kernel/src/block.rs` not modified here); full workspace host tests, full Clippy matrix, 8/16 CPU, fuzz/property, and independent hardware qualification not run. No production-readiness claim.
+Additional checks: `cargo fmt -p wovenhat-kernel -- --check` PASS. `cargo fmt -p libwoven -- libwoven/src/lib.rs` applied fmt-only (no logic change). `cargo fmt --all -- --check` PASS (resolved `kernel/src/block.rs` edition 2021/2024 rustfmt import-order conflict with `#[rustfmt::skip]` on that use group). `cargo clippy --all-targets -- -D warnings` PASS. `cargo test --workspace` PASS (no FAILED/error lines detected). Kernel clippy PASS for all Stage 11 test features (`stage11-1..6-test`, `stage11-aslr-test`, `stage11-exit-status-test`, `stage11-compiler-test`, `stage11-tls-test`). `cargo test -p libwoven --lib` PASS (256 passed, 0 failed, 1 ignored).
+
+Phase A adversarial/lifecycle evidence mapping (existing gates, no new tests added): ELF validation/relocation/DT_NEEDED bounds/cycles/duplicates/missing-symbol/rollback/W^X/RELRO/lazy PLT/weak/versioned/ctors-dtors covered by Stage 11.5/11.5-compiler/11.6 markers in `scripts/test-stage10-runtime.py` and `kernel/src/userspace/linker/acceptance.rs`. TLS template/init/align/per-thread isolation/fresh-child/fork/owner-exit/rollback/runtime-generation/pure-BSS/relocated-pointer/biased PIE covered by Stage 11.2-tls markers. Process/thread/join/exit-status/ownership/teardown covered by 11.1/11.2/11.2-status. ASLR/stack guard covered by 11.2-aslr. Owner-death/cleanup/recovery covered by existing bounded owner-exit/stale-join/rollback/teardown markers; no new dedicated fault-injection harness added. 8/16 CPU, fuzz/property, and independent hardware qualification not run. No production-readiness claim.
 
 ## Windows 11 desktop polish - 2026-11-23 - IN PROGRESS / DESKTOP QUAL PASS (1/2/4 CPU)
 

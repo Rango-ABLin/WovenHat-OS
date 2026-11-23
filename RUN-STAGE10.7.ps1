@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
-# Keep Cargo/bootloader intermediates inside the project. Windows cleanup of
+# Keep Cargo/bootloader intermediates on D: for disk space. Windows cleanup of
 # %TEMP% previously removed cargo-install* directories during the bootloader
 # build and falsely failed the entire preservation chain.
-$env:CARGO_BUILD_BUILD_DIR = Join-Path $PSScriptRoot ".cargo-build"
-$env:CARGO_TARGET_DIR = Join-Path $PSScriptRoot "target"
+if (-not $env:CARGO_BUILD_BUILD_DIR) { $env:CARGO_BUILD_BUILD_DIR = "D:\wovenhat-os-build\.cargo-build" }
+if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = "D:\wovenhat-os-build\target" }
 New-Item -ItemType Directory -Force -Path $env:CARGO_BUILD_BUILD_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 

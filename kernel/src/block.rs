@@ -1,7 +1,8 @@
 extern crate alloc;
 
+#[rustfmt::skip]
 use alloc::{
-    alloc::{Layout, alloc_zeroed},
+    alloc::{alloc_zeroed, Layout},
     boxed::Box,
 };
 

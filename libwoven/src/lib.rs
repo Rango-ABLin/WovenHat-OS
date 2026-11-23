@@ -14426,8 +14426,8 @@ impl<'a> Canvas<'a> {
                 // silently vanish. Draw a scaled bitmap fallback so missing
                 // glyphs stay legible and size-consistent with the TTF run.
                 let mut encoded = [0_u8; 4];
-                let bitmap_scale = ((usize::from(scale) + font::HEIGHT / 2) / font::HEIGHT)
-                    .clamp(1, 16);
+                let bitmap_scale =
+                    ((usize::from(scale) + font::HEIGHT / 2) / font::HEIGHT).clamp(1, 16);
                 let bitmap_y = cursor_y
                     .saturating_add(face.ascent_px(scale))
                     .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
@@ -14506,8 +14506,8 @@ impl<'a> Canvas<'a> {
                     // size so a rasterizer/cache miss does not mix tiny 5x7 text
                     // with real TTF glyphs. Keep the real advance when available.
                     let mut encoded = [0_u8; 4];
-                    let bitmap_scale = ((usize::from(size) + font::HEIGHT / 2) / font::HEIGHT)
-                        .clamp(1, 16);
+                    let bitmap_scale =
+                        ((usize::from(size) + font::HEIGHT / 2) / font::HEIGHT).clamp(1, 16);
                     let bitmap_y = pen_y
                         .saturating_add(face.ascent_px(size))
                         .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
@@ -14525,9 +14525,8 @@ impl<'a> Canvas<'a> {
                     if let Some(advance) = face.advance_px(character, size) {
                         pen_x = pen_x.saturating_add(advance);
                     } else {
-                        pen_x = pen_x.saturating_add(
-                            font::ADVANCE.saturating_mul(bitmap_scale as i32),
-                        );
+                        pen_x =
+                            pen_x.saturating_add(font::ADVANCE.saturating_mul(bitmap_scale as i32));
                     }
                 }
             }
