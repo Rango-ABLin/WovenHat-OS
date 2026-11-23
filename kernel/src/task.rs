@@ -2593,15 +2593,6 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
     if index >= userspace::MAX_DYNAMIC_MODULES {
         return None;
     }
-    let tls = {
-        let image = crate::elf::parse_shared(&bytes).ok()?;
-        if let Some(tls) = image.tls() {
-            let end = tls.file_offset.checked_add(tls.file_size)?;
-            Some((bytes.get(tls.file_offset..end)?.to_vec(), tls.memory_size))
-        } else {
-            None
-        }
-    };
     let owner = current_process_id();
     let mut space = {
         let processes = process_table_lock();
@@ -2611,7 +2602,8 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
             .find(|process| process.id.as_u64() == owner)?
             .address_space?
     };
-    let generation = userspace::load_runtime_module(&mut space, bytes, index)?;
+    let loaded = userspace::load_runtime_module(&mut space, bytes, index)?;
+    let generation = loaded.generation;
     {
         let mut processes = process_table_lock();
         let published = processes
@@ -2625,11 +2617,16 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
         }
         *published = space;
     }
-    if let Some((initializer, memory_size)) = tls {
-        if !map_runtime_tls_existing(index, generation, &initializer, memory_size) {
-            let _ = release_dynamic_module(module, u64::from(generation));
-            return None;
-        }
+    if loaded.tls_memory_size != 0
+        && !map_runtime_tls_existing(
+            index,
+            generation,
+            &loaded.tls_initializer,
+            loaded.tls_memory_size,
+        )
+    {
+        let _ = release_dynamic_module(module, u64::from(generation));
+        return None;
     }
     encode_runtime_module_handle(index, generation)
 }

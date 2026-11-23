@@ -10177,3 +10177,26 @@ with no separator or alternate block. Both substantive merged status sections
 were already present. Codex removed only that syntax line, preserving every
 status claim. Documentation-only validation and a separate commit follow; no
 Cargo/QEMU chain is active.
+
+## Codex - runtime graph dependency TLS active (2026-11-23)
+
+After reviewing the remaining closure ledger in dependency order, Stage 1-10
+software durability gates are present and their earliest blockers require
+physical hardware/power-loss qualification. Codex therefore owns the next
+implementable Stage 11 gap: a bounded combined TLS layout for live runtime
+`DT_NEEDED` graphs, including dependency-local PT_TLS, relocation offsets,
+per-task mapping, rollback and final teardown. Scope is the runtime linker,
+task TLS publication, fixtures, focused harness contracts and directly related
+documentation. Do not concurrently edit these paths. No Cargo/QEMU chain is
+active.
+
+## Codex - runtime graph dependency TLS complete (2026-11-23)
+
+Completed the claimed bounded increment.  Runtime dependency graphs now build
+and publish a combined, aligned, zero-filled, 4 KiB-capped PT_TLS template via
+the existing generation-safe per-thread transaction.  No ABI/capability change.
+Stage 11.6 and Stage 11.2 QEMU gates pass on 1/2/4 CPUs; target/host Clippy,
+target kernel build, focused harness/ELF tests and libwoven host tests pass.
+Remaining scope is explicitly compiler-transparent runtime TLS relocations,
+general-dynamic/TLSDESC, per-image offsets, and a live compiler dependency
+fixture.  Ownership released after commit; no Cargo or QEMU chain remains active.

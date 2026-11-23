@@ -16510,3 +16510,25 @@ The read-only host inventory
 after the QEMU matrix. It reports 8.21 GiB installed RAM and
 `PhysicalTestPerformed=false`; it changes no firmware, boot configuration,
 disk, or device state and cannot substitute for an authorized native test.
+## Stage 11 runtime dependency PT_TLS template audit (2026-11-23)
+
+The previous runtime graph rejected any dependency containing `PT_TLS`.  The
+linker now plans the entire dependency graph before commit, aligns every TLS
+image, copies only parser-validated initializer bytes, zero-fills BSS tails, and
+rejects combined storage over 4 KiB.  The load result carries the generation and
+the complete immutable template to the task layer.  The task layer maps it into
+all existing threads through the established dynamic-TLS publication
+transaction and releases the module generation on any mapping failure.
+
+Acceptance added a dependency with an eight-byte initializer and eight-byte BSS
+tail.  Stage 11.6 proved the combined template and existing graph resolution on
+1/2/4 CPUs.  Stage 11.2 reruns on 1/2/4 CPUs preserved scheduler-backed thread,
+TLS, and join behavior.  Target/host Clippy, the target-aware kernel build, the
+runtime harness tests, 33 ELF scope tests, and 256 passing `libwoven` tests also
+passed.  The attempted generic `cargo build --workspace` is not a valid build
+gate for the freestanding kernel because it selects the host target; the
+documented `cargo build -p wovenhat-kernel --target x86_64-unknown-none` passed.
+
+Audit boundary: this closes dependency template storage and lifecycle only.
+TLS relocation models, general-dynamic/TLSDESC lookup, per-image module offsets,
+and a live compiler-generated dependency exercise remain open and fail closed.

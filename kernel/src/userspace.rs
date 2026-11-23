@@ -18,8 +18,14 @@ pub fn load_runtime_module(
     space: &mut AddressSpace,
     bytes: alloc::vec::Vec<u8>,
     slot: usize,
-) -> Option<u32> {
+) -> Option<RuntimeModuleLoad> {
     linker::load_runtime_module(space, bytes, slot)
+}
+
+pub struct RuntimeModuleLoad {
+    pub generation: u32,
+    pub tls_initializer: alloc::vec::Vec<u8>,
+    pub tls_memory_size: usize,
 }
 #[cfg(feature = "stage11-tls-test")]
 mod tls_acceptance;
