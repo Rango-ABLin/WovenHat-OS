@@ -1,6 +1,6 @@
 # WovenHat OS Architecture & Codebase Guide
 
-## Live runtime ELF and symbol publication boundary
+## Live runtime ELF graph, TLS, and symbol publication boundary
 
 `RuntimeModuleMap` copies at most 1 MiB from the calling process before parsing,
 uses the production shared-object parser and admitted relocations, and stages
@@ -13,8 +13,18 @@ its bounded exported symbols become visible together.
 The per-process scope holds at most 32 names of at most 64 bytes. Lookup checks
 the owning module generation, and final unload removes both mapping and symbols.
 Runtime placement uses the reserved library arena after startup dependency
-slots. The current ABI rejects runtime TLS and `DT_NEEDED` objects rather than
-silently loading an incomplete graph.
+slots. `DT_NEEDED` names resolve breadth-first from signed, read-only `/lib`
+packages into a bounded complete scope; SONAME, dependency count, relocation,
+W^X, RELRO, arena size, and contiguous ownership are validated before the root
+generation becomes visible. Duplicate exported names retain the first symbol
+in scope order.
+
+A root PT_TLS template is coupled to that same generation. Mapping allocates a
+distinct initialized block for every live task before publication; any failure
+rolls back the TLS blocks, image graph, and symbols. Final release unmaps both
+the graph and all task-local blocks before descriptor retirement. Dependency-
+local PT_TLS is rejected until runtime graphs have combined TLS layout and
+per-image module offsets; this prevents silently publishing incomplete TLS.
 
 ## Generation-tagged runtime TLS transaction boundary
 

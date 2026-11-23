@@ -9911,3 +9911,15 @@ maps, resolves, executes and unloads a real Rust/LLD shared object on 1/2/4
 CPUs. Stage 11.6 rollback preservation, host suites and warning-denying Clippy
 pass. No Cargo/QEMU chain is active. Runtime dependency graphs, TLS coupling
 and lifecycle callbacks remain open.
+
+## Codex - runtime dependency graphs and TLS coupling accepted (2026-11-23)
+
+The live mapper now loads a bounded breadth-first graph from signed read-only
+`/lib` packages, validates its complete scope, maps and protects it as one
+generation-owned arena, and publishes first-definition symbols atomically.
+Root PT_TLS is coupled to that generation with distinct all-task mappings and
+rollback/final-release cleanup. Dependency-local PT_TLS fails closed pending a
+combined graph TLS layout. Exact-source Stage 11.2 TLS and Stage 11.6 gates pass
+on 1/2/4 CPUs; affected-feature/all-target Clippy, 33 ELF tests, 263
+libwoven/typography tests (one ignored), and 19 harness tests pass. No Cargo or
+QEMU chain is active. Runtime lifecycle callbacks remain next.

@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 11 runtime dependency graphs and TLS coupling - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Live runtime mapping now resolves a bounded breadth-first `DT_NEEDED` graph
+from signed, read-only `/lib` packages, validates the complete scope, maps the
+graph into one owned arena, applies admitted relocations, W^X and RELRO, and
+publishes the root generation and first-definition symbol scope atomically.
+Rollback unmaps the entire unpublished graph. Root-image PT_TLS is coupled to
+the same generation: every live task receives a distinct initialized block,
+and final release removes all TLS blocks, graph pages, and symbols before the
+generation can be reused. Dependency-local PT_TLS remains explicitly rejected
+pending a combined graph TLS layout.
+
+Exact-source QEMU acceptance passed on 1/2/4 CPUs for both Stage 11.2 TLS and
+Stage 11.6. The gates require `[S11.RUNTIME] ELF and PT_TLS atomic coupling:
+PASSED` and `[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED`.
+Evidence is under `audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954147*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795430*`. Warning-denying affected-
+feature and all-target Clippy pass, as do 33 ELF tests, 263 libwoven/typography
+tests (one existing ignored fixture), and 19 fixture/harness tests.
+
+Runtime constructor/destructor ownership remains the next live-loader Stage 11
+requirement; this acceptance does not claim dependency-local TLS support.
+
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 
 The production syscall boundary now copies and validates a bounded ELF shared

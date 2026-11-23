@@ -312,6 +312,7 @@ impl Pending {
 /// checked at plan time, before any pages are mapped, so that staging is
 /// fail-closed.  The load bias is fixed when the plan is built; the caller
 /// selects a free slot in the dynamic-module table before calling `new`.
+#[cfg(feature = "stage11-6-test")]
 pub(super) struct ModulePlan {
     pub(super) bytes: Vec<u8>,
     pub(super) image: elf::Image,
@@ -323,6 +324,7 @@ pub(super) struct ModulePlan {
     pub(super) mapping_size: usize,
 }
 
+#[cfg(feature = "stage11-6-test")]
 impl ModulePlan {
     /// Build a plan for `bytes` at dynamic-module `slot` with the given load
     /// `bias`.  Returns `None` if the image is not a valid shared library, any
@@ -366,6 +368,7 @@ impl ModulePlan {
 /// address space.  Pages are physically present but the module generation is
 /// not published; callers must call `commit` before any thread can observe the
 /// new module, or drop the guard to roll back all mapped pages.
+#[cfg(feature = "stage11-6-test")]
 pub(super) struct StagedSegments<'a> {
     space: &'a mut AddressSpace,
     mapping_start: u64,
@@ -374,6 +377,7 @@ pub(super) struct StagedSegments<'a> {
     committed: bool,
 }
 
+#[cfg(feature = "stage11-6-test")]
 impl Drop for StagedSegments<'_> {
     fn drop(&mut self) {
         if !self.committed {
@@ -386,6 +390,7 @@ impl Drop for StagedSegments<'_> {
     }
 }
 
+#[cfg(feature = "stage11-6-test")]
 impl<'a> StagedSegments<'a> {
     /// Apply relocations to the staged pages, reusing the same
     /// `validate_relocation_plan` + `relocate_linked_images` path used by
@@ -471,6 +476,7 @@ impl<'a> StagedSegments<'a> {
 /// On partial failure, any already-mapped pages are immediately unmapped before
 /// returning `None`.  On success the returned `StagedSegments` guard rolls back
 /// via `Drop` unless `commit` is called first.
+#[cfg(feature = "stage11-6-test")]
 pub(super) fn stage_module_segments<'a>(
     space: &'a mut AddressSpace,
     plan: &ModulePlan,
@@ -600,6 +606,12 @@ fn prepare_runtime_graph(root: Vec<u8>, base: u64) -> Option<Vec<LinkImage<'stat
                 .bytes()
                 .to_vec();
             let image = elf::parse_shared(&payload).ok()?;
+            // Runtime TLS is currently coupled to the root module generation.
+            // Refuse dependency-local PT_TLS until the graph owns a combined
+            // template and per-image module offsets.
+            if image.tls().is_some() {
+                return None;
+            }
             runtime_image_contiguous(&image)?;
             if image.dynamic().is_some_and(|dynamic| dynamic.soname_offset.is_some())
                 && image.soname(&payload) != Some(name.as_slice())
