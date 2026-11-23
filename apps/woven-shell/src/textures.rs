@@ -10,7 +10,7 @@
 use core::cell::UnsafeCell;
 
 use crate::tokens::{PANEL_ROW, TOAST_HEIGHT, TOAST_WIDTH};
-use crate::{CENTER_WIDTH, MAX_NOTES, QS_ROWS, TILE_HEIGHT, TILE_WIDTH};
+use crate::{CENTER_WIDTH, MAX_NOTES, QS_WIDTH, TILE_HEIGHT, TILE_WIDTH};
 
 pub const TILE_PIXELS: usize = TILE_WIDTH * TILE_HEIGHT;
 
@@ -26,8 +26,8 @@ pub static TILE: TileBuffer = TileBuffer(UnsafeCell::new([0; TILE_PIXELS]));
 /// per repaint into this offscreen texture, then sampled by the 3D desktop
 /// mode's perspective projection. `.bss`, not the stack, for the same reason
 /// as `TILE`.
-pub const QS_PANEL_MAX_HEIGHT: usize = (1 + QS_ROWS) * PANEL_ROW as usize + 2;
-pub const QS_PANEL_PIXELS: usize = CENTER_WIDTH as usize * QS_PANEL_MAX_HEIGHT;
+pub const QS_PANEL_MAX_HEIGHT: usize = 460;
+pub const QS_PANEL_PIXELS: usize = QS_WIDTH as usize * QS_PANEL_MAX_HEIGHT;
 
 pub struct QsPanelTexture(pub UnsafeCell<[u32; QS_PANEL_PIXELS]>);
 

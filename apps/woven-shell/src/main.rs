@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! WovenShell: the WovenHat desktop.
 //!
 //! A userspace program that takes the compositor lease and runs the desktop:
@@ -175,14 +176,69 @@ const DESKTOP_ICON_SIZE: i32 = 32;
 
 mod icons;
 use icons::{app_icon, draw_app_icon, draw_app_icon_light};
+mod status;
+use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
+
+/// Bounded system-status indicators in the taskbar tray. The module only
+/// reads existing status calls and never adds a capability; see `status.rs`.
+/// Quick Settings presents the same sampled values in its own panel.
+const STATUS_ICONS: usize = 3;
+const STATUS_SAMPLE_PERIOD: u64 = 2 * libwoven::time::TICKS_PER_SECOND;
 
 /// Notifications remembered for the Notification Center.
 const MAX_NOTES: usize = 8;
-const CENTER_WIDTH: i32 = 164;
+const CENTER_WIDTH: i32 = 220;
 const CENTER_TITLE: &str = "Notifications";
 const CENTER_CLEAR: &str = "Clear";
 const QS_TITLE: &str = "Quick Settings";
+/// Quick Settings panel, Win11-style: action grid + sliders + footer.
+const QS_WIDTH: i32 = 360;
+const QS_PADDING: i32 = 12;
+const QS_GRID_COLS: usize = 3;
+const QS_GRID_GAP: i32 = 8;
+const QS_BUTTON_HEIGHT: i32 = 48;
+const QS_BUTTON_RADIUS: usize = 10;
+const QS_ICON_SIZE: i32 = 16;
+const QS_SLIDER_HEIGHT: i32 = 34;
+const QS_SLIDER_GAP: i32 = 10;
+const QS_SECTION_GAP: i32 = 8;
+const QS_FOOTER_HEIGHT: i32 = 40;
+/// Grid rows shown in the quick-action panel.
+const QS_GRID_ROWS: usize = 4;
+const QS_ACTIONS: usize = QS_GRID_COLS * QS_GRID_ROWS;
+/// Legacy row count kept for texture sizing; actual layout is grid-driven.
 const QS_ROWS: usize = 10;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QsAction {
+    Wifi,
+    Bluetooth,
+    Airplane,
+    BatterySaver,
+    FocusAssist,
+    NightLight,
+    Accessibility,
+    DisplayScale,
+    Tiling,
+    ThreeD,
+    Language,
+    ChangePin,
+}
+
+const QS_ACTION_ORDER: [QsAction; QS_ACTIONS] = [
+    QsAction::Wifi,
+    QsAction::Bluetooth,
+    QsAction::Airplane,
+    QsAction::BatterySaver,
+    QsAction::FocusAssist,
+    QsAction::NightLight,
+    QsAction::Accessibility,
+    QsAction::DisplayScale,
+    QsAction::Tiling,
+    QsAction::ThreeD,
+    QsAction::Language,
+    QsAction::ChangePin,
+];
 
 /// How dark the lock screen makes the wallpaper behind it.
 const LOCK_DIM: u8 = 160;
@@ -323,6 +379,16 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("start", "Start"),
             ("type_to_search", "Type to search"),
             ("no_open_windows", "No open windows on this workspace"),
+            ("pinned", "Pinned"),
+            ("all_apps", "All apps"),
+            ("network", "Network"),
+            ("volume", "Volume"),
+            ("battery", "Battery"),
+            ("online", "Connected"),
+            ("offline", "Offline"),
+            ("unavailable", "Unavailable"),
+            ("muted", "Muted"),
+            ("not_available", "Not available"),
         ],
         Language::Chichewa => &[
             ("sign_in", "Lowani"),
@@ -337,6 +403,16 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("start", "Yambani"),
             ("type_to_search", "Lembani kufunafuna"),
             ("no_open_windows", "Palibe mawindo otseguka pa gawo ili"),
+            ("pinned", "Zokhazikika"),
+            ("all_apps", "Mapulogalamu onse"),
+            ("network", "Netiweki"),
+            ("volume", "Voliyumu"),
+            ("battery", "Batri"),
+            ("online", "Yalumikizana"),
+            ("offline", "Siyalumikizana"),
+            ("unavailable", "Sikupezeka"),
+            ("muted", "Yachetsetsedwa"),
+            ("not_available", "Sikupezeka"),
         ],
         Language::Arabic => &[
             ("sign_in", "تسجيل الدخول"),
@@ -351,6 +427,16 @@ fn fill_shell_catalog(catalog: &mut libwoven::i18n::Catalog, language: libwoven:
             ("start", "ابدأ"),
             ("type_to_search", "اكتب للبحث"),
             ("no_open_windows", "لا توجد نوافذ مفتوحة في مساحة العمل"),
+            ("pinned", "مثبت"),
+            ("all_apps", "كل التطبيقات"),
+            ("network", "الشبكة"),
+            ("volume", "الصوت"),
+            ("battery", "البطارية"),
+            ("online", "متصل"),
+            ("offline", "غير متصل"),
+            ("unavailable", "غير متاح"),
+            ("muted", "مكتوم"),
+            ("not_available", "غير متاح"),
         ],
     };
     for (key, value) in entries {
@@ -407,7 +493,7 @@ fn shell_catalog(language: libwoven::i18n::Language) -> &'static libwoven::i18n:
 
 /// `bytes` as text, cut to `limit` characters; anything not printable ASCII
 /// is shown as `?`, so the font's replacement box never appears.
-fn label(bytes: &[u8], limit: usize, buffer: &mut [u8; 32]) -> usize {
+fn label(bytes: &[u8], limit: usize, buffer: &mut [u8]) -> usize {
     let length = bytes.len().min(limit).min(buffer.len());
     for (slot, byte) in buffer.iter_mut().zip(&bytes[..length]) {
         *slot = if (b' '..=b'~').contains(byte) {
@@ -584,8 +670,20 @@ struct Desktop {
     qs_open: bool,
     /// Do Not Disturb: notifications are remembered but raise no toast.
     dnd: bool,
+    /// Simulated quick-action connectivity/power states.
+    wifi: bool,
+    bluetooth: bool,
+    airplane: bool,
+    battery_saver: bool,
+    night_light: bool,
+    /// Brightness percentage for the quick-settings slider (0-100).
+    brightness: u8,
     /// The display scale the shell set.
     scale: u32,
+    /// Last sampled network/volume/battery state behind the tray indicators.
+    status: StatusSnapshot,
+    /// Tick at which the next bounded status re-sample is due.
+    status_next_sample: u64,
     /// The lock screen's language. Defaults to English, which keeps the
     /// exact strings every already-accepted lock-screen gate expects;
     /// Quick Settings can switch it to Chichewa.
@@ -670,7 +768,19 @@ impl Desktop {
         center_open: false,
         qs_open: false,
         dnd: false,
+        wifi: true,
+        bluetooth: false,
+        airplane: false,
+        battery_saver: false,
+        night_light: false,
+        brightness: 80,
         scale: 1,
+        status: StatusSnapshot {
+            network: NetworkStatus::Unavailable,
+            volume: VolumeStatus::Unavailable,
+            battery: BatteryStatus::Unavailable,
+        },
+        status_next_sample: 0,
         language: libwoven::i18n::Language::English,
         // Production presentation is 3D by default. The 3D path still calls
         // the bounded 2D painters to populate textures before projecting
@@ -738,48 +848,42 @@ impl Desktop {
     /// The taskbar sits flush at the top of the screen. Keep this as a
     /// function so every layout calculation shares one chrome origin.
     fn taskbar_top(&self) -> i32 {
-        0
+        (self.height - TASKBAR_HEIGHT).max(0)
     }
 
     fn taskbar(&self) -> Area {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
     }
 
-    /// The screen's usable band, excluding the taskbar: `(top, height)`.
+    /// The screen's usable band, excluding the bottom taskbar: `(top, height)`.
     /// Shared by every window-placement/clamp site that needs to keep
     /// windows clear of the bar (`work_area`, `open`, `resized`,
     /// `toggle_scale`, `drag_to_pointer`).
     fn usable_band(&self) -> (i32, i32) {
-        (
-            self.taskbar_top() + TASKBAR_HEIGHT,
-            self.height - TASKBAR_HEIGHT,
-        )
+        (0, (self.height - TASKBAR_HEIGHT).max(0))
     }
 
-    /// Row for taskbar text: seven glyph rows centred in the bar below its
-    /// one-pixel accent line.
+    /// Row for taskbar text, centered vertically in the bar.
     fn text_y(&self) -> i32 {
-        self.taskbar_top() + 9
+        self.taskbar_top() + (TASKBAR_HEIGHT - font::WIDTH as i32) / 2
     }
 
-    /// Centered in the taskbar, not right-aligned.
+    /// Right side of the taskbar (Win11-style).
     fn clock_area(&self) -> Area {
-        let x = (self.width - CLOCK_WIDTH) / 2;
+        let x = (self.width - CLOCK_WIDTH - 4).max(0);
         Area::new(x, self.taskbar_top(), CLOCK_WIDTH, TASKBAR_HEIGHT)
     }
 
     fn tray_area(&self, index: usize) -> Area {
-        let x = self.width - CLOCK_WIDTH - (index as i32 + 1) * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x - (index as i32 + 1) * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
-    /// Centered, dropping down from the taskbar (M4): the fixed
-    /// TOAST_MARGIN from the screen's own top edge alone would land the
-    /// toast under/behind the bar, since the bar occupies that band.
+    /// Bottom-right, floating above the taskbar (Win11-style).
     fn toast_area(&self) -> Area {
         Area::new(
-            (self.width - TOAST_WIDTH) / 2,
-            self.taskbar_top() + TASKBAR_HEIGHT + TOAST_MARGIN,
+            (self.width - TOAST_WIDTH - TOAST_MARGIN).max(0),
+            (self.taskbar_top() - TOAST_HEIGHT - TOAST_MARGIN).max(0),
             TOAST_WIDTH,
             TOAST_HEIGHT,
         )
@@ -833,11 +937,21 @@ impl Desktop {
         ]);
     }
 
-    /// Fixed launcher button geometry keeps the taskbar stable across
-    /// languages and avoids shifting the centered clock.
+    /// Win11-style centered taskbar group: Start + running/pinned entries.
+    fn taskbar_group_width(&self) -> i32 {
+        let entries = self.stacked as i32;
+        let entries_width = if entries > 0 {
+            8 + entries * TASKBAR_ENTRY_WIDTH + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
+        } else {
+            0
+        };
+        START_BUTTON_WIDTH + entries_width
+    }
+
     fn start_area(&self) -> Area {
+        let group_x = (self.width - self.taskbar_group_width()) / 2;
         Area::new(
-            START_X,
+            group_x.max(4),
             self.taskbar_top() + 4,
             START_BUTTON_WIDTH,
             START_HEIGHT as i32,
@@ -845,16 +959,9 @@ impl Desktop {
     }
 
     fn taskbar_entry_area(&self, index: usize) -> Area {
-        let x = self.start_area().x
-            + self.start_area().width
-            + 8
-            + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
-        Area::new(
-            x,
-            self.taskbar_top() + 4,
-            TASKBAR_ENTRY_WIDTH,
-            START_HEIGHT as i32,
-        )
+        let start = self.start_area();
+        let x = start.x + start.width + 8 + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
+        Area::new(x, self.taskbar_top() + 4, TASKBAR_ENTRY_WIDTH, START_HEIGHT as i32)
     }
 
     /// The full-screen launcher has no projected halo; its bounded overview
@@ -863,19 +970,18 @@ impl Desktop {
         self.overview_area()
     }
 
-    /// The launcher overview (M3): search, this workspace's window cards,
-    /// and the app grid, filling the screen below the taskbar.
+    /// Win11-style floating Start panel, centered above the taskbar.
     /// Empty unless the launcher is open.
     fn overview_area(&self) -> Area {
         if !self.launcher_open {
             return Area::new(0, 0, 0, 0);
         }
-        Area::new(
-            0,
-            self.taskbar_top() + TASKBAR_HEIGHT,
-            self.width,
-            self.height - TASKBAR_HEIGHT,
-        )
+        let width = (self.width - 48).clamp(320, 700);
+        let max_height = (self.taskbar_top() - 24).max(240);
+        let height = max_height.clamp(240, 560);
+        let x = (self.width - width) / 2;
+        let y = (self.taskbar_top() - height - 8).max(8);
+        Area::new(x, y, width, height)
     }
 
     /// The search field, top of the overview.
@@ -889,9 +995,9 @@ impl Desktop {
         )
     }
 
-    /// Top of the Dash row, below the search field.
+    /// Top of the Dash row, below the "Pinned" label.
     fn overview_dash_row_top(&self) -> i32 {
-        self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN
+        self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN + 14
     }
 
     /// Dash entry `index`'s area, left to right. See [`Self::dash_apps`].
@@ -952,7 +1058,7 @@ impl Desktop {
         )
     }
 
-    /// Top of the app grid, below the (always reserved) thumbnails row.
+    /// Top of the app grid, below the window cards (if any) and "All apps" label.
     fn overview_grid_top(&self) -> i32 {
         let has_windows = self.entries().next().is_some();
         self.overview_dash_row_top()
@@ -963,6 +1069,7 @@ impl Desktop {
             } else {
                 0
             }
+            + 14
     }
 
     /// Grid columns that fit the overview's width.
@@ -1041,7 +1148,7 @@ impl Desktop {
             let length = (prefix.len() + app.name().len()).min(message.len());
             message[..prefix.len()].copy_from_slice(prefix);
             message[prefix.len()..length].copy_from_slice(&app.name()[..length - prefix.len()]);
-            let mut text = [0u8; 32];
+            let mut text = [0u8; TOAST_CHARS];
             let shown = label(&message[..length], TOAST_CHARS, &mut text);
             self.toast = Some(Toast {
                 text,
@@ -1324,23 +1431,22 @@ impl Desktop {
             theme_taskbar(),
             TASKBAR_OPACITY,
         );
-        // The accent line marks the taskbar's boundary with the desktop.
-        canvas.fill_rect(0, top + TASKBAR_HEIGHT - 1, width, 1, theme_accent());
-        
-        // 3a. Perspective cue: when 3D mode is on, the taskbar optically
-        //     recedes, making the workspace feel deeper. The taskbar fills
-        //     width is reduced slightly and a subtle bevel adds depth.
-        // Perspective taskbar narrowing in 3D mode
-        // Perspective inset for 3D taskbar narrowing
+        // Win11-like subtle top edge: a faint stroke separates chrome from the
+        // desktop without the old heavy accent line.
+        canvas.blend_rect(0, top, width, 1, theme_stroke(), 28);
+
         let start = self.start_area();
         let catalog = shell_catalog(self.language);
-        let fill = theme_start_fill();
+        let fill = if self.launcher_open { theme_accent() } else { theme_start_fill() };
+        let fill_top = if self.launcher_open { lighten(fill, 18) } else { lighten(fill, 28) };
         Renderer::new(canvas).rounded_rect_gradient(
             rect_of(start),
             CHROME_RADIUS,
-            color_of(lighten(fill, 24)),
+            color_of(fill_top),
             color_of(fill),
         );
+        // Subtle highlight stroke gives the Start pill a Win11-like surface edge.
+        outline(canvas, start, blend(theme_stroke(), fill, 48));
         canvas.draw_text_system(
             start.x + 24,
             self.text_y(),
@@ -1372,6 +1478,16 @@ impl Desktop {
                     theme_entry(false)
                 },
             );
+            // Win11-style running/active indicator.
+            let indicator_w = if active { 16 } else { 6 };
+            let indicator_x = area.x + (area.width - indicator_w) / 2;
+            let indicator_y = area.y + area.height - 3;
+            fill_rounded(
+                canvas,
+                Area::new(indicator_x, indicator_y, indicator_w, 3),
+                1,
+                if active { theme_accent() } else { theme_muted() },
+            );
             draw_app_icon(
                 canvas,
                 area.x + 2,
@@ -1388,7 +1504,8 @@ impl Desktop {
 
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
-        let clock_x = (self.width - font::text_width(text) as i32) / 2;
+        let clock = self.clock_area();
+        let clock_x = clock.x + (clock.width - font::text_width(text) as i32).max(0) / 2;
         canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
         // The workspace switcher sits left of the system menu button.
@@ -1413,6 +1530,28 @@ impl Desktop {
             canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
         }
 
+        // System status glyphs: network, volume, battery. Drawn in the same
+        // bounded canvas as the rest of the taskbar, never from a client
+        // surface, so no application can spoof or own them.
+        for index in 0..STATUS_ICONS {
+            let place = self.status_area(index);
+            let ink = theme_accent();
+            let dim = theme_muted();
+            match index {
+                0 => status::draw_network(canvas, place.x, place.y, self.status.network, ink, dim),
+                1 => status::draw_volume(canvas, place.x, place.y, self.status.volume, ink, dim),
+                _ => status::draw_battery(
+                    canvas,
+                    place.x,
+                    place.y,
+                    self.status.battery,
+                    theme_taskbar(),
+                    ink,
+                    dim,
+                ),
+            }
+        }
+
         if self.unread > 0 {
             let badge = self.badge_area();
             fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
@@ -1432,7 +1571,8 @@ impl Desktop {
     /// rendered behind this overview.
     fn paint_overview_content(&self, canvas: &mut Canvas<'_>) {
         let overview = self.overview_area();
-        fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 248);
+        fill_rounded_blended(canvas, overview, CHROME_CARD_RADIUS, theme_panel(), 240);
+        outline(canvas, overview, blend(theme_stroke(), theme_panel(), 36));
         // The shell paints in small tiles and calls this for every tile. Skip
         // items whose own footprint misses the tile: the canvas would clip
         // their pixels anyway, but redrawing every icon and label in all ~76
@@ -1470,7 +1610,13 @@ impl Desktop {
             }
         }
 
-        // The Dash: favorites and running apps, icon-only.
+        // Pinned / favorites section.
+        canvas.draw_text_system(
+            overview.x + OVERVIEW_MARGIN,
+            self.overview_search_area().y + OVERVIEW_SEARCH_HEIGHT + 4,
+            catalog.lookup("pinned", "Pinned"),
+            theme_muted(),
+        );
         let (dash_apps, dash_count) = self.dash_apps();
         for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
             let Some(app) = self.apps[app_index] else { continue };
@@ -1529,7 +1675,13 @@ impl Desktop {
             }
         }
 
-        // The app grid, filtered by the search field.
+        // All apps section.
+        canvas.draw_text_system(
+            overview.x + OVERVIEW_MARGIN,
+            self.overview_grid_top() - 14,
+            catalog.lookup("all_apps", "All apps"),
+            theme_muted(),
+        );
         let (found, count) = self.filtered();
         for (index, &app_index) in found[..count].iter().enumerate() {
             let Some(app) = self.apps[app_index] else { continue };
@@ -1572,24 +1724,181 @@ impl Desktop {
                 theme_text(),
             );
         }
+
+        // Footer: user and power hint, Win11-style bottom bar.
+        let footer_h = 28;
+        let footer_y = overview.y + overview.height - footer_h;
+        let footer = Area::new(overview.x, footer_y, overview.width, footer_h);
+        canvas.fill_rect(footer.x, footer.y, footer.width as usize, 1, blend(theme_stroke(), theme_panel(), 28));
+        let mut user_buf = [0u8; 32];
+        let user_name = if let Some(account) = self
+            .session
+            .and_then(|index| self.accounts.get(index).copied().flatten())
+        {
+            let name = account.name();
+            let len = name.len().min(user_buf.len());
+            user_buf[..len].copy_from_slice(&name[..len]);
+            core::str::from_utf8(&user_buf[..len]).unwrap_or("User")
+        } else {
+            "User"
+        };
+        canvas.draw_text_system(footer.x + 12, footer.y + 9, user_name, theme_text());
+        let power = catalog.lookup("power", "Power");
+        let power_w = font::text_width(power) as i32;
+        canvas.draw_text_system(
+            footer.x + footer.width - power_w - 12,
+            footer.y + 9,
+            power,
+            theme_muted(),
+        );
         }
     }
 
-    /// The Quick Settings button, left of the tray's last icon slot.
+    /// One of the three bounded system-status icons, between the Quick Settings
+    /// button and the application tray: network, volume, battery (left to
+    /// right). Keeping them in their own slots leaves the existing `TRAY`
+    /// protocol and its surface ownership untouched.
+    fn status_area(&self, index: usize) -> Area {
+        let x = self.clock_area().x
+            - (MAX_TRAY + index + 1) as i32 * (TRAY_ICON + TRAY_GAP);
+        Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
+    }
+
+    /// The union of the status icons' damage area.
+    fn status_icons_area(&self) -> Area {
+        let mut area = Area::new(0, 0, 0, 0);
+        for index in 0..STATUS_ICONS {
+            area = area.union(self.status_area(index));
+        }
+        area
+    }
+
+    /// The Quick Settings button, left of the status icons.
     fn qs_button(&self) -> Area {
-        let x = self.width - CLOCK_WIDTH - (MAX_TRAY as i32 + 1) * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x
+            - (MAX_TRAY + STATUS_ICONS + 1) as i32 * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
     /// Quick Settings: a title row and one row per toggle, above the
     /// taskbar's right end; empty while closed.
+    fn qs_action_active(&self, action: QsAction) -> bool {
+        match action {
+            QsAction::Wifi => self.wifi && !self.airplane,
+            QsAction::Bluetooth => self.bluetooth && !self.airplane,
+            QsAction::Airplane => self.airplane,
+            QsAction::BatterySaver => self.battery_saver,
+            QsAction::FocusAssist => self.dnd,
+            QsAction::NightLight => self.night_light,
+            QsAction::Accessibility => self.reduced_motion,
+            QsAction::DisplayScale => self.scale == 2,
+            QsAction::Tiling => self.tiled,
+            QsAction::ThreeD => self.three_d,
+            QsAction::Language => true,
+            QsAction::ChangePin => false,
+        }
+    }
+
+    fn qs_action_label(&self, action: QsAction) -> &'static str {
+        match action {
+            QsAction::Wifi => "Wi-Fi",
+            QsAction::Bluetooth => "Bluetooth",
+            QsAction::Airplane => "Airplane mode",
+            QsAction::BatterySaver => "Battery saver",
+            QsAction::FocusAssist => "Focus assist",
+            QsAction::NightLight => "Night light",
+            QsAction::Accessibility => "Accessibility",
+            QsAction::DisplayScale => "Scale",
+            QsAction::Tiling => "Tiling",
+            QsAction::ThreeD => "3D Desktop",
+            QsAction::Language => "Language",
+            QsAction::ChangePin => "Change PIN",
+        }
+    }
+
+    fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
+        match action {
+            QsAction::Wifi => if self.airplane { "Unavailable" } else if self.wifi { "Connected" } else { "Off" },
+            QsAction::Bluetooth => if self.airplane { "Unavailable" } else if self.bluetooth { "On" } else { "Off" },
+            QsAction::Airplane => if self.airplane { "On" } else { "Off" },
+            QsAction::BatterySaver => if self.battery_saver { "On" } else { "Off" },
+            QsAction::FocusAssist => if self.dnd { "On" } else { "Off" },
+            QsAction::NightLight => if self.night_light { "On" } else { "Off" },
+            QsAction::Accessibility => if self.reduced_motion { "On" } else { "Off" },
+            QsAction::DisplayScale => if self.scale == 2 { "200%" } else { "100%" },
+            QsAction::Tiling => if self.tiled { "On" } else { "Off" },
+            QsAction::ThreeD => if self.three_d { "On" } else { "Off" },
+            QsAction::Language => match self.language {
+                libwoven::i18n::Language::English => "English",
+                libwoven::i18n::Language::Chichewa => "Chichewa",
+                libwoven::i18n::Language::Arabic => "Arabic",
+            },
+            QsAction::ChangePin => "Security",
+        }
+    }
+
+    fn qs_panel_height(&self) -> i32 {
+        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
+            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        // header + grid + sliders(2) + footer + paddings/gaps
+        16 + 24 + QS_PADDING + grid_h + QS_SECTION_GAP
+            + QS_SLIDER_HEIGHT * 2
+            + QS_SLIDER_GAP
+            + QS_SECTION_GAP
+            + QS_FOOTER_HEIGHT
+            + QS_PADDING
+    }
+
     fn qs_area(&self) -> Area {
         if !self.qs_open {
             return Area::new(0, 0, 0, 0);
         }
-        let height = (1 + QS_ROWS as i32) * PANEL_ROW + 2;
-        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
-        Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
+        let height = self.qs_panel_height().min(460);
+        let y = (self.taskbar_top() - height - 8).max(0);
+        Area::new(self.width - QS_WIDTH - 8, y, QS_WIDTH, height)
+    }
+
+    fn qs_grid_area(&self) -> Area {
+        let panel = self.qs_area();
+        let top = panel.y + 16 + 24 + QS_PADDING;
+        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
+            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            grid_h,
+        )
+    }
+
+    fn qs_action_area(&self, index: usize) -> Area {
+        let grid = self.qs_grid_area();
+        let col = (index % QS_GRID_COLS) as i32;
+        let row = (index / QS_GRID_COLS) as i32;
+        let cell_w = (grid.width - QS_GRID_GAP * (QS_GRID_COLS as i32 - 1)) / QS_GRID_COLS as i32;
+        Area::new(
+            grid.x + col * (cell_w + QS_GRID_GAP),
+            grid.y + row * (QS_BUTTON_HEIGHT + QS_GRID_GAP),
+            cell_w,
+            QS_BUTTON_HEIGHT,
+        )
+    }
+
+    fn qs_slider_area(&self, which: i32) -> Area {
+        let panel = self.qs_area();
+        let grid = self.qs_grid_area();
+        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
+        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
+    }
+
+    fn qs_footer_area(&self) -> Area {
+        let panel = self.qs_area();
+        Area::new(
+            panel.x,
+            panel.y + panel.height - QS_FOOTER_HEIGHT - QS_PADDING,
+            panel.width,
+            QS_FOOTER_HEIGHT + QS_PADDING,
+        )
     }
 
     /// The toggles as they currently read.
@@ -1798,7 +2107,7 @@ impl Desktop {
     fn start_change_pin(&mut self) -> Area {
         let dirty = self.close_panels();
         if self.session.is_none() {
-            let mut text = [0u8; 32];
+            let mut text = [0u8; TOAST_CHARS];
             let length = label(b"No account signed in", TOAST_CHARS, &mut text);
             self.toast = Some(Toast {
                 text,
@@ -2091,7 +2400,7 @@ impl Desktop {
                     Some(Err(_)) => b"Could not change PIN",
                     None => b"No account signed in",
                 };
-                let mut text = [0u8; 32];
+                let mut text = [0u8; TOAST_CHARS];
                 let length = label(message, TOAST_CHARS, &mut text);
                 self.toast = Some(Toast {
                     text,
@@ -2113,31 +2422,387 @@ impl Desktop {
     /// both for the ordinary flat 2D panel and, rendered once at local
     /// origin into an offscreen texture, as the source the 3D mode's
     /// perspective projection samples.
+    fn qs_activate_action(&mut self, action: QsAction) -> Area {
+        let panel = self.qs_area();
+        match action {
+            QsAction::Wifi => {
+                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
+                self.wifi = !self.wifi;
+                log(if self.wifi { &[b"woven-shell: wifi on"] } else { &[b"woven-shell: wifi off"] });
+                panel
+            }
+            QsAction::Bluetooth => {
+                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
+                self.bluetooth = !self.bluetooth;
+                log(if self.bluetooth { &[b"woven-shell: bluetooth on"] } else { &[b"woven-shell: bluetooth off"] });
+                panel
+            }
+            QsAction::Airplane => {
+                self.airplane = !self.airplane;
+                if self.airplane { self.wifi = false; self.bluetooth = false; }
+                log(if self.airplane { &[b"woven-shell: airplane on"] } else { &[b"woven-shell: airplane off"] });
+                panel
+            }
+            QsAction::BatterySaver => {
+                self.battery_saver = !self.battery_saver;
+                panel
+            }
+            QsAction::FocusAssist => {
+                self.dnd = !self.dnd;
+                log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                panel
+            }
+            QsAction::NightLight => {
+                self.night_light = !self.night_light;
+                panel
+            }
+            QsAction::Accessibility => {
+                self.reduced_motion = !self.reduced_motion;
+                log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                panel
+            }
+            QsAction::DisplayScale => self.toggle_scale().union(self.qs_area()),
+            QsAction::Tiling => self.toggle_tiling().union(self.qs_area()),
+            QsAction::ThreeD => {
+                self.three_d = !self.three_d;
+                log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
+                panel.union(self.screen())
+            }
+            QsAction::Language => {
+                self.language = match self.language {
+                    libwoven::i18n::Language::English => libwoven::i18n::Language::Chichewa,
+                    libwoven::i18n::Language::Chichewa => libwoven::i18n::Language::Arabic,
+                    libwoven::i18n::Language::Arabic => libwoven::i18n::Language::English,
+                };
+                log(&[b"woven-shell: language toggled"]);
+                panel
+            }
+            QsAction::ChangePin => self.start_change_pin(),
+        }
+    }
+
+    fn qs_grid_area_at(&self, panel: Area) -> Area {
+        let top = panel.y + 16 + 24 + QS_PADDING;
+        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
+            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, grid_h)
+    }
+
+    fn qs_action_area_at(&self, panel: Area, index: usize) -> Area {
+        let grid = self.qs_grid_area_at(panel);
+        let col = (index % QS_GRID_COLS) as i32;
+        let row = (index / QS_GRID_COLS) as i32;
+        let cell_w = (grid.width - QS_GRID_GAP * (QS_GRID_COLS as i32 - 1)) / QS_GRID_COLS as i32;
+        Area::new(
+            grid.x + col * (cell_w + QS_GRID_GAP),
+            grid.y + row * (QS_BUTTON_HEIGHT + QS_GRID_GAP),
+            cell_w,
+            QS_BUTTON_HEIGHT,
+        )
+    }
+
+    fn qs_slider_area_at(&self, panel: Area, which: i32) -> Area {
+        let grid = self.qs_grid_area_at(panel);
+        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
+        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
+    }
+
+    fn qs_footer_area_at(&self, panel: Area) -> Area {
+        Area::new(
+            panel.x,
+            panel.y + panel.height - QS_FOOTER_HEIGHT - QS_PADDING,
+            panel.width,
+            QS_FOOTER_HEIGHT + QS_PADDING,
+        )
+    }
+
+    fn qs_summary<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
+        let mut len = 0usize;
+        let net: &[u8] = match self.status.network {
+            NetworkStatus::Online { .. } if self.wifi && !self.airplane => b"Wi-Fi",
+            NetworkStatus::Online { .. } => b"Online",
+            NetworkStatus::Offline => b"Offline",
+            NetworkStatus::Unavailable => b"No net",
+        };
+        for b in net.iter().take(buf.len()) { buf[len] = *b; len += 1; }
+        if len < buf.len() { buf[len] = b' '; len += 1; }
+        let (pct, muted) = match self.status.volume {
+            VolumeStatus::Level { percent, muted } => (percent, muted),
+            VolumeStatus::Unavailable => (0, true),
+        };
+        let mut pbuf = [0u8; 3];
+        let plen = status::format_percent(pct, &mut pbuf);
+        for b in pbuf[..plen].iter().take(buf.len().saturating_sub(len)) { buf[len] = *b; len += 1; }
+        if len < buf.len() { buf[len] = b'%'; len += 1; }
+        if muted && len < buf.len() { buf[len] = b' '; len += 1; if len < buf.len() { buf[len] = b'M'; len += 1; } }
+        core::str::from_utf8(&buf[..len]).unwrap_or("")
+    }
+
+    fn qs_footer_status<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
+        let mut len = 0usize;
+        let prefix: &[u8] = b"Battery: ";
+        for b in prefix { if len < buf.len() { buf[len] = *b; len += 1; } }
+        let text: &[u8] = match self.status.battery {
+            BatteryStatus::Unavailable => b"N/A",
+        };
+        for b in text { if len < buf.len() { buf[len] = *b; len += 1; } }
+        core::str::from_utf8(&buf[..len]).unwrap_or("Battery: N/A")
+    }
+
+    fn draw_qs_footer_button(&self, canvas: &mut Canvas<'_>, area: Area, label: &str) {
+        fill_rounded(canvas, area, 6, blend(theme_stroke(), theme_panel(), 20));
+        outline(canvas, area, blend(theme_stroke(), theme_panel(), 34));
+        let tw = font::text_width(label) as i32;
+        let tx = area.x + (area.width - tw).max(0) / 2;
+        let ty = area.y + (area.height - font::LINE_HEIGHT).max(0) / 2;
+        canvas.draw_text_system(tx, ty, label, theme_text());
+    }
+
+    fn draw_qs_slider(&self, canvas: &mut Canvas<'_>, area: Area, label: &str, value: u8, active: bool) {
+        let value = value.min(100);
+        fill_rounded(canvas, area, 8, blend(theme_stroke(), theme_panel(), 14));
+        outline(canvas, area, blend(theme_stroke(), theme_panel(), 24));
+
+        // Icon box
+        let icon_area = Area::new(area.x + 8, area.y + 7, 20, 20);
+        let icon_fg = if active { theme_text() } else { theme_muted() };
+        if label.starts_with("Brightness") {
+            // sun icon
+            fill_rounded(canvas, Area::new(icon_area.x + 6, icon_area.y + 6, 8, 8), 4, icon_fg);
+            for (dx, dy, w, h) in [(9,0,2,3),(9,17,2,3),(0,9,3,2),(17,9,3,2)] {
+                canvas.fill_rect(icon_area.x + dx, icon_area.y + dy, w as usize, h as usize, icon_fg);
+            }
+        } else {
+            // speaker icon
+            let c = icon_fg;
+            canvas.fill_rect(icon_area.x + 2, icon_area.y + 7, 3, 6, c);
+            canvas.fill_rect(icon_area.x + 5, icon_area.y + 5, 2, 10, c);
+            canvas.fill_rect(icon_area.x + 7, icon_area.y + 4, 2, 12, c);
+            if !active {
+                canvas.fill_rect(icon_area.x + 12, icon_area.y + 7, 1, 1, c);
+                canvas.fill_rect(icon_area.x + 13, icon_area.y + 8, 1, 1, c);
+                canvas.fill_rect(icon_area.x + 14, icon_area.y + 9, 1, 1, c);
+                canvas.fill_rect(icon_area.x + 13, icon_area.y + 10, 1, 1, c);
+                canvas.fill_rect(icon_area.x + 12, icon_area.y + 11, 1, 1, c);
+            } else {
+                canvas.fill_rect(icon_area.x + 11, icon_area.y + 7, 1, 6, c);
+                canvas.fill_rect(icon_area.x + 13, icon_area.y + 5, 1, 10, c);
+            }
+        }
+
+        let track_x = area.x + 36;
+        let track_w = area.width - 44;
+        let track_y = area.y + area.height / 2 - 2;
+        let track_h = 4i32;
+        fill_rounded(canvas, Area::new(track_x, track_y, track_w, track_h), 2, blend(theme_stroke(), theme_panel(), 44));
+        let fill_w = (track_w * value as i32) / 100;
+        if fill_w > 0 {
+            let fill_color = if active { theme_accent() } else { theme_muted() };
+            fill_rounded(canvas, Area::new(track_x, track_y, fill_w.max(4), track_h), 2, fill_color);
+            let thumb_x = track_x + fill_w - 5;
+            let thumb_y = area.y + area.height / 2 - 6;
+            fill_rounded(canvas, Area::new(thumb_x, thumb_y, 10, 12), 5, theme_text());
+            outline(canvas, Area::new(thumb_x, thumb_y, 10, 12), blend(theme_panel(), theme_text(), 60));
+        }
+        let _ = label;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_qs_action_icon(&self, canvas: &mut Canvas<'_>, action: QsAction, x: i32, y: i32, fg: u32, bg: u32, active: bool) {
+        let a = Area::new(x, y, 20, 20);
+        fill_rounded(canvas, a, 6, bg);
+        let c = fg;
+        match action {
+            QsAction::Wifi => {
+                // simple wifi arcs as bars
+                for (i, w) in [14i32, 10, 6].iter().enumerate() {
+                    let by = y + 14 - i as i32 * 4;
+                    let bx = x + (20 - *w) / 2;
+                    canvas.fill_rect(bx, by, *w as usize, 2, c);
+                }
+                canvas.fill_rect(x + 9, y + 16, 2, 2, c);
+            }
+            QsAction::Bluetooth => {
+                canvas.fill_rect(x + 9, y + 3, 2, 14, c);
+                canvas.fill_rect(x + 11, y + 5, 2, 2, c);
+                canvas.fill_rect(x + 13, y + 7, 2, 2, c);
+                canvas.fill_rect(x + 11, y + 9, 2, 2, c);
+                canvas.fill_rect(x + 13, y + 11, 2, 2, c);
+                canvas.fill_rect(x + 11, y + 13, 2, 2, c);
+                canvas.fill_rect(x + 7, y + 5, 2, 2, c);
+                canvas.fill_rect(x + 5, y + 7, 2, 2, c);
+                canvas.fill_rect(x + 7, y + 13, 2, 2, c);
+                canvas.fill_rect(x + 5, y + 11, 2, 2, c);
+            }
+            QsAction::Airplane => {
+                canvas.fill_rect(x + 9, y + 2, 2, 16, c);
+                canvas.fill_rect(x + 4, y + 7, 12, 2, c);
+                canvas.fill_rect(x + 6, y + 14, 8, 2, c);
+            }
+            QsAction::BatterySaver => {
+                canvas.fill_rect(x + 4, y + 5, 10, 10, c);
+                canvas.fill_rect(x + 14, y + 8, 2, 4, c);
+                let inner = if active { bg } else { blend(theme_panel(), theme_stroke(), 8) };
+                canvas.fill_rect(x + 5, y + 6, 8, 8, inner);
+                canvas.fill_rect(x + 8, y + 7, 2, 6, c);
+                canvas.fill_rect(x + 7, y + 9, 4, 2, c);
+            }
+            QsAction::FocusAssist => {
+                // moon
+                fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, c);
+                let cut = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                fill_rounded(canvas, Area::new(x + 8, y + 2, 10, 10), 5, cut);
+            }
+            QsAction::NightLight => {
+                fill_rounded(canvas, Area::new(x + 5, y + 5, 10, 10), 5, c);
+                for (dx, dy) in [(2,2),(16,2),(2,16),(16,16)] {
+                    canvas.fill_rect(x + dx, y + dy, 2, 2, c);
+                }
+            }
+            QsAction::Accessibility => {
+                canvas.fill_rect(x + 9, y + 3, 2, 2, c);
+                canvas.fill_rect(x + 9, y + 6, 2, 6, c);
+                canvas.fill_rect(x + 6, y + 7, 8, 2, c);
+                canvas.fill_rect(x + 7, y + 12, 2, 5, c);
+                canvas.fill_rect(x + 11, y + 12, 2, 5, c);
+            }
+            QsAction::DisplayScale => {
+                canvas.fill_rect(x + 3, y + 4, 14, 10, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                canvas.fill_rect(x + 4, y + 5, 12, 8, inner);
+                canvas.fill_rect(x + 8, y + 14, 4, 2, c);
+                canvas.fill_rect(x + 6, y + 16, 8, 1, c);
+            }
+            QsAction::Tiling => {
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                for (dx, dy, w, h) in [(3,3,6,6),(11,3,6,6),(3,11,6,6),(11,11,6,6)] {
+                    canvas.fill_rect(x + dx, y + dy, w as usize, h as usize, c);
+                    canvas.fill_rect(x + dx + 1, y + dy + 1, (w - 2) as usize, (h - 2) as usize, inner);
+                }
+            }
+            QsAction::ThreeD => {
+                canvas.fill_rect(x + 4, y + 6, 8, 8, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                canvas.fill_rect(x + 5, y + 7, 6, 6, inner);
+                canvas.fill_rect(x + 7, y + 3, 8, 1, c);
+                canvas.fill_rect(x + 14, y + 4, 1, 8, c);
+            }
+            QsAction::Language => {
+                canvas.fill_rect(x + 3, y + 9, 14, 2, c);
+                canvas.fill_rect(x + 9, y + 3, 2, 14, c);
+                fill_rounded(canvas, Area::new(x + 3, y + 3, 14, 14), 7, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, inner);
+                canvas.fill_rect(x + 4, y + 9, 12, 1, c);
+                canvas.fill_rect(x + 9, y + 4, 1, 12, c);
+            }
+            QsAction::ChangePin => {
+                fill_rounded(canvas, Area::new(x + 5, y + 9, 10, 8), 2, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                canvas.fill_rect(x + 7, y + 4, 6, 6, c);
+                canvas.fill_rect(x + 8, y + 5, 4, 4, inner);
+                canvas.fill_rect(x + 9, y + 12, 2, 3, inner);
+            }
+        }
+        let _ = (a, active);
+    }
+
     fn paint_qs_content(&self, canvas: &mut Canvas<'_>, area: Area) {
         let (x, y) = (area.x, area.y);
-        // A rounded, near-opaque card instead of a hard-edged square outline
-        // with a flat header block, Windows-11-style like the lock screen's
-        // card. `render()`'s keyed overlay leaves the handful of corner
-        // pixels outside the rounding untouched, so the square backdrop tint
-        // `blend()` already laid down under this shows through there as a
-        // soft drop shadow rather than a visible seam.
-        fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
-        canvas.draw_text_system(x + 6, y + 5, QS_TITLE, theme_accent());
-        canvas.fill_rect(
-            x + CHROME_RADIUS as i32,
-            y + PANEL_ROW,
-            (area.width - 2 * CHROME_RADIUS as i32).max(0) as usize,
-            1,
-            theme_accent(),
+        fill_rounded_blended(canvas, area, 12, theme_panel(), 238);
+        outline(canvas, area, blend(theme_stroke(), theme_panel(), 30));
+
+        // Header
+        canvas.draw_text_system(x + QS_PADDING, y + 12, QS_TITLE, theme_text());
+        let mut summary_buf = [0u8; 32];
+        let summary = self.qs_summary(&mut summary_buf);
+        let summary_w = font::text_width(summary) as i32;
+        canvas.draw_text_system(
+            x + area.width - QS_PADDING - summary_w,
+            y + 12,
+            summary,
+            theme_muted(),
         );
-        for (row, text) in self.qs_rows().iter().enumerate() {
-            canvas.draw_text_system(
-                x + 6,
-                y + 1 + (1 + row as i32) * PANEL_ROW + 4,
-                text,
-                theme_text(),
-            );
+
+        // Quick-action grid
+        for (index, action) in QS_ACTION_ORDER.iter().enumerate() {
+            let cell = self.qs_action_area_at(area, index);
+            let active = self.qs_action_active(*action);
+            let fill = if active {
+                blend(theme_accent(), theme_panel(), 210)
+            } else {
+                blend(theme_stroke(), theme_panel(), 18)
+            };
+            let border = if active {
+                blend(theme_accent(), theme_text(), 40)
+            } else {
+                blend(theme_stroke(), theme_panel(), 28)
+            };
+            fill_rounded(canvas, cell, QS_BUTTON_RADIUS, fill);
+            outline(canvas, cell, border);
+
+            let icon_x = cell.x + 10;
+            let icon_y = cell.y + 8;
+            let icon_fg = if active { rgb(20, 28, 38) } else { theme_text() };
+            let icon_bg = if active { theme_accent() } else { blend(theme_stroke(), theme_panel(), 40) };
+            self.draw_qs_action_icon(canvas, *action, icon_x, icon_y, icon_fg, icon_bg, active);
+
+            let label = self.qs_action_label(*action);
+            let sub = self.qs_action_subtitle(*action);
+            let text_x = cell.x + 10;
+            let label_y = cell.y + 30;
+            let max_w = cell.width - 14;
+            let mut lbuf = [0u8; 64];
+            let llen = truncate_to_width(label.as_bytes(), max_w, &mut lbuf);
+            let ltext = core::str::from_utf8(&lbuf[..llen]).unwrap_or(label);
+            let label_color = if active { rgb(20, 28, 38) } else { theme_text() };
+            let sub_color = if active { blend(rgb(20, 28, 38), theme_accent(), 140) } else { theme_muted() };
+            canvas.draw_text_system(text_x, label_y, ltext, label_color);
+            let mut sbuf = [0u8; 64];
+            let slen = truncate_to_width(sub.as_bytes(), max_w, &mut sbuf);
+            let stext = core::str::from_utf8(&sbuf[..slen]).unwrap_or(sub);
+            canvas.draw_text_system(text_x, cell.y + cell.height - 12, stext, sub_color);
         }
+
+        // Sliders
+        let brightness_area = self.qs_slider_area_at(area, 0);
+        let volume_area = self.qs_slider_area_at(area, 1);
+        self.draw_qs_slider(canvas, brightness_area, "Brightness", self.brightness, true);
+        let (vol_percent, muted) = match self.status.volume {
+            VolumeStatus::Level { percent, muted } => (percent, muted),
+            VolumeStatus::Unavailable => (0, true),
+        };
+        let vol_label = if muted { "Volume (muted)" } else { "Volume" };
+        self.draw_qs_slider(canvas, volume_area, vol_label, vol_percent, !muted);
+
+        // Footer
+        let footer = self.qs_footer_area_at(area);
+        canvas.fill_rect(
+            x + QS_PADDING,
+            footer.y,
+            (area.width - QS_PADDING * 2).max(0) as usize,
+            1,
+            blend(theme_stroke(), theme_panel(), 24),
+        );
+        let mut bat_buf = [0u8; 32];
+        let bat_text = self.qs_footer_status(&mut bat_buf);
+        canvas.draw_text_system(x + QS_PADDING, footer.y + 14, bat_text, theme_muted());
+
+        let btn_y = footer.y + 8;
+        let btn_h = 24;
+        let power_w = 54;
+        let restart_w = 58;
+        let lock_w = 40;
+        let settings_w = 60;
+        let gap = 6;
+        let power_x = x + area.width - QS_PADDING - power_w;
+        let restart_x = power_x - gap - restart_w;
+        let lock_x = restart_x - gap - lock_w;
+        let settings_x = lock_x - gap - settings_w;
+        self.draw_qs_footer_button(canvas, Area::new(settings_x, btn_y, settings_w, btn_h), "Settings");
+        self.draw_qs_footer_button(canvas, Area::new(lock_x, btn_y, lock_w, btn_h), "Lock");
+        self.draw_qs_footer_button(canvas, Area::new(restart_x, btn_y, restart_w, btn_h), "Restart");
+        self.draw_qs_footer_button(canvas, Area::new(power_x, btn_y, power_w, btn_h), "Power");
     }
 
     fn render_qs(&self, canvas: &mut Canvas<'_>) {
@@ -2274,6 +2939,36 @@ impl Desktop {
         dirty
     }
 
+    /// Click one of the tray status glyphs. Network and battery open Quick
+    /// Settings for their detail row; volume toggles the real output mute via
+    /// the existing audio ABI. No new capability or client surface is involved.
+    fn status_click(&mut self, index: usize) -> Area {
+        let icon = self.status_area(index);
+        if index != 1 {
+            return self.toggle_qs().union(icon);
+        }
+        let Some(level) = self.status.toggle_mute() else {
+            log(&[b"woven-shell: volume unavailable"]);
+            return icon;
+        };
+        let mut digits = [0u8; 3];
+        let length = status::format_percent(level, &mut digits);
+        log(&[b"woven-shell: volume ", &digits[..length]]);
+        icon.union(self.qs_area())
+    }
+
+    /// Show a short informational toast and return its damage area.
+    fn toast_message(&mut self, text: &str) -> Area {
+        let mut buffer = [0u8; TOAST_CHARS];
+        let length = label(text.as_bytes(), TOAST_CHARS, &mut buffer);
+        self.toast = Some(Toast {
+            text: buffer,
+            length,
+            until: libwoven::ticks() + TOAST_TICKS,
+        });
+        self.toast_area()
+    }
+
     /// Power off, or restart. Returns only if the machine is still
     /// running; a toast says why.
     fn power(&mut self, restart: bool) -> Area {
@@ -2293,7 +2988,7 @@ impl Desktop {
             Ok(2) => b"The firmware refused ACPI power-off",
             Ok(_) => b"The machine ignored the request",
         };
-        let mut text = [0u8; 32];
+        let mut text = [0u8; TOAST_CHARS];
         let length = label(reason, TOAST_CHARS, &mut text);
         self.toast = Some(Toast {
             text,
@@ -2357,10 +3052,8 @@ impl Desktop {
 
     /// Where the unread badge sits: a 10x11 box just left of the clock text.
     fn badge_area(&self) -> Area {
-        let (_, length) = clock_text(self.time, self.seconds);
-        let clock_width = length as i32 * font::ADVANCE - (font::ADVANCE - font::WIDTH as i32);
-        let clock_x = (self.width - clock_width) / 2;
-        Area::new(clock_x - 13, self.taskbar_top() + 7, 10, 11)
+        let clock = self.clock_area();
+        Area::new(clock.x - 14, self.taskbar_top() + 7, 10, 11)
     }
 
     /// The Notification Center, sized to its rows, drops down from the
@@ -2371,7 +3064,7 @@ impl Desktop {
         }
         let count = self.notes.iter().flatten().count();
         let height = (1 + count.max(1) as i32) * PANEL_ROW + 2;
-        let y = self.taskbar_top() + TASKBAR_HEIGHT + 2;
+        let y = (self.taskbar_top() - height - 4).max(0);
         Area::new(self.width - 4 - CENTER_WIDTH, y, CENTER_WIDTH, height)
     }
 
@@ -2386,6 +3079,7 @@ impl Desktop {
         // panel and the lock screen, instead of a hard-edged square outline
         // with a flat header block.
         fill_rounded_blended(canvas, area, CHROME_RADIUS, theme_panel(), 235);
+        outline(canvas, area, blend(theme_stroke(), theme_panel(), 34));
         canvas.draw_text_system(x + 6, y + 5, CENTER_TITLE, theme_accent());
         let clear_x = x + area.width - 6 - font::text_width(CENTER_CLEAR) as i32;
         canvas.draw_text_system(clear_x, y + 5, CENTER_CLEAR, theme_text());
@@ -2399,20 +3093,18 @@ impl Desktop {
         let mut any = false;
         for (row, note) in self.notes.iter().flatten().enumerate() {
             any = true;
+            let row_y = y + 1 + (1 + row as i32) * PANEL_ROW;
+            let row_bg = Area::new(x + 4, row_y + 1, area.width - 8, PANEL_ROW - 2);
+            fill_rounded(canvas, row_bg, 4, blend(theme_stroke(), theme_panel(), 14));
             let text = core::str::from_utf8(&note.text[..note.length]).unwrap_or("");
-            canvas.draw_text_system(
-                x + 6,
-                y + 1 + (1 + row as i32) * PANEL_ROW + 4,
-                text,
-                theme_text(),
-            );
+            canvas.draw_text_system(x + 8, row_y + 4, text, theme_text());
         }
         if !any {
             canvas.draw_text_system(
-                x + 6,
+                x + 8,
                 y + 1 + PANEL_ROW + 4,
                 "No notifications",
-                theme_text(),
+                theme_muted(),
             );
         }
     }
@@ -2570,6 +3262,7 @@ impl Desktop {
         canvas: &mut Canvas<'_>,
         three_d: bool,
         height: i32,
+        close_hovered: bool,
     ) {
         let area = window.title_area();
         let fill = theme_title(focused);
@@ -2598,7 +3291,8 @@ impl Desktop {
         }
         let close = window.close_area();
         if !close.is_empty() {
-            fill_rounded(canvas, close, CHROME_RADIUS_SMALL, CLOSE_FILL);
+            let close_fill = if close_hovered { lighten(CLOSE_FILL, 28) } else { CLOSE_FILL };
+            fill_rounded(canvas, close, CHROME_RADIUS_SMALL, close_fill);
             canvas.draw_ui_text(close.x + 2, close.y - 1, "x", theme_text(), BODY_TEXT);
         }
         let reserved = if close.is_empty() {
@@ -2909,16 +3603,17 @@ impl Desktop {
                     painter.blend(part, SHADOW, opacity);
                 }
             }
+            let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
-                let active = Some(slot) == focused;
+                let close_hovered = window.close_area().contains(self.pointer.0, self.pointer.1);
                 if alpha == u8::MAX {
                     painter.draw(title, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height)
+                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
                     });
                 } else {
                     painter.draw_blended(title, alpha, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height)
+                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
                     });
                 }
             }
@@ -2942,6 +3637,28 @@ impl Desktop {
                     return Some(slot);
                 }
             }
+            // Subtle Win11-style window border: accent for focused, muted for inactive.
+            let border_color = if active {
+                blend(theme_accent(), theme_stroke(), 90)
+            } else {
+                blend(theme_stroke(), theme_panel(), 72)
+            };
+            let frame = window.frame().intersect(above_taskbar);
+            for edge in [
+                Area::new(frame.x, frame.y, frame.width, 1),
+                Area::new(frame.x, frame.y + frame.height - 1, frame.width, 1),
+                Area::new(frame.x, frame.y, 1, frame.height),
+                Area::new(frame.x + frame.width - 1, frame.y, 1, frame.height),
+            ] {
+                let part = edge.intersect(area);
+                if !part.is_empty() {
+                    // Keyed overlay: only the border pixels land, so body blits
+                    // already on screen are preserved.
+                    painter.overlay(part, |canvas| {
+                        canvas.fill_rect(part.x, part.y, part.width as usize, part.height as usize, border_color);
+                    });
+                }
+            }
         }
 
         if let Some(toast) = &self.toast {
@@ -2954,16 +3671,12 @@ impl Desktop {
 
         let overview = self.overview_area().intersect(area);
         if !overview.is_empty() {
-            // The M5 fade-in attempt (a single draw_blended pass at the
-            // overview_fade spring's value) produced a ghosted, tile-
-            // offset duplicate of the panel's content once actually seen
-            // on screen via QEMU -- reverted to the plain blend+keyed-
-            // overlay two-step the other panels already use and that M3
-            // verified correct, rather than ship something visibly
-            // broken. See the M5 writeup in
-            // docs/graphics/overview-desktop-2026-11-03.md.
-            painter.blend(overview, theme_panel(), PANEL_OPACITY);
-            painter.overlay(overview, |canvas| self.paint_overview_content(canvas));
+            // Floating Start panel: draw desktop behind it, then the rounded
+            // panel content so corners blend correctly over wallpaper/icons.
+            painter.draw(overview, |canvas| {
+                self.render_desktop(canvas);
+                self.paint_overview_content(canvas);
+            });
         }
 
         let qs = self.qs_area().intersect(area);
@@ -3247,7 +3960,7 @@ impl Desktop {
                 Dirty::of(self.tray_area(index))
             }
             Some(b"NOTE") => {
-                let mut text = [0u8; 32];
+                let mut text = [0u8; TOAST_CHARS];
                 let length = label(&message[4..], TOAST_CHARS, &mut text);
                 log(&[b"woven-shell: notification: ", &text[..length]]);
                 let remembered = self.remember(sender, &message[4..]);
@@ -3339,6 +4052,13 @@ impl Desktop {
                 if let Some(slot) = taskbar_slot {
                     return self.focus(slot);
                 }
+                // The three status glyphs own their own slots; they are not
+                // client tray surfaces and cannot be hit-tested as one.
+                if let Some(index) =
+                    (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
+                {
+                    return self.status_click(index);
+                }
                 // The Quick Settings button, and its panel's rows.
                 if self.qs_button().contains(x, y) {
                     return self.toggle_qs();
@@ -3348,59 +4068,66 @@ impl Desktop {
                     if !panel.contains(x, y) {
                         return self.close_panels();
                     }
-                    return match (y - panel.y - 1) / PANEL_ROW - 1 {
-                        0 => self.power(false),
-                        1 => self.power(true),
-                        2 => self.toggle_scale(),
-                        3 => {
-                            self.dnd = !self.dnd;
-                            log(if self.dnd {
-                                &[b"woven-shell: do not disturb on"]
-                            } else {
-                                &[b"woven-shell: do not disturb off"]
-                            });
-                            panel
+                    // Grid actions
+                    for (index, &action) in QS_ACTION_ORDER.iter().enumerate().take(QS_ACTIONS) {
+                        let cell = self.qs_action_area_at(panel, index);
+                        if cell.contains(x, y) {
+                            return self.qs_activate_action(action);
                         }
-                        4 => self.toggle_tiling(),
-                        5 => self.lock(),
-                        6 => self.start_change_pin(),
-                        7 => {
-                            self.language = match self.language {
-                                libwoven::i18n::Language::English => {
-                                    libwoven::i18n::Language::Chichewa
-                                }
-                                libwoven::i18n::Language::Chichewa => {
-                                    libwoven::i18n::Language::Arabic
-                                }
-                                libwoven::i18n::Language::Arabic => {
-                                    libwoven::i18n::Language::English
-                                }
-                            };
-                            log(&[b"woven-shell: language toggled"]);
-                            panel
+                    }
+                    // Brightness slider
+                    let bslider = self.qs_slider_area_at(panel, 0);
+                    if bslider.contains(x, y) {
+                        let track_x = bslider.x + 36;
+                        let track_w = (bslider.width - 44).max(1);
+                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        self.brightness = pct;
+                        return panel;
+                    }
+                    // Volume slider
+                    let vslider = self.qs_slider_area_at(panel, 1);
+                    if vslider.contains(x, y) {
+                        let track_x = vslider.x + 36;
+                        let track_w = (vslider.width - 44).max(1);
+                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let _ = self.status.set_volume(pct);
+                        return panel.union(self.status_icons_area());
+                    }
+                    // Footer buttons
+                    let footer = self.qs_footer_area_at(panel);
+                    let btn_y = footer.y + 8;
+                    let btn_h = 24;
+                    let power_w = 54;
+                    let restart_w = 58;
+                    let lock_w = 40;
+                    let settings_w = 60;
+                    let gap = 6;
+                    let power_x = panel.x + panel.width - QS_PADDING - power_w;
+                    let restart_x = power_x - gap - restart_w;
+                    let lock_x = restart_x - gap - lock_w;
+                    let settings_x = lock_x - gap - settings_w;
+                    let settings = Area::new(settings_x, btn_y, settings_w, btn_h);
+                    let lock = Area::new(lock_x, btn_y, lock_w, btn_h);
+                    let restart = Area::new(restart_x, btn_y, restart_w, btn_h);
+                    let power = Area::new(power_x, btn_y, power_w, btn_h);
+                    if settings.contains(x, y) {
+                        if let Some(index) = (0..self.app_count).find(|&i| {
+                            self.apps[i].is_some_and(|a| a.name() == b"WovenSettings")
+                        }) {
+                            return panel.union(self.launch(index));
                         }
-                        8 => {
-                            self.three_d = !self.three_d;
-                            log(if self.three_d {
-                                &[b"woven-shell: 3D desktop on"]
-                            } else {
-                                &[b"woven-shell: 3D desktop off"]
-                            });
-                            // Every open window's title bar also renders
-                            // differently in 3D mode, not just this panel.
-                            panel.union(self.screen())
-                        }
-                        9 => {
-                            self.reduced_motion = !self.reduced_motion;
-                            log(if self.reduced_motion {
-                                &[b"woven-shell: reduced motion on"]
-                            } else {
-                                &[b"woven-shell: reduced motion off"]
-                            });
-                            panel
-                        }
-                        _ => empty,
-                    };
+                        return panel.union(self.toast_message("Settings unavailable"));
+                    }
+                    if lock.contains(x, y) {
+                        return self.lock();
+                    }
+                    if restart.contains(x, y) {
+                        return self.power(true);
+                    }
+                    if power.contains(x, y) {
+                        return self.power(false);
+                    }
+                    return empty;
                 }
                 // The clock opens and closes the Notification Center.
                 if self.clock_area().contains(x, y)
@@ -3772,6 +4499,18 @@ impl Desktop {
     fn tick(&mut self) -> Area {
         self.reap();
         let mut dirty = Area::new(0, 0, 0, 0);
+        // Re-sample on a slow, bounded cadence. Only the status glyphs and an
+        // open Quick Settings panel are dirtied, so this never triggers a
+        // full-screen recompose just to update a tray icon.
+        let now = libwoven::ticks();
+        if now >= self.status_next_sample {
+            self.status_next_sample = now.saturating_add(STATUS_SAMPLE_PERIOD);
+            let before = self.status;
+            self.status.refresh();
+            if before != self.status {
+                dirty = dirty.union(self.status_icons_area()).union(self.qs_area());
+            }
+        }
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
@@ -3963,6 +4702,24 @@ fn main(args: Args) -> ! {
     desktop.height = height;
     desktop.time = libwoven::clock().ok();
     desktop.scale = info.scale;
+    // Sample the indicators before the first frame so no boot paints a
+    // placeholder "Unavailable" set of glyphs. `refresh` only calls existing
+    // read-only status syscalls and copies their results into local storage.
+    desktop.status = StatusSnapshot::new();
+    desktop.status_next_sample = libwoven::ticks().saturating_add(STATUS_SAMPLE_PERIOD);
+    // A real observation, not a guess: the read-only status syscall either
+    // returned a version-1 link record or it did not. Serial evidence can
+    // distinguish "offline" from "shell cannot observe the link".
+    match desktop.status.network {
+        NetworkStatus::Online { ipv4 } => {
+            let mut ip = [0u8; 15];
+            let len = status::format_ipv4(ipv4, &mut ip);
+            log(&[b"woven-shell: network online ", &ip[..len]]);
+        }
+        NetworkStatus::Offline => log(&[b"woven-shell: network offline"]),
+        NetworkStatus::Unavailable => log(&[b"woven-shell: network unavailable"]),
+    }
+    log(&[b"woven-shell: status indicators initialized"]);
     // With accounts, the desktop starts at the sign-in screen.
     desktop.locked = desktop.accounts.iter().any(Option::is_some);
     desktop.pointer = (width / 2, height / 2);

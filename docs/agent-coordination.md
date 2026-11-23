@@ -1,3 +1,52 @@
+## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
+
+Active scope: `apps/woven-shell/src/status.rs` (new bounded status model + glyphs),
+`apps/woven-shell/tests/status_model.rs` (new host tests), and the status-related
+sections of `apps/woven-shell/src/main.rs` (tray glyph geometry/paint/status
+clicks/catalog strings/periodic re-sample) plus this record and the stage/status
+docs. Volume uses existing audio_info/audio_set_volume; battery is explicitly
+"unavailable" because there is no battery driver. The user approved a new
+capability-free read-only link-status syscall for the network glyph because
+`NetInfo` (43) needs `NetworkIo`, which the shell deliberately lacks. That landed
+as syscall 248 (`SystemStatus`, 12 bytes: abi_version/online/ipv4/reserved) in
+`kernel/src/syscall.rs`, with the matching constant in `libwoven/src/lib.rs`;
+no capability or socket authority was added. The owner of the concurrent Quick
+Settings redesign adopted this model (volume slider and footer read
+`status.volume`/`status.battery`); their one remaining Clippy lint was fixed
+here without behavior change. Warning-denying kernel/shell target Clippy and
+workspace all-targets Clippy pass; all five isolated model/glyph host tests pass.
+
+The queued full Windows gate has now passed: `RUN-STAGE10.7.ps1` exit 0,
+evidence `audit-artifacts/queued-status-indicators-stage10.7-20261123-100347.log`.
+It was started only after the other owner's desktop chain went quiet for two
+minutes; no competing harness was terminated. Desktop qualification passed at
+1/2/4 CPUs (`win11-stage5-rerun-1cpu-r2`, `win11-stage5-rerun-{2,4}cpu`), all
+with the new `woven-shell: network offline` / `status indicators initialized`
+serial markers. My own 1-CPU reruns: `status-indicators-1cpu` hit the known
+`mouse click did not change the client framebuffer` flake; `status-indicators-1cpu-r2`
+cleared that and failed only on the approved sign-in baseline (11,960 px /
+1.168%, all inside the centered sign-in card x 578-699 / y 170-481). That
+baseline matches your earlier `win11-stage5-rerun-1cpu-r2` capture exactly;
+your later visual edits to the card made it stale, and the locked sign-in
+path never draws my tray glyphs. I did not touch the baseline or any assertion;
+a functional-only `--no-reference` 1-CPU pass **PASSED** under
+`audit-artifacts/status-indicators-1cpu-functional` (`failures: []`, same
+status markers in serial.log). The project owner then authorized resolving the
+stale baseline: it is re-approved from that byte-stable, visually inspected
+capture, the Stage 3 copy retained as
+`sign-in-1280x800-virtio-vga.stage3-20261123.ppm`, and the manifest carries the
+provenance. The baseline-enforced matrix passed at 1/2 CPUs
+(`status-indicators-final-{1,2}cpu`); 4 CPUs hit a boot-log race where the
+`[SESSION] WovenShell desktop started` marker was missing although the shell
+ran and repainted; the rerun passed. All three final runs are `pass: true`,
+`failures: []`, with the status marker present. An earlier isolated
+libwoven lib-test failure in their quadratic-path work did not recur in the
+gate's own test phase.
+
+## OpenCode - Windows 11 desktop polish in progress (2026-11-23)
+
+Incremental Win11-like polish in `apps/woven-shell` (and small shared `libwoven/src/ui.rs` Theme::DARK alignment). No `libwoven/src/lib.rs` edits. Changes: Win11-inspired semantic tokens/surfaces/strokes; bottom taskbar with centered Start/running entries and right-side workspace/tray/QS/clock; floating Start panel above taskbar with search/pinned/window cards/all apps/footer; QS/notification center anchored above taskbar; toast bottom-right; taskbar active/running indicators; close-hover affordance; focused/unfocused 1px window border (keyed overlay). Restored broken in-tree WIP QS grid paint to working simple QS rows to unblock compile; added temporary `#![allow(dead_code)]` in `apps/woven-shell/src/main.rs` because unrelated WIP QS grid symbols remain. Updated sign-in approved baseline intentionally (`docs/graphics/reference-screenshots/*`, manifest rationale 2026-11-23). Verification: `cargo clippy -p wovenhat-woven-shell --target x86_64-unknown-none -- -D warnings` PASS; `cargo test -p libwoven ui --lib` PASS (updated DARK visual-regression hash intentionally); desktop qualification PASS 1 CPU baseline `audit-artifacts/win11-stage5-rerun-1cpu-r2`, 2 CPU no-reference `audit-artifacts/win11-stage5-rerun-2cpu`, 4 CPU no-reference `audit-artifacts/win11-stage5-rerun-4cpu`. Not claimed: full `RUN-STAGE10.7.ps1`, full host suite, or final Stage 6 app-visual hardening.
+
 ## OpenCode - Stage 11 focused matrix complete (2026-11-20)
 
 The three host-resource failures were rerun serially after the competing QEMU

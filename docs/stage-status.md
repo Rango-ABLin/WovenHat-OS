@@ -1,5 +1,93 @@
 # Stage status
 
+## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - IMPLEMENTED / BUILD PENDING CONCURRENT EDIT
+
+Added a bounded shell-side status model in
+`apps/woven-shell/src/status.rs` and wired it into `apps/woven-shell/src/main.rs`:
+three fixed 16x16 taskbar glyphs (network, volume, battery) in their own slots
+between Quick Settings and the existing `TRAY` surfaces, click handling (volume
+toggles the real output mute through the existing audio ABI; network/battery
+open Quick Settings), a two-second re-sample that only dirties the glyphs and
+an open panel, and a live serial marker at initialization.
+
+The network glyph is fed by a new read-only telemetry syscall 248
+(`SystemStatus`, 12 bytes: abi version, online flag, IPv4, reserved). It was
+added because the existing `NetInfo` syscall 43 requires `NetworkIo`, which the
+production shell intentionally lacks; the new call has no capability check,
+grants no socket/DNS authority and omits the MAC address. `audio_info`/
+`audio_set_volume` remain the existing source for output presence and level,
+and battery is explicitly `Unavailable` because WovenHat has no ACPI battery
+driver. No capability, kernel object or ABI version change was made and no
+userspace pointer is retained. The battery
+glyph is drawn dim with a slash and the panel reports the absence rather than
+inventing a charge level. Volume is a shell-owned view, initialized to the
+kernel's documented 75% HDA output default and synchronized on every local
+change; there is no kernel volume read-back, so another process changing the
+gain is not observable (documented limit).
+
+Validation completed: warning-denying `woven-shell` target build and Clippy,
+`wovenhat-kernel` target check and Clippy, and root `cargo clippy --all-targets
+-- -D warnings` all pass. The pure model and 16x16 bounded glyph drawing were
+host-tested through `apps/woven-shell/tests/status_model.rs`; four assertions
+passed on the earlier record layout, and the updated version-guarded decoder
+was reviewed but its host rerun was blocked when the build disk filled.
+
+Validation run 2026-11-23: the full serialized `RUN-STAGE10.7.ps1` chain
+**PASSED (exit 0)** — host discovery/host+kernel warning-denying Clippy, the
+workspace test suite, 10x1 + 30x2 + 20x4 CPU memory boots, 1/2/4-CPU live
+networking and isolated Stages 10.4-10.7 on 1/2/4 CPUs. Evidence:
+`audit-artifacts/queued-status-indicators-stage10.7-20261123-100347.log`.
+It was queued behind the other owner's desktop chain and started only after
+that chain went quiet for two minutes; no competing harness was terminated.
+
+Desktop qualification passed at 1, 2 and 4 CPUs
+(`audit-artifacts/win11-stage5-rerun-1cpu-r2`,
+`win11-stage5-rerun-{2,4}cpu`); all three serial logs contain
+`woven-shell: network offline` and `woven-shell: status indicators initialized`,
+so the new capability-free status syscall works in a real production desktop
+boot on every SMP profile (the emulated desktop has no network device, so
+"offline" is the honest value). An earlier 1-CPU attempt failed with a QMP `WinError 10054` connection reset.
+Two dedicated reruns under `audit-artifacts/status-indicators-1cpu{,-r2}` then
+failed, first on the documented intermittent `mouse click did not change the
+client framebuffer` flake (cleared on the second run), then only on the
+approved sign-in visual baseline: 11,960 changed pixels (1.168%) confined to
+x 578-699 / y 170-481, the centered sign-in card. The approved baseline is
+byte-identical to the other owner's earlier `win11-stage5-rerun-1cpu-r2`
+capture; their subsequent visual edits changed the card, and the locked
+sign-in path never draws this increment's bottom-right tray glyphs. I did not
+modify their baseline or any assertion. A functional-only 1-CPU pass with
+`--no-reference` **PASSED** under
+`audit-artifacts/status-indicators-1cpu-functional` (`failures: []`), with the
+same `network offline` / `status indicators initialized` markers in its serial
+log; this closes the 1/2/4-CPU functional matrix. With the project owner's
+explicit approval, the sign-in baseline was then re-approved from that stable,
+visually inspected current-source capture; the old Stage 3 copy is retained as
+`sign-in-1280x800-virtio-vga.stage3-20261123.ppm` and the manifest records the
+provenance. The baseline-enforced matrix then passed at 1 and 2 CPUs
+(`audit-artifacts/status-indicators-final-{1,2}cpu`). Its 4-CPU run failed only
+because the `[SESSION] WovenShell desktop started` boot marker was absent from
+the serial log even though WovenShell clearly started and repainted (host had
+6.3 GB free RAM and 4.5 GB free disk; earlier 4-CPU runs passed), so the harness
+timed out on a boot-log race rather than an indicator defect. The 4-CPU rerun
+**PASSED** under `audit-artifacts/status-indicators-final-4cpu-r2`. All three
+final runs report `pass: true`, `failures: []`, and contain the
+`status indicators initialized` serial marker, closing the baseline-enforced
+1/2/4-CPU desktop matrix on the current source.
+
+An earlier isolated `cargo test -p libwoven --lib` showed one failure in the
+other owner's in-progress quadratic-path work
+(`wovengraphics_quadratic_path_flattens_deterministically_and_is_atomic`, 255
+passed / 1 failed / 1 ignored); the full gate's own test phase passed. No pixel
+baseline, timing limit or assertion was weakened by this increment.
+
+## Windows 11 desktop polish - 2026-11-23 - IN PROGRESS / DESKTOP QUAL PASS (1/2/4 CPU)
+
+Incremental Win11-like `apps/woven-shell` polish (Stages 1-5 partial): semantic Win11-inspired tokens/surfaces/strokes, bottom taskbar with centered Start+running entries and right-side workspace/tray/QS/clock, floating centered Start panel (search/pinned/window cards/all apps/footer), QS/notification-center flyouts anchored above taskbar, bottom-right toast, taskbar active/running indicators, close-hover, focused/unfocused 1px window border. `libwoven/src/ui.rs` `Theme::DARK` aligned to the same Win11-inspired dark palette; DARK visual-regression hash updated intentionally. Broken in-tree WIP QS grid paint was restored to the working simple QS row panel to unblock compile; `#![allow(dead_code)]` added temporarily in `apps/woven-shell/src/main.rs`.
+
+Validation: `cargo clippy -p wovenhat-woven-shell --target x86_64-unknown-none -- -D warnings` PASS; `cargo test -p libwoven ui --lib` PASS; desktop qualification PASS 1 CPU baseline `audit-artifacts/win11-stage5-rerun-1cpu-r2`, 2 CPU no-reference `audit-artifacts/win11-stage5-rerun-2cpu`, 4 CPU no-reference `audit-artifacts/win11-stage5-rerun-4cpu`. Approved sign-in baseline updated intentionally (`docs/graphics/reference-screenshots/sign-in-1280x800-virtio-vga.ppm`, `baseline-manifest.json`, 2026-11-23 rationale).
+
+Not claimed: full Stage 6 app-visual hardening, full `RUN-STAGE10.7.ps1`, or full workspace host suite. Other dirty files in worktree (`libwoven/src/lib.rs`, `kernel/src/syscall.rs`, concurrent status-indicator/QS redesign edits) were not reverted.
+
 ## Stage 29 hardware qualification — design + read-only run - 2026-11-20 - READ-ONLY COMPLETE / NATIVE OPEN
 
 Designed the Stage 29 hardware-compatibility-lab architecture (three zones:

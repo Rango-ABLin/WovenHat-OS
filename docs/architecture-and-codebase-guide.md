@@ -1,5 +1,23 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Desktop system-status indicator boundary (2026-11-23)
+
+`apps/woven-shell/src/status.rs` is the bounded presentation model behind the
+taskbar's network, volume and battery glyphs. Its network source is syscall
+248 (`SystemStatus`), a capability-free read-only telemetry record of 12 bytes
+(ABI version, online flag, IPv4, reserved). It exists because the pre-existing
+`NetInfo` syscall 43 requires `NetworkIo`, which the desktop session is
+deliberately not granted; the new record grants no socket/DNS authority,
+carries no device identity and is copied into caller-owned storage. `audio_info()`
+detects an output and `audio_set_volume()` applies local level/mute changes
+(the kernel's HDA path initializes output gain at 75%, which is the model's
+initial percentage). Battery state is `Unavailable`: there is no ACPI battery
+driver, so the shell neither queries nor fabricates a charge level. The model
+owns no kernel object, retains no userspace pointer and adds no capability or
+ABI version. A two-second refresh updates only the tray glyphs and an open
+panel; a locally chosen volume is preserved across refreshes because the
+kernel exposes no gain read-back.
+
 ## Stage 9 independent WovenGuard acceptance boundary
 
 The `stage9-test` feature exits immediately after the production boot path has

@@ -9,8 +9,8 @@
       "display": "virtio-vga",
       "resolution": "1280x800",
       "tolerance_percent": 0.1,
-      "approved_utc": "2026-11-20",
-      "rationale": "Deterministic: no clock, no animation, no input-dependent state. Verified after restoring the inkless-glyph bitmap fallback in Canvas::draw_text_proportional; all headline characters render on one baseline."
+      "approved_utc": "2026-11-23",
+      "rationale": "Re-approved for the current Win11 desktop/Quick Settings source after the later visual edits changed the centered sign-in card. Deterministic scene: no clock, no animation, no input-dependent state. Captured from audit-artifacts/status-indicators-1cpu-functional/sign-in.ppm (byte-identical across three independent 1-CPU boots), following a PASS of the functional desktop journey and the full RUN-STAGE10.7.ps1 gate (exit 0). Visually inspected: rounded card, avatar, account pills and PIN prompt intact. The previous Stage 3 baseline is retained alongside as sign-in-1280x800-virtio-vga.stage3-20261123.ppm."
     }
   ],
   "deferred": [

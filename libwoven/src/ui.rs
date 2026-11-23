@@ -30,19 +30,16 @@ pub struct Theme {
 
 impl Theme {
     pub const DARK: Self = Self {
-        surface: crate::rgb(45, 65, 90),
-        surface_raised: crate::rgb(30, 41, 56),
-        border: crate::rgb(62, 82, 104),
-        // The WovenHat Overview brand teal (apps/woven-shell's ACCENT),
-        // not the earlier unrelated mint-green: this is the one color
-        // every first-party app should now agree on, since it is what
-        // the shell itself (top bar, buttons, focus rings) is already
-        // built and QEMU-verified against.
-        accent: crate::rgb(76, 190, 188),
+        // Win11-inspired dark surfaces, tuned for WovenHat's calm desktop.
+        surface: crate::rgb(34, 42, 54),
+        surface_raised: crate::rgb(26, 34, 46),
+        border: crate::rgb(68, 80, 98),
+        // WovenHat brand teal, aligned with the shell accent.
+        accent: crate::rgb(78, 198, 214),
         on_accent: crate::rgb(8, 24, 28),
-        text: crate::rgb(235, 240, 250),
-        muted: crate::rgb(150, 164, 184),
-        disabled: crate::rgb(76, 84, 100),
+        text: crate::rgb(243, 246, 251),
+        muted: crate::rgb(162, 174, 190),
+        disabled: crate::rgb(88, 98, 114),
         focus: crate::rgb(255, 205, 96),
         danger: crate::rgb(226, 96, 96),
         success: crate::rgb(104, 202, 138),
@@ -1778,7 +1775,8 @@ mod tests {
         assert_ne!(dark, light);
         assert_ne!(dark, high_contrast);
         assert_ne!(light, high_contrast);
-        assert_eq!(dark, 11_428_746_854_785_215_829);
+        // Updated intentionally: Theme::DARK aligned to Win11-inspired shell palette.
+        assert_eq!(dark, 6_002_237_161_786_121_964);
         assert_eq!(light, 7_898_872_504_501_740_404);
         assert_eq!(high_contrast, 10_262_539_617_757_164_205);
     }

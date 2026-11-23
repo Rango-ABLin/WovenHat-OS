@@ -451,6 +451,9 @@ pub enum Number {
     ProcessMetrics = 246,
     /// output versioned guest-wide counters (56 bytes) -> 0 or ERROR
     SystemMetrics = 247,
+    /// output versioned read-only link status (12 bytes) -> 0 or ERROR.
+    /// Telemetry only: no capability, socket authority or device identity.
+    SystemStatus = 248,
     /// -> process-local endpoint handle, or ERROR
     IpcEndpointCreate = 211,
     /// name ptr, packed name length|client rights<<32, endpoint handle -> 0
@@ -2039,6 +2042,44 @@ fn sys_system_metrics(user_out: u64, capacity: u64) -> u64 {
     crate::paging::copy_to_current_user(user_out, bytes).map_or(SYSCALL_ERROR, |_| 0)
 }
 
+/// The bounded, capability-free telemetry record behind syscall 248. It is a
+/// pure copy of the kernel's current link summary: a version, the online flag,
+/// IPv4 address and reserved zero bytes. It deliberately excludes the MAC
+/// address and exposes no socket, DNS or device-control authority.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SystemStatusRecord {
+    abi_version: u8,
+    online: u8,
+    ipv4: [u8; 4],
+    reserved: [u8; 6],
+}
+
+fn sys_system_status(user_out: u64, capacity: u64) -> u64 {
+    let Ok(capacity) = usize::try_from(capacity) else {
+        return SYSCALL_ERROR;
+    };
+    if capacity < core::mem::size_of::<SystemStatusRecord>() {
+        return SYSCALL_ERROR;
+    }
+    let link = crate::network::net_info();
+    let record = SystemStatusRecord {
+        abi_version: 1,
+        online: link.online,
+        ipv4: link.ipv4,
+        reserved: [0; 6],
+    };
+    // SAFETY: `record` is a live local of exactly its `size_of` bytes, copied
+    // out before it is dropped; `copy_to_current_user` validates the user range.
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (&record as *const SystemStatusRecord).cast::<u8>(),
+            core::mem::size_of::<SystemStatusRecord>(),
+        )
+    };
+    crate::paging::copy_to_current_user(user_out, bytes).map_or(SYSCALL_ERROR, |_| 0)
+}
+
 fn sys_socket(kind: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
@@ -3148,6 +3189,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::ProcessInfo as u64 => sys_process_info(arg0, arg1),
         value if value == Number::ProcessMetrics as u64 => sys_process_metrics(arg0, arg1),
         value if value == Number::SystemMetrics as u64 => sys_system_metrics(arg0, arg1),
+        value if value == Number::SystemStatus as u64 => sys_system_status(arg0, arg1),
         value if value == Number::SpawnCommand as u64 => sys_spawn_command(arg0, arg1),
         value if value == Number::MmapFileShared as u64 => {
             crate::task::mmap_file_current(arg0, arg1, arg2, true, true, true)

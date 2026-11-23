@@ -5,7 +5,7 @@
 use libwoven::{process, Spring};
 
 use crate::geometry::Area;
-use crate::tokens::{CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT};
+use crate::tokens::{CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT, TOAST_CHARS};
 
 #[derive(Clone, Copy)]
 pub struct Window {
@@ -214,7 +214,7 @@ pub struct Note {
 }
 
 pub struct Toast {
-    pub text: [u8; 32],
+    pub text: [u8; TOAST_CHARS],
     pub length: usize,
     pub until: libwoven::time::Ticks,
 }

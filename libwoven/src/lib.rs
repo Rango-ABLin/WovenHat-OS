@@ -387,10 +387,11 @@ pub mod graphics {
     static SYSTEM_FONT_BASE: AtomicU64 = AtomicU64::new(0);
 
     // Keeps the fixed userspace image within the established loader-size
-    // budget while covering the hottest repeated UI glyphs.
+    // budget while covering the hottest repeated UI glyphs. 32x32 covers
+    // common UI sizes without overflowing short userspace stacks.
     const GLYPH_CACHE_CAPACITY: usize = 64;
-    pub(crate) const GLYPH_CACHE_WIDTH: usize = 24;
-    pub(crate) const GLYPH_CACHE_HEIGHT: usize = 24;
+    pub(crate) const GLYPH_CACHE_WIDTH: usize = 32;
+    pub(crate) const GLYPH_CACHE_HEIGHT: usize = 32;
     pub(crate) const GLYPH_CACHE_PIXELS: usize = GLYPH_CACHE_WIDTH * GLYPH_CACHE_HEIGHT;
 
     #[derive(Clone, Copy)]
@@ -502,7 +503,7 @@ pub mod graphics {
         }
     }
 
-    const MAX_PATH_POINTS: usize = 64;
+    const MAX_PATH_POINTS: usize = 96;
 
     /// A bounded open or closed path. The fixed storage keeps scene geometry
     /// allocation-free and makes the renderer's worst-case work explicit.
@@ -12717,6 +12718,9 @@ pub mod syscall {
     pub const PROCESS_METRICS: u64 = 246;
     /// output versioned guest-wide performance metrics (56 bytes)
     pub const SYSTEM_METRICS: u64 = 247;
+    /// output versioned read-only link status (12 bytes): abi_version, online,
+    /// ipv4[4], reserved[6]. Telemetry only; no NetworkIo capability required.
+    pub const SYSTEM_STATUS: u64 = 248;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;
     pub const IDENTITY_ADMIN_DELETE_USER: u64 = 227;
@@ -14386,15 +14390,24 @@ impl<'a> Canvas<'a> {
                 );
             } else {
                 // A contour that does not fit the fixed path budget must not
-                // silently vanish. Draw that one character with the bounded
-                // bitmap glyph so every string stays complete and legible;
-                // the rest of the string remains on the real face.
+                // silently vanish. Draw a scaled bitmap fallback so missing
+                // glyphs stay legible and size-consistent with the TTF run.
                 let mut encoded = [0_u8; 4];
-                self.draw_text(
+                let bitmap_scale = ((usize::from(scale) + font::HEIGHT / 2) / font::HEIGHT)
+                    .clamp(1, 16);
+                let bitmap_y = cursor_y
+                    .saturating_add(face.ascent_px(scale))
+                    .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
+                crate::graphics::Renderer::new(self).text_scaled(
                     cursor_x,
-                    cursor_y,
+                    bitmap_y,
                     character.encode_utf8(&mut encoded),
-                    color,
+                    crate::graphics::Color::rgb(
+                        ((color >> 16) & 0xFF) as u8,
+                        ((color >> 8) & 0xFF) as u8,
+                        (color & 0xFF) as u8,
+                    ),
+                    bitmap_scale,
                 );
             }
             cursor_x = cursor_x.saturating_add(font::ADVANCE);
@@ -14457,24 +14470,32 @@ impl<'a> Canvas<'a> {
                     pen_x = pen_x.saturating_add(cells.advance);
                 }
                 None => {
-                    // Substitute one bounded bitmap glyph; keep the real
-                    // advance so proportional layout does not shift.
+                    // Substitute one bounded bitmap glyph scaled to the requested
+                    // size so a rasterizer/cache miss does not mix tiny 5x7 text
+                    // with real TTF glyphs. Keep the real advance when available.
                     let mut encoded = [0_u8; 4];
-                    // The real face positions glyphs by baseline (`ascent`),
-                    // while the bitmap font is drawn from its top-left. Offset
-                    // the substitute so it sits on the same baseline instead
-                    // of floating a line above its neighbours.
+                    let bitmap_scale = ((usize::from(size) + font::HEIGHT / 2) / font::HEIGHT)
+                        .clamp(1, 16);
                     let bitmap_y = pen_y
                         .saturating_add(face.ascent_px(size))
-                        .saturating_sub(font::HEIGHT as i32);
-                    self.draw_text(
+                        .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
+                    crate::graphics::Renderer::new(self).text_scaled(
                         pen_x,
                         bitmap_y,
                         character.encode_utf8(&mut encoded),
-                        color,
+                        crate::graphics::Color::rgb(
+                            ((color >> 16) & 0xFF) as u8,
+                            ((color >> 8) & 0xFF) as u8,
+                            (color & 0xFF) as u8,
+                        ),
+                        bitmap_scale,
                     );
                     if let Some(advance) = face.advance_px(character, size) {
                         pen_x = pen_x.saturating_add(advance);
+                    } else {
+                        pen_x = pen_x.saturating_add(
+                            font::ADVANCE.saturating_mul(bitmap_scale as i32),
+                        );
                     }
                 }
             }
