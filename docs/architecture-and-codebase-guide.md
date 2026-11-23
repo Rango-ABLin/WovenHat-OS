@@ -3151,6 +3151,39 @@ wait path releases the process-table lock. Shared libraries, symbol
 resolution, dynamic TLS, and physical qualification remain outside this
 bounded increment.
 
+## Stage 11 live runtime lifecycle ownership (2026-11-23)
+
+`userspace::RuntimeLifecycle` stores the callback schedule outside the copied
+`AddressSpace` value. The fixed table is bounded by process and dynamic-module
+capacity and is keyed by page-table root, module slot, and generation, so a
+staged address-space snapshot cannot accidentally duplicate or publish cursor
+state. Publication occurs only after the runtime graph, symbols, protections,
+and module generation have succeeded. Final module release clears the matching
+entry before generation reuse.
+
+Syscall 158 returns one already-validated executable callback at a time while
+the exact task owns the process-wide dynamic-module transaction. The init
+schedule retains dependency order; the fini schedule retains reverse dependency
+order from `elf::collect_lifecycle`. The cursor advances before the address is
+returned. Therefore concurrent callers cannot receive the same callback, and a
+task loss cannot cause the kernel to assume an unobserved callback completed.
+The conservative result is a deliberately stuck generation until a future
+recovery policy resolves it. Final unload is rejected after init begins until
+all init callbacks have been requested, initialization has been sealed, and all
+fini callbacks have been requested. A schedule that never starts may still be
+rolled back without executing user code.
+
+The process-table lock may acquire the lifecycle-table lock through an
+`AddressSpace` operation; no lifecycle path acquires the process table in the
+opposite order. Callback execution occurs in Ring 3 after both locks are
+released, and no task switch or sleep occurs under either lock. Callback
+addresses come only from copied and bounded ELF metadata already checked
+against executable segments; the kernel retains no userspace pointer. The
+Stage 11.2 fixture covers real `DT_INIT`/`DT_FINI`, premature release rejection,
+state visibility, stale lookup and frame recovery on 1/2/4 CPUs. This slice does
+not recover an owner killed between callback retrieval and execution and does
+not add dependency-local TLS.
+
 ## Stage 11.5 bounded symbol relocation (2026-10-14; scope groundwork 2026-10-15)
 
 `elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and

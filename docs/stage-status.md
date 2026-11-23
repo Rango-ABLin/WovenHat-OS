@@ -1,5 +1,32 @@
 # Stage status
 
+## Stage 11 live runtime lifecycle ownership - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Live runtime images now publish their validated `DT_INIT`, `DT_INIT_ARRAY`,
+`DT_FINI_ARRAY`, and `DT_FINI` schedule into a fixed-capacity kernel lifecycle
+table keyed by address-space root, module slot, and generation. The process-wide
+runtime transaction must remain owned while userspace requests each callback.
+Once initialization starts, final unload fails closed until initialization has
+completed and the reverse-order finalization schedule has been consumed. A
+never-started image remains rollback-safe, and final release clears lifecycle
+state before the module generation can be reused.
+
+The Ring-3 Rust/LLD fixture executes a real `DT_INIT`, observes its mapped state,
+requires premature unload rejection, executes `DT_FINI`, then verifies final
+unload, stale symbol lookup, stale lifecycle lookup, and exact frame recovery.
+Stage 11.2 and neighboring Stage 11.6 gates pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795432*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795432*`. Warning-denying affected-feature
+and all-target Clippy pass, as do 33 ELF tests, 256 libwoven tests (one existing
+ignored fixture), and 19 fixture/harness contracts.
+
+The callback ABI deliberately advances its kernel cursor before returning an
+address, so a task killed between retrieval and invocation leaves the image
+non-unloadable rather than guessing that user code ran. Recovery for that
+abandoned initialized transaction, dependency-local PT_TLS, and broader
+compiler/runtime interoperability remain open; this is not full Stage 11
+closure.
+
 ## Stage 11 runtime dependency graphs and TLS coupling - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Live runtime mapping now resolves a bounded breadth-first `DT_NEEDED` graph

@@ -4324,6 +4324,33 @@ physical-hardware qualification and later production-release requirements
 remain governed by their later roadmap stages.
 ---
 
+## Stage 11 live runtime lifecycle acceptance - 2026-11-23
+
+This focused increment extends the already accepted startup lifecycle parser to
+post-start runtime modules. Modified source is limited to the kernel lifecycle
+ownership table and the compiler fixtures/link command, plus architecture,
+status, audit, and coordination records. It adds no syscall number or broad
+capability: syscall 158 remains transaction-owner-only and consumes a
+generation-tagged handle. No unchecked userspace pointer is retained, no
+callback runs in kernel mode, and final release removes lifecycle metadata with
+the mapped image and symbol scope.
+
+Validation on exact source: Stage 11.2 and Stage 11.6 pass on 1/2/4 CPUs with
+exit 33; `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features stage11-2-test -- -D warnings` and `cargo clippy --all-targets -- -D
+warnings` pass; 33 `elf_scope` tests, 256 libwoven tests with one pre-declared
+ignored fixture, and 19 Python fixture/harness contracts pass. Evidence is in
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795432*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795432*`.
+
+Known limit: cursor advancement is intentionally at-most-once and occurs before
+return to Ring 3. Termination between retrieval and invocation fails closed by
+leaving final unload blocked. A separately designed recovery/cancellation
+contract is required before claiming lifecycle recovery under arbitrary task
+death. Dependency-local TLS and full Stage 11 breadth also remain open.
+
+---
+
 ## Source: docs/audit-stage11-lifecycle-2026-10-20.md
 
 # Stage 11 lifecycle callback audit â€” 2026-10-20
