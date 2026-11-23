@@ -1,6 +1,5 @@
 # Stage status
 
-<<<<<<< HEAD
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in

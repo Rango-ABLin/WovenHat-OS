@@ -10169,3 +10169,11 @@ and automated-test evidence to `D:\WovenHat-OS-output`. The implementation uses
 Cargo configuration, launcher environment, and verified NTFS junctions so
 existing harness paths remain compatible. Existing evidence is preserved by
 moving rather than deleting it. No Cargo/QEMU acceptance chain is active.
+
+## Codex - committed status-marker cleanup (2026-11-23)
+
+The current `docs/stage-status.md` contained one orphaned `<<<<<<< HEAD` line
+with no separator or alternate block. Both substantive merged status sections
+were already present. Codex removed only that syntax line, preserving every
+status claim. Documentation-only validation and a separate commit follow; no
+Cargo/QEMU chain is active.
