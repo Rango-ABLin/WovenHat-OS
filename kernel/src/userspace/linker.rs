@@ -533,7 +533,7 @@ pub(super) fn load_runtime_module(
     space: &mut AddressSpace,
     bytes: Vec<u8>,
     slot: usize,
-) -> Option<u32> {
+) -> Option<RuntimeModuleLoad> {
     if slot >= MAX_DYNAMIC_MODULES {
         return None;
     }
@@ -543,6 +543,7 @@ pub(super) fn load_runtime_module(
             .checked_mul(LIBRARY_STRIDE)?,
     )?;
     let images = prepare_runtime_graph(bytes, bias)?;
+    let (tls_initializer, tls_memory_size) = runtime_tls_template(&images)?;
     let first = images
         .iter()
         .flat_map(|image| image.image.segments())
@@ -584,7 +585,45 @@ pub(super) fn load_runtime_module(
                 .ok()?;
         }
     }
-    staged.commit(&images)
+    let generation = staged.commit(&images)?;
+    Some(RuntimeModuleLoad {
+        generation,
+        tls_initializer,
+        tls_memory_size,
+    })
+}
+
+fn runtime_tls_template(images: &[LinkImage<'_>]) -> Option<(Vec<u8>, usize)> {
+    let mut offsets = [None; elf::MAX_SCOPE_IMAGES];
+    let mut memory_size = 0usize;
+    for (index, linked) in images.iter().enumerate() {
+        let Some(tls) = linked.image.tls() else {
+            continue;
+        };
+        let alignment = usize::try_from(tls.alignment).ok()?.max(8);
+        memory_size = align_up(memory_size, alignment)?;
+        offsets[index] = Some(memory_size);
+        memory_size = memory_size.checked_add(tls.memory_size)?;
+    }
+    if memory_size == 0 {
+        return Some((Vec::new(), 0));
+    }
+    if memory_size > 4096 {
+        return None;
+    }
+    let mut initializer = alloc::vec![0; memory_size];
+    for (index, linked) in images.iter().enumerate() {
+        let Some(tls) = linked.image.tls() else {
+            continue;
+        };
+        let offset = offsets[index]?;
+        let file_end = tls.file_offset.checked_add(tls.file_size)?;
+        let target_end = offset.checked_add(tls.file_size)?;
+        initializer
+            .get_mut(offset..target_end)?
+            .copy_from_slice(linked.bytes.get(tls.file_offset..file_end)?);
+    }
+    Some((initializer, memory_size))
 }
 
 fn prepare_runtime_graph(root: Vec<u8>, base: u64) -> Option<Vec<LinkImage<'static>>> {
@@ -633,12 +672,6 @@ fn prepare_runtime_graph(root: Vec<u8>, base: u64) -> Option<Vec<LinkImage<'stat
                 .bytes()
                 .to_vec();
             let image = elf::parse_shared(&payload).ok()?;
-            // Runtime TLS is currently coupled to the root module generation.
-            // Refuse dependency-local PT_TLS until the graph owns a combined
-            // template and per-image module offsets.
-            if image.tls().is_some() {
-                return None;
-            }
             runtime_image_contiguous(&image)?;
             if image
                 .dynamic()

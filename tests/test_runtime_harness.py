@@ -150,6 +150,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertIn('[S11.6] generation-safe unload/reload: PASSED', required)
         self.assertIn('[S11.6] per-thread dynamic TLS isolation: PASSED', required)
         self.assertIn('[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED', required)
+        self.assertIn('[S11.RUNTIME] dependency PT_TLS template: PASSED', required)
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)

@@ -13734,3 +13734,23 @@ marker before its unchanged frame-change assertion and budgets the client
 launch and shell compose phases separately. Committed timing limits remain
 20 s input / 60 s startup / 5 s frame. Full real QEMU desktop journey passes
 at 1, 2 and 4 CPUs (`audit-artifacts/progressive-{1cpu,2cpu-r2,4cpu}`).
+## Stage 11 runtime dependency PT_TLS template increment (2026-11-23)
+
+Accepted as a bounded Stage 11 increment.  Runtime `DT_NEEDED` graphs may now
+contain dependency-local `PT_TLS`: the linker builds an aligned, zero-filled,
+graph-ordered template capped at 4 KiB and publishes it through the existing
+generation-safe per-thread dynamic-TLS transaction.  A publication failure
+unloads the new generation.  No ABI or capability was added.
+
+Validation passed: Stage 11.6 QEMU on 1/2/4 CPUs with the new
+`[S11.RUNTIME] dependency PT_TLS template: PASSED` marker; Stage 11.2 QEMU on
+1/2/4 CPUs; warning-denying `stage11-6-test`, `stage11-2-test`, and host
+all-target Clippy; target-aware kernel build; 19 runtime/fixture harness tests;
+33 ELF scope tests; and 256 `libwoven` tests (one pre-existing ignored).
+Evidence is retained under `audit-artifacts/stage11.6-{1,2,4}cpu-*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-*`, backed by `D:\WovenHat-OS-output`.
+
+This is not full compiler-transparent dependency TLS.  Runtime TLS relocations,
+general-dynamic/TLSDESC access, per-image offset discovery, and a live
+compiler-generated dependency fixture remain open.  Physical and power-loss
+qualification claims are unchanged.

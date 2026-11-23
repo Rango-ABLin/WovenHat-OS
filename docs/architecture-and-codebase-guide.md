@@ -5076,3 +5076,23 @@ physical RSS and shared pages are not attributed as private memory. WovenShell
 logs both records beside repaint/present timing, and the host qualification
 parser stores them under `phase7_metrics`. Input-to-display latency remains a
 separate measurement and is not inferred from these records.
+## Runtime dependency PT_TLS template publication (2026-11-23)
+
+The runtime linker now constructs one bounded TLS template for the complete
+`DT_NEEDED` graph before publishing a module generation.  Graph images retain
+scope order, each `PT_TLS` contribution is aligned to at least eight bytes, file
+initializers are copied from parser-validated ranges, and `p_memsz - p_filesz`
+is zero-filled.  The combined allocation is limited to one 4 KiB dynamic-TLS
+block.  Failure to plan or copy the complete graph aborts staging before the
+address-space generation is committed.
+
+`task::map_runtime_module` publishes that immutable combined template to every
+existing thread with the established generation-tagged dynamic-TLS transaction.
+Publication failure releases the just-created module generation, so stale
+handles cannot reuse partial TLS state.  Thread creation, join and owner teardown
+continue to use the existing dynamic-TLS lifecycle; no syscall ABI or capability
+surface changed.
+
+This increment is template storage and lifecycle support.  Runtime-module TLS
+relocations, general-dynamic/TLSDESC access, per-image module-offset discovery,
+and a compiler-generated live dependency fixture remain fail-closed or open.

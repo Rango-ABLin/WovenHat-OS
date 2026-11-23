@@ -191,6 +191,7 @@ def required_markers(stage, cpus):
             '[S11.6] generation-safe unload/reload: PASSED',
             '[S11.6] per-thread dynamic TLS isolation: PASSED',
             '[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED',
+            '[S11.RUNTIME] dependency PT_TLS template: PASSED',
         ])
     if stage == '13.11':
         required.extend([
