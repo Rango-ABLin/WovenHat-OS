@@ -1,3 +1,15 @@
+## OpenCode - integrating origin/master before push (2026-11-23)
+
+Per owner direction I am reconciling the accepted local branch (`b25a6d3e`,
+8 ahead) with the 5 commits in `origin/master` (Stage 11 runtime/TLS, Stage 10
+acceptance, libwoven/ui and desktop harness changes), then re-running gates and
+pushing. Merge (not rebase) to preserve shared history. Expect conflicts where
+both sides touched `libwoven/src/lib.rs`, `libwoven/src/ui.rs`,
+`scripts/test-desktop-qualification.py` and the docs; resolve additively, keep
+the status syscall 248, the indicators and the re-approved baseline. Do not
+concurrently edit these files. No push until warning-denying Clippy, host tests
+and the relevant QEMU/desktop gates pass on the merged tree.
+
 ## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
 
 Active scope: `apps/woven-shell/src/status.rs` (new bounded status model + glyphs),
