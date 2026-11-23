@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (HOST/CLIPPY ONLY, NO QEMU YET)
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE QEMU-VERIFIED)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
 taskbar) and M7 (honest desktop controls), on branch
@@ -44,14 +44,60 @@ desktop/overview frame markers and no panic. This verifies the bottom-taskbar
 boot path with the radio and taskbar-preference changes; it does not verify
 the new alignment/icon-size settings values, which are unit-tested only.
 
+Minimize/restore from the taskbar (branch `phase-b/window-minimize`,
+commit `134e8cbd`, built in the `D:\WovenHat-build\desktop-wt` worktree so
+the concurrent kernel chain's uncommitted files were never touched): a
+taskbar click on the focused window minimizes it, a click on a minimized
+entry restores it, and any other click still focuses that window.
+Minimized entries render dimmed with a short muted indicator. Minimization
+reuses the existing focus/paint/hit-test skip by keeping the slot out of
+`stack[..stacked]`, so no new `Window` field was needed. Warning-denying
+freestanding shell clippy passes. Desktop qualification passed at 1, 2
+and 4 CPUs on this commit:
+`audit-artifacts/desktop-qualification-1795445644994223900` (1 CPU),
+`desktop-qualification-1795446056922824200` (2 CPU) and
+`desktop-qualification-1795446369997474500` (4 CPU); every `result.json`
+is `pass: true` with zero failures, and every serial log shows the
+desktop/overview frame markers with no panic.
+
+`keyboard_refresh` root cause closed (2026-11-23): the historical flake
+was a harness acceptance-oracle defect, not a guest input/rendering
+defect. Every documented failure is dated 2026-11-03/04, and all predate
+commit `73ea4d40` (2026-11-04 12:05, "Refresh desktop acceptance oracle
+after chrome modernization"). Until that commit the step's `expected`
+predicate was an exact-glyph bitmap oracle: a hard-coded 5x7 (2x scaled)
+raster of the digit `2` at exactly (236,492), demanding exact ink
+(100,220,180) and paper (35,43,66) bytes. That predicate is falsified by
+any legitimate variation -- the count not being exactly that digit,
+chrome shifting the client origin, font/AA raster differences -- while
+the serial marker `WovenFiles: keyboard refreshed` proves Enter was
+delivered, the client re-rendered and the surface was damaged;
+`capture_until_changed` then misreported the oracle mismatch as a
+framebuffer timeout. Verified on retained artifacts rather than argued
+from code alone: replaying the old predicate against the current PASSING
+frame (`desktop-qualification-1795445644994223900`'s
+`files-keyboard-refresh.ppm`, whose counter region measurably changed by
+116 px against the pre-Enter frame) returns False -- a demonstrated false
+negative on a known-good frame; and no failure has been recorded since
+the oracle was replaced -- the Nov 20 `progressive-{1cpu,2cpu-r2,4cpu}`
+runs, the Nov 23 `merged-final-{1,2,4}cpu` runs and the seven Phase B
+runs above across 1/2/4 CPUs all report zero failures, with the current
+20-byte region threshold comfortably cleared (measured delta ~116 px).
+Caveat stated plainly: no framebuffer from the historical failing runs
+was retained, so the exact mismatching digit/position of 2026-11-03
+cannot be replayed; what is proven is the oracle's false-negative
+behavior on a known-good frame, the replacement commit's own stated
+reason, and the unbroken pass record since. The separate intermittent
+"mouse click did not change the client framebuffer" pointer-step flake
+remains open and is NOT claimed fixed by this analysis.
+
 Not done, and therefore not claimed: a visual check of the changed taskbar
-settings, auto-hide, pinned-app persistence, minimize/restore,
-maximize/fullscreen geometry, Alt+Tab, an in-shell taskbar settings editor,
-the `keyboard_refresh` root-cause fix, Quick Settings Battery saver and Night
-light (still local toggles with no effect), and the stale `#![allow(dead_code)]`
-at the top of `main.rs`. The Desktop QEMU run is blocked on a concurrent
-acceptance chain that uses `target/` and `.cargo-build/`; those directories
-are to be redirected to D: once it finishes.
+alignment/icon-size settings values, auto-hide, pinned-app UI wiring and
+persistence, maximize/fullscreen geometry, Alt+Tab (blocked on modifier
+state in the input ABI, which touches kernel files with another agent's
+uncommitted edits), an in-shell taskbar settings editor, Quick Settings
+Battery saver and Night light (still local toggles with no effect), and
+the stale `#![allow(dead_code)]` at the top of `main.rs`.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 

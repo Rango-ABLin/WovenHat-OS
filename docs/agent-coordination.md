@@ -1,3 +1,31 @@
+## OpenCode - Phase B minimize accepted + keyboard_refresh root cause closed (2026-11-23)
+
+Branch `phase-b/window-minimize` (worktree `D:\WovenHat-build\desktop-wt`,
+commit `134e8cbd`, stacked on `eb5020da`): taskbar minimize/restore is
+QEMU-accepted at 1/2/4 CPUs (`desktop-qualification-1795445644994223900`,
+`-1795446056922824200`, `-1795446369997474500`, all `pass: true`, zero
+failures, frame markers present, no panic). Click the focused window's
+button to minimize, a minimized button to restore, another to focus;
+minimized entries paint dimmed. No new `Window` field: minimized means
+absent from `stack[..stacked]`.
+
+`keyboard_refresh` root cause CLOSED (see the Phase B section of
+`docs/stage-status.md` for the full evidence): the historical flake was
+the harness's pre-`73ea4d40` exact-glyph oracle (hard-coded digit `2`
+raster at (236,492) with exact colors), which returned false negatives
+while the guest demonstrably delivered Enter and repainted (serial marker
+always present). Replaying that old predicate against today's retained
+PASSING frame returns False on a frame whose counter region changed by
+116 px -- direct proof the oracle, not the guest, was the failure. No
+failure recorded anywhere since the oracle was replaced (Nov 20
+progressive runs, Nov 23 merged-final runs, seven Phase B runs). The
+pointer-step "mouse click did not change the client framebuffer" flake is
+a separate, still-open issue; nothing is claimed for it.
+
+Next: wire the host-tested `pinned_apps.rs` model into the taskbar with
+persistence, then auto-hide. Alt+Tab stays blocked on input-ABI modifier
+state (kernel files carry another agent's uncommitted edits).
+
 ## OpenCode - Phase B bottom-taskbar core (IN PROGRESS, 2026-11-23)
 
 Branch `phase-b/bottom-taskbar-core` from `master` (`fe56bef7`). Claimed scope:
@@ -8,8 +36,9 @@ Changes so far: Wi-Fi/Bluetooth/Airplane no longer invent state (they read
 "Unavailable" and say so when pressed); the Quick Settings summary is driven
 only by real network status; taskbar alignment (center/left) and icon size
 (small/medium/large) are read from the installed settings record with safe
-per-field fallback. Auto-hide, pinning persistence, minimize/Alt+Tab and the
-keyboard_refresh root cause are NOT done. Host: 6/6 taskbar-preference tests
+per-field fallback. Auto-hide, pinning persistence and Alt+Tab are NOT
+done (minimize is now done and QEMU-verified, and the keyboard_refresh
+root cause is closed -- see the entry above). Host: 6/6 taskbar-preference tests
 pass (run via `rustc --test`, because the shell's `build-std` config breaks
 host cargo builds). Freestanding `cargo clippy --target x86_64-unknown-none -- -D warnings`
 passes. No QEMU claim yet. I deferred moving the repo's `target/` and
