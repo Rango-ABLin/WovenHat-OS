@@ -1104,6 +1104,16 @@ pub(crate) fn protect_user_range_in_inactive(
     protect_user_range_in_impl(address_space, start, size, writable, executable, false)
 }
 
+pub(crate) fn protect_user_range_in(
+    address_space: AddressSpace,
+    start: u64,
+    size: usize,
+    writable: bool,
+    executable: bool,
+) -> Result<(), MapRangeError> {
+    protect_user_range_in_impl(address_space, start, size, writable, executable, true)
+}
+
 fn protect_user_range_in_impl(
     address_space: AddressSpace,
     start: u64,

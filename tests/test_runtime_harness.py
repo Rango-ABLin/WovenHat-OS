@@ -84,6 +84,12 @@ class RuntimeAcceptanceTests(unittest.TestCase):
                        '[S11.TLS] nonzero congruence TLS: PASSED',
                        '[S11.TLS] page-edge TCB: PASSED',
                        '[S11.TLS] template/TCB rollback and fork protection: PASSED',
+                       '[S11.TLS] runtime generation handle and unload: PASSED',
+                       '[S11.TLS] runtime pure-BSS reload: PASSED',
+                       '[S11.RUNTIME] live ELF mapping and execution: PASSED',
+                       '[S11.RUNTIME] symbol publication and unload: PASSED',
+                       '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
+                       '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
                        '[S11.TLS] compiler TLS lifecycle: PASSED',
                        '[S11.2] threads/TLS/join: PASSED'):
             self.assertIn(marker, required)
@@ -133,6 +139,17 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertTrue(any('constructors/destructors Ring-3 execution and teardown' in marker for marker in required))
         self.assertTrue(any('tampered signature rejected' in marker for marker in required))
         self.assertTrue(any('argv failure rollback' in marker for marker in required))
+        for missing in required:
+            with self.subTest(missing=missing):
+                log = '\n'.join(marker for marker in required if marker != missing)
+                self.assertTrue(harness.validation_errors(33, log, required))
+
+    def test_stage11_6_requires_generation_safe_reload(self):
+        required = harness.required_markers('11.6', 4)
+        self.assertIn('[S11.6] module staging rollback: PASSED', required)
+        self.assertIn('[S11.6] generation-safe unload/reload: PASSED', required)
+        self.assertIn('[S11.6] per-thread dynamic TLS isolation: PASSED', required)
+        self.assertIn('[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED', required)
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)

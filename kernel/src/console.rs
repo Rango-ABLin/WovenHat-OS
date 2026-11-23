@@ -284,7 +284,10 @@ impl Console {
 
         self.cursor_x += 6 * self.scale;
 
-        if self.info.is_some_and(|info| self.cursor_x + 6 * self.scale >= info.width) {
+        if self
+            .info
+            .is_some_and(|info| self.cursor_x + 6 * self.scale >= info.width)
+        {
             self.newline();
         }
     }

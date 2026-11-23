@@ -384,6 +384,57 @@ impl Image {
             .map(|(value, _)| value)
     }
 
+    /// Visit every externally visible defined symbol in this image.
+    ///
+    /// Names remain borrowed from the caller-owned ELF buffer and values are
+    /// already load-biased. Returning `false` from the visitor stops the walk
+    /// and makes the operation fail, allowing fixed-capacity publishers to
+    /// reject an image before exposing a partial namespace.
+    pub fn visit_defined_global_symbols(
+        &self,
+        bytes: &[u8],
+        mut visitor: impl FnMut(&[u8], u64) -> bool,
+    ) -> Option<usize> {
+        let dynamic = self.dynamic?;
+        if dynamic.symbol_count == 0 || dynamic.symtab_entry_size != 24 {
+            return Some(0);
+        }
+        let mut count = 0;
+        for index in 1..dynamic.symbol_count {
+            let offset = dynamic
+                .symtab_file_offset
+                .checked_add(index.checked_mul(dynamic.symtab_entry_size)?)?;
+            let symbol = bytes.get(offset..offset.checked_add(24)?)?;
+            let binding = symbol[4] >> 4;
+            let visibility = symbol[5] & 3;
+            let section = u16::from_le_bytes(symbol[6..8].try_into().ok()?);
+            if !matches!(binding, 1 | 2)
+                || !matches!(visibility, 0 | 3)
+                || section == 0
+                || symbol[4] & 0xf == STT_TLS
+            {
+                continue;
+            }
+            let name_offset = u32::from_le_bytes(symbol[..4].try_into().ok()?) as u64;
+            let name = dynamic_string(bytes, dynamic, name_offset)?;
+            if name.is_empty() || name.contains(&0) {
+                continue;
+            }
+            let (_, hidden) = self.symbol_version(bytes, index, true)?;
+            if hidden {
+                continue;
+            }
+            let Some(value) = self.defined_symbol_value(bytes, index) else {
+                continue;
+            };
+            if !visitor(name, value) {
+                return None;
+            }
+            count += 1;
+        }
+        Some(count)
+    }
+
     fn defined_global_symbol_kind(
         &self,
         bytes: &[u8],

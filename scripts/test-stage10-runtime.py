@@ -132,6 +132,12 @@ def required_markers(stage, cpus):
             '[S11.TLS] nonzero congruence TLS: PASSED',
             '[S11.TLS] page-edge TCB: PASSED',
             '[S11.TLS] template/TCB rollback and fork protection: PASSED',
+            '[S11.TLS] runtime generation handle and unload: PASSED',
+            '[S11.TLS] runtime pure-BSS reload: PASSED',
+                       '[S11.RUNTIME] live ELF mapping and execution: PASSED',
+                       '[S11.RUNTIME] symbol publication and unload: PASSED',
+                       '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
+                       '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
@@ -179,6 +185,12 @@ def required_markers(stage, cpus):
             '[S11.5] shared libraries constructors/destructors Ring-3 execution and teardown: PASSED',
             '[S11.5] shared libraries unresolved import rollback: PASSED',
             '[S11.5] shared libraries argv failure rollback: PASSED',
+        ])
+    if stage == '11.6':
+        required.extend([
+            '[S11.6] generation-safe unload/reload: PASSED',
+            '[S11.6] per-thread dynamic TLS isolation: PASSED',
+            '[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED',
         ])
     if stage == '13.11':
         required.extend([

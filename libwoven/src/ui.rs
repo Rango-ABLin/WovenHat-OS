@@ -1440,8 +1440,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, Checkbox, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table, Tabs,
-        DesignTokens, TextField, Theme, Tree, VideoView, WebView, stack_vertical,
+        Button, Checkbox, DesignTokens, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table,
+        Tabs, TextField, Theme, Tree, VideoView, WebView, stack_vertical,
     };
     use crate::{Canvas, InputEvent, Key, layout::Frame};
 
@@ -1738,7 +1738,10 @@ mod tests {
     fn design_tokens_select_accessible_theme_and_motion() {
         let mut settings = crate::accessibility::Settings::new();
         assert_eq!(Theme::for_accessibility(settings), Theme::DARK);
-        assert_eq!(DesignTokens::for_accessibility(settings).motion_normal_ms, 220);
+        assert_eq!(
+            DesignTokens::for_accessibility(settings).motion_normal_ms,
+            220
+        );
 
         settings.high_contrast = true;
         settings.reduced_motion = true;

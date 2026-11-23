@@ -18,6 +18,68 @@ ABI version. A two-second refresh updates only the tray glyphs and an open
 panel; a locally chosen volume is preserved across refreshes because the
 kernel exposes no gain read-back.
 
+## Live runtime ELF graph, TLS, and symbol publication boundary
+
+`RuntimeModuleMap` copies at most 1 MiB from the calling process before parsing,
+uses the production shared-object parser and admitted relocations, and stages
+pages under the exact-task dynamic-module transaction. Page-table mutation is
+performed without holding the process-table lock; the updated address-space
+metadata is published afterward, avoiding the paging/process lock inversion.
+Final segment flags and GNU RELRO are installed before a module generation and
+its bounded exported symbols become visible together.
+
+The per-process scope holds at most 32 names of at most 64 bytes. Lookup checks
+the owning module generation, and final unload removes both mapping and symbols.
+Runtime placement uses the reserved library arena after startup dependency
+slots. `DT_NEEDED` names resolve breadth-first from signed, read-only `/lib`
+packages into a bounded complete scope; SONAME, dependency count, relocation,
+W^X, RELRO, arena size, and contiguous ownership are validated before the root
+generation becomes visible. Duplicate exported names retain the first symbol
+in scope order.
+
+A root PT_TLS template is coupled to that same generation. Mapping allocates a
+distinct initialized block for every live task before publication; any failure
+rolls back the TLS blocks, image graph, and symbols. Final release unmaps both
+the graph and all task-local blocks before descriptor retirement. Dependency-
+local PT_TLS is rejected until runtime graphs have combined TLS layout and
+per-image module offsets; this prevents silently publishing incomplete TLS.
+
+## Generation-tagged runtime TLS transaction boundary
+
+`DynamicTlsMapAll` publishes only after every live process task has received a
+distinct bounded block and returns `(generation << 32) | (module_slot + 1)`.
+Address and range syscalls validate that generation before returning a task's
+mapping. A final release is permitted only to the exact task that owns the
+process-wide dynamic-module transaction; it unmaps leader and auxiliary-thread
+blocks before the descriptor generation can be reused. Recording the owner
+task explicitly is required on SMP: deriving ownership from a CPU's current
+slot would strand a preempted loader forever.
+
+## Per-thread dynamic TLS address geometry
+
+The runtime TLS arena is indexed by `(thread slot, module slot)` after the
+process mmap ASLR displacement. Thread generations prevent a live slot from
+being reused, module generations protect publication, and each 64 KiB cell is
+bounded by `USER_MMAP_MAX_SIZE`. Current-thread lookup uses the mapping owned
+by that thread; startup TLS remains a separate fallback path.
+
+## Runtime module generation boundary
+
+Dynamic-module descriptors remain valid at any nonzero current generation;
+generation 1 is not special. Releasing the final reference invalidates the old
+handle before a slot can be republished. Dynamic TLS modules may have an empty
+file initializer when their declared memory size is nonzero; mapping allocates
+and zero-fills the full block. The Stage 11.6 gate directly enforces both
+contracts on 1/2/4 CPUs.
+
+## Stage 10 exact-source acceptance boundary
+
+Stage 10 acceptance combines the serialized `RUN-STAGE10.7.ps1` preservation
+chain with dedicated `stage10-8-test` and `stage10-9-test` boots on 1/2/4 CPUs.
+The latter pair jointly exercises the Stage 10.10 unified completion runtime.
+Focused passes do not replace the inherited chain; all three boundaries must
+refer to the same source baseline.
+
 ## Stage 9 independent WovenGuard acceptance boundary
 
 The `stage9-test` feature exits immediately after the production boot path has

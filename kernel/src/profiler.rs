@@ -200,19 +200,35 @@ pub fn self_test() -> bool {
     }
 
     let a = &t.slots[0];
-    if a.count != 3 { return false; }
-    if a.sum_tsc != 600 { return false; }
-    if a.min_tsc != 100 { return false; }
-    if a.max_tsc != 300 { return false; }
-    if a.sum_tsc.checked_div(a.count) != Some(200) { return false; } // avg
+    if a.count != 3 {
+        return false;
+    }
+    if a.sum_tsc != 600 {
+        return false;
+    }
+    if a.min_tsc != 100 {
+        return false;
+    }
+    if a.max_tsc != 300 {
+        return false;
+    }
+    if a.sum_tsc.checked_div(a.count) != Some(200) {
+        return false;
+    } // avg
 
     let b = &t.slots[1];
-    if b.count != 1 { return false; }
-    if b.min_tsc != 500 || b.max_tsc != 500 { return false; }
+    if b.count != 1 {
+        return false;
+    }
+    if b.min_tsc != 500 || b.max_tsc != 500 {
+        return false;
+    }
 
     // reset() must clear all slots.
     t.reset();
-    if t.used != 0 { return false; }
+    if t.used != 0 {
+        return false;
+    }
 
     // Filling all MAX_SLOTS slots must not panic; a (MAX_SLOTS + 1)-th
     // distinct key is silently dropped.
@@ -225,7 +241,9 @@ pub fn self_test() -> bool {
         t.record(SUB, sub, i as u64 * 10);
     }
     // Two distinct (SUB, sub) pairs exist; used must be 2.
-    if t.used != 2 { return false; }
+    if t.used != 2 {
+        return false;
+    }
 
     true
 }

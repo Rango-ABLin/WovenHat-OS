@@ -23,15 +23,16 @@ def build(output, rustc='rustc'):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     commands = []
-    inputs = ('library.rs', 'shared-main.rs', 'static-tls.rs', 'tls-threads.rs',
-              'pure-bss-tls.rs')
+    inputs = ('library.rs', 'runtime-library.rs', 'runtime-tls-library.rs', 'shared-main.rs', 'static-tls.rs',
+              'tls-threads.rs', 'pure-bss-tls.rs')
     input_hashes = {name: digest(source / name) for name in inputs}
     builder_hash = digest(Path(__file__).resolve())
 
-    def run(command):
+    def run(command, env=None):
         command = [str(item) for item in command]
         print(json.dumps(command), flush=True)
-        result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+        result = subprocess.run(command, cwd=root, capture_output=True, text=True,
+                                env=env)
         record = dict(command=command, exit_code=result.returncode,
                       stdout=result.stdout, stderr=result.stderr)
         commands.append(record)
@@ -53,21 +54,38 @@ def build(output, rustc='rustc'):
         if not tool.is_file():
             raise RuntimeError(f'missing bundled LLVM tool: {tool}')
 
-    for name in inputs:
+    for name in (name for name in inputs if name != 'tls-threads.rs'):
         command = [rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
                    '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
                    '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large']
-        if name in ('static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs'):
+        if name in ('runtime-tls-library.rs', 'static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs'):
             command.append('-Ztls-model=local-exec')
         run(command + [source / name, '-o', output / (Path(name).stem + '.o')])
 
     library = output / 'libwoven-demo.so'
+    runtime_library = output / 'libwoven-runtime.so'
+    runtime_tls_library = output / 'libwoven-runtime-tls.so'
     shared = output / 'shared-demo'
     tls = output / 'static-tls-demo'
     threads = output / 'tls-threads-demo'
     pure_bss = output / 'pure-bss-tls-demo'
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', library.name, '-z', 'now', '-o', library, output / 'library.o'])
+    run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
+         '-soname', runtime_library.name, '-z', 'now', '-init', 'woven_runtime_init',
+         '-fini', 'woven_runtime_fini', '-o', runtime_library,
+         output / 'runtime-library.o'])
+    run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
+         '-soname', runtime_tls_library.name, '-z', 'now', '-o', runtime_tls_library,
+         output / 'runtime-tls-library.o'])
+    fixture_env = os.environ.copy()
+    fixture_env['WOVENHAT_RUNTIME_MODULE_ELF'] = str(runtime_library)
+    fixture_env['WOVENHAT_RUNTIME_TLS_MODULE_ELF'] = str(runtime_tls_library)
+    run([rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
+         '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
+         '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large',
+         '-Ztls-model=local-exec', source / 'tls-threads.rs', '-o',
+         output / 'tls-threads.o'], env=fixture_env)
     run([linker, '-flavor', 'gnu', '-pie', '--no-dynamic-linker', '--hash-style=sysv',
          '-z', 'now', '--image-base=0x400000000000', '-e', '_start', '-L', output,
          '-lwoven-demo', '-o', shared, output / 'shared-main.o'])
@@ -78,7 +96,7 @@ def build(output, rustc='rustc'):
          '-e', '_start', '-o', threads, output / 'tls-threads.o'])
     run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
          '-e', '_start', '-o', pure_bss, output / 'pure-bss-tls.o'])
-    outputs = (library, shared, tls, threads, pure_bss)
+    outputs = (library, runtime_library, runtime_tls_library, shared, tls, threads, pure_bss)
     report = run([readobj, '--file-headers', '--program-headers', '--dynamic-table',
                   '--relocations', '--symbols', *outputs])
     (output / 'elf-report.txt').write_text(report, encoding='utf-8')

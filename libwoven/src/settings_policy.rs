@@ -33,13 +33,17 @@ mod tests {
     fn patch_is_bounded_and_fixed_width() {
         let mut data = *br#"{"high_contrast":false,"reduced_motion":false}"#;
         assert!(patch_high_contrast(&mut data, true));
-        assert!(core::str::from_utf8(&data)
-            .unwrap()
-            .contains(r#""high_contrast":true "#));
+        assert!(
+            core::str::from_utf8(&data)
+                .unwrap()
+                .contains(r#""high_contrast":true "#)
+        );
         assert!(patch_high_contrast(&mut data, false));
-        assert!(core::str::from_utf8(&data)
-            .unwrap()
-            .contains(r#""high_contrast":false"#));
+        assert!(
+            core::str::from_utf8(&data)
+                .unwrap()
+                .contains(r#""high_contrast":false"#)
+        );
         let mut malformed = *br#"{"schema":"wrong"}"#;
         assert!(!patch_high_contrast(&mut malformed, true));
     }

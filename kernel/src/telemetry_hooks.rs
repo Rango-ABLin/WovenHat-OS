@@ -22,11 +22,14 @@ impl SyscallMetrics {
     pub fn record(&self, latency: u64) {
         self.total_syscalls.fetch_add(1, Ordering::Relaxed);
         self.total_latency.fetch_add(latency, Ordering::Relaxed);
-        
+
         let mut max = self.max_latency.load(Ordering::Relaxed);
         while latency > max {
             match self.max_latency.compare_exchange_weak(
-                max, latency, Ordering::Release, Ordering::Relaxed
+                max,
+                latency,
+                Ordering::Release,
+                Ordering::Relaxed,
             ) {
                 Ok(_) => break,
                 Err(current) => max = current,
@@ -121,7 +124,7 @@ impl TelemetryRegistry {
     pub fn print_summary(&self) {
         let syscall_count = self.syscalls.total_syscalls.load(Ordering::Relaxed);
         let avg_latency = self.syscalls.average_latency();
-        
+
         crate::serial::write_line(format_args!(
             "[TELEMETRY] Syscalls: {}, Avg latency: {} ticks",
             syscall_count, avg_latency
@@ -138,7 +141,7 @@ mod tests {
         let metrics = SyscallMetrics::new();
         metrics.record(100);
         metrics.record(200);
-        
+
         assert_eq!(metrics.total_syscalls.load(Ordering::Relaxed), 2);
         assert_eq!(metrics.average_latency(), 150);
         assert_eq!(metrics.max_latency.load(Ordering::Relaxed), 200);
@@ -149,7 +152,7 @@ mod tests {
         let metrics = SchedulingMetrics::new();
         metrics.record_context_switch();
         metrics.add_run_time(1000);
-        
+
         assert_eq!(metrics.context_switches.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.total_run_time.load(Ordering::Relaxed), 1000);
     }

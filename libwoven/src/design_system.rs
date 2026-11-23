@@ -85,7 +85,11 @@ impl Weave {
     /// The weave colour at a point. Pure and deterministic: asset generators
     /// and the renderer can agree on the same motif without sharing code.
     pub const fn sample(self, x: i32, y: i32) -> u32 {
-        if self.is_highlight(x, y) { self.tint } else { self.shade }
+        if self.is_highlight(x, y) {
+            self.tint
+        } else {
+            self.shade
+        }
     }
 }
 
@@ -212,22 +216,21 @@ impl SemanticPalette {
 /// Keeping it as a table makes WCAG checks exact, allocation-free and
 /// floating-point free in `no_std`.
 const SRGB_LINEAR: [u16; 256] = [
-        0,     3,     6,     9,    12,    15,    18,    21,    24,    27,    30,    33,    37,    40,    44,    48,
-       52,    56,    60,    65,    70,    75,    80,    86,    91,    97,   103,   110,   116,   123,   130,   137,
-      144,   152,   160,   168,   176,   185,   194,   203,   212,   222,   232,   242,   252,   262,   273,   284,
-      296,   307,   319,   331,   343,   356,   369,   382,   395,   409,   423,   437,   452,   467,   482,   497,
-      513,   529,   545,   561,   578,   595,   612,   630,   648,   666,   685,   704,   723,   742,   762,   782,
-      802,   823,   844,   865,   887,   908,   931,   953,   976,   999,  1022,  1046,  1070,  1095,  1119,  1144,
-     1170,  1195,  1221,  1248,  1274,  1301,  1329,  1356,  1384,  1413,  1441,  1470,  1500,  1529,  1559,  1590,
-     1620,  1651,  1683,  1714,  1746,  1779,  1812,  1845,  1878,  1912,  1946,  1981,  2016,  2051,  2086,  2122,
-     2159,  2195,  2232,  2270,  2307,  2346,  2384,  2423,  2462,  2502,  2542,  2582,  2623,  2664,  2705,  2747,
-     2789,  2831,  2874,  2918,  2961,  3005,  3050,  3095,  3140,  3185,  3231,  3278,  3325,  3372,  3419,  3467,
-     3515,  3564,  3613,  3663,  3712,  3763,  3813,  3864,  3916,  3968,  4020,  4072,  4125,  4179,  4233,  4287,
-     4342,  4397,  4452,  4508,  4564,  4621,  4678,  4735,  4793,  4851,  4910,  4969,  5029,  5089,  5149,  5210,
-     5271,  5333,  5395,  5457,  5520,  5583,  5647,  5711,  5776,  5841,  5906,  5972,  6038,  6105,  6172,  6240,
-     6308,  6376,  6445,  6514,  6584,  6654,  6724,  6795,  6867,  6939,  7011,  7084,  7157,  7231,  7305,  7379,
-     7454,  7529,  7605,  7682,  7758,  7835,  7913,  7991,  8070,  8148,  8228,  8308,  8388,  8469,  8550,  8632,
-     8714,  8796,  8879,  8963,  9047,  9131,  9216,  9301,  9387,  9473,  9560,  9647,  9734,  9823,  9911, 10000,
+    0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 37, 40, 44, 48, 52, 56, 60, 65, 70, 75, 80, 86, 91,
+    97, 103, 110, 116, 123, 130, 137, 144, 152, 160, 168, 176, 185, 194, 203, 212, 222, 232, 242,
+    252, 262, 273, 284, 296, 307, 319, 331, 343, 356, 369, 382, 395, 409, 423, 437, 452, 467, 482,
+    497, 513, 529, 545, 561, 578, 595, 612, 630, 648, 666, 685, 704, 723, 742, 762, 782, 802, 823,
+    844, 865, 887, 908, 931, 953, 976, 999, 1022, 1046, 1070, 1095, 1119, 1144, 1170, 1195, 1221,
+    1248, 1274, 1301, 1329, 1356, 1384, 1413, 1441, 1470, 1500, 1529, 1559, 1590, 1620, 1651, 1683,
+    1714, 1746, 1779, 1812, 1845, 1878, 1912, 1946, 1981, 2016, 2051, 2086, 2122, 2159, 2195, 2232,
+    2270, 2307, 2346, 2384, 2423, 2462, 2502, 2542, 2582, 2623, 2664, 2705, 2747, 2789, 2831, 2874,
+    2918, 2961, 3005, 3050, 3095, 3140, 3185, 3231, 3278, 3325, 3372, 3419, 3467, 3515, 3564, 3613,
+    3663, 3712, 3763, 3813, 3864, 3916, 3968, 4020, 4072, 4125, 4179, 4233, 4287, 4342, 4397, 4452,
+    4508, 4564, 4621, 4678, 4735, 4793, 4851, 4910, 4969, 5029, 5089, 5149, 5210, 5271, 5333, 5395,
+    5457, 5520, 5583, 5647, 5711, 5776, 5841, 5906, 5972, 6038, 6105, 6172, 6240, 6308, 6376, 6445,
+    6514, 6584, 6654, 6724, 6795, 6867, 6939, 7011, 7084, 7157, 7231, 7305, 7379, 7454, 7529, 7605,
+    7682, 7758, 7835, 7913, 7991, 8070, 8148, 8228, 8308, 8388, 8469, 8550, 8632, 8714, 8796, 8879,
+    8963, 9047, 9131, 9216, 9301, 9387, 9473, 9560, 9647, 9734, 9823, 9911, 10000,
 ];
 
 /// WCAG relative luminance in `0..=10000` for an opaque `0x00RRGGBB` colour.
@@ -396,15 +399,31 @@ impl IconGrammar {
         let raw_radius = size.saturating_mul(self.corner_radius) / self.grid;
         let radius = if raw_radius < 1 { 1 } else { raw_radius } as usize;
         let half = size / 2;
-        let inset = if self.inner_inset < half { self.inner_inset } else { half };
+        let inset = if self.inner_inset < half {
+            self.inner_inset
+        } else {
+            half
+        };
         let raw_height = size / self.inner_height_divisor;
         let floored_height = if raw_height < 3 { 3 } else { raw_height };
-        let inner_height = if floored_height > size { size } else { floored_height };
+        let inner_height = if floored_height > size {
+            size
+        } else {
+            floored_height
+        };
         let raw_radius_inner = size / self.inner_radius_divisor;
-        let inner_radius = if raw_radius_inner < 2 { 2 } else { raw_radius_inner } as usize;
+        let inner_radius = if raw_radius_inner < 2 {
+            2
+        } else {
+            raw_radius_inner
+        } as usize;
         let raw_span = size / self.glyph_span_divisor;
         let floored_span = if raw_span < 4 { 4 } else { raw_span };
-        let glyph_span = if floored_span > size { size } else { floored_span };
+        let glyph_span = if floored_span > size {
+            size
+        } else {
+            floored_span
+        };
         IconMetrics {
             size,
             radius,
@@ -607,7 +626,11 @@ pub mod wallpaper {
             let row = HEADER_BYTES + (height - 1 - y) * row_bytes;
             for x in 0..width {
                 let band = ((x as i32 + y as i32) / spec.pitch) % 2 == 0;
-                let delta = (if band { spec.weave_delta } else { -spec.weave_delta }) as i32;
+                let delta = (if band {
+                    spec.weave_delta
+                } else {
+                    -spec.weave_delta
+                }) as i32;
                 let offset = row + x * 3;
                 out[offset] = (b + delta).clamp(0, 255) as u8;
                 out[offset + 1] = (g + delta).clamp(0, 255) as u8;
@@ -665,12 +688,24 @@ mod tests {
             assert_ne!(palette.accent, palette.on_accent);
             assert_ne!(palette.focus, palette.surface);
         }
-        assert_eq!(SemanticPalette::resolve(true, true), SemanticPalette::HIGH_CONTRAST);
-        assert_eq!(SemanticPalette::resolve(false, true), SemanticPalette::LIGHT);
-        assert_eq!(SemanticPalette::resolve(false, false), SemanticPalette::DARK);
+        assert_eq!(
+            SemanticPalette::resolve(true, true),
+            SemanticPalette::HIGH_CONTRAST
+        );
+        assert_eq!(
+            SemanticPalette::resolve(false, true),
+            SemanticPalette::LIGHT
+        );
+        assert_eq!(
+            SemanticPalette::resolve(false, false),
+            SemanticPalette::DARK
+        );
         // Shared roles must track the accepted theme exactly.
         assert_eq!(SemanticPalette::DARK.accent, crate::ui::Theme::DARK.accent);
-        assert_eq!(SemanticPalette::LIGHT.accent, crate::ui::Theme::LIGHT.accent);
+        assert_eq!(
+            SemanticPalette::LIGHT.accent,
+            crate::ui::Theme::LIGHT.accent
+        );
         assert_eq!(
             SemanticPalette::HIGH_CONTRAST.accent,
             crate::ui::Theme::HIGH_CONTRAST.accent
@@ -697,7 +732,10 @@ mod tests {
                 "{name}: focus ring on surface"
             );
             for status in [palette.success, palette.warning, palette.danger] {
-                assert!(meets_aa(status, palette.surface), "{name}: status text on surface");
+                assert!(
+                    meets_aa(status, palette.surface),
+                    "{name}: status text on surface"
+                );
             }
             assert!(
                 meets_aa(palette.on_accent, palette.accent),
@@ -793,7 +831,10 @@ mod tests {
         assert_eq!(first, second);
 
         assert_eq!(&first[..2], b"BM");
-        assert_eq!(u32::from_le_bytes(first[2..6].try_into().unwrap()), len as u32);
+        assert_eq!(
+            u32::from_le_bytes(first[2..6].try_into().unwrap()),
+            len as u32
+        );
         assert_eq!(u32::from_le_bytes(first[10..14].try_into().unwrap()), 54);
         assert_eq!(u32::from_le_bytes(first[14..18].try_into().unwrap()), 40);
         assert_eq!(i32::from_le_bytes(first[18..22].try_into().unwrap()), 160);
@@ -819,7 +860,10 @@ mod tests {
         let mut images: Vec<Vec<u8>> = Vec::new();
         for variant in Variant::ALL {
             let mut image = vec![0u8; len];
-            assert_eq!(wallpaper::render_bmp(&variant.spec(320, 200), &mut image), Ok(len));
+            assert_eq!(
+                wallpaper::render_bmp(&variant.spec(320, 200), &mut image),
+                Ok(len)
+            );
             images.push(image);
         }
         assert_ne!(images[0], images[1]);
@@ -851,13 +895,22 @@ mod tests {
         let names = ["dark", "light", "high-contrast"];
         for (variant, name) in Variant::ALL.iter().zip(names) {
             let bytes: &[u8] = match variant {
-                Variant::Dark => include_bytes!("../../assets/wallpapers/wovenhat-weave-dark-320x200.bmp"),
-                Variant::Light => include_bytes!("../../assets/wallpapers/wovenhat-weave-light-320x200.bmp"),
-                Variant::HighContrast => include_bytes!("../../assets/wallpapers/wovenhat-weave-high-contrast-320x200.bmp"),
+                Variant::Dark => {
+                    include_bytes!("../../assets/wallpapers/wovenhat-weave-dark-320x200.bmp")
+                }
+                Variant::Light => {
+                    include_bytes!("../../assets/wallpapers/wovenhat-weave-light-320x200.bmp")
+                }
+                Variant::HighContrast => include_bytes!(
+                    "../../assets/wallpapers/wovenhat-weave-high-contrast-320x200.bmp"
+                ),
             };
             let len = wallpaper::bmp_len(320, 200).unwrap();
             let mut expected = vec![0u8; len];
-            assert_eq!(wallpaper::render_bmp(&variant.spec(320, 200), &mut expected), Ok(len));
+            assert_eq!(
+                wallpaper::render_bmp(&variant.spec(320, 200), &mut expected),
+                Ok(len)
+            );
             assert_eq!(bytes, expected, "asset drift for {name}");
 
             let digest = Sha256::digest(bytes);
@@ -867,12 +920,25 @@ mod tests {
                 hex[index * 2 + 1] = b"0123456789abcdef"[(byte & 0xf) as usize];
             }
             let manifest: &[u8] = match variant {
-                Variant::Dark => include_bytes!("../../assets/wallpapers/weave-dark-320x200.manifest.toml"),
-                Variant::Light => include_bytes!("../../assets/wallpapers/weave-light-320x200.manifest.toml"),
-                Variant::HighContrast => include_bytes!("../../assets/wallpapers/weave-high-contrast-320x200.manifest.toml"),
+                Variant::Dark => {
+                    include_bytes!("../../assets/wallpapers/weave-dark-320x200.manifest.toml")
+                }
+                Variant::Light => {
+                    include_bytes!("../../assets/wallpapers/weave-light-320x200.manifest.toml")
+                }
+                Variant::HighContrast => include_bytes!(
+                    "../../assets/wallpapers/weave-high-contrast-320x200.manifest.toml"
+                ),
             };
-            assert!(manifest.windows(64).any(|window| window == hex), "digest mismatch for {name}");
-            assert!(manifest.windows(b"CC0-1.0".len()).any(|window| window == b"CC0-1.0"));
+            assert!(
+                manifest.windows(64).any(|window| window == hex),
+                "digest mismatch for {name}"
+            );
+            assert!(
+                manifest
+                    .windows(b"CC0-1.0".len())
+                    .any(|window| window == b"CC0-1.0")
+            );
         }
     }
 }

@@ -22,7 +22,12 @@ impl Entry {
         }
         let mut bytes = [0; MAX_NAME_BYTES];
         bytes[..name.len()].copy_from_slice(name.as_bytes());
-        Some(Self { id, name: bytes, name_len: name.len() as u8, directory })
+        Some(Self {
+            id,
+            name: bytes,
+            name_len: name.len() as u8,
+            directory,
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -31,7 +36,10 @@ impl Entry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Error { Full, InvalidEntry }
+pub enum Error {
+    Full,
+    InvalidEntry,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileDialog {
@@ -42,25 +50,46 @@ pub struct FileDialog {
 }
 
 impl Default for FileDialog {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FileDialog {
     pub const fn new() -> Self {
-        Self { entries: [None; MAX_ENTRIES], count: 0, selected: None, open: true }
+        Self {
+            entries: [None; MAX_ENTRIES],
+            count: 0,
+            selected: None,
+            open: true,
+        }
     }
 
-    pub const fn is_open(self) -> bool { self.open }
-    pub const fn len(self) -> usize { self.count }
-    pub const fn is_empty(self) -> bool { self.count == 0 }
-    pub fn selected(&self) -> Option<Entry> { self.selected.and_then(|i| self.entries[i]) }
+    pub const fn is_open(self) -> bool {
+        self.open
+    }
+    pub const fn len(self) -> usize {
+        self.count
+    }
+    pub const fn is_empty(self) -> bool {
+        self.count == 0
+    }
+    pub fn selected(&self) -> Option<Entry> {
+        self.selected.and_then(|i| self.entries[i])
+    }
 
     pub fn push(&mut self, entry: Entry) -> Result<(), Error> {
-        if self.count == MAX_ENTRIES { return Err(Error::Full); }
-        let Some(slot) = self.entries.iter().position(Option::is_none) else { return Err(Error::Full) };
+        if self.count == MAX_ENTRIES {
+            return Err(Error::Full);
+        }
+        let Some(slot) = self.entries.iter().position(Option::is_none) else {
+            return Err(Error::Full);
+        };
         self.entries[slot] = Some(entry);
         self.count += 1;
-        if self.selected.is_none() { self.selected = Some(slot); }
+        if self.selected.is_none() {
+            self.selected = Some(slot);
+        }
         Ok(())
     }
 
@@ -72,10 +101,14 @@ impl FileDialog {
         self.move_selection(-1)
     }
 
-    pub fn cancel(&mut self) { self.open = false; }
+    pub fn cancel(&mut self) {
+        self.open = false;
+    }
 
     fn move_selection(&mut self, direction: isize) -> Option<Entry> {
-        if self.count == 0 { return None; }
+        if self.count == 0 {
+            return None;
+        }
         let start = self.selected.unwrap_or(0);
         for step in 1..=MAX_ENTRIES {
             let index = if direction > 0 {
@@ -99,8 +132,12 @@ mod tests {
     #[test]
     fn navigation_is_bounded_and_deterministic() {
         let mut dialog = FileDialog::new();
-        dialog.push(Entry::new(10, "Documents", true).unwrap()).unwrap();
-        dialog.push(Entry::new(11, "notes.txt", false).unwrap()).unwrap();
+        dialog
+            .push(Entry::new(10, "Documents", true).unwrap())
+            .unwrap();
+        dialog
+            .push(Entry::new(11, "notes.txt", false).unwrap())
+            .unwrap();
         assert_eq!(dialog.selected().unwrap().id, 10);
         assert_eq!(dialog.select_next().unwrap().id, 11);
         assert_eq!(dialog.select_next().unwrap().id, 10);
@@ -117,6 +154,9 @@ mod tests {
         for id in 0..MAX_ENTRIES as u64 {
             dialog.push(Entry::new(id, "x", false).unwrap()).unwrap();
         }
-        assert_eq!(dialog.push(Entry::new(99, "x", false).unwrap()), Err(Error::Full));
+        assert_eq!(
+            dialog.push(Entry::new(99, "x", false).unwrap()),
+            Err(Error::Full)
+        );
     }
 }

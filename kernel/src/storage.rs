@@ -1,9 +1,12 @@
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 use crate::block::BlockDevice;
-use crate::{block_io, fat32, gpt, partition, swap, vfs};
 #[cfg(any(feature = "stage12-3-test", feature = "stage12-5-test"))]
-use crate::volume_crypto::{provision_measured_wrapped_for, WrappedKeyError, ProvisioningEvidence, KeyHandle, KEY_SIZE, WrappedKeyRecord, KeyGeneration};
+use crate::volume_crypto::{
+    provision_measured_wrapped_for, KeyGeneration, KeyHandle, ProvisioningEvidence,
+    WrappedKeyError, WrappedKeyRecord, KEY_SIZE,
+};
+use crate::{block_io, fat32, gpt, partition, swap, vfs};
 
 const READ_ONLY_ATTRIBUTE: u8 = 0x01;
 const DIRECTORY_ATTRIBUTE: u8 = 0x10;
@@ -268,9 +271,7 @@ pub fn mount_ata_root() -> MountStatus {
     status
 }
 
-fn wovenfs_partition(
-    device: &mut impl crate::block::BlockDevice,
-) -> Option<partition::Partition> {
+fn wovenfs_partition(device: &mut impl crate::block::BlockDevice) -> Option<partition::Partition> {
     let partitions = match gpt::fat_partitions(device) {
         Ok(partitions) => partitions,
         Err(_) => {
@@ -313,7 +314,10 @@ fn mount_wovenfs_aliases(device: &mut impl crate::block::BlockDevice) -> MountSt
                 &[0u8; KEY_SIZE],
                 evidence,
                 &WrappedKeyRecord {
-                    identity: KeyGeneration { volume_id: 0, generation: 1 },
+                    identity: KeyGeneration {
+                        volume_id: 0,
+                        generation: 1,
+                    },
                     nonce: 0,
                     ciphertext: [0u8; KEY_SIZE],
                     tag: [0u8; 16],
@@ -1483,13 +1487,14 @@ pub fn ensure_path(path: &str) -> Result<(), EnsureError> {
     }
 
     if mnt_wovenfs() {
-        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks())
-            .map_err(|error| match error {
+        return crate::wfs::ensure_vfs_path(path, crate::timer::ticks()).map_err(
+            |error| match error {
                 crate::wfs::Error::NotFound => EnsureError::NotFound,
                 crate::wfs::Error::NotADirectory => EnsureError::InvalidPath,
                 crate::wfs::Error::InvalidName => EnsureError::InvalidPath,
                 _ => EnsureError::Failed,
-            });
+            },
+        );
     }
 
     if let Ok(stat) = vfs::stat(path) {
@@ -3324,10 +3329,8 @@ pub fn installed_wovenfs_self_test() -> Option<InstalledWovenfsPhase> {
     const PATH: &str = "/mnt/INSTALL.JSON";
     const WRITTEN: &[u8] = b"written\nWovenFS installed boot qualification\n";
     const DELETED: &[u8; 8] = b"deleted\n";
-    let healthy = || {
-        df_mnt().is_ok()
-            && matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches)
-    };
+    let healthy =
+        || df_mnt().is_ok() && matches!(fscheck_mnt(), Ok(report) if report.fs_info_matches);
 
     let mut current = [0u8; 64];
     let Ok(length) = read_disk_file(PATH, 0, &mut current) else {
@@ -3450,8 +3453,7 @@ pub fn fscheck_mnt() -> Result<fat32::CheckReport, SpaceError> {
         return Ok(fat32::CheckReport {
             files: report.files,
             directories: report.directories,
-            total_clusters: u32::try_from(report.total_blocks)
-                .map_err(|_| SpaceError::Failed)?,
+            total_clusters: u32::try_from(report.total_blocks).map_err(|_| SpaceError::Failed)?,
             free_clusters: u32::try_from(report.free_blocks).map_err(|_| SpaceError::Failed)?,
             fs_info_free_count: None,
             fs_info_matches: true,

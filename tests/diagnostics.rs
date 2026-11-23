@@ -10,7 +10,7 @@
 #[path = "../kernel/src/diagnostics.rs"]
 mod diagnostics;
 
-use diagnostics::{format_record, Field, Level, Value, TRUNCATION_MARKER};
+use diagnostics::{Field, Level, TRUNCATION_MARKER, Value, format_record};
 
 /// A second, crate-level check that the public API composes as documented,
 /// independent of the module's in-file tests.

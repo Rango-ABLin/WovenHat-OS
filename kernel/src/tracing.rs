@@ -94,13 +94,7 @@ pub fn span_begin(_subsystem: &'static str, _name: &'static str) -> (u64, u64) {
 /// No-op stub.
 #[cfg(not(all(feature = "tracing", not(test))))]
 #[inline(always)]
-pub fn span_end(
-    _subsystem: &'static str,
-    _name: &'static str,
-    _id: u64,
-    _tsc_start: u64,
-) {
-}
+pub fn span_end(_subsystem: &'static str, _name: &'static str, _id: u64, _tsc_start: u64) {}
 
 // ── RAII guard ────────────────────────────────────────────────────────────────
 
@@ -133,7 +127,12 @@ impl SpanGuard {
         #[cfg(all(feature = "tracing", not(test)))]
         {
             let (id, tsc_start) = span_begin(subsystem, name);
-            SpanGuard { subsystem, name, id, tsc_start }
+            SpanGuard {
+                subsystem,
+                name,
+                id,
+                tsc_start,
+            }
         }
         #[cfg(not(all(feature = "tracing", not(test))))]
         {

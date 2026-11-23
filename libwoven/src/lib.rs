@@ -135,44 +135,44 @@ pub mod terminal {
 }
 pub mod abi;
 pub mod accessibility;
-pub mod audio;
-pub mod clipboard;
-pub mod desktop_services;
-pub mod file_dialog;
 pub mod ai_assistant;
 pub mod ai_ipc;
 pub mod ai_model;
 pub mod ai_monitor;
 pub mod ai_provider;
+pub mod audio;
 pub mod browser;
-pub mod javascript;
+pub mod clipboard;
 pub mod codecs;
+pub mod design_system;
+pub mod desktop_services;
+pub mod dynamic_tls;
+pub mod elf_loader;
+pub mod file_dialog;
 pub mod i18n;
+pub mod icons;
+pub mod identity;
+pub mod installer_ipc;
 pub mod ipp;
 #[cfg(not(target_os = "none"))]
 pub mod ipp_tls;
-pub mod remote_admin;
+pub mod javascript;
 pub mod keyboard_layout;
-pub mod unicode_data;
-pub mod icons;
-pub mod design_system;
-pub mod identity;
-pub mod installer_ipc;
 pub mod media;
+pub mod module_namespace;
 #[path = "net.rs"]
 pub mod network;
-pub mod dynamic_tls;
-pub mod elf_loader;
-pub mod module_namespace;
-pub mod runtime_modules;
 pub mod package;
 pub mod package_ipc;
 pub mod recovery;
+pub mod remote_admin;
+pub mod runtime_modules;
+pub mod search_ipc;
 pub mod semantic_search;
 pub mod settings_policy;
-pub mod search_ipc;
 pub mod store;
 pub mod ui;
+pub mod unicode_data;
 pub mod update_ipc;
 pub mod web;
 
@@ -1406,10 +1406,12 @@ pub mod graphics {
             };
             // `hhea` carries the vertical metrics used for line layout:
             // ascender at +4, descender at +6, line gap at +8.
-            let ascender = read_i16(bytes, hhea_offset + 4).ok_or(TrueTypeError::BadTableDirectory)?;
+            let ascender =
+                read_i16(bytes, hhea_offset + 4).ok_or(TrueTypeError::BadTableDirectory)?;
             let descender =
                 read_i16(bytes, hhea_offset + 6).ok_or(TrueTypeError::BadTableDirectory)?;
-            let line_gap = read_i16(bytes, hhea_offset + 8).ok_or(TrueTypeError::BadTableDirectory)?;
+            let line_gap =
+                read_i16(bytes, hhea_offset + 8).ok_or(TrueTypeError::BadTableDirectory)?;
             if units_per_em == 0
                 || glyph_count == 0
                 || horizontal_metrics == 0
@@ -1615,11 +1617,8 @@ pub mod graphics {
                 } else {
                     loca_offset.checked_add(index.checked_mul(4)?)?
                 };
-                if offset.checked_add(if self.index_to_loc_format == 0 {
-                    2
-                } else {
-                    4
-                })? > loca_offset.checked_add(loca_length)?
+                if offset.checked_add(if self.index_to_loc_format == 0 { 2 } else { 4 })?
+                    > loca_offset.checked_add(loca_length)?
                 {
                     return None;
                 }
@@ -7314,13 +7313,8 @@ pub mod graphics {
             .unwrap_or(0);
 
         let mut pixels = [0_u32; GLYPH_CACHE_PIXELS];
-        let mut canvas = super::Canvas::new(
-            &mut pixels,
-            0,
-            0,
-            GLYPH_CACHE_WIDTH,
-            GLYPH_CACHE_HEIGHT,
-        )?;
+        let mut canvas =
+            super::Canvas::new(&mut pixels, 0, 0, GLYPH_CACHE_WIDTH, GLYPH_CACHE_HEIGHT)?;
         let ascent = face.ascent_px(scale);
         let mut renderer = Renderer::new(&mut canvas);
         if face
@@ -7349,8 +7343,8 @@ pub mod graphics {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            let slot = RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed)
-                % GLYPH_CACHE_CAPACITY;
+            let slot =
+                RASTER_GLYPH_CACHE.next.fetch_add(1, Ordering::Relaxed) % GLYPH_CACHE_CAPACITY;
             // SAFETY: busy is held exclusively for this access.
             unsafe {
                 (*RASTER_GLYPH_CACHE.entries.get())[slot] = RasterGlyphCacheEntry {
@@ -7366,10 +7360,7 @@ pub mod graphics {
             RASTER_GLYPH_CACHE.busy.store(false, Ordering::Release);
         }
         output.copy_from_slice(&alpha);
-        Some(GlyphCells {
-            advance,
-            bearing_x,
-        })
+        Some(GlyphCells { advance, bearing_x })
     }
 
     pub(crate) fn load_system_font_face() -> Option<&'static TrueTypeFace<'static>> {
@@ -7393,9 +7384,8 @@ pub mod graphics {
                 return None;
             };
             // SAFETY: the mapping remains valid until process teardown.
-            let face = unsafe {
-                core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face)
-            };
+            let face =
+                unsafe { core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face) };
             unsafe {
                 *SYSTEM_FACE_CACHE.face.get() = Some(face);
             }
@@ -11219,7 +11209,13 @@ pub mod graphics {
         /// interpolated by row instead of constant, so chrome like the
         /// Start button can carry the same top-lit look as the window
         /// title bars without a separate flat-vs-gradient special case.
-        pub fn rounded_rect_gradient(&mut self, rect: Rect, radius: usize, top: Color, bottom: Color) {
+        pub fn rounded_rect_gradient(
+            &mut self,
+            rect: Rect,
+            radius: usize,
+            top: Color,
+            bottom: Color,
+        ) {
             if rect.is_empty() {
                 return;
             }
@@ -13081,7 +13077,11 @@ pub mod syscall {
     ///
     /// # Safety
     /// `initializer` must point to readable WovenHat userspace memory.
-    pub unsafe fn dynamic_tls_validate(initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+    pub unsafe fn dynamic_tls_validate(
+        initializer: u64,
+        initializer_len: u64,
+        memory_size: u64,
+    ) -> u64 {
         let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
         unsafe { invoke(148, initializer, packed, 0) }
     }
@@ -13091,11 +13091,40 @@ pub mod syscall {
     /// # Safety
     /// The caller must own the dynamic-module transaction and provide readable
     /// userspace initializer memory.
-    pub unsafe fn dynamic_tls_map_all(module: u64, initializer: u64, initializer_len: u64, memory_size: u64) -> u64 {
+    pub unsafe fn dynamic_tls_map_all(
+        module: u64,
+        initializer: u64,
+        initializer_len: u64,
+        memory_size: u64,
+    ) -> u64 {
         let packed = (initializer_len << 32) | (memory_size & 0xffff_ffff);
         unsafe { invoke(149, module, initializer, packed) }
     }
 
+    /// Map and publish one bounded self-contained ELF shared object.
+    ///
+    /// # Safety
+    /// The caller must own the dynamic-module transaction and `image` must
+    /// reference `image_len` readable userspace bytes for the duration of the
+    /// call. `module` is a 1-based slot.
+    pub unsafe fn runtime_module_map(image: u64, image_len: u64, module: u64) -> u64 {
+        unsafe { invoke(156, image, image_len, module) }
+    }
+
+    /// Resolve an exact exported name in the current process runtime scope.
+    ///
+    /// # Safety
+    /// `name` must reference `name_len` readable userspace bytes.
+    pub unsafe fn runtime_symbol_lookup(name: u64, name_len: u64) -> u64 {
+        unsafe { invoke(157, name, name_len, 0) }
+    }
+
+    /// Return the next generation-owned runtime lifecycle callback.
+    /// `phase` is zero for constructors and one for destructors. A zero return
+    /// means that phase is drained; `u64::MAX` means the request was rejected.
+    pub fn runtime_lifecycle_next(handle: u64, phase: u64) -> u64 {
+        unsafe { invoke(158, handle, phase, 0) }
+    }
 
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].
@@ -14258,7 +14287,8 @@ impl<'a> Canvas<'a> {
         // canvas pixel back into the mask's own coordinates, then clamp the
         // run to the mask so a blit whose origin is offset from the canvas
         // origin cannot read past `alpha`.
-        let mask_column = i128::try_from(column).unwrap_or(0) - (i128::from(x) - i128::from(self.x));
+        let mask_column =
+            i128::try_from(column).unwrap_or(0) - (i128::from(x) - i128::from(self.x));
         let mask_row = i128::try_from(row).unwrap_or(0) - (i128::from(y) - i128::from(self.y));
         let source_column = usize::try_from(mask_column.max(0)).unwrap_or(0);
         let source_row = usize::try_from(mask_row.max(0)).unwrap_or(0);
@@ -14312,7 +14342,10 @@ impl<'a> Canvas<'a> {
             };
             for row in 0..glyph.len() as i32 {
                 for column in 0..font::WIDTH as i32 {
-                    let (px, py) = (cursor_x.saturating_add(column), cursor_y.saturating_add(row));
+                    let (px, py) = (
+                        cursor_x.saturating_add(column),
+                        cursor_y.saturating_add(row),
+                    );
                     if bit_at(row, column) {
                         self.set(px, py, color);
                         continue;
@@ -14443,9 +14476,8 @@ impl<'a> Canvas<'a> {
             if let Some(left) = previous
                 && let Some(kern) = face.kerning(left, character)
             {
-                pen_x = pen_x.saturating_add(
-                    i32::from(kern).saturating_mul(i32::from(size)) / units,
-                );
+                pen_x =
+                    pen_x.saturating_add(i32::from(kern).saturating_mul(i32::from(size)) / units);
             }
             let mut alpha = [0_u8; crate::graphics::GLYPH_CACHE_PIXELS];
             let mut cells = crate::graphics::cached_glyph(face, character, size, &mut alpha);
@@ -15910,8 +15942,15 @@ pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, Error> {
     if key.is_empty() || key.len() >= 96 || out.is_empty() || out.len() > 96 {
         return Err(Error::Failed);
     }
-    check(unsafe { syscall::invoke(syscall::ENV_GET, key.as_ptr() as u64, key.len() as u64, out.as_mut_ptr() as u64) })
-        .map(|length| length as usize)
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_GET,
+            key.as_ptr() as u64,
+            key.len() as u64,
+            out.as_mut_ptr() as u64,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Set one bounded environment value.
@@ -15920,7 +15959,15 @@ pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), Error> {
         return Err(Error::Failed);
     }
     let packed = key.len() as u64 | ((value.len() as u64) << 32);
-    check(unsafe { syscall::invoke(syscall::ENV_SET, key.as_ptr() as u64, packed, value.as_ptr() as u64) }).map(|_| ())
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_SET,
+            key.as_ptr() as u64,
+            packed,
+            value.as_ptr() as u64,
+        )
+    })
+    .map(|_| ())
 }
 
 /// Return the number of inherited environment entries.
@@ -15933,8 +15980,15 @@ pub fn env_entry(index: usize, out: &mut [u8]) -> Result<usize, Error> {
     if out.is_empty() || out.len() > 96 {
         return Err(Error::Failed);
     }
-    check(unsafe { syscall::invoke(syscall::ENV_ENTRY, index as u64, out.as_mut_ptr() as u64, out.len() as u64) })
-        .map(|length| length as usize)
+    check(unsafe {
+        syscall::invoke(
+            syscall::ENV_ENTRY,
+            index as u64,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Wait for a child process, returning its zero-extended 32-bit exit payload.
@@ -16505,7 +16559,10 @@ mod tests {
             Transform::rotate(-90),
             Transform::new(0, 1 << 16, -(1 << 16), 0, 0, 0)
         );
-        assert_eq!(Transform::rotate(180), Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0));
+        assert_eq!(
+            Transform::rotate(180),
+            Transform::new(-(1 << 16), 0, 0, -(1 << 16), 0, 0)
+        );
 
         let diagonal = Transform::rotate(45);
         assert!(diagonal.xx > 46_000 && diagonal.xx < 47_000);

@@ -1,6 +1,6 @@
 # Stage status
 
-## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - IMPLEMENTED / BUILD PENDING CONCURRENT EDIT
+## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in
 `apps/woven-shell/src/status.rs` and wired it into `apps/woven-shell/src/main.rs`:
@@ -103,6 +103,130 @@ failures). No device was opened, written, or rebooted. Native (Z3) qualification
 remains open pending a spare non-boot device, Administrator elevation, and
 signed destructive authorization. Evidence under
 `audit-artifacts/physical-*` and `audit-artifacts/hardware-qualification-*`.
+
+## Stage 11 runtime dependency graphs and TLS coupling - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Live runtime mapping now resolves a bounded breadth-first `DT_NEEDED` graph
+from signed, read-only `/lib` packages, validates the complete scope, maps the
+graph into one owned arena, applies admitted relocations, W^X and RELRO, and
+publishes the root generation and first-definition symbol scope atomically.
+Rollback unmaps the entire unpublished graph. Root-image PT_TLS is coupled to
+the same generation: every live task receives a distinct initialized block,
+and final release removes all TLS blocks, graph pages, and symbols before the
+generation can be reused. Dependency-local PT_TLS remains explicitly rejected
+pending a combined graph TLS layout.
+
+Exact-source QEMU acceptance passed on 1/2/4 CPUs for both Stage 11.2 TLS and
+Stage 11.6. The gates require `[S11.RUNTIME] ELF and PT_TLS atomic coupling:
+PASSED` and `[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED`.
+Evidence is under `audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954147*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795430*`. Warning-denying affected-
+feature and all-target Clippy pass, as do 33 ELF tests, 263 libwoven/typography
+tests (one existing ignored fixture), and 19 fixture/harness tests.
+
+Runtime constructor/destructor ownership remains the next live-loader Stage 11
+requirement; this acceptance does not claim dependency-local TLS support.
+
+## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
+
+The production syscall boundary now copies and validates a bounded ELF shared
+object, stages its segments in the running process, applies the already admitted
+relocations, enforces final W^X and RELRO protections, and atomically publishes
+the generation-tagged module descriptor with a fixed-capacity exported-symbol
+scope. Exact-name lookup returns only symbols belonging to live generations;
+final-reference unload removes the symbols and shared mapping before retiring
+the descriptor. `libwoven` exposes the raw map and lookup ABI.
+
+The Ring-3 compiler fixture embeds a separately linked shared object, maps it
+after process start, resolves and executes `woven_runtime_answer` (returning
+77), unloads it, and verifies that lookup becomes stale. Exact-final-source
+Stage 11.2 TLS boots pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795411*`; Stage 11.6 staging and
+rollback preservation passes on 1/2/4 CPUs. Warning-denying affected-feature
+and all-target Clippy, 33 ELF tests, 263 libwoven/typography tests (one existing
+ignored fixture), and 19 harness tests pass.
+
+This slice intentionally accepts only self-contained, non-TLS runtime objects
+with contiguous mapped segments. Runtime `DT_NEEDED` graph extension, dynamic
+TLS coupling, and constructor/destructor ownership remain separate Stage 11
+requirements.
+
+## Stage 11 generation-tagged runtime TLS lifecycle - 2026-11-22 - ACCEPTED (BOUNDED)
+
+Runtime TLS mapping now returns a generation-tagged module handle, resolves
+that handle against the calling task's block, rejects stale generations, and
+supports zero-initializer pure-BSS reloads. Final-reference release, while the
+process-wide module transaction is held, unmaps every live task's block before
+retiring the descriptor. The transaction records the exact owning task so an
+SMP preemption cannot permanently exclude that loader task from scheduling.
+
+The strengthened compiler fixture exercises initialized generation 1,
+retain/release, final unload, stale-handle rejection, generation-2 same-slot
+pure-BSS reload, and final teardown through the syscall ABI. Exact-final-source
+Stage 11.2 TLS boots pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795350*`. Neighboring ASLR and Stage
+11.6 rollback gates pass on 1/2/4 CPUs, all affected feature and host-target
+Clippy runs pass with warnings denied, and 19 loader/harness host tests pass.
+
+This closes the bounded runtime-TLS generation, lookup, quiescence and teardown
+slice. Full Stage 11 remains open for live runtime image mapping, symbol-scope
+publication, constructor/destructor ownership and the remaining documented
+compiler/runtime interoperability breadth.
+
+## Stage 11 per-thread runtime TLS arena - 2026-11-21 - ACCEPTED (BOUNDED)
+
+Runtime TLS mappings now include the generation-safe thread slot in their
+virtual address calculation. Two live threads in one shared process address
+space therefore receive distinct blocks for the same dynamic module instead
+of colliding at one address. Current-thread TLS start/size/address resolution
+checks the thread-owned runtime mapping before falling back to startup TLS.
+
+The Stage 11.6 gate writes distinct bytes into two runtime-TLS blocks in one
+address space, verifies isolation, and unmaps both before module teardown. The
+strengthened 11.6 and neighboring 11.2-ASLR gates pass on 1/2/4 CPUs, alongside
+15 harness contracts and warning-denying affected-feature Clippy. Evidence is
+under `audit-artifacts/stage11.6-*cpu-17952329*` and
+`audit-artifacts/stage11.2-aslr-*cpu-17952330*`.
+
+This still does not claim the full runtime loader: generation-tagged TLS ABI,
+final-reference all-thread unmap/quiescence, symbol publication and lifecycle
+callback ownership remain open.
+
+## Stage 11 runtime module generation and pure-BSS TLS - 2026-11-21 - ACCEPTED (BOUNDED)
+
+The exact Stage 10 baseline passes the complete existing Stage 11 matrix: 30
+focused boots across process, thread/TLS, exit status, ASLR, notifications,
+libwoven, graph-loader, compiler-interoperability and staging gates on 1/2/4
+CPUs. During the post-start runtime audit, two uncovered defects were repaired:
+dynamic TLS mapping now admits valid pure-BSS templates with zero initializer
+bytes, and dynamic-module range lookup no longer rejects every generation
+after the first unload/reload.
+
+The strengthened Stage 11.6 gate now requires final-reference unload,
+stale-generation rejection, same-slot publication at generation 2, and exact
+teardown in addition to staged mapping/relocation rollback. Fifteen harness
+contracts, warning-denying host and feature Clippy, and the 1/2/4-CPU gate pass;
+evidence is under `audit-artifacts/stage11.6-{1,2,4}cpu-17952327*`.
+
+This is not full Stage 11 closure. Live-process image mapping, symbol
+publication, per-thread runtime TLS lookup, destructor/quiescent unmap and the
+remaining runtime/allocator compiler matrix still follow in design order.
+
+## Stage 10 exact-current-source acceptance - 2026-11-20 - CLOSED (SOFTWARE/QEMU)
+
+At `b7c27cb5`, the complete Windows Stage 10.7 preservation chain passes host
+build/lint/tests, all 60 memory boots, live network exchange, and isolated
+Stages 10.1-10.7 on 1/2/4 CPUs. The durable transcript is
+`audit-artifacts/stage10-current-source-full-20261120.log`. Dedicated Stage
+10.8 completion-port and Stage 10.9 timer/event gates also pass on 1/2/4 CPUs
+with exit 33; together they execute the accepted Stage 10.10 aggregate runtime
+boundary. Evidence is under `audit-artifacts/stage10.{8,9}-*cpu-1795207*`.
+
+The initial Stage 10.9 build stopped before execution because the volume had
+zero free bytes. Only the verified project-local `.cargo-build` cache was
+cleared; source and evidence were preserved. The clean rebuild and all three
+boots then passed. This closes Stage 10's bounded software/QEMU requirements,
+not native network/storage hardware qualification.
 
 ## Stage 9 current-source WovenGuard gate - 2026-11-20 - CLOSED (BOUNDED SOFTWARE)
 

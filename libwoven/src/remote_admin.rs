@@ -40,11 +40,17 @@ pub struct Request {
 /// listener. Authentication is deliberately not implied by this codec: the
 /// listener must bind it to a TLS client identity before calling `apply` or
 /// `rollback`.
-pub fn encode_request(request: &Request, payload: &[u8], output: &mut [u8]) -> Result<usize, Error> {
+pub fn encode_request(
+    request: &Request,
+    payload: &[u8],
+    output: &mut [u8],
+) -> Result<usize, Error> {
     if request.payload_len != payload.len() || payload.len() > MAX_COMMAND_BYTES {
         return Err(Error::TooLarge);
     }
-    let total = REQUEST_HEADER.checked_add(payload.len()).ok_or(Error::TooLarge)?;
+    let total = REQUEST_HEADER
+        .checked_add(payload.len())
+        .ok_or(Error::TooLarge)?;
     if output.len() < total {
         return Err(Error::TooLarge);
     }
@@ -315,6 +321,9 @@ mod tests {
         encoded[6] = 1;
         assert_eq!(decode_request(&encoded, &mut []), Err(Error::Invalid));
         encoded[6] = 0;
-        assert_eq!(decode_request(&encoded[..REQUEST_HEADER - 1], &mut []), Err(Error::Invalid));
+        assert_eq!(
+            decode_request(&encoded[..REQUEST_HEADER - 1], &mut []),
+            Err(Error::Invalid)
+        );
     }
 }

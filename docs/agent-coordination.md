@@ -10025,3 +10025,93 @@ warning-denying `stage9-test` Clippy, and dedicated 1/2/4-CPU boots pass with
 exit 33. Evidence is under `audit-artifacts/stage9-{1,2,4}cpu-17952046*`.
 No Cargo/QEMU chain is active. Codex is finalizing the required separate stage
 commit before proceeding in roadmap order.
+
+## Codex - exact-current-source Stage 10 acceptance active (2026-11-20)
+
+Stage 9 landed as `b7c27cb5`. Codex now owns the exact-current-source Stage 10
+preservation and focused 10.8/10.9/10.10 acceptance, followed by Stage 11 and
+the remaining dependency-ordered stages. The full Windows chain and all focused
+QEMU gates will be serialized because their ports and output paths collide.
+Do not start another Cargo/QEMU acceptance chain until this entry records that
+the active chain has ended.
+
+Stage 10 is closed on exact current source. The full Windows chain passes all
+60 memory boots, live networking and Stages 10.1-10.7; dedicated 10.8 and 10.9
+gates pass on 1/2/4 CPUs. The first 10.9 compilation hit zero free disk space;
+after exact-path verification, only `.cargo-build` was cleared and the clean
+rerun passed. No Cargo/QEMU chain is active. Stage 11 is next.
+
+## Codex - Stage 11 full-breadth closure active (2026-11-21)
+
+Stage 10 landed as `38fd6d6c`. Codex owns the dependency-ordered Stage 11
+runtime-loading, dynamic-TLS and compiler-interoperability closure. The first
+step is the complete existing Stage 11 matrix on the exact accepted Stage 10
+baseline; QEMU runs remain serialized. Do not concurrently edit
+`kernel/src/userspace*`, `kernel/src/{task,thread,syscall}.rs`,
+`libwoven/src/{runtime_modules,dynamic_tls,module_namespace,elf_loader}.rs`, or
+the Stage 11 fixture/harness files without coordination.
+
+The existing 30-boot Stage 11 matrix passes. The first runtime increment fixes
+pure-BSS dynamic-TLS admission and generation-safe module reload, strengthens
+Stage 11.6 to require stale-handle rejection plus generation-2 reuse, and
+passes host/feature Clippy and 1/2/4-CPU boots. No QEMU chain is active. Full
+post-start mapping/unmap remains in progress and is not yet claimed.
+
+The second runtime increment separates dynamic TLS by thread slot and routes
+lookup through the current thread's owned mapping. Strengthened Stage 11.6 and
+neighboring ASLR gates pass on 1/2/4 CPUs. No QEMU chain is active. Final-
+reference all-thread teardown and the generation-tagged userspace ABI remain
+next; do not treat this as full Stage 11 acceptance.
+
+## Codex - generation-tagged runtime TLS accepted (2026-11-22)
+
+The third runtime increment returns generation-tagged mapping handles, resolves
+them per task, rejects stale generations, supports pure-BSS reload, and performs
+final-reference all-task unmap before descriptor retirement. The first 2-CPU
+run exposed an SMP scheduler self-deadlock: transaction ownership was inferred
+from the current CPU slot, so a preempted loader could never run again. The gate
+now records the exact owner task and the clean exact-source TLS matrix passes on
+1/2/4 CPUs. Neighboring ASLR and Stage 11.6 matrices, affected-feature and host
+Clippy, and 19 host harness tests pass. No Cargo or QEMU chain is active. Live
+runtime image/symbol/callback integration remains open; do not claim full Stage
+11 closure from this bounded acceptance.
+
+## Codex - live runtime ELF and symbol scope accepted (2026-11-23)
+
+Production syscalls now map a copied, self-contained shared object into the
+running process, reuse admitted relocation and rollback, install W^X/RELRO,
+publish a bounded generation-checked symbol scope, and remove mapping plus
+symbols on final unload. The initial boot exposed a process-table-to-paging lock
+inversion; live page-table work now occurs on a transaction-quiesced local
+address-space snapshot before metadata publication. The final Ring-3 fixture
+maps, resolves, executes and unloads a real Rust/LLD shared object on 1/2/4
+CPUs. Stage 11.6 rollback preservation, host suites and warning-denying Clippy
+pass. No Cargo/QEMU chain is active. Runtime dependency graphs, TLS coupling
+and lifecycle callbacks remain open.
+
+## Codex - runtime dependency graphs and TLS coupling accepted (2026-11-23)
+
+The live mapper now loads a bounded breadth-first graph from signed read-only
+`/lib` packages, validates its complete scope, maps and protects it as one
+generation-owned arena, and publishes first-definition symbols atomically.
+Root PT_TLS is coupled to that generation with distinct all-task mappings and
+rollback/final-release cleanup. Dependency-local PT_TLS fails closed pending a
+combined graph TLS layout. Exact-source Stage 11.2 TLS and Stage 11.6 gates pass
+on 1/2/4 CPUs; affected-feature/all-target Clippy, 33 ELF tests, 263
+libwoven/typography tests (one ignored), and 19 harness tests pass. No Cargo or
+QEMU chain is active. Runtime lifecycle callbacks remain next.
+
+## Codex - live runtime lifecycle ownership active (2026-11-23)
+
+Codex owns the focused runtime `DT_INIT`/`DT_FINI` and array lifecycle slice.
+The implementation will reuse startup dependency ordering, bind callback
+cursors to the generation and exact transaction owner, reject premature final
+unload after initialization begins, and preserve rollback for callbacks that
+were never started. Cargo and QEMU work remains serialized; do not concurrently
+edit the Stage 11 runtime loader, task/syscall ABI, or loader fixtures.
+
+Codex resumed this exact in-progress slice at `dae1582a` on 2026-11-23. The
+four existing lifecycle edits are retained as the active working set; no other
+owner's files will be staged or overwritten. Focused compile and fixture
+contracts run before any serialized QEMU acceptance chain. No Cargo/QEMU chain
+is active at this handoff update.

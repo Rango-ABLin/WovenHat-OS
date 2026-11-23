@@ -26,8 +26,8 @@ use crate::diagnostics::Level;
 
 #[cfg(feature = "log-filter")]
 mod active {
-    use core::sync::atomic::{AtomicU8, Ordering};
     use crate::diagnostics::Level;
+    use core::sync::atomic::{AtomicU8, Ordering};
 
     // Level is #[repr(u8)] so the discriminants are 0..4 in declaration order.
     pub const fn level_to_u8(l: Level) -> u8 {
@@ -110,29 +110,51 @@ pub fn min_level() -> Level {
 #[cfg(any(test, feature = "stage32-7-test"))]
 pub fn self_test() -> bool {
     // Level ordering: Error is most severe (lowest discriminant).
-    if !(Level::Error < Level::Warn) { return false; }
-    if !(Level::Warn  < Level::Info) { return false; }
-    if !(Level::Info  < Level::Debug) { return false; }
-    if !(Level::Debug < Level::Trace) { return false; }
+    if !(Level::Error < Level::Warn) {
+        return false;
+    }
+    if !(Level::Warn < Level::Info) {
+        return false;
+    }
+    if !(Level::Info < Level::Debug) {
+        return false;
+    }
+    if !(Level::Debug < Level::Trace) {
+        return false;
+    }
 
     // Filter logic: with min = Info, Error/Warn/Info pass and Debug/Trace drop.
     let min = Level::Info;
     // Pass (level ≤ min means "at least as severe as threshold"):
-    if Level::Error > min { return false; }
-    if Level::Warn  > min { return false; }
-    if Level::Info  > min { return false; }
+    if Level::Error > min {
+        return false;
+    }
+    if Level::Warn > min {
+        return false;
+    }
+    if Level::Info > min {
+        return false;
+    }
     // Drop (level > min means "less severe than threshold"):
-    if !(Level::Debug > min) { return false; }
-    if !(Level::Trace > min) { return false; }
+    if !(Level::Debug > min) {
+        return false;
+    }
+    if !(Level::Trace > min) {
+        return false;
+    }
 
     // get/set round-trip — only testable when the atomics are live.
     #[cfg(feature = "log-filter")]
     {
         let saved = min_level();
         set_min_level(Level::Warn);
-        if min_level() != Level::Warn { return false; }
+        if min_level() != Level::Warn {
+            return false;
+        }
         set_min_level(Level::Trace);
-        if min_level() != Level::Trace { return false; }
+        if min_level() != Level::Trace {
+            return false;
+        }
         set_min_level(saved);
     }
 
@@ -148,8 +170,8 @@ mod tests {
     #[test]
     fn level_ordering_matches_severity() {
         assert!(Level::Error < Level::Warn);
-        assert!(Level::Warn  < Level::Info);
-        assert!(Level::Info  < Level::Debug);
+        assert!(Level::Warn < Level::Info);
+        assert!(Level::Info < Level::Debug);
         assert!(Level::Debug < Level::Trace);
     }
 
@@ -168,15 +190,21 @@ mod tests {
     fn filter_logic_info_threshold() {
         let min = Level::Info;
         assert!(!(Level::Error > min)); // passes
-        assert!(!(Level::Warn  > min)); // passes
-        assert!(!(Level::Info  > min)); // passes
-        assert!(  Level::Debug > min);  // dropped
-        assert!(  Level::Trace > min);  // dropped
+        assert!(!(Level::Warn > min)); // passes
+        assert!(!(Level::Info > min)); // passes
+        assert!(Level::Debug > min); // dropped
+        assert!(Level::Trace > min); // dropped
     }
 
     #[test]
     fn u8_round_trip_all_levels() {
-        for l in [Level::Error, Level::Warn, Level::Info, Level::Debug, Level::Trace] {
+        for l in [
+            Level::Error,
+            Level::Warn,
+            Level::Info,
+            Level::Debug,
+            Level::Trace,
+        ] {
             assert_eq!(u8_to_level(level_to_u8(l)), l);
         }
     }

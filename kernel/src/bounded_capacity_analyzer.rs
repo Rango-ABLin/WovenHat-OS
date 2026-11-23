@@ -118,15 +118,24 @@ impl CapacityAnalyzer {
     }
 
     pub fn total_capacity(&self) -> usize {
-        self.objects[..self.object_count].iter().map(|m| m.capacity).sum()
+        self.objects[..self.object_count]
+            .iter()
+            .map(|m| m.capacity)
+            .sum()
     }
 
     pub fn total_usage(&self) -> usize {
-        self.objects[..self.object_count].iter().map(|m| m.current_usage).sum()
+        self.objects[..self.object_count]
+            .iter()
+            .map(|m| m.current_usage)
+            .sum()
     }
 
     pub fn total_peak(&self) -> usize {
-        self.objects[..self.object_count].iter().map(|m| m.peak_usage).sum()
+        self.objects[..self.object_count]
+            .iter()
+            .map(|m| m.peak_usage)
+            .sum()
     }
 
     pub fn total_failures(&self) -> u32 {
@@ -243,9 +252,9 @@ impl CapacityTrendAnalyzer {
         }
 
         let recent = &self.snapshots[self.snapshot_count - 3..self.snapshot_count];
-        recent.iter().all(|(usage, capacity)| {
-            (*usage as u64 * 100) / (*capacity as u64) > 70
-        })
+        recent
+            .iter()
+            .all(|(usage, capacity)| (*usage as u64 * 100) / (*capacity as u64) > 70)
     }
 
     pub fn average_utilization(&self) -> u32 {
@@ -256,7 +265,11 @@ impl CapacityTrendAnalyzer {
         let sum: u64 = self.snapshots[..self.snapshot_count]
             .iter()
             .map(|(usage, capacity)| {
-                if *capacity == 0 { 0 } else { (*usage as u64 * 100) / (*capacity as u64) }
+                if *capacity == 0 {
+                    0
+                } else {
+                    (*usage as u64 * 100) / (*capacity as u64)
+                }
             })
             .sum();
 

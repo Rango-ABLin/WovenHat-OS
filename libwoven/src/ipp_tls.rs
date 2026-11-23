@@ -89,7 +89,8 @@ impl SecureTransport for RustlsTransport {
         stream
             .set_write_timeout(Some(self.timeout))
             .map_err(|_| Error::Connect)?;
-        let name = ServerName::try_from(endpoint.host.to_owned()).map_err(|_| Error::Certificate)?;
+        let name =
+            ServerName::try_from(endpoint.host.to_owned()).map_err(|_| Error::Certificate)?;
         let connection = ClientConnection::new(Arc::clone(&self.config), name)
             .map_err(|_| Error::Certificate)?;
         let mut tls = StreamOwned::new(connection, stream);
@@ -114,7 +115,10 @@ impl SecureTransport for RustlsTransport {
                 return Err(Error::Read);
             }
             length += read;
-            if let Some(end) = raw[..length].windows(4).position(|window| window == b"\r\n\r\n") {
+            if let Some(end) = raw[..length]
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+            {
                 break end + 4;
             }
             if length > MAX_HTTP_HEADERS {
@@ -170,9 +174,10 @@ fn content_length(headers: &[u8]) -> Option<usize> {
 }
 
 fn has_chunked_encoding(headers: &[u8]) -> bool {
-    headers
-        .split(|byte| *byte == b'\n')
-        .any(|line| line.windows(7).any(|window| window.eq_ignore_ascii_case(b"chunked")))
+    headers.split(|byte| *byte == b'\n').any(|line| {
+        line.windows(7)
+            .any(|window| window.eq_ignore_ascii_case(b"chunked"))
+    })
 }
 
 #[cfg(test)]
