@@ -4324,6 +4324,57 @@ physical-hardware qualification and later production-release requirements
 remain governed by their later roadmap stages.
 ---
 
+## Stage 11 live runtime lifecycle acceptance - 2026-11-23
+
+This focused increment extends the already accepted startup lifecycle parser to
+post-start runtime modules. Modified source is limited to the kernel lifecycle
+ownership table and the compiler fixtures/link command, plus architecture,
+status, audit, and coordination records. It adds no syscall number or broad
+capability: syscall 158 remains transaction-owner-only and consumes a
+generation-tagged handle. No unchecked userspace pointer is retained, no
+callback runs in kernel mode, and final release removes lifecycle metadata with
+the mapped image and symbol scope.
+
+Validation on exact source: Stage 11.2 and Stage 11.6 pass on 1/2/4 CPUs with
+exit 33; `cargo clippy -p wovenhat-kernel --target x86_64-unknown-none
+--features stage11-2-test -- -D warnings` and `cargo clippy --all-targets -- -D
+warnings` pass; 33 `elf_scope` tests, 256 libwoven tests with one pre-declared
+ignored fixture, and 19 Python fixture/harness contracts pass. Evidence is in
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795432*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795432*`.
+
+Known limit: cursor advancement is intentionally at-most-once and occurs before
+return to Ring 3. Termination between retrieval and invocation fails closed by
+leaving final unload blocked. A separately designed recovery/cancellation
+contract is required before claiming lifecycle recovery under arbitrary task
+death. Dependency-local TLS and full Stage 11 breadth also remain open.
+
+---
+
+## Stage 11 runtime transaction owner-death audit - 2026-11-23
+
+The exact-owner scheduler record was not enforced at every syscall: the common
+predicate compared only the process ID. It also had no recovery when the task
+died, leaving the global gate permanently owned. The repair checks the exact
+task, releases a dead owner's global gate, and quarantines the abandoned
+process while a sibling can execute. This prevents cross-task entry and false
+lifecycle completion.
+
+State is fixed-capacity (`MAX_PROCESSES`), scheduler-lock-owned, and reclaimed
+after process task retirement. No ABI or capability was added, and recovery
+does not change a callback cursor. Exact-final-source Stage 11.6 and Stage 11.2
+pass on 1/2/4 CPUs under `audit-artifacts/stage11.6-{1,2,4}cpu-17954334*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795433*`. Build, warning-denying affected
+and all-target Clippy, formatter checks, 19 fixture contracts, 33 ELF tests,
+and 256 libwoven tests with one existing ignored fixture pass.
+
+The shared `kernel/src/block.rs` source is visited through different workspace
+edition contexts. Fully qualifying `Layout` and `alloc_zeroed` removes their
+edition-dependent import-order conflict, so `cargo fmt --all --check` is stable
+without a formatting suppression.
+
+---
+
 ## Source: docs/audit-stage11-lifecycle-2026-10-20.md
 
 # Stage 11 lifecycle callback audit â€” 2026-10-20
@@ -16459,3 +16510,35 @@ The read-only host inventory
 after the QEMU matrix. It reports 8.21 GiB installed RAM and
 `PhysicalTestPerformed=false`; it changes no firmware, boot configuration,
 disk, or device state and cannot substitute for an authorized native test.
+## Stage 11 runtime dependency PT_TLS template audit (2026-11-23)
+
+The previous runtime graph rejected any dependency containing `PT_TLS`.  The
+linker now plans the entire dependency graph before commit, aligns every TLS
+image, copies only parser-validated initializer bytes, zero-fills BSS tails, and
+rejects combined storage over 4 KiB.  The load result carries the generation and
+the complete immutable template to the task layer.  The task layer maps it into
+all existing threads through the established dynamic-TLS publication
+transaction and releases the module generation on any mapping failure.
+
+Acceptance added a dependency with an eight-byte initializer and eight-byte BSS
+tail.  Stage 11.6 proved the combined template and existing graph resolution on
+1/2/4 CPUs.  Stage 11.2 reruns on 1/2/4 CPUs preserved scheduler-backed thread,
+TLS, and join behavior.  Target/host Clippy, the target-aware kernel build, the
+runtime harness tests, 33 ELF scope tests, and 256 passing `libwoven` tests also
+passed.  The attempted generic `cargo build --workspace` is not a valid build
+gate for the freestanding kernel because it selects the host target; the
+documented `cargo build -p wovenhat-kernel --target x86_64-unknown-none` passed.
+
+Audit boundary: this closes dependency template storage and lifecycle only.
+TLS relocation models, general-dynamic/TLSDESC lookup, per-image module offsets,
+and a live compiler-generated dependency exercise remain open and fail closed.
+
+Follow-up audit: the graph plan now retains each image's aligned offset.
+Runtime `R_X86_64_DTPMOD64` is relocated to the generation-tagged graph handle
+and `R_X86_64_DTPOFF64` to the checked image plus TLS-symbol offset. The handle
+is computed only for an inactive descriptor and verified against the generation
+returned by publication. The strengthened Stage 11.6 fixture proves offsets
+0/16, exact relocation values, distinct initializer/BSS contents, and atomic
+publication on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
+dependency execution and general-dynamic/TLSDESC remain open.

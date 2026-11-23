@@ -23,8 +23,9 @@ def build(output, rustc='rustc'):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     commands = []
-    inputs = ('library.rs', 'runtime-library.rs', 'runtime-tls-library.rs', 'shared-main.rs', 'static-tls.rs',
-              'tls-threads.rs', 'pure-bss-tls.rs')
+    inputs = ('library.rs', 'runtime-library.rs', 'runtime-tls-library.rs',
+              'runtime-tls-dependency.rs', 'runtime-tls-root.rs', 'shared-main.rs',
+              'static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs')
     input_hashes = {name: digest(source / name) for name in inputs}
     builder_hash = digest(Path(__file__).resolve())
 
@@ -60,11 +61,15 @@ def build(output, rustc='rustc'):
                    '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large']
         if name in ('runtime-tls-library.rs', 'static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs'):
             command.append('-Ztls-model=local-exec')
+        elif name == 'runtime-tls-dependency.rs':
+            command.append('-Ztls-model=global-dynamic')
         run(command + [source / name, '-o', output / (Path(name).stem + '.o')])
 
     library = output / 'libwoven-demo.so'
     runtime_library = output / 'libwoven-runtime.so'
     runtime_tls_library = output / 'libwoven-runtime-tls.so'
+    runtime_tls_dependency = output / 'libwoven-runtime-tls-dependency.so'
+    runtime_tls_root = output / 'libwoven-runtime-tls-root.so'
     shared = output / 'shared-demo'
     tls = output / 'static-tls-demo'
     threads = output / 'tls-threads-demo'
@@ -78,9 +83,16 @@ def build(output, rustc='rustc'):
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', runtime_tls_library.name, '-z', 'now', '-o', runtime_tls_library,
          output / 'runtime-tls-library.o'])
+    run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
+         '-soname', runtime_tls_dependency.name, '-z', 'now', '-o', runtime_tls_dependency,
+         output / 'runtime-tls-dependency.o'])
+    run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv', '-z', 'now',
+         '-L', output, '-lwoven-runtime-tls-dependency', '-o', runtime_tls_root,
+         output / 'runtime-tls-root.o'])
     fixture_env = os.environ.copy()
     fixture_env['WOVENHAT_RUNTIME_MODULE_ELF'] = str(runtime_library)
     fixture_env['WOVENHAT_RUNTIME_TLS_MODULE_ELF'] = str(runtime_tls_library)
+    fixture_env['WOVENHAT_RUNTIME_TLS_ROOT_ELF'] = str(runtime_tls_root)
     run([rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
          '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
          '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large',
@@ -96,10 +108,17 @@ def build(output, rustc='rustc'):
          '-e', '_start', '-o', threads, output / 'tls-threads.o'])
     run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
          '-e', '_start', '-o', pure_bss, output / 'pure-bss-tls.o'])
-    outputs = (library, runtime_library, runtime_tls_library, shared, tls, threads, pure_bss)
+    outputs = (library, runtime_library, runtime_tls_library, runtime_tls_dependency,
+               runtime_tls_root, shared, tls, threads, pure_bss)
     report = run([readobj, '--file-headers', '--program-headers', '--dynamic-table',
                   '--relocations', '--symbols', *outputs])
     (output / 'elf-report.txt').write_text(report, encoding='utf-8')
+    for required in ('R_X86_64_DTPMOD64 WOVEN_RUNTIME_DEPENDENCY_TLS',
+                     'R_X86_64_DTPOFF64 WOVEN_RUNTIME_DEPENDENCY_TLS',
+                     'R_X86_64_JUMP_SLOT __tls_get_addr',
+                     'Shared library: [libwoven-runtime-tls-dependency.so]'):
+        if required not in report:
+            raise RuntimeError(f'compiler runtime TLS fixture missing {required!r}')
     report = run([objdump, '--disassemble', *outputs])
     (output / 'disassembly.txt').write_text(report, encoding='utf-8')
     if input_hashes != {name: digest(source / name) for name in inputs}:

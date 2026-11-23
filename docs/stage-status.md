@@ -75,6 +75,30 @@ at the top of `main.rs`. The Desktop QEMU run is blocked on a concurrent
 acceptance chain that uses `target/` and `.cargo-build/`; those directories
 are to be redirected to D: once it finishes.
 
+## Volume read-back for the status indicator - 2026-11-23 - ACCEPTED (BOUNDED)
+
+The volume glyph now displays the kernel's last applied output percentage
+instead of a shell-local guess. The HDA driver stores the percent it programs
+into the amplifier; an always-compiled `kernel/src/audio_status.rs` publishes
+`(ready, percent)` so syscall 248 can report it in a version-2 `SystemStatus`
+record (the version-1 link fields are unchanged). Muting keeps the last
+non-zero level for restore, and an older version-1 kernel still gets the
+previous audio-presence behaviour. The always-compiled module is deliberate:
+`hda` is absent in `qemu-test` builds, and the first gate run caught that
+feature-gate defect before acceptance.
+
+Validation: warning-denying kernel Clippy in default and `qemu-test` configs,
+shell target and workspace all-targets Clippy, and 6/6 isolated model/glyph
+host tests pass. The full `RUN-STAGE10.7.ps1` chain passed, and baseline-
+enforced desktop qualification passed at 1/2/4 CPUs
+(`audit-artifacts/volume-readback-1cpu`, `volume-readback-2cpu-r2`,
+`volume-readback-4cpu-r2`, and after merging the upstream runtime-TLS commits,
+`volume-readback-merged-{1,2}cpu` / `volume-readback-merged-4cpu-r2`). One
+2-CPU run missed the fixed startup limit by 265 ms and one 4-CPU run missed the
+`WovenFiles: pointer cancelled` input marker; both were reruns with unchanged
+limits and passed. No assertion, timeout or baseline was changed. Battery remains explicitly unavailable: there
+is no ACPI battery driver, so no charge level is fabricated.
+
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in
@@ -208,6 +232,56 @@ remains open pending a spare non-boot device, Administrator elevation, and
 signed destructive authorization. Evidence under
 `audit-artifacts/physical-*` and `audit-artifacts/hardware-qualification-*`.
 
+## Stage 11 runtime transaction owner-death recovery - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Runtime-module authorization now requires both the recorded process and exact
+scheduler task. If that task dies or disappears, the scheduler releases the
+global gate so unrelated processes retain loader service. The abandoned
+process enters a fixed-capacity quarantine: surviving siblings cannot begin a
+new module transaction and advance past a callback the dead owner may never
+have executed. Quarantine ends only after no executable task remains.
+
+The Stage 11.6 probe requires live-owner depth retention, sibling denial,
+dead-owner release, surviving-process quarantine, and final reclamation. Stage
+11.6 and the real Stage 11.2 TLS/lifecycle gate pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954334*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795433*`. Build, affected-feature and
+all-target warning-denying Clippy, 19 fixture contracts, 33 ELF tests, 256
+libwoven tests (one existing ignored fixture), and `cargo fmt --all --check`
+pass.
+
+The unrelated shared-source rustfmt failure in `kernel/src/block.rs` was fixed
+by fully qualifying allocator APIs, avoiding contradictory import ordering when
+different workspace edition contexts visit the file. No ABI, capability,
+callback ordering, or timeout changed.
+
+## Stage 11 live runtime lifecycle ownership - 2026-11-23 - ACCEPTED (BOUNDED)
+
+Live runtime images now publish their validated `DT_INIT`, `DT_INIT_ARRAY`,
+`DT_FINI_ARRAY`, and `DT_FINI` schedule into a fixed-capacity kernel lifecycle
+table keyed by address-space root, module slot, and generation. The process-wide
+runtime transaction must remain owned while userspace requests each callback.
+Once initialization starts, final unload fails closed until initialization has
+completed and the reverse-order finalization schedule has been consumed. A
+never-started image remains rollback-safe, and final release clears lifecycle
+state before the module generation can be reused.
+
+The Ring-3 Rust/LLD fixture executes a real `DT_INIT`, observes its mapped state,
+requires premature unload rejection, executes `DT_FINI`, then verifies final
+unload, stale symbol lookup, stale lifecycle lookup, and exact frame recovery.
+Stage 11.2 and neighboring Stage 11.6 gates pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-{1,2,4}cpu-1795432*` and
+`audit-artifacts/stage11.6-{1,2,4}cpu-1795432*`. Warning-denying affected-feature
+and all-target Clippy pass, as do 33 ELF tests, 256 libwoven tests (one existing
+ignored fixture), and 19 fixture/harness contracts.
+
+The callback ABI deliberately advances its kernel cursor before returning an
+address, so a task killed between retrieval and invocation leaves the image
+non-unloadable rather than guessing that user code ran. Recovery for that
+abandoned initialized transaction, dependency-local PT_TLS, and broader
+compiler/runtime interoperability remain open; this is not full Stage 11
+closure.
+
 ## Stage 11 runtime dependency graphs and TLS coupling - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Live runtime mapping now resolves a bounded breadth-first `DT_NEEDED` graph
@@ -230,6 +304,14 @@ tests (one existing ignored fixture), and 19 fixture/harness tests.
 
 Runtime constructor/destructor ownership remains the next live-loader Stage 11
 requirement; this acceptance does not claim dependency-local TLS support.
+
+Dependency-local TLS now has a bounded follow-up: the combined template keeps
+aligned per-image offsets, and runtime `DTPMOD64`/`DTPOFF64` relocations receive
+the generation-tagged graph handle and checked defining-image offset. The
+strengthened Stage 11.6 gate exercises two TLS dependencies (offsets 0 and 16)
+and passes on 1/2/4 CPUs with exit 33 under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
+dependency execution and general-dynamic/TLSDESC remain open and fail closed.
 
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 
@@ -13766,3 +13848,23 @@ marker before its unchanged frame-change assertion and budgets the client
 launch and shell compose phases separately. Committed timing limits remain
 20 s input / 60 s startup / 5 s frame. Full real QEMU desktop journey passes
 at 1, 2 and 4 CPUs (`audit-artifacts/progressive-{1cpu,2cpu-r2,4cpu}`).
+## Stage 11 runtime dependency PT_TLS template increment (2026-11-23)
+
+Accepted as a bounded Stage 11 increment.  Runtime `DT_NEEDED` graphs may now
+contain dependency-local `PT_TLS`: the linker builds an aligned, zero-filled,
+graph-ordered template capped at 4 KiB and publishes it through the existing
+generation-safe per-thread dynamic-TLS transaction.  A publication failure
+unloads the new generation.  No ABI or capability was added.
+
+Validation passed: Stage 11.6 QEMU on 1/2/4 CPUs with the new
+`[S11.RUNTIME] dependency PT_TLS template: PASSED` marker; Stage 11.2 QEMU on
+1/2/4 CPUs; warning-denying `stage11-6-test`, `stage11-2-test`, and host
+all-target Clippy; target-aware kernel build; 19 runtime/fixture harness tests;
+33 ELF scope tests; and 256 `libwoven` tests (one pre-existing ignored).
+Evidence is retained under `audit-artifacts/stage11.6-{1,2,4}cpu-*` and
+`audit-artifacts/stage11.2-{1,2,4}cpu-*`, backed by `D:\WovenHat-OS-output`.
+
+This is not full compiler-transparent dependency TLS.  Runtime TLS relocations,
+general-dynamic/TLSDESC access, per-image offset discovery, and a live
+compiler-generated dependency fixture remain open.  Physical and power-loss
+qualification claims are unchanged.

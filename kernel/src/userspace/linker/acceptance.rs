@@ -22,7 +22,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     write_u64(&mut elf, 32, 64)?;
     write_u16(&mut elf, 52, 64)?;
     write_u16(&mut elf, 54, 56)?;
-    write_u16(&mut elf, 56, 4)?;
+    write_u16(&mut elf, 56, if kind == 2 { 5 } else { 4 })?;
     for (offset, typ, flags, file_offset, address, file_size, memory_size) in [
         (64, 1, 5, 0x1000, base, 0x400, 0x1000),
         (120, 1, 6, 0, base + 0x1000, 0, 0x1000),
@@ -44,6 +44,19 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         write_u64(&mut elf, offset + 32, file_size)?;
         write_u64(&mut elf, offset + 40, memory_size)?;
         write_u64(&mut elf, offset + 48, 0x1000)?;
+    }
+    if kind == 2 {
+        let offset = 288;
+        write_u32(&mut elf, offset, 7)?;
+        write_u32(&mut elf, offset + 4, 4)?;
+        write_u64(&mut elf, offset + 8, 0x13d0)?;
+        write_u64(&mut elf, offset + 16, base + 0x3d0)?;
+        write_u64(&mut elf, offset + 32, 8)?;
+        write_u64(&mut elf, offset + 40, 16)?;
+        write_u64(&mut elf, offset + 48, 8)?;
+        elf[0x13d0..0x13d8].copy_from_slice(
+            &0x5b_u64.to_le_bytes(),
+        );
     }
     if matches!(kind, 8 | 9) {
         // Keep the lifecycle marker in a writable BSS page outside the
@@ -229,6 +242,45 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
     } else {
         elf[0x1020..0x1026].copy_from_slice(&[0xb8, 42, 0, 0, 0, 0xc3]);
     }
+    Some(elf)
+}
+
+fn runtime_dependency_tls_fixture() -> Option<Vec<u8>> {
+    let mut elf = fixture(2)?;
+    elf[0x121c] = 0x16;
+    write_u64(&mut elf, 0x1220, 0)?;
+    // Exercise the runtime graph's generation-tagged module identity and the
+    // nonzero combined-template offset of this second TLS image.
+    write_u64(&mut elf, 0x1168, 72)?;
+    write_u64(&mut elf, 0x1398, 0x1008)?;
+    write_u64(
+        &mut elf,
+        0x13a0,
+        (1_u64 << 32) | u64::from(elf::R_X86_64_DTPMOD64),
+    )?;
+    write_u64(&mut elf, 0x13a8, 0)?;
+    write_u64(&mut elf, 0x13b0, 0x1010)?;
+    write_u64(
+        &mut elf,
+        0x13b8,
+        (1_u64 << 32) | u64::from(elf::R_X86_64_DTPOFF64),
+    )?;
+    write_u64(&mut elf, 0x13c0, 0)?;
+    Some(elf)
+}
+
+fn runtime_scope_tls_fixture() -> Option<Vec<u8>> {
+    let mut elf = fixture(1)?;
+    write_u16(&mut elf, 56, 5)?;
+    let offset = 288;
+    write_u32(&mut elf, offset, 7)?;
+    write_u32(&mut elf, offset + 4, 4)?;
+    write_u64(&mut elf, offset + 8, 0x13d0)?;
+    write_u64(&mut elf, offset + 16, 0x3d0)?;
+    write_u64(&mut elf, offset + 32, 8)?;
+    write_u64(&mut elf, offset + 40, 16)?;
+    write_u64(&mut elf, offset + 48, 8)?;
+    elf[0x13d0..0x13d8].copy_from_slice(&0x6c_u64.to_le_bytes());
     Some(elf)
 }
 
@@ -958,13 +1010,76 @@ pub(super) fn module_staging_run() -> bool {
         crate::serial::write_line(format_args!(
             "[S11.6] per-thread dynamic TLS isolation: PASSED"
         ));
-        let graph_generation = load_runtime_module(&mut space, scope_bytes.clone(), 1)?;
-        if graph_generation != 1 || space.lookup_runtime_symbol(b"answer").is_none() {
+        crate::vfs::remove("/lib/base.so").ok()?;
+        owned_base = false;
+        let runtime_base = runtime_dependency_tls_fixture()?;
+        crate::vfs::create_read_only("/lib/base.so", &package(&runtime_base)).ok()?;
+        owned_base = true;
+        crate::vfs::remove("/lib/scope.so").ok()?;
+        owned_scope = false;
+        let runtime_scope = runtime_scope_tls_fixture()?;
+        crate::vfs::create_read_only("/lib/scope.so", &package(&runtime_scope)).ok()?;
+        owned_scope = true;
+        let graph_root = fixture(0)?;
+        let graph_base = LIBRARY_START.checked_add(LIBRARY_STRIDE)?;
+        let planned_graph = prepare_runtime_graph(graph_root.clone(), graph_base)?;
+        let planned_tls = runtime_tls_template(&planned_graph)?;
+        let mut planned_scope = SymbolScope::new(&planned_graph[0].image, &planned_graph[0].bytes);
+        for image in planned_graph.iter().skip(1) {
+            planned_scope
+                .add_dependency(image.name.as_deref()?, &image.image, &image.bytes)
+                .ok()?;
+        }
+        let module_relocation = tls_relocation_value(
+                &planned_graph[2],
+                2,
+                1,
+                elf::R_X86_64_DTPMOD64,
+                &planned_scope,
+                Some(TlsRelocationPlan::Runtime {
+                    offsets: &planned_tls.offsets,
+                    handle: (1_u64 << 32) | 2,
+                }),
+                &planned_graph,
+            )?;
+        let offset_relocation = tls_relocation_value(
+                &planned_graph[2],
+                2,
+                1,
+                elf::R_X86_64_DTPOFF64,
+                &planned_scope,
+                Some(TlsRelocationPlan::Runtime {
+                    offsets: &planned_tls.offsets,
+                    handle: (1_u64 << 32) | 2,
+                }),
+                &planned_graph,
+            )?;
+        if planned_tls.offsets.get(1).copied().flatten() != Some(0)
+            || planned_tls.offsets.get(2).copied().flatten() != Some(16)
+            || module_relocation != (1_u64 << 32) | 2
+            || offset_relocation != 16
+        {
+            let _ = destroy(space);
+            return None;
+        }
+        drop(planned_graph);
+        let graph = load_runtime_module(&mut space, graph_root, 1)?;
+        if graph.generation != 1
+            || graph.tls_memory_size != 32
+            || graph.tls_initializer.get(..8) != Some(&0x6c_u64.to_le_bytes())
+            || graph.tls_initializer.get(8..16) != Some(&[0; 8])
+            || graph.tls_initializer.get(16..24) != Some(&0x5b_u64.to_le_bytes())
+            || graph.tls_initializer.get(24..) != Some(&[0; 8])
+            || space.lookup_runtime_symbol(b"answer").is_none()
+        {
             let _ = destroy(space);
             return None;
         }
         crate::serial::write_line(format_args!(
             "[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED"
+        ));
+        crate::serial::write_line(format_args!(
+            "[S11.RUNTIME] dependency PT_TLS template: PASSED"
         ));
         let _ = destroy(space);
         Some(true)

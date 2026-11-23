@@ -4,19 +4,20 @@
 
 `apps/woven-shell/src/status.rs` is the bounded presentation model behind the
 taskbar's network, volume and battery glyphs. Its network source is syscall
-248 (`SystemStatus`), a capability-free read-only telemetry record of 12 bytes
-(ABI version, online flag, IPv4, reserved). It exists because the pre-existing
-`NetInfo` syscall 43 requires `NetworkIo`, which the desktop session is
-deliberately not granted; the new record grants no socket/DNS authority,
-carries no device identity and is copied into caller-owned storage. `audio_info()`
-detects an output and `audio_set_volume()` applies local level/mute changes
-(the kernel's HDA path initializes output gain at 75%, which is the model's
-initial percentage). Battery state is `Unavailable`: there is no ACPI battery
-driver, so the shell neither queries nor fabricates a charge level. The model
-owns no kernel object, retains no userspace pointer and adds no capability or
-ABI version. A two-second refresh updates only the tray glyphs and an open
-panel; a locally chosen volume is preserved across refreshes because the
-kernel exposes no gain read-back.
+248 (`SystemStatus`), a capability-free read-only telemetry record of 12 bytes.
+Version 1 carried ABI version, online flag, IPv4 and reserved bytes; version 2
+adds audio readiness and the kernel's last applied output percentage. It exists
+because the pre-existing `NetInfo` syscall 43 requires `NetworkIo`, which the
+desktop session is deliberately not granted; the record grants no socket/DNS
+authority, carries no device identity and is copied into caller-owned storage.
+The HDA driver caches the percentage it last programmed into the amplifier, so
+`audio_set_volume()` applies changes while the telemetry record supplies the
+read-back; muting keeps the last non-zero level for restore. `audio_info()` is
+only a fallback for a version-1 kernel. Battery state is `Unavailable`: there
+is no ACPI battery driver, so the shell neither queries nor fabricates a charge
+level. The model owns no kernel object, retains no userspace pointer and adds
+no capability. A two-second refresh updates only the tray glyphs and an open
+panel.
 
 ## Live runtime ELF graph, TLS, and symbol publication boundary
 
@@ -3169,6 +3170,58 @@ wait path releases the process-table lock. Shared libraries, symbol
 resolution, dynamic TLS, and physical qualification remain outside this
 bounded increment.
 
+## Stage 11 live runtime lifecycle ownership (2026-11-23)
+
+`userspace::RuntimeLifecycle` stores the callback schedule outside the copied
+`AddressSpace` value. The fixed table is bounded by process and dynamic-module
+capacity and is keyed by page-table root, module slot, and generation, so a
+staged address-space snapshot cannot accidentally duplicate or publish cursor
+state. Publication occurs only after the runtime graph, symbols, protections,
+and module generation have succeeded. Final module release clears the matching
+entry before generation reuse.
+
+Syscall 158 returns one already-validated executable callback at a time while
+the exact task owns the process-wide dynamic-module transaction. The init
+schedule retains dependency order; the fini schedule retains reverse dependency
+order from `elf::collect_lifecycle`. The cursor advances before the address is
+returned. Therefore concurrent callers cannot receive the same callback, and a
+task loss cannot cause the kernel to assume an unobserved callback completed.
+The conservative result is a deliberately stuck generation until a future
+recovery policy resolves it. Final unload is rejected after init begins until
+all init callbacks have been requested, initialization has been sealed, and all
+fini callbacks have been requested. A schedule that never starts may still be
+rolled back without executing user code.
+
+The process-table lock may acquire the lifecycle-table lock through an
+`AddressSpace` operation; no lifecycle path acquires the process table in the
+opposite order. Callback execution occurs in Ring 3 after both locks are
+released, and no task switch or sleep occurs under either lock. Callback
+addresses come only from copied and bounded ELF metadata already checked
+against executable segments; the kernel retains no userspace pointer. The
+Stage 11.2 fixture covers real `DT_INIT`/`DT_FINI`, premature release rejection,
+state visibility, stale lookup and frame recovery on 1/2/4 CPUs. This slice does
+not recover an owner killed between callback retrieval and execution and does
+not add dependency-local TLS.
+
+### Runtime transaction owner-death recovery
+
+The scheduler gate is authorized by `(process_id, task_id)`, not process
+identity alone. This prevents an already-running sibling on another CPU from
+entering another task's transaction. During scheduler hand-off, a dead or
+absent owner releases the global gate so other processes can continue. The
+abandoned process ID enters a `MAX_PROCESSES`-bounded quarantine while any of
+its tasks remains live; transaction begin rejects that process until all its
+tasks are dead. This preserves at-most-once lifecycle semantics when death
+occurs after a callback address is returned but before userspace invokes it.
+
+All transitions occur under the rank-10 scheduler IRQ lock. They allocate no
+memory, retain no userspace pointer, sleep nowhere, and acquire neither the
+process-table nor paging lock. Capacity follows the process bound, and entries
+are reclaimed only when no task can execute with that process ID. Stage 11.6
+checks exact-owner admission, nested depth, sibling exclusion, owner-death
+release, quarantine, and retirement; Stage 11.2 preserves real runtime TLS and
+lifecycle execution on 1/2/4 CPUs.
+
 ## Stage 11.5 bounded symbol relocation (2026-10-14; scope groundwork 2026-10-15)
 
 `elf::DynamicImage` validates a SysV hash table, dynamic symbol table, and
@@ -5023,3 +5076,40 @@ physical RSS and shared pages are not attributed as private memory. WovenShell
 logs both records beside repaint/present timing, and the host qualification
 parser stores them under `phase7_metrics`. Input-to-display latency remains a
 separate measurement and is not inferred from these records.
+## Runtime dependency PT_TLS template publication (2026-11-23)
+
+The runtime linker now constructs one bounded TLS template for the complete
+`DT_NEEDED` graph before publishing a module generation.  Graph images retain
+scope order, each `PT_TLS` contribution is aligned to at least eight bytes, file
+initializers are copied from parser-validated ranges, and `p_memsz - p_filesz`
+is zero-filled.  The combined allocation is limited to one 4 KiB dynamic-TLS
+block.  Failure to plan or copy the complete graph aborts staging before the
+address-space generation is committed.
+
+`task::map_runtime_module` publishes that immutable combined template to every
+existing thread with the established generation-tagged dynamic-TLS transaction.
+Publication failure releases the just-created module generation, so stale
+handles cannot reuse partial TLS state.  Thread creation, join and owner teardown
+continue to use the existing dynamic-TLS lifecycle; no syscall ABI or capability
+surface changed.
+
+This increment is template storage and lifecycle support.  Runtime-module TLS
+relocations, general-dynamic/TLSDESC access, per-image module-offset discovery,
+and a compiler-generated live dependency fixture remain fail-closed or open.
+
+The follow-up runtime-relocation increment retains every image's aligned
+offset.  Before mapping, the linker combines the inactive descriptor's next
+generation with its one-based module slot. Runtime `R_X86_64_DTPMOD64`
+receives that generation-tagged handle; `R_X86_64_DTPOFF64` receives the
+defining image's combined-template offset plus its validated TLS-symbol offset.
+Publication checks that the committed generation matches the precomputed
+handle. Startup behavior is unchanged, and unsupported runtime local-exec,
+initial-exec, general-dynamic, and TLSDESC forms remain fail-closed.
+
+Stage 11.6 now uses two runtime-only TLS dependencies with distinct initializer
+and BSS ranges. It proves offsets 0 and 16, the exact module/offset relocation
+values, the 32-byte combined template, and atomic graph publication. The clean
+gate passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`; affected and all-target
+warning-denying Clippy and the workspace suite pass. A compiler-generated live
+dependency fixture and general-dynamic/TLSDESC remain open.

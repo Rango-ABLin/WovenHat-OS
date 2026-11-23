@@ -12714,8 +12714,9 @@ pub mod syscall {
     pub const PROCESS_METRICS: u64 = 246;
     /// output versioned guest-wide performance metrics (56 bytes)
     pub const SYSTEM_METRICS: u64 = 247;
-    /// output versioned read-only link status (12 bytes): abi_version, online,
-    /// ipv4[4], reserved[6]. Telemetry only; no NetworkIo capability required.
+    /// output versioned read-only system status (12 bytes): abi_version,
+    /// online, ipv4[4], then (version 2) audio_ready, volume_percent and
+    /// reserved[4]. Telemetry only; no capability required.
     pub const SYSTEM_STATUS: u64 = 248;
     pub const ACCOUNTS_CHANGE_PIN: u64 = 210;
     pub const IDENTITY_ADMIN_ADD_USER: u64 = 226;

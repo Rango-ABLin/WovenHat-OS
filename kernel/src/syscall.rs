@@ -2049,17 +2049,19 @@ fn sys_system_metrics(user_out: u64, capacity: u64) -> u64 {
     crate::paging::copy_to_current_user(user_out, bytes).map_or(SYSCALL_ERROR, |_| 0)
 }
 
-/// The bounded, capability-free telemetry record behind syscall 248. It is a
-/// pure copy of the kernel's current link summary: a version, the online flag,
-/// IPv4 address and reserved zero bytes. It deliberately excludes the MAC
-/// address and exposes no socket, DNS or device-control authority.
+/// The bounded, capability-free telemetry record behind syscall 248. Version 2
+/// adds audio readiness and the kernel's last applied output level (percent)
+/// to the version-1 link summary. It still excludes the MAC address and grants
+/// no socket, DNS or device-control authority.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct SystemStatusRecord {
     abi_version: u8,
     online: u8,
     ipv4: [u8; 4],
-    reserved: [u8; 6],
+    audio_ready: u8,
+    volume_percent: u8,
+    reserved: [u8; 4],
 }
 
 fn sys_system_status(user_out: u64, capacity: u64) -> u64 {
@@ -2070,11 +2072,14 @@ fn sys_system_status(user_out: u64, capacity: u64) -> u64 {
         return SYSCALL_ERROR;
     }
     let link = crate::network::net_info();
+    let (audio_ready, volume_percent) = crate::audio_status::audio_status();
     let record = SystemStatusRecord {
-        abi_version: 1,
+        abi_version: 2,
         online: link.online,
         ipv4: link.ipv4,
-        reserved: [0; 6],
+        audio_ready,
+        volume_percent,
+        reserved: [0; 4],
     };
     // SAFETY: `record` is a live local of exactly its `size_of` bytes, copied
     // out before it is dropped; `copy_to_current_user` validates the user range.

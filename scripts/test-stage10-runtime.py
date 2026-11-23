@@ -138,6 +138,7 @@ def required_markers(stage, cpus):
                        '[S11.RUNTIME] symbol publication and unload: PASSED',
                        '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
                        '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
+                       '[S11.RUNTIME] compiler dependency TLS execution: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
@@ -191,6 +192,7 @@ def required_markers(stage, cpus):
             '[S11.6] generation-safe unload/reload: PASSED',
             '[S11.6] per-thread dynamic TLS isolation: PASSED',
             '[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED',
+            '[S11.RUNTIME] dependency PT_TLS template: PASSED',
         ])
     if stage == '13.11':
         required.extend([
@@ -298,6 +300,8 @@ def main():
             env['WOVENHAT_TLS_STATIC_ELF'] = manifest['outputs']['static-tls-demo']['path']
             env['WOVENHAT_TLS_THREADS_ELF'] = manifest['outputs']['tls-threads-demo']['path']
             env['WOVENHAT_TLS_PURE_BSS_ELF'] = manifest['outputs']['pure-bss-tls-demo']['path']
+            env['WOVENHAT_RUNTIME_TLS_ROOT_ELF'] = manifest['outputs']['libwoven-runtime-tls-root.so']['path']
+            env['WOVENHAT_RUNTIME_TLS_DEPENDENCY_ELF'] = manifest['outputs']['libwoven-runtime-tls-dependency.so']['path']
         except RuntimeError as error:
             print(str(error), file=sys.stderr)
             return 1

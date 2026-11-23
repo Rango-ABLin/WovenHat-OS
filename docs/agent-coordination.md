@@ -41,6 +41,39 @@ passes. No QEMU claim yet. I deferred moving the repo's `target/` and
 `.cargo-build/` to D: because another chain (memory-regression QEMU and a
 kernel `cargo run`) was active under them at 13:55.
 
+## OpenCode - volume read-back on master (2026-11-23)
+
+Implemented and accepted on `master`: HDA publishes the last applied output
+percent into an always-compiled `audio_status` module; syscall 248 reports it
+in a version-2 `SystemStatus` record; the shell reads it instead of guessing.
+The first gate exposed a genuine feature-gate defect (`hda` absent under
+`qemu-test`), fixed by the always-compiled module. Warning-denying kernel Clippy
+in default and `qemu-test` configs, shell/all-target Clippy, 6/6 isolated model
+tests, the full Stage 10.7 gate and baseline-enforced desktop qualification at
+1/2/4 CPUs all pass; a 2-CPU startup-limit miss by 265 ms was rerun with
+unchanged limits and passed. Removed a leftover `<<<<<<< HEAD` marker from the
+committed `docs/stage-status.md` in this increment. Battery stays explicitly
+unavailable (no ACPI driver). Next: merge updated `master` into the other
+owner's `phase-b` branch with their uncommitted work stashed and restored.
+
+## OpenCode - final master reconciliation (2026-11-23)
+
+The main worktree was switched to `phase-b/bottom-taskbar-core` by the other
+owner while this work was in flight. To avoid disrupting them I reconciled
+`master` in an isolated worktree under
+`C:\Users\banda\AppData\Local\Temp\opencode\wovenhat-master`. Origin advanced
+again from `edfa0ee8` to `0d82a3be` (Stage 11 runtime transaction owner-death,
+D: drive build output, related docs); merged as `6fa26cd6`, keeping both sides
+of the one status-document conflict. Clippy (all targets, kernel target, shell
+target) and `cargo test --workspace` pass on that tree; the serialized full
+Stage 10.7 gate and 1/2/4-CPU baseline-enforced desktop matrix passed on that
+tree. A C:-disk-full failure in the per-app packager was resolved by moving the
+isolated worktree to `D:\WovenHat-build\status-indicators-master`; the baseline-
+enforced matrix then passed at 1/2/4 CPUs
+(`audit-artifacts/push-final-d-{1,2,4}cpu`). `master` has been pushed:
+`0d82a3be..e6d3d1d1 master -> master`. The `phase-b` branch remains based on
+`fe56bef7`; its owner should merge the updated `master` when their work settles.
+
 ## OpenCode - integrating origin/master before push (2026-11-23)
 
 Per owner direction I am reconciling the accepted local branch (`b25a6d3e`,
@@ -10176,3 +10209,96 @@ four existing lifecycle edits are retained as the active working set; no other
 owner's files will be staged or overwritten. Focused compile and fixture
 contracts run before any serialized QEMU acceptance chain. No Cargo/QEMU chain
 is active at this handoff update.
+
+The bounded lifecycle slice now passes warning-denying affected-feature and
+all-target Clippy, 19 fixture/harness contracts, 33 ELF tests, 256 libwoven
+tests (one existing ignored fixture), and exact-source Stage 11.2 plus 11.6
+boots on 1/2/4 CPUs. Evidence is under `audit-artifacts/stage11.2-*cpu-1795432*`
+and `audit-artifacts/stage11.6-*cpu-1795432*`. No Cargo/QEMU chain is active.
+Documentation and the separate accepted-stage commit are being finalized.
+
+## Codex - runtime transaction owner-death repair active (2026-11-23)
+
+Codex owns the focused Stage 11 scheduler transaction repair plus the unrelated
+`kernel/src/block.rs` rustfmt correction requested by the user. The repair will
+require exact task identity for runtime-module operations and release the global
+gate only after its recorded task is dead or absent; lifecycle callback cursors
+remain fail-closed. Focused tests and serialized Stage 11.2/11.6 QEMU follow.
+No Cargo/QEMU chain is active.
+
+The final repair enforces exact-task ownership, releases a dead owner's global
+gate, quarantines its still-live process against skipped lifecycle callbacks,
+and reclaims that quarantine after all process tasks die. The unrelated
+`block.rs` cross-edition rustfmt conflict is fixed without an allow. Exact-source
+Stage 11.6 and 11.2 pass on 1/2/4 CPUs under the `17954334*` and `1795433*`
+evidence sets respectively. Host build/lint/test/format gates pass. No
+Cargo/QEMU chain is active; documentation and commit are being finalized.
+
+## Codex - D: test-output redirection active (2026-11-23)
+
+At user direction, Codex owns persistent redirection of Cargo build/test output
+and automated-test evidence to `D:\WovenHat-OS-output`. The implementation uses
+Cargo configuration, launcher environment, and verified NTFS junctions so
+existing harness paths remain compatible. Existing evidence is preserved by
+moving rather than deleting it. No Cargo/QEMU acceptance chain is active.
+
+## Codex - committed status-marker cleanup (2026-11-23)
+
+The current `docs/stage-status.md` contained one orphaned `<<<<<<< HEAD` line
+with no separator or alternate block. Both substantive merged status sections
+were already present. Codex removed only that syntax line, preserving every
+status claim. Documentation-only validation and a separate commit follow; no
+Cargo/QEMU chain is active.
+
+## Codex - runtime graph dependency TLS active (2026-11-23)
+
+After reviewing the remaining closure ledger in dependency order, Stage 1-10
+software durability gates are present and their earliest blockers require
+physical hardware/power-loss qualification. Codex therefore owns the next
+implementable Stage 11 gap: a bounded combined TLS layout for live runtime
+`DT_NEEDED` graphs, including dependency-local PT_TLS, relocation offsets,
+per-task mapping, rollback and final teardown. Scope is the runtime linker,
+task TLS publication, fixtures, focused harness contracts and directly related
+documentation. Do not concurrently edit these paths. No Cargo/QEMU chain is
+active.
+
+## Codex - runtime graph dependency TLS complete (2026-11-23)
+
+Completed the claimed bounded increment.  Runtime dependency graphs now build
+and publish a combined, aligned, zero-filled, 4 KiB-capped PT_TLS template via
+the existing generation-safe per-thread transaction.  No ABI/capability change.
+Stage 11.6 and Stage 11.2 QEMU gates pass on 1/2/4 CPUs; target/host Clippy,
+target kernel build, focused harness/ELF tests and libwoven host tests pass.
+Remaining scope is explicitly compiler-transparent runtime TLS relocations,
+general-dynamic/TLSDESC, per-image offsets, and a live compiler dependency
+fixture.  Ownership released after commit; no Cargo or QEMU chain remains active.
+
+## Codex - compiler-visible runtime dependency TLS active (2026-11-23)
+
+Codex owns the remaining bounded Stage 11 userspace/runtime TLS gap: preserve
+per-image offsets in the combined runtime graph template, apply supported
+x86-64 TLS relocations against that layout, expose the established checked
+module/offset resolver semantics, and add a compiler-generated live dependency
+fixture. Unsupported TLS models remain fail-closed. Scope is limited to the
+runtime linker, TLS publication/resolution, loader fixtures and their harness
+and status documentation. No Cargo or QEMU chain is active.
+
+## Codex - runtime dependency TLS relocations accepted (2026-11-23)
+
+The bounded per-image layout and runtime `DTPMOD64`/`DTPOFF64` slice is
+complete. Stage 11.6 proves two TLS dependencies, offsets 0/16, and the
+generation-tagged module value; its clean 1/2/4-CPU matrix exits 33 under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Affected and all-target
+warning-denying Clippy and `cargo test --workspace` pass. Compiler-generated
+live dependency execution and general-dynamic/TLSDESC remain open. Ownership
+is released; no Cargo or QEMU chain remains active.
+
+## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
+
+Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD
+runtime root plus TLS-bearing `DT_NEEDED` dependency, feed both through the
+existing signed read-only runtime graph path, and require compiler-produced TLS
+relocations and live generation-safe publication in focused acceptance. Scope
+is loader-fixture sources/builder, Stage 11 runtime harness, linker acceptance,
+and directly related documentation. General-dynamic/TLSDESC implementation is
+not included unless this fixture closes first. No Cargo/QEMU chain is active.

@@ -9,13 +9,12 @@
 //!   `NetInfo` (43) which requires `NetworkIo` that the desktop does not have.
 //!   Its bytes are copied into a local, fixed-layout value; nothing is held
 //!   across calls.
-//! - **Volume** uses `libwoven::audio_info()` to detect an output and
-//!   `audio_set_volume()` to change it. The kernel initialises HDA output gain
-//!   to 75% at boot, and every local change is synchronised with the value the
-//!   syscall reports, so the shell's percentage is an accurate view of the
-//!   local output path. There is no read-back syscall today, so an external
-//!   change made by another process cannot be observed; that is a deliberate,
-//!   documented limit rather than a fabricated reading.
+//! - **Volume** uses the same telemetry record: version 2 carries audio
+//!   readiness and the kernel's last applied output percentage, cached by the
+//!   HDA driver when it programs the amplifier. `audio_set_volume()` still
+//!   applies local changes; `audio_info()` is only a fallback for an older
+//!   version-1 kernel. Muting keeps the last non-zero level so the icon can
+//!   restore it.
 //! - **Battery** is reported as unavailable. WovenHat has no ACPI battery
 //!   driver (the only battery-like code is a Bluetooth LE *service* self-test),
 //!   so showing a level would invent data. The glyph is drawn dim with a slash
@@ -24,17 +23,21 @@
 use libwoven::graphics::Canvas;
 use libwoven::syscall;
 
-/// The kernel's HDA output starts at three quarters of full gain.
-const INITIAL_VOLUME_PERCENT: u8 = 75;
+/// Fallback when a version-1 kernel has no volume field: HDA starts at 75%.
+const LEGACY_VOLUME_PERCENT: u8 = 75;
 
 /// Layout of the kernel's fixed 12-byte `SystemStatus` telemetry record:
-/// ABI version, online flag, IPv4 address, reserved zero bytes. Manual field
-/// decoding avoids reinterpreting kernel bytes as a Rust value.
+/// ABI version, online flag, IPv4 address, then (from version 2) audio ready
+/// and the applied volume percentage. Manual field decoding avoids
+/// reinterpreting kernel bytes as a Rust value.
 const STATUS_BYTES: usize = 12;
 const STATUS_VERSION: usize = 0;
 const STATUS_ONLINE: usize = 1;
 const STATUS_IPV4: usize = 2;
+const STATUS_AUDIO_READY: usize = 6;
+const STATUS_VOLUME_PERCENT: usize = 7;
 const STATUS_VERSION_1: u8 = 1;
+const STATUS_VERSION_2: u8 = 2;
 
 /// The state of the network link, as far as the shell can observe it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,13 +90,15 @@ fn read_system_status() -> Option<[u8; STATUS_BYTES]> {
             0,
         )
     };
-    (result != syscall::ERROR && bytes[STATUS_VERSION] == STATUS_VERSION_1).then_some(bytes)
+    let version = bytes[STATUS_VERSION];
+    (result != syscall::ERROR && (version == STATUS_VERSION_1 || version == STATUS_VERSION_2))
+        .then_some(bytes)
 }
 
 /// Decode a copied telemetry record. Pure so the wire layout can be tested on
 /// a host without invoking a WovenHat syscall.
 fn network_status(bytes: [u8; STATUS_BYTES]) -> NetworkStatus {
-    if bytes[STATUS_VERSION] != STATUS_VERSION_1 {
+    if bytes[STATUS_VERSION] < STATUS_VERSION_1 {
         return NetworkStatus::Unavailable;
     }
     if bytes[STATUS_ONLINE] == 0 {
@@ -102,6 +107,26 @@ fn network_status(bytes: [u8; STATUS_BYTES]) -> NetworkStatus {
     let mut ipv4 = [0u8; 4];
     ipv4.copy_from_slice(&bytes[STATUS_IPV4..STATUS_IPV4 + 4]);
     NetworkStatus::Online { ipv4 }
+}
+
+/// Decode the version-2 audio fields. `last_percent` is the level to restore
+/// when the kernel reports zero because the output is muted.
+fn volume_from_record(bytes: &[u8; STATUS_BYTES], last_percent: u8) -> VolumeStatus {
+    if bytes[STATUS_VERSION] != STATUS_VERSION_2 || bytes[STATUS_AUDIO_READY] == 0 {
+        return VolumeStatus::Unavailable;
+    }
+    let applied = bytes[STATUS_VOLUME_PERCENT].min(100);
+    if applied == 0 {
+        VolumeStatus::Level {
+            percent: last_percent,
+            muted: true,
+        }
+    } else {
+        VolumeStatus::Level {
+            percent: applied,
+            muted: false,
+        }
+    }
 }
 
 impl StatusSnapshot {
@@ -116,22 +141,25 @@ impl StatusSnapshot {
         snapshot
     }
 
-    /// Re-sample network availability and audio presence. A locally chosen
-    /// volume level is kept: there is no kernel read-back, so overwriting it on
-    /// a timer would undo the user's mute/level changes.
+    /// Re-sample the read-only telemetry record. The volume percentage now
+    /// comes from the kernel's cached gain, so an external change is visible;
+    /// a version-1 kernel falls back to the old audio-presence-only view.
     pub fn refresh(&mut self) {
-        self.network = read_system_status().map_or(NetworkStatus::Unavailable, network_status);
-        let audio_ready = libwoven::audio_info().is_ok();
-        self.volume = if !audio_ready {
-            VolumeStatus::Unavailable
-        } else {
-            match self.volume {
-                VolumeStatus::Level { .. } => self.volume,
-                VolumeStatus::Unavailable => VolumeStatus::Level {
-                    percent: INITIAL_VOLUME_PERCENT,
-                    muted: false,
-                },
+        let record = read_system_status();
+        self.network = record.map_or(NetworkStatus::Unavailable, network_status);
+        let last_percent = match self.volume {
+            VolumeStatus::Level { percent, .. } => percent,
+            VolumeStatus::Unavailable => LEGACY_VOLUME_PERCENT,
+        };
+        self.volume = match record {
+            Some(bytes) if bytes[STATUS_VERSION] == STATUS_VERSION_2 => {
+                volume_from_record(&bytes, last_percent)
             }
+            _ if libwoven::audio_info().is_ok() => VolumeStatus::Level {
+                percent: last_percent,
+                muted: false,
+            },
+            _ => VolumeStatus::Unavailable,
         };
         // No battery driver exists yet; keep this explicit for future work.
         self.battery = BatteryStatus::Unavailable;
@@ -143,9 +171,20 @@ impl StatusSnapshot {
         let level = percent.min(100);
         match libwoven::audio_set_volume(level) {
             Ok(_gain) => {
-                self.volume = VolumeStatus::Level {
-                    percent: level,
-                    muted: level == 0,
+                let last_percent = match self.volume {
+                    VolumeStatus::Level { percent, .. } => percent,
+                    VolumeStatus::Unavailable => LEGACY_VOLUME_PERCENT,
+                };
+                self.volume = if level == 0 {
+                    VolumeStatus::Level {
+                        percent: last_percent,
+                        muted: true,
+                    }
+                } else {
+                    VolumeStatus::Level {
+                        percent: level,
+                        muted: false,
+                    }
                 };
                 true
             }
@@ -311,6 +350,8 @@ mod tests {
         assert_eq!(STATUS_VERSION, 0);
         assert_eq!(STATUS_ONLINE, 1);
         assert_eq!(STATUS_IPV4, 2);
+        assert_eq!(STATUS_AUDIO_READY, 6);
+        assert_eq!(STATUS_VOLUME_PERCENT, 7);
     }
 
     #[test]
@@ -324,6 +365,24 @@ mod tests {
         assert_eq!(
             network_status(bytes),
             NetworkStatus::Online { ipv4: [10, 0, 2, 15] }
+        );
+    }
+
+    #[test]
+    fn decodes_version2_volume_and_mute() {
+        let mut bytes = [0u8; STATUS_BYTES];
+        bytes[STATUS_VERSION] = STATUS_VERSION_2;
+        assert_eq!(volume_from_record(&bytes, 75), VolumeStatus::Unavailable);
+        bytes[STATUS_AUDIO_READY] = 1;
+        bytes[STATUS_VOLUME_PERCENT] = 42;
+        assert_eq!(
+            volume_from_record(&bytes, 75),
+            VolumeStatus::Level { percent: 42, muted: false }
+        );
+        bytes[STATUS_VOLUME_PERCENT] = 0;
+        assert_eq!(
+            volume_from_record(&bytes, 42),
+            VolumeStatus::Level { percent: 42, muted: true }
         );
     }
 

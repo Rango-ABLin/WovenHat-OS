@@ -67,12 +67,12 @@ impl<const SECTORS: usize> RamDisk<SECTORS> {
     /// Allocate a large disposable RAM disk without constructing its backing
     /// array on the caller's small kernel stack.
     pub fn boxed_zeroed() -> Option<Box<Self>> {
-        let layout = Layout::new::<Self>();
+        let layout = alloc::alloc::Layout::new::<Self>();
         // SAFETY: `alloc_zeroed` returns a pointer aligned and sized for the
         // exact `Self` layout. `Box::from_raw` takes ownership and will use
         // the same layout when the returned box is dropped. Zero is the
         // valid initial state for every byte of `RamDisk`.
-        let pointer = unsafe { alloc_zeroed(layout) }.cast::<Self>();
+        let pointer = unsafe { alloc::alloc::alloc_zeroed(layout) }.cast::<Self>();
         if pointer.is_null() {
             None
         } else {

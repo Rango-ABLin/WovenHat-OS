@@ -18,8 +18,14 @@ pub fn load_runtime_module(
     space: &mut AddressSpace,
     bytes: alloc::vec::Vec<u8>,
     slot: usize,
-) -> Option<u32> {
+) -> Option<RuntimeModuleLoad> {
     linker::load_runtime_module(space, bytes, slot)
+}
+
+pub struct RuntimeModuleLoad {
+    pub generation: u32,
+    pub tls_initializer: alloc::vec::Vec<u8>,
+    pub tls_memory_size: usize,
 }
 #[cfg(feature = "stage11-tls-test")]
 mod tls_acceptance;
@@ -5019,6 +5025,11 @@ impl AddressSpace {
         })
     }
 
+    pub fn dynamic_module_next_generation(self, index: usize) -> Option<u32> {
+        let descriptor = self.dynamic_modules.get(index)?;
+        (!descriptor.live && descriptor.generation != 0).then_some(descriptor.generation)
+    }
+
     pub fn dynamic_module_final_reference(self, index: usize, generation: u32) -> bool {
         self.dynamic_modules.get(index).is_some_and(|descriptor| {
             descriptor.live && descriptor.generation == generation && descriptor.references == 1
@@ -6399,7 +6410,8 @@ pub fn compiler_loader_self_test() -> bool {
 #[cfg(feature = "stage11-6-test")]
 #[inline(never)]
 pub fn module_staging_self_test() -> bool {
-    linker::module_staging_self_test()
+    crate::task::dynamic_module_transaction_recovery_self_test()
+        && linker::module_staging_self_test()
 }
 
 /// Load an ELF and place a custom argv vector on the user stack.
