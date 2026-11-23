@@ -7,8 +7,15 @@ Stage 11 matrix is 30/30 on kernel sources `b9829f62`: stages 11.1-11.6,
 11.2-status, 11.2-tls (including pure-BSS compiler TLS), 11.2-aslr and
 11.5-compiler, each on 1/2/4 CPUs. Warning-denying feature Clippy, host
 all-targets Clippy, 212 Python tests and 256 workspace tests also passed.
-This is focused software evidence, not Stage 11, Stage 1-19, or release
-closure. Retained host-failure logs remain under
+Follow-up: `s03-process-lifecycle-test` passed on 1/2/4 CPUs with exit 33 via
+`scripts/test-s03-process-lifecycle.py` (logs
+`audit-artifacts/stage11-closure-s03-process-lifecycle-{1,2,4}cpu.log`,
+evidence under `target/s03-process-lifecycle-{1,2,4}cpu`). `s02-c-abi-test` and
+`musl-bootstrap-test` were not run: both require compile-time fixture env vars
+and no `clang.exe` was found on PATH or in `C:\Program Files\LLVM\bin` (only
+`clang-cl`/`ld.lld`/`llvm-ar` present); no prebuilt `c-abi.elf`/`musl-bootstrap.elf`
+fixtures were found. This is focused software evidence, not Stage 11, Stage 1-19,
+or release closure. Retained host-failure logs remain under
 `audit-artifacts/stage11-closure-qemu-11.2-*`; successful retries are
 `stage11.2-status-1cpu-1795188934182564700`,
 `stage11.2-status-4cpu-1795188990440889800` and
