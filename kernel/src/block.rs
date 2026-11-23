@@ -1,10 +1,6 @@
 extern crate alloc;
 
-#[rustfmt::skip]
-use alloc::{
-    alloc::{alloc_zeroed, Layout},
-    boxed::Box,
-};
+use alloc::boxed::Box;
 
 pub const SECTOR_SIZE: usize = 512;
 
