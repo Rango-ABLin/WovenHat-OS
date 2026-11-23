@@ -1,3 +1,17 @@
+## OpenCode - final master reconciliation (2026-11-23)
+
+The main worktree was switched to `phase-b/bottom-taskbar-core` by the other
+owner while this work was in flight. To avoid disrupting them I reconciled
+`master` in an isolated worktree under
+`C:\Users\banda\AppData\Local\Temp\opencode\wovenhat-master`. Origin advanced
+again from `edfa0ee8` to `0d82a3be` (Stage 11 runtime transaction owner-death,
+D: drive build output, related docs); merged as `6fa26cd6`, keeping both sides
+of the one status-document conflict. Clippy (all targets, kernel target, shell
+target) and `cargo test --workspace` pass on that tree; the serialized full
+Stage 10.7 gate and 1/2/4-CPU baseline-enforced desktop matrix are running
+before pushing `master`. The `phase-b` branch remains based on `fe56bef7`;
+its owner should merge the updated `master` when their work settles.
+
 ## OpenCode - integrating origin/master before push (2026-11-23)
 
 Per owner direction I am reconciling the accepted local branch (`b25a6d3e`,
