@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE QEMU-VERIFIED)
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS QEMU-VERIFIED)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
 taskbar) and M7 (honest desktop controls), on branch
@@ -91,13 +91,71 @@ reason, and the unbroken pass record since. The separate intermittent
 "mouse click did not change the client framebuffer" pointer-step flake
 remains open and is NOT claimed fixed by this analysis.
 
+Pinned taskbar apps (commit `2d40b94b`): the bounded pinned-application
+model is wired into the shell. The taskbar group draws pins and windows
+from one combined list that painting, hit-testing and the group width
+all share -- a pinned app with a window on the workspace shows that
+window at the pin's position, a pin without one is a launchable entry,
+and a pin whose name is not in the catalog stays inert like the desktop
+shortcuts. Sharing one list also fixed group centering drifting when
+minimized windows were excluded from the width count. Left-clicking a
+pin launches its app through a `start_app` split of `launch`, so the
+Start panel never opens on a pin click; right-clicking any taskbar entry
+pins or unpins its app with an honest toast (Pinned/Unpinned `<name>`,
+"Pin list full", "No app for this window"). The PS/2 decoder and the HID
+ABI already delivered button 1, so this needed no kernel or input-ABI
+change. Pins are seeded from the installed settings record's
+`pinned_apps` value (absent: curated Files/Terminal/Store; empty: none).
+They are in-session state, recorded as such: the shell process holds
+`FileRead` only and no settings-write path exists, so nothing claims
+pins survive a reboot. Cross-boot persistence needs a writable settings
+record plus a deliberate `FileWrite` capability decision for the shell,
+and stays open.
+
+The stale blanket `#![allow(dead_code)]` at the top of `main.rs` is also
+gone (same commit): the freestanding shell now lints clean under
+`-D warnings` with the dead legacy Quick Settings layout helpers that
+the allow was hiding deleted, and the unused `PinnedApps::is_empty`
+replaced by `len` in its host test.
+
+Validation for the pinned-apps increment: freestanding clippy
+`-D warnings` and the release build clean; host suites pinned_apps 7/7
+and taskbar_prefs 6/6 (`rustc --test`; the pre-existing build-std config
+still breaks host cargo test). A new real-QEMU gate,
+`scripts/test-taskbar-pins.py`, drives the full pin lifecycle
+(launch-from-pin, unpin, re-pin, close-keeps-pin, unpin-again) with
+occurrence-counted serial markers -- a repeated "Unpinned WovenFiles"
+cannot pass on its earlier occurrence -- and taskbar-strip repaint
+assertions: **PASS at 1, 2 and 4 CPUs**
+(`audit-artifacts/taskbar-pins-1795451941851309600`,
+`-1795452801971620600`, `-1795453153842152100`; every `result.json`
+`pass: true` with zero failures, both "Unpinned WovenFiles"
+occurrences present in each serial log). A pixel audit of the retained
+frames confirms the repaints are real re-layouts, not
+threshold-scraping: 136 changed strip pixels for the launch indicator,
+1948 for the unpin tail move, 644 for the close (slot kept, indicator
+gone) and 9124 for the group shrinking 3 -> 2 entries, against the
+gate's 20-byte minimum. The full desktop qualification then **passed at
+1, 2 and 4 CPUs from this exact tree**
+(`desktop-qualification-1795452497487046700`,
+`-1795452948321374000`, `-1795453290969248000`; zero failures each).
+One earlier 1-CPU attempt
+(`desktop-qualification-1795452130105296700`) failed the 120000 ms
+startup budget at 121226 ms on a host still loaded by the preceding
+gate's teardown; the identical tree re-run on a quiet host booted in
+90406 ms and passed, and every other run this day booted in the
+50-91 s band, so that miss is recorded as host load, not a guest
+regression. No budget was widened.
+
 Not done, and therefore not claimed: a visual check of the changed taskbar
-alignment/icon-size settings values, auto-hide, pinned-app UI wiring and
-persistence, maximize/fullscreen geometry, Alt+Tab (blocked on modifier
-state in the input ABI, which touches kernel files with another agent's
-uncommitted edits), an in-shell taskbar settings editor, Quick Settings
-Battery saver and Night light (still local toggles with no effect), and
-the stale `#![allow(dead_code)]` at the top of `main.rs`.
+alignment/icon-size settings values, auto-hide, cross-boot pin
+persistence (needs a writable settings record and a deliberate
+`FileWrite` capability decision), maximize/fullscreen geometry, Alt+Tab
+(blocked on modifier state in the input ABI, which touches kernel files
+with another agent's uncommitted edits), an in-shell taskbar settings
+editor, and Quick Settings Battery saver and Night light (still local
+toggles with no effect). The separate intermittent "mouse click did not
+change the client framebuffer" pointer-step flake also remains open.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 

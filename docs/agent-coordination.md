@@ -1,3 +1,39 @@
+## OpenCode - Phase B pinned apps accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `2d40b94b` on `phase-b/window-minimize` (worktree
+`D:\WovenHat-build\desktop-wt`): the bounded pinned-application model is
+wired into the taskbar. One combined pins+windows list feeds painting,
+hit-testing and group width (this also fixed centering drift when
+minimized windows existed). Left-click a pin to launch; right-click any
+entry to pin/unpin with a toast -- the PS/2 decoder already delivered
+button 1, so no kernel or input-ABI change. Pins seed from the settings
+record's `pinned_apps` value and are IN-SESSION ONLY, recorded as such:
+the shell holds `FileRead` and no settings-write path exists, so
+nothing pretends pins survive a reboot (cross-boot persistence = a
+`FileWrite` capability decision, deliberately not taken unreviewed).
+Also removed the stale blanket `#![allow(dead_code)]`, deleting the
+dead legacy QS helpers it hid; freestanding clippy `-D warnings` and
+release build clean; host suites pinned_apps 7/7, taskbar_prefs 6/6.
+
+New gate `scripts/test-taskbar-pins.py` (reuses the qualification
+harness's QMP plumbing; must run serialized against it -- shared build
+paths): full pin lifecycle with occurrence-counted markers and
+strip-repaint assertions. PASS at 1/2/4 CPUs:
+`taskbar-pins-1795451941851309600`, `-1795452801971620600`,
+`-1795453153842152100`. Retained-frame pixel audit: 136/1948/644/9124
+changed strip pixels across the four re-layout steps (gate minimum 20
+bytes). Full desktop qualification from this tree PASS at 1/2/4:
+`desktop-qualification-1795452497487046700`,
+`-1795452948321374000`, `-1795453290969248000`. One 1-CPU attempt
+(`-1795452130105296700`) missed the 120 s startup budget at 121.2 s on
+a host loaded by the preceding gate's teardown; quiet-host re-run of the
+identical tree booted in 90.4 s and passed. Failure evidence preserved;
+no budget widened.
+
+Next: auto-hide, then maximize/fullscreen geometry. Alt+Tab stays
+blocked on input-ABI modifier state (kernel files carry another agent's
+uncommitted edits). Phase B remains NOT accepted as a whole.
+
 ## OpenCode - Phase B minimize accepted + keyboard_refresh root cause closed (2026-11-23)
 
 Branch `phase-b/window-minimize` (worktree `D:\WovenHat-build\desktop-wt`,
