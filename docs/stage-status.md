@@ -34,8 +34,18 @@ with `rustc --test` because the shell's `[unstable] build-std` config makes host
 `status_model`'s host build). Freestanding `cargo clippy --target
 x86_64-unknown-none -- -D warnings` passes for the shell.
 
-Not done, and therefore not claimed: a QEMU desktop boot and visual check of
-the changed taskbar, auto-hide, pinned-app persistence, minimize/restore,
+Desktop qualification (`scripts/test-desktop-qualification.py`, default
+timing, VirtIO display, TCG) **passed at 1, 2 and 4 CPUs** on this commit:
+`audit-artifacts/desktop-qualification-1795439038413181800` (1 CPU),
+`desktop-qualification-1795440273398492800` (2 CPU) and
+`desktop-qualification-1795440551973970000` (4 CPU). Each `result.json` has
+`pass: true` and zero failures; each serial log shows the status indicators,
+desktop/overview frame markers and no panic. This verifies the bottom-taskbar
+boot path with the radio and taskbar-preference changes; it does not verify
+the new alignment/icon-size settings values, which are unit-tested only.
+
+Not done, and therefore not claimed: a visual check of the changed taskbar
+settings, auto-hide, pinned-app persistence, minimize/restore,
 maximize/fullscreen geometry, Alt+Tab, an in-shell taskbar settings editor,
 the `keyboard_refresh` root-cause fix, Quick Settings Battery saver and Night
 light (still local toggles with no effect), and the stale `#![allow(dead_code)]`
