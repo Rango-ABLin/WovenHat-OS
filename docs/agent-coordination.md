@@ -20,7 +20,9 @@ from this tree PASS at 1/2/4:
 (mismatched cursor frames, stale variable, sleep-vs-repaint race,
 off-screen comparison box), preserved at
 `taskbar-pins-1795454258433091200`/`-1795454445640302000`/`-1795454634578127800`/`-1795454904737521700`;
-the guest produced every marker and pixel state correctly in all four.
+the guest produced every marker and pixel state correctly in all four
+(`-...9445640302000` predates the gate's unexpected-error arm, so it is
+evidenced by serial/QMP/frames rather than result.json).
 
 Next: maximize/fullscreen geometry, then the taskbar settings visual
 verification. Alt+Tab still blocked on kernel input-ABI modifier state

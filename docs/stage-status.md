@@ -194,7 +194,10 @@ guest had passed the steps in question
 (`-1795454634578127800`, pixel-diffed to prove the guest was correct),
 and an off-screen comparison box that `region_changed` correctly
 refuses (`-1795454904737521700`) -- the shell produced every expected
-marker and pixel state in all four.
+marker and pixel state in all four. One audit note: the second of those
+directories (`-1795454445640302000`) has no `result.json` because that
+crash is exactly what motivated the gate's unexpected-error arm; its
+serial log, QMP trace, frames and build logs are the evidence.
 
 Not done, and therefore not claimed: a visual check of the changed taskbar
 alignment/icon-size settings values, cross-boot pin and auto-hide
