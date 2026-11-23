@@ -9962,3 +9962,11 @@ and reclaims that quarantine after all process tasks die. The unrelated
 Stage 11.6 and 11.2 pass on 1/2/4 CPUs under the `17954334*` and `1795433*`
 evidence sets respectively. Host build/lint/test/format gates pass. No
 Cargo/QEMU chain is active; documentation and commit are being finalized.
+
+## Codex - D: test-output redirection active (2026-11-23)
+
+At user direction, Codex owns persistent redirection of Cargo build/test output
+and automated-test evidence to `D:\WovenHat-OS-output`. The implementation uses
+Cargo configuration, launcher environment, and verified NTFS junctions so
+existing harness paths remain compatible. Existing evidence is preserved by
+moving rather than deleting it. No Cargo/QEMU acceptance chain is active.
