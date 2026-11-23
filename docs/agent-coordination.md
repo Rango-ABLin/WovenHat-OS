@@ -9898,3 +9898,16 @@ now records the exact owner task and the clean exact-source TLS matrix passes on
 Clippy, and 19 host harness tests pass. No Cargo or QEMU chain is active. Live
 runtime image/symbol/callback integration remains open; do not claim full Stage
 11 closure from this bounded acceptance.
+
+## Codex - live runtime ELF and symbol scope accepted (2026-11-23)
+
+Production syscalls now map a copied, self-contained shared object into the
+running process, reuse admitted relocation and rollback, install W^X/RELRO,
+publish a bounded generation-checked symbol scope, and remove mapping plus
+symbols on final unload. The initial boot exposed a process-table-to-paging lock
+inversion; live page-table work now occurs on a transaction-quiesced local
+address-space snapshot before metadata publication. The final Ring-3 fixture
+maps, resolves, executes and unloads a real Rust/LLD shared object on 1/2/4
+CPUs. Stage 11.6 rollback preservation, host suites and warning-denying Clippy
+pass. No Cargo/QEMU chain is active. Runtime dependency graphs, TLS coupling
+and lifecycle callbacks remain open.

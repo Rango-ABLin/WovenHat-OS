@@ -2397,6 +2397,39 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
         if !dynamic_module_transaction_owned() {
             return None;
         }
+        let runtime_image = {
+            let processes = process_table_lock();
+            processes
+                .iter()
+                .flatten()
+                .find(|process| process.id.as_u64() == owner)
+                .and_then(|process| process.address_space)
+                .is_some_and(|space| space.dynamic_module_is_runtime_image(index, generation))
+        };
+        if runtime_image {
+            let (address_space, mapping) = {
+                let processes = process_table_lock();
+                let process = processes
+                    .iter()
+                    .flatten()
+                    .find(|process| process.id.as_u64() == owner)?;
+                let space = process.address_space?;
+                let (address, size) = space.dynamic_module_mapping(index, generation)?;
+                (space.paging(), userspace::dynamic_mapping_descriptor(address, size)?)
+            };
+            if !userspace::unmap_dynamic_anonymous(address_space, mapping) {
+                return None;
+            }
+            let mut processes = process_table_lock();
+            let space = processes
+                .iter_mut()
+                .flatten()
+                .find(|process| process.id.as_u64() == owner)?
+                .address_space
+                .as_mut()?;
+            space.remove_runtime_symbols(index, generation);
+            return space.release_dynamic_module(index, generation);
+        }
         let tasks = {
             let scheduler = SCHEDULER.lock();
             let mut tasks = [(0usize, None, None); MAX_TASKS];
@@ -2455,6 +2488,52 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
         .find(|process| process.id.as_u64() == current_process_id())
         .and_then(|process| process.address_space.as_mut())
         .and_then(|space| space.release_dynamic_module(index, generation))
+}
+
+pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64> {
+    if !dynamic_module_transaction_owned() {
+        return None;
+    }
+    let index = usize::try_from(module.checked_sub(1)?).ok()?;
+    if index >= userspace::MAX_DYNAMIC_MODULES {
+        return None;
+    }
+    let owner = current_process_id();
+    let mut space = {
+        let processes = process_table_lock();
+        processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)?
+            .address_space
+            ?
+    };
+    let generation = userspace::load_runtime_module(&mut space, bytes, index)?;
+    {
+        let mut processes = process_table_lock();
+        let published = processes
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)?
+            .address_space
+            .as_mut()?;
+        if published.paging() != space.paging() {
+            return None;
+        }
+        *published = space;
+    }
+    encode_runtime_module_handle(index, generation)
+}
+
+pub fn lookup_runtime_symbol(name: &[u8]) -> Option<u64> {
+    let owner = current_process_id();
+    let processes = process_table_lock();
+    processes
+        .iter()
+        .flatten()
+        .find(|process| process.id.as_u64() == owner)?
+        .address_space?
+        .lookup_runtime_symbol(name)
 }
 
 fn encode_runtime_module_handle(index: usize, generation: u32) -> Option<u64> {
@@ -2572,7 +2651,7 @@ pub fn map_dynamic_tls_all(module: u64, initializer: &[u8], memory_size: usize) 
                         .find(|entry| entry.0.is_none())
                         .and_then(|entry| entry.1)
                         .or(installed[0].1)?;
-                    space.publish_dynamic_module(module, leader.address, size)
+                    space.publish_dynamic_tls_module(module, leader.address, size)
                 }
                 None => None,
             },

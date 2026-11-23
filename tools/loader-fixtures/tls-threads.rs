@@ -167,6 +167,34 @@ fn runtime_tls_lifecycle() -> u64 {
     else { 0 }
 }
 
+fn runtime_image_lifecycle() -> u64 {
+    const ERROR: u64 = u64::MAX;
+    const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RUNTIME_MODULE_ELF"));
+    const SYMBOL: &[u8] = b"woven_runtime_answer";
+    if invoke(146, 0, 0, 0) != 1 {
+        return 1;
+    }
+    let handle = invoke(156, IMAGE.as_ptr() as u64, IMAGE.len() as u64, 3);
+    let generation = handle >> 32;
+    let slot = handle & 0xffff_ffff;
+    let address = invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0);
+    let result = if handle == ERROR { 2 }
+        else if generation != 1 || slot != 3 { 3 }
+        else if address == ERROR { 4 }
+        else {
+            let function: extern "C" fn() -> u64 = unsafe { core::mem::transmute(address) };
+            if function() != 77 { 5 }
+            else if invoke(145, slot, generation, 0) != 1 { 6 }
+            else if invoke(157, SYMBOL.as_ptr() as u64, SYMBOL.len() as u64, 0) != ERROR { 7 }
+            else if invoke(147, 0, 0, 0) != 1 { 8 }
+            else { 0 }
+        };
+    if result != 0 {
+        let _ = invoke(147, 0, 0, 0);
+    }
+    result
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn thread_main() -> u64 {
     if !matches(42, 0, 17) {
@@ -190,6 +218,13 @@ pub extern "C" fn demo_main() -> u64 {
         || !report(b"[S11.TLS] runtime pure-BSS reload: PASSED\n")
     {
         return 30 + runtime_tls;
+    }
+    let runtime_image = runtime_image_lifecycle();
+    if runtime_image != 0
+        || !report(b"[S11.RUNTIME] live ELF mapping and execution: PASSED\n")
+        || !report(b"[S11.RUNTIME] symbol publication and unload: PASSED\n")
+    {
+        return 60 + runtime_image;
     }
     set(99, 23, 19);
     let pid = syscall(16, 0, 0);

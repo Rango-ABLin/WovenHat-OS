@@ -1,5 +1,29 @@
 # Stage status
 
+## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
+
+The production syscall boundary now copies and validates a bounded ELF shared
+object, stages its segments in the running process, applies the already admitted
+relocations, enforces final W^X and RELRO protections, and atomically publishes
+the generation-tagged module descriptor with a fixed-capacity exported-symbol
+scope. Exact-name lookup returns only symbols belonging to live generations;
+final-reference unload removes the symbols and shared mapping before retiring
+the descriptor. `libwoven` exposes the raw map and lookup ABI.
+
+The Ring-3 compiler fixture embeds a separately linked shared object, maps it
+after process start, resolves and executes `woven_runtime_answer` (returning
+77), unloads it, and verifies that lookup becomes stale. Exact-final-source
+Stage 11.2 TLS boots pass on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795411*`; Stage 11.6 staging and
+rollback preservation passes on 1/2/4 CPUs. Warning-denying affected-feature
+and all-target Clippy, 33 ELF tests, 263 libwoven/typography tests (one existing
+ignored fixture), and 19 harness tests pass.
+
+This slice intentionally accepts only self-contained, non-TLS runtime objects
+with contiguous mapped segments. Runtime `DT_NEEDED` graph extension, dynamic
+TLS coupling, and constructor/destructor ownership remain separate Stage 11
+requirements.
+
 ## Stage 11 generation-tagged runtime TLS lifecycle - 2026-11-22 - ACCEPTED (BOUNDED)
 
 Runtime TLS mapping now returns a generation-tagged module handle, resolves

@@ -380,6 +380,10 @@ pub enum Number {
     ThreadRobustConsistent = 153,
     ThreadRobustWait = 154,
     ThreadRobustWake = 155,
+    /// ELF image pointer, byte length, 1-based module slot -> tagged handle.
+    RuntimeModuleMap = 156,
+    /// symbol-name pointer and length -> resolved address.
+    RuntimeSymbolLookup = 157,
     /// Internal ELF PLT resolver: the entry stub supplies the GOT slot in R11
     /// and receives the validated target address in RAX.
     LazyBind = 137,
@@ -3311,6 +3315,35 @@ pub extern "C" fn wovenhat_syscall_dispatch(
                     memory_size,
                 )
                 .unwrap_or(SYSCALL_ERROR)
+            }
+        }
+        value if value == Number::RuntimeModuleMap as u64 => {
+            const MAX_RUNTIME_IMAGE: usize = 1024 * 1024;
+            let Some(length) = usize::try_from(arg1)
+                .ok()
+                .filter(|length| *length >= 64 && *length <= MAX_RUNTIME_IMAGE)
+            else {
+                return SYSCALL_ERROR;
+            };
+            let mut bytes = alloc::vec![0; length];
+            if crate::paging::copy_from_current_user(arg0, &mut bytes).is_err() {
+                SYSCALL_ERROR
+            } else {
+                crate::task::map_runtime_module(arg2, bytes).unwrap_or(SYSCALL_ERROR)
+            }
+        }
+        value if value == Number::RuntimeSymbolLookup as u64 => {
+            let Some(length) = usize::try_from(arg1)
+                .ok()
+                .filter(|length| *length != 0 && *length <= crate::userspace::MAX_RUNTIME_SYMBOL_NAME)
+            else {
+                return SYSCALL_ERROR;
+            };
+            let mut name = [0; crate::userspace::MAX_RUNTIME_SYMBOL_NAME];
+            if crate::paging::copy_from_current_user(arg0, &mut name[..length]).is_err() {
+                SYSCALL_ERROR
+            } else {
+                crate::task::lookup_runtime_symbol(&name[..length]).unwrap_or(SYSCALL_ERROR)
             }
         }
         value if value == Number::ThreadRobustRegister as u64 => {

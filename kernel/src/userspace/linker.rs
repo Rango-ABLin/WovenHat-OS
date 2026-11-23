@@ -312,7 +312,6 @@ impl Pending {
 /// checked at plan time, before any pages are mapped, so that staging is
 /// fail-closed.  The load bias is fixed when the plan is built; the caller
 /// selects a free slot in the dynamic-module table before calling `new`.
-#[cfg(feature = "stage11-6-test")]
 pub(super) struct ModulePlan {
     pub(super) bytes: Vec<u8>,
     pub(super) image: elf::Image,
@@ -324,7 +323,6 @@ pub(super) struct ModulePlan {
     pub(super) mapping_size: usize,
 }
 
-#[cfg(feature = "stage11-6-test")]
 impl ModulePlan {
     /// Build a plan for `bytes` at dynamic-module `slot` with the given load
     /// `bias`.  Returns `None` if the image is not a valid shared library, any
@@ -350,6 +348,16 @@ impl ModulePlan {
         if mapping_size == 0 {
             return None;
         }
+        let mut cursor = mapping_start;
+        for segment in image.segments() {
+            if segment.mapping_start != cursor {
+                return None;
+            }
+            cursor = cursor.checked_add(segment.mapping_size as u64)?;
+        }
+        if cursor != mapping_end {
+            return None;
+        }
         Some(Self { bytes, image, slot, mapping_start, mapping_size })
     }
 }
@@ -358,8 +366,6 @@ impl ModulePlan {
 /// address space.  Pages are physically present but the module generation is
 /// not published; callers must call `commit` before any thread can observe the
 /// new module, or drop the guard to roll back all mapped pages.
-#[cfg(feature = "stage11-6-test")]
-#[cfg(feature = "stage11-6-test")]
 pub(super) struct StagedSegments<'a> {
     space: &'a mut AddressSpace,
     mapping_start: u64,
@@ -368,7 +374,6 @@ pub(super) struct StagedSegments<'a> {
     committed: bool,
 }
 
-#[cfg(feature = "stage11-6-test")]
 impl Drop for StagedSegments<'_> {
     fn drop(&mut self) {
         if !self.committed {
@@ -381,8 +386,6 @@ impl Drop for StagedSegments<'_> {
     }
 }
 
-#[cfg(feature = "stage11-6-test")]
-#[cfg(feature = "stage11-6-test")]
 impl<'a> StagedSegments<'a> {
     /// Apply relocations to the staged pages, reusing the same
     /// `validate_relocation_plan` + `relocate_linked_images` path used by
@@ -404,10 +407,60 @@ impl<'a> StagedSegments<'a> {
     /// Publish the module generation only after all staged pages are confirmed.
     /// Returns the new generation number, or `None` if the slot is already live
     /// or the mapping size is zero.
+    #[cfg(feature = "stage11-6-test")]
     pub(super) fn commit(mut self) -> Option<u32> {
         let generation = self
             .space
             .publish_dynamic_module(self.slot, self.mapping_start, self.mapping_size)?;
+        self.committed = true;
+        Some(generation)
+    }
+
+    fn commit_with_symbols(
+        mut self,
+        image: &elf::Image,
+        bytes: &[u8],
+    ) -> Option<u32> {
+        let mut symbols = [None; MAX_RUNTIME_SYMBOLS];
+        let mut count = 0;
+        image.visit_defined_global_symbols(bytes, |name, address| {
+            if count == symbols.len() || name.len() > MAX_RUNTIME_SYMBOL_NAME {
+                return false;
+            }
+            let mut copied = RuntimeSymbol {
+                module: 0,
+                generation: 0,
+                name_len: name.len() as u8,
+                name: [0; MAX_RUNTIME_SYMBOL_NAME],
+                address,
+            };
+            copied.name[..name.len()].copy_from_slice(name);
+            symbols[count] = Some(copied);
+            count += 1;
+            true
+        })?;
+        let mut compact = [RuntimeSymbol {
+            module: 0,
+            generation: 0,
+            name_len: 0,
+            name: [0; MAX_RUNTIME_SYMBOL_NAME],
+            address: 0,
+        }; MAX_RUNTIME_SYMBOLS];
+        for (target, symbol) in compact.iter_mut().zip(symbols).take(count) {
+            *target = symbol?;
+        }
+        if !self.space.can_publish_runtime_symbols(&compact[..count]) {
+            return None;
+        }
+        let generation = self
+            .space
+            .publish_dynamic_module(self.slot, self.mapping_start, self.mapping_size)?;
+        if !self
+            .space
+            .publish_runtime_symbols(self.slot, generation, &compact[..count])
+        {
+            return None;
+        }
         self.committed = true;
         Some(generation)
     }
@@ -417,7 +470,6 @@ impl<'a> StagedSegments<'a> {
 /// On partial failure, any already-mapped pages are immediately unmapped before
 /// returning `None`.  On success the returned `StagedSegments` guard rolls back
 /// via `Drop` unless `commit` is called first.
-#[cfg(feature = "stage11-6-test")]
 pub(super) fn stage_module_segments<'a>(
     space: &'a mut AddressSpace,
     plan: &ModulePlan,
@@ -456,6 +508,54 @@ pub(super) fn stage_module_segments<'a>(
         slot: plan.slot,
         committed: false,
     })
+}
+
+/// Map, relocate, protect and atomically publish one self-contained shared
+/// object into a live process address space.
+pub(super) fn load_runtime_module(
+    space: &mut AddressSpace,
+    bytes: Vec<u8>,
+    slot: usize,
+) -> Option<u32> {
+    if slot >= MAX_DYNAMIC_MODULES {
+        return None;
+    }
+    let bias = LIBRARY_START.checked_add(
+        (elf::MAX_NEEDED_LIBRARIES as u64)
+            .checked_add(slot as u64)?
+            .checked_mul(LIBRARY_STRIDE)?,
+    )?;
+    let plan = ModulePlan::new(bytes, slot, bias)?;
+    if plan
+        .image
+        .dynamic()
+        .is_some_and(|dynamic| dynamic.needed_count != 0)
+        || plan.image.tls().is_some()
+    {
+        return None;
+    }
+    let mut staged = stage_module_segments(space, &plan)?;
+    let link = LinkImage {
+        name: None,
+        bytes: Cow::Borrowed(&plan.bytes),
+        image: plan.image,
+    };
+    let scope = SymbolScope::new(&link.image, &link.bytes);
+    staged.relocate_staged(core::slice::from_ref(&link), &scope, None)?;
+    for segment in link.image.segments() {
+        paging::protect_user_range_in(
+            staged.space.paging(),
+            segment.mapping_start,
+            segment.mapping_size,
+            segment.writable,
+            segment.executable,
+        )
+        .ok()?;
+    }
+    if let Some((start, size)) = link.image.relro() {
+        paging::protect_user_range_in(staged.space.paging(), start, size, false, false).ok()?;
+    }
+    staged.commit_with_symbols(&link.image, &link.bytes)
 }
 
 /// Validate relocation metadata before the first staged write. This keeps a
@@ -769,6 +869,7 @@ pub(super) fn load_with_geometry(
             library_relro: [None; elf::MAX_NEEDED_LIBRARIES],
             tls: None,
             dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+            runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
             destructors: [0; elf::MAX_SCOPE_IMAGES * elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,

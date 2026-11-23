@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Live runtime ELF and symbol publication boundary
+
+`RuntimeModuleMap` copies at most 1 MiB from the calling process before parsing,
+uses the production shared-object parser and admitted relocations, and stages
+pages under the exact-task dynamic-module transaction. Page-table mutation is
+performed without holding the process-table lock; the updated address-space
+metadata is published afterward, avoiding the paging/process lock inversion.
+Final segment flags and GNU RELRO are installed before a module generation and
+its bounded exported symbols become visible together.
+
+The per-process scope holds at most 32 names of at most 64 bytes. Lookup checks
+the owning module generation, and final unload removes both mapping and symbols.
+Runtime placement uses the reserved library arena after startup dependency
+slots. The current ABI rejects runtime TLS and `DT_NEEDED` objects rather than
+silently loading an incomplete graph.
+
 ## Generation-tagged runtime TLS transaction boundary
 
 `DynamicTlsMapAll` publishes only after every live process task has received a

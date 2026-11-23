@@ -13,6 +13,14 @@ mod tls_layout;
 pub fn aslr_geometry_self_test() -> bool {
     aslr_acceptance::run()
 }
+
+pub fn load_runtime_module(
+    space: &mut AddressSpace,
+    bytes: alloc::vec::Vec<u8>,
+    slot: usize,
+) -> Option<u32> {
+    linker::load_runtime_module(space, bytes, slot)
+}
 #[cfg(feature = "stage11-tls-test")]
 mod tls_acceptance;
 
@@ -28,6 +36,8 @@ use crate::paging;
 
 pub use crate::config::MAX_ANONYMOUS_MAPPINGS;
 pub const MAX_DYNAMIC_MODULES: usize = crate::elf::MAX_SCOPE_IMAGES;
+pub const MAX_RUNTIME_SYMBOLS: usize = 32;
+pub const MAX_RUNTIME_SYMBOL_NAME: usize = 64;
 // Dynamic TLS has its own bounded arena beyond the shared-library slots.
 const DYNAMIC_TLS_START: u64 = USER_REGION_START + 0x2000_0000;
 
@@ -4895,6 +4905,7 @@ pub struct DynamicModule {
     pub mapping_size: usize,
     // Static TLS descriptors borrow bytes from InitialTls's owned allocation.
     pub owns_mapping: bool,
+    pub runtime_image: bool,
 }
 
 impl DynamicModule {
@@ -4905,7 +4916,17 @@ impl DynamicModule {
         mapping_start: 0,
         mapping_size: 0,
         owns_mapping: false,
+        runtime_image: false,
     };
+}
+
+#[derive(Clone, Copy)]
+pub struct RuntimeSymbol {
+    pub module: usize,
+    pub generation: u32,
+    pub name_len: u8,
+    pub name: [u8; MAX_RUNTIME_SYMBOL_NAME],
+    pub address: u64,
 }
 
 /// The dedicated read-only large-asset window installed in an address space.
@@ -4926,6 +4947,7 @@ pub struct AddressSpace {
     library_relro: [Option<(u64, usize)>; crate::elf::MAX_NEEDED_LIBRARIES],
     tls: Option<InitialTls>,
     dynamic_modules: [DynamicModule; MAX_DYNAMIC_MODULES],
+    runtime_symbols: [Option<RuntimeSymbol>; MAX_RUNTIME_SYMBOLS],
     pub(crate) destructors:
         [u64; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
     pub(crate) destructor_count: usize,
@@ -4981,7 +5003,78 @@ impl AddressSpace {
         descriptor.mapping_start = mapping_start;
         descriptor.mapping_size = mapping_size;
         descriptor.owns_mapping = true;
+        descriptor.runtime_image = true;
         Some(descriptor.generation)
+    }
+
+    pub fn publish_dynamic_tls_module(
+        &mut self,
+        index: usize,
+        mapping_start: u64,
+        mapping_size: usize,
+    ) -> Option<u32> {
+        let generation = self.publish_dynamic_module(index, mapping_start, mapping_size)?;
+        self.dynamic_modules[index].runtime_image = false;
+        Some(generation)
+    }
+
+    pub fn dynamic_module_is_runtime_image(self, index: usize, generation: u32) -> bool {
+        self.dynamic_modules.get(index).is_some_and(|descriptor| {
+            descriptor.live
+                && descriptor.generation == generation
+                && descriptor.runtime_image
+        })
+    }
+
+    pub fn publish_runtime_symbols(
+        &mut self,
+        module: usize,
+        generation: u32,
+        symbols: &[RuntimeSymbol],
+    ) -> bool {
+        if !self.can_publish_runtime_symbols(symbols) { return false; }
+        for symbol in symbols {
+            let Some(slot) = self.runtime_symbols.iter_mut().find(|entry| entry.is_none()) else {
+                return false;
+            };
+            let mut published = *symbol;
+            published.module = module;
+            published.generation = generation;
+            *slot = Some(published);
+        }
+        true
+    }
+
+    pub fn can_publish_runtime_symbols(self, symbols: &[RuntimeSymbol]) -> bool {
+        symbols.len() <= self.runtime_symbols.iter().filter(|entry| entry.is_none()).count()
+            && symbols.iter().enumerate().all(|(index, symbol)| {
+                let name = &symbol.name[..symbol.name_len as usize];
+                !name.is_empty()
+                    && !symbols[..index].iter().any(|prior| {
+                        prior.name[..prior.name_len as usize] == *name
+                    })
+                    && !self.runtime_symbols.iter().flatten().any(|published| {
+                        published.name[..published.name_len as usize] == *name
+                    })
+            })
+    }
+
+    pub fn lookup_runtime_symbol(self, name: &[u8]) -> Option<u64> {
+        self.runtime_symbols.iter().flatten().find_map(|symbol| {
+            let live = self.dynamic_module_live(symbol.module, symbol.generation);
+            (live && symbol.name[..symbol.name_len as usize] == *name)
+                .then_some(symbol.address)
+        })
+    }
+
+    pub fn remove_runtime_symbols(&mut self, module: usize, generation: u32) {
+        for symbol in &mut self.runtime_symbols {
+            if symbol.is_some_and(|symbol| {
+                symbol.module == module && symbol.generation == generation
+            }) {
+                *symbol = None;
+            }
+        }
     }
 
     pub fn retain_dynamic_module(&mut self, index: usize, generation: u32) -> bool {
@@ -5003,6 +5096,7 @@ impl AddressSpace {
         descriptor.mapping_start = 0;
         descriptor.mapping_size = 0;
         descriptor.owns_mapping = false;
+        descriptor.runtime_image = false;
         descriptor.generation = descriptor.generation.saturating_add(1).max(1);
         Some(true)
     }
@@ -6593,6 +6687,7 @@ pub fn clone_address_space(
         library_relro: source.library_relro,
         tls: source.tls,
         dynamic_modules: source.dynamic_modules,
+        runtime_symbols: source.runtime_symbols,
         destructors: source.destructors,
         destructor_count: source.destructor_count,
         destructor_pending: source.destructor_pending,
@@ -6987,6 +7082,7 @@ pub fn shared_disk_mmap_self_test() -> bool {
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
             dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+            runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
@@ -7051,6 +7147,7 @@ pub fn disk_unlink_mmap_self_test() -> bool {
             library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
             tls: None,
             dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+            runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
             destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
             destructor_count: 0,
             destructor_pending: false,
@@ -7106,6 +7203,7 @@ pub fn shared_file_mmap_self_test() -> bool {
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
         dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -7201,6 +7299,7 @@ pub fn lazy_file_mmap_self_test() -> bool {
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
         dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -7297,6 +7396,7 @@ pub fn private_lazy_swap_self_test() -> bool {
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
         dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,
@@ -7377,6 +7477,7 @@ pub fn file_mmap_self_test() -> bool {
         library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
         tls: None,
         dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
         destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
         destructor_count: 0,
         destructor_pending: false,

@@ -13092,6 +13092,24 @@ pub mod syscall {
         unsafe { invoke(149, module, initializer, packed) }
     }
 
+    /// Map and publish one bounded self-contained ELF shared object.
+    ///
+    /// # Safety
+    /// The caller must own the dynamic-module transaction and `image` must
+    /// reference `image_len` readable userspace bytes for the duration of the
+    /// call. `module` is a 1-based slot.
+    pub unsafe fn runtime_module_map(image: u64, image_len: u64, module: u64) -> u64 {
+        unsafe { invoke(156, image, image_len, module) }
+    }
+
+    /// Resolve an exact exported name in the current process runtime scope.
+    ///
+    /// # Safety
+    /// `name` must reference `name_len` readable userspace bytes.
+    pub unsafe fn runtime_symbol_lookup(name: u64, name_len: u64) -> u64 {
+        unsafe { invoke(157, name, name_len, 0) }
+    }
+
 
     /// Cancel an owned sibling thread. The sibling remains joinable and the
     /// supplied status is returned by [`thread_join`].

@@ -134,6 +134,8 @@ def required_markers(stage, cpus):
             '[S11.TLS] template/TCB rollback and fork protection: PASSED',
             '[S11.TLS] runtime generation handle and unload: PASSED',
             '[S11.TLS] runtime pure-BSS reload: PASSED',
+                       '[S11.RUNTIME] live ELF mapping and execution: PASSED',
+                       '[S11.RUNTIME] symbol publication and unload: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
