@@ -4906,6 +4906,8 @@ pub struct DynamicModule {
     // Static TLS descriptors borrow bytes from InitialTls's owned allocation.
     pub owns_mapping: bool,
     pub runtime_image: bool,
+    pub image_mapping_start: u64,
+    pub image_mapping_size: usize,
 }
 
 impl DynamicModule {
@@ -4917,6 +4919,8 @@ impl DynamicModule {
         mapping_size: 0,
         owns_mapping: false,
         runtime_image: false,
+        image_mapping_start: 0,
+        image_mapping_size: 0,
     };
 }
 
@@ -5004,6 +5008,8 @@ impl AddressSpace {
         descriptor.mapping_size = mapping_size;
         descriptor.owns_mapping = true;
         descriptor.runtime_image = true;
+        descriptor.image_mapping_start = mapping_start;
+        descriptor.image_mapping_size = mapping_size;
         Some(descriptor.generation)
     }
 
@@ -5024,6 +5030,39 @@ impl AddressSpace {
                 && descriptor.generation == generation
                 && descriptor.runtime_image
         })
+    }
+
+    pub fn dynamic_module_image_mapping(
+        self,
+        index: usize,
+        generation: u32,
+    ) -> Option<(u64, usize)> {
+        let descriptor = self.dynamic_modules.get(index)?;
+        (descriptor.live
+            && descriptor.generation == generation
+            && descriptor.runtime_image
+            && descriptor.image_mapping_size != 0)
+            .then_some((descriptor.image_mapping_start, descriptor.image_mapping_size))
+    }
+
+    pub fn attach_runtime_tls_mapping(
+        &mut self,
+        index: usize,
+        generation: u32,
+        mapping_start: u64,
+        mapping_size: usize,
+    ) -> bool {
+        let Some(descriptor) = self.dynamic_modules.get_mut(index) else { return false; };
+        if !descriptor.live
+            || descriptor.generation != generation
+            || !descriptor.runtime_image
+            || mapping_size == 0
+        {
+            return false;
+        }
+        descriptor.mapping_start = mapping_start;
+        descriptor.mapping_size = mapping_size;
+        true
     }
 
     pub fn publish_runtime_symbols(
@@ -5097,6 +5136,8 @@ impl AddressSpace {
         descriptor.mapping_size = 0;
         descriptor.owns_mapping = false;
         descriptor.runtime_image = false;
+        descriptor.image_mapping_start = 0;
+        descriptor.image_mapping_size = 0;
         descriptor.generation = descriptor.generation.saturating_add(1).max(1);
         Some(true)
     }

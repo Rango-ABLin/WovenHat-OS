@@ -88,6 +88,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
                        '[S11.TLS] runtime pure-BSS reload: PASSED',
                        '[S11.RUNTIME] live ELF mapping and execution: PASSED',
                        '[S11.RUNTIME] symbol publication and unload: PASSED',
+                       '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
                        '[S11.TLS] compiler TLS lifecycle: PASSED',
                        '[S11.2] threads/TLS/join: PASSED'):
             self.assertIn(marker, required)
@@ -147,6 +148,7 @@ class RuntimeAcceptanceTests(unittest.TestCase):
         self.assertIn('[S11.6] module staging rollback: PASSED', required)
         self.assertIn('[S11.6] generation-safe unload/reload: PASSED', required)
         self.assertIn('[S11.6] per-thread dynamic TLS isolation: PASSED', required)
+        self.assertIn('[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED', required)
         for missing in required:
             with self.subTest(missing=missing):
                 log = '\n'.join(marker for marker in required if marker != missing)

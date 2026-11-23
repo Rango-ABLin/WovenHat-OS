@@ -195,6 +195,29 @@ fn runtime_image_lifecycle() -> u64 {
     result
 }
 
+fn runtime_image_tls_coupling() -> u64 {
+    const ERROR: u64 = u64::MAX;
+    const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_RUNTIME_TLS_MODULE_ELF"));
+    if invoke(146, 0, 0, 0) != 1 {
+        return 1;
+    }
+    let handle = invoke(156, IMAGE.as_ptr() as u64, IMAGE.len() as u64, 4);
+    let address = invoke(141, handle, 0, 0);
+    let generation = handle >> 32;
+    let result = if handle == ERROR { 2 }
+        else if generation != 1 || (handle & 0xffff_ffff) != 4 { 3 }
+        else if address == ERROR { 4 }
+        else if unsafe { core::ptr::read_volatile(address as *const u64) } != 55 { 5 }
+        else if invoke(145, 4, generation, 0) != 1 { 6 }
+        else if invoke(141, handle, 0, 0) != ERROR { 7 }
+        else if invoke(147, 0, 0, 0) != 1 { 8 }
+        else { 0 };
+    if result != 0 {
+        let _ = invoke(147, 0, 0, 0);
+    }
+    result
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn thread_main() -> u64 {
     if !matches(42, 0, 17) {
@@ -225,6 +248,12 @@ pub extern "C" fn demo_main() -> u64 {
         || !report(b"[S11.RUNTIME] symbol publication and unload: PASSED\n")
     {
         return 60 + runtime_image;
+    }
+    let runtime_tls = runtime_image_tls_coupling();
+    if runtime_tls != 0
+        || !report(b"[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED\n")
+    {
+        return 80 + runtime_tls;
     }
     set(99, 23, 19);
     let pid = syscall(16, 0, 0);

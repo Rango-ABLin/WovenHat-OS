@@ -421,7 +421,8 @@ impl<'a> StagedSegments<'a> {
         image: &elf::Image,
         bytes: &[u8],
     ) -> Option<u32> {
-        let mut symbols = [None; MAX_RUNTIME_SYMBOLS];
+        let mut symbols: [Option<RuntimeSymbol>; MAX_RUNTIME_SYMBOLS] =
+            [None; MAX_RUNTIME_SYMBOLS];
         let mut count = 0;
         image.visit_defined_global_symbols(bytes, |name, address| {
             if count == symbols.len() || name.len() > MAX_RUNTIME_SYMBOL_NAME {
@@ -525,37 +526,215 @@ pub(super) fn load_runtime_module(
             .checked_add(slot as u64)?
             .checked_mul(LIBRARY_STRIDE)?,
     )?;
-    let plan = ModulePlan::new(bytes, slot, bias)?;
-    if plan
-        .image
-        .dynamic()
-        .is_some_and(|dynamic| dynamic.needed_count != 0)
-        || plan.image.tls().is_some()
-    {
-        return None;
+    let images = prepare_runtime_graph(bytes, bias)?;
+    let first = images
+        .iter()
+        .flat_map(|image| image.image.segments())
+        .map(|segment| segment.mapping_start)
+        .min()?;
+    let end = images
+        .iter()
+        .flat_map(|image| image.image.segments())
+        .filter_map(|segment| segment.mapping_start.checked_add(segment.mapping_size as u64))
+        .max()?;
+    let size = usize::try_from(end.checked_sub(first)?).ok()?;
+    let staged = RuntimeGraphGuard::map(space, first, size, &images, slot)?;
+    let mut scope = SymbolScope::new(&images[0].image, &images[0].bytes);
+    for image in images.iter().skip(1) {
+        scope
+            .add_dependency(image.name.as_deref()?, &image.image, &image.bytes)
+            .ok()?;
     }
-    let mut staged = stage_module_segments(space, &plan)?;
-    let link = LinkImage {
-        name: None,
-        bytes: Cow::Borrowed(&plan.bytes),
-        image: plan.image,
-    };
-    let scope = SymbolScope::new(&link.image, &link.bytes);
-    staged.relocate_staged(core::slice::from_ref(&link), &scope, None)?;
-    for segment in link.image.segments() {
-        paging::protect_user_range_in(
-            staged.space.paging(),
-            segment.mapping_start,
-            segment.mapping_size,
-            segment.writable,
-            segment.executable,
-        )
-        .ok()?;
+    scope.validate_dependencies().ok()?;
+    validate_relocation_plan(&images)?;
+    relocate_linked_images(&images, &scope, staged.space.paging(), staged.space, None)?;
+    for linked in &images {
+        for segment in linked.image.segments() {
+            paging::protect_user_range_in(
+                staged.space.paging(),
+                segment.mapping_start,
+                segment.mapping_size,
+                segment.writable,
+                segment.executable,
+            )
+            .ok()?;
+        }
+        if let Some((start, relro_size)) = linked.image.relro() {
+            paging::protect_user_range_in(staged.space.paging(), start, relro_size, false, false)
+                .ok()?;
+        }
     }
-    if let Some((start, size)) = link.image.relro() {
-        paging::protect_user_range_in(staged.space.paging(), start, size, false, false).ok()?;
+    staged.commit(&images)
+}
+
+fn prepare_runtime_graph(root: Vec<u8>, base: u64) -> Option<Vec<LinkImage<'static>>> {
+    let root_image = elf::parse_shared(&root).ok()?;
+    runtime_image_contiguous(&root_image)?;
+    let root_start = root_image.segments().map(|segment| segment.mapping_start).min()?;
+    let root_image = root_image.relocated(base.checked_sub(root_start)?)?;
+    let mut images = Vec::with_capacity(elf::MAX_SCOPE_IMAGES);
+    images.push(LinkImage { name: None, bytes: Cow::Owned(root), image: root_image });
+    let mut cursor = 0;
+    while cursor < images.len() {
+        let count = images[cursor].image.dynamic().map_or(0, |dynamic| dynamic.needed_count);
+        for needed_index in 0..count {
+            let name = images[cursor]
+                .image
+                .needed_name(&images[cursor].bytes, needed_index)?
+                .to_vec();
+            if images.iter().any(|image| image.name.as_deref() == Some(name.as_slice())) {
+                continue;
+            }
+            if images.len() == elf::MAX_SCOPE_IMAGES {
+                return None;
+            }
+            let path = library_path(&name)?;
+            let stat = crate::vfs::stat(&path).ok()?;
+            if stat.kind != crate::vfs::NodeKind::File || stat.writable {
+                return None;
+            }
+            let mut package = alloc::vec![0; crate::vfs::NODE_CAPACITY];
+            let length = crate::vfs::read_all(&path, &mut package).ok()?;
+            let payload = crate::signed_app::verify_package(package.get(..length)?)
+                .ok()?
+                .bytes()
+                .to_vec();
+            let image = elf::parse_shared(&payload).ok()?;
+            runtime_image_contiguous(&image)?;
+            if image.dynamic().is_some_and(|dynamic| dynamic.soname_offset.is_some())
+                && image.soname(&payload) != Some(name.as_slice())
+            {
+                return None;
+            }
+            let original_start = image.segments().map(|segment| segment.mapping_start).min()?;
+            let next_base = images
+                .iter()
+                .flat_map(|image| image.image.segments())
+                .filter_map(|segment| segment.mapping_start.checked_add(segment.mapping_size as u64))
+                .max()?
+                .checked_add(4095)?
+                & !4095;
+            let image = image.relocated(next_base.checked_sub(original_start)?)?;
+            images.push(LinkImage { name: Some(name), bytes: Cow::Owned(payload), image });
+        }
+        cursor += 1;
     }
-    staged.commit_with_symbols(&link.image, &link.bytes)
+    let end = images
+        .iter()
+        .flat_map(|image| image.image.segments())
+        .filter_map(|segment| segment.mapping_start.checked_add(segment.mapping_size as u64))
+        .max()?;
+    (end <= base.checked_add(LIBRARY_STRIDE)?).then_some(images)
+}
+
+fn runtime_image_contiguous(image: &elf::Image) -> Option<()> {
+    let mut segments = image.segments();
+    let first = segments.next()?;
+    let mut cursor = first.mapping_start.checked_add(first.mapping_size as u64)?;
+    for segment in segments {
+        if segment.mapping_start != cursor {
+            return None;
+        }
+        cursor = cursor.checked_add(segment.mapping_size as u64)?;
+    }
+    Some(())
+}
+
+struct RuntimeGraphGuard<'a> {
+    space: &'a mut AddressSpace,
+    start: u64,
+    size: usize,
+    slot: usize,
+    committed: bool,
+}
+
+impl Drop for RuntimeGraphGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = paging::unmap_user_range_in(self.space.paging(), self.start, self.size);
+        }
+    }
+}
+
+impl<'a> RuntimeGraphGuard<'a> {
+    fn map(
+        space: &'a mut AddressSpace,
+        start: u64,
+        size: usize,
+        images: &[LinkImage<'_>],
+        slot: usize,
+    ) -> Option<Self> {
+        let page_table = space.paging();
+        paging::map_user_range_in(page_table, start, size, true, false).ok()?;
+        let result = (|| {
+            paging::zero_user_range_in(page_table, start, size).ok()?;
+            for linked in images {
+                for segment in linked.image.segments() {
+                    let file_end = segment.file_offset.checked_add(segment.file_size)?;
+                    paging::write_user_bytes(
+                        page_table,
+                        segment.virtual_address,
+                        linked.bytes.get(segment.file_offset..file_end)?,
+                    )
+                    .ok()?;
+                }
+            }
+            Some(())
+        })();
+        if result.is_none() {
+            let _ = paging::unmap_user_range_in(page_table, start, size);
+            return None;
+        }
+        Some(Self { space, start, size, slot, committed: false })
+    }
+
+    fn commit(mut self, images: &[LinkImage<'_>]) -> Option<u32> {
+        let mut symbols: [Option<RuntimeSymbol>; MAX_RUNTIME_SYMBOLS] =
+            [None; MAX_RUNTIME_SYMBOLS];
+        let mut count = 0;
+        for linked in images {
+            linked.image.visit_defined_global_symbols(&linked.bytes, |name, address| {
+                if symbols[..count].iter().flatten().any(|published| {
+                    published.name[..published.name_len as usize] == *name
+                }) {
+                    return true;
+                }
+                if count == symbols.len() || name.len() > MAX_RUNTIME_SYMBOL_NAME {
+                    return false;
+                }
+                let mut symbol = RuntimeSymbol {
+                    module: 0,
+                    generation: 0,
+                    name_len: name.len() as u8,
+                    name: [0; MAX_RUNTIME_SYMBOL_NAME],
+                    address,
+                };
+                symbol.name[..name.len()].copy_from_slice(name);
+                symbols[count] = Some(symbol);
+                count += 1;
+                true
+            })?;
+        }
+        let mut compact = [RuntimeSymbol {
+            module: 0,
+            generation: 0,
+            name_len: 0,
+            name: [0; MAX_RUNTIME_SYMBOL_NAME],
+            address: 0,
+        }; MAX_RUNTIME_SYMBOLS];
+        for (target, symbol) in compact.iter_mut().zip(symbols).take(count) {
+            *target = symbol?;
+        }
+        if !self.space.can_publish_runtime_symbols(&compact[..count]) {
+            return None;
+        }
+        let generation = self.space.publish_dynamic_module(self.slot, self.start, self.size)?;
+        if !self.space.publish_runtime_symbols(self.slot, generation, &compact[..count]) {
+            return None;
+        }
+        self.committed = true;
+        Some(generation)
+    }
 }
 
 /// Validate relocation metadata before the first staged write. This keeps a

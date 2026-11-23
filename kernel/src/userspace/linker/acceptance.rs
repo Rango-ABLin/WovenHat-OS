@@ -943,6 +943,14 @@ pub(super) fn module_staging_run() -> bool {
         crate::serial::write_line(format_args!(
             "[S11.6] per-thread dynamic TLS isolation: PASSED"
         ));
+        let graph_generation = load_runtime_module(&mut space, scope_bytes.clone(), 1)?;
+        if graph_generation != 1 || space.lookup_runtime_symbol(b"answer").is_none() {
+            let _ = destroy(space);
+            return None;
+        }
+        crate::serial::write_line(format_args!(
+            "[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED"
+        ));
         let _ = destroy(space);
         Some(true)
     })()

@@ -136,6 +136,7 @@ def required_markers(stage, cpus):
             '[S11.TLS] runtime pure-BSS reload: PASSED',
                        '[S11.RUNTIME] live ELF mapping and execution: PASSED',
                        '[S11.RUNTIME] symbol publication and unload: PASSED',
+                       '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])
@@ -188,6 +189,7 @@ def required_markers(stage, cpus):
         required.extend([
             '[S11.6] generation-safe unload/reload: PASSED',
             '[S11.6] per-thread dynamic TLS isolation: PASSED',
+            '[S11.RUNTIME] bounded DT_NEEDED graph and scope: PASSED',
         ])
     if stage == '13.11':
         required.extend([

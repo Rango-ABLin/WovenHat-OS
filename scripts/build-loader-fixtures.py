@@ -23,7 +23,7 @@ def build(output, rustc='rustc'):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     commands = []
-    inputs = ('library.rs', 'runtime-library.rs', 'shared-main.rs', 'static-tls.rs',
+    inputs = ('library.rs', 'runtime-library.rs', 'runtime-tls-library.rs', 'shared-main.rs', 'static-tls.rs',
               'tls-threads.rs', 'pure-bss-tls.rs')
     input_hashes = {name: digest(source / name) for name in inputs}
     builder_hash = digest(Path(__file__).resolve())
@@ -58,12 +58,13 @@ def build(output, rustc='rustc'):
         command = [rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
                    '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
                    '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large']
-        if name in ('static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs'):
+        if name in ('runtime-tls-library.rs', 'static-tls.rs', 'tls-threads.rs', 'pure-bss-tls.rs'):
             command.append('-Ztls-model=local-exec')
         run(command + [source / name, '-o', output / (Path(name).stem + '.o')])
 
     library = output / 'libwoven-demo.so'
     runtime_library = output / 'libwoven-runtime.so'
+    runtime_tls_library = output / 'libwoven-runtime-tls.so'
     shared = output / 'shared-demo'
     tls = output / 'static-tls-demo'
     threads = output / 'tls-threads-demo'
@@ -73,8 +74,12 @@ def build(output, rustc='rustc'):
     run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
          '-soname', runtime_library.name, '-z', 'now', '-o', runtime_library,
          output / 'runtime-library.o'])
+    run([linker, '-flavor', 'gnu', '-shared', '--hash-style=sysv',
+         '-soname', runtime_tls_library.name, '-z', 'now', '-o', runtime_tls_library,
+         output / 'runtime-tls-library.o'])
     fixture_env = os.environ.copy()
     fixture_env['WOVENHAT_RUNTIME_MODULE_ELF'] = str(runtime_library)
+    fixture_env['WOVENHAT_RUNTIME_TLS_MODULE_ELF'] = str(runtime_tls_library)
     run([rustc, '--edition=2024', '--crate-type=lib', '--emit=obj',
          '--target=x86_64-unknown-none', '-Dwarnings', '-Cpanic=abort',
          '-Copt-level=2', '-Crelocation-model=pic', '-Ccode-model=large',
@@ -90,7 +95,7 @@ def build(output, rustc='rustc'):
          '-e', '_start', '-o', threads, output / 'tls-threads.o'])
     run([linker, '-flavor', 'gnu', '-static', '--image-base=0x400000000000',
          '-e', '_start', '-o', pure_bss, output / 'pure-bss-tls.o'])
-    outputs = (library, runtime_library, shared, tls, threads, pure_bss)
+    outputs = (library, runtime_library, runtime_tls_library, shared, tls, threads, pure_bss)
     report = run([readobj, '--file-headers', '--program-headers', '--dynamic-table',
                   '--relocations', '--symbols', *outputs])
     (output / 'elf-report.txt').write_text(report, encoding='utf-8')

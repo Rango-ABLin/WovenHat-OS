@@ -2407,28 +2407,34 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
                 .is_some_and(|space| space.dynamic_module_is_runtime_image(index, generation))
         };
         if runtime_image {
-            let (address_space, mapping) = {
+            let (address_space, image_mapping, tls_mapping) = {
                 let processes = process_table_lock();
                 let process = processes
                     .iter()
                     .flatten()
                     .find(|process| process.id.as_u64() == owner)?;
                 let space = process.address_space?;
-                let (address, size) = space.dynamic_module_mapping(index, generation)?;
-                (space.paging(), userspace::dynamic_mapping_descriptor(address, size)?)
+                let (address, size) = space.dynamic_module_image_mapping(index, generation)?;
+                (
+                    space.paging(),
+                    userspace::dynamic_mapping_descriptor(address, size)?,
+                    space.dynamic_module_mapping(index, generation),
+                )
             };
-            if !userspace::unmap_dynamic_anonymous(address_space, mapping) {
+            if !userspace::unmap_dynamic_anonymous(address_space, image_mapping) {
                 return None;
             }
-            let mut processes = process_table_lock();
-            let space = processes
-                .iter_mut()
-                .flatten()
-                .find(|process| process.id.as_u64() == owner)?
-                .address_space
-                .as_mut()?;
-            space.remove_runtime_symbols(index, generation);
-            return space.release_dynamic_module(index, generation);
+            if tls_mapping == Some((image_mapping.address, image_mapping.size)) {
+                let mut processes = process_table_lock();
+                let space = processes
+                    .iter_mut()
+                    .flatten()
+                    .find(|process| process.id.as_u64() == owner)?
+                    .address_space
+                    .as_mut()?;
+                space.remove_runtime_symbols(index, generation);
+                return space.release_dynamic_module(index, generation);
+            }
         }
         let tasks = {
             let scheduler = SCHEDULER.lock();
@@ -2480,6 +2486,16 @@ pub fn release_dynamic_module(module: u64, generation: u64) -> Option<bool> {
                 }
             }
         }
+        if runtime_image {
+            let mut processes = process_table_lock();
+            processes
+                .iter_mut()
+                .flatten()
+                .find(|process| process.id.as_u64() == owner)?
+                .address_space
+                .as_mut()?
+                .remove_runtime_symbols(index, generation);
+        }
     }
     let mut processes = process_table_lock();
     processes
@@ -2498,6 +2514,15 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
     if index >= userspace::MAX_DYNAMIC_MODULES {
         return None;
     }
+    let tls = {
+        let image = crate::elf::parse_shared(&bytes).ok()?;
+        if let Some(tls) = image.tls() {
+            let end = tls.file_offset.checked_add(tls.file_size)?;
+            Some((bytes.get(tls.file_offset..end)?.to_vec(), tls.memory_size))
+        } else {
+            None
+        }
+    };
     let owner = current_process_id();
     let mut space = {
         let processes = process_table_lock();
@@ -2522,7 +2547,117 @@ pub fn map_runtime_module(module: u64, bytes: alloc::vec::Vec<u8>) -> Option<u64
         }
         *published = space;
     }
+    if let Some((initializer, memory_size)) = tls {
+        if !map_runtime_tls_existing(index, generation, &initializer, memory_size) {
+            let _ = release_dynamic_module(module, u64::from(generation));
+            return None;
+        }
+    }
     encode_runtime_module_handle(index, generation)
+}
+
+fn map_runtime_tls_existing(
+    module: usize,
+    generation: u32,
+    initializer: &[u8],
+    memory_size: usize,
+) -> bool {
+    if memory_size == 0 || initializer.len() > memory_size || memory_size > 4096 {
+        return false;
+    }
+    let owner = current_process_id();
+    let mmap_base = {
+        let processes = process_table_lock();
+        let Some(space) = processes
+            .iter()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)
+            .and_then(|process| process.address_space)
+        else {
+            return false;
+        };
+        if !space.dynamic_module_is_runtime_image(module, generation) {
+            return false;
+        }
+        space.mmap_base()
+    };
+    let tasks = {
+        let scheduler = SCHEDULER.lock();
+        let mut tasks = [(0usize, None, None); MAX_TASKS];
+        let mut count = 0;
+        for (task_slot, task) in scheduler.tasks.iter().enumerate() {
+            if task.process_id.as_u64() == owner
+                && !matches!(task.state, TaskState::Empty | TaskState::Dead)
+            {
+                if count == tasks.len() {
+                    return false;
+                }
+                tasks[count] = (task_slot, task.thread_id, task.address_space);
+                count += 1;
+            }
+        }
+        tasks
+    };
+    if tasks[0].2.is_none() {
+        return false;
+    }
+    let Some(size) = memory_size.checked_add(4095).map(|value| value & !4095) else {
+        return false;
+    };
+    let mut installed = [(None, None); MAX_TASKS];
+    let mut count = 0;
+    while count < tasks.len() && tasks[count].2.is_some() {
+        let (task_slot, thread, Some(address_space)) = tasks[count] else { break };
+        let Some(mapping) = userspace::map_dynamic_anonymous(
+            address_space,
+            mmap_base,
+            module,
+            task_slot,
+            size,
+        ) else {
+            break;
+        };
+        if crate::paging::write_user_bytes(address_space, mapping.address, initializer).is_err()
+            || thread.is_some_and(|thread| {
+                !crate::thread::install_dynamic_tls(thread, module, mapping)
+            })
+        {
+            let _ = userspace::unmap_dynamic_anonymous(address_space, mapping);
+            break;
+        }
+        installed[count] = (thread, Some(mapping));
+        count += 1;
+    }
+    let expected = tasks.iter().filter(|entry| entry.2.is_some()).count();
+    let leader = installed[..count]
+        .iter()
+        .find(|entry| entry.0.is_none())
+        .and_then(|entry| entry.1);
+    let attached = count == expected && leader.is_some_and(|leader| {
+        let mut processes = process_table_lock();
+        processes
+            .iter_mut()
+            .flatten()
+            .find(|process| process.id.as_u64() == owner)
+            .and_then(|process| process.address_space.as_mut())
+            .is_some_and(|space| {
+                space.attach_runtime_tls_mapping(module, generation, leader.address, size)
+            })
+    });
+    if attached {
+        return true;
+    }
+    for index in 0..count {
+        if let Some(mapping) = installed[index].1 {
+            if let Some(thread) = installed[index].0 {
+                let _ = crate::thread::clear_dynamic_tls(thread, module, mapping.address);
+            }
+            if let Some(address_space) = tasks[index].2 {
+                let _ = userspace::unmap_dynamic_anonymous(address_space, mapping);
+            }
+        }
+    }
+    false
 }
 
 pub fn lookup_runtime_symbol(name: &[u8]) -> Option<u64> {
