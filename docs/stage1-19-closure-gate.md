@@ -108,8 +108,13 @@ test session.
    and shared-library audits. The bounded ASLR arena/guard geometry correction
    is also accepted with dedicated 1/2/4-CPU evidence. Compiler-produced
    pure-BSS TLS is accepted at `b9829f62` with full inherited Stage 10.7
-   preservation. Broader TLS models, entropy/stress qualification, general
-   toolchain interoperability and physical validation remain unqualified.
+   preservation. A focused Stage 11 runtime matrix on `b9829f62` passed 30/30 on
+   2026-11-20: `11.1-11.6`, `11.2-status`, `11.2-tls`, `11.2-aslr`, and
+   `11.5-compiler`, each on 1/2/4 CPUs, exit 33; three host-resource pre-boot
+   failures were rerun serially and passed. Evidence:
+   `audit-artifacts/stage11-closure-*`. Broader TLS models, entropy/stress
+   qualification, general toolchain interoperability and physical validation
+   remain unqualified.
    See the shared-library audit for the exact
    implemented graph, permission and teardown contract.
 5. Close the native WovenFS mount/write-through policy and recovery evidence
