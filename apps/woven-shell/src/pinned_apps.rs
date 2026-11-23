@@ -46,6 +46,27 @@ impl PinnedApps {
         pins
     }
 
+    /// The curated defaults, as a constant. Hand-unrolled byte copies because
+    /// `pin`'s validation (iterators, `copy_from_slice`) is not `const`-able;
+    /// the three literals are compile-time trusted, and the host tests check
+    /// this equals `pin`-ing each default name in order.
+    pub const fn defaults_const() -> Self {
+        let mut pins = Self::empty();
+        let mut index = 0;
+        while index < DEFAULT_PINS.len() {
+            let name = DEFAULT_PINS[index].as_bytes();
+            let mut byte = 0;
+            while byte < name.len() {
+                pins.names[index][byte] = name[byte];
+                byte += 1;
+            }
+            pins.lens[index] = name.len() as u8;
+            pins.count = index + 1;
+            index += 1;
+        }
+        pins
+    }
+
     /// Parse a settings value. `None` means the setting is absent and yields the
     /// defaults. An empty string means the user unpinned everything.
     pub fn from_setting(value: Option<&str>) -> Self {
@@ -64,10 +85,6 @@ impl PinnedApps {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.count == 0
     }
 
     pub fn get(&self, index: usize) -> Option<&str> {
