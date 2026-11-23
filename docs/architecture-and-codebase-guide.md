@@ -4,19 +4,20 @@
 
 `apps/woven-shell/src/status.rs` is the bounded presentation model behind the
 taskbar's network, volume and battery glyphs. Its network source is syscall
-248 (`SystemStatus`), a capability-free read-only telemetry record of 12 bytes
-(ABI version, online flag, IPv4, reserved). It exists because the pre-existing
-`NetInfo` syscall 43 requires `NetworkIo`, which the desktop session is
-deliberately not granted; the new record grants no socket/DNS authority,
-carries no device identity and is copied into caller-owned storage. `audio_info()`
-detects an output and `audio_set_volume()` applies local level/mute changes
-(the kernel's HDA path initializes output gain at 75%, which is the model's
-initial percentage). Battery state is `Unavailable`: there is no ACPI battery
-driver, so the shell neither queries nor fabricates a charge level. The model
-owns no kernel object, retains no userspace pointer and adds no capability or
-ABI version. A two-second refresh updates only the tray glyphs and an open
-panel; a locally chosen volume is preserved across refreshes because the
-kernel exposes no gain read-back.
+248 (`SystemStatus`), a capability-free read-only telemetry record of 12 bytes.
+Version 1 carried ABI version, online flag, IPv4 and reserved bytes; version 2
+adds audio readiness and the kernel's last applied output percentage. It exists
+because the pre-existing `NetInfo` syscall 43 requires `NetworkIo`, which the
+desktop session is deliberately not granted; the record grants no socket/DNS
+authority, carries no device identity and is copied into caller-owned storage.
+The HDA driver caches the percentage it last programmed into the amplifier, so
+`audio_set_volume()` applies changes while the telemetry record supplies the
+read-back; muting keeps the last non-zero level for restore. `audio_info()` is
+only a fallback for a version-1 kernel. Battery state is `Unavailable`: there
+is no ACPI battery driver, so the shell neither queries nor fabricates a charge
+level. The model owns no kernel object, retains no userspace pointer and adds
+no capability. A two-second refresh updates only the tray glyphs and an open
+panel.
 
 ## Live runtime ELF graph, TLS, and symbol publication boundary
 

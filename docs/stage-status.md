@@ -1,6 +1,27 @@
 # Stage status
 
-<<<<<<< HEAD
+## Volume read-back for the status indicator - 2026-11-23 - ACCEPTED (BOUNDED)
+
+The volume glyph now displays the kernel's last applied output percentage
+instead of a shell-local guess. The HDA driver stores the percent it programs
+into the amplifier; an always-compiled `kernel/src/audio_status.rs` publishes
+`(ready, percent)` so syscall 248 can report it in a version-2 `SystemStatus`
+record (the version-1 link fields are unchanged). Muting keeps the last
+non-zero level for restore, and an older version-1 kernel still gets the
+previous audio-presence behaviour. The always-compiled module is deliberate:
+`hda` is absent in `qemu-test` builds, and the first gate run caught that
+feature-gate defect before acceptance.
+
+Validation: warning-denying kernel Clippy in default and `qemu-test` configs,
+shell target and workspace all-targets Clippy, and 6/6 isolated model/glyph
+host tests pass. The full `RUN-STAGE10.7.ps1` chain passed, and baseline-
+enforced desktop qualification passed at 1/2/4 CPUs
+(`audit-artifacts/volume-readback-1cpu`, `volume-readback-2cpu-r2`,
+`volume-readback-4cpu-r2`). One 2-CPU run missed the fixed startup limit by
+265 ms under TCG; it was rerun with unchanged limits and passed. No assertion,
+timeout or baseline was changed. Battery remains explicitly unavailable: there
+is no ACPI battery driver, so no charge level is fabricated.
+
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in

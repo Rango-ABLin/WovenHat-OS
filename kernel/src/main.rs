@@ -67,6 +67,7 @@ mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
+mod audio_status;
 #[cfg(any(test, feature = "qemu-test"))]
 mod graphics;
 pub mod graphics_abi;

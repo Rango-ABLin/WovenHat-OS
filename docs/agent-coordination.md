@@ -1,3 +1,18 @@
+## OpenCode - volume read-back on master (2026-11-23)
+
+Implemented and accepted on `master`: HDA publishes the last applied output
+percent into an always-compiled `audio_status` module; syscall 248 reports it
+in a version-2 `SystemStatus` record; the shell reads it instead of guessing.
+The first gate exposed a genuine feature-gate defect (`hda` absent under
+`qemu-test`), fixed by the always-compiled module. Warning-denying kernel Clippy
+in default and `qemu-test` configs, shell/all-target Clippy, 6/6 isolated model
+tests, the full Stage 10.7 gate and baseline-enforced desktop qualification at
+1/2/4 CPUs all pass; a 2-CPU startup-limit miss by 265 ms was rerun with
+unchanged limits and passed. Removed a leftover `<<<<<<< HEAD` marker from the
+committed `docs/stage-status.md` in this increment. Battery stays explicitly
+unavailable (no ACPI driver). Next: merge updated `master` into the other
+owner's `phase-b` branch with their uncommitted work stashed and restored.
+
 ## OpenCode - final master reconciliation (2026-11-23)
 
 The main worktree was switched to `phase-b/bottom-taskbar-core` by the other

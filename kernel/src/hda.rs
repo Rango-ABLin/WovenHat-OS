@@ -675,8 +675,11 @@ impl HdaController {
             bdl,
             pages,
         });
-        // Three quarters of full gain, unmuted.
+        // Three quarters of full gain, unmuted. Publish readiness only after
+        // the output path is fully prepared so telemetry cannot claim an
+        // output the driver could not program.
         self.set_output_volume(75)?;
+        crate::audio_status::OUTPUT_READY.store(true, Ordering::Release);
         Ok(())
     }
 
@@ -692,6 +695,7 @@ impl HdaController {
         let mute = if percent == 0 { 0x80 } else { 0 };
         // Set Amplifier Gain/Mute: output amp, both channels.
         let _ = self.command16(codec, node, 0x03, 0xb000 | u16::from(gain) | mute)?;
+        crate::audio_status::OUTPUT_VOLUME_PERCENT.store(percent.min(100), Ordering::Release);
         Ok(gain)
     }
 
