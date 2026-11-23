@@ -1,3 +1,32 @@
+## OpenCode - Phase B auto-hide + placement fix accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `d511ded4`: taskbar auto-hide (pure `AutoHide` model, seeded from
+settings `taskbar_auto_hide`, right-click an empty strip to toggle
+in-session; bottom-row reveal, one-second hold, panels hold the bar up;
+hidden controls capture nothing and the usable band grows). Plus a real
+placement fix the pins evidence exposed: the 3-pin centered group ran
+under the workspace boxes and QS button, painting over the Store entry
+(retained-frame proof); `start_area` now centers inside the free band
+left of the right-side controls. Freestanding clippy + release clean;
+host taskbar_prefs 12/12, pinned_apps 7/7.
+
+Extended gate (pins lifecycle + five auto-hide phases, same boot) PASS
+at 1/2/4: `taskbar-pins-1795455150266353700`,
+`-1795455380078094100`, `-1795455916058784100`. Desktop qualification
+from this tree PASS at 1/2/4:
+`desktop-qualification-1795455593064749300`,
+`-1795456116747088900`, `-1795456412952954800` (startup 95-98 s vs the
+120 s budget). Four earlier failures were all my gate's own defects
+(mismatched cursor frames, stale variable, sleep-vs-repaint race,
+off-screen comparison box), preserved at
+`taskbar-pins-1795454258433091200`/`-1795454445640302000`/`-1795454634578127800`/`-1795454904737521700`;
+the guest produced every marker and pixel state correctly in all four.
+
+Next: maximize/fullscreen geometry, then the taskbar settings visual
+verification. Alt+Tab still blocked on kernel input-ABI modifier state
+(another agent's uncommitted kernel work). Phase B remains NOT accepted
+as a whole.
+
 ## OpenCode - Phase B pinned apps accepted at 1/2/4 CPUs (2026-11-23)
 
 Commit `2d40b94b` on `phase-b/window-minimize` (worktree

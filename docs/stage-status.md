@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS QEMU-VERIFIED)
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS + AUTO-HIDE QEMU-VERIFIED)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
 taskbar) and M7 (honest desktop controls), on branch
@@ -147,15 +147,65 @@ gate's teardown; the identical tree re-run on a quiet host booted in
 50-91 s band, so that miss is recorded as host load, not a guest
 regression. No budget was widened.
 
+Taskbar auto-hide (commit `d511ded4`): a pure `AutoHide` model in
+`taskbar_prefs.rs` -- seeded from the installed settings record's
+`taskbar_auto_hide` value (only the exact string `true` enables it, and
+the bar starts hidden), flipped in-session by right-clicking an empty
+part of the strip, with a toast and serial marker each way. The screen's
+bottom row reveals a hidden bar; a one-second hold hides it again once
+the pointer leaves; open panels (Quick Settings, Notification Center,
+the overview) hold it up until they close. Hidden, the bar paints
+nothing, the usable band grows to the full screen so windows may extend
+under where it was, and its controls capture no clicks. Like pins, the
+preference is in-session state: the shell holds `FileRead` and no
+settings-write path exists, so nothing claims it survives a reboot.
+
+The same commit fixed a real placement defect the pins evidence
+exposed: with the three default pins the full-screen-centered group
+(logical 211..429) ran under the workspace boxes and the Quick Settings
+button, painting over the Store entry -- proven by the retained
+sign-in frame, whose Store-colored tile was absent while the Files tile
+was intact. `start_area` now centers the group inside the free band
+between the left margin and the right-side controls, clamping left when
+it cannot fit, so pins and windows never draw under the switcher, tray,
+status icons or clock. The pre-pins layout had the same latent flaw
+from two entries upward; the defaults made it visible at sign-in.
+
+Validation: freestanding clippy `-D warnings` and the release build
+clean; host suites taskbar_prefs 12/12 and pinned_apps 7/7. The
+extended `scripts/test-taskbar-pins.py` gate (pins lifecycle plus five
+auto-hide phases in the same boot: toggle-on, hidden-controls-
+capture-nothing, edge reveal, timer hide, toggle-off-stays-up-past-the-
+old-hold) **passed at 1, 2 and 4 CPUs**
+(`taskbar-pins-1795455150266353700`, `-1795455380078094100`,
+`-1795455916058784100`), with occurrence-counted markers and two
+pixel-equality negative checks (clock columns masked, comparison boxes
+inside the framebuffer, references captured only after the drawn
+cursor demonstrably settled). The full desktop qualification **passed
+at 1, 2 and 4 CPUs** from this exact tree
+(`desktop-qualification-1795455593064749300`,
+`-1795456116747088900`, `-1795456412952954800`; zero failures each,
+startup 95-98 s against the 120 s budget). Four earlier gate-side
+failures are preserved and were all defects in the new gate itself, not
+the guest -- a mismatched cursor position between compared frames
+(`taskbar-pins-1795454258433091200`), a stale-variable crash after the
+guest had passed the steps in question
+(`-1795454445640302000`), a fixed sleep racing the cursor's repaint lag
+(`-1795454634578127800`, pixel-diffed to prove the guest was correct),
+and an off-screen comparison box that `region_changed` correctly
+refuses (`-1795454904737521700`) -- the shell produced every expected
+marker and pixel state in all four.
+
 Not done, and therefore not claimed: a visual check of the changed taskbar
-alignment/icon-size settings values, auto-hide, cross-boot pin
+alignment/icon-size settings values, cross-boot pin and auto-hide
 persistence (needs a writable settings record and a deliberate
-`FileWrite` capability decision), maximize/fullscreen geometry, Alt+Tab
-(blocked on modifier state in the input ABI, which touches kernel files
-with another agent's uncommitted edits), an in-shell taskbar settings
-editor, and Quick Settings Battery saver and Night light (still local
-toggles with no effect). The separate intermittent "mouse click did not
-change the client framebuffer" pointer-step flake also remains open.
+`FileWrite` capability decision for the shell), maximize/fullscreen
+geometry, Alt+Tab (blocked on modifier state in the input ABI, which
+touches kernel files with another agent's uncommitted edits), an
+in-shell taskbar settings editor, and Quick Settings Battery saver and
+Night light (still local toggles with no effect). The separate
+intermittent "mouse click did not change the client framebuffer"
+pointer-step flake also remains open.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
