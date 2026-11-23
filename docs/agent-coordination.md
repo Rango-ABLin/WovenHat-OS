@@ -3,12 +3,16 @@
 Per owner direction I am reconciling the accepted local branch (`b25a6d3e`,
 8 ahead) with the 5 commits in `origin/master` (Stage 11 runtime/TLS, Stage 10
 acceptance, libwoven/ui and desktop harness changes), then re-running gates and
-pushing. Merge (not rebase) to preserve shared history. Expect conflicts where
-both sides touched `libwoven/src/lib.rs`, `libwoven/src/ui.rs`,
-`scripts/test-desktop-qualification.py` and the docs; resolve additively, keep
-the status syscall 248, the indicators and the re-approved baseline. Do not
-concurrently edit these files. No push until warning-denying Clippy, host tests
-and the relevant QEMU/desktop gates pass on the merged tree.
+pushing. Merge (not rebase) to preserve shared history. Conflicts occurred in
+`libwoven/src/lib.rs` (kept the accepted scaled bitmap fallback, 96-point path)
+and two status/architecture docs (kept both sides), resolved in merge commit
+`659fac0b`; no concurrent edits remain in those files. Two stale host test
+expectations were then aligned with the accepted palette/path budget in
+`a01e1781` (no runtime behavior or assertion strength changed). Warning-denying
+host/kernel/shell Clippy and the full `cargo test --workspace` suite pass on the
+merged tree. The serialized full Stage 10.7 gate followed by the baseline-
+enforced 1/2/4-CPU desktop matrix is running under
+`audit-artifacts/merged-final-{1,2,4}cpu`; push only after all of it passes.
 
 ## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
 
