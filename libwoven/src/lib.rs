@@ -19414,13 +19414,17 @@ mod tests {
     fn wovengraphics_quadratic_path_flattens_deterministically_and_is_atomic() {
         use crate::graphics::{Path, Point};
 
+        // The accepted glyph path budget is 96 points (was 64 upstream): one
+        // move, one four-point quadratic, then lines until the buffer is full.
+        // A further curve and line must both be refused without partial writes.
         let mut path = Path::new();
         assert!(path.move_to(Point::new(0, 0)));
         assert!(path.quadratic_to(Point::new(8, 16), Point::new(16, 0)));
-        for index in 0..57 {
+        for index in 0..91 {
             assert!(path.line_to(Point::new(index, 0)));
         }
         assert!(!path.quadratic_to(Point::new(24, 16), Point::new(32, 0)));
+        assert!(!path.line_to(Point::new(99, 0)));
     }
 
     #[test]

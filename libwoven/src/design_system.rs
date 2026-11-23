@@ -751,7 +751,10 @@ mod tests {
         assert_eq!(contrast_ratio(0x000000, 0xffffff), 2100);
         assert_eq!(contrast_ratio(0xffffff, 0xffffff), 100);
         assert!(contrast_ratio(0x000000, 0x808080) > contrast_ratio(0x000000, 0x707070));
-        assert!(!meets_aa(0x96a4b8, crate::ui::Theme::DARK.surface));
+        // The accepted Win11 polish darkened `Theme::DARK.surface` from
+        // rgb(45, 65, 90) to rgb(34, 42, 54), so muted ink now clears AA on it.
+        // Keep both contrast checks exact for the current accepted palette.
+        assert!(meets_aa(0x96a4b8, crate::ui::Theme::DARK.surface));
         assert!(meets_aa(0x96a4b8, SemanticPalette::DARK.surface));
     }
 
