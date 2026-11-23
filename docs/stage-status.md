@@ -21,6 +21,13 @@ Implemented in this increment:
   "Unavailable" and show a toast when pressed. The summary line reports only the
   real `NetworkStatus` from the tray model.
 
+- `apps/woven-shell/src/pinned_apps.rs`: a bounded pinned-application model
+  (8 pins, 32-byte ASCII names, duplicate and invalid names dropped, pin/unpin
+  with stable order). Absent setting restores the three curated shortcuts; an
+  empty value means nothing pinned. Host-tested 6/6 with
+  `apps/woven-shell/tests/pinned_apps.rs`. It is NOT yet wired into the taskbar
+  or persisted from the UI, so no pinning behavior is claimed.
+
 Validation so far: `apps/woven-shell/tests/taskbar_prefs.rs` 6/6 pass, compiled
 with `rustc --test` because the shell's `[unstable] build-std` config makes host
 `cargo test` fail with a duplicate `core` (pre-existing; the same config breaks
