@@ -5095,3 +5095,20 @@ surface changed.
 This increment is template storage and lifecycle support.  Runtime-module TLS
 relocations, general-dynamic/TLSDESC access, per-image module-offset discovery,
 and a compiler-generated live dependency fixture remain fail-closed or open.
+
+The follow-up runtime-relocation increment retains every image's aligned
+offset.  Before mapping, the linker combines the inactive descriptor's next
+generation with its one-based module slot. Runtime `R_X86_64_DTPMOD64`
+receives that generation-tagged handle; `R_X86_64_DTPOFF64` receives the
+defining image's combined-template offset plus its validated TLS-symbol offset.
+Publication checks that the committed generation matches the precomputed
+handle. Startup behavior is unchanged, and unsupported runtime local-exec,
+initial-exec, general-dynamic, and TLSDESC forms remain fail-closed.
+
+Stage 11.6 now uses two runtime-only TLS dependencies with distinct initializer
+and BSS ranges. It proves offsets 0 and 16, the exact module/offset relocation
+values, the 32-byte combined template, and atomic graph publication. The clean
+gate passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`; affected and all-target
+warning-denying Clippy and the workspace suite pass. A compiler-generated live
+dependency fixture and general-dynamic/TLSDESC remain open.

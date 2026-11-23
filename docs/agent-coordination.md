@@ -10200,3 +10200,23 @@ target kernel build, focused harness/ELF tests and libwoven host tests pass.
 Remaining scope is explicitly compiler-transparent runtime TLS relocations,
 general-dynamic/TLSDESC, per-image offsets, and a live compiler dependency
 fixture.  Ownership released after commit; no Cargo or QEMU chain remains active.
+
+## Codex - compiler-visible runtime dependency TLS active (2026-11-23)
+
+Codex owns the remaining bounded Stage 11 userspace/runtime TLS gap: preserve
+per-image offsets in the combined runtime graph template, apply supported
+x86-64 TLS relocations against that layout, expose the established checked
+module/offset resolver semantics, and add a compiler-generated live dependency
+fixture. Unsupported TLS models remain fail-closed. Scope is limited to the
+runtime linker, TLS publication/resolution, loader fixtures and their harness
+and status documentation. No Cargo or QEMU chain is active.
+
+## Codex - runtime dependency TLS relocations accepted (2026-11-23)
+
+The bounded per-image layout and runtime `DTPMOD64`/`DTPOFF64` slice is
+complete. Stage 11.6 proves two TLS dependencies, offsets 0/16, and the
+generation-tagged module value; its clean 1/2/4-CPU matrix exits 33 under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Affected and all-target
+warning-denying Clippy and `cargo test --workspace` pass. Compiler-generated
+live dependency execution and general-dynamic/TLSDESC remain open. Ownership
+is released; no Cargo or QEMU chain remains active.

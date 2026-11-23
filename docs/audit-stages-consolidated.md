@@ -16532,3 +16532,13 @@ documented `cargo build -p wovenhat-kernel --target x86_64-unknown-none` passed.
 Audit boundary: this closes dependency template storage and lifecycle only.
 TLS relocation models, general-dynamic/TLSDESC lookup, per-image module offsets,
 and a live compiler-generated dependency exercise remain open and fail closed.
+
+Follow-up audit: the graph plan now retains each image's aligned offset.
+Runtime `R_X86_64_DTPMOD64` is relocated to the generation-tagged graph handle
+and `R_X86_64_DTPOFF64` to the checked image plus TLS-symbol offset. The handle
+is computed only for an inactive descriptor and verified against the generation
+returned by publication. The strengthened Stage 11.6 fixture proves offsets
+0/16, exact relocation values, distinct initializer/BSS contents, and atomic
+publication on 1/2/4 CPUs under
+`audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
+dependency execution and general-dynamic/TLSDESC remain open.
