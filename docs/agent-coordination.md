@@ -10276,3 +10276,41 @@ state (overlaps other agent kernel work). Main repo
 `C:\Users\banda\Documents\GitHub\WovenHat-OS` remains dirty with other agent's
 uncommitted work; do not reconcile/overwrite from this worktree. No Cargo/QEMU
 chain active.
+
+## Codex - Phase B taskbar layout visual QEMU verification (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only increment plus small, isolated-kernel test-harness support; no
+input ABI/capability changes. Touched files: `apps/woven-shell/src/main.rs`,
+`kernel/src/session.rs`, `kernel/src/userspace.rs`,
+`scripts/test-taskbar-layout.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: shell CLI args `--taskbar-alignment`, `--taskbar-icon-size`,
+`--taskbar-auto-hide` (unknown values fail closed); one-time startup serial
+marker `woven-shell: taskbar layout alignment=... icon_size=... auto_hide=...`.
+Kernel session argv accepts compile-time `WOVENHAT_SHELL_TASKBAR_ALIGNMENT`,
+`WOVENHAT_SHELL_TASKBAR_ICON_SIZE`, `WOVENHAT_SHELL_TASKBAR_AUTO_HIDE`
+(option_env, only when set) for real-QEMU gates. `kernel/src/userspace.rs`
+`MAX_ARGV` raised 8->16 and `MAX_ARGV_BYTES` 512->1024 because the extended
+session argv exceeded the old limit; first 1-CPU layout attempt
+`audit-artifacts/taskbar-layout-1795512583100247100` failed with
+`[SESSION] desktop not started: Image`, preserved, then fixed.
+
+Validation: freestanding shell clippy/release clean (`-D warnings`).
+`python -m py_compile scripts/test-taskbar-layout.py` clean.
+Real-QEMU layout gate PASS 1/2/4 CPUs:
+`audit-artifacts/taskbar-layout-1795512950531598600` (1 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513102956382300` (2 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513257891825300` (4 CPU, pass).
+Each result.json `pass: true`, zero failures, layout marker
+`alignment=left icon_size=large auto_hide=off`, screenshot preserved, pixel
+sanity check passed. No assertions/budgets weakened.
+
+Open: Phase B not accepted; no §24 report. In-shell taskbar settings editor
+not done. Cross-boot persistence of layout/pins/auto-hide remains blocked on
+writable settings record + deliberate shell `FileWrite` capability decision.
+Maximize WSIZ reflow and window shadows still deferred pending compositor
+non-blocking proof. Alt+Tab still blocked on input ABI/modifier state.
+Main repo remains dirty with other agent's uncommitted kernel/work; do not
+reconcile or overwrite. No Cargo/QEMU chain active.

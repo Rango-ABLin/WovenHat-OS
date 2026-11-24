@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS + AUTO-HIDE + MAXIMIZE QEMU-VERIFIED)
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS + AUTO-HIDE + MAXIMIZE + LAYOUT QEMU-VERIFIED)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
 taskbar) and M7 (honest desktop controls), on branch
@@ -237,6 +237,42 @@ uncommitted edits), an in-shell taskbar settings editor, and Quick
 Settings Battery saver and Night light (still local toggles with no
 effect). The separate intermittent "mouse click did not change the
 client framebuffer" pointer-step flake also remains open.
+
+Taskbar alignment/icon-size visual QEMU verification (worktree
+`D:\WovenHat-build\desktop-wt`, branch `phase-b/window-minimize`, 2026-11-24):
+the shell's effective taskbar layout is now logged once at startup
+(`woven-shell: taskbar layout alignment=<center|left> icon_size=<small|medium|large> auto_hide=<on|off>`).
+Shell CLI overrides `--taskbar-alignment`, `--taskbar-icon-size` and
+`--taskbar-auto-hide` are accepted (unknown values fail closed with the same
+`fail(1)` path as other bad args). For real QEMU acceptance, the kernel session
+argv gained compile-time overrides `WOVENHAT_SHELL_TASKBAR_ALIGNMENT`,
+`WOVENHAT_SHELL_TASKBAR_ICON_SIZE` and `WOVENHAT_SHELL_TASKBAR_AUTO_HIDE`
+(option_env, only when set); `kernel/src/userspace.rs` `MAX_ARGV` was raised
+from 8 to 16 / `MAX_ARGV_BYTES` from 512 to 1024 to accommodate the bounded
+session argv. These are small kernel changes in the isolated worktree; they
+are not reconciled into the main repo, which has other agents' uncommitted
+kernel work.
+
+Validation: freestanding shell `cargo clippy --release --target
+x86_64-unknown-none -- -D warnings` clean. New real-QEMU gate
+`scripts/test-taskbar-layout.py` boots a hardware-demo image with
+`alignment=left icon_size=large auto_hide=off`, waits for the startup layout
+marker, signs in, captures the desktop frame, and performs a pixel sanity check
+that the left-aligned Start area is present. PASS at 1/2/4 CPUs:
+`audit-artifacts/taskbar-layout-1795512950531598600` (1 CPU),
+`audit-artifacts/taskbar-layout-1795513102956382300` (2 CPU),
+`audit-artifacts/taskbar-layout-1795513257891825300` (4 CPU); each
+`result.json` is `pass: true` with zero failures, the layout marker matches,
+and screenshots are preserved. The first 1-CPU attempt
+`audit-artifacts/taskbar-layout-1795512583100247100` failed with
+`[SESSION] desktop not started: Image` because `MAX_ARGV=8` was too small for
+the extended session argv; preserved as evidence and fixed by the MAX_ARGV bump,
+no assertion weakened.
+
+Still not claimed: in-shell taskbar settings editor, cross-boot persistence of
+taskbar layout preferences (shell remains FileRead-only; no settings-write
+path), alignment/icon-size visual verification under every theme/density
+combination beyond the tested left+large case, and Phase B §24 acceptance.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 

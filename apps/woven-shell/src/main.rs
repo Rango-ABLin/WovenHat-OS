@@ -178,7 +178,7 @@ use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
-use taskbar_prefs::{Alignment, AutoHide, TaskbarPrefs, AUTO_HIDE_HOLD};
+use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
 mod pinned_apps;
 use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
 
@@ -5043,6 +5043,38 @@ fn main(args: Args) -> ! {
                     fail(9);
                 }
             }
+            b"--taskbar-alignment" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(Alignment::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.alignment = value;
+            }
+            b"--taskbar-icon-size" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(IconSize::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.icon_size = value;
+            }
+            b"--taskbar-auto-hide" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                else {
+                    fail(1);
+                };
+                desktop.auto_hide = AutoHide::from_setting(Some(value));
+            }
             _ => fail(1),
         }
         index += 1;
@@ -5157,6 +5189,28 @@ fn main(args: Args) -> ! {
     let mut pid = [0u8; 20];
     let pid = libwoven::format_u64(libwoven::current_pid().0, &mut pid);
     log(&[b"woven-shell: desktop ready pid=", pid]);
+    let alignment = match desktop.taskbar.alignment {
+        taskbar_prefs::Alignment::Center => b"center" as &[u8],
+        taskbar_prefs::Alignment::Left => b"left",
+    };
+    let icon_size = match desktop.taskbar.icon_size {
+        taskbar_prefs::IconSize::Small => b"small" as &[u8],
+        taskbar_prefs::IconSize::Medium => b"medium",
+        taskbar_prefs::IconSize::Large => b"large",
+    };
+    let auto_hide = if desktop.auto_hide.enabled() {
+        b"on" as &[u8]
+    } else {
+        b"off"
+    };
+    log(&[
+        b"woven-shell: taskbar layout alignment=",
+        alignment,
+        b" icon_size=",
+        icon_size,
+        b" auto_hide=",
+        auto_hide,
+    ]);
 
     // The overview draws every app label on its first F1 paint. Warm the fixed
     // glyph cache with that bounded label set now so cold outline rasterisation

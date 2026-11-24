@@ -4620,9 +4620,9 @@ impl UserStack {
 }
 
 /// Maximum number of argv strings placed on the initial user stack.
-pub const MAX_ARGV: usize = 8;
+pub const MAX_ARGV: usize = 16;
 /// Maximum total bytes for all argv string data (including NULs).
-pub const MAX_ARGV_BYTES: usize = 512;
+pub const MAX_ARGV_BYTES: usize = 1024;
 
 /// Minimal crt0 contract expected by the kernel stack layout:
 ///
