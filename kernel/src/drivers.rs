@@ -169,6 +169,9 @@ const SPECS: [Spec; COUNT] = [
 /// that it did, which on real hardware leaves nothing to act on.
 fn init_error(name: &str, error: impl core::fmt::Debug) {
     crate::serial::write_line(format_args!("[DRIVERS] {} init error: {:?}", name, error));
+    crate::terminal::write_bytes(b"[DRIVERS] init error: ");
+    crate::terminal::write_bytes(name.as_bytes());
+    crate::terminal::write_bytes(b"\n");
 }
 
 fn address_of(device: &pci::Device) -> pci::Address {
@@ -220,6 +223,9 @@ fn bring_up_one(spec: &Spec) -> Driver {
         return result;
     }
     crate::serial::write_line(format_args!("[DRIVERS] {} init begin", spec.name));
+    crate::terminal::write_bytes(b"[DRIVERS] init begin: ");
+    crate::terminal::write_bytes(spec.name.as_bytes());
+    crate::terminal::write_bytes(b"\n");
     result.outcome = match device_at(address).ok_or(()).and_then(spec.init) {
         Ok(value) => {
             // Listed with the other devices; a name already present (an
@@ -230,12 +236,18 @@ fn bring_up_one(spec: &Spec) -> Driver {
                 irq: None,
             });
             crate::serial::write_line(format_args!("[DRIVERS] {} init complete", spec.name));
+            crate::terminal::write_bytes(b"[DRIVERS] init complete: ");
+            crate::terminal::write_bytes(spec.name.as_bytes());
+            crate::terminal::write_bytes(b"\n");
             Outcome::Ready(value)
         }
         Err(()) => {
             // The controller is quiesced by its driver's own failure path;
             // give the function back.
             let _ = driver::unbind_pci_resources(spec.name);
+            crate::terminal::write_bytes(b"[DRIVERS] init failed: ");
+            crate::terminal::write_bytes(spec.name.as_bytes());
+            crate::terminal::write_bytes(b"\n");
             Outcome::InitFailed
         }
     };
