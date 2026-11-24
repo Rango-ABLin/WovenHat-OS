@@ -22,6 +22,7 @@ pub const R_X86_64_DTPOFF64: u32 = 17;
 pub const R_X86_64_TPOFF64: u32 = 18;
 pub const R_X86_64_GOTTPOFF: u32 = 22;
 pub const R_X86_64_TPOFF32: u32 = 23;
+pub const R_X86_64_TLSDESC: u32 = 36;
 pub const RELA_ENTRY_SIZE: usize = 24;
 const REL_ENTRY_SIZE: usize = 16;
 const MAX_RELATIVE_RELOCATIONS: usize = 4096;
@@ -1697,6 +1698,7 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                         | R_X86_64_TPOFF64
                         | R_X86_64_GOTTPOFF
                         | R_X86_64_TPOFF32
+                        | R_X86_64_TLSDESC
                 ) {
                     return Err(Error::Unsupported);
                 }
@@ -1706,7 +1708,14 @@ fn parse_image(bytes: &[u8], shared: bool) -> Result<Image, Error> {
                 if relocation_type != R_X86_64_RELATIVE && symbol == 0 {
                     return Err(Error::InvalidSegment);
                 }
-                let target_end = target.checked_add(8).ok_or(Error::InvalidSegment)?;
+                let target_size = if relocation_type == R_X86_64_TLSDESC {
+                    16
+                } else {
+                    8
+                };
+                let target_end = target
+                    .checked_add(target_size)
+                    .ok_or(Error::InvalidSegment)?;
                 let writable_target = image.segments().any(|segment| {
                     let end = segment
                         .virtual_address

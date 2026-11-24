@@ -139,6 +139,7 @@ def required_markers(stage, cpus):
                        '[S11.RUNTIME] constructor/destructor generation ownership: PASSED',
                        '[S11.RUNTIME] ELF and PT_TLS atomic coupling: PASSED',
                        '[S11.RUNTIME] compiler dependency TLS execution: PASSED',
+                       '[S11.RUNTIME] TLSDESC execution: PASSED',
             '[S11.2] scheduler-backed thread: PASSED',
             '[S11.2] threads/TLS/join: PASSED',
         ])

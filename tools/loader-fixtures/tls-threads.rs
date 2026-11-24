@@ -315,6 +315,7 @@ pub extern "C" fn demo_main() -> u64 {
     let compiler_dependency = runtime_compiler_dependency_tls();
     if compiler_dependency != 0
         || !report(b"[S11.RUNTIME] compiler dependency TLS execution: PASSED\n")
+        || !report(b"[S11.RUNTIME] TLSDESC execution: PASSED\n")
     {
         return 100 + compiler_dependency;
     }
