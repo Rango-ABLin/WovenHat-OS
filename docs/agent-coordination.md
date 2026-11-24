@@ -10317,3 +10317,16 @@ F12 round trip and SMP/TLB input. Candidate image:
 `41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
 This is a disposable acceptance-key/demo-account image, not a production
 release. Disk 3 has not yet been overwritten with this candidate.
+## Codex - current hardware-demo written and verified on Disk 3 (2026-11-24)
+
+The guarded live-USB writer matched the owner-authorized Disk 3 by model
+`VendorCo ProductCode USB Device`, exact CIM size 15,726,735,360 bytes and
+serial `4045141272666606378`. It wrote the 35,717,120-byte current-source
+hardware-demo candidate and read the entire image region back with matching
+SHA-256 `41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+The writer then created the remaining 14,964 MiB FAT32 `WOVENLOG` partition
+at offset 36,700,160. Transcript:
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`. This establishes exact
+media preparation, not bare-metal boot or device-function qualification. The
+next evidence must come from booting the HP 290 G4 via its one-time UEFI boot
+menu with Secure Boot off and returning the WOVENLOG files.

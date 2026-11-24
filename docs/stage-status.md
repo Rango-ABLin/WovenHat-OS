@@ -1,5 +1,22 @@
 # Stage status
 
+## Hardware-demo physical USB preparation - 2026-11-24 - VERIFIED
+
+The identity-guarded writer matched Disk 3 by model, exact CIM size and serial,
+and independently rejected boot/system or non-USB media. It wrote the accepted
+35,717,120-byte hardware-demo image to the physical USB and verified the whole
+image region by raw SHA-256 readback:
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+The remaining media is a 14,964 MiB FAT32 partition labelled `WOVENLOG`, with
+its primary and backup boot-sector labels checked. Evidence is
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`.
+
+This verifies exact candidate transfer and log-media construction only. It
+does not claim that the HP 290 G4 firmware boots the image, that WovenHat
+reaches sign-in/desktop on native hardware, or that its physical graphics,
+input, storage, network, audio or power paths work. Those observations require
+the following controlled bare-metal boot and returned `WOVENLOG` evidence.
+
 ## Hardware-demo preflash marker repair - 2026-11-24 - ACCEPTED (FOCUSED)
 
 The current kernel reports installation of all signed applications, licensed

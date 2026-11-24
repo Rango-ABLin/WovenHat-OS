@@ -4,6 +4,16 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Hardware-demo physical USB write - 2026-11-24
+
+The guarded writer resolved the authorized USB by model, exact byte size and
+serial, wrote the 35,717,120-byte candidate, and verified its complete raw
+readback against SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+It created the remaining 14,964 MiB as FAT32 `WOVENLOG`. The transcript is
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`. Media preparation is
+verified; bare-metal firmware boot and native device behavior remain open.
+
 ## Hardware-demo preflash catalog-marker repair - 2026-11-24
 
 The first 4-CPU candidate boot successfully installed the current 11-app,
