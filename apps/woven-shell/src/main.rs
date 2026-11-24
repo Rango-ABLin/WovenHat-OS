@@ -1548,6 +1548,20 @@ impl Desktop {
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock = self.clock_area();
+        let clock_active = self.center_open;
+        let clock_hover = !clock_active && clock.contains(self.pointer.0, self.pointer.1);
+        if clock_active || clock_hover {
+            fill_rounded(
+                canvas,
+                clock,
+                CHROME_RADIUS_SMALL,
+                if clock_hover {
+                    lighten(theme_entry(false), 8)
+                } else {
+                    theme_entry(true)
+                },
+            );
+        }
         let clock_x = clock.x + (clock.width - font::text_width(text) as i32).max(0) / 2;
         canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
@@ -1632,7 +1646,13 @@ impl Desktop {
 
         if self.unread > 0 {
             let badge = self.badge_area();
-            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
+            let hovered = badge.contains(self.pointer.0, self.pointer.1);
+            let fill = if hovered {
+                lighten(theme_accent(), 14)
+            } else {
+                theme_accent()
+            };
+            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, fill);
             let digit = [b'0' + self.unread.min(9) as u8];
             canvas.draw_text_system(
                 badge.x + 3,
