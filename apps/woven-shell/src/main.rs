@@ -1584,6 +1584,30 @@ impl Desktop {
             canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
         }
 
+        for index in 0..MAX_TRAY {
+            if self.tray[index].is_some() {
+                let place = self.tray_area(index);
+                if place.contains(self.pointer.0, self.pointer.1) {
+                    fill_rounded(
+                        canvas,
+                        place,
+                        CHROME_RADIUS_SMALL,
+                        lighten(theme_entry(false), 8),
+                    );
+                }
+            }
+        }
+
+        let status = self.status_icons_area();
+        if !self.qs_open && status.contains(self.pointer.0, self.pointer.1) {
+            fill_rounded(
+                canvas,
+                status,
+                CHROME_RADIUS_SMALL,
+                lighten(theme_entry(false), 8),
+            );
+        }
+
         // System status glyphs: network, volume, battery. Drawn in the same
         // bounded canvas as the rest of the taskbar, never from a client
         // surface, so no application can spoof or own them.
