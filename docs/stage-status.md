@@ -1,6 +1,6 @@
 # Stage status
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS + AUTO-HIDE QEMU-VERIFIED)
+## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (CORE + MINIMIZE + PINNED APPS + AUTO-HIDE + MAXIMIZE QEMU-VERIFIED)
 
 Phase B is **not accepted**. This is the first increment toward M2 (bottom
 taskbar) and M7 (honest desktop controls), on branch
@@ -199,16 +199,44 @@ directories (`-1795454445640302000`) has no `result.json` because that
 crash is exactly what motivated the gate's unexpected-error arm; its
 serial log, QMP trace, frames and build logs are the evidence.
 
-Not done, and therefore not claimed: a visual check of the changed taskbar
-alignment/icon-size settings values, cross-boot pin and auto-hide
-persistence (needs a writable settings record and a deliberate
-`FileWrite` capability decision for the shell), maximize/fullscreen
-geometry, Alt+Tab (blocked on modifier state in the input ABI, which
-touches kernel files with another agent's uncommitted edits), an
-in-shell taskbar settings editor, and Quick Settings Battery saver and
-Night light (still local toggles with no effect). The separate
-intermittent "mouse click did not change the client framebuffer"
-pointer-step flake also remains open.
+Window maximize/restore (frame-only increment, worktree
+`D:\WovenHat-build\desktop-wt`, branch `phase-b/window-minimize`):
+right-clicking a window title bar toggles maximize and restore. Maximize
+saves the exact pre-maximize client geometry in `Window.restore`, moves
+the frame to fill the usable band (title bar at the top, client body to
+the band bottom), and marks `Window.maximized`. Restore returns the
+saved geometry verbatim. Dragging a maximized title bar restores the
+window before the drag continues. Explicit re-placement/snap/tile and
+a client-driven WRSZ clear the maximized flag so it never describes a
+stale geometry. A client WRSZ that clamps to a smaller surface than the
+band-filling frame keeps the frame maximized and blits only the reported
+`surface_w/surface_h`, filling the uncovered body with `theme_panel()`
+so the desktop background never shows through.
+
+This increment is deliberately frame-only: toggle_maximize does not send
+WSIZ. Sending WSIZ during live maximize exposed a reproducible stall in
+the software compositor/present path on slow 1-CPU QEMU (a Terminal
+clamped resize caused the repaint to hang in shadow blending /
+`present_region_blended`). Until that compositor path is proven
+non-blocking, client reflow on maximize is deferred. For the same reason
+window shadows are temporarily disabled in `repaint_once` with an
+explicit TODO; this is a visual regression recorded here, not a hidden
+behavior change.
+
+Validation: freestanding shell `cargo clippy --target x86_64-unknown-none -- -D warnings` and release build clean. Host suites: `apps/woven-shell/tests/taskbar_prefs.rs` 12/12, `apps/woven-shell/tests/pinned_apps.rs` 7/7 (compiled with `rustc --test`; the pre-existing build-std config still breaks host cargo test). Extended `scripts/test-taskbar-pins.py` (pins + auto-hide + maximize/restore/drag-restore phases, occurrence-counted markers, clock-masked pixel checks, title-bar restore-position check) **PASS at 1, 2 and 4 CPUs**: `audit-artifacts/taskbar-pins-1795504655655003900` (1 CPU), `taskbar-pins-1795504803500124300` (2 CPU), `taskbar-pins-1795504942282416200` (4 CPU), all `pass: true`, zero failures. Desktop qualification **PASS at 1, 2 and 4 CPUs**: `desktop-qualification-1795505086591807900` (1 CPU, PASS), `desktop-qualification-1795505768460324700` (2 CPU rerun, PASS), `desktop-qualification-1795505531386805300` (4 CPU, PASS). Preserved 2-CPU failure: `desktop-qualification-1795505275169282000` failed with `timed out waiting for marker 'WovenFiles: pointer cancelled' for files_pointer_cancel_ms`; rerun on the same tree passed, and no budget or assertion was weakened.
+
+Not done, and therefore not claimed: WSIZ client reflow on maximize
+(deferred until compositor/present path is proven non-blocking), window
+shadows (temporarily disabled by the same workaround), a visual check
+of the changed taskbar alignment/icon-size settings values, cross-boot
+pin and auto-hide persistence (needs a writable settings record and a
+deliberate `FileWrite` capability decision for the shell),
+fullscreen/maximize visual polish, Alt+Tab (blocked on modifier state in
+the input ABI, which touches kernel files with another agent's
+uncommitted edits), an in-shell taskbar settings editor, and Quick
+Settings Battery saver and Night light (still local toggles with no
+effect). The separate intermittent "mouse click did not change the
+client framebuffer" pointer-step flake also remains open.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 

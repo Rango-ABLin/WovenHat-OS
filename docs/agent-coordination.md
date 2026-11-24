@@ -10239,3 +10239,40 @@ four existing lifecycle edits are retained as the active working set; no other
 owner's files will be staged or overwritten. Focused compile and fixture
 contracts run before any serialized QEMU acceptance chain. No Cargo/QEMU chain
 is active at this handoff update.
+
+## Codex - Phase B frame-only maximize/restore (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`) owns
+this shell-only Phase B increment. No kernel/input ABI files were changed.
+Touched files: `apps/woven-shell/src/main.rs`, `apps/woven-shell/src/model.rs`,
+`scripts/test-taskbar-pins.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: right-click window title bar toggles frame-only maximize/restore
+(`Window.maximized`, `Window.restore`, `Window.surface_w/h`), band-filling frame
+with clamped-surface body fill, drag-on-maximized restores before drag, and
+resized/explicit-replace clears maximized. WSIZ client reflow is intentionally
+deferred: a live maximize WSIZ exposed a reproducible software-compositor
+present/blend stall on slow 1-CPU QEMU. Window shadows are temporarily disabled
+in `repaint_once` for the same compositor stall (explicit TODO). Gate hardened:
+chunked PS/2-safe `move_to`, restore title-bar position check, step-14 retry,
+and auto-hide hold refresh.
+
+Validation (this exact tree): freestanding shell clippy/release clean.
+Host `rustc --test`: `taskbar_prefs` 12/12, `pinned_apps` 7/7. Taskbar-pins
+extended gate PASS 1/2/4: `taskbar-pins-1795504655655003900`,
+`taskbar-pins-1795504803500124300`, `taskbar-pins-1795504942282416200`.
+Desktop qualification PASS 1/2/4: `desktop-qualification-1795505086591807900`
+(1 CPU), `desktop-qualification-1795505768460324700` (2 CPU rerun, PASS),
+`desktop-qualification-1795505531386805300` (4 CPU). Preserved 2-CPU failure:
+`desktop-qualification-1795505275169282000` (`files_pointer_cancel_ms` timeout),
+rerun passed; no budget/assertion weakened.
+
+Open/blocked: Phase B not accepted; no §24 report. Maximize WSIZ reflow and
+window shadows deferred pending compositor non-blocking proof. Cross-boot
+pin/auto-hide persistence still needs writable settings record + deliberate
+shell `FileWrite` capability decision. Alt+Tab blocked on input ABI/modifier
+state (overlaps other agent kernel work). Main repo
+`C:\Users\banda\Documents\GitHub\WovenHat-OS` remains dirty with other agent's
+uncommitted work; do not reconcile/overwrite from this worktree. No Cargo/QEMU
+chain active.

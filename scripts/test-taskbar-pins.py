@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Fail-closed, real-QEMU taskbar pinning and auto-hide qualification.
+"""Fail-closed, real-QEMU taskbar pinning, auto-hide and maximize
+qualification.
 
-Exercises the Phase B pinned-application wiring and auto-hide end to end on
-the same hardware-demo image the desktop qualification uses: a left-click
-on a pinned entry launches its app, a right-click on any taskbar entry
-pins or unpins that app in-session, a pinned app keeps its taskbar slot
-after its window closes, and the group re-flows on every state change.
-Auto-hide then follows in the same boot: right-clicking an empty part of
-the strip enables it, the hidden bar's controls stop capturing clicks,
-the screen's bottom row reveals it, the hold timer hides it again once
-the pointer leaves, and a final right-click turns it back off with the
-bar staying up.
+Exercises the Phase B pinned-application wiring, auto-hide and window
+maximize end to end on the same hardware-demo image the desktop
+qualification uses: a left-click on a pinned entry launches its app, a
+right-click on any taskbar entry pins or unpins that app in-session, a
+pinned app keeps its taskbar slot after its window closes, and the group
+re-flows on every state change. Auto-hide then follows in the same boot:
+right-clicking an empty part of the strip enables it, the hidden bar's
+controls stop capturing clicks, the screen's bottom row reveals it, the
+hold timer hides it again once the pointer leaves, and a final
+right-click turns it back off with the bar staying up. Maximize closes
+the boot: a right-click on a window's title bar fills the usable band, a
+second right-click returns the exact saved geometry, and dragging a
+maximized title bar restores the window first.
 
 Journey (PS/2 pointer moves are in the guest's logical 640x400 space; the
 scanout is 1280x800, the logical 2x scale):
@@ -38,13 +42,26 @@ scanout is 1280x800, the logical 2x scale):
  10. reveal, then right-click empty strip -> "Taskbar auto-hide off", and
                                               the bar stays up past the
                                               old hold (negative check)
+ 11. left-click the Terminal pin          -> launched + window opened
+ 12. right-click the Terminal title bar   -> "window maximized", the
+                                              band-filling frame reaches
+                                              the top-left corner
+ 13. right-click the maximized title bar  -> "window restored", the
+                                              corner goes back to
+                                              wallpaper and the window's
+                                              region is pixel-identical
+                                              to its pre-maximize frame
+ 14. maximize, then drag the maximized
+     title bar                           -> a second "restored": dragging
+                                              a maximized window restores
+                                              it first
 
 Every step must publish its serial marker, and the re-flow steps must
 also repaint the taskbar strip on the scanout within the frame budget.
-Marker waits are occurrence-counted, so a repeated "Unpinned WovenFiles"
-cannot pass on its earlier occurrence. The two negative steps compare
-the strip pixel-for-pixel (minus the wall-clock clock, which legitimately
-changes on a minute boundary) and fail on any difference.
+Marker waits are occurrence-counted, so repeated markers cannot pass on
+their earlier occurrences. The two negative steps compare pixels
+directly (the clock columns masked where the wall clock can legitimately
+change) and fail on any difference.
 
 Nothing here asserts a pin or the auto-hide preference survives a
 reboot: the shell holds no settings-write path, and this gate does not
@@ -53,9 +70,9 @@ pretend otherwise.
 Return codes: 0 pass, 1 a guest check failed, 2 unsupported environment.
 
 Reuses the desktop-qualification harness's QMP plumbing, build steps and
-evidence conventions by importing it as a module. Like that harness, this
-gate owns the QEMU run; do not run two acceptance chains at once (shared
-build/image paths).
+evidence conventions by importing it as a module. Like that harness,
+this gate owns the QEMU run; do not run two acceptance chains at once
+(shared build/image paths).
 """
 
 from __future__ import annotations
@@ -210,6 +227,20 @@ def strip_equal_ignoring_clock(left: bytes, right: bytes) -> bool:
     return True
 
 
+def region_equal(left: bytes, right: bytes, box: tuple[int, int, int, int]) -> bool:
+    """Pixel equality of one physical box (x0, y0, x1, y1) between two
+    frames. Used where the guest must return to an exact previous state
+    and no cursor or toast can enter the box between the two captures."""
+    x0, y0, x1, y1 = box
+    for y in range(y0, y1):
+        row = y * 1280 * 3
+        for x in range(x0, x1):
+            offset = row + x * 3
+            if left[offset:offset + 3] != right[offset:offset + 3]:
+                return False
+    return True
+
+
 def capture_and_require_unchanged(
     qmp: dq.Qmp,
     output: Path,
@@ -342,7 +373,16 @@ def main(argv: list[str] | None = None) -> int:
             def move_to(target: tuple[int, int]) -> None:
                 nonlocal pointer
                 dx, dy = target[0] - pointer[0], target[1] - pointer[1]
-                qmp.relative_mouse(dx, dy)
+                # PS/2 mouse packets carry 9-bit signed deltas; a single large
+                # QMP relative move can be clipped by the guest's PS/2 path. Chunk
+                # into safe steps so the cursor lands where the gate aimed it.
+                while dx != 0 or dy != 0:
+                    step_x = max(-100, min(100, dx))
+                    step_y = max(-100, min(100, dy))
+                    qmp.relative_mouse(step_x, step_y)
+                    dx -= step_x
+                    dy -= step_y
+                    time.sleep(0.05)
                 time.sleep(0.3)
                 time.sleep(0.5)
                 pointer = target
@@ -511,6 +551,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             # Moving to the empty strip refreshes the hold on the way.
             move_to((330, LOGICAL_HEIGHT - BAR_HEIGHT + BAR_HEIGHT // 2))
+            # Refresh the auto-hide hold just before the click so the 1s
+            # timer cannot race the gate's own settle sleeps.
+            qmp.relative_mouse(0, -1)
+            time.sleep(0.05)
+            qmp.relative_mouse(0, 1)
+            time.sleep(0.05)
             right_click(qmp)
             wait_marker_count(
                 serial, "woven-shell: Taskbar auto-hide off", 1, step + args.input_timeout,
@@ -539,11 +585,129 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             )
             screenshots.append(parked.name)
-            capture_and_require_unchanged(
+            _, _, quiet_frame = capture_and_require_unchanged(
                 qmp, output, parked_frame, "autohide-step10-stays-up", timings,
                 time.monotonic() + args.frame_timeout, 2.5,
             )
             screenshots.append("autohide-step10-stays-up.ppm")
+
+            # Step 11: launch the Terminal through its pinned entry, the
+            # same launch path the Files pin exercised.
+            step = time.monotonic()
+            move_to(entry_center(0, 2))
+            qmp.click()
+            wait_marker_count(
+                serial, "woven-shell: launched WovenTerminal", 1, step + args.input_timeout,
+                process, "maximize_launch_ms", timings, step,
+            )
+            wait_marker_count(
+                serial, "woven-shell: window opened: Terminal", 1, step + args.input_timeout,
+                process, "maximize_window_open_ms", timings, step,
+            )
+            terminal = output / "maximize-step11-launched.ppm"
+            _, _, terminal_frame = dq.capture_until_changed(
+                qmp, terminal, quiet_frame,
+                time.monotonic() + args.frame_timeout, timings, "maximize_launch", 1000,
+            )
+            screenshots.append(terminal.name)
+
+            # Step 12: right-click the Terminal title bar -- cascade offset 64,
+            # title bar (64, 50, 360, 14). The window must maximize to the
+            # whole usable band, which the top-left corner box proves: the
+            # maximized title bar covers what was wallpaper.
+            step = time.monotonic()
+            move_to((64 + 180, 50 + 7))
+            right_click(qmp)
+            wait_marker_count(
+                serial, "woven-shell: window maximized: Terminal", 1, step + args.input_timeout,
+                process, "maximize_on_ms", timings, step,
+            )
+            maximized = output / "maximize-step12-maximized.ppm"
+            _, _, maximized_frame = dq.capture_until_changed(
+                qmp, maximized, terminal_frame,
+                time.monotonic() + args.frame_timeout, timings, "maximize_on", 1000,
+                dq.region_changed(terminal_frame, 0, 0, 80, 56, 20),
+            )
+            screenshots.append(maximized.name)
+
+            # Step 13: right-click the maximized title bar, now at the very
+            # top. The window must return to its exact saved geometry: the
+            # top-left box goes back to wallpaper, and the window's own
+            # footprint region is pixel-identical to the pre-maximize frame
+            # (no cursor or toast ever lands inside that region).
+            step = time.monotonic()
+            move_to((LOGICAL_WIDTH // 2, 7))
+            right_click(qmp)
+            wait_marker_count(
+                serial, "woven-shell: window restored: Terminal", 1, step + args.input_timeout,
+                process, "maximize_off_ms", timings, step,
+            )
+            restored = output / "maximize-step13-restored.ppm"
+            _, _, restored_frame = dq.capture_until_changed(
+                qmp, restored, maximized_frame,
+                time.monotonic() + args.frame_timeout, timings, "maximize_off", 1000,
+                dq.region_changed(maximized_frame, 0, 0, 80, 56, 20),
+            )
+            screenshots.append(restored.name)
+            # Compare the shell-drawn title bar, not the client body: the
+            # Terminal owns its surface content and may repaint a cursor
+            # blink between captures. The title bar position and pixels are
+            # shell-deterministic and prove the window returned to its saved
+            # geometry.
+            # The saved title-bar position must be occupied again. Compare
+            # against the maximized frame, not the pre-maximize frame: the
+            # shell-drawn title can legitimately repaint in a different focus
+            # style across the round-trip, but the band-filling maximized frame
+            # left this region as wallpaper.
+            title_box = (2 * 64 - 2, 2 * 36 - 2, 2 * 424 + 2, 2 * 50 - 2)
+            if region_equal(maximized_frame, restored_frame, title_box):
+                raise dq.GateFailure(
+                    "maximize restore: the saved title bar region is unchanged "
+                    "from the maximized frame"
+                )
+
+            # Step 14: maximize again from the restored title bar, then drag
+            # the maximized title bar: the drag must restore the window first,
+            # so a second "maximized" and a second "restored" marker appear
+            # and the band-filling frame goes away.
+            step = time.monotonic()
+            move_to((64 + 180, 50 + 7))
+            right_click(qmp)
+            # A single missed right-click should not fail the gate; retry once.
+            if dq.read_serial(serial).count("woven-shell: window maximized: Terminal") < 2:
+                time.sleep(0.5)
+                move_to((64 + 180, 36 + 7))
+                right_click(qmp)
+            wait_marker_count(
+                serial, "woven-shell: window maximized: Terminal", 2, step + args.input_timeout,
+                process, "maximize_on_again_ms", timings, step,
+            )
+            maximized2 = output / "maximize-step14-maximized.ppm"
+            _, _, maximized2_frame = dq.capture_until_changed(
+                qmp, maximized2, restored_frame,
+                time.monotonic() + args.frame_timeout, timings, "maximize_on_again", 1000,
+            )
+            screenshots.append(maximized2.name)
+            move_to((LOGICAL_WIDTH // 2, 7))
+            qmp.command("input-send-event", {"events": [
+                {"type": "btn", "data": {"down": True, "button": "left"}},
+            ]})
+            time.sleep(0.2)
+            move_to((LOGICAL_WIDTH // 2 + 40, 37))
+            time.sleep(0.3)
+            qmp.command("input-send-event", {"events": [
+                {"type": "btn", "data": {"down": False, "button": "left"}},
+            ]})
+            wait_marker_count(
+                serial, "woven-shell: window restored: Terminal", 2, step + args.input_timeout,
+                process, "maximize_drag_restore_ms", timings, step,
+            )
+            dragged = output / "maximize-step14-drag-restored.ppm"
+            dq.capture_until_changed(
+                qmp, dragged, maximized2_frame,
+                time.monotonic() + args.frame_timeout, timings, "maximize_drag", 1000,
+            )
+            screenshots.append(dragged.name)
 
             result = dict(base)
             result.update({

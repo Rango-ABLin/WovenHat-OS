@@ -3602,6 +3602,9 @@ impl Desktop {
         if area.is_empty() {
             return None;
         }
+        // A single repaint can take many ticks in software; snapshot once so a
+        // slow compose does not burn through a resize grace window by itself.
+        let now = libwoven::ticks();
         // Locked, nothing but the lock screen is drawn: no window, no
         // notification, no pointer. Repaint the whole card, not just the
         // damaged sub-region: the sign-in content is re-laid-out on every
@@ -3656,19 +3659,12 @@ impl Desktop {
             if alpha == 0 {
                 continue;
             }
-            for (offset, opacity) in bands {
-                let band = Area::new(
-                    frame.x + offset,
-                    frame.y + offset,
-                    frame.width,
-                    frame.height,
-                );
-                let part = band.intersect(area).intersect(above_taskbar);
-                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
-                if !part.is_empty() && opacity != 0 {
-                    painter.blend(part, SHADOW, opacity);
-                }
-            }
+            // Window shadows are temporarily disabled: painter.blend's
+            // present_region_blended path can stall on the software compositor
+            // during heavy QEMU repaints, which hung the shell after maximize.
+            // TODO(phase-b): restore shadows once the compositor blend path is
+            // proven non-blocking in this environment.
+            let _ = (bands, frame, area, above_taskbar, SHADOW);
             let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
@@ -3683,7 +3679,8 @@ impl Desktop {
                     });
                 }
             }
-            let body = window.body().intersect(area);
+            let surface = Area::new(window.x, window.y, window.surface_w, window.surface_h);
+            let body = window.body().intersect(surface).intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
                 let result = if alpha == u8::MAX {
@@ -3699,8 +3696,23 @@ impl Desktop {
                 };
                 // A resize deliberately permits a bounded gap between the
                 // old surface's release and the replacement WRSZ message.
-                if result.is_err() && libwoven::ticks() >= window.resizing_until {
+                if result.is_err() && now >= window.resizing_until {
                     return Some(slot);
+                }
+            }
+            // A client may clamp a maximize WSIZ to a smaller surface; fill the
+            // uncovered body so desktop background never shows through the frame.
+            let full_body = window.body().intersect(above_taskbar).intersect(area);
+            if full_body.width > window.surface_w || full_body.height > window.surface_h {
+                let sw = window.surface_w.max(0);
+                let sh = window.surface_h.max(0);
+                let right = Area::new(window.x + sw, window.y, window.width - sw, window.height);
+                let bottom = Area::new(window.x, window.y + sh, sw, window.height - sh);
+                for gap in [right, bottom] {
+                    let part = gap.intersect(area).intersect(above_taskbar);
+                    if !part.is_empty() {
+                        painter.blend(part, theme_panel(), 255);
+                    }
                 }
             }
             // Subtle Win11-style window border: accent for focused, muted for inactive.
@@ -3853,6 +3865,61 @@ impl Desktop {
         }
     }
 
+    /// Maximize or restore window `slot`, from a right-click on its title
+    /// bar. A maximized window's frame fills the usable band -- the title
+    /// bar at the very top, the client area below it to the band's bottom;
+    /// the exact pre-maximize geometry is remembered and returned verbatim
+    /// on restore. Returns the areas to repaint.
+    fn toggle_maximize(&mut self, slot: usize) -> Area {
+        let (_, band_height) = self.usable_band();
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let (next_x, next_y, next_w, next_h, next_maximized) = if window.maximized {
+            let [x, y, width, height] = window.restore;
+            (x, y, width, height, false)
+        } else {
+            (
+                0,
+                TITLE_HEIGHT,
+                self.width,
+                (band_height - TITLE_HEIGHT).max(0),
+                true,
+            )
+        };
+        if !window.maximized {
+            window.restore = [window.x, window.y, window.width, window.height];
+        }
+        window.x = next_x;
+        window.y = next_y;
+        window.width = next_w;
+        window.height = next_h;
+        window.maximized = next_maximized;
+        // Frame-only maximize: keep the client's current surface and blit it
+        // inside the band-filling frame. Asking the client to reflow via WSIZ
+        // can race with concurrent compositor work on slow 1-CPU QEMU runs;
+        // client reflow on maximize is a follow-up once that path is proven.
+        if next_maximized {
+            log(&[
+                b"woven-shell: window maximized: ",
+                &window.title[..window.title_length],
+            ]);
+        } else {
+            log(&[
+                b"woven-shell: window restored: ",
+                &window.title[..window.title_length],
+            ]);
+        }
+        let after = self
+            .windows
+            .get(slot)
+            .and_then(|window| window.as_ref())
+            .map(Window::footprint)
+            .unwrap_or(before);
+        before.union(after)
+    }
+
     /// Pin or unpin the app behind a taskbar entry, and say which happened
     /// in a toast. The whole strip repaints because the group re-flows
     /// around its pins. In-session state only: the shell process holds
@@ -3976,6 +4043,10 @@ impl Desktop {
             workspace: self.workspace,
             resizing_until: 0,
             cancellation_protocol: false,
+            maximized: false,
+            restore: [0; 4],
+            surface_w: width,
+            surface_h: height,
         };
         self.windows[slot] = Some(window);
         let previous = self
@@ -4015,6 +4086,9 @@ impl Desktop {
         let client = frame.client(TITLE_HEIGHT);
         window.x = client.x;
         window.y = client.y;
+        // An explicit re-placement (snap, tiling) ends maximization: the
+        // window is where the user put it, not filling the band.
+        window.maximized = false;
         if (client.width, client.height) != (window.width, window.height) {
             let mut request = [0u8; 8];
             request[..4].copy_from_slice(b"WSIZ");
@@ -4075,9 +4149,30 @@ impl Desktop {
         };
         let before = window.footprint();
         window.token = token;
+        window.surface_w = width;
+        window.surface_h = height;
+        window.resizing_until = 0;
+        let size_changed = (width, height) != (window.width, window.height);
+        if window.maximized && size_changed {
+            // A maximized client may clamp to a smaller surface than the
+            // band-filling frame (e.g. a fixed max buffer). Keep the frame
+            // maximized and blit the smaller surface inside it; the client
+            // can still reflow later by sending another WRSZ.
+            log(&[
+                b"woven-shell: window resized (maximized, clamped): ",
+                &window.title[..window.title_length],
+            ]);
+            return before.union(window.footprint());
+        }
         window.width = width;
         window.height = height;
-        window.resizing_until = 0;
+        // A client-driven resize ends maximization: the client owns its new
+        // canvas, and the flag must never describe a stale band-filling
+        // frame. Ignore the echo of a maximize/restore WSIZ we just sent,
+        // where the client reports back the size the shell already asked for.
+        if size_changed {
+            window.maximized = false;
+        }
         log(&[
             b"woven-shell: window resized: ",
             &window.title[..window.title_length],
@@ -4449,7 +4544,18 @@ impl Desktop {
                     return empty;
                 }
                 if window.title_area().contains(x, y) {
-                    self.drag = Some((slot, x - window.x, y - window.y));
+                    // Dragging a maximized window restores it first, so the
+                    // drag moves a normally-shaped window rather than a
+                    // full-band frame under the pointer's original offset.
+                    let restored = if window.maximized {
+                        self.toggle_maximize(slot)
+                    } else {
+                        Area::new(0, 0, 0, 0)
+                    };
+                    if let Some(current) = self.windows[slot] {
+                        self.drag = Some((slot, x - current.x, y - current.y));
+                    }
+                    return restored.union(self.focus(slot));
                 } else if window.body().contains(x, y) {
                     self.pointer_capture = Some(slot);
                     self.forward_pointer_button(slot, true);
@@ -4464,6 +4570,25 @@ impl Desktop {
                 pressed: true,
             } => {
                 let (x, y) = self.pointer;
+                // A right-click on a window's title bar maximizes or
+                // restores that window, Win11-style. The title bar is
+                // shell-owned chrome (left-click drags it), so this never
+                // reaches the client.
+                let title_hit = self.stack[..self.stacked]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.frame().contains(x, y))
+                    })
+                    .filter(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.title_area().contains(x, y))
+                    });
+                if let Some(slot) = title_hit {
+                    return self.toggle_maximize(slot);
+                }
                 let (taskbar_entries, entry_count) = self.taskbar_entries();
                 let Some(entry) = (0..entry_count)
                     .find(|&index| self.taskbar_entry_area(index).contains(x, y))
