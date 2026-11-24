@@ -10245,6 +10245,17 @@ global-dynamic TLS in Ring 3 through the existing generation-safe ABI. Stage
 builder/harness contracts, and the workspace suite pass. TLSDESC remains open.
 Ownership is released; no Cargo or QEMU chain remains active.
 
+## Codex - bounded runtime TLSDESC accepted (2026-11-24)
+
+The remaining x86-64 TLSDESC software gap is closed for runtime graphs. Parser
+admission is RELA-only with an aligned writable 16-byte target; the descriptor
+uses the existing generation-safe syscall and bounded module/template limits.
+The signed live fixture executes global-dynamic and TLSDESC reads of the same
+value. Stage 11.2 TLS passes on 1/2/4 CPUs under the `1795496990*`,
+`1795497015*`, and `1795497041*` evidence sets. Target/all-target Clippy, 20
+contracts, ELF tests, and workspace tests pass. Ownership is released; no
+Cargo or QEMU chain remains active.
+
 ## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
 
 Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD

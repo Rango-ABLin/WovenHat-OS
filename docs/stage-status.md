@@ -225,6 +225,23 @@ all-target warning-denying Clippy, 20 builder/harness contracts, and the full
 workspace suite pass. TLSDESC remains open and fail-closed; this does not claim
 arbitrary libc dynamic loading or physical qualification.
 
+## Stage 11 bounded runtime TLSDESC - 2026-11-24 - ACCEPTED (BOUNDED)
+
+Runtime graphs now admit the x86-64 `R_X86_64_TLSDESC` RELA form with a
+validated aligned 16-byte writable target. The descriptor binds the exact
+graph resolver to a compact generation/slot/offset record bounded by the
+existing module table and 4 KiB TLS template. The resolver reuses syscall 141;
+there is no new ABI authority. REL/PLT, startup TLSDESC, missing resolver,
+invalid symbol, overflow, misalignment, and stale generation fail closed.
+
+The live signed dependency executes both global-dynamic and TLSDESC reads of
+the same per-thread value. Stage 11.2 TLS passes on 1/2/4 CPUs with exit 33 in
+`audit-artifacts/stage11.2-tls-1cpu-1795496990464907300`,
+`stage11.2-tls-2cpu-1795497015976006900`, and
+`stage11.2-tls-4cpu-1795497041682313400`. The required TLSDESC marker appears
+once per exercised CPU. Target/all-target warning-denying Clippy, 20
+builder/harness contracts, 33 ELF tests, and the workspace suite pass.
+
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 
 The production syscall boundary now copies and validates a bounded ELF shared

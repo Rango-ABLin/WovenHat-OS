@@ -5133,3 +5133,28 @@ The dependency file is removed even after a failed CPU iteration. The gate
 passes on 1/2/4 CPUs under
 `audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954573*` and `17954574*`.
 TLSDESC and unsupported runtime local/initial-exec models remain fail-closed.
+
+## Bounded x86-64 runtime TLSDESC (2026-11-24)
+
+The ELF parser admits `R_X86_64_TLSDESC` only in the main RELA table, requires
+a nonzero TLS symbol, and validates the complete aligned 16-byte writable
+descriptor target. Startup and REL/PLT encodings remain rejected. During a
+runtime transaction, the linker resolves the same checked TLS symbol and graph
+layout used by `DTPMOD64`/`DTPOFF64`, then writes the descriptor atomically.
+
+The descriptor's first word is the graph's exact exported
+`__woven_tlsdesc_resolver`. Its second word is a private bounded encoding:
+generation in bits 63:32, one-based module slot in bits 31:12, and the combined
+TLS offset in bits 11:0. The limits match the existing 4 KiB template and fixed
+module table. The x86-64 resolver decodes that record, calls existing syscall
+141 with the reconstructed generation-tagged handle and offset, and returns the
+resolved address relative to the current FS base as required by the TLSDESC
+call sequence. No descriptor retains a kernel pointer, and no new syscall or
+capability is added.
+
+The signed live dependency contains both compiler global-dynamic access and an
+architecture TLSDESC access to the same variable. Ring 3 requires both to read
+91 before unload. The clean Stage 11.2 TLS gate passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954969*`, `17954970*`; malformed,
+unaligned, oversized, missing-resolver, startup, and stale-generation cases
+remain fail-closed at existing validation or syscall boundaries.

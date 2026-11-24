@@ -34,6 +34,11 @@ missing. The Stage 11.2 TLS gate installs only the signed dependency package,
 then Ring 3 maps the root, executes the compiler TLS read, unloads the graph,
 and verifies stale lookup rejection.
 
+The same dependency also contains the architecture-required GNU2/TLSDESC
+sequence. Its `R_X86_64_TLSDESC` relocation targets a 16-byte descriptor and
+calls the root's `__woven_tlsdesc_resolver`; acceptance requires the TLSDESC
+and global-dynamic paths to read the same per-thread value.
+
 At the initial 2026-10-15 probe, the shared PIE is rejected for LLD's null
 `DT_DEBUG`, while the static TLS image parses but exposes the missing TCB and
 incorrect TLS-template placement. The kernel acceptance gate still needs to

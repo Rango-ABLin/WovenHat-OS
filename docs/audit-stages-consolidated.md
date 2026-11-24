@@ -16558,3 +16558,20 @@ for every Stage 11.2 TLS boot and appears once per tested CPU in the 1/2/4-CPU
 evidence at `audit-artifacts/stage11.2-tls-*cpu-1795457*`. Target/all-target
 Clippy, 20 harness contracts, and workspace tests pass. TLSDESC, unsupported
 runtime local/initial-exec models, and physical qualification remain open.
+
+## Stage 11 runtime TLSDESC audit (2026-11-24)
+
+Admission is deliberately narrower than generic ELF support: only
+`R_X86_64_TLSDESC` in RELA is accepted, the target must be aligned and wholly
+writable for 16 bytes, the TLS symbol and combined offset must validate, and
+the graph must export the exact resolver. The descriptor stores no address to
+kernel memory. Its packed generation/slot/offset limits are checked before one
+16-byte user-memory write, and runtime resolution still crosses the existing
+generation-safe syscall boundary.
+
+The artifact builder refuses publication without the TLSDESC relocation and
+resolver symbol. The harness requires `[S11.RUNTIME] TLSDESC execution: PASSED`;
+the 1/2/4-CPU evidence under `audit-artifacts/stage11.2-tls-*cpu-1795497*`
+contains it once per CPU. Warning-denying target/all-target Clippy, builder and
+harness contracts, ELF tests, and workspace tests pass. This is bounded x86-64
+software acceptance, not arbitrary TLS ABI or physical qualification.
