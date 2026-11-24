@@ -1,5 +1,22 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Identity-locked physical WovenFS qualification boundary (2026-11-24)
+
+`scripts/test-wovenfs-physical.ps1` never treats a mutable Windows disk number
+as identity. Before raw access it requires an exact model, byte size and serial
+match, rejects ambiguous matches, and independently refuses Windows boot or
+system disks. Its optional `-Inspect` path opens the selected physical drive
+read-only. The destructive path removes volumes, clears only the verified
+device, dismounts its drive letters, and attaches the raw device to QEMU as the
+ATA primary disk while the WovenHat boot image remains read-only.
+
+The Stage 15.2 kernel path formats the physical media and validates durable
+WovenFS and VFS behavior across remounts, including mutation rollback and
+authority-denial preservation. The accepted Disk 3 matrix passed on 1/2/4
+virtual CPUs. This boundary proves physical media I/O through the raw-device
+and ATA path; it does not exercise bare-metal firmware handoff or a native
+WovenHat USB controller/mass-storage stack.
+
 ## Stage 11 exact-source verification boundary (2026-11-24)
 
 The production-userspace closure matrix exercises ten independent boot

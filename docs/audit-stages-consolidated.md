@@ -4,6 +4,18 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 15.2 physical WovenFS USB-media matrix - 2026-11-24
+
+The owner authorized Disk 3 after a read-only identity and raw-sector check.
+The destructive gate matched the USB device by model, exact size and serial on
+every run and refused boot/system media. Physical WovenFS/VFS formatting,
+write-through, rejection, rollback, remount and unlink checks passed with exit
+33 on 1/2/4 CPUs at `b87d7a07`; evidence is retained under
+`audit-artifacts/wovenfs-physical-{1,2,4}cpu-20261124-*`. The media was accessed
+through QEMU raw-device passthrough and the WovenHat ATA path. Bare-metal boot,
+native USB-driver behavior, surprise removal and controlled power-loss remain
+outside this accepted boundary.
+
 ## Stage 11 exact-source closure verification - 2026-11-24
 
 Source `bedee571` passes the unchanged full Windows Stage 10.7 gate and the

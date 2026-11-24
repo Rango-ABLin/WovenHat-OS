@@ -1,5 +1,31 @@
 # Stage status
 
+## Stage 15.2 identity-locked physical WovenFS storage - 2026-11-24 - ACCEPTED (BOUNDED)
+
+At source `b87d7a07`, the destructive physical-storage gate passed on 1/2/4
+CPUs against the owner-authorized Disk 3. Every run re-resolved and matched the
+target by all three identity fields: model `VendorCo ProductCode USB Device`,
+exact CIM size 15,726,735,360 bytes, and serial `4045141272666606378`. The live
+Windows inventory additionally reported USB/removable media, healthy,
+`IsBoot=False`, and `IsSystem=False`; a separate `-Inspect` raw-sector read
+passed before destructive execution.
+
+All three boots exited 33 and required the physical marker. The gate cleared
+and formatted the target as WovenFS, then exercised sector write, rejection of
+an unformatted device, file creation, authorized write-through, namespace and
+filename validation, oversized/overlong and sparse-write rollback, remount
+durability, VFS mount/read/handle invalidation, denied-write preservation, and
+unlink persistence. Evidence:
+`audit-artifacts/wovenfs-physical-1cpu-20261124-124319`,
+`wovenfs-physical-2cpu-20261124-124950`, and
+`wovenfs-physical-4cpu-20261124-125250`.
+
+This is genuine physical-media evidence through QEMU raw-device passthrough to
+the kernel ATA path. It does not qualify bare-metal boot, a native WovenHat USB
+mass-storage driver, surprise removal, controlled power loss, other media, or
+the remaining Stage 29 hardware categories. Disk 3 now contains WovenFS and is
+intentionally unreadable by Windows unless reformatted.
+
 ## Stage 11 exact-source software closure matrix - 2026-11-24 - VERIFIED
 
 At source `bedee571`, the complete inherited Windows gate passed unchanged:

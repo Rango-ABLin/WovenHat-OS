@@ -10289,3 +10289,17 @@ passed 30/30: 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler on
 `audit-artifacts/stage11-closure-matrix-20261124.log` plus its per-case
 directories. No Cargo/QEMU chain remains active; verification ownership is
 released.
+
+## Codex - identity-locked physical WovenFS matrix passed (2026-11-24)
+
+With explicit owner authorization for Disk 3, the destructive Stage 15.2
+physical-storage gate passed on 1/2/4 CPUs at source `b87d7a07`. The target was
+matched on every run by model `VendorCo ProductCode USB Device`, exact CIM size
+15,726,735,360 bytes, and serial `4045141272666606378`; Windows also confirmed
+USB/removable, healthy, non-boot and non-system before the first write. Each run
+cleared and reformatted only that device, exercised durable WovenFS/VFS writes,
+denials, remounts and unlink, and exited 33. Evidence is under
+`audit-artifacts/wovenfs-physical-{1,2,4}cpu-20261124-*`. This qualifies the
+physical USB media through QEMU raw-device passthrough and the ATA path; it is
+not bare-metal WovenHat boot or native USB-driver qualification. No QEMU/Cargo
+chain remains active.
