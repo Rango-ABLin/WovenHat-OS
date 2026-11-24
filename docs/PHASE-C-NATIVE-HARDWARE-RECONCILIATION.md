@@ -136,6 +136,29 @@ Evidence: `audit-artifacts/phase-c-e1000-network-20261123/` (per-CPU serial
 logs for e1000, e1000e, the Stage 14.5 e1000 run and the virtio regression) and
 `audit-artifacts/stage13.2-{1,2,4}cpu-*/`.
 
+### 3.1 Re-run after the `master` merge (2026-11-24)
+
+Commit `36e721e9` merged `master` (runtime TLS relocation, status indicators,
+volume read-back, loader/linker changes) into this branch, and `194d2d5e`
+landed this driver. The pre-merge runs above therefore no longer describe the
+committed tree, and the merged tree had been Clippy-checked but **not**
+QEMU-tested with the e1000 attached. Re-run once another agent's serialized
+desktop matrix released the host (one chain at a time):
+
+| Gate | Feature / NIC | CPUs | Result |
+|---|---|---|---|
+| `--nic e1000` | `network-test` | 1, 2, 4 | PASS |
+| `--nic e1000` | `stage14-5d-test` | 1 | PASS |
+| `--nic e1000e` | `network-test` | 1 | PASS |
+| `--nic virtio` | `network-test` (regression) | 1 | PASS |
+| `--stage 13.2` | `stage13-2-test`, e1000 attached | 1 | PASS |
+
+Two `cargo fmt` violations inherited from that merge (`mod audio_status;`
+ordering in `kernel/src/main.rs`, split argument lists in
+`kernel/src/userspace/linker/acceptance.rs`) were repaired rustfmt-only in
+`9d1d8c36`; `cargo fmt --all -- --check` is clean again. Evidence:
+`audit-artifacts/phase-c-e1000-network-20261124-merged/`.
+
 ## 4. What this does and does not establish
 
 **Established (QEMU/software):** WovenHat now has a native, non-paravirtual

@@ -1,3 +1,21 @@
+## OpenCode - Phase C merged-tree revalidation (2026-11-24)
+
+`194d2d5e` landed the e1000 driver; `9d1d8c36` then dropped the now-unused
+`Counters::initialized` field (the shell reports counters through
+`network::transport_counters()`) and repaired two `cargo fmt` violations that
+`36e721e9` brought in (`mod audio_status;` ordering in `kernel/src/main.rs`,
+split argument lists in `kernel/src/userspace/linker/acceptance.rs`). The tree
+was Clippy-clean but had **no** QEMU run with the e1000 attached after that
+merge, so I re-ran it once your `phaseb-desktop-qual-*cpu-hover4` matrix
+released the host: `--nic e1000` at 1/2/4 CPU, `--nic e1000e` at 1,
+`--nic virtio` at 1, `stage14-5d-test` over e1000 at 1, and Stage 13.2 at 1 —
+all PASS, exit 33. `cargo clippy` for default/`qemu-test`/`network-test`/
+`stage13-2-test`/`stage14-5d-test` plus `--all-targets`, and
+`cargo fmt --all -- --check`, are clean. Evidence:
+`audit-artifacts/phase-c-e1000-network-20261124-merged/`. Decision unchanged:
+`PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`; native qualification still
+BLOCKED. I touched no Phase B shell file.
+
 ## OpenCode - phase-b merge and e1000 WIP build fix (2026-11-24)
 
 Merged the pushed `master` (status indicators, volume read-back, runtime TLS)
