@@ -441,13 +441,9 @@ pub fn is_initialized() -> bool {
 }
 
 /// Dataplane counters, mirroring `virtio_net::Stats`' counter set so the
-/// diagnostic shell can report either transport through one shape.
-// The reporting caller is not wired yet; keep the shape available without a
-// broad module-level suppression.
+/// diagnostic shell reports either transport through one shape.
 #[derive(Clone, Copy, Default)]
 pub struct Counters {
-    #[allow(dead_code)]
-    pub initialized: bool,
     pub rx_frames: u64,
     pub tx_frames: u64,
     pub rx_dropped: u64,
@@ -457,7 +453,6 @@ pub struct Counters {
 pub fn counters() -> Counters {
     let t = TRANSPORT.lock();
     Counters {
-        initialized: t.initialized,
         rx_frames: t.rx_frames,
         tx_frames: t.tx_frames,
         rx_dropped: t.rx_dropped,

@@ -46,6 +46,7 @@ mod console;
 mod deadline;
 mod device;
 // Public kernel instrumentation API; does not expose userspace authority.
+mod audio_status;
 pub mod diagnostics;
 mod display;
 mod driver;
@@ -68,7 +69,6 @@ mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
-mod audio_status;
 #[cfg(any(test, feature = "qemu-test"))]
 mod graphics;
 pub mod graphics_abi;

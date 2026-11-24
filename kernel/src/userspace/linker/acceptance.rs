@@ -54,9 +54,7 @@ fn fixture(kind: usize) -> Option<Vec<u8>> {
         write_u64(&mut elf, offset + 32, 8)?;
         write_u64(&mut elf, offset + 40, 16)?;
         write_u64(&mut elf, offset + 48, 8)?;
-        elf[0x13d0..0x13d8].copy_from_slice(
-            &0x5b_u64.to_le_bytes(),
-        );
+        elf[0x13d0..0x13d8].copy_from_slice(&0x5b_u64.to_le_bytes());
     }
     if matches!(kind, 8 | 9) {
         // Keep the lifecycle marker in a writable BSS page outside the
@@ -1031,29 +1029,29 @@ pub(super) fn module_staging_run() -> bool {
                 .ok()?;
         }
         let module_relocation = tls_relocation_value(
-                &planned_graph[2],
-                2,
-                1,
-                elf::R_X86_64_DTPMOD64,
-                &planned_scope,
-                Some(TlsRelocationPlan::Runtime {
-                    offsets: &planned_tls.offsets,
-                    handle: (1_u64 << 32) | 2,
-                }),
-                &planned_graph,
-            )?;
+            &planned_graph[2],
+            2,
+            1,
+            elf::R_X86_64_DTPMOD64,
+            &planned_scope,
+            Some(TlsRelocationPlan::Runtime {
+                offsets: &planned_tls.offsets,
+                handle: (1_u64 << 32) | 2,
+            }),
+            &planned_graph,
+        )?;
         let offset_relocation = tls_relocation_value(
-                &planned_graph[2],
-                2,
-                1,
-                elf::R_X86_64_DTPOFF64,
-                &planned_scope,
-                Some(TlsRelocationPlan::Runtime {
-                    offsets: &planned_tls.offsets,
-                    handle: (1_u64 << 32) | 2,
-                }),
-                &planned_graph,
-            )?;
+            &planned_graph[2],
+            2,
+            1,
+            elf::R_X86_64_DTPOFF64,
+            &planned_scope,
+            Some(TlsRelocationPlan::Runtime {
+                offsets: &planned_tls.offsets,
+                handle: (1_u64 << 32) | 2,
+            }),
+            &planned_graph,
+        )?;
         if planned_tls.offsets.get(1).copied().flatten() != Some(0)
             || planned_tls.offsets.get(2).copied().flatten() != Some(16)
             || module_relocation != (1_u64 << 32) | 2
