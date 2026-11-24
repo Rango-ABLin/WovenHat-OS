@@ -1,3 +1,19 @@
+## OpenCode - phase-b merge and e1000 WIP build fix (2026-11-24)
+
+Merged the pushed `master` (status indicators, volume read-back, runtime TLS)
+into `phase-b/bottom-taskbar-core` as `36e721e9`, after stashing the other
+owner's uncommitted work (including the untracked `e1000.rs`); the stash was
+restored cleanly. One follow-up (`14354164`) corrected an unused-import
+resolution in `kernel/src/block.rs`. The merged tree then still failed only on
+two dead-code errors in the restored WIP `kernel/src/e1000.rs`; per owner
+direction I added two narrow
+`#[expect(dead_code, reason = "diagnostic shell integration is follow-on work")]`
+attributes on `Counters` and `counters()` — no behavior change, no broad
+suppression. Those two lines remain part of the uncommitted e1000 WIP, so the
+driver owner still controls their commit. `cargo check` for the kernel target,
+warning-denying kernel Clippy, shell target Clippy and workspace all-targets
+Clippy now all pass on the merged tree with the WIP present.
+
 ## OpenCode - Phase C native EtherNIC (COMPLETE, 2026-11-23)
 
 Scope owned and closed: new `kernel/src/e1000.rs` plus its integration in
