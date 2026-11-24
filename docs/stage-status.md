@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 11 exact-source software closure matrix - 2026-11-24 - VERIFIED
+
+At source `bedee571`, the complete inherited Windows gate passed unchanged:
+build, warning-denying host/kernel Clippy, workspace tests, 60 memory boots,
+live DHCP/DNS/ICMP and host-verified UDP/TCP, and isolated Stages 10.4-10.7 on
+1/2/4 CPUs. Evidence is
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261124-090013-971`; the
+repository-side combined log is
+`audit-artifacts/stage11-closure-stage10-7-20261124.log`. A preceding 1-CPU DNS
+timeout is preserved under `acceptance-20261124-071649-886`; it did not recur
+in the serialized rerun and no limit or assertion changed.
+
+The exact-current-source Stage 11 matrix passed 30/30 with exit 33: stages
+11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler, each on 1/2/4
+CPUs. The combined transcript is
+`audit-artifacts/stage11-closure-matrix-20261124.log`, with individual evidence
+under `audit-artifacts/stage11*-179551*`. This verifies the implemented bounded
+production-userspace software path, including compiler-built global-dynamic and
+TLSDESC runtime TLS. It does not claim arbitrary libc/dynamic-loader
+interoperability, physical qualification, or release closure; runtime
+local/initial-exec remains deliberately rejected for post-start modules because
+it requires static TLS reservation.
+
 ## Volume read-back for the status indicator - 2026-11-23 - ACCEPTED (BOUNDED)
 
 The volume glyph now displays the kernel's last applied output percentage

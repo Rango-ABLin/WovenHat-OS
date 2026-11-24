@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 11 exact-source verification boundary (2026-11-24)
+
+The production-userspace closure matrix exercises ten independent boot
+configurations rather than chaining Stage 11 features: 11.1-11.6 plus the
+11.2 status, TLS, and ASLR variants and the 11.5 compiler variant. Each feature
+boots separately on 1/2/4 CPUs because these gates own their termination path
+and must not mask one another. The runtime-TLS variant rebuilds the unmodified
+compiler fixtures for every CPU count and exercises global-dynamic and TLSDESC
+access through the generation-safe graph lifecycle; unsupported post-start
+local/initial-exec models continue to fail closed. At `bedee571`, the inherited
+Stage 10.7 chain and all 30 Stage 11 boots pass without a feature-graph,
+timeout, assertion, ABI, capability, or runtime-ownership change.
+
 ## Desktop system-status indicator boundary (2026-11-23)
 
 `apps/woven-shell/src/status.rs` is the bounded presentation model behind the

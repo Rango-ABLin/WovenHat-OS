@@ -4,6 +4,17 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 11 exact-source closure verification - 2026-11-24
+
+Source `bedee571` passes the unchanged full Windows Stage 10.7 gate and the
+30-case Stage 11 feature matrix. The matrix covers 11.1-11.6, 11.2-status,
+11.2-tls, 11.2-aslr, and 11.5-compiler on 1/2/4 CPUs; every boot exited 33.
+The inherited gate includes warning-denying Clippy, workspace tests, 60 memory
+boots, live network round trips, and isolated 10.4-10.7 boots. The earlier
+1-CPU DNS timeout is retained as failure evidence and cleared on an unchanged
+serialized rerun. This is exact-source bounded software verification, not
+physical, arbitrary-toolchain, libc-interoperability, or release acceptance.
+
 ## POSIX musl static-libc bootstrap - 2026-10-28
 
 Added the repeatable bounded bootstrap builder for pinned musl 1.2.6. It

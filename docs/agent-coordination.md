@@ -10275,3 +10275,17 @@ relocations and live generation-safe publication in focused acceptance. Scope
 is loader-fixture sources/builder, Stage 11 runtime harness, linker acceptance,
 and directly related documentation. General-dynamic/TLSDESC implementation is
 not included unless this fixture closes first. No Cargo/QEMU chain is active.
+
+## Codex - exact-source Stage 11 closure matrix passed (2026-11-24)
+
+At `bedee571`, the inherited full `RUN-STAGE10.7.ps1` Windows gate passed
+unchanged, including 60 memory boots, live networking, and isolated 10.4-10.7
+boots on 1/2/4 CPUs. The first attempt's 1-CPU DNS timeout remains preserved;
+the serialized rerun passed DNS plus host-verified UDP/TCP on every CPU count
+without changing a timeout or assertion. The exact-source Stage 11 matrix then
+passed 30/30: 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler on
+1/2/4 CPUs, all with exit 33. Evidence is
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261124-090013-971` and
+`audit-artifacts/stage11-closure-matrix-20261124.log` plus its per-case
+directories. No Cargo/QEMU chain remains active; verification ownership is
+released.
