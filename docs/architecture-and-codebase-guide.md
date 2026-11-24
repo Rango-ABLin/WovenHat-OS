@@ -1,5 +1,15 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Hardware-demo catalog evidence contract (2026-11-24)
+
+`scripts/test-shell-qemu.py` derives the expected application count from the
+packaged manifest and requires the kernel's exact successful catalog marker.
+That marker includes signed applications plus licensed wallpaper and font and
+the exact VFS readback sizes of both assets. A partial or historical marker
+cannot satisfy the normal-boot gate. This keeps the preflash check coupled to
+the assets actually embedded in the candidate rather than merely accepting
+desktop startup.
+
 ## Identity-locked physical WovenFS qualification boundary (2026-11-24)
 
 `scripts/test-wovenfs-physical.ps1` never treats a mutable Windows disk number

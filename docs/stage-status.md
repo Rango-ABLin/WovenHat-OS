@@ -1,5 +1,25 @@
 # Stage status
 
+## Hardware-demo preflash marker repair - 2026-11-24 - ACCEPTED (FOCUSED)
+
+The current kernel reports installation of all signed applications, licensed
+wallpaper, and licensed font with exact VFS readback sizes. The normal-boot
+harness still required the obsolete wallpaper-only marker, so its first
+current-source 4-CPU preflash run rejected a guest that had installed all 11
+apps, published the services, started WovenShell and reached desktop-ready.
+The harness now requires the complete font-inclusive marker; it does not accept
+the weaker legacy text. Eight focused fail-closed serial-contract tests pass.
+
+The unchanged 4-CPU hardware-demo rerun then passed demo-account sign-in,
+non-uniform 1280x800 desktop capture, F12 diagnostic/desktop return, PS/2 input,
+and SMP/TLB acknowledgement. Evidence is
+`audit-artifacts/hardware-demo-preflash-4cpu-20261124-r2.log` and
+`target/shell-regression/system-apps-4cpu-1795518336510756000`. The validated
+candidate is 35,717,120 bytes with SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+It uses the disposable acceptance application key and demo accounts and is not
+a production release. Physical USB write and bare-metal boot remain separate.
+
 ## Stage 15.2 identity-locked physical WovenFS storage - 2026-11-24 - ACCEPTED (BOUNDED)
 
 At source `b87d7a07`, the destructive physical-storage gate passed on 1/2/4

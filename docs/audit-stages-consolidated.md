@@ -4,6 +4,18 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Hardware-demo preflash catalog-marker repair - 2026-11-24
+
+The first 4-CPU candidate boot successfully installed the current 11-app,
+wallpaper and font catalog, but a stale harness marker rejected it. The harness
+now requires the exact font-inclusive asset/readback marker and retains a
+negative contract for the weaker old text. Eight host contracts and the rerun
+pass; the rerun also proves demo sign-in, visible desktop frames, F12 focus
+round trip and SMP/TLB input. Candidate SHA-256 is
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+This validates a disposable hardware-demo image, not production signing or a
+physical boot.
+
 ## Stage 15.2 physical WovenFS USB-media matrix - 2026-11-24
 
 The owner authorized Disk 3 after a read-only identity and raw-sector check.

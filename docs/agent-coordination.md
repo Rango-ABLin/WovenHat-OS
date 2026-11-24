@@ -10303,3 +10303,17 @@ denials, remounts and unlink, and exited 33. Evidence is under
 physical USB media through QEMU raw-device passthrough and the ATA path; it is
 not bare-metal WovenHat boot or native USB-driver qualification. No QEMU/Cargo
 chain remains active.
+## Codex - hardware-demo preflash gate repaired and passed (2026-11-24)
+
+The first current-source 4-CPU preflash gate reached the desktop and installed
+all 11 applications, wallpaper and font, but the harness rejected the newer
+font-inclusive `[APPS]` marker because it still required the older
+wallpaper-only text. The harness and its fail-closed contract now require the
+complete current marker; 8/8 focused tests pass, including rejection of the
+weaker legacy marker. The rerun passed demo sign-in, visible 1280x800 desktop,
+F12 round trip and SMP/TLB input. Candidate image:
+`D:\WovenHat-OS-output\cargo-build\release\build\wovenhat-os-0ffb3e803298f592\out\wovenhat-os-uefi.img`,
+35,717,120 bytes, SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+This is a disposable acceptance-key/demo-account image, not a production
+release. Disk 3 has not yet been overwritten with this candidate.
