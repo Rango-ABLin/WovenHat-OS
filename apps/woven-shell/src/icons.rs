@@ -26,7 +26,12 @@ pub fn app_icon(name: &[u8]) -> AppIcon {
 /// grid's own highlight behind this tile shows selection.
 pub fn draw_app_icon_light(canvas: &mut Canvas<'_>, x: i32, y: i32, icon: AppIcon, size: i32) {
     let IconAppearance { fill, .. } = IconAppearance::for_id(icon);
-    fill_rounded(canvas, Area::new(x, y, size, size), (size / 4).max(1) as usize, fill);
+    fill_rounded(
+        canvas,
+        Area::new(x, y, size, size),
+        (size / 4).max(1) as usize,
+        fill,
+    );
 }
 
 /// Draw a compact Fluent-inspired app tile. The icon is composed from
@@ -85,20 +90,50 @@ pub fn draw_app_icon(
         AppIcon::Terminal => {
             fill_rounded(canvas, Area::new(left, top, span, 3), 1, ink);
             fill_rounded(canvas, Area::new(left, top + 5, 4, 4), 1, ink);
-            fill_rounded(canvas, Area::new(left + 7, top + 5, span.saturating_sub(7), 3), 1, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 7, top + 5, span.saturating_sub(7), 3),
+                1,
+                ink,
+            );
         }
         AppIcon::Store => {
             fill_rounded(canvas, Area::new(left, top, span, 3), 1, ink);
-            fill_rounded(canvas, Area::new(left + 2, top + 5, span.saturating_sub(4), 3), 1, ink);
-            fill_rounded(canvas, Area::new(left + 2, top + 10, span.saturating_sub(4), 3), 1, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 2, top + 5, span.saturating_sub(4), 3),
+                1,
+                ink,
+            );
+            fill_rounded(
+                canvas,
+                Area::new(left + 2, top + 10, span.saturating_sub(4), 3),
+                1,
+                ink,
+            );
         }
         AppIcon::Security => {
-            fill_rounded(canvas, Area::new(left + 2, top - 1, span.saturating_sub(4), 3), 1, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 2, top - 1, span.saturating_sub(4), 3),
+                1,
+                ink,
+            );
             fill_rounded(canvas, Area::new(left, top + 2, span, 6), 2, ink);
-            fill_rounded(canvas, Area::new(left + 2, top + 8, span.saturating_sub(4), 3), 1, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 2, top + 8, span.saturating_sub(4), 3),
+                1,
+                ink,
+            );
         }
         AppIcon::Images => {
-            fill_rounded(canvas, Area::new(left, top + 3, span, span.saturating_sub(2)), 3, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left, top + 3, span, span.saturating_sub(2)),
+                3,
+                ink,
+            );
             fill_rounded(canvas, Area::new(left + 4, top, 5, 5), 2, ink);
         }
         AppIcon::Calculator => {
@@ -116,7 +151,12 @@ pub fn draw_app_icon(
             fill_rounded(canvas, Area::new(left + 4, top - 1, 5, span + 2), 2, ink);
         }
         AppIcon::Monitor => {
-            fill_rounded(canvas, Area::new(left, top, span, span.saturating_sub(3)), 2, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left, top, span, span.saturating_sub(3)),
+                2,
+                ink,
+            );
             fill_rounded(
                 canvas,
                 Area::new(left + span / 2 - 2, top + span - 2, 5, 5),
@@ -125,13 +165,23 @@ pub fn draw_app_icon(
             );
         }
         AppIcon::Installer => {
-            fill_rounded(canvas, Area::new(left + 3, top - 1, 5, span.saturating_sub(2)), 2, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 3, top - 1, 5, span.saturating_sub(2)),
+                2,
+                ink,
+            );
             fill_rounded(canvas, Area::new(left, top + span - 4, span, 4), 1, ink);
             fill_rounded(canvas, Area::new(left, top + span, span, 4), 1, ink);
         }
         AppIcon::Update | AppIcon::Ai | AppIcon::Generic => {
             fill_rounded(canvas, Area::new(left, top + 2, span, 4), 1, ink);
-            fill_rounded(canvas, Area::new(left + 2, top + 8, span.saturating_sub(4), 4), 1, ink);
+            fill_rounded(
+                canvas,
+                Area::new(left + 2, top + 8, span.saturating_sub(4), 4),
+                1,
+                ink,
+            );
         }
     }
 }

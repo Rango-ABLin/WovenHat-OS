@@ -5,7 +5,10 @@
 use libwoven::{process, Spring};
 
 use crate::geometry::Area;
-use crate::tokens::{CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT, TOAST_CHARS};
+use crate::tokens::{
+    CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT,
+    TOAST_CHARS,
+};
 
 #[derive(Clone, Copy)]
 pub struct Window {

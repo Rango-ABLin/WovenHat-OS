@@ -143,10 +143,10 @@ use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
+use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
-use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::layout::{self, Frame};
 use libwoven::ui::DesignTokens;
 use libwoven::{
@@ -578,7 +578,13 @@ fn fill_rounded(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32) 
 
 /// A filled rounded rectangle with explicit opacity, for translucent chrome
 /// (the sign-in/lock card) rather than a fully opaque fill.
-fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32, opacity: u8) {
+fn fill_rounded_blended(
+    canvas: &mut Canvas<'_>,
+    area: Area,
+    radius: usize,
+    color: u32,
+    opacity: u8,
+) {
     Renderer::new(canvas).rounded_rect_blended(rect_of(area), radius, color_of(color), opacity);
 }
 
@@ -587,7 +593,12 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
 /// reuses `rounded_rect` rather than adding a second corner-distance
 /// implementation.
 fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
-    let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
+    let area = Area::new(
+        center_x - diameter / 2,
+        center_y - diameter / 2,
+        diameter,
+        diameter,
+    );
     fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
 }
 
@@ -607,7 +618,7 @@ fn lighten(color: u32, amount: u8) -> u32 {
 }
 
 mod model;
-use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
+use model::{load_catalog, matches, App, Child, Note, Toast, TrayIcon, Window};
 
 mod painter;
 use painter::Painter;
@@ -1058,7 +1069,9 @@ impl Desktop {
     fn overview_thumb_area(&self, index: usize) -> Area {
         let overview = self.overview_area();
         Area::new(
-            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
+            overview.x
+                + OVERVIEW_MARGIN
+                + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
             self.overview_thumb_row_top(),
             OVERVIEW_THUMB_WIDTH,
             OVERVIEW_THUMB_HEIGHT,
@@ -1444,8 +1457,19 @@ impl Desktop {
 
         let start = self.start_area();
         let catalog = shell_catalog(self.language);
-        let fill = if self.launcher_open { theme_accent() } else { theme_start_fill() };
-        let fill_top = if self.launcher_open { lighten(fill, 18) } else { lighten(fill, 28) };
+        let start_hover = !self.launcher_open && start.contains(self.pointer.0, self.pointer.1);
+        let fill = if self.launcher_open {
+            theme_accent()
+        } else if start_hover {
+            lighten(theme_start_fill(), 10)
+        } else {
+            theme_start_fill()
+        };
+        let fill_top = if self.launcher_open {
+            lighten(fill, 18)
+        } else {
+            lighten(fill, 28)
+        };
         Renderer::new(canvas).rounded_rect_gradient(
             rect_of(start),
             CHROME_RADIUS,
@@ -1469,7 +1493,12 @@ impl Desktop {
             (0, 8, theme_text()),
             (8, 8, theme_accent()),
         ] {
-            fill_rounded(canvas, Area::new(icon_left + dx, icon_top + dy, 6, 6), 1, color);
+            fill_rounded(
+                canvas,
+                Area::new(icon_left + dx, icon_top + dy, 6, 6),
+                1,
+                color,
+            );
         }
 
         for (index, (slot, window)) in self.entries().enumerate() {
@@ -1496,7 +1525,11 @@ impl Desktop {
                 canvas,
                 Area::new(indicator_x, indicator_y, indicator_w, 3),
                 1,
-                if active { theme_accent() } else { theme_muted() },
+                if active {
+                    theme_accent()
+                } else {
+                    theme_muted()
+                },
             );
             draw_app_icon(
                 canvas,
@@ -1521,7 +1554,13 @@ impl Desktop {
         // The workspace switcher sits left of the system menu button.
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
-            let fill = theme_entry(index == self.workspace);
+            let active = index == self.workspace;
+            let hovered = !active && area.contains(self.pointer.0, self.pointer.1);
+            let fill = if hovered {
+                lighten(theme_entry(false), 8)
+            } else {
+                theme_entry(active)
+            };
             fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let digit = [b'1' + index as u8];
             canvas.draw_text_system(
@@ -1534,7 +1573,12 @@ impl Desktop {
 
         // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
-        let fill = theme_entry(self.qs_open);
+        let qs_hover = !self.qs_open && button.contains(self.pointer.0, self.pointer.1);
+        let fill = if qs_hover {
+            lighten(theme_entry(false), 8)
+        } else {
+            theme_entry(self.qs_open)
+        };
         fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
         for row in 0..3 {
             canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
@@ -1629,7 +1673,9 @@ impl Desktop {
         );
         let (dash_apps, dash_count) = self.dash_apps();
         for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
-            let Some(app) = self.apps[app_index] else { continue };
+            let Some(app) = self.apps[app_index] else {
+                continue;
+            };
             let area = self.overview_dash_area(index);
             if visible.intersect(area).is_empty() {
                 continue;
@@ -1646,121 +1692,134 @@ impl Desktop {
         // The first frame only publishes the panel and search field. The
         // window cards and app grid are filled on the following frame.
         if self.overview_detail {
-        // This workspace's window cards: a title-card placeholder per
-        // window, not a live thumbnail -- the compositor ABI has no scaled
-        // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
-        let entries: [Option<&Window>; MAX_WINDOWS] = {
-            let mut cards = [None; MAX_WINDOWS];
-            for (slot, (_, window)) in self.entries().enumerate() {
-                if slot < MAX_WINDOWS {
-                    cards[slot] = Some(window);
+            // This workspace's window cards: a title-card placeholder per
+            // window, not a live thumbnail -- the compositor ABI has no scaled
+            // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
+            let entries: [Option<&Window>; MAX_WINDOWS] = {
+                let mut cards = [None; MAX_WINDOWS];
+                for (slot, (_, window)) in self.entries().enumerate() {
+                    if slot < MAX_WINDOWS {
+                        cards[slot] = Some(window);
+                    }
+                }
+                cards
+            };
+            if entries.iter().all(Option::is_none) {
+                canvas.draw_text_system(
+                    overview.x + OVERVIEW_MARGIN,
+                    self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
+                    catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                    theme_muted(),
+                );
+            } else {
+                for (index, window) in entries.iter().enumerate() {
+                    let Some(window) = window else { continue };
+                    let card = self.overview_thumb_area(index);
+                    if visible.intersect(card).is_empty() {
+                        continue;
+                    }
+                    fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
+                    outline(canvas, card, theme_accent());
+                    let mut buffer = [0u8; 32];
+                    let length = label(
+                        &window.title[..window.title_length],
+                        ((card.width - 8) / font::ADVANCE) as usize,
+                        &mut buffer,
+                    );
+                    let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+                    canvas.draw_text_system(
+                        card.x + 4,
+                        card.y + card.height / 2 - 3,
+                        text,
+                        theme_text(),
+                    );
                 }
             }
-            cards
-        };
-        if entries.iter().all(Option::is_none) {
+
+            // All apps section.
             canvas.draw_text_system(
                 overview.x + OVERVIEW_MARGIN,
-                self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
-                catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                self.overview_grid_top() - 14,
+                catalog.lookup("all_apps", "All apps"),
                 theme_muted(),
             );
-        } else {
-            for (index, window) in entries.iter().enumerate() {
-                let Some(window) = window else { continue };
-                let card = self.overview_thumb_area(index);
-                if visible.intersect(card).is_empty() {
+            let (found, count) = self.filtered();
+            for (index, &app_index) in found[..count].iter().enumerate() {
+                let Some(app) = self.apps[app_index] else {
+                    continue;
+                };
+                let cell = self.overview_cell_area(index);
+                if visible.intersect(cell).is_empty() {
                     continue;
                 }
-                fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
-                outline(canvas, card, theme_accent());
+                if index == self.selected {
+                    fill_rounded(
+                        canvas,
+                        Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
+                        CHROME_RADIUS,
+                        lighten(theme_taskbar(), 18),
+                    );
+                }
+                draw_app_icon_light(
+                    canvas,
+                    cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
+                    cell.y + 2,
+                    app_icon(app.name()),
+                    OVERVIEW_APP_ICON_SIZE,
+                );
+                // Catalog names are "Woven<App>"; the grid already shows the
+                // WovenHat-branded icon beside each one, so the repeated
+                // prefix only costs width better spent on the rest of the
+                // name before truncation.
+                let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
                 let mut buffer = [0u8; 32];
                 let length = label(
-                    &window.title[..window.title_length],
-                    ((card.width - 8) / font::ADVANCE) as usize,
+                    display_name,
+                    (cell.width / font::ADVANCE) as usize,
                     &mut buffer,
                 );
                 let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-                canvas.draw_text_system(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
-            }
-        }
-
-        // All apps section.
-        canvas.draw_text_system(
-            overview.x + OVERVIEW_MARGIN,
-            self.overview_grid_top() - 14,
-            catalog.lookup("all_apps", "All apps"),
-            theme_muted(),
-        );
-        let (found, count) = self.filtered();
-        for (index, &app_index) in found[..count].iter().enumerate() {
-            let Some(app) = self.apps[app_index] else { continue };
-            let cell = self.overview_cell_area(index);
-            if visible.intersect(cell).is_empty() {
-                continue;
-            }
-            if index == self.selected {
-                fill_rounded(
-                    canvas,
-                    Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
-                    CHROME_RADIUS,
-                    lighten(theme_taskbar(), 18),
+                let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
+                canvas.draw_text_system(
+                    text_x.max(cell.x),
+                    cell.y + OVERVIEW_APP_ICON_SIZE + 12,
+                    text,
+                    theme_text(),
                 );
             }
-            draw_app_icon_light(
-                canvas,
-                cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
-                cell.y + 2,
-                app_icon(app.name()),
-                OVERVIEW_APP_ICON_SIZE,
-            );
-            // Catalog names are "Woven<App>"; the grid already shows the
-            // WovenHat-branded icon beside each one, so the repeated
-            // prefix only costs width better spent on the rest of the
-            // name before truncation.
-            let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
-            let mut buffer = [0u8; 32];
-            let length = label(
-                display_name,
-                (cell.width / font::ADVANCE) as usize,
-                &mut buffer,
-            );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
-            canvas.draw_text_system(
-                text_x.max(cell.x),
-                cell.y + OVERVIEW_APP_ICON_SIZE + 12,
-                text,
-                theme_text(),
-            );
-        }
 
-        // Footer: user and power hint, Win11-style bottom bar.
-        let footer_h = 28;
-        let footer_y = overview.y + overview.height - footer_h;
-        let footer = Area::new(overview.x, footer_y, overview.width, footer_h);
-        canvas.fill_rect(footer.x, footer.y, footer.width as usize, 1, blend(theme_stroke(), theme_panel(), 28));
-        let mut user_buf = [0u8; 32];
-        let user_name = if let Some(account) = self
-            .session
-            .and_then(|index| self.accounts.get(index).copied().flatten())
-        {
-            let name = account.name();
-            let len = name.len().min(user_buf.len());
-            user_buf[..len].copy_from_slice(&name[..len]);
-            core::str::from_utf8(&user_buf[..len]).unwrap_or("User")
-        } else {
-            "User"
-        };
-        canvas.draw_text_system(footer.x + 12, footer.y + 9, user_name, theme_text());
-        let power = catalog.lookup("power", "Power");
-        let power_w = font::text_width(power) as i32;
-        canvas.draw_text_system(
-            footer.x + footer.width - power_w - 12,
-            footer.y + 9,
-            power,
-            theme_muted(),
-        );
+            // Footer: user and power hint, Win11-style bottom bar.
+            let footer_h = 28;
+            let footer_y = overview.y + overview.height - footer_h;
+            let footer = Area::new(overview.x, footer_y, overview.width, footer_h);
+            canvas.fill_rect(
+                footer.x,
+                footer.y,
+                footer.width as usize,
+                1,
+                blend(theme_stroke(), theme_panel(), 28),
+            );
+            let mut user_buf = [0u8; 32];
+            let user_name = if let Some(account) = self
+                .session
+                .and_then(|index| self.accounts.get(index).copied().flatten())
+            {
+                let name = account.name();
+                let len = name.len().min(user_buf.len());
+                user_buf[..len].copy_from_slice(&name[..len]);
+                core::str::from_utf8(&user_buf[..len]).unwrap_or("User")
+            } else {
+                "User"
+            };
+            canvas.draw_text_system(footer.x + 12, footer.y + 9, user_name, theme_text());
+            let power = catalog.lookup("power", "Power");
+            let power_w = font::text_width(power) as i32;
+            canvas.draw_text_system(
+                footer.x + footer.width - power_w - 12,
+                footer.y + 9,
+                power,
+                theme_muted(),
+            );
         }
     }
 
@@ -1769,8 +1828,7 @@ impl Desktop {
     /// right). Keeping them in their own slots leaves the existing `TRAY`
     /// protocol and its surface ownership untouched.
     fn status_area(&self, index: usize) -> Area {
-        let x = self.clock_area().x
-            - (MAX_TRAY + index + 1) as i32 * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x - (MAX_TRAY + index + 1) as i32 * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
@@ -1785,8 +1843,7 @@ impl Desktop {
 
     /// The Quick Settings button, left of the status icons.
     fn qs_button(&self) -> Area {
-        let x = self.clock_area().x
-            - (MAX_TRAY + STATUS_ICONS + 1) as i32 * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x - (MAX_TRAY + STATUS_ICONS + 1) as i32 * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
@@ -1827,13 +1884,55 @@ impl Desktop {
     fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
         match action {
             QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => "Unavailable",
-            QsAction::BatterySaver => if self.battery_saver { "On" } else { "Off" },
-            QsAction::FocusAssist => if self.dnd { "On" } else { "Off" },
-            QsAction::NightLight => if self.night_light { "On" } else { "Off" },
-            QsAction::Accessibility => if self.reduced_motion { "On" } else { "Off" },
-            QsAction::DisplayScale => if self.scale == 2 { "200%" } else { "100%" },
-            QsAction::Tiling => if self.tiled { "On" } else { "Off" },
-            QsAction::ThreeD => if self.three_d { "On" } else { "Off" },
+            QsAction::BatterySaver => {
+                if self.battery_saver {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::FocusAssist => {
+                if self.dnd {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::NightLight => {
+                if self.night_light {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::Accessibility => {
+                if self.reduced_motion {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::DisplayScale => {
+                if self.scale == 2 {
+                    "200%"
+                } else {
+                    "100%"
+                }
+            }
+            QsAction::Tiling => {
+                if self.tiled {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::ThreeD => {
+                if self.three_d {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
             QsAction::Language => match self.language {
                 libwoven::i18n::Language::English => "English",
                 libwoven::i18n::Language::Chichewa => "Chichewa",
@@ -1844,10 +1943,13 @@ impl Desktop {
     }
 
     fn qs_panel_height(&self) -> i32 {
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        let grid_h =
+            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
         // header + grid + sliders(2) + footer + paddings/gaps
-        16 + 24 + QS_PADDING + grid_h + QS_SECTION_GAP
+        16 + 24
+            + QS_PADDING
+            + grid_h
+            + QS_SECTION_GAP
             + QS_SLIDER_HEIGHT * 2
             + QS_SLIDER_GAP
             + QS_SECTION_GAP
@@ -1867,8 +1969,8 @@ impl Desktop {
     fn qs_grid_area(&self) -> Area {
         let panel = self.qs_area();
         let top = panel.y + 16 + 24 + QS_PADDING;
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        let grid_h =
+            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
         Area::new(
             panel.x + QS_PADDING,
             top,
@@ -1893,8 +1995,14 @@ impl Desktop {
     fn qs_slider_area(&self, which: i32) -> Area {
         let panel = self.qs_area();
         let grid = self.qs_grid_area();
-        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
+        let top =
+            grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            QS_SLIDER_HEIGHT,
+        )
     }
 
     fn qs_footer_area(&self) -> Area {
@@ -1975,7 +2083,13 @@ impl Desktop {
                 .unwrap_or(b'?')
                 .to_ascii_uppercase();
             let avatar_y = middle - 92;
-            fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, palette.accent);
+            fill_circle(
+                canvas,
+                self.width / 2,
+                avatar_y,
+                AVATAR_DIAMETER,
+                palette.accent,
+            );
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
             let avatar_size = (AVATAR_DIAMETER as u16 / 2).max(BODY_TEXT);
@@ -2010,15 +2124,19 @@ impl Desktop {
                 let y = middle - 24 + (index as i32) * account_line;
                 let chosen = index == self.chosen;
                 if chosen {
-                    let pill = Area::new(
-                        x - 10,
-                        y - 3,
-                        width + 20,
-                        account_line + 6,
+                    let pill = Area::new(x - 10, y - 3, width + 20, account_line + 6);
+                    fill_rounded(
+                        canvas,
+                        pill,
+                        (pill.height / 2).max(0) as usize,
+                        palette.accent,
                     );
-                    fill_rounded(canvas, pill, (pill.height / 2).max(0) as usize, palette.accent);
                 }
-                let ink = if chosen { palette.on_accent } else { palette.text };
+                let ink = if chosen {
+                    palette.on_accent
+                } else {
+                    palette.text
+                };
                 canvas.draw_ui_text(x, y, name, ink, account_role.em_px());
             }
         } else if self.mode == LockMode::ChangePin {
@@ -2443,7 +2561,11 @@ impl Desktop {
             }
             QsAction::FocusAssist => {
                 self.dnd = !self.dnd;
-                log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                log(if self.dnd {
+                    &[b"woven-shell: do not disturb on"]
+                } else {
+                    &[b"woven-shell: do not disturb off"]
+                });
                 panel
             }
             QsAction::NightLight => {
@@ -2452,14 +2574,22 @@ impl Desktop {
             }
             QsAction::Accessibility => {
                 self.reduced_motion = !self.reduced_motion;
-                log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                log(if self.reduced_motion {
+                    &[b"woven-shell: reduced motion on"]
+                } else {
+                    &[b"woven-shell: reduced motion off"]
+                });
                 panel
             }
             QsAction::DisplayScale => self.toggle_scale().union(self.qs_area()),
             QsAction::Tiling => self.toggle_tiling().union(self.qs_area()),
             QsAction::ThreeD => {
                 self.three_d = !self.three_d;
-                log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
+                log(if self.three_d {
+                    &[b"woven-shell: 3D desktop on"]
+                } else {
+                    &[b"woven-shell: 3D desktop off"]
+                });
                 panel.union(self.screen())
             }
             QsAction::Language => {
@@ -2477,9 +2607,14 @@ impl Desktop {
 
     fn qs_grid_area_at(&self, panel: Area) -> Area {
         let top = panel.y + 16 + 24 + QS_PADDING;
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, grid_h)
+        let grid_h =
+            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            grid_h,
+        )
     }
 
     fn qs_action_area_at(&self, panel: Area, index: usize) -> Area {
@@ -2497,8 +2632,14 @@ impl Desktop {
 
     fn qs_slider_area_at(&self, panel: Area, which: i32) -> Area {
         let grid = self.qs_grid_area_at(panel);
-        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
+        let top =
+            grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            QS_SLIDER_HEIGHT,
+        )
     }
 
     fn qs_footer_area_at(&self, panel: Area) -> Area {
@@ -2517,28 +2658,57 @@ impl Desktop {
             NetworkStatus::Offline => b"Offline",
             NetworkStatus::Unavailable => b"No net",
         };
-        for b in net.iter().take(buf.len()) { buf[len] = *b; len += 1; }
-        if len < buf.len() { buf[len] = b' '; len += 1; }
+        for b in net.iter().take(buf.len()) {
+            buf[len] = *b;
+            len += 1;
+        }
+        if len < buf.len() {
+            buf[len] = b' ';
+            len += 1;
+        }
         let (pct, muted) = match self.status.volume {
             VolumeStatus::Level { percent, muted } => (percent, muted),
             VolumeStatus::Unavailable => (0, true),
         };
         let mut pbuf = [0u8; 3];
         let plen = status::format_percent(pct, &mut pbuf);
-        for b in pbuf[..plen].iter().take(buf.len().saturating_sub(len)) { buf[len] = *b; len += 1; }
-        if len < buf.len() { buf[len] = b'%'; len += 1; }
-        if muted && len < buf.len() { buf[len] = b' '; len += 1; if len < buf.len() { buf[len] = b'M'; len += 1; } }
+        for b in pbuf[..plen].iter().take(buf.len().saturating_sub(len)) {
+            buf[len] = *b;
+            len += 1;
+        }
+        if len < buf.len() {
+            buf[len] = b'%';
+            len += 1;
+        }
+        if muted && len < buf.len() {
+            buf[len] = b' ';
+            len += 1;
+            if len < buf.len() {
+                buf[len] = b'M';
+                len += 1;
+            }
+        }
         core::str::from_utf8(&buf[..len]).unwrap_or("")
     }
 
     fn qs_footer_status<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
         let mut len = 0usize;
         let prefix: &[u8] = b"Battery: ";
-        for b in prefix { if len < buf.len() { buf[len] = *b; len += 1; } }
+        for b in prefix {
+            if len < buf.len() {
+                buf[len] = *b;
+                len += 1;
+            }
+        }
         let text: &[u8] = match self.status.battery {
             BatteryStatus::Unavailable => b"N/A",
         };
-        for b in text { if len < buf.len() { buf[len] = *b; len += 1; } }
+        for b in text {
+            if len < buf.len() {
+                buf[len] = *b;
+                len += 1;
+            }
+        }
         core::str::from_utf8(&buf[..len]).unwrap_or("Battery: N/A")
     }
 
@@ -2551,7 +2721,14 @@ impl Desktop {
         canvas.draw_text_system(tx, ty, label, theme_text());
     }
 
-    fn draw_qs_slider(&self, canvas: &mut Canvas<'_>, area: Area, label: &str, value: u8, active: bool) {
+    fn draw_qs_slider(
+        &self,
+        canvas: &mut Canvas<'_>,
+        area: Area,
+        label: &str,
+        value: u8,
+        active: bool,
+    ) {
         let value = value.min(100);
         fill_rounded(canvas, area, 8, blend(theme_stroke(), theme_panel(), 14));
         outline(canvas, area, blend(theme_stroke(), theme_panel(), 24));
@@ -2561,9 +2738,20 @@ impl Desktop {
         let icon_fg = if active { theme_text() } else { theme_muted() };
         if label.starts_with("Brightness") {
             // sun icon
-            fill_rounded(canvas, Area::new(icon_area.x + 6, icon_area.y + 6, 8, 8), 4, icon_fg);
-            for (dx, dy, w, h) in [(9,0,2,3),(9,17,2,3),(0,9,3,2),(17,9,3,2)] {
-                canvas.fill_rect(icon_area.x + dx, icon_area.y + dy, w as usize, h as usize, icon_fg);
+            fill_rounded(
+                canvas,
+                Area::new(icon_area.x + 6, icon_area.y + 6, 8, 8),
+                4,
+                icon_fg,
+            );
+            for (dx, dy, w, h) in [(9, 0, 2, 3), (9, 17, 2, 3), (0, 9, 3, 2), (17, 9, 3, 2)] {
+                canvas.fill_rect(
+                    icon_area.x + dx,
+                    icon_area.y + dy,
+                    w as usize,
+                    h as usize,
+                    icon_fg,
+                );
             }
         } else {
             // speaker icon
@@ -2587,21 +2775,48 @@ impl Desktop {
         let track_w = area.width - 44;
         let track_y = area.y + area.height / 2 - 2;
         let track_h = 4i32;
-        fill_rounded(canvas, Area::new(track_x, track_y, track_w, track_h), 2, blend(theme_stroke(), theme_panel(), 44));
+        fill_rounded(
+            canvas,
+            Area::new(track_x, track_y, track_w, track_h),
+            2,
+            blend(theme_stroke(), theme_panel(), 44),
+        );
         let fill_w = (track_w * value as i32) / 100;
         if fill_w > 0 {
-            let fill_color = if active { theme_accent() } else { theme_muted() };
-            fill_rounded(canvas, Area::new(track_x, track_y, fill_w.max(4), track_h), 2, fill_color);
+            let fill_color = if active {
+                theme_accent()
+            } else {
+                theme_muted()
+            };
+            fill_rounded(
+                canvas,
+                Area::new(track_x, track_y, fill_w.max(4), track_h),
+                2,
+                fill_color,
+            );
             let thumb_x = track_x + fill_w - 5;
             let thumb_y = area.y + area.height / 2 - 6;
             fill_rounded(canvas, Area::new(thumb_x, thumb_y, 10, 12), 5, theme_text());
-            outline(canvas, Area::new(thumb_x, thumb_y, 10, 12), blend(theme_panel(), theme_text(), 60));
+            outline(
+                canvas,
+                Area::new(thumb_x, thumb_y, 10, 12),
+                blend(theme_panel(), theme_text(), 60),
+            );
         }
         let _ = label;
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_qs_action_icon(&self, canvas: &mut Canvas<'_>, action: QsAction, x: i32, y: i32, fg: u32, bg: u32, active: bool) {
+    fn draw_qs_action_icon(
+        &self,
+        canvas: &mut Canvas<'_>,
+        action: QsAction,
+        x: i32,
+        y: i32,
+        fg: u32,
+        bg: u32,
+        active: bool,
+    ) {
         let a = Area::new(x, y, 20, 20);
         fill_rounded(canvas, a, 6, bg);
         let c = fg;
@@ -2635,7 +2850,11 @@ impl Desktop {
             QsAction::BatterySaver => {
                 canvas.fill_rect(x + 4, y + 5, 10, 10, c);
                 canvas.fill_rect(x + 14, y + 8, 2, 4, c);
-                let inner = if active { bg } else { blend(theme_panel(), theme_stroke(), 8) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_panel(), theme_stroke(), 8)
+                };
                 canvas.fill_rect(x + 5, y + 6, 8, 8, inner);
                 canvas.fill_rect(x + 8, y + 7, 2, 6, c);
                 canvas.fill_rect(x + 7, y + 9, 4, 2, c);
@@ -2643,12 +2862,16 @@ impl Desktop {
             QsAction::FocusAssist => {
                 // moon
                 fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, c);
-                let cut = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let cut = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 fill_rounded(canvas, Area::new(x + 8, y + 2, 10, 10), 5, cut);
             }
             QsAction::NightLight => {
                 fill_rounded(canvas, Area::new(x + 5, y + 5, 10, 10), 5, c);
-                for (dx, dy) in [(2,2),(16,2),(2,16),(16,16)] {
+                for (dx, dy) in [(2, 2), (16, 2), (2, 16), (16, 16)] {
                     canvas.fill_rect(x + dx, y + dy, 2, 2, c);
                 }
             }
@@ -2661,21 +2884,39 @@ impl Desktop {
             }
             QsAction::DisplayScale => {
                 canvas.fill_rect(x + 3, y + 4, 14, 10, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 4, y + 5, 12, 8, inner);
                 canvas.fill_rect(x + 8, y + 14, 4, 2, c);
                 canvas.fill_rect(x + 6, y + 16, 8, 1, c);
             }
             QsAction::Tiling => {
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
-                for (dx, dy, w, h) in [(3,3,6,6),(11,3,6,6),(3,11,6,6),(11,11,6,6)] {
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
+                for (dx, dy, w, h) in [(3, 3, 6, 6), (11, 3, 6, 6), (3, 11, 6, 6), (11, 11, 6, 6)] {
                     canvas.fill_rect(x + dx, y + dy, w as usize, h as usize, c);
-                    canvas.fill_rect(x + dx + 1, y + dy + 1, (w - 2) as usize, (h - 2) as usize, inner);
+                    canvas.fill_rect(
+                        x + dx + 1,
+                        y + dy + 1,
+                        (w - 2) as usize,
+                        (h - 2) as usize,
+                        inner,
+                    );
                 }
             }
             QsAction::ThreeD => {
                 canvas.fill_rect(x + 4, y + 6, 8, 8, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 5, y + 7, 6, 6, inner);
                 canvas.fill_rect(x + 7, y + 3, 8, 1, c);
                 canvas.fill_rect(x + 14, y + 4, 1, 8, c);
@@ -2684,14 +2925,22 @@ impl Desktop {
                 canvas.fill_rect(x + 3, y + 9, 14, 2, c);
                 canvas.fill_rect(x + 9, y + 3, 2, 14, c);
                 fill_rounded(canvas, Area::new(x + 3, y + 3, 14, 14), 7, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, inner);
                 canvas.fill_rect(x + 4, y + 9, 12, 1, c);
                 canvas.fill_rect(x + 9, y + 4, 1, 12, c);
             }
             QsAction::ChangePin => {
                 fill_rounded(canvas, Area::new(x + 5, y + 9, 10, 8), 2, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 7, y + 4, 6, 6, c);
                 canvas.fill_rect(x + 8, y + 5, 4, 4, inner);
                 canvas.fill_rect(x + 9, y + 12, 2, 3, inner);
@@ -2736,8 +2985,16 @@ impl Desktop {
 
             let icon_x = cell.x + 10;
             let icon_y = cell.y + 8;
-            let icon_fg = if active { rgb(20, 28, 38) } else { theme_text() };
-            let icon_bg = if active { theme_accent() } else { blend(theme_stroke(), theme_panel(), 40) };
+            let icon_fg = if active {
+                rgb(20, 28, 38)
+            } else {
+                theme_text()
+            };
+            let icon_bg = if active {
+                theme_accent()
+            } else {
+                blend(theme_stroke(), theme_panel(), 40)
+            };
             self.draw_qs_action_icon(canvas, *action, icon_x, icon_y, icon_fg, icon_bg, active);
 
             let label = self.qs_action_label(*action);
@@ -2748,8 +3005,16 @@ impl Desktop {
             let mut lbuf = [0u8; 64];
             let llen = truncate_to_width(label.as_bytes(), max_w, &mut lbuf);
             let ltext = core::str::from_utf8(&lbuf[..llen]).unwrap_or(label);
-            let label_color = if active { rgb(20, 28, 38) } else { theme_text() };
-            let sub_color = if active { blend(rgb(20, 28, 38), theme_accent(), 140) } else { theme_muted() };
+            let label_color = if active {
+                rgb(20, 28, 38)
+            } else {
+                theme_text()
+            };
+            let sub_color = if active {
+                blend(rgb(20, 28, 38), theme_accent(), 140)
+            } else {
+                theme_muted()
+            };
             canvas.draw_text_system(text_x, label_y, ltext, label_color);
             let mut sbuf = [0u8; 64];
             let slen = truncate_to_width(sub.as_bytes(), max_w, &mut sbuf);
@@ -2792,9 +3057,17 @@ impl Desktop {
         let restart_x = power_x - gap - restart_w;
         let lock_x = restart_x - gap - lock_w;
         let settings_x = lock_x - gap - settings_w;
-        self.draw_qs_footer_button(canvas, Area::new(settings_x, btn_y, settings_w, btn_h), "Settings");
+        self.draw_qs_footer_button(
+            canvas,
+            Area::new(settings_x, btn_y, settings_w, btn_h),
+            "Settings",
+        );
         self.draw_qs_footer_button(canvas, Area::new(lock_x, btn_y, lock_w, btn_h), "Lock");
-        self.draw_qs_footer_button(canvas, Area::new(restart_x, btn_y, restart_w, btn_h), "Restart");
+        self.draw_qs_footer_button(
+            canvas,
+            Area::new(restart_x, btn_y, restart_w, btn_h),
+            "Restart",
+        );
         self.draw_qs_footer_button(canvas, Area::new(power_x, btn_y, power_w, btn_h), "Power");
     }
 
@@ -3284,7 +3557,11 @@ impl Desktop {
         }
         let close = window.close_area();
         if !close.is_empty() {
-            let close_fill = if close_hovered { lighten(CLOSE_FILL, 28) } else { CLOSE_FILL };
+            let close_fill = if close_hovered {
+                lighten(CLOSE_FILL, 28)
+            } else {
+                CLOSE_FILL
+            };
             fill_rounded(canvas, close, CHROME_RADIUS_SMALL, close_fill);
             canvas.draw_ui_text(close.x + 2, close.y - 1, "x", theme_text(), BODY_TEXT);
         }
@@ -3295,7 +3572,8 @@ impl Desktop {
         };
         let available = (window.width - reserved).max(0);
         let mut buffer = [0u8; 64];
-        let length = truncate_to_width(&window.title[..window.title_length], available, &mut buffer);
+        let length =
+            truncate_to_width(&window.title[..window.title_length], available, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_ui_text(area.x + 8, area.y + 2, text, theme_text(), BODY_TEXT);
     }
@@ -3602,11 +3880,25 @@ impl Desktop {
                 let close_hovered = window.close_area().contains(self.pointer.0, self.pointer.1);
                 if alpha == u8::MAX {
                     painter.draw(title, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
+                        Self::render_title(
+                            window,
+                            active,
+                            canvas,
+                            self.three_d,
+                            self.height,
+                            close_hovered,
+                        )
                     });
                 } else {
                     painter.draw_blended(title, alpha, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
+                        Self::render_title(
+                            window,
+                            active,
+                            canvas,
+                            self.three_d,
+                            self.height,
+                            close_hovered,
+                        )
                     });
                 }
             }
@@ -3648,7 +3940,13 @@ impl Desktop {
                     // Keyed overlay: only the border pixels land, so body blits
                     // already on screen are preserved.
                     painter.overlay(part, |canvas| {
-                        canvas.fill_rect(part.x, part.y, part.width as usize, part.height as usize, border_color);
+                        canvas.fill_rect(
+                            part.x,
+                            part.y,
+                            part.width as usize,
+                            part.height as usize,
+                            border_color,
+                        );
                     });
                 }
             }
@@ -3696,8 +3994,7 @@ impl Desktop {
             .iter()
             .filter_map(|&higher_slot| self.windows[higher_slot].as_ref())
             .any(|higher| {
-                higher.alpha() == u8::MAX
-                    && higher.frame().intersect(footprint) == footprint
+                higher.alpha() == u8::MAX && higher.frame().intersect(footprint) == footprint
             })
     }
 
@@ -3931,7 +4228,10 @@ impl Desktop {
         let empty = Dirty::new();
         match message.get(..4) {
             Some(b"WCAP") if message == b"WCAP\x01" => {
-                if let Some(window) = self.windows.iter_mut().flatten()
+                if let Some(window) = self
+                    .windows
+                    .iter_mut()
+                    .flatten()
                     .find(|window| window.owner == sender)
                 {
                     window.cancellation_protocol = true;
@@ -4040,7 +4340,9 @@ impl Desktop {
                     return self.toggle_launcher();
                 }
                 let taskbar_slot = self.entries().enumerate().find_map(|(index, (slot, _))| {
-                    self.taskbar_entry_area(index).contains(x, y).then_some(slot)
+                    self.taskbar_entry_area(index)
+                        .contains(x, y)
+                        .then_some(slot)
                 });
                 if let Some(slot) = taskbar_slot {
                     return self.focus(slot);
@@ -4073,7 +4375,8 @@ impl Desktop {
                     if bslider.contains(x, y) {
                         let track_x = bslider.x + 36;
                         let track_w = (bslider.width - 44).max(1);
-                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
                         self.brightness = pct;
                         return panel;
                     }
@@ -4082,7 +4385,8 @@ impl Desktop {
                     if vslider.contains(x, y) {
                         let track_x = vslider.x + 36;
                         let track_w = (vslider.width - 44).max(1);
-                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
                         let _ = self.status.set_volume(pct);
                         return panel.union(self.status_icons_area());
                     }
@@ -4104,9 +4408,9 @@ impl Desktop {
                     let restart = Area::new(restart_x, btn_y, restart_w, btn_h);
                     let power = Area::new(power_x, btn_y, power_w, btn_h);
                     if settings.contains(x, y) {
-                        if let Some(index) = (0..self.app_count).find(|&i| {
-                            self.apps[i].is_some_and(|a| a.name() == b"WovenSettings")
-                        }) {
+                        if let Some(index) = (0..self.app_count)
+                            .find(|&i| self.apps[i].is_some_and(|a| a.name() == b"WovenSettings"))
+                        {
                             return panel.union(self.launch(index));
                         }
                         return panel.union(self.toast_message("Settings unavailable"));
@@ -4249,8 +4553,12 @@ impl Desktop {
             }
             InputEvent::Key(Key::Escape) => {
                 self.cancel_pointer_gesture();
-                let Some(slot) = self.focused() else { return empty };
-                let Some(window) = self.windows[slot] else { return empty };
+                let Some(slot) = self.focused() else {
+                    return empty;
+                };
+                let Some(window) = self.windows[slot] else {
+                    return empty;
+                };
                 let _ = libwoven::message_send(window.owner, b"WCLS");
                 log(&[b"woven-shell: keyboard close requested"]);
                 empty
@@ -4347,9 +4655,16 @@ impl Desktop {
         {
             None
         } else {
-            self.stack[..self.stacked].iter().rev().copied()
-                .find(|&slot| self.windows[slot].is_some_and(|window| window.frame().contains(x, y)))
-                .filter(|&slot| self.windows[slot].is_some_and(|window| window.body().contains(x, y)))
+            self.stack[..self.stacked]
+                .iter()
+                .rev()
+                .copied()
+                .find(|&slot| {
+                    self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
+                })
+                .filter(|&slot| {
+                    self.windows[slot].is_some_and(|window| window.body().contains(x, y))
+                })
         };
         let Some(slot) = slot else { return };
         let Some(window) = self.windows[slot] else {
@@ -4557,9 +4872,7 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     let _ = libwoven::close(descriptor);
     let Ok(length) = read else { return };
     let data = &bytes[..length.min(bytes.len())];
-    if let Some(locale) = json_string(data, b"locale")
-        .and_then(libwoven::i18n::Locale::parse_tag)
-    {
+    if let Some(locale) = json_string(data, b"locale").and_then(libwoven::i18n::Locale::parse_tag) {
         desktop.language = locale.language;
     }
     desktop.taskbar = TaskbarPrefs::from_values(
@@ -4588,7 +4901,9 @@ fn json_string<'a>(data: &'a [u8], key: &[u8]) -> Option<&'a str> {
     needle[0] = b'\"';
     needle[1..1 + key.len()].copy_from_slice(key);
     needle[1 + key.len()] = b'\"';
-    let start = data.windows(length).position(|window| window == &needle[..length])?;
+    let start = data
+        .windows(length)
+        .position(|window| window == &needle[..length])?;
     let rest = &data[start + length..];
     let colon = rest.iter().position(|byte| *byte == b':')?;
     let quoted = &rest[colon + 1..];
@@ -4759,10 +5074,7 @@ fn main(args: Args) -> ! {
     let recompose_ticks = libwoven::ticks().saturating_sub(recompose_start);
     let mut recompose_digits = [0u8; 20];
     let recompose_text = libwoven::format_u64(recompose_ticks, &mut recompose_digits);
-    log(&[
-        b"woven-shell: full recompose ticks=",
-        recompose_text,
-    ]);
+    log(&[b"woven-shell: full recompose ticks=", recompose_text]);
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
         fail(6);

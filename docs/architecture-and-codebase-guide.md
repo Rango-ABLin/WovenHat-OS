@@ -3620,7 +3620,7 @@ map wording that says 8 KiB is historical and is superseded by
 | `block.rs`, `block_cache.rs`, `block_io.rs`, `ata.rs`, `partition.rs`, `gpt.rs`, `storage.rs` | Block devices, request execution, caching, partitions and storage initialization |
 | `vfs.rs`, `fat32.rs`, `async_file.rs` | Filesystem operations and positional asynchronous file requests |
 | `async_op.rs`, `async_network.rs`, `irq_lock.rs` | Completion ownership, asynchronous sockets and interrupt-safe network/completion locks |
-| `network.rs`, `virtio_net.rs` | smoltcp IPv4 sockets and the transitional VirtIO-net transport |
+| `network.rs`, `virtio_net.rs`, `e1000.rs` | smoltcp IPv4 sockets, the transitional VirtIO-net transport and the native Intel e1000/e1000e transport |
 | `capability.rs`, `wovenguard.rs`, `audit.rs`, `permission.rs`, `secret_vault.rs`, `signed_app.rs`, `secure_boot.rs`, `boot_measurement.rs`, `entropy.rs` | Authority, domains, resource policy, runtime permission decisions, volatile WovenVault handles, signed applications, software signed-kernel handoff, boot measurement, security-ledger recording/read ABI, and entropy support |
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
@@ -5060,6 +5060,45 @@ the current session and attempts the mounted source copy for reboot
 persistence. Malformed records and unavailable storage fail closed and leave
 the policy unchanged. Light/dark remain session previews because the shell's
 persisted policy surface currently distinguishes only high contrast.
+
+## Native Intel e1000/e1000e transport (2026-11-23)
+
+Phase C added `kernel/src/e1000.rs`, the first native (non-paravirtual) NIC
+transport, because every prior network acceptance marker was produced over
+virtio-net. It binds Intel `8086` functions `0x100E` (82540EM), `0x1000`,
+`0x1004`, `0x100F` and `0x10D3` (82574L, QEMU `-device e1000e`) only — never by
+class code alone — so unsupported Intel NICs stay unbound.
+
+`network::init()` prefers virtio-net and falls back to e1000; `SmolDevice`
+carries a `NicKind` and its RX/TX tokens dispatch accordingly. Exactly one
+transport initializes per boot.
+
+Three invariants keep it inside the existing locking and safety model:
+
+- **No paging under transport.** All six BAR0 pages (`0x0000`–`0x5FFF`) are
+  mapped once during init, so MMIO access never takes the rank-10 paging lock
+  while holding the rank-30 transport lock.
+- **Bounded, contiguous DMA.** One 9-frame reservation (33 024 B) holds an
+  8-entry RX ring, an 8-entry TX ring and eight 2048-byte buffers per direction,
+  reached through the direct physical mapping exactly like virtio_net.
+- **Ring indices are ring indices.** `RDT` and `TDT` are written modulo the ring
+  size. Writing absolute frame counters let the device replay stale descriptors
+  after the first wrap.
+
+Interrupts stay masked after reset (`IMC = 0xFFFF_FFFF`) and completion is
+reaped from descriptor `DD` bits, matching the legacy virtio-net dataplane; a
+single outstanding TX descriptor preserves smoltcp's serialized `transmit`
+contract. `qemu_runtime_self_test()` — which requires host-forwarded UDP/7000
+and TCP/8080 peers — now runs only in the dedicated `network-test` image, so a
+QEMU gate that attaches an unforwarded e1000 for PCIe topology reasons no longer
+halts on a host-dependent round trip it cannot receive.
+
+Acceptance is bounded software/QEMU: DHCP, DNS, ICMP and host-verified UDP and
+TCP round trips pass over both device models at 1/2/4 CPUs, plus the Stage
+14.1–14.5D chain over e1000. This is **not** native qualification — there was no
+physical device, PHY negotiation, EEPROM/MAC handling, MSI/MSI-X or real
+link-state handling involved. See
+`docs/PHASE-C-NATIVE-HARDWARE-RECONCILIATION.md`.
 
 ## Phase 7 process performance metrics (2026-11-06)
 

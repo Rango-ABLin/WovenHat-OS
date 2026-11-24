@@ -51,6 +51,7 @@ mod display;
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod drivers;
+mod e1000;
 mod elf;
 mod entropy;
 mod exit_status;
@@ -1797,7 +1798,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         match network::init() {
             Ok(()) => serial::write_line(format_args!(
-                "[NET] virtio-net + smoltcp online at 10.0.2.15/24"
+                "[NET] {} + smoltcp online at 10.0.2.15/24",
+                network::transport_name()
             )),
             Err(error) => serial::write_line(format_args!(
                 "[NET] optional network init skipped: {:?}",
@@ -2209,6 +2211,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     match virtio_net::probe() {
         virtio_net::ProbeStatus::Found(_) => console.println("VIRTIO-NET PCI: DETECTED"),
         virtio_net::ProbeStatus::Missing => console.println("VIRTIO-NET PCI: NOT PRESENT"),
+    }
+    match e1000::probe() {
+        e1000::ProbeStatus::Found(_) => console.println("E1000 PCI: DETECTED"),
+        e1000::ProbeStatus::Missing => console.println("E1000 PCI: NOT PRESENT"),
     }
 
     if vfs::self_test() {
@@ -2739,7 +2745,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     {
         match network::init() {
             Ok(()) => {
-                serial::write_line(format_args!("[NETTEST] virtio-net + smoltcp initialized"));
+                serial::write_line(format_args!(
+                    "[NETTEST] {} + smoltcp initialized",
+                    network::transport_name()
+                ));
+                // Only the dedicated `network-test` image owns host forwarding
+                // for UDP/7000 and TCP/8080, so only it runs the live round trip.
+                // Plain qemu-test images merely initialize the transport.
+                #[cfg(feature = "network-test")]
                 if network::qemu_runtime_self_test() {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
                     #[cfg(feature = "stage14-1-test")]

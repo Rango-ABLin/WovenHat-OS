@@ -21,7 +21,9 @@ fn empty_setting_means_everything_unpinned() {
 
 #[test]
 fn parsing_trims_drops_duplicates_and_invalid_names() {
-    let pins = PinnedApps::from_setting(Some(" WovenFiles, ,WovenFiles,bad name,../x,WovenCalculator"));
+    let pins = PinnedApps::from_setting(Some(
+        " WovenFiles, ,WovenFiles,bad name,../x,WovenCalculator",
+    ));
     assert_eq!(pins.len(), 2);
     assert_eq!(pins.get(0), Some("WovenFiles"));
     assert_eq!(pins.get(1), Some("WovenCalculator"));

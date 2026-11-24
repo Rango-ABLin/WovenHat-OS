@@ -127,6 +127,12 @@ def main():
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--feature', default='network-test')
     parser.add_argument(
+        '--nic',
+        choices=('virtio', 'e1000', 'e1000e'),
+        default='virtio',
+        help='guest NIC model: virtio-net-pci (default), native e1000, or e1000e',
+    )
+    parser.add_argument(
         '--link-loss',
         action='store_true',
         help='flap the QEMU virtio-net link after UDP and require TCP recovery',
@@ -195,6 +201,9 @@ def main():
         f'hostfwd=udp:127.0.0.1:{udp_port}-10.0.2.15:7000,'
         f'hostfwd=tcp:127.0.0.1:{tcp_port}-10.0.2.15:8080'
     )
+    nic_device = {'virtio': 'virtio-net-pci,netdev=net0,disable-modern=on',
+                  'e1000': 'e1000,netdev=net0',
+                  'e1000e': 'e1000e,netdev=net0'}[args.nic]
     command = [
         str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'q35', '-m', '256M', '-smp', str(args.cpus),
         '-display', 'none', '-serial', f'file:{serial}', '-no-reboot',
@@ -203,7 +212,7 @@ def main():
                *(['-drive', f'if=pflash,unit=1,format=raw,file={vars_copy}'] if vars_copy is not None else []),
         '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
         '-device', 'virtio-blk-pci,drive=boot,bootindex=1',
-        '-device', 'virtio-net-pci,netdev=net0,disable-modern=on',
+        '-device', nic_device,
         '-netdev', netdev,
         *(['-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off'] if qmp_port is not None else []),
     ]
@@ -211,7 +220,7 @@ def main():
     qemu_log = out / 'qemu.log'
     deadline = time.monotonic() + args.timeout
 
-    print(f"[2/6] Starting QEMU with {args.cpus} CPU(s)...", flush=True)
+    print(f"[2/6] Starting QEMU with {args.cpus} CPU(s), NIC={args.nic}...", flush=True)
     print(f"      UDP host:{udp_port} -> guest:7000", flush=True)
     print(f"      TCP host:{tcp_port} -> guest:8080", flush=True)
 
