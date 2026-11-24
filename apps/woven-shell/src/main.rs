@@ -1724,6 +1724,14 @@ impl Desktop {
             if visible.intersect(area).is_empty() {
                 continue;
             }
+            if area.contains(self.pointer.0, self.pointer.1) {
+                fill_rounded(
+                    canvas,
+                    Area::new(area.x - 2, area.y - 2, area.width + 4, area.height + 4),
+                    CHROME_RADIUS_SMALL,
+                    lighten(theme_taskbar(), 10),
+                );
+            }
             draw_app_icon_light(
                 canvas,
                 area.x,
@@ -1762,7 +1770,17 @@ impl Desktop {
                     if visible.intersect(card).is_empty() {
                         continue;
                     }
-                    fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
+                    let hovered = card.contains(self.pointer.0, self.pointer.1);
+                    fill_rounded(
+                        canvas,
+                        card,
+                        CHROME_RADIUS_SMALL,
+                        if hovered {
+                            lighten(theme_entry(false), 10)
+                        } else {
+                            theme_entry(false)
+                        },
+                    );
                     outline(canvas, card, theme_accent());
                     let mut buffer = [0u8; 32];
                     let length = label(
@@ -1796,13 +1814,11 @@ impl Desktop {
                 if visible.intersect(cell).is_empty() {
                     continue;
                 }
+                let cell_bg = Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4);
                 if index == self.selected {
-                    fill_rounded(
-                        canvas,
-                        Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
-                        CHROME_RADIUS,
-                        lighten(theme_taskbar(), 18),
-                    );
+                    fill_rounded(canvas, cell_bg, CHROME_RADIUS, lighten(theme_taskbar(), 18));
+                } else if cell.contains(self.pointer.0, self.pointer.1) {
+                    fill_rounded(canvas, cell_bg, CHROME_RADIUS, lighten(theme_taskbar(), 10));
                 }
                 draw_app_icon_light(
                     canvas,
@@ -5201,6 +5217,16 @@ fn main(args: Args) -> ! {
             if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
                 dirty.add(cursor_before);
                 dirty.add(desktop.cursor_area());
+                let (px, py) = desktop.pointer;
+                let taskbar = desktop.taskbar();
+                if taskbar.contains(px, py)
+                    || taskbar.contains(pointer_before.0 .0, pointer_before.0 .1)
+                {
+                    dirty.add(taskbar);
+                }
+                if desktop.launcher_open {
+                    dirty.add(desktop.overview_area());
+                }
             }
         }
         for &area in desktop.check_clients().areas() {
