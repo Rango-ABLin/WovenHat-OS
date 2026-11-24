@@ -5113,3 +5113,23 @@ gate passes on 1/2/4 CPUs under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`; affected and all-target
 warning-denying Clippy and the workspace suite pass. A compiler-generated live
 dependency fixture and general-dynamic/TLSDESC remain open.
+
+## Compiler-generated runtime global-dynamic TLS (2026-11-24)
+
+The loader fixture builder now produces an unpatched Rust/LLD root shared
+object and TLS-bearing `DT_NEEDED` dependency. The dependency is compiled with
+the x86-64 global-dynamic model; artifact publication requires compiler-emitted
+`R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, a PLT relocation for
+`__tls_get_addr`, and the exact dependency name. The root implements
+`__tls_get_addr` as a narrow adapter to the existing generation-checked dynamic
+TLS address syscall. No new syscall or capability is introduced.
+
+The Stage 11.2 TLS gate installs the dependency as a signed read-only `/lib`
+package, embeds the root in the ordinary Ring-3 fixture, and performs a complete
+transaction: acquire the runtime-module gate, map the graph, resolve and call
+the root probe, read value 91 through compiler-generated global-dynamic code,
+release the generation, verify stale symbol lookup, and end the transaction.
+The dependency file is removed even after a failed CPU iteration. The gate
+passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954573*` and `17954574*`.
+TLSDESC and unsupported runtime local/initial-exec models remain fail-closed.

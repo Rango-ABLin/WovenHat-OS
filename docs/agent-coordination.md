@@ -10236,6 +10236,15 @@ warning-denying Clippy and `cargo test --workspace` pass. Compiler-generated
 live dependency execution and general-dynamic/TLSDESC remain open. Ownership
 is released; no Cargo or QEMU chain remains active.
 
+## Codex - compiler runtime global-dynamic TLS accepted (2026-11-24)
+
+The unmodified Rust/LLD root/dependency graph executes compiler-generated
+global-dynamic TLS in Ring 3 through the existing generation-safe ABI. Stage
+11.2 TLS passes on 1/2/4 CPUs under the `1795457354*`, `1795457404*`, and
+`1795457431*` evidence sets. Fixture-aware target and all-target Clippy, 20
+builder/harness contracts, and the workspace suite pass. TLSDESC remains open.
+Ownership is released; no Cargo or QEMU chain remains active.
+
 ## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
 
 Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD

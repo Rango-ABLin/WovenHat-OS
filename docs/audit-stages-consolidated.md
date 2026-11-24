@@ -16542,3 +16542,19 @@ returned by publication. The strengthened Stage 11.6 fixture proves offsets
 publication on 1/2/4 CPUs under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
 dependency execution and general-dynamic/TLSDESC remain open.
+
+## Stage 11 compiler runtime global-dynamic TLS audit (2026-11-24)
+
+The evidence builder hashes the two new sources and refuses to publish a
+manifest unless LLVM inspection finds the exact `DTPMOD64`, `DTPOFF64`,
+`__tls_get_addr` PLT, and `DT_NEEDED` records. The QEMU gate signs only the
+dependency test package, installs it read-only, and removes it after the
+multi-CPU run. The root maps through the production runtime transaction, and
+the compiler code reaches the existing checked TLS-address syscall using the
+generation-tagged handle and relocated combined-template offset.
+
+The marker `[S11.RUNTIME] compiler dependency TLS execution: PASSED` is required
+for every Stage 11.2 TLS boot and appears once per tested CPU in the 1/2/4-CPU
+evidence at `audit-artifacts/stage11.2-tls-*cpu-1795457*`. Target/all-target
+Clippy, 20 harness contracts, and workspace tests pass. TLSDESC, unsupported
+runtime local/initial-exec models, and physical qualification remain open.

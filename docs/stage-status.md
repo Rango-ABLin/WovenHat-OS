@@ -209,6 +209,22 @@ and passes on 1/2/4 CPUs with exit 33 under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
 dependency execution and general-dynamic/TLSDESC remain open and fail closed.
 
+## Stage 11 compiler runtime global-dynamic TLS - 2026-11-24 - ACCEPTED (BOUNDED)
+
+An unmodified Rust/LLD runtime dependency now carries compiler-produced
+`DTPMOD64`, `DTPOFF64`, and `__tls_get_addr` PLT relocations, while its root
+retains the exact dependency through `DT_NEEDED`. Ring 3 maps the signed graph,
+executes the compiler TLS read (91), unloads it, and verifies stale symbol
+rejection through the existing generation-safe transaction and syscall ABI.
+
+Stage 11.2 TLS passes on 1/2/4 CPUs with exit 33 under
+`audit-artifacts/stage11.2-tls-1cpu-1795457354246639000`,
+`stage11.2-tls-2cpu-1795457404361778200`, and
+`stage11.2-tls-4cpu-1795457431699639200`. Fixture-aware target Clippy,
+all-target warning-denying Clippy, 20 builder/harness contracts, and the full
+workspace suite pass. TLSDESC remains open and fail-closed; this does not claim
+arbitrary libc dynamic loading or physical qualification.
+
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 
 The production syscall boundary now copies and validates a bounded ELF shared
