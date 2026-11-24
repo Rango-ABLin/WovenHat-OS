@@ -225,9 +225,9 @@ enum QsAction {
     Wifi,
     Bluetooth,
     Airplane,
-    BatterySaver,
+    TaskbarAlign,
     FocusAssist,
-    NightLight,
+    TaskbarIconSize,
     Accessibility,
     DisplayScale,
     Tiling,
@@ -240,9 +240,9 @@ const QS_ACTION_ORDER: [QsAction; QS_ACTIONS] = [
     QsAction::Wifi,
     QsAction::Bluetooth,
     QsAction::Airplane,
-    QsAction::BatterySaver,
+    QsAction::TaskbarAlign,
     QsAction::FocusAssist,
-    QsAction::NightLight,
+    QsAction::TaskbarIconSize,
     QsAction::Accessibility,
     QsAction::DisplayScale,
     QsAction::Tiling,
@@ -703,9 +703,6 @@ struct Desktop {
     /// `FileRead` and no settings-write path exists, so pins honestly reset
     /// to the record's list on the next boot.
     pinned: PinnedApps,
-    /// Local quick-action preference state.
-    battery_saver: bool,
-    night_light: bool,
     /// Brightness percentage for the quick-settings slider (0-100).
     brightness: u8,
     /// The display scale the shell set.
@@ -801,8 +798,6 @@ impl Desktop {
         taskbar: TaskbarPrefs::DEFAULT,
         auto_hide: AutoHide::off(),
         pinned: PinnedApps::defaults_const(),
-        battery_saver: false,
-        night_light: false,
         brightness: 80,
         scale: 1,
         status: StatusSnapshot {
@@ -1951,9 +1946,9 @@ impl Desktop {
     fn qs_action_active(&self, action: QsAction) -> bool {
         match action {
             QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => false,
-            QsAction::BatterySaver => self.battery_saver,
+            QsAction::TaskbarAlign => self.taskbar.alignment == taskbar_prefs::Alignment::Left,
             QsAction::FocusAssist => self.dnd,
-            QsAction::NightLight => self.night_light,
+            QsAction::TaskbarIconSize => self.taskbar.icon_size != taskbar_prefs::IconSize::Medium,
             QsAction::Accessibility => self.reduced_motion,
             QsAction::DisplayScale => self.scale == 2,
             QsAction::Tiling => self.tiled,
@@ -1968,9 +1963,9 @@ impl Desktop {
             QsAction::Wifi => "Wi-Fi",
             QsAction::Bluetooth => "Bluetooth",
             QsAction::Airplane => "Airplane mode",
-            QsAction::BatterySaver => "Battery saver",
+            QsAction::TaskbarAlign => "Taskbar align",
             QsAction::FocusAssist => "Focus assist",
-            QsAction::NightLight => "Night light",
+            QsAction::TaskbarIconSize => "Icon size",
             QsAction::Accessibility => "Accessibility",
             QsAction::DisplayScale => "Scale",
             QsAction::Tiling => "Tiling",
@@ -1983,9 +1978,16 @@ impl Desktop {
     fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
         match action {
             QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => "Unavailable",
-            QsAction::BatterySaver => if self.battery_saver { "On" } else { "Off" },
+            QsAction::TaskbarAlign => match self.taskbar.alignment {
+                taskbar_prefs::Alignment::Center => "Center",
+                taskbar_prefs::Alignment::Left => "Left",
+            },
             QsAction::FocusAssist => if self.dnd { "On" } else { "Off" },
-            QsAction::NightLight => if self.night_light { "On" } else { "Off" },
+            QsAction::TaskbarIconSize => match self.taskbar.icon_size {
+                taskbar_prefs::IconSize::Small => "Small",
+                taskbar_prefs::IconSize::Medium => "Medium",
+                taskbar_prefs::IconSize::Large => "Large",
+            },
             QsAction::Accessibility => if self.reduced_motion { "On" } else { "Off" },
             QsAction::DisplayScale => if self.scale == 2 { "200%" } else { "100%" },
             QsAction::Tiling => if self.tiled { "On" } else { "Off" },
@@ -2510,17 +2512,9 @@ impl Desktop {
                 log(&[b"woven-shell: radio unavailable"]);
                 panel.union(self.toast_message("No wireless hardware is available"))
             }
-            QsAction::BatterySaver => {
-                self.battery_saver = !self.battery_saver;
-                panel
-            }
             QsAction::FocusAssist => {
                 self.dnd = !self.dnd;
                 log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
-                panel
-            }
-            QsAction::NightLight => {
-                self.night_light = !self.night_light;
                 panel
             }
             QsAction::Accessibility => {
@@ -2545,6 +2539,32 @@ impl Desktop {
                 panel
             }
             QsAction::ChangePin => self.start_change_pin(),
+            QsAction::TaskbarAlign => {
+                self.taskbar.alignment = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => taskbar_prefs::Alignment::Left,
+                    taskbar_prefs::Alignment::Left => taskbar_prefs::Alignment::Center,
+                };
+                let label = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => "Taskbar alignment: Center (session)",
+                    taskbar_prefs::Alignment::Left => "Taskbar alignment: Left (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
+            QsAction::TaskbarIconSize => {
+                self.taskbar.icon_size = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => taskbar_prefs::IconSize::Medium,
+                    taskbar_prefs::IconSize::Medium => taskbar_prefs::IconSize::Large,
+                    taskbar_prefs::IconSize::Large => taskbar_prefs::IconSize::Small,
+                };
+                let label = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => "Taskbar icon size: Small (session)",
+                    taskbar_prefs::IconSize::Medium => "Taskbar icon size: Medium (session)",
+                    taskbar_prefs::IconSize::Large => "Taskbar icon size: Large (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
         }
     }
 
@@ -2705,25 +2725,11 @@ impl Desktop {
                 canvas.fill_rect(x + 4, y + 7, 12, 2, c);
                 canvas.fill_rect(x + 6, y + 14, 8, 2, c);
             }
-            QsAction::BatterySaver => {
-                canvas.fill_rect(x + 4, y + 5, 10, 10, c);
-                canvas.fill_rect(x + 14, y + 8, 2, 4, c);
-                let inner = if active { bg } else { blend(theme_panel(), theme_stroke(), 8) };
-                canvas.fill_rect(x + 5, y + 6, 8, 8, inner);
-                canvas.fill_rect(x + 8, y + 7, 2, 6, c);
-                canvas.fill_rect(x + 7, y + 9, 4, 2, c);
-            }
             QsAction::FocusAssist => {
                 // moon
                 fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, c);
                 let cut = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
                 fill_rounded(canvas, Area::new(x + 8, y + 2, 10, 10), 5, cut);
-            }
-            QsAction::NightLight => {
-                fill_rounded(canvas, Area::new(x + 5, y + 5, 10, 10), 5, c);
-                for (dx, dy) in [(2,2),(16,2),(2,16),(16,16)] {
-                    canvas.fill_rect(x + dx, y + dy, 2, 2, c);
-                }
             }
             QsAction::Accessibility => {
                 canvas.fill_rect(x + 9, y + 3, 2, 2, c);
@@ -2769,6 +2775,31 @@ impl Desktop {
                 canvas.fill_rect(x + 8, y + 5, 4, 4, inner);
                 canvas.fill_rect(x + 9, y + 12, 2, 3, inner);
             }
+            QsAction::TaskbarAlign => {
+                // bar with centered/left group indicator
+                canvas.fill_rect(x + 2, y + 14, 16, 3, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                if self.taskbar.alignment == taskbar_prefs::Alignment::Left {
+                    canvas.fill_rect(x + 3, y + 15, 3, 1, inner);
+                    canvas.fill_rect(x + 7, y + 15, 3, 1, inner);
+                } else {
+                    canvas.fill_rect(x + 7, y + 15, 2, 1, inner);
+                    canvas.fill_rect(x + 10, y + 15, 2, 1, inner);
+                }
+                canvas.fill_rect(x + 4, y + 5, 12, 7, c);
+                canvas.fill_rect(x + 5, y + 6, 10, 5, inner);
+            }
+            QsAction::TaskbarIconSize => {
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                for (dx, size) in [(3i32, 3i32), (8, 4), (14, 5)] {
+                    let dy = y + 16 - size;
+                    canvas.fill_rect(x + dx, dy, size as usize, size as usize, c);
+                    if size > 2 {
+                        canvas.fill_rect(x + dx + 1, dy + 1, (size - 2) as usize, (size - 2) as usize, inner);
+                    }
+                }
+            }
+
         }
         let _ = (a, active);
     }

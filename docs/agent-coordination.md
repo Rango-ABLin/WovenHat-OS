@@ -10314,3 +10314,20 @@ Maximize WSIZ reflow and window shadows still deferred pending compositor
 non-blocking proof. Alt+Tab still blocked on input ABI/modifier state.
 Main repo remains dirty with other agent's uncommitted kernel/work; do not
 reconcile or overwrite. No Cargo/QEMU chain active.
+
+## Codex - Phase B in-shell taskbar QS controls (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only: `apps/woven-shell/src/main.rs`. Added Quick Settings actions
+`TaskbarAlign` and `TaskbarIconSize` (in-session only; toasts/logs say
+"(session)"; resets to startup/settings on next boot). Replaced QS
+`BatterySaver` and `NightLight` no-effect local toggles to keep the 4x3 grid.
+Auto-hide remains the existing right-click strip toggle with its serial markers.
+
+Validation: freestanding shell clippy/release `-D warnings` clean; host tests
+`taskbar_prefs` 12/12 and `pinned_apps` 7/7 pass. 1-CPU desktop qualification
+smoke attempted twice (`desktop-qualification-1795516306643836000`,
+`desktop-qualification-1795516388939047300`); both failed during hardware-demo
+kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN (environment, not a
+code regression; shell-only change). No QEMU runtime regression asserted/denied
+by those build failures. No Cargo/QEMU chain active.

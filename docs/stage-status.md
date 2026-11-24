@@ -269,10 +269,25 @@ and screenshots are preserved. The first 1-CPU attempt
 the extended session argv; preserved as evidence and fixed by the MAX_ARGV bump,
 no assertion weakened.
 
-Still not claimed: in-shell taskbar settings editor, cross-boot persistence of
-taskbar layout preferences (shell remains FileRead-only; no settings-write
-path), alignment/icon-size visual verification under every theme/density
-combination beyond the tested left+large case, and Phase B §24 acceptance.
+In-shell taskbar Quick Settings controls (same worktree, 2026-11-24, shell-only):
+Quick Settings now exposes `Taskbar align` and `Icon size` actions (in-session
+only; toasts/logs include "(session)"; resets to startup/settings on next
+boot). They replaced the no-effect `Battery saver` and `Night light` local QS
+toggles to keep the 4x3 grid. Auto-hide remains the existing right-click
+taskbar-strip toggle with its established serial markers. Freestanding shell
+clippy `-D warnings` clean; host `taskbar_prefs` 12/12 and `pinned_apps` 7/7
+pass. 1-CPU desktop qualification smoke attempted twice
+(`desktop-qualification-1795516306643836000`,
+`desktop-qualification-1795516388939047300`) but both failed during
+hardware-demo kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN
+(environment issue, not a shell code regression); no QEMU runtime regression is
+asserted or denied by those build failures.
+
+Still not claimed: a dedicated in-shell taskbar settings editor beyond QS
+toggles, cross-boot persistence of taskbar layout preferences (shell remains
+FileRead-only; no settings-write path), alignment/icon-size visual verification
+under every theme/density combination beyond the tested left+large case, and
+Phase B §24 acceptance.
 
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
