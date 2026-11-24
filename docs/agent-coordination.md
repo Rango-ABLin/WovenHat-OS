@@ -10256,6 +10256,16 @@ value. Stage 11.2 TLS passes on 1/2/4 CPUs under the `1795496990*`,
 contracts, ELF tests, and workspace tests pass. Ownership is released; no
 Cargo or QEMU chain remains active.
 
+## Codex - exact-source Stage 11 closure verification active (2026-11-24)
+
+The required production-userspace paths are now implemented, including live
+global-dynamic and TLSDESC runtime TLS. Codex owns serialized exact-current-
+source closure verification: the inherited full Windows gate followed by the
+Stage 11 feature matrix on 1/2/4 CPUs, with existing assertions unchanged.
+Runtime local/initial-exec remain deliberately rejected for post-start modules
+because they require static TLS reservation and are not dynamic-loader models.
+No competing Cargo/QEMU acceptance chain is active.
+
 ## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
 
 Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD
