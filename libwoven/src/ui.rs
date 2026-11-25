@@ -400,6 +400,18 @@ impl<const N: usize> TextField<N> {
         core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
     }
 
+    /// Replace the bounded contents, e.g. to load a note into the editor.
+    /// Returns false without mutating the field for non-UTF-8 or overlong
+    /// input, so callers can fail closed on untrusted file data.
+    pub fn set_text(&mut self, text: &str) -> bool {
+        if text.len() > N {
+            return false;
+        }
+        self.bytes[..text.len()].copy_from_slice(text.as_bytes());
+        self.len = text.len();
+        true
+    }
+
     /// Give focus on a press inside the bounded field frame.
     pub fn pointer(&mut self, x: i32, y: i32, pressed: bool) -> bool {
         if !pressed {
