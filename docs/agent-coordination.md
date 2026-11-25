@@ -1,3 +1,29 @@
+## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
+
+Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,
+`test-desktop-qualification.py`, matrix verifier) to 8/16 and wired the
+previously unused in-guest `deterministic_fault_injection.rs` behind a new
+`fault-injection-test` feature with a single cfg-guarded self-test call site in
+`main.rs`. During 16-CPU bring-up a reproducible pre-self-test boot timeout was
+traced to the fixed paired-userspace wait; it now scales above four online CPUs
+with 1/2/4 budgets unchanged (a control feature passed at 16 CPUs, isolating
+the cause). New gate passes 1/2/4/8/16 with exit 33; memory 8/16, Stage 11 TLS
+and 11.6 at 8, and baseline-enforced desktop qualification at 8/16 also pass.
+
+Also corrected stale S-slice records (`software-gap-inventory.md`,
+`m00-baseline-ledger.md`): the OVMF/swtpm/signed-guest virtual trust chain is
+already QUALIFIED in WSL2, and S15/S17/S19 software paths are local-pass, so
+the remaining blockers are the explicitly external custody/review/native items
+plus small missing virtual models (VARS/cert generator, absolute-click or WAX1
+click path, HDA capture input source, local IPP TLS server, guest mTLS
+listener). No new S-slice virtual model was fabricated in this increment.
+
+Note: `cargo fmt --all -- --check` currently fails only in
+`libwoven/src/settings_policy.rs` from the other owner's concurrent
+`483647ec` WovenFS settings-migration commit; I did not touch that file or the
+owner's uncommitted `kernel/src/storage.rs` /
+`scripts/test-installed-disk-qemu.py`. My changed files are fmt-clean.
+
 ## OpenCode - production key custody boundary (2026-11-25)
 
 Implemented the repository-side PKCS#11 custody path after the user selected a

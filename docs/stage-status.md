@@ -1,5 +1,41 @@
 # Stage status
 
+## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The 1/2/4-only choke points were removed without changing any assertion:
+`scripts/test-stage10-runtime.py`, `scripts/test-desktop-qualification.py` and
+`scripts/verify-stage31-matrix.py` now accept/default over 1/2/4/8/16 CPUs; the
+verifier also takes `--seed` and falls back to a non-`-9scenarios` canonical
+directory. The repository already had `smp::MAX_CPUS = 16` and all Stage 31
+child gates at 8/16, so no kernel capacity was widened.
+
+`kernel/src/deterministic_fault_injection.rs` was previously declared but
+unused. It now compiles only under a new `fault-injection-test` feature
+(forwarded by the root package) and exposes `qemu_self_test()`: deterministic
+trigger counts from a fixed seed, reproduction against a second injector,
+divergence against a different seed, exactly-once firing plus no post-exhaustion
+firing, statistics, a bounded test case, coverage accounting, scenario
+description and the disable path. Its single self-test call site is cfg-guarded
+and ends with `qemu_test_exit_success()`. This is a self-test of the seeded
+decision logic, not a production fault injector.
+
+One real 16-CPU defect was found and repaired while bringing the gate up: the
+fixed 2,000-tick paired-userspace wait in `main.rs` timed out at 16 CPUs under
+TCG (a control feature passed at the same profile, isolating the cause). It now
+scales only when more than four CPUs are online; 1/2/4 budgets are unchanged
+and the requirement that both processes exit is unchanged.
+
+Validation on exact source: warning-denying kernel Clippy passes for default
+and `fault-injection-test`. The new gate passes at 1/2/4/8/16 CPUs with exit 33
+and the `[S31] deterministic randomized fault injection: PASSED` marker
+(`target/stage31-fi-final-{1,2,4,8,16}cpu-debug`). Fresh 8/16 evidence also
+passes for the memory suite (`target/memory-regression-{8,16}-debug`), Stage
+11.2-tls and 11.6 at 8 CPUs, and baseline-enforced desktop qualification at 8
+and 16 CPUs (`audit-artifacts/stage31-desktop-{8,16}cpu-20261125`, both
+`pass: true`, `failures: []`). This is bounded software/QEMU evidence; it does
+not claim arbitrary in-guest fault injection into production paths, host
+16-core physical performance, or release closure.
+
 ## Production key-custody boundary - 2026-11-25 - TOOLING COMPLETE / TOKEN CEREMONY OPEN
 
 Release signing no longer requires production private seed material in the
