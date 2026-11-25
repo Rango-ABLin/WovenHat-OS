@@ -1,5 +1,40 @@
 # Stage status
 
+## Physical WovenFS qualification - 2026-11-25
+
+After the read-only preflight, the user authorized erasing one exact USB device
+(VendorCo ProductCode USB Device, 15,726,735,360 bytes, serial
+4045141272666606378). An elevated UAC child invoked
+`scripts/test-wovenfs-physical.ps1` with that exact identity at 1/2/4 CPUs. All
+three runs passed with QEMU exit 33 and
+`[S15.2] WovenFS physical device: PASSED`, including format, write-through,
+remount, VFS isolation, malformed-mutation rejection, unlink, and remount
+verification. A read-only elevated inspection confirmed LBA0 `WOVENFS1` and
+checkpoint sequence 15. The boot/system NVMe was never selected. This qualifies
+the kernel WovenFS transaction against a real USB block device passed through
+to QEMU; native boot, Secure Boot, TPM, Wi-Fi/GPU/audio, power-loss recovery,
+and installer/release certification remain open. Evidence:
+`docs/audit-physical-wovenfs-2026-11-25.md`.
+
+## Physical hardware readiness preflight - 2026-11-25
+
+Ran the read-only host/TPM preflights and the read-only `physical-probe` QEMU
+inventory smoke on commit `cacbf699`. The host is an HP Pavilion x360 Convertible
+14-dw1xxx with 8 GiB RAM, Windows 11 Pro, Hyper-V present, and an enabled Intel
+AX201 Wi-Fi adapter. The only disk is the boot/system Samsung NVMe; there are
+zero USB targets. Secure Boot, device-assignment, and firmware BCD queries were
+denied because the session is not elevated. TPM visible/ready, software-TPM
+backend, and signed provisioning record are all unavailable. No raw disk, media,
+or TPM state was changed. The QEMU inventory smoke passed on 1/2/4 configured
+CPUs, but it explicitly records no AP startup and no physical Wi-Fi acceptance.
+A later read-only rerun found one safe USB candidate (Disk 1, VendorCo
+ProductCode USB Device, 15,726,735,360 bytes, serial 4045141272666606378), and
+the user explicitly authorized erasing that exact device. The session remains
+non-elevated, so no destructive gate was started. Native hardware qualification
+remains blocked, not failed; see
+`docs/audit-physical-hardware-preflight-2026-11-25.md` for exact evidence and
+the prerequisites for an authorized elevated destructive USB/live-TPM session.
+
 ## Host regression repair - IPC capacity probe - 2026-10-22
 
 The full host suite caught a stale `scripts/test-ipc-handle-generation.py`

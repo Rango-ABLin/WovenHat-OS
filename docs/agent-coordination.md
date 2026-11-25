@@ -1,5 +1,36 @@
 # Agent coordination (Claude Code and Codex)
 
+## OpenCode - physical WovenFS qualification (2026-11-25)
+
+After explicit user authorization of the exact USB identity (VendorCo
+ProductCode USB Device, 15,726,735,360 bytes, serial 4045141272666606378), an
+elevated UAC child ran `scripts/test-wovenfs-physical.ps1` at 1/2/4 CPUs. All
+profiles passed with exit 33 and the full Stage 15.2 marker sequence; a final
+read-only elevated inspection found `WOVENFS1` at LBA0 and checkpoint sequence
+15. The boot/system NVMe was not selected. This is real removable-device
+WovenFS evidence under QEMU passthrough, not native boot/Secure Boot/TPM/Wi-Fi/
+GPU/audio/power-loss/release qualification. Evidence:
+`docs/audit-physical-wovenfs-2026-11-25.md` and the matching
+`audit-artifacts/wovenfs-physical-*` directories.
+
+## OpenCode - physical hardware readiness preflight (2026-11-25)
+
+Ran the read-only host inventory, TPM/USB readiness preflight, and the QEMU
+`physical-probe` inventory smoke on `phase2/userspace-platform` commit
+`cacbf699`. The host is non-elevated; Secure Boot, assignable-device, firmware
+BCD, and `Win32_Tpm` queries were denied. The only disk is the boot/system
+Samsung NVMe, so there is no safe destructive target; USB candidates were zero.
+No software TPM backend or signed provisioning record is present, and no raw
+disk, media, or TPM state was changed. The QEMU probe passed at 1/2/4 configured
+CPUs but records no AP startup and no physical Wi-Fi acceptance. A later rerun found one safe USB candidate (VendorCo ProductCode USB Device,
+15,726,735,360 bytes, serial 4045141272666606378), and the user explicitly
+authorized erasing that exact device. The session remained non-elevated, so no
+destructive gate was started; do not target Disk 0, the boot/system NVMe. Full
+native hardware tests remain blocked until an elevated session re-verifies that
+exact identity. Evidence:
+`docs/audit-physical-hardware-preflight-2026-11-25.md` and the matching
+`audit-artifacts/physical-*` directories.
+
 ## Codex - Repair stale IPC capacity regression probe (2026-10-22)
 
 The complete host test run found the source-extraction IPC allocator probe
