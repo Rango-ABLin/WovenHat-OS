@@ -21,6 +21,14 @@ and recovery evidence remains absent. The controlled ceremony and release
 configuration are in `docs/release-qualification/KEY-CUSTODY.md`; production
 signing custody remains externally blocked until that ceremony succeeds.
 
+Validation completed: warning-denying workspace Clippy and the 256-test
+libwoven/host suite pass; all five standalone signing-tool Clippy targets pass;
+the PKCS#11 adapter tests, release package-boundary tests, missing/mismatched/
+ambiguous/invalid external-signature cases, and SDK production sign/verify
+round-trip pass. The Stage 15.5 signed-handoff image passes on 1/2/4 CPUs with
+exit 33 under
+`audit-artifacts/stage15.5-{1,2,4}cpu-1795594*`. No production key was used.
+
 ## Release hygiene: opt-in hardware diagnostics - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The two real-hardware diagnostic commits (`2e579970`, `7d02aeea`) are now

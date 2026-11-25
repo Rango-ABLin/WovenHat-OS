@@ -15,7 +15,9 @@ external custody gate: physical key generation, non-exportability verification,
 backup/recovery evidence and production public-key provisioning remain for the
 token ceremony. See `docs/release-qualification/KEY-CUSTODY.md`. Unrelated
 Stage 31 fault-injection changes are left to their owner and are not part of
-this custody increment.
+this custody increment. Host/workspace Clippy and tests, standalone signer
+Clippy, PKCS#11 adapter and release-boundary tests, plus Stage 15.5 signed
+handoff on 1/2/4 CPUs all pass using only deterministic test material.
 
 ## OpenCode - release hygiene: diagnostics gated (2026-11-25)
 
