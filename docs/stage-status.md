@@ -1,5 +1,42 @@
 # Stage status
 
+## Phase B desktop reconciliation (master + both sibling branches) - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+User requested reconciliation and validation of the Phase B desktop branch.
+The diverged `phase-b/bottom-taskbar-core` was reconciled with the three
+`origin/master` hardware-demo commits, the docs-only `phase-b/desktop-evidence`
+branch, and the `phase-b/window-minimize` feature branch, each as an explicit
+`--no-ff` merge. Conflict resolution preserved the accepted bottom taskbar
+core: hover feedback and honest Quick Settings rows remain, while auto-hide,
+right-click pin/unpin, frame-only maximize/restore and the QS taskbar
+alignment/icon-size controls are integrated. The QS grid carries both branches'
+14 actions over five rows (one spare cell); no action was dropped. `pinned_apps`
+keeps both default constructors and now uses `unpin` in-session. The kernel
+change is bounded argv capacity growth (8->16 slots, 512->1024 bytes) for
+compile-time taskbar flags: no new syscall, capability or ABI version. Docs
+conflicts kept both records, newest first, and the sibling branch's historical
+"IN PROGRESS" claims were not promoted. A pre-existing fmt drift in
+`libwoven/src/settings_policy.rs` was repaired fmt-only.
+
+Validation on the exact reconciled source: `cargo fmt --all -- --check`,
+warning-denying host/all-target/kernel/shell Clippy (including `qemu-test`),
+`cargo test --workspace`, 12/12 taskbar-prefs and 7/7 pinned-apps host suites,
+and 222/222 Python contracts pass. The mandated serialized `RUN-STAGE10.7.ps1`
+chain exited 0: 60 memory boots, live networking and isolated Stages 10.4-10.7
+all pass at 1/2/4 CPUs
+(`D:\WovenHat-OS-output-phaseb\audit-artifacts\acceptance-20261125-113758-475`).
+Baseline-enforced desktop qualification passed at 1/2/4 CPUs
+(`phaseb-reconciled-desktop-{1,2,4}cpu-d`: `pass: true`, `failures: []`).
+The merged taskbar layout and pins/auto-hide harnesses pass at 1/2/4 CPUs
+(`phaseb-reconciled-layout-*` and `phaseb-reconciled-pins-*`). Two early pins
+runs failed at launch because the host commit limit was exhausted by other
+owners' gates, and the first desktop run failed because the per-app packager's
+app-local C: `target/` was full; both were rerun with unchanged harnesses and
+limits after the environment recovered. No assertion, timeout or baseline was
+weakened. This is bounded software/QEMU evidence only: native hardware,
+production signing custody, signed independent review and physical power-loss
+qualification remain externally blocked.
+
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The 1/2/4-only choke points were removed without changing any assertion:

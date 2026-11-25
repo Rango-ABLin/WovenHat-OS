@@ -1,3 +1,49 @@
+## OpenCode - Phase B desktop reconciliation and full validation (2026-11-25)
+
+User requested reconciliation and validation of the Phase B desktop branch with
+full gates and a push. In an isolated worktree I merged `origin/master` (the
+three hardware-demo evidence commits), the docs-only `phase-b/desktop-evidence`
+branch, and `phase-b/window-minimize` into `phase-b/bottom-taskbar-core` with
+`--no-ff`. No acceptance claim was upgraded by conflict resolution.
+
+Conflict resolutions kept accepted behavior:
+- docs: both sides retained, newest first. The sibling branch's "IN PROGRESS"
+  record is explicitly labelled historical and does not supersede the accepted
+  Phase B section.
+- shell: the accepted bottom-taskbar core's hover feedback and honest Quick
+  Settings rows were preserved while integrating auto-hide, right-click
+  pin/unpin, frame-only maximize/restore and the taskbar-layout controls. The
+  QS grid now carries both branches' 14 actions over five rows (one spare
+  cell); the variants and labels dropped by the auto-merge were restored.
+- `pinned_apps`: both default constructors kept as aliases; `unpin` is live
+  in-session so its dead-code expectation was removed, and the host-test alias
+  gained a narrow one.
+- kernel: `session.rs` argv 7->13 and `userspace.rs` MAX_ARGV 8->16 /
+  MAX_ARGV_BYTES 512->1024 carry compile-time taskbar layout flags. No new
+  syscall, capability or ABI version was introduced.
+- fmt-only repair of pre-existing `libwoven/src/settings_policy.rs` drift from
+  commit `483647ec`, so the warning-denying chain can run.
+
+Validation on the exact merged source: `cargo fmt --all -- --check`, warning-
+denying `cargo clippy --all-targets`, freestanding `woven-shell` and kernel
+target Clippy (default and `qemu-test`), and `cargo test --workspace` pass;
+isolated shell host suites pass 12/12 taskbar-prefs and 7/7 pinned-apps;
+`python -m unittest discover -s tests` passes 222/222. The full serialized
+`RUN-STAGE10.7.ps1` chain exited 0 with every stage passing at 1/2/4 CPUs (60
+memory boots, live networking, isolated Stages 10.4-10.7; transcript
+`D:\WovenHat-OS-output-phaseb\audit-artifacts\acceptance-20261125-113758-475`).
+Baseline-enforced desktop qualification passes at 1/2/4 CPUs
+(`phaseb-reconciled-desktop-{1,2,4}cpu-d`: all `pass: true`, `status: PASS`,
+`failures: []`). The merged layout and pins/auto-hide harnesses pass at 1/2/4
+CPUs (`phaseb-reconciled-layout-*`, `phaseb-reconciled-pins-*`). Two early pins
+runs failed before boot with QEMU `cannot set up guest memory 'pc.ram'` while
+the host commit limit was exhausted by other owners' concurrent gates; they
+were rerun with the unchanged harness after memory released. The first desktop
+run failed only because the per-app packager's app-local C: `target/` directory
+was full; the worktree was moved to D: and the rerun passed. No limit or
+assertion was weakened, and no other agent's QEMU process or uncommitted file
+was touched.
+
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
 Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,
