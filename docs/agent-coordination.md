@@ -951,6 +951,63 @@ next prerequisite and must be run before calling this slice fully accepted.
 
 # Agent coordination (Claude Code and Codex)
 
+## OpenCode - native hardware boot failures (2026-11-25)
+
+The exact authorized USB was rewritten with the current `hardware-demo` image
+and a FAT32 `WOVENLOG` partition, then booted natively by the user on the HP
+Pavilion x360. The first boot reached the diagnostic shell and the kernel F1
+`ACTIVATE`/`SECOND` developer fallback; the user confirmed that fallback is not
+wanted in the product experience. The second boot supplied the missing exact
+signature: `SESSION: pid N has not shown the desktop yet (still running)`, and
+both `note` and `savelog` replied that there was no live-test stick. The returned
+`WOVENLOG` volume remained healthy but empty.
+
+These are recorded as native failed observations in the Stage 29 manifest, so
+the report is now **Tier 3**, not Tier 2. No native category passes, and the
+failures are in WovenShell display startup and native live-log discovery rather
+than proof of a USB-controller hardware defect. Source tracing localizes the
+WovenShell failure to before or inside `compositor_claim()`; later font loading,
+painting, and presentation paths are excluded by the observed status. The
+highest-ranked live-log cause is `NoUsbDisk` (native xHCI never published mass
+storage), then `NoLogPartition`; neither is proven without another boot. Do not
+remove or gate the F1 fallback until root-cause evidence is preserved; the user
+has asked that it ultimately not ship. Evidence:
+`docs/audit-native-hardware-boot-attempt-1-2026-11-25.md`,
+`docs/audit-native-hardware-boot-attempt-2-2026-11-25.md`, and
+`docs/audit-stage29-hardware-qualification-2026-11-25.md`.
+
+## OpenCode - physical WovenFS qualification (2026-11-25)
+
+After explicit user authorization of the exact USB identity (VendorCo
+ProductCode USB Device, 15,726,735,360 bytes, serial 4045141272666606378), an
+elevated UAC child ran `scripts/test-wovenfs-physical.ps1` at 1/2/4 CPUs. All
+profiles passed with exit 33 and the full Stage 15.2 marker sequence; a final
+read-only elevated inspection found `WOVENFS1` at LBA0 and checkpoint sequence
+15. The boot/system NVMe was not selected. This is real removable-device
+WovenFS evidence under QEMU passthrough, not native boot/Secure Boot/TPM/Wi-Fi/
+GPU/audio/power-loss/release qualification. Evidence:
+`docs/audit-physical-wovenfs-2026-11-25.md` and the matching
+`audit-artifacts/wovenfs-physical-*` directories.
+
+## OpenCode - physical hardware readiness preflight (2026-11-25)
+
+Ran the read-only host inventory, TPM/USB readiness preflight, and the QEMU
+`physical-probe` inventory smoke on `phase2/userspace-platform` commit
+`cacbf699`. The host is non-elevated; Secure Boot, assignable-device, firmware
+BCD, and `Win32_Tpm` queries were denied. The only disk is the boot/system
+Samsung NVMe, so there is no safe destructive target; USB candidates were zero.
+No software TPM backend or signed provisioning record is present, and no raw
+disk, media, or TPM state was changed. The QEMU probe passed at 1/2/4 configured
+CPUs but records no AP startup and no physical Wi-Fi acceptance. A later rerun
+found one safe USB candidate (VendorCo ProductCode USB Device,
+15,726,735,360 bytes, serial 4045141272666606378), and the user explicitly
+authorized erasing that exact device. The session remained non-elevated, so no
+destructive gate was started; do not target Disk 0, the boot/system NVMe. Full
+native hardware tests remain blocked until an elevated session re-verifies that
+exact identity. Evidence:
+`docs/audit-physical-hardware-preflight-2026-11-25.md` and the matching
+`audit-artifacts/physical-*` directories.
+
 ## Codex - packaged-client acceptance uses live VirtIO-GPU output (2026-11-06)
 
 The `scripts/test-files-desktop-qemu.py` harness now defaults to a single
@@ -10552,3 +10609,44 @@ passed 30/30: 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler on
 `audit-artifacts/stage11-closure-matrix-20261124.log` plus its per-case
 directories. No Cargo/QEMU chain remains active; verification ownership is
 released.
+
+## Codex - identity-locked physical WovenFS matrix passed (2026-11-24)
+
+With explicit owner authorization for Disk 3, the destructive Stage 15.2
+physical-storage gate passed on 1/2/4 CPUs at source `b87d7a07`. The target was
+matched on every run by model `VendorCo ProductCode USB Device`, exact CIM size
+15,726,735,360 bytes, and serial `4045141272666606378`; Windows also confirmed
+USB/removable, healthy, non-boot and non-system before the first write. Each run
+cleared and reformatted only that device, exercised durable WovenFS/VFS writes,
+denials, remounts and unlink, and exited 33. Evidence is under
+`audit-artifacts/wovenfs-physical-{1,2,4}cpu-20261124-*`. This qualifies the
+physical USB media through QEMU raw-device passthrough and the ATA path; it is
+not bare-metal WovenHat boot or native USB-driver qualification. No QEMU/Cargo
+chain remains active.
+## Codex - hardware-demo preflash gate repaired and passed (2026-11-24)
+
+The first current-source 4-CPU preflash gate reached the desktop and installed
+all 11 applications, wallpaper and font, but the harness rejected the newer
+font-inclusive `[APPS]` marker because it still required the older
+wallpaper-only text. The harness and its fail-closed contract now require the
+complete current marker; 8/8 focused tests pass, including rejection of the
+weaker legacy marker. The rerun passed demo sign-in, visible 1280x800 desktop,
+F12 round trip and SMP/TLB input. Candidate image:
+`D:\WovenHat-OS-output\cargo-build\release\build\wovenhat-os-0ffb3e803298f592\out\wovenhat-os-uefi.img`,
+35,717,120 bytes, SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+This is a disposable acceptance-key/demo-account image, not a production
+release. Disk 3 has not yet been overwritten with this candidate.
+## Codex - current hardware-demo written and verified on Disk 3 (2026-11-24)
+
+The guarded live-USB writer matched the owner-authorized Disk 3 by model
+`VendorCo ProductCode USB Device`, exact CIM size 15,726,735,360 bytes and
+serial `4045141272666606378`. It wrote the 35,717,120-byte current-source
+hardware-demo candidate and read the entire image region back with matching
+SHA-256 `41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+The writer then created the remaining 14,964 MiB FAT32 `WOVENLOG` partition
+at offset 36,700,160. Transcript:
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`. This establishes exact
+media preparation, not bare-metal boot or device-function qualification. The
+next evidence must come from booting the HP 290 G4 via its one-time UEFI boot
+menu with Secure Boot off and returning the WOVENLOG files.
