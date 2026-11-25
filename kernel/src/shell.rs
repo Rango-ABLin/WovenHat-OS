@@ -464,6 +464,9 @@ impl Shell {
                 cmd_devices(console);
                 cmd_net(console);
                 console.println("--- end auto diagnostics ---");
+                // `livelog` is compiled out of every `qemu-test` image; the
+                // live-log flush is a production/real-hardware debug aid only.
+                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
                 let _ = crate::livelog::flush_now();
             }
             self.print_prompt(console);
