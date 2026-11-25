@@ -33,9 +33,9 @@ The device owner authorizes Stage 29 Zone 3 (Z3) native hardware qualification o
 
 | Field | Value |
 |-------|-------|
-| Operator name | **TO BE FILLED BY OWNER** |
+| Operator name |Anthony George Banda |
 | Elevation | Administrator (required — current session is NOT elevated) |
-| Date | **TO BE FILLED BY OWNER** |
+| Date | 11-25-2026 |
 | Host machine | Apeirova (HP 290 G4 Microtower PC) |
 
 ## 4. Z3 Test Phases
