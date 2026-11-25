@@ -1,5 +1,25 @@
 # Stage status
 
+## Desktop taskbar, Start and Notification Center completion - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Completed the remaining WovenShell chrome acceptance on the current M3/M4
+desktop design. The Start overview now explicitly renders a localized
+`No matches` result, while its kernel gate verifies the real centered overview,
+search, pinned section, app grid, keyboard selection, pointer launch, process
+reaping and missing-program notification instead of the retired 160-pixel
+legacy panel. Notification acceptance now checks the current 240-by-24 toast,
+220-pixel Notification Center, exact unread badge glyph and Clear/open/close
+behavior.
+
+Validation on the exact accepted source: 12/12 taskbar-preference and 7/7
+pinned-app host tests; taskbar layout and pins/auto-hide QEMU acceptance at
+1/2/4 CPUs; Start/launcher and Notification Center QEMU acceptance at 1/2/4
+CPUs; warning-denying `stage20-3-test` and `stage20-9-test` kernel Clippy,
+all-targets Clippy, workspace tests, formatting and the serialized
+`RUN-STAGE10.7.ps1` preservation chain pass. This is bounded software/QEMU
+acceptance only; native input/display, physical power loss and the externally
+controlled release-signing and independent-review gates remain open.
+
 ## System font mapping reconfirmed on current source - 2026-11-25 - PASS (BOUNDED SOFTWARE/QEMU)
 
 Addressed the stale system-font record without changing the accepted ABI or

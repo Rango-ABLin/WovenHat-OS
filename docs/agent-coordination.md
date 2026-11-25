@@ -1,3 +1,18 @@
+## OpenCode - desktop chrome acceptance completion (2026-11-25)
+
+Completed the current taskbar, Start overview and Notification Center gates
+without changing the syscall, capability or ABI boundaries. The Start overview
+now shows a real `No matches` state. Kernel acceptance was updated from the
+retired legacy launcher/toast geometry to the current centered M3 overview,
+220-pixel notification panel and 240-by-24 toast, with semantic pixel checks
+for app names, search results, unread digits and notification actions.
+
+Taskbar layout and pin/auto-hide gates pass at 1/2/4 CPUs; Start and
+Notification Center pass at 1/2/4 CPUs. Formatting, affected-feature and
+all-target warning-denying Clippy, workspace tests and the full serialized
+Stage 10.7 preservation chain exit 0. Native hardware, physical power-loss
+qualification and restoration of the test USB remain separate open work.
+
 ## OpenCode - Ring-3 secure-randomness ABI (2026-11-25)
 
 Added the second prerequisite for an eventual guest TLS service: an HMAC-SHA256

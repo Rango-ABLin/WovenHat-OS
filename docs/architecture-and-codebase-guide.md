@@ -1,5 +1,21 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Desktop chrome acceptance boundary (2026-11-25)
+
+WovenShell's bottom taskbar, centered Start overview and Notification Center
+are validated as one presentation system but through separate bounded gates.
+The taskbar's authoritative geometry comes from `taskbar_prefs`, `tokens` and
+`Desktop::{start_area, taskbar_entry_area}`. The Start overview is a
+full-width bounded panel with search, pinned Dash entries, current-workspace
+cards and a responsive app grid; an empty filtered catalog is an explicit
+`No matches` state rather than an invisible empty grid. Notification
+presentation uses the current 240-by-24 toast and 220-pixel center geometry.
+
+Kernel QEMU acceptance intentionally reconstructs only stable semantic glyphs
+and state transitions while translucent surface backgrounds remain owned by
+the compositor. Retired 160-pixel launcher and 180-by-22 toast oracles are not
+compatible with the current UI and must not be reused.
+
 ## Hardware-demo catalog evidence contract (2026-11-24)
 
 `scripts/test-shell-qemu.py` derives the expected application count from the
