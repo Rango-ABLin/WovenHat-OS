@@ -120,9 +120,15 @@ single fmt-only repair was applied to the incoming remote-admin line; no
 assertion, timeout or baseline changed.
 
 A final two-commit advance (TCP listen/accept plus its `PORT` fix) was merged in
-with one fmt-only repair to `libwoven/src/net.rs`; the full gate set was rerun
-on that exact source with evidence under
-`D:\WovenHat-OS-output-phaseb-push2\audit-artifacts\`.
+with one fmt-only repair to `libwoven/src/net.rs`. The gate then exposed a real
+defect in that incoming work: the async worker's new `Operation::Accept` arm
+calling `network::socket_accept_pinned` had no matching stub in the host test's
+mock `network` module, breaking warning-denying all-targets Clippy. The minimal
+stub was added (same `WouldBlock` behaviour as the neighbouring stubs), with no
+assertion weakened. The full gate set then passed on the exact final source,
+including baseline-enforced desktop qualification and both taskbar harnesses at
+1/2/4 CPUs; evidence is under
+`D:\WovenHat-OS-output-phaseb-push3\audit-artifacts\`.
 
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 

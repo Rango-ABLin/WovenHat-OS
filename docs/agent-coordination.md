@@ -95,9 +95,17 @@ external release gate was changed.
 
 The branch advanced once more with TCP listen/accept support and a follow-up
 `PORT` fix; those two commits were merged in, one further fmt-only repair was
-applied to `libwoven/src/net.rs`, and the full gate set was rerun on that exact
-source under `D:\WovenHat-OS-output-phaseb-push2\audit-artifacts\`. No assertion
-or limit changed.
+applied to `libwoven/src/net.rs`. Its first full gate then exposed a genuine
+defect in the incoming TCP work: `kernel/src/async_network.rs` gained an
+`Operation::Accept` arm calling `network::socket_accept_pinned`, but the host
+test's mock `network` module in `tests/async_network.rs` never gained the
+matching stub, so warning-denying all-targets Clippy failed to compile. I added
+the minimal stub with the same `WouldBlock` behaviour as the neighbouring
+connect/recv stubs; no test was weakened or disabled. The full gate set then
+passed on the exact final source under
+`D:\WovenHat-OS-output-phaseb-push3\audit-artifacts\` (exit 0, all stages at
+1/2/4 CPUs, plus baseline-enforced desktop qualification and both taskbar
+harnesses at 1/2/4 CPUs). No assertion, timeout or baseline changed.
 
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
