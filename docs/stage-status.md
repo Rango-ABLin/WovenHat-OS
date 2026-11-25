@@ -1,5 +1,37 @@
 # Stage status
 
+## System font mapping reconfirmed on current source - 2026-11-25 - PASS (BOUNDED SOFTWARE/QEMU)
+
+Addressed the stale system-font record without changing the accepted ABI or
+visual baselines. Source is 96-point `MAX_PATH_POINTS` with a 64-entry 32×32
+glyph cache and inkless-miss fallback on both `draw_text_ttf` and
+`draw_text_proportional`; the older 64-point/24×24 documentation was corrected
+in `docs/graphics/design-system.md` and `docs/graphics/modernization-tracker.md`.
+Added host coverage for the exact historical regression
+(`libwoven/tests/typography.rs::proportional_path_never_drops_complex_real_glyphs`)
+asserting `S`, `g` and `@` leave ink through the proportional path, and fixed a
+pre-existing `bool_comparison` lint in `libwoven::settings_policy` so host
+all-targets Clippy is clean.
+
+The bounded large read-only mapping self-test was deliberately NOT restored:
+attempting it reproduced the documented frame-pressure failure at page 3 under
+TCG (`write_user_bytes` fails after 2 KiB of a 64 KiB+7 copy). Re-adding a
+frame-pressure-flaky gate would be a false improvement, so the existing real
+desktop coverage remains the font-mapping evidence.
+
+Validation at 1/2/4 CPUs: `test-stage10-runtime.py --stage 5-font` PASS (exit
+33), `test-memory-qemu.py` PASS (exit 33), and baseline-enforced
+`test-desktop-qualification.py` PASS with `failures: []`, the
+`system font parsed bytes=621572 units_per_em=1000` marker in every serial log,
+and `sign-in.ppm` `pass: true` at 0 changed pixels
+(`audit-artifacts/font-mapping-{1,2,4}cpu-20261125`). Host all-targets Clippy,
+workspace tests, typography tests and kernel target Clippy pass.
+
+Still open (not addressed here): a shared cross-process read-only font mapping
+ABI with a written threat review, physical entropy/TLS prerequisites for a
+guest-terminated service, and host-independent physical input-to-display
+latency. None of these were claimed.
+
 ## Native application integration closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Closed the remaining bounded items of
