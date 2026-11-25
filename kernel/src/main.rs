@@ -9216,14 +9216,23 @@ fn native_app_mutation_self_test() -> bool {
     let image = package.bytes();
     const COMMANDS: &[&[&str]] = &[
         &["/bin/wovenhat-files", "--mkdir", "/mnt/mutation-probe"],
-        &["/bin/wovenhat-files", "--write", "/mnt/mutation-probe/note.txt", "hello"],
+        &[
+            "/bin/wovenhat-files",
+            "--write",
+            "/mnt/mutation-probe/note.txt",
+            "hello",
+        ],
         &[
             "/bin/wovenhat-files",
             "--rename",
             "/mnt/mutation-probe/note.txt",
             "/mnt/mutation-probe/renamed.txt",
         ],
-        &["/bin/wovenhat-files", "--rm", "/mnt/mutation-probe/renamed.txt"],
+        &[
+            "/bin/wovenhat-files",
+            "--rm",
+            "/mnt/mutation-probe/renamed.txt",
+        ],
         &["/bin/wovenhat-files", "--rm", "/mnt/mutation-probe"],
     ];
     for (index, argv) in COMMANDS.iter().enumerate() {

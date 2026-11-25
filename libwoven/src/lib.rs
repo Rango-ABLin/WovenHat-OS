@@ -15630,9 +15630,8 @@ pub fn mkdir(path: &str) -> Result<(), Error> {
     if path.is_empty() || path.len() > MAX_PATH {
         return Err(Error::Failed);
     }
-    let result = unsafe {
-        syscall::invoke(syscall::MKDIR, path.as_ptr() as u64, path.len() as u64, 0)
-    };
+    let result =
+        unsafe { syscall::invoke(syscall::MKDIR, path.as_ptr() as u64, path.len() as u64, 0) };
     check(result).map(|_| ())
 }
 
@@ -15643,9 +15642,8 @@ pub fn unlink(path: &str) -> Result<(), Error> {
     if path.is_empty() || path.len() > MAX_PATH {
         return Err(Error::Failed);
     }
-    let result = unsafe {
-        syscall::invoke(syscall::UNLINK, path.as_ptr() as u64, path.len() as u64, 0)
-    };
+    let result =
+        unsafe { syscall::invoke(syscall::UNLINK, path.as_ptr() as u64, path.len() as u64, 0) };
     check(result).map(|_| ())
 }
 
