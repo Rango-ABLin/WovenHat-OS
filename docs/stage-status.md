@@ -283,7 +283,11 @@ status model 6/6). The mandated serialized `RUN-STAGE10.7.ps1` chain exited 0
 Fresh baseline-enforced desktop qualification passed at 1, 2 and 4 CPUs
 (`audit-artifacts/phaseb-final-{1,2,4}cpu-20261125`): every `result.json`
 reports `pass: true`, `status: PASS`, `failures: []` and 0 changed sign-in
-baseline pixels.
+baseline pixels. The earlier `phase-b/desktop-evidence` branch retained its
+pre-acceptance 1/2/4-CPU captures
+(`audit-artifacts/desktop-qualification-1795439038413181800`,
+`-1795440273398492800`, `-1795440551973970000`); they are historical evidence
+for the radio/taskbar-preference boot path and are superseded by the matrix above.
 
 Not claimed, and explicitly deferred to separate bounded increments: taskbar
 auto-hide (needs pointer-edge hit-testing and geometry/baseline work); an
@@ -319,7 +323,6 @@ enforced desktop qualification passed at 1/2/4 CPUs
 `WovenFiles: pointer cancelled` input marker; both were reruns with unchanged
 limits and passed. No assertion, timeout or baseline was changed. Battery remains explicitly unavailable: there
 is no ACPI battery driver, so no charge level is fabricated.
-
 ## Desktop system-status indicators (network/volume/battery) - 2026-11-23 - ACCEPTED (BOUNDED)
 
 Added a bounded shell-side status model in
