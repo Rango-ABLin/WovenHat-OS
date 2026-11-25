@@ -34,6 +34,64 @@ seven WovenFS cuts at 1/2/4 CPUs pass with exit 33. Evidence is
 `audit-artifacts/woven-settings-{1,2,4}cpu`. Physical power-loss, controller
 cache, torn-media and native-device qualification remain external. Unrelated
 Stage 31/virtual-input and desktop-harness dirty work was left untouched.
+## OpenCode - Phase B desktop reconciliation and full validation (2026-11-25)
+
+User requested reconciliation and validation of the Phase B desktop branch with
+full gates and a push. In an isolated worktree I merged `origin/master` (the
+three hardware-demo evidence commits), the docs-only `phase-b/desktop-evidence`
+branch, and `phase-b/window-minimize` into `phase-b/bottom-taskbar-core` with
+`--no-ff`. No acceptance claim was upgraded by conflict resolution.
+
+Conflict resolutions kept accepted behavior:
+- docs: both sides retained, newest first. The sibling branch's "IN PROGRESS"
+  record is explicitly labelled historical and does not supersede the accepted
+  Phase B section.
+- shell: the accepted bottom-taskbar core's hover feedback and honest Quick
+  Settings rows were preserved while integrating auto-hide, right-click
+  pin/unpin, frame-only maximize/restore and the taskbar-layout controls. The
+  QS grid now carries both branches' 14 actions over five rows (one spare
+  cell); the variants and labels dropped by the auto-merge were restored.
+- `pinned_apps`: both default constructors kept as aliases; `unpin` is live
+  in-session so its dead-code expectation was removed, and the host-test alias
+  gained a narrow one.
+- kernel: `session.rs` argv 7->13 and `userspace.rs` MAX_ARGV 8->16 /
+  MAX_ARGV_BYTES 512->1024 carry compile-time taskbar layout flags. No new
+  syscall, capability or ABI version was introduced.
+- fmt-only repair of pre-existing `libwoven/src/settings_policy.rs` drift from
+  commit `483647ec`, so the warning-denying chain can run.
+
+Validation on the exact merged source: `cargo fmt --all -- --check`, warning-
+denying `cargo clippy --all-targets`, freestanding `woven-shell` and kernel
+target Clippy (default and `qemu-test`), and `cargo test --workspace` pass;
+isolated shell host suites pass 12/12 taskbar-prefs and 7/7 pinned-apps;
+`python -m unittest discover -s tests` passes 222/222. The full serialized
+`RUN-STAGE10.7.ps1` chain exited 0 with every stage passing at 1/2/4 CPUs (60
+memory boots, live networking, isolated Stages 10.4-10.7; transcript
+`D:\WovenHat-OS-output-phaseb\audit-artifacts\acceptance-20261125-113758-475`).
+Baseline-enforced desktop qualification passes at 1/2/4 CPUs
+(`phaseb-reconciled-desktop-{1,2,4}cpu-d`: all `pass: true`, `status: PASS`,
+`failures: []`). The merged layout and pins/auto-hide harnesses pass at 1/2/4
+CPUs (`phaseb-reconciled-layout-*`, `phaseb-reconciled-pins-*`). Two early pins
+runs failed before boot with QEMU `cannot set up guest memory 'pc.ram'` while
+the host commit limit was exhausted by other owners' concurrent gates; they
+were rerun with the unchanged harness after memory released. The first desktop
+run failed only because the per-app packager's app-local C: `target/` directory
+was full; the worktree was moved to D: and the rerun passed. No limit or
+assertion was weakened, and no other agent's QEMU process or uncommitted file
+was touched.
+
+While this ran, another owner advanced `phase-b/bottom-taskbar-core` by nine
+commits (config migration, WovenFS crash cuts, virtual input, desktop QEMU
+options and remote admin). I merged the reconciled work onto that new tip in a
+second D: worktree, resolved the two doc-only conflicts by keeping both
+records, and repaired one fmt-only drift in the incoming remote-admin line.
+The entire gate set was then rerun on that exact final source: fmt, warning-
+denying host/all-target/kernel/shell Clippy, workspace tests, the full
+`RUN-STAGE10.7.ps1` chain (exit 0, 1/2/4 CPUs), baseline-enforced desktop
+qualification and both taskbar harnesses at 1/2/4 CPUs all pass. Final evidence
+is under `D:\WovenHat-OS-output-phaseb-final\audit-artifacts\` (`acceptance-*`,
+`phaseb-final-desktop-*`, `phaseb-final-layout-*`, `phaseb-final-pins-*`). No
+external release gate was changed.
 
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
@@ -211,6 +269,100 @@ NOTE for whoever runs the full `RUN-STAGE10.7.ps1` next: `qemu_runtime_self_test
 now compiles and runs only under the `network-test` feature, because Stage 13.2
 attaches an unforwarded e1000 and cannot supply the host UDP/TCP peer. No
 required marker of any gate changed.
+## OpenCode - Phase B auto-hide + placement fix accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `d511ded4`: taskbar auto-hide (pure `AutoHide` model, seeded from
+settings `taskbar_auto_hide`, right-click an empty strip to toggle
+in-session; bottom-row reveal, one-second hold, panels hold the bar up;
+hidden controls capture nothing and the usable band grows). Plus a real
+placement fix the pins evidence exposed: the 3-pin centered group ran
+under the workspace boxes and QS button, painting over the Store entry
+(retained-frame proof); `start_area` now centers inside the free band
+left of the right-side controls. Freestanding clippy + release clean;
+host taskbar_prefs 12/12, pinned_apps 7/7.
+
+Extended gate (pins lifecycle + five auto-hide phases, same boot) PASS
+at 1/2/4: `taskbar-pins-1795455150266353700`,
+`-1795455380078094100`, `-1795455916058784100`. Desktop qualification
+from this tree PASS at 1/2/4:
+`desktop-qualification-1795455593064749300`,
+`-1795456116747088900`, `-1795456412952954800` (startup 95-98 s vs the
+120 s budget). Four earlier failures were all my gate's own defects
+(mismatched cursor frames, stale variable, sleep-vs-repaint race,
+off-screen comparison box), preserved at
+`taskbar-pins-1795454258433091200`/`-1795454445640302000`/`-1795454634578127800`/`-1795454904737521700`;
+the guest produced every marker and pixel state correctly in all four
+(`-...9445640302000` predates the gate's unexpected-error arm, so it is
+evidenced by serial/QMP/frames rather than result.json).
+
+Next: maximize/fullscreen geometry, then the taskbar settings visual
+verification. Alt+Tab still blocked on kernel input-ABI modifier state
+(another agent's uncommitted kernel work). Phase B remains NOT accepted
+as a whole.
+
+## OpenCode - Phase B pinned apps accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `2d40b94b` on `phase-b/window-minimize` (worktree
+`D:\WovenHat-build\desktop-wt`): the bounded pinned-application model is
+wired into the taskbar. One combined pins+windows list feeds painting,
+hit-testing and group width (this also fixed centering drift when
+minimized windows existed). Left-click a pin to launch; right-click any
+entry to pin/unpin with a toast -- the PS/2 decoder already delivered
+button 1, so no kernel or input-ABI change. Pins seed from the settings
+record's `pinned_apps` value and are IN-SESSION ONLY, recorded as such:
+the shell holds `FileRead` and no settings-write path exists, so
+nothing pretends pins survive a reboot (cross-boot persistence = a
+`FileWrite` capability decision, deliberately not taken unreviewed).
+Also removed the stale blanket `#![allow(dead_code)]`, deleting the
+dead legacy QS helpers it hid; freestanding clippy `-D warnings` and
+release build clean; host suites pinned_apps 7/7, taskbar_prefs 6/6.
+
+New gate `scripts/test-taskbar-pins.py` (reuses the qualification
+harness's QMP plumbing; must run serialized against it -- shared build
+paths): full pin lifecycle with occurrence-counted markers and
+strip-repaint assertions. PASS at 1/2/4 CPUs:
+`taskbar-pins-1795451941851309600`, `-1795452801971620600`,
+`-1795453153842152100`. Retained-frame pixel audit: 136/1948/644/9124
+changed strip pixels across the four re-layout steps (gate minimum 20
+bytes). Full desktop qualification from this tree PASS at 1/2/4:
+`desktop-qualification-1795452497487046700`,
+`-1795452948321374000`, `-1795453290969248000`. One 1-CPU attempt
+(`-1795452130105296700`) missed the 120 s startup budget at 121.2 s on
+a host loaded by the preceding gate's teardown; quiet-host re-run of the
+identical tree booted in 90.4 s and passed. Failure evidence preserved;
+no budget widened.
+
+Next: auto-hide, then maximize/fullscreen geometry. Alt+Tab stays
+blocked on input-ABI modifier state (kernel files carry another agent's
+uncommitted edits). Phase B remains NOT accepted as a whole.
+
+## OpenCode - Phase B minimize accepted + keyboard_refresh root cause closed (2026-11-23)
+
+Branch `phase-b/window-minimize` (worktree `D:\WovenHat-build\desktop-wt`,
+commit `134e8cbd`, stacked on `eb5020da`): taskbar minimize/restore is
+QEMU-accepted at 1/2/4 CPUs (`desktop-qualification-1795445644994223900`,
+`-1795446056922824200`, `-1795446369997474500`, all `pass: true`, zero
+failures, frame markers present, no panic). Click the focused window's
+button to minimize, a minimized button to restore, another to focus;
+minimized entries paint dimmed. No new `Window` field: minimized means
+absent from `stack[..stacked]`.
+
+`keyboard_refresh` root cause CLOSED (see the Phase B section of
+`docs/stage-status.md` for the full evidence): the historical flake was
+the harness's pre-`73ea4d40` exact-glyph oracle (hard-coded digit `2`
+raster at (236,492) with exact colors), which returned false negatives
+while the guest demonstrably delivered Enter and repainted (serial marker
+always present). Replaying that old predicate against today's retained
+PASSING frame returns False on a frame whose counter region changed by
+116 px -- direct proof the oracle, not the guest, was the failure. No
+failure recorded anywhere since the oracle was replaced (Nov 20
+progressive runs, Nov 23 merged-final runs, seven Phase B runs). The
+pointer-step "mouse click did not change the client framebuffer" flake is
+a separate, still-open issue; nothing is claimed for it.
+
+Next: wire the host-tested `pinned_apps.rs` model into the taskbar with
+persistence, then auto-hide. Alt+Tab stays blocked on input-ABI modifier
+state (kernel files carry another agent's uncommitted edits).
 
 ## OpenCode - Phase B bottom-taskbar core (IN PROGRESS, 2026-11-23)
 
@@ -222,8 +374,9 @@ Changes so far: Wi-Fi/Bluetooth/Airplane no longer invent state (they read
 "Unavailable" and say so when pressed); the Quick Settings summary is driven
 only by real network status; taskbar alignment (center/left) and icon size
 (small/medium/large) are read from the installed settings record with safe
-per-field fallback. Auto-hide, pinning persistence, minimize/Alt+Tab and the
-keyboard_refresh root cause are NOT done. Host: 6/6 taskbar-preference tests
+per-field fallback. Auto-hide, pinning persistence and Alt+Tab are NOT
+done (minimize is now done and QEMU-verified, and the keyboard_refresh
+root cause is closed -- see the entry above). Host: 6/6 taskbar-preference tests
 pass (run via `rustc --test`, because the shell's `build-std` config breaks
 host cargo builds). Freestanding `cargo clippy --target x86_64-unknown-none -- -D warnings`
 passes. No QEMU claim yet. I deferred moving the repo's `target/` and
@@ -10535,3 +10688,135 @@ passed 30/30: 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler on
 `audit-artifacts/stage11-closure-matrix-20261124.log` plus its per-case
 directories. No Cargo/QEMU chain remains active; verification ownership is
 released.
+
+## Codex - identity-locked physical WovenFS matrix passed (2026-11-24)
+
+With explicit owner authorization for Disk 3, the destructive Stage 15.2
+physical-storage gate passed on 1/2/4 CPUs at source `b87d7a07`. The target was
+matched on every run by model `VendorCo ProductCode USB Device`, exact CIM size
+15,726,735,360 bytes, and serial `4045141272666606378`; Windows also confirmed
+USB/removable, healthy, non-boot and non-system before the first write. Each run
+cleared and reformatted only that device, exercised durable WovenFS/VFS writes,
+denials, remounts and unlink, and exited 33. Evidence is under
+`audit-artifacts/wovenfs-physical-{1,2,4}cpu-20261124-*`. This qualifies the
+physical USB media through QEMU raw-device passthrough and the ATA path; it is
+not bare-metal WovenHat boot or native USB-driver qualification. No QEMU/Cargo
+chain remains active.
+## Codex - hardware-demo preflash gate repaired and passed (2026-11-24)
+
+The first current-source 4-CPU preflash gate reached the desktop and installed
+all 11 applications, wallpaper and font, but the harness rejected the newer
+font-inclusive `[APPS]` marker because it still required the older
+wallpaper-only text. The harness and its fail-closed contract now require the
+complete current marker; 8/8 focused tests pass, including rejection of the
+weaker legacy marker. The rerun passed demo sign-in, visible 1280x800 desktop,
+F12 round trip and SMP/TLB input. Candidate image:
+`D:\WovenHat-OS-output\cargo-build\release\build\wovenhat-os-0ffb3e803298f592\out\wovenhat-os-uefi.img`,
+35,717,120 bytes, SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+This is a disposable acceptance-key/demo-account image, not a production
+release. Disk 3 has not yet been overwritten with this candidate.
+## Codex - current hardware-demo written and verified on Disk 3 (2026-11-24)
+
+The guarded live-USB writer matched the owner-authorized Disk 3 by model
+`VendorCo ProductCode USB Device`, exact CIM size 15,726,735,360 bytes and
+serial `4045141272666606378`. It wrote the 35,717,120-byte current-source
+hardware-demo candidate and read the entire image region back with matching
+SHA-256 `41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+The writer then created the remaining 14,964 MiB FAT32 `WOVENLOG` partition
+at offset 36,700,160. Transcript:
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`. This establishes exact
+media preparation, not bare-metal boot or device-function qualification. The
+next evidence must come from booting the HP 290 G4 via its one-time UEFI boot
+menu with Secure Boot off and returning the WOVENLOG files.
+## Codex - Phase B frame-only maximize/restore (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`) owns
+this shell-only Phase B increment. No kernel/input ABI files were changed.
+Touched files: `apps/woven-shell/src/main.rs`, `apps/woven-shell/src/model.rs`,
+`scripts/test-taskbar-pins.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: right-click window title bar toggles frame-only maximize/restore
+(`Window.maximized`, `Window.restore`, `Window.surface_w/h`), band-filling frame
+with clamped-surface body fill, drag-on-maximized restores before drag, and
+resized/explicit-replace clears maximized. WSIZ client reflow is intentionally
+deferred: a live maximize WSIZ exposed a reproducible software-compositor
+present/blend stall on slow 1-CPU QEMU. Window shadows are temporarily disabled
+in `repaint_once` for the same compositor stall (explicit TODO). Gate hardened:
+chunked PS/2-safe `move_to`, restore title-bar position check, step-14 retry,
+and auto-hide hold refresh.
+
+Validation (this exact tree): freestanding shell clippy/release clean.
+Host `rustc --test`: `taskbar_prefs` 12/12, `pinned_apps` 7/7. Taskbar-pins
+extended gate PASS 1/2/4: `taskbar-pins-1795504655655003900`,
+`taskbar-pins-1795504803500124300`, `taskbar-pins-1795504942282416200`.
+Desktop qualification PASS 1/2/4: `desktop-qualification-1795505086591807900`
+(1 CPU), `desktop-qualification-1795505768460324700` (2 CPU rerun, PASS),
+`desktop-qualification-1795505531386805300` (4 CPU). Preserved 2-CPU failure:
+`desktop-qualification-1795505275169282000` (`files_pointer_cancel_ms` timeout),
+rerun passed; no budget/assertion weakened.
+
+Open/blocked: Phase B not accepted; no §24 report. Maximize WSIZ reflow and
+window shadows deferred pending compositor non-blocking proof. Cross-boot
+pin/auto-hide persistence still needs writable settings record + deliberate
+shell `FileWrite` capability decision. Alt+Tab blocked on input ABI/modifier
+state (overlaps other agent kernel work). Main repo
+`C:\Users\banda\Documents\GitHub\WovenHat-OS` remains dirty with other agent's
+uncommitted work; do not reconcile/overwrite from this worktree. No Cargo/QEMU
+chain active.
+
+## Codex - Phase B taskbar layout visual QEMU verification (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only increment plus small, isolated-kernel test-harness support; no
+input ABI/capability changes. Touched files: `apps/woven-shell/src/main.rs`,
+`kernel/src/session.rs`, `kernel/src/userspace.rs`,
+`scripts/test-taskbar-layout.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: shell CLI args `--taskbar-alignment`, `--taskbar-icon-size`,
+`--taskbar-auto-hide` (unknown values fail closed); one-time startup serial
+marker `woven-shell: taskbar layout alignment=... icon_size=... auto_hide=...`.
+Kernel session argv accepts compile-time `WOVENHAT_SHELL_TASKBAR_ALIGNMENT`,
+`WOVENHAT_SHELL_TASKBAR_ICON_SIZE`, `WOVENHAT_SHELL_TASKBAR_AUTO_HIDE`
+(option_env, only when set) for real-QEMU gates. `kernel/src/userspace.rs`
+`MAX_ARGV` raised 8->16 and `MAX_ARGV_BYTES` 512->1024 because the extended
+session argv exceeded the old limit; first 1-CPU layout attempt
+`audit-artifacts/taskbar-layout-1795512583100247100` failed with
+`[SESSION] desktop not started: Image`, preserved, then fixed.
+
+Validation: freestanding shell clippy/release clean (`-D warnings`).
+`python -m py_compile scripts/test-taskbar-layout.py` clean.
+Real-QEMU layout gate PASS 1/2/4 CPUs:
+`audit-artifacts/taskbar-layout-1795512950531598600` (1 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513102956382300` (2 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513257891825300` (4 CPU, pass).
+Each result.json `pass: true`, zero failures, layout marker
+`alignment=left icon_size=large auto_hide=off`, screenshot preserved, pixel
+sanity check passed. No assertions/budgets weakened.
+
+Open: Phase B not accepted; no §24 report. In-shell taskbar settings editor
+not done. Cross-boot persistence of layout/pins/auto-hide remains blocked on
+writable settings record + deliberate shell `FileWrite` capability decision.
+Maximize WSIZ reflow and window shadows still deferred pending compositor
+non-blocking proof. Alt+Tab still blocked on input ABI/modifier state.
+Main repo remains dirty with other agent's uncommitted kernel/work; do not
+reconcile or overwrite. No Cargo/QEMU chain active.
+
+## Codex - Phase B in-shell taskbar QS controls (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only: `apps/woven-shell/src/main.rs`. Added Quick Settings actions
+`TaskbarAlign` and `TaskbarIconSize` (in-session only; toasts/logs say
+"(session)"; resets to startup/settings on next boot). Replaced QS
+`BatterySaver` and `NightLight` no-effect local toggles to keep the 4x3 grid.
+Auto-hide remains the existing right-click strip toggle with its serial markers.
+
+Validation: freestanding shell clippy/release `-D warnings` clean; host tests
+`taskbar_prefs` 12/12 and `pinned_apps` 7/7 pass. 1-CPU desktop qualification
+smoke attempted twice (`desktop-qualification-1795516306643836000`,
+`desktop-qualification-1795516388939047300`); both failed during hardware-demo
+kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN (environment, not a
+code regression; shell-only change). No QEMU runtime regression asserted/denied
+by those build failures. No Cargo/QEMU chain active.

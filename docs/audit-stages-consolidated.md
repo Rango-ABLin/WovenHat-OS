@@ -4,6 +4,40 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Hardware-demo physical USB write - 2026-11-24
+
+The guarded writer resolved the authorized USB by model, exact byte size and
+serial, wrote the 35,717,120-byte candidate, and verified its complete raw
+readback against SHA-256
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+It created the remaining 14,964 MiB as FAT32 `WOVENLOG`. The transcript is
+`audit-artifacts/hardware-demo-usb-write-20261124.txt`. Media preparation is
+verified; bare-metal firmware boot and native device behavior remain open.
+
+## Hardware-demo preflash catalog-marker repair - 2026-11-24
+
+The first 4-CPU candidate boot successfully installed the current 11-app,
+wallpaper and font catalog, but a stale harness marker rejected it. The harness
+now requires the exact font-inclusive asset/readback marker and retains a
+negative contract for the weaker old text. Eight host contracts and the rerun
+pass; the rerun also proves demo sign-in, visible desktop frames, F12 focus
+round trip and SMP/TLB input. Candidate SHA-256 is
+`41f69b716886338f8c04b181b624bd9b4b334460e2ad7bc2af0bf82128618dfc`.
+This validates a disposable hardware-demo image, not production signing or a
+physical boot.
+
+## Stage 15.2 physical WovenFS USB-media matrix - 2026-11-24
+
+The owner authorized Disk 3 after a read-only identity and raw-sector check.
+The destructive gate matched the USB device by model, exact size and serial on
+every run and refused boot/system media. Physical WovenFS/VFS formatting,
+write-through, rejection, rollback, remount and unlink checks passed with exit
+33 on 1/2/4 CPUs at `b87d7a07`; evidence is retained under
+`audit-artifacts/wovenfs-physical-{1,2,4}cpu-20261124-*`. The media was accessed
+through QEMU raw-device passthrough and the WovenHat ATA path. Bare-metal boot,
+native USB-driver behavior, surprise removal and controlled power-loss remain
+outside this accepted boundary.
+
 ## Stage 11 exact-source closure verification - 2026-11-24
 
 Source `bedee571` passes the unchanged full Windows Stage 10.7 gate and the

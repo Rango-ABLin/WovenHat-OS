@@ -178,9 +178,20 @@ use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
-use taskbar_prefs::{Alignment, TaskbarPrefs};
+use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
 mod pinned_apps;
-use pinned_apps::PinnedApps;
+use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
+
+/// One taskbar group entry: a window on the current workspace, or a pinned
+/// catalog app that is not running on it. A pinned app with a running window
+/// shows that window's entry at the pin's position.
+#[derive(Clone, Copy)]
+enum TaskbarEntry {
+    /// Window slot.
+    Window(usize),
+    /// Catalog app index.
+    PinnedApp(usize),
+}
 
 /// Bounded system-status indicators in the taskbar tray. The module only
 /// reads existing status calls and never adds a capability; see `status.rs`.
@@ -205,9 +216,12 @@ const QS_SLIDER_HEIGHT: i32 = 34;
 const QS_SLIDER_GAP: i32 = 10;
 const QS_SECTION_GAP: i32 = 8;
 const QS_FOOTER_HEIGHT: i32 = 40;
-/// Grid rows shown in the quick-action panel.
-const QS_GRID_ROWS: usize = 4;
-const QS_ACTIONS: usize = QS_GRID_COLS * QS_GRID_ROWS;
+/// Grid rows shown in the quick-action panel. Five rows hold the combined
+/// action set from both reconciled Phase B branches (one spare cell).
+const QS_GRID_ROWS: usize = 5;
+/// Both branches' controls are retained: honest radios/power/display plus the
+/// taskbar layout controls. The final grid cell is intentionally unused.
+const QS_ACTIONS: usize = 14;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum QsAction {
@@ -215,8 +229,10 @@ enum QsAction {
     Bluetooth,
     Airplane,
     BatterySaver,
+    TaskbarAlign,
     FocusAssist,
     NightLight,
+    TaskbarIconSize,
     Accessibility,
     DisplayScale,
     Tiling,
@@ -230,8 +246,10 @@ const QS_ACTION_ORDER: [QsAction; QS_ACTIONS] = [
     QsAction::Bluetooth,
     QsAction::Airplane,
     QsAction::BatterySaver,
+    QsAction::TaskbarAlign,
     QsAction::FocusAssist,
     QsAction::NightLight,
+    QsAction::TaskbarIconSize,
     QsAction::Accessibility,
     QsAction::DisplayScale,
     QsAction::Tiling,
@@ -505,6 +523,15 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8]) -> usize {
     length
 }
 
+/// `prefix + name` for a pin/unpin toast, truncated to the caller's buffer.
+/// Catalog names are bounded ASCII, so this never escapes the buffer.
+fn pin_text<'a>(prefix: &[u8], name: &[u8], buffer: &'a mut [u8; 48]) -> &'a str {
+    let length = (prefix.len() + name.len()).min(buffer.len());
+    buffer[..prefix.len()].copy_from_slice(prefix);
+    buffer[prefix.len()..length].copy_from_slice(&name[..length - prefix.len()]);
+    core::str::from_utf8(&buffer[..length]).unwrap_or("Pinned")
+}
+
 /// `bytes` as text, cut to the longest prefix that fits `max_width` at the
 /// body size, with the same printable-ASCII substitution as [`label`].
 fn truncate_to_width(bytes: &[u8], max_width: i32, buffer: &mut [u8; 64]) -> usize {
@@ -682,10 +709,17 @@ struct Desktop {
     dnd: bool,
     /// Bottom taskbar placement and entry size, from the installed settings.
     taskbar: TaskbarPrefs,
-    /// Bounded pinned catalog names for the overview Dash, from the installed
-    /// settings. Absent restores the curated defaults; an empty value pins
-    /// nothing. The model is read-only here: there is no in-shell settings
-    /// writer, so persistence is supplied by the installed record.
+    /// Taskbar auto-hide state: the settings-seeded preference plus its
+    /// reveal/hide timing. In-session state like pins: the shell holds
+    /// `FileRead` and no settings-write path exists, so it resets to the
+    /// record's value on the next boot.
+    auto_hide: AutoHide,
+    /// Bounded pinned catalog names, in pin order. Seeded from the installed
+    /// settings record's `pinned_apps` value (absent: the curated defaults;
+    /// empty: nothing pinned) and changed in-session by right-clicking a
+    /// taskbar entry. The same list drives the Overview Dash. In-session state
+    /// only: the shell process holds `FileRead` and no settings-write path
+    /// exists, so pins honestly reset to the record's list on the next boot.
     pinned: PinnedApps,
     /// Brightness percentage for the quick-settings slider (0-100).
     brightness: u8,
@@ -780,6 +814,7 @@ impl Desktop {
         qs_open: false,
         dnd: false,
         taskbar: TaskbarPrefs::DEFAULT,
+        auto_hide: AutoHide::off(),
         pinned: PinnedApps::curated(),
         brightness: 80,
         scale: 1,
@@ -863,12 +898,18 @@ impl Desktop {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
     }
 
-    /// The screen's usable band, excluding the bottom taskbar: `(top, height)`.
-    /// Shared by every window-placement/clamp site that needs to keep
-    /// windows clear of the bar (`work_area`, `open`, `resized`,
-    /// `toggle_scale`, `drag_to_pointer`).
+    /// The screen's usable band for windows: everything when the bar is
+    /// hidden, everything above the bar when it is not. Shared by every
+    /// window-placement/clamp site (`work_area`, `open`, `resized`,
+    /// `toggle_scale`, `drag_to_pointer`); the revealed bar simply draws
+    /// over whatever a window placed in the freed strip.
     fn usable_band(&self) -> (i32, i32) {
-        (0, (self.height - TASKBAR_HEIGHT).max(0))
+        let height = if self.auto_hide.is_hidden() {
+            self.height
+        } else {
+            (self.height - TASKBAR_HEIGHT).max(0)
+        };
+        (0, height)
     }
 
     /// Row for taskbar text, centered vertically in the bar.
@@ -949,10 +990,13 @@ impl Desktop {
         self.taskbar.icon_size.entry_width()
     }
 
-    /// Win11-style application group: Start + running/pinned entries. It is
-    /// centred by default, or pinned to the left edge when the preference says so.
+    /// Win11-style application group: Start + pinned/running entries. It is
+    /// centred by default, or pinned to the left edge when the preference says
+    /// so. The count is the same combined list the painter and hit tests use,
+    /// so centering cannot disagree with what is actually on screen.
     fn taskbar_group_width(&self) -> i32 {
-        let entries = self.stacked as i32;
+        let (_, count) = self.taskbar_entries();
+        let entries = count as i32;
         let entries_width = if entries > 0 {
             8 + entries * self.taskbar_entry_width() + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
         } else {
@@ -962,12 +1006,23 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        let group_x = match self.taskbar.alignment {
-            Alignment::Center => (self.width - self.taskbar_group_width()) / 2,
+        let width = self.taskbar_group_width();
+        // The group may not run under the right-side controls (workspace
+        // boxes, tray, status icons, clock). Centre it inside the free band
+        // between the left margin and those controls -- not the whole screen,
+        // which the pinned defaults already fill past their left edge. When
+        // the group cannot fit even there, clamp it to the left margin so
+        // only the excess, never the whole group, overlaps.
+        let controls_left = self.workspace_area(0).x - 8;
+        let left = match self.taskbar.alignment {
+            Alignment::Center => {
+                let free = (controls_left - 8).max(0);
+                (8 + free / 2 - width / 2).clamp(8, (controls_left - width).max(8))
+            }
             Alignment::Left => 8,
         };
         Area::new(
-            group_x.max(4),
+            left.max(4),
             self.taskbar_top() + 4,
             START_BUTTON_WIDTH,
             START_HEIGHT as i32,
@@ -1146,9 +1201,17 @@ impl Desktop {
     /// Launch catalog entry `index` and close the launcher. A failure is
     /// reported in a toast. Returns the area to repaint.
     fn launch(&mut self, index: usize) -> Area {
-        let mut dirty = self.toggle_launcher();
+        self.toggle_launcher().union(self.start_app(index))
+    }
+
+    /// Start catalog entry `index` without touching the launcher: the
+    /// taskbar's pinned entries call this directly, so clicking a pin does
+    /// not open the Start panel. A failure is reported in a toast.
+    /// Returns the area to repaint.
+    fn start_app(&mut self, index: usize) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
         let Some(app) = self.apps[index] else {
-            return dirty;
+            return empty;
         };
         let slot = self.children.iter().position(Option::is_none);
         let mut buffer = [0u8; 128];
@@ -1177,9 +1240,9 @@ impl Desktop {
                 until: libwoven::ticks() + TOAST_TICKS,
             });
             log(&[b"woven-shell: could not start ", app.name()]);
-            dirty = dirty.union(self.toast_area());
+            return empty.union(self.toast_area());
         }
-        dirty
+        empty
     }
 
     /// Keys while the launcher is open edit the search and choose.
@@ -1250,6 +1313,64 @@ impl Desktop {
             .enumerate()
             .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
             .filter(move |(_, window)| window.workspace == workspace)
+    }
+
+    /// Catalog index of the app named `name`, if the catalog lists it.
+    fn app_index(&self, name: &[u8]) -> Option<usize> {
+        self.apps[..self.app_count]
+            .iter()
+            .position(|app| app.is_some_and(|app| app.name() == name))
+    }
+
+    /// Catalog index of the app that owns window `slot`, when the shell
+    /// launched it. Windows whose owner the shell did not spawn have no
+    /// app, and are not pinnable.
+    fn window_app(&self, slot: usize) -> Option<usize> {
+        let owner = self.windows.get(slot)?.as_ref()?.owner;
+        self.children
+            .iter()
+            .flatten()
+            .find(|child| child.pid == owner)
+            .map(|child| child.app)
+    }
+
+    /// The taskbar's application group, in display order: pinned apps in
+    /// pin order first -- a pinned app with a window on this workspace
+    /// shows that window's entry at the pin's position -- then every other
+    /// window in slot order. A pin whose name is not in the catalog is
+    /// not shown: a missing package leaves the pin inert, the same
+    /// contract as the desktop shortcuts. Bounded by
+    /// `MAX_PINNED` + `MAX_WINDOWS` entries.
+    fn taskbar_entries(&self) -> ([TaskbarEntry; PIN_CAP + MAX_WINDOWS], usize) {
+        let mut entries = [TaskbarEntry::Window(0); PIN_CAP + MAX_WINDOWS];
+        let mut claimed = [false; MAX_WINDOWS];
+        let mut count = 0;
+        for pin in 0..self.pinned.len() {
+            let Some(name) = self.pinned.get(pin) else {
+                continue;
+            };
+            let Some(app) = self.app_index(name.as_bytes()) else {
+                continue;
+            };
+            let claimed_slot = self.entries().find_map(|(slot, _)| {
+                (!claimed[slot] && self.window_app(slot) == Some(app)).then_some(slot)
+            });
+            match claimed_slot {
+                Some(slot) => {
+                    claimed[slot] = true;
+                    entries[count] = TaskbarEntry::Window(slot);
+                }
+                None => entries[count] = TaskbarEntry::PinnedApp(app),
+            }
+            count += 1;
+        }
+        for (slot, _) in self.entries() {
+            if !claimed[slot] {
+                entries[count] = TaskbarEntry::Window(slot);
+                count += 1;
+            }
+        }
+        (entries, count)
     }
 
     /// The switcher box for workspace `index`, left of the Quick Settings
@@ -1431,7 +1552,9 @@ impl Desktop {
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
         self.paint_desktop_icons(canvas);
-        self.paint_taskbar_content(canvas);
+        if !self.auto_hide.is_hidden() {
+            self.paint_taskbar_content(canvas);
+        }
     }
 
     /// The taskbar content: its translucent fill and bottom accent line, the
@@ -1509,48 +1632,94 @@ impl Desktop {
             );
         }
 
-        for (index, (slot, window)) in self.entries().enumerate() {
+        let (taskbar_entries, entry_count) = self.taskbar_entries();
+        for (index, entry) in taskbar_entries[..entry_count].iter().enumerate() {
             let area = self.taskbar_entry_area(index);
-            let active = self.focused() == Some(slot);
-            let hovered = !active && area.contains(self.pointer.0, self.pointer.1);
-            fill_rounded(
-                canvas,
-                area,
-                CHROME_RADIUS_SMALL,
-                if active {
-                    lighten(theme_entry(true), 12)
-                } else if hovered {
-                    lighten(theme_entry(false), 8)
-                } else {
-                    theme_entry(false)
-                },
-            );
-            // Win11-style running/active indicator.
-            let indicator_w = if active { 16 } else { 6 };
-            let indicator_x = area.x + (area.width - indicator_w) / 2;
-            let indicator_y = area.y + area.height - 3;
-            fill_rounded(
-                canvas,
-                Area::new(indicator_x, indicator_y, indicator_w, 3),
-                1,
-                if active {
-                    theme_accent()
-                } else {
-                    theme_muted()
-                },
-            );
-            draw_app_icon(
-                canvas,
-                area.x + 2,
-                area.y + 1,
-                app_icon(&window.title[..window.title_length]),
-                14,
-                false,
-            );
-            let mut title = [0u8; 32];
-            let length = label(&window.title[..window.title_length], 5, &mut title);
-            let text = core::str::from_utf8(&title[..length]).unwrap_or("");
-            canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+            match entry {
+                TaskbarEntry::Window(slot) => {
+                    let slot = *slot;
+                    let active = self.focused() == Some(slot);
+                    let minimized = self.is_minimized(slot);
+                    let hovered =
+                        !active && !minimized && area.contains(self.pointer.0, self.pointer.1);
+                    let fill = if active {
+                        lighten(theme_entry(true), 12)
+                    } else if minimized {
+                        blend(theme_entry(false), theme_taskbar(), 90)
+                    } else if hovered {
+                        lighten(theme_entry(false), 8)
+                    } else {
+                        theme_entry(false)
+                    };
+                    fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
+                    // Win11-style running/active indicator: a wide accent bar for the
+                    // focused window, a short muted bar for a running one, and a short
+                    // dim bar for a minimized one.
+                    let (indicator_w, indicator_color) = if active {
+                        (16, theme_accent())
+                    } else if minimized {
+                        (6, blend(theme_muted(), theme_taskbar(), 100))
+                    } else {
+                        (6, theme_muted())
+                    };
+                    let indicator_x = area.x + (area.width - indicator_w) / 2;
+                    let indicator_y = area.y + area.height - 3;
+                    fill_rounded(
+                        canvas,
+                        Area::new(indicator_x, indicator_y, indicator_w, 3),
+                        1,
+                        indicator_color,
+                    );
+                    let Some(window) = self.windows[slot].as_ref() else {
+                        continue;
+                    };
+                    draw_app_icon(
+                        canvas,
+                        area.x + 2,
+                        area.y + 1,
+                        app_icon(&window.title[..window.title_length]),
+                        14,
+                        minimized,
+                    );
+                    let mut title = [0u8; 32];
+                    let length = label(&window.title[..window.title_length], 5, &mut title);
+                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+                    let ink = if minimized {
+                        blend(theme_text(), theme_taskbar(), 110)
+                    } else {
+                        theme_text()
+                    };
+                    canvas.draw_text_system(area.x + 18, self.text_y(), text, ink);
+                }
+                TaskbarEntry::PinnedApp(app) => {
+                    // A pinned app with no window on this workspace. Same
+                    // tile treatment as a running entry, but no running
+                    // indicator: being in the group at all is the pin.
+                    let Some(app) = self.apps[*app] else {
+                        continue;
+                    };
+                    let hovered = area.contains(self.pointer.0, self.pointer.1);
+                    fill_rounded(
+                        canvas,
+                        area,
+                        CHROME_RADIUS_SMALL,
+                        if hovered {
+                            lighten(theme_entry(false), 8)
+                        } else {
+                            theme_entry(false)
+                        },
+                    );
+                    draw_app_icon(canvas, area.x + 2, area.y + 1, app_icon(app.name()), 14, false);
+                    let shown = app
+                        .name()
+                        .strip_prefix(b"Woven")
+                        .unwrap_or_else(|| app.name());
+                    let mut title = [0u8; 32];
+                    let length = label(shown, 5, &mut title);
+                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+                    canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+                }
+            }
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
@@ -1924,7 +2093,9 @@ impl Desktop {
             | QsAction::Airplane
             | QsAction::BatterySaver
             | QsAction::NightLight => false,
+            QsAction::TaskbarAlign => self.taskbar.alignment == taskbar_prefs::Alignment::Left,
             QsAction::FocusAssist => self.dnd,
+            QsAction::TaskbarIconSize => self.taskbar.icon_size != taskbar_prefs::IconSize::Medium,
             QsAction::Accessibility => self.reduced_motion,
             QsAction::DisplayScale => self.scale == 2,
             QsAction::Tiling => self.tiled,
@@ -1940,8 +2111,10 @@ impl Desktop {
             QsAction::Bluetooth => "Bluetooth",
             QsAction::Airplane => "Airplane mode",
             QsAction::BatterySaver => "Battery saver",
+            QsAction::TaskbarAlign => "Taskbar align",
             QsAction::FocusAssist => "Focus assist",
             QsAction::NightLight => "Night light",
+            QsAction::TaskbarIconSize => "Icon size",
             QsAction::Accessibility => "Accessibility",
             QsAction::DisplayScale => "Scale",
             QsAction::Tiling => "Tiling",
@@ -1958,6 +2131,10 @@ impl Desktop {
             | QsAction::Airplane
             | QsAction::BatterySaver
             | QsAction::NightLight => "Unavailable",
+            QsAction::TaskbarAlign => match self.taskbar.alignment {
+                taskbar_prefs::Alignment::Center => "Center",
+                taskbar_prefs::Alignment::Left => "Left",
+            },
             QsAction::FocusAssist => {
                 if self.dnd {
                     "On"
@@ -1965,6 +2142,11 @@ impl Desktop {
                     "Off"
                 }
             }
+            QsAction::TaskbarIconSize => match self.taskbar.icon_size {
+                taskbar_prefs::IconSize::Small => "Small",
+                taskbar_prefs::IconSize::Medium => "Medium",
+                taskbar_prefs::IconSize::Large => "Large",
+            },
             QsAction::Accessibility => {
                 if self.reduced_motion {
                     "On"
@@ -2577,6 +2759,32 @@ impl Desktop {
                 panel
             }
             QsAction::ChangePin => self.start_change_pin(),
+            QsAction::TaskbarAlign => {
+                self.taskbar.alignment = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => taskbar_prefs::Alignment::Left,
+                    taskbar_prefs::Alignment::Left => taskbar_prefs::Alignment::Center,
+                };
+                let label = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => "Taskbar alignment: Center (session)",
+                    taskbar_prefs::Alignment::Left => "Taskbar alignment: Left (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
+            QsAction::TaskbarIconSize => {
+                self.taskbar.icon_size = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => taskbar_prefs::IconSize::Medium,
+                    taskbar_prefs::IconSize::Medium => taskbar_prefs::IconSize::Large,
+                    taskbar_prefs::IconSize::Large => taskbar_prefs::IconSize::Small,
+                };
+                let label = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => "Taskbar icon size: Small (session)",
+                    taskbar_prefs::IconSize::Medium => "Taskbar icon size: Medium (session)",
+                    taskbar_prefs::IconSize::Large => "Taskbar icon size: Large (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
         }
     }
 
@@ -2920,6 +3128,31 @@ impl Desktop {
                 canvas.fill_rect(x + 8, y + 5, 4, 4, inner);
                 canvas.fill_rect(x + 9, y + 12, 2, 3, inner);
             }
+            QsAction::TaskbarAlign => {
+                // bar with centered/left group indicator
+                canvas.fill_rect(x + 2, y + 14, 16, 3, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                if self.taskbar.alignment == taskbar_prefs::Alignment::Left {
+                    canvas.fill_rect(x + 3, y + 15, 3, 1, inner);
+                    canvas.fill_rect(x + 7, y + 15, 3, 1, inner);
+                } else {
+                    canvas.fill_rect(x + 7, y + 15, 2, 1, inner);
+                    canvas.fill_rect(x + 10, y + 15, 2, 1, inner);
+                }
+                canvas.fill_rect(x + 4, y + 5, 12, 7, c);
+                canvas.fill_rect(x + 5, y + 6, 10, 5, inner);
+            }
+            QsAction::TaskbarIconSize => {
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                for (dx, size) in [(3i32, 3i32), (8, 4), (14, 5)] {
+                    let dy = y + 16 - size;
+                    canvas.fill_rect(x + dx, dy, size as usize, size as usize, c);
+                    if size > 2 {
+                        canvas.fill_rect(x + dx + 1, dy + 1, (size - 2) as usize, (size - 2) as usize, inner);
+                    }
+                }
+            }
+
         }
         let _ = (a, active);
     }
@@ -3782,6 +4015,9 @@ impl Desktop {
         if area.is_empty() {
             return None;
         }
+        // A single repaint can take many ticks in software; snapshot once so a
+        // slow compose does not burn through a resize grace window by itself.
+        let now = libwoven::ticks();
         // Locked, nothing but the lock screen is drawn: no window, no
         // notification, no pointer. Repaint the whole card, not just the
         // damaged sub-region: the sign-in content is re-laid-out on every
@@ -3836,19 +4072,12 @@ impl Desktop {
             if alpha == 0 {
                 continue;
             }
-            for (offset, opacity) in bands {
-                let band = Area::new(
-                    frame.x + offset,
-                    frame.y + offset,
-                    frame.width,
-                    frame.height,
-                );
-                let part = band.intersect(area).intersect(above_taskbar);
-                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
-                if !part.is_empty() && opacity != 0 {
-                    painter.blend(part, SHADOW, opacity);
-                }
-            }
+            // Window shadows are temporarily disabled: painter.blend's
+            // present_region_blended path can stall on the software compositor
+            // during heavy QEMU repaints, which hung the shell after maximize.
+            // TODO(phase-b): restore shadows once the compositor blend path is
+            // proven non-blocking in this environment.
+            let _ = (bands, frame, area, above_taskbar, SHADOW);
             let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
@@ -3877,7 +4106,8 @@ impl Desktop {
                     });
                 }
             }
-            let body = window.body().intersect(area);
+            let surface = Area::new(window.x, window.y, window.surface_w, window.surface_h);
+            let body = window.body().intersect(surface).intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
                 let result = if alpha == u8::MAX {
@@ -3893,8 +4123,23 @@ impl Desktop {
                 };
                 // A resize deliberately permits a bounded gap between the
                 // old surface's release and the replacement WRSZ message.
-                if result.is_err() && libwoven::ticks() >= window.resizing_until {
+                if result.is_err() && now >= window.resizing_until {
                     return Some(slot);
+                }
+            }
+            // A client may clamp a maximize WSIZ to a smaller surface; fill the
+            // uncovered body so desktop background never shows through the frame.
+            let full_body = window.body().intersect(above_taskbar).intersect(area);
+            if full_body.width > window.surface_w || full_body.height > window.surface_h {
+                let sw = window.surface_w.max(0);
+                let sh = window.surface_h.max(0);
+                let right = Area::new(window.x + sw, window.y, window.width - sw, window.height);
+                let bottom = Area::new(window.x, window.y + sh, sw, window.height - sh);
+                for gap in [right, bottom] {
+                    let part = gap.intersect(area).intersect(above_taskbar);
+                    if !part.is_empty() {
+                        painter.blend(part, theme_panel(), 255);
+                    }
                 }
             }
             // Subtle Win11-style window border: accent for focused, muted for inactive.
@@ -3998,6 +4243,186 @@ impl Desktop {
             .union(self.taskbar())
     }
 
+    /// A window is minimized while its slot is outside the visual stack: it
+    /// is then never painted, focused or hit-tested, but it keeps its taskbar
+    /// entry so it can be restored.
+    fn is_minimized(&self, slot: usize) -> bool {
+        self.windows[slot].is_some() && !self.stack[..self.stacked].contains(&slot)
+    }
+
+    /// Minimize `slot`, handing focus to the next window down the stack.
+    fn minimize(&mut self, slot: usize) -> Area {
+        let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) else {
+            return Area::new(0, 0, 0, 0);
+        };
+        self.cancel_pointer_gesture();
+        let hidden = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[position..self.stacked].rotate_left(1);
+        self.stacked -= 1;
+        let next = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        log(&[b"woven-shell: window minimized"]);
+        hidden.union(next).union(self.taskbar())
+    }
+
+    /// Restore a minimized window to the top of the stack and focus it.
+    fn restore(&mut self, slot: usize) -> Area {
+        if !self.is_minimized(slot) || self.stacked >= self.stack.len() {
+            return Area::new(0, 0, 0, 0);
+        }
+        let previous = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[self.stacked] = slot;
+        self.stacked += 1;
+        log(&[b"woven-shell: window restored"]);
+        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        previous.union(current).union(self.taskbar())
+    }
+
+    /// Taskbar button policy: the focused window's button minimizes it, a
+    /// minimized window's button restores it, and any other focuses it.
+    fn taskbar_activate(&mut self, slot: usize) -> Area {
+        if self.focused() == Some(slot) {
+            self.minimize(slot)
+        } else if self.is_minimized(slot) {
+            self.restore(slot)
+        } else {
+            self.focus(slot)
+        }
+    }
+
+    /// Maximize or restore window `slot`, from a right-click on its title
+    /// bar. A maximized window's frame fills the usable band -- the title
+    /// bar at the very top, the client area below it to the band's bottom;
+    /// the exact pre-maximize geometry is remembered and returned verbatim
+    /// on restore. Returns the areas to repaint.
+    fn toggle_maximize(&mut self, slot: usize) -> Area {
+        let (_, band_height) = self.usable_band();
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let (next_x, next_y, next_w, next_h, next_maximized) = if window.maximized {
+            let [x, y, width, height] = window.restore;
+            (x, y, width, height, false)
+        } else {
+            (
+                0,
+                TITLE_HEIGHT,
+                self.width,
+                (band_height - TITLE_HEIGHT).max(0),
+                true,
+            )
+        };
+        if !window.maximized {
+            window.restore = [window.x, window.y, window.width, window.height];
+        }
+        window.x = next_x;
+        window.y = next_y;
+        window.width = next_w;
+        window.height = next_h;
+        window.maximized = next_maximized;
+        // Frame-only maximize: keep the client's current surface and blit it
+        // inside the band-filling frame. Asking the client to reflow via WSIZ
+        // can race with concurrent compositor work on slow 1-CPU QEMU runs;
+        // client reflow on maximize is a follow-up once that path is proven.
+        if next_maximized {
+            log(&[
+                b"woven-shell: window maximized: ",
+                &window.title[..window.title_length],
+            ]);
+        } else {
+            log(&[
+                b"woven-shell: window restored: ",
+                &window.title[..window.title_length],
+            ]);
+        }
+        let after = self
+            .windows
+            .get(slot)
+            .and_then(|window| window.as_ref())
+            .map(Window::footprint)
+            .unwrap_or(before);
+        before.union(after)
+    }
+
+    /// Pin or unpin the app behind a taskbar entry, and say which happened
+    /// in a toast. The whole strip repaints because the group re-flows
+    /// around its pins. In-session state only: the shell process holds
+    /// `FileRead` and no settings-write path exists, so pins reset to the
+    /// installed record's list on the next boot, and no message here
+    /// promises otherwise.
+    fn toggle_pin(&mut self, entry: TaskbarEntry) -> Area {
+        let Some((name, length)) = self.entry_app_name(entry) else {
+            return self.toast_message("No app for this window");
+        };
+        let Ok(name) = core::str::from_utf8(&name[..length]) else {
+            return self.toast_message("Cannot pin");
+        };
+        if self.pinned.contains(name) {
+            self.pinned.unpin(name);
+            let mut buffer = [0u8; 48];
+            let text = pin_text(b"Unpinned ", name.as_bytes(), &mut buffer);
+            log(&[b"woven-shell: ", text.as_bytes()]);
+            let toast = self.toast_message(text);
+            return self.taskbar().union(toast);
+        }
+        let mut buffer = [0u8; 48];
+        let text = pin_text(b"Pinned ", name.as_bytes(), &mut buffer);
+        log(&[b"woven-shell: ", text.as_bytes()]);
+        let toast = self.toast_message(text);
+        match self.pinned.pin(name) {
+            Ok(()) => self.taskbar().union(toast),
+            Err(PinError::Full) => self.taskbar().union(self.toast_message("Pin list full")),
+            Err(PinError::Invalid) => self.taskbar().union(self.toast_message("Cannot pin")),
+            // `contains` just said otherwise; report without changing.
+            Err(PinError::Duplicate) => {
+                self.taskbar().union(self.toast_message("Already pinned"))
+            }
+        }
+    }
+
+    /// The catalog name behind a taskbar entry, copied out so nothing
+    /// borrows the catalog. Windows whose owner the shell did not launch
+    /// have no app, so they have no name.
+    fn entry_app_name(&self, entry: TaskbarEntry) -> Option<([u8; MAX_APP_NAME], usize)> {
+        let app = match entry {
+            TaskbarEntry::PinnedApp(app) => self.apps[app],
+            TaskbarEntry::Window(slot) => self.window_app(slot).and_then(|app| self.apps[app]),
+        }?;
+        let name = app.name();
+        if name.is_empty() || name.len() > MAX_APP_NAME {
+            return None;
+        }
+        let mut buffer = [0u8; MAX_APP_NAME];
+        buffer[..name.len()].copy_from_slice(name);
+        Some((buffer, name.len()))
+    }
+
+    /// Right-click on an empty part of the strip: flip the auto-hide
+    /// preference in-session, with a toast saying which way it went.
+    /// Enabling hides the bar immediately; disabling reveals it. Like
+    /// pins, the preference resets on the next boot to whatever the
+    /// installed settings record says; no write path is pretended.
+    fn toggle_auto_hide(&mut self) -> Area {
+        let changed = self.auto_hide.toggle();
+        let text = if self.auto_hide.enabled() {
+            "Taskbar auto-hide on"
+        } else {
+            "Taskbar auto-hide off"
+        };
+        log(&[b"woven-shell: ", text.as_bytes()]);
+        let toast = self.toast_message(text);
+        let strip = if changed { self.taskbar() } else { Area::new(0, 0, 0, 0) };
+        strip.union(toast)
+    }
+
     /// Open a window for `owner`. Returns the areas to repaint.
     fn open(&mut self, owner: process::Id, message: &[u8]) -> Dirty {
         if message.len() < 16 {
@@ -4050,6 +4475,10 @@ impl Desktop {
             workspace: self.workspace,
             resizing_until: 0,
             cancellation_protocol: false,
+            maximized: false,
+            restore: [0; 4],
+            surface_w: width,
+            surface_h: height,
         };
         self.windows[slot] = Some(window);
         let previous = self
@@ -4089,6 +4518,9 @@ impl Desktop {
         let client = frame.client(TITLE_HEIGHT);
         window.x = client.x;
         window.y = client.y;
+        // An explicit re-placement (snap, tiling) ends maximization: the
+        // window is where the user put it, not filling the band.
+        window.maximized = false;
         if (client.width, client.height) != (window.width, window.height) {
             let mut request = [0u8; 8];
             request[..4].copy_from_slice(b"WSIZ");
@@ -4149,9 +4581,30 @@ impl Desktop {
         };
         let before = window.footprint();
         window.token = token;
+        window.surface_w = width;
+        window.surface_h = height;
+        window.resizing_until = 0;
+        let size_changed = (width, height) != (window.width, window.height);
+        if window.maximized && size_changed {
+            // A maximized client may clamp to a smaller surface than the
+            // band-filling frame (e.g. a fixed max buffer). Keep the frame
+            // maximized and blit the smaller surface inside it; the client
+            // can still reflow later by sending another WRSZ.
+            log(&[
+                b"woven-shell: window resized (maximized, clamped): ",
+                &window.title[..window.title_length],
+            ]);
+            return before.union(window.footprint());
+        }
         window.width = width;
         window.height = height;
-        window.resizing_until = 0;
+        // A client-driven resize ends maximization: the client owns its new
+        // canvas, and the flag must never describe a stale band-filling
+        // frame. Ignore the echo of a maximize/restore WSIZ we just sent,
+        // where the client reports back the size the shell already asked for.
+        if size_changed {
+            window.maximized = false;
+        }
         log(&[
             b"woven-shell: window resized: ",
             &window.title[..window.title_length],
@@ -4306,32 +4759,44 @@ impl Desktop {
                 pressed: true,
             } => {
                 let (x, y) = self.pointer;
-                if let Some(index) =
-                    (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
-                {
-                    return self.switch_workspace(index);
-                }
-                if self.start_area().contains(x, y) {
-                    return self.toggle_launcher();
-                }
-                let taskbar_slot = self.entries().enumerate().find_map(|(index, (slot, _))| {
-                    self.taskbar_entry_area(index)
-                        .contains(x, y)
-                        .then_some(slot)
-                });
-                if let Some(slot) = taskbar_slot {
-                    return self.focus(slot);
-                }
-                // The three status glyphs own their own slots; they are not
-                // client tray surfaces and cannot be hit-tested as one.
-                if let Some(index) =
-                    (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
-                {
-                    return self.status_click(index);
-                }
-                // The Quick Settings button, and its panel's rows.
-                if self.qs_button().contains(x, y) {
-                    return self.toggle_qs();
+                // The strip's controls exist only while the bar is painted.
+                // Hidden, none of them may capture: the reveal happens on
+                // pointer motion, not on a press.
+                if !self.auto_hide.is_hidden() {
+                    if let Some(index) =
+                        (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
+                    {
+                        return self.switch_workspace(index);
+                    }
+                    if self.start_area().contains(x, y) {
+                        return self.toggle_launcher();
+                    }
+                    let (taskbar_entries, entry_count) = self.taskbar_entries();
+                    let entry_hit = (0..entry_count)
+                        .find(|&index| self.taskbar_entry_area(index).contains(x, y))
+                        .map(|index| taskbar_entries[index]);
+                    if let Some(entry) = entry_hit {
+                        return match entry {
+                            // A window entry behaves as before: focus, minimize
+                            // when already focused, restore when minimized.
+                            TaskbarEntry::Window(slot) => self.taskbar_activate(slot),
+                            // A pinned app with no window on this workspace
+                            // starts one, like a Dash icon. This does not open
+                            // the launcher.
+                            TaskbarEntry::PinnedApp(app) => self.start_app(app),
+                        };
+                    }
+                    // The three status glyphs own their own slots; they are not
+                    // client tray surfaces and cannot be hit-tested as one.
+                    if let Some(index) =
+                        (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
+                    {
+                        return self.status_click(index);
+                    }
+                    // The Quick Settings button, and its panel's rows.
+                    if self.qs_button().contains(x, y) {
+                        return self.toggle_qs();
+                    }
                 }
                 if self.qs_open {
                     let panel = self.qs_area();
@@ -4401,9 +4866,11 @@ impl Desktop {
                     }
                     return empty;
                 }
-                // The clock opens and closes the Notification Center.
-                if self.clock_area().contains(x, y)
-                    || (self.unread > 0 && self.badge_area().contains(x, y))
+                // The clock opens and closes the Notification Center; it is a
+                // strip control, so it exists only while the bar is painted.
+                if !self.auto_hide.is_hidden()
+                    && (self.clock_area().contains(x, y)
+                        || (self.unread > 0 && self.badge_area().contains(x, y)))
                 {
                     return self.toggle_center();
                 }
@@ -4514,12 +4981,64 @@ impl Desktop {
                     return empty;
                 }
                 if window.title_area().contains(x, y) {
-                    self.drag = Some((slot, x - window.x, y - window.y));
+                    // Dragging a maximized window restores it first, so the
+                    // drag moves a normally-shaped window rather than a
+                    // full-band frame under the pointer's original offset.
+                    let restored = if window.maximized {
+                        self.toggle_maximize(slot)
+                    } else {
+                        Area::new(0, 0, 0, 0)
+                    };
+                    if let Some(current) = self.windows[slot] {
+                        self.drag = Some((slot, x - current.x, y - current.y));
+                    }
+                    return restored.union(self.focus(slot));
                 } else if window.body().contains(x, y) {
                     self.pointer_capture = Some(slot);
                     self.forward_pointer_button(slot, true);
                 }
                 self.focus(slot)
+            }
+            // Right-click a taskbar entry to pin or unpin its app for this
+            // session. The PS/2 decoder and the HID ABI both deliver
+            // button 1; no other desktop control consumes it yet.
+            InputEvent::PointerButton {
+                button: 1,
+                pressed: true,
+            } => {
+                let (x, y) = self.pointer;
+                // A right-click on a window's title bar maximizes or
+                // restores that window, Win11-style. The title bar is
+                // shell-owned chrome (left-click drags it), so this never
+                // reaches the client.
+                let title_hit = self.stack[..self.stacked]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.frame().contains(x, y))
+                    })
+                    .filter(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.title_area().contains(x, y))
+                    });
+                if let Some(slot) = title_hit {
+                    return self.toggle_maximize(slot);
+                }
+                let (taskbar_entries, entry_count) = self.taskbar_entries();
+                let Some(entry) = (0..entry_count)
+                    .find(|&index| self.taskbar_entry_area(index).contains(x, y))
+                    .map(|index| taskbar_entries[index])
+                else {
+                    // An empty part of the strip flips the auto-hide
+                    // preference; the toast says which way it went.
+                    if self.taskbar().contains(x, y) && !self.auto_hide.is_hidden() {
+                        return self.toggle_auto_hide();
+                    }
+                    return empty;
+                };
+                self.toggle_pin(entry)
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => {
@@ -4590,9 +5109,22 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         self.pointer_visible = true;
-        let moved = self.drag_to_pointer();
+        let mut moved = self.drag_to_pointer();
         if self.drag.is_none() {
             self.forward_pointer_move();
+        }
+        // Auto-hide: the screen's bottom row reveals a hidden bar, and any
+        // position inside the strip refreshes the hold on a revealed one.
+        let (_, pointer_y) = self.pointer;
+        if self.auto_hide.pointer(
+            pointer_y,
+            self.height - 1,
+            self.taskbar_top(),
+            libwoven::ticks(),
+            AUTO_HIDE_HOLD,
+        ) {
+            log(&[b"woven-shell: taskbar revealed"]);
+            moved = moved.union(self.taskbar());
         }
         moved
     }
@@ -4812,6 +5344,17 @@ impl Desktop {
             self.toast = None;
             dirty = dirty.union(self.toast_area());
         }
+        // Auto-hide: past the hold, the bar goes back down. Panels that hang
+        // off the strip (Quick Settings, Notification Center, the overview)
+        // hold it up until they close.
+        if self.auto_hide.tick(now)
+            && !self.qs_open
+            && !self.center_open
+            && !self.launcher_open
+        {
+            log(&[b"woven-shell: taskbar hidden"]);
+            dirty = dirty.union(self.taskbar());
+        }
         dirty
     }
 }
@@ -4854,6 +5397,7 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
         json_string(data, b"taskbar_alignment"),
         json_string(data, b"taskbar_icon_size"),
     );
+    desktop.auto_hide = AutoHide::from_setting(json_string(data, b"taskbar_auto_hide"));
     desktop.pinned = PinnedApps::from_setting(json_string(data, b"pinned_apps"));
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
@@ -4946,6 +5490,38 @@ fn main(args: Args) -> ! {
                 if desktop.accounts.iter().all(Option::is_none) {
                     fail(9);
                 }
+            }
+            b"--taskbar-alignment" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(Alignment::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.alignment = value;
+            }
+            b"--taskbar-icon-size" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(IconSize::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.icon_size = value;
+            }
+            b"--taskbar-auto-hide" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                else {
+                    fail(1);
+                };
+                desktop.auto_hide = AutoHide::from_setting(Some(value));
             }
             _ => fail(1),
         }
@@ -5058,6 +5634,28 @@ fn main(args: Args) -> ! {
     let mut pid = [0u8; 20];
     let pid = libwoven::format_u64(libwoven::current_pid().0, &mut pid);
     log(&[b"woven-shell: desktop ready pid=", pid]);
+    let alignment = match desktop.taskbar.alignment {
+        taskbar_prefs::Alignment::Center => b"center" as &[u8],
+        taskbar_prefs::Alignment::Left => b"left",
+    };
+    let icon_size = match desktop.taskbar.icon_size {
+        taskbar_prefs::IconSize::Small => b"small" as &[u8],
+        taskbar_prefs::IconSize::Medium => b"medium",
+        taskbar_prefs::IconSize::Large => b"large",
+    };
+    let auto_hide = if desktop.auto_hide.enabled() {
+        b"on" as &[u8]
+    } else {
+        b"off"
+    };
+    log(&[
+        b"woven-shell: taskbar layout alignment=",
+        alignment,
+        b" icon_size=",
+        icon_size,
+        b" auto_hide=",
+        auto_hide,
+    ]);
 
     // The overview draws every app label on its first F1 paint. Warm the fixed
     // glyph cache with that bounded label set now so cold outline rasterisation
