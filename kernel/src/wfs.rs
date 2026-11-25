@@ -32,6 +32,49 @@ pub fn arm_interrupt_after_journal_commit() {
     INTERRUPT_AFTER_JOURNAL_COMMIT.store(true, Ordering::Release);
 }
 
+#[cfg(any(
+    feature = "installed-wovenfs-interruption-qualification",
+    feature = "installed-wovenfs-interruption-test"
+))]
+fn interruption_point() -> u8 {
+    match option_env!("WOVENHAT_WFS_INTERRUPTION_POINT") {
+        None | Some("commit") => 2,
+        Some("descriptor") => 0,
+        Some("staged") => 1,
+        Some("target") => 3,
+        Some("target-flush") => 4,
+        Some("checkpoint") => 5,
+        Some("retire") => 6,
+        Some(_) => panic!("unsupported WOVENHAT_WFS_INTERRUPTION_POINT"),
+    }
+}
+
+#[cfg(any(
+    feature = "installed-wovenfs-interruption-qualification",
+    feature = "installed-wovenfs-interruption-test"
+))]
+fn maybe_interrupt(point: u8) {
+    if point != interruption_point()
+        || !INTERRUPT_AFTER_JOURNAL_COMMIT.swap(false, Ordering::AcqRel)
+    {
+        return;
+    }
+    let name = match point {
+        0 => "descriptor",
+        1 => "staged",
+        2 => "commit",
+        3 => "target",
+        4 => "target-flush",
+        5 => "checkpoint",
+        6 => "retire",
+        _ => "unknown",
+    };
+    crate::serial::write_line(format_args!(
+        "[INSTALLED WOVENFS] journal {name} interruption: PASSED"
+    ));
+    crate::qemu_test_exit_success();
+}
+
 #[cfg(not(test))]
 use alloc::string::String;
 #[cfg(test)]
@@ -898,6 +941,11 @@ impl<D: BlockDevice> Volume<D> {
         let zero = [0u8; SECTOR_SIZE];
         self.device
             .write_sector(self.super_block.journal_start, &zero)?;
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        maybe_interrupt(6);
         self.device.flush()?;
         Ok(())
     }
@@ -923,12 +971,22 @@ impl<D: BlockDevice> Volume<D> {
             descriptor[at..at + 8].copy_from_slice(&block.target.to_le_bytes());
         }
         self.device.write_sector(sb.journal_start, &descriptor)?;
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        maybe_interrupt(0);
 
         for (index, block) in txn.blocks[..count].iter().enumerate() {
             self.device
                 .write_sector(sb.journal_start + 1 + index as u64, &block.data)?;
         }
         self.device.flush()?;
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        maybe_interrupt(1);
 
         let mut commit = [0u8; SECTOR_SIZE];
         commit[..8].copy_from_slice(JOURNAL_COMMIT_MAGIC);
@@ -942,17 +1000,22 @@ impl<D: BlockDevice> Volume<D> {
             feature = "installed-wovenfs-interruption-qualification",
             feature = "installed-wovenfs-interruption-test"
         ))]
-        if INTERRUPT_AFTER_JOURNAL_COMMIT.swap(false, Ordering::AcqRel) {
-            crate::serial::write_line(format_args!(
-                "[INSTALLED WOVENFS] journal commit interruption: PASSED"
-            ));
-            crate::qemu_test_exit_success();
-        }
+        maybe_interrupt(2);
 
         for block in txn.blocks[..count].iter() {
             self.device.write_sector(block.target, &block.data)?;
+            #[cfg(any(
+                feature = "installed-wovenfs-interruption-qualification",
+                feature = "installed-wovenfs-interruption-test"
+            ))]
+            maybe_interrupt(3);
         }
         self.device.flush()?;
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        maybe_interrupt(4);
 
         let mut next = sb;
         next.sequence = transaction_id;
@@ -961,6 +1024,11 @@ impl<D: BlockDevice> Volume<D> {
         next.encode(&mut sector);
         self.device.write_sector(slot, &sector)?;
         self.device.flush()?;
+        #[cfg(any(
+            feature = "installed-wovenfs-interruption-qualification",
+            feature = "installed-wovenfs-interruption-test"
+        ))]
+        maybe_interrupt(5);
         self.super_block = next;
         self.slot = slot;
         self.retire_journal()

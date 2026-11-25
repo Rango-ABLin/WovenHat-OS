@@ -290,9 +290,10 @@ fn read_settings(output: &mut [u8]) -> Option<usize> {
 }
 
 fn persist_settings_file(path: &str, enabled: bool) -> bool {
+    let mut source = [0u8; 512];
     let mut data = [0u8; 512];
     let length = if path == SETTINGS_PATH {
-        match read_settings(&mut data) {
+        match read_settings(&mut source) {
             Some(length) => length,
             None => return false,
         }
@@ -300,18 +301,25 @@ fn persist_settings_file(path: &str, enabled: bool) -> bool {
         let Ok(descriptor) = libwoven::open(path) else {
             return false;
         };
-        let result = libwoven::read(descriptor, &mut data);
+        let result = libwoven::read(descriptor, &mut source);
         let _ = libwoven::close(descriptor);
         let Ok(length) = result else { return false };
         length
     };
-    if !libwoven::settings_policy::patch_high_contrast(&mut data[..length], enabled) {
+    let Ok(migration) = libwoven::settings_policy::migrate(&source[..length], &mut data) else {
+        return false;
+    };
+    if !libwoven::settings_policy::patch_high_contrast(
+        &mut data[..migration.length],
+        enabled,
+    ) {
         return false;
     }
     let Ok(descriptor) = libwoven::open_access(path, 2) else {
         return false;
     };
-    let result = libwoven::write_file_all(descriptor, &data[..length]) == Ok(length);
+    let result =
+        libwoven::write_file_all(descriptor, &data[..migration.length]) == Ok(migration.length);
     let _ = libwoven::close(descriptor);
     result
 }
@@ -323,11 +331,15 @@ fn persist_high_contrast(enabled: bool) -> bool {
 }
 
 fn persisted_mode(fallback: ThemeMode) -> ThemeMode {
-    let mut data = [0u8; 512];
-    let Some(length) = read_settings(&mut data) else {
+    let mut source = [0u8; 512];
+    let Some(length) = read_settings(&mut source) else {
         return fallback;
     };
-    if data[..length]
+    let mut data = [0u8; 512];
+    let Ok(migration) = libwoven::settings_policy::migrate(&source[..length], &mut data) else {
+        return fallback;
+    };
+    if data[..migration.length]
         .windows(b"\"high_contrast\":true".len())
         .any(|window| window == b"\"high_contrast\":true")
     {

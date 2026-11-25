@@ -368,11 +368,16 @@ def resolve_qemu_and_firmware(qemu: Path | None, firmware: Path | None) -> tuple
     return resolved_qemu, resolved_firmware
 
 
-def build_kernel_image(root: Path, feature: str, timeout: float) -> Path:
+def build_kernel_image(
+    root: Path, feature: str, timeout: float, interrupt_point: str | None = None
+) -> Path:
     """Build through the existing Cargo UEFI image path and return its image."""
     env = dict(os.environ)
     env.setdefault("CARGO_BUILD_BUILD_DIR", str(root / ".cargo-build"))
     env.setdefault("CARGO_TARGET_DIR", str(root / "target"))
+    if interrupt_point is not None:
+        env["WOVENHAT_WFS_INTERRUPTION_POINT"] = interrupt_point
+        env.pop("CARGO_INCREMENTAL", None)
     command = ["cargo", "run", "--quiet", "--features", feature, "--", "--print-image"]
     try:
         result = subprocess.run(
@@ -409,6 +414,7 @@ def run_profile(
     timeout: float,
     filesystem: str,
     interrupt_after_commit: bool = False,
+    interrupt_point: str | None = None,
 ) -> dict[str, object]:
     profile = output_root / f"{cpus}cpu"
     profile.mkdir(parents=True, exist_ok=False)
@@ -419,8 +425,8 @@ def run_profile(
         vars_copy = _copy_vars(firmware_vars, profile / "OVMF_VARS.fd")
     started = time.monotonic()
     first_marker = (
-        "[INSTALLED WOVENFS] journal commit interruption: PASSED"
-        if interrupt_after_commit
+        f"[INSTALLED WOVENFS] journal {interrupt_point or 'commit'} interruption: PASSED"
+        if interrupt_point is not None or interrupt_after_commit
         else "[INSTALLED WOVENFS] reboot phase write: PASSED"
     )
     markers = (
@@ -530,6 +536,7 @@ def run_gate(
     timeout: float,
     filesystem: str,
     interrupt_after_commit: bool = False,
+    interrupt_point: str | None = None,
 ) -> dict[str, object]:
     source_info = validate_source_image(source)
     if DEVICE_PATH_RE.search(str(output_root)):
@@ -542,6 +549,7 @@ def run_gate(
         results.append(run_profile(
             source_info_path(source_info), qemu, firmware, firmware_vars,
             output_root, profile, timeout, filesystem, interrupt_after_commit,
+            interrupt_point,
         ))
     passed = all(
         bool(item["guest"]["guest_execution"])
@@ -556,6 +564,7 @@ def run_gate(
         "media_attached": False,
         "filesystem": filesystem,
         "interrupt_after_commit": interrupt_after_commit,
+        "interrupt_point": interrupt_point,
         "profiles": results,
     }
     (output_root / "result.json").write_text(json_dumps(result) + "\n", encoding="utf-8")
@@ -571,6 +580,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--firmware-vars", type=Path)
     parser.add_argument("--filesystem", choices=("fat32", "wovenfs"), default="fat32")
     parser.add_argument("--interrupt-after-commit", action="store_true")
+    parser.add_argument(
+        "--interrupt-point",
+        choices=(
+            "descriptor",
+            "staged",
+            "commit",
+            "target",
+            "target-flush",
+            "checkpoint",
+            "retire",
+        ),
+    )
     cpu_group = parser.add_mutually_exclusive_group()
     cpu_group.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
     cpu_group.add_argument("--all-cpus", action="store_true")
@@ -578,16 +599,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args(argv)
     try:
-        validate_qualification_mode(args.filesystem, args.interrupt_after_commit)
+        if args.interrupt_after_commit and args.interrupt_point is None:
+            args.interrupt_point = "commit"
+        validate_qualification_mode(args.filesystem, args.interrupt_point)
         qemu, firmware = resolve_qemu_and_firmware(args.qemu, args.firmware)
         feature = args.feature
         if args.filesystem == "wovenfs" and feature == "stage28-installer-test":
             feature = (
                 "installed-wovenfs-interruption-test"
-                if args.interrupt_after_commit
+                if args.interrupt_point
                 else "installed-wovenfs-test"
             )
-        source = args.kernel_image or build_kernel_image(ROOT, feature, args.timeout)
+        source = args.kernel_image or build_kernel_image(
+            ROOT, feature, args.timeout, args.interrupt_point
+        )
         source = validate_source_image(source)["path"]
         source_path = Path(source)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -603,6 +628,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=args.timeout,
             filesystem=args.filesystem,
             interrupt_after_commit=args.interrupt_after_commit,
+            interrupt_point=args.interrupt_point,
         )
     except (InstalledDiskGateError, OSError, ValueError) as exc:
         print(f"INSTALLED-DISK-RELEASE: FAIL: {exc}", file=sys.stderr)
@@ -611,10 +637,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if result["valid"] else 1
 
 
-def validate_qualification_mode(filesystem: str, interrupt_after_commit: bool) -> None:
-    if interrupt_after_commit and filesystem != "wovenfs":
+def validate_qualification_mode(
+    filesystem: str, interruption: bool | str | None
+) -> None:
+    if interruption is not None and interruption is not False and filesystem != "wovenfs":
         raise InstalledDiskGateError(
-            "--interrupt-after-commit requires --filesystem wovenfs"
+            "WovenFS interruption qualification requires --filesystem wovenfs"
         )
 
 
