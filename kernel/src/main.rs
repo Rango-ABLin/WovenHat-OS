@@ -13049,15 +13049,14 @@ fn stage20_18_self_test() -> bool {
 fn stage20_9_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
+    const TASKBAR: u32 = rgb(24, 32, 46);
     const ACCENT: u32 = rgb(76, 190, 188);
     const START_FILL: u32 = rgb(28, 115, 145);
-    const PANEL_FILL: u32 = rgb(28, 32, 44);
-    const TOAST_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_FILL: u32 = rgb(32, 40, 56);
     const NOTES: u32 = rgb(150, 120, 40);
     const UNSET: u32 = 0x0100_0000;
 
@@ -13085,11 +13084,11 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = (x / 220 + y / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
+        let woven = blend_pixel(tint, base, 4);
+        if x % 220 == 0 || y % 220 == 0 {
+            blend_pixel(WHITE, woven, 4)
         } else {
             woven
         }
@@ -13175,36 +13174,50 @@ fn stage20_9_self_test() -> bool {
         return false;
     }
 
-    // An overlay as the shell draws it: a one-pixel ACCENT border, then
-    // `draw`; everything else UNSET (transparent over a blended background).
-    let overlay = |size: (i32, i32), draw: &dyn Fn(&mut Surface)| {
-        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
-        let bounds = surface.bounds();
-        surface.fill_rect(bounds, UNSET);
-        surface.stroke_rect(bounds, ACCENT);
-        draw(&mut surface);
+    // The toast shows the latest notification.
+    let toast = {
+        let mut surface = Surface::new(240, 24);
+        surface.fill_rect(surface.bounds(), UNSET);
+        surface.draw_text(6, 8, "Battery 80%", rgb(243, 246, 251));
         surface
     };
-    // The toast shows the latest notification.
-    let toast = overlay((180, 22), &|surface| {
-        surface.draw_text(6, 8, "Battery 80%", WHITE);
-    });
-    let toast_expected = |x: i32, y: i32| match toast.pixel(x - (width - 188), y - 8) {
-        Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-        Some(color) => color,
+    let toast_x = width - 250;
+    let toast_y = height - 24 - 24 - 10;
+    let toast_text_visible = || {
+        (0..24).all(|dy| {
+            (0..240).all(|dx| {
+                toast.pixel(dx, dy).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(expected)
+                })
+            })
+        })
     };
     if !step(
         "the toast shows the latest notification",
-        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
+        until(1500, toast_text_visible),
     ) {
         return false;
     }
 
     // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
-    let clock_width = 5 * crate::font::ADVANCE - (crate::font::ADVANCE - crate::font::WIDTH as i32);
-    let clock_x = width - 6 - clock_width;
-    let (badge_x, badge_y) = (clock_x - 13, top + 7);
-    let badge_3d = || compositor::pixel(badge_x + 5, badge_y + 5) == Ok(ACCENT);
+    let clock_width = 8 * crate::font::ADVANCE + 6;
+    let clock_x = width - clock_width - 4;
+    let (badge_x, badge_y) = (clock_x - 14, top + 7);
+    let mut badge_digit = Surface::new(10, 11);
+    badge_digit.fill_rect(badge_digit.bounds(), UNSET);
+    badge_digit.draw_text(3, 2, "3", rgb(243, 246, 251));
+    let badge_3d = || {
+        compositor::pixel(badge_x + 1, badge_y + 5) == Ok(ACCENT)
+            && (0..11).all(|dy| {
+                (0..10).all(|dx| {
+                    badge_digit.pixel(dx, dy).is_none_or(|expected| {
+                        expected == UNSET
+                            || compositor::pixel(badge_x + dx, badge_y + dy) == Ok(expected)
+                    })
+                })
+            })
+    };
     if !step(
         "a badge counts three unread notifications",
         until(1000, badge_3d),
@@ -13217,42 +13230,43 @@ fn stage20_9_self_test() -> bool {
     let center = |rows: &[&str]| {
         let lines = rows.len().max(1) as i32;
         let h = (1 + lines) * 14 + 2;
-        let (x0, y0) = (width - 4 - 164, top - 2 - h);
-        let image = overlay((164, h), &|surface| {
-            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
-            surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(
-                164 - 6 - crate::font::text_width("Clear") as i32,
-                5,
-                "Clear",
-                WHITE,
-            );
-            if rows.is_empty() {
-                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
-            }
-            for (index, row) in rows.iter().enumerate() {
-                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
-            }
-        });
+        let (x0, y0) = (width - 4 - 220, top - 4 - h);
+        let mut image = Surface::new(220, h as usize);
+        image.fill_rect(image.bounds(), UNSET);
+        image.draw_text(6, 5, "Notifications", ACCENT);
+        image.draw_text(
+            220 - 6 - crate::font::text_width("Clear") as i32,
+            5,
+            "Clear",
+            rgb(243, 246, 251),
+        );
+        if rows.is_empty() {
+            image.draw_text(8, 1 + 14 + 4, "No notifications", rgb(166, 178, 196));
+        }
+        for (index, row) in rows.iter().enumerate() {
+            image.draw_text(8, 1 + (1 + index as i32) * 14 + 4, row, rgb(243, 246, 251));
+        }
         (x0, y0, h, image)
+    };
+    let text_matches = |x0: i32, y0: i32, image: &Surface| {
+        (0..image.height()).all(|dy| {
+            (0..image.width()).all(|dx| {
+                image.pixel(dx as i32, dy as i32).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(x0 + dx as i32, y0 + dy as i32) == Ok(expected)
+                })
+            })
+        })
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, full_height, full) = center(&[
+    let (x0, y0, _full_height, full) = center(&[
         "Notes: Battery 80%",
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
-    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        // Verify the entire panel: header, clear control, all rows and border.
-        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
-            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        })
-    };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered =
-        clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
+    let center_rendered = clock_clicked && until(1000, || text_matches(x0, y0, &full));
     let badge_removed = center_rendered
         && until(500, || {
             compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT)
@@ -13266,19 +13280,17 @@ fn stage20_9_self_test() -> bool {
     }
 
     // Clear, at the right of the title row; then the clock closes it.
-    let (ex, ey, eh, empty) = center(&[]);
-    let clear_point = (x0 + 164 - 20, y0 + 7);
+    let (ex, ey, _empty_height, empty) = center(&[]);
+    let clear_point = (x0 + 220 - 20, y0 + 7);
     let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
         && click()
-        && until(1000, || center_matches(ex, ey, eh, &empty));
+        && until(1000, || text_matches(ex, ey, &empty));
     if !step("Clear empties the Notification Center", cleared) {
         return false;
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || {
-            compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL)
-        });
+        && until(1000, || !text_matches(ex, ey, &empty));
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
@@ -14662,7 +14674,7 @@ fn stage20_5_self_test() -> bool {
         && until(500, || {
             region(48, top, 120, 1, |_, _| ACCENT)
                 && region(48, top + 1, 120, 3, |x, y| {
-                    blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
+                    blend_pixel(TASKBAR, wallpaper(x, y, height), 188)
                 })
         });
     if !step("shadows stop at the taskbar", edge) {

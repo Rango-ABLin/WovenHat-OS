@@ -286,10 +286,9 @@ mod tests {
         assert!(text.contains("\"high_contrast\":true"));
         assert!(text.contains("\"taskbar_alignment\":\"center\""));
         assert!(
-            migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
+            !migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
                 .unwrap()
                 .changed
-                == false
         );
     }
 

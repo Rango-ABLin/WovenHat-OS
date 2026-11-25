@@ -218,8 +218,10 @@ vanished from the 20 px headline because `Canvas::draw_text_proportional` did
 not treat an inkless cached real glyph as a miss, unlike `draw_text_ttf`. That
 fallback has now been added and baseline-aligned to the real face's ascent
 (commits `487eb003`, `dcf21259`). All characters render on one line; complex
-outlines that still overflow the accepted 64-point `Path` budget use the bounded
-bitmap substitute, which is the project's accepted design.
+outlines that still overflow the accepted path budget use the bounded bitmap
+substitute, which is the project's accepted design. The budget is 96 points in
+current source (raised from 64 in `b25a6d3e` alongside a 32×32 glyph cache); the
+inkless-miss fallback remains for any real glyph whose mask has no ink.
 
 The verified capture was approved as the gate reference and is enforced by
 `docs/graphics/reference-screenshots/baseline-manifest.json`. Evidence:
