@@ -12611,6 +12611,14 @@ pub mod syscall {
     pub const DNS_POLL: u64 = 45;
     pub const DNS_CANCEL: u64 = 97;
     pub const NET_PEER: u64 = 46;
+    /// socket, local port -> 0: put a TCP socket into bounded listen state
+    pub const NET_LISTEN: u64 = 249;
+    /// socket -> async handle for one event-driven accept
+    pub const ASYNC_NET_ACCEPT: u64 = 250;
+    /// async handle, completion buffer, data buffer -> 1 complete, 0 pending
+    pub const ASYNC_NET_POLL: u64 = 79;
+    /// async handle, completion buffer, data buffer -> 1 complete
+    pub const ASYNC_NET_WAIT: u64 = 80;
     pub const DHCP: u64 = 47;
     pub const PING_START: u64 = 48;
     pub const PING_POLL: u64 = 49;

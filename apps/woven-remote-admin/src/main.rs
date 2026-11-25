@@ -83,20 +83,24 @@ pub extern "C" fn _start() -> ! {
     let _ = libwoven::print("[REMOTE ADMIN] freestanding process entered\n");
     let socket = invoke(syscall::SOCKET, 2, 0, 0);
     let _ = libwoven::print("[REMOTE ADMIN] socket opened\n");
-    if socket == ERROR || invoke(syscall::BIND, socket, wovenhat_remote_admin::PORT, 0) == ERROR {
+    if socket == ERROR
+        || libwoven::network::listen(socket, wovenhat_remote_admin::PORT as u16).is_err()
+    {
         libwoven::exit(2)
     }
     let Ok(mut journal) = PolicyJournal::new(b"safe") else {
         libwoven::exit(3)
     };
     let _ = libwoven::print("[REMOTE ADMIN] freestanding listener ready port=7001\n");
+    let peer = match libwoven::network::accept(socket) {
+        Ok(peer) => peer,
+        Err(_) => libwoven::exit(5),
+    };
+    let _ = libwoven::print("[REMOTE ADMIN] accepted connection through listen/accept ABI\n");
+    let _ = peer;
     let mut frame = [0u8; MAX_FRAME];
     let mut payload = [0u8; libwoven::remote_admin::MAX_COMMAND_BYTES];
     loop {
-        if invoke(syscall::NET_PEER, socket, 0, 0) == 0 {
-            yield_now();
-            continue;
-        }
         if !recv_exact(socket, &mut frame[..HEADER]) {
             continue;
         }

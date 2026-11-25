@@ -189,6 +189,10 @@ pub enum Number {
     DnsPoll = 45,
     /// socket -> packed peer endpoint
     NetPeer = 46,
+    /// socket, local port: put a TCP socket into bounded listen state
+    NetListen = 249,
+    /// socket -> async handle; completes with the packed accepted endpoint
+    AsyncNetAccept = 250,
     /// 0=static fallback, nonzero=enable DHCP
     Dhcp = 47,
     /// packed IPv4 in low 32 bits
@@ -2115,6 +2119,26 @@ fn sys_net_bind(socket: u64, port: u64) -> u64 {
         .map_or(SYSCALL_ERROR, |()| 0)
 }
 
+fn sys_net_listen(socket: u64, port: u64) -> u64 {
+    if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
+        return SYSCALL_ERROR;
+    }
+    let Ok(port) = u16::try_from(port) else {
+        return SYSCALL_ERROR;
+    };
+    crate::network::socket_listen(crate::task::current_process_id(), socket, port)
+        .map_or(SYSCALL_ERROR, |()| 0)
+}
+
+fn sys_async_net_accept(socket: u64) -> u64 {
+    if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
+        return SYSCALL_ERROR;
+    }
+    crate::async_network::submit_accept(socket)
+        .map(|handle| handle.to_raw())
+        .unwrap_or(SYSCALL_ERROR)
+}
+
 fn sys_net_connect(socket: u64, packed: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
@@ -3510,6 +3534,8 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::DnsPoll as u64 => sys_dns_poll(arg0, arg1),
         value if value == Number::DnsCancel as u64 => sys_dns_cancel(arg0),
         value if value == Number::NetPeer as u64 => sys_net_peer(arg0),
+        value if value == Number::NetListen as u64 => sys_net_listen(arg0, arg1),
+        value if value == Number::AsyncNetAccept as u64 => sys_async_net_accept(arg0),
         value if value == Number::Dhcp as u64 => sys_dhcp(arg0),
         value if value == Number::PingStart as u64 => sys_ping_start(arg0),
         value if value == Number::PingPoll as u64 => sys_ping_poll(),
