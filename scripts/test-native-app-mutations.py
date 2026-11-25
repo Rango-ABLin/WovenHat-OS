@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 def main():
@@ -58,14 +59,23 @@ def main():
     out = root / "audit-artifacts" / f"native-app-mutations-{args.cpus}cpu"
     out.mkdir(parents=True, exist_ok=True)
     serial = out / "serial.log"
+    # Mutations must be qualified against mounted, persistent storage. Use a
+    # disposable workspace-local FAT32 image; never touch a real device.
+    disk = out / "fat32.img"
+    if disk.exists():
+        disk.unlink()
+    subprocess.check_call(
+        [sys.executable, str(root / "scripts" / "create-fat32.py"), str(disk)], cwd=root
+    )
     command = [
-        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "q35", "-m", "256M",
+        str(qemu), "-accel", "tcg,tb-size=128", "-machine", "pc", "-m", "5G",
         "-smp", str(args.cpus), "-display", "none", "-serial", f"file:{serial}",
         "-no-reboot",
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-drive", f"if=pflash,format=raw,readonly=on,file={firmware}",
         "-drive", f"if=none,id=boot,format=raw,readonly=on,file={boot.stdout.strip()}",
         "-device", "virtio-blk-pci,drive=boot,bootindex=1",
+        "-drive", f"if=ide,index=0,format=raw,file={disk}",
     ]
     try:
         with (out / "qemu.log").open("w") as log:
