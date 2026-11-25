@@ -133,6 +133,9 @@ mod network {
     ) -> Result<(usize, Option<IpEndpoint>), SocketError> {
         Err(SocketError::WouldBlock)
     }
+    pub fn socket_accept_pinned(_: SocketToken) -> Result<usize, SocketError> {
+        Err(SocketError::WouldBlock)
+    }
 }
 #[path = "../kernel/src/async_network.rs"]
 mod async_network;
