@@ -3387,8 +3387,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         "[PROC-DIAG] paired userspace execution wait: BEGIN"
     ));
     let user_pair_wait_start = timer::ticks();
+    // TCG emulation cost grows with the online CPU count. Keep the accepted
+    // 1/2/4-CPU budget unchanged and scale only wider profiles; the assertion
+    // that both paired processes exit is unchanged.
+    let pair_budget_ticks = 2_000u64 * (smp::online_count() as u64 / 4).clamp(1, 4);
     while !task::process_exited(first_pid) || !task::process_exited(second_pid) {
-        if timer::ticks().wrapping_sub(user_pair_wait_start) > 2_000 {
+        if timer::ticks().wrapping_sub(user_pair_wait_start) > pair_budget_ticks {
             serial::write_line(format_args!(
                 "[BOOT] paired userspace execution: TIMEOUT first_exited={} second_exited={}",
                 task::process_exited(first_pid),
