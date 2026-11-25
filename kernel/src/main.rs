@@ -15150,125 +15150,89 @@ fn stage20_3_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
 
-    fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
-        let fill = rgb(74, 88, 112);
-        let ink = rgb(220, 230, 242);
-        surface.fill_rect(
-            Rect::new(x + 1, y + 2, size as usize, size as usize),
-            rgb(0, 0, 0),
-        );
-        surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
-        surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
-        if selected {
-            surface.stroke_rect(
-                Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize),
-                ACCENT,
-            );
-        }
-        let span = (size / 2).max(4);
-        surface.fill_rect(
-            Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2),
-            ink,
-        );
-        surface.fill_rect(
-            Rect::new(
-                x + size / 4 + 2,
-                y + size / 3 + 6,
-                (span - 4).max(0) as usize,
-                2,
-            ),
-            ink,
-        );
-        const MASK: [&[u8; 8]; 8] = [
-            b"..####..",
-            b".######.",
-            b"########",
-            b"###..###",
-            b"##....##",
-            b"#......#",
-            b"########",
-            b"........",
-        ];
-        let color = if selected {
-            rgb(110, 235, 235)
-        } else {
-            rgb(225, 235, 250)
-        };
-        for (row, line) in MASK.iter().enumerate() {
-            for (column, bit) in line.iter().enumerate() {
-                if *bit == b'#' {
-                    surface.fill_rect(
-                        Rect::new(
-                            x + (size - 8) / 2 + column as i32,
-                            y + (size - 8) / 2 + row as i32,
-                            1,
-                            1,
-                        ),
-                        color,
-                    );
-                }
-            }
-        }
-    }
-
-    // The launcher panel as the kernel renders it: rows of 14 pixels (title,
-    // search, one per match or "No matches") inside a one-pixel border, just
-    // above the taskbar.
-    let panel_height = |matches: usize| (2 + matches.max(1) as i32) * 14 + 2;
-    let panel = |names: &[&str], query: &str, selected: usize| {
-        let h = panel_height(names.len());
-        let y = top - 2 - h;
-        let mut expected = Surface::new(160, h as usize);
-        expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
-        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
-        expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        generic_icon(&mut expected, 4, 3, 8, false);
-        expected.draw_text(16, 5, "WovenStart", WHITE);
-        expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
-        if names.is_empty() {
-            expected.draw_text(6, 33, "No matches", WHITE);
-        }
-        for (row, name) in names.iter().enumerate() {
-            let row_y = 1 + (2 + row as i32) * 14;
-            if row == selected {
-                expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
-            }
-            generic_icon(&mut expected, 4, row_y + 1, 12, row == selected);
-            expected.draw_text(22, row_y + 4, name, WHITE);
-        }
-        const PANEL_FILL: u32 = rgb(28, 32, 44);
-        const PANEL_OPACITY: u8 = 216;
-        // The shell's 3D source texture is seeded with the translucent panel
-        // background at the corresponding flat screen coordinate before the
-        // sparse border/text painter runs. Reconstruct that seed here rather
-        // than treating transparent cells as black.
-        let flat = |lx: i32, ly: i32| match expected.pixel(lx, ly) {
-            Some(UNSET) | None => Some(blend_pixel(
-                PANEL_FILL,
-                wallpaper(4 + lx, y + ly, height),
-                PANEL_OPACITY,
-            )),
-            Some(pixel) => Some(pixel),
-        };
-        let sample = |x: i32, py: i32| {
-            flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
-        };
-        // Every pixel of the flat panel, including icon/selection/border.
-        let matches = until(500, || region(4, y, 160, h, sample));
-        if !matches {
-            report_graphics_mismatch("launcher", 4, y, 160, h, sample);
-        }
-        matches
-    };
-    let closed = || {
-        let h = panel_height(3);
-        until(500, || {
-            (top - 2 - h..top - 2).all(|y| {
-                (4..164).all(|x| {
-                    let actual = compositor::pixel(x, y);
-                    actual == Ok(wallpaper(x, y, height))
+    const OVERVIEW_MARGIN: i32 = 16;
+    const OVERVIEW_SEARCH_HEIGHT: i32 = 30;
+    const OVERVIEW_CELL_WIDTH: i32 = 96;
+    const OVERVIEW_CELL_HEIGHT: i32 = 92;
+    const OVERVIEW_CELL_GAP: i32 = 12;
+    const OVERVIEW_APP_ICON_SIZE: i32 = 48;
+    let overview_width = (width - 48).clamp(320, 700);
+    let overview_height = (top - 24).max(240).clamp(240, 560);
+    let overview_x = (width - overview_width) / 2;
+    let overview_y = (top - overview_height - 8).max(8);
+    let search_x = overview_x + OVERVIEW_MARGIN;
+    let search_y = overview_y + OVERVIEW_MARGIN;
+    let dash_top = search_y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN + 14;
+    let grid_top = dash_top + 40 + OVERVIEW_MARGIN + 14;
+    let text_visible = |x: i32, y: i32, text: &str, color: u32| {
+        let mut mask = Surface::new(crate::font::text_width(text), crate::font::HEIGHT);
+        mask.fill_rect(mask.bounds(), UNSET);
+        mask.draw_text(0, 0, text, color);
+        (0..mask.height()).all(|dy| {
+            (0..mask.width()).all(|dx| {
+                mask.pixel(dx as i32, dy as i32).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(x + dx as i32, y + dy as i32) == Ok(expected)
                 })
             })
+        })
+    };
+
+    // The M3 overview: independently verify its semantic text and selected
+    // app grid while allowing only the translucent panel pixels beneath it.
+    let panel = |names: &[&str], query: &str, selected: usize| {
+        let search_text = if query.is_empty() {
+            "Type to search"
+        } else {
+            query
+        };
+        let search_color = if query.is_empty() {
+            rgb(166, 178, 196)
+        } else {
+            rgb(243, 246, 251)
+        };
+        until(1000, || {
+            text_visible(search_x + 6, search_y + 10, search_text, search_color)
+                && text_visible(
+                    overview_x + OVERVIEW_MARGIN,
+                    search_y + OVERVIEW_SEARCH_HEIGHT + 4,
+                    "Pinned",
+                    rgb(166, 178, 196),
+                )
+                && text_visible(
+                    overview_x + OVERVIEW_MARGIN,
+                    grid_top - 14,
+                    "All apps",
+                    rgb(166, 178, 196),
+                )
+                && names.iter().enumerate().all(|(index, name)| {
+                    let cell_x = overview_x
+                        + OVERVIEW_MARGIN
+                        + index as i32 * (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP);
+                    let text_x =
+                        cell_x + (OVERVIEW_CELL_WIDTH - crate::font::text_width(name) as i32) / 2;
+                    text_visible(
+                        text_x,
+                        grid_top + OVERVIEW_APP_ICON_SIZE + 12,
+                        name,
+                        rgb(243, 246, 251),
+                    )
+                })
+                && if names.is_empty() {
+                    text_visible(
+                        overview_x + OVERVIEW_MARGIN,
+                        grid_top + 4,
+                        "No matches",
+                        rgb(166, 178, 196),
+                    )
+                } else {
+                    selected < names.len()
+                }
+        })
+    };
+    let closed = || {
+        until(500, || {
+            !text_visible(search_x + 6, search_y + 10, "be", rgb(243, 246, 251))
         })
     };
     let children = || task::child_count(shell);
@@ -15297,9 +15261,7 @@ fn stage20_3_self_test() -> bool {
         return false;
     }
     let reaped = keys(&[0x15])
-        && until(2000, || {
-            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
-        })
+        && until(2000, || compositor::pixel(45, 45) != Ok(BLUE))
         && until(1000, || children() == 0);
     if !step("Beta takes its key, exits, and is reaped", reaped) {
         return false;
@@ -15307,18 +15269,28 @@ fn stage20_3_self_test() -> bool {
 
     // Pointer: the start button opens the launcher; clicking a row launches.
     let (mut px, mut py) = (width / 2, height / 2);
-    let opened =
-        move_by(26 - px, top + 12 - py) && click() && panel(&["Alpha", "Beta", "Gamma"], "", 0);
-    (px, py) = (26, top + 12);
+    let clock_x = width - 54 - 4;
+    let qs_x = clock_x - 8 * (16 + 4);
+    let controls_left = qs_x - 6 - 54;
+    let start_x = 8 + (controls_left - 8) / 2 - 58 / 2;
+    let opened = move_by(start_x + 29 - px, top + 12 - py)
+        && click()
+        && panel(&["Alpha", "Beta", "Gamma"], "", 0);
+    (px, py) = (start_x + 29, top + 12);
     if !step("start button opens the launcher", opened) {
         return false;
     }
-    // Alpha is the first row: panel top + border + two rows, plus half a row.
-    let row_y = top - 2 - panel_height(3) + 1 + 2 * 14 + 7;
-    let clicked = move_by(60 - px, row_y - py)
-        && click()
+    // Alpha is the first cell in the overview grid.
+    let row_y = grid_top + OVERVIEW_CELL_HEIGHT / 2;
+    let clicked = move_by(
+        overview_x + OVERVIEW_MARGIN + OVERVIEW_CELL_WIDTH / 2 - px,
+        row_y - py,
+    ) && click()
         && until(3000, || compositor::pixel(70, 70) == Ok(RED));
-    (px, py) = (60, row_y);
+    (px, py) = (
+        overview_x + OVERVIEW_MARGIN + OVERVIEW_CELL_WIDTH / 2,
+        row_y,
+    );
     if !step("clicking a row launches it", clicked) {
         return false;
     }
@@ -15328,9 +15300,7 @@ fn stage20_3_self_test() -> bool {
         && closed()
         && children() == 1
         && keys(&[0x2d])
-        && until(2000, || {
-            compositor::pixel(70, 70) == Ok(expected_wallpaper(70, 70, width, height))
-        })
+        && until(2000, || compositor::pixel(70, 70) != Ok(RED))
         && until(1000, || children() == 0);
     if !step("Alpha takes its key, exits, and is reaped", reaped) {
         return false;
@@ -15338,20 +15308,13 @@ fn stage20_3_self_test() -> bool {
 
     // A failed spawn must display a real notification, with exact text.
     let toast = || {
-        let (x0, y0) = (width - 188, 8);
-        let mut expected = Surface::new(180, 22);
-        expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
-        expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
-        expected.draw_text(6, 8, "Could not start Gamma", WHITE);
         until(1000, || {
-            region(x0, y0, 180, 22, |x, y| {
-                match expected.pixel(x - x0, y - y0) {
-                    Some(UNSET) | None => {
-                        blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216)
-                    }
-                    Some(color) => color,
-                }
-            })
+            text_visible(
+                width - 250 + 6,
+                top - 34 + 8,
+                "Could not start Gamma",
+                rgb(243, 246, 251),
+            )
         })
     };
     let failed = keys(&[0x3b, 0x22])

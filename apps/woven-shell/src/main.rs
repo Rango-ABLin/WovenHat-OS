@@ -1983,6 +1983,14 @@ impl Desktop {
                 theme_muted(),
             );
             let (found, count) = self.filtered();
+            if count == 0 {
+                canvas.draw_text_system(
+                    overview.x + OVERVIEW_MARGIN,
+                    self.overview_grid_top() + 4,
+                    catalog.lookup("no_matches", "No matches"),
+                    theme_muted(),
+                );
+            }
             for (index, &app_index) in found[..count].iter().enumerate() {
                 let Some(app) = self.apps[app_index] else {
                     continue;
