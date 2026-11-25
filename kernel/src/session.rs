@@ -58,7 +58,9 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     // Build one bounded argv without allocating. The emulated demo uses the
     // existing flat renderer and reduced motion; other sessions retain their
     // established defaults and all profiles keep the 3D settings toggle.
-    let mut argv = [""; 7];
+    // Compile-time taskbar overrides let QEMU acceptance gates verify layout
+    // preferences without inventing a writable settings path.
+    let mut argv = [""; 13];
     let mut argc = 1;
     argv[0] = "/bin/woven-shell";
     if let Some(path) = accounts {
@@ -74,6 +76,21 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     if cfg!(feature = "hardware-demo") {
         argv[argc] = "--no-3d";
         argv[argc + 1] = "--reduced-motion";
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_ALIGNMENT") {
+        argv[argc] = "--taskbar-alignment";
+        argv[argc + 1] = value;
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_ICON_SIZE") {
+        argv[argc] = "--taskbar-icon-size";
+        argv[argc + 1] = value;
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_AUTO_HIDE") {
+        argv[argc] = "--taskbar-auto-hide";
+        argv[argc + 1] = value;
         argc += 2;
     }
     let program = crate::userspace::load_elf_with_argv(image, &argv[..argc]).ok_or(Error::Image)?;
