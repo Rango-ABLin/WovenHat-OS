@@ -82,7 +82,7 @@ stage13-14-test = ["qemu-test", "stage13-12-test"]
 # WovenAudio playback for userspace: AudioPlayback capability, syscalls
 # 203-205, interrupt-driven HDA completion.
 stage13-15-test = ["qemu-test", "stage13-12-test"]
-stage13-15-capture-test = ["qemu-test", "stage13-12-test"]
+stage13-15-capture-test = ["qemu-test", "stage13-12-test", "stage13-15-test"]
 # Virtual HDA capture source for the S13 software slice: feeds a deterministic
 # PCM pattern into the bounded capture ABI without starting a hardware stream.
 stage13-15-capture-virtual-test = ["stage13-15-capture-test"]

@@ -57,6 +57,10 @@ def main():
     parser.add_argument('--firmware', type=Path)
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4), default=1)
     parser.add_argument('--memory', default='5G', help='guest RAM (default: 5G, matching desktop qualification)')
+    parser.add_argument('--absolute-click', action='store_true',
+                        help='use an absolute usb-tablet click model instead of relative PS/2 motion')
+    parser.add_argument('--click-x', type=int, default=310, help='absolute click X with --absolute-click')
+    parser.add_argument('--click-y', type=int, default=160, help='absolute click Y with --absolute-click')
     parser.add_argument('--display', choices=('std', 'virtio-vga'), default='virtio-vga',
                         help='display path to exercise (default: live VirtIO-GPU surface)')
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
@@ -141,12 +145,13 @@ def main():
     display_args = (['-display', 'none', '-vga', 'none',
                      '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800']
                     if args.display == 'virtio-vga' else ['-vga', 'std'])
+    tablet_args = ['-usb', '-device', 'usb-tablet'] if args.absolute_click else []
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', args.memory,
                '-smp', str(args.cpus), '-serial', f'file:{serial}',
                '-no-reboot', '-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off',
                '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}',
                '-drive', f'if=none,id=boot,format=raw,readonly=on,file={image}',
-               '-device', 'virtio-blk-pci,drive=boot,bootindex=1'] + display_args
+               '-device', 'virtio-blk-pci,drive=boot,bootindex=1'] + display_args + tablet_args
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     errors = []
     process = subprocess.Popen(command, cwd=root, stdout=(out / 'qemu.log').open('w'),
@@ -308,9 +313,9 @@ def main():
             pointer_changed = sum(left != right for left, right in zip(before_pointer, pointer_pixels)) // 3
             if pointer_changed < 100:
                 raise RuntimeError(f'{app[1]} pointer motion did not change its presented cursor/frame: changed_pixels={pointer_changed}')
-        if args.exercise_client_pointer and args.app not in ('calculator', 'terminal', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store'):
+        if args.exercise_client_pointer and not args.absolute_click and args.app not in ('calculator', 'terminal', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store'):
             parser.error('--exercise-client-pointer currently supports the packaged desktop clients only')
-        if args.exercise_client_pointer:
+        if args.exercise_client_pointer and not args.absolute_click:
             client_pointer_baseline = out / f'woven-{app[0]}-before-client-pointer.ppm'
             screendump(client_pointer_baseline)
             # Normalize the logical pointer to the bottom-right corner before
@@ -361,17 +366,26 @@ def main():
             }[args.app]
             click_baseline = out / f"woven-{control['name']}-before-client-click.ppm"
             screendump(click_baseline)
-            if not args.exercise_client_pointer:
+            if args.absolute_click:
+                # Absolute usb-tablet coordinates are stable: the guest input
+                # layer latches absolute position once seen, so no relative
+                # accumulation or PS/2/tablet disagreement is involved.
                 command_qmp('input-send-event', {'events': [
-                    {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
-                    {'type': 'rel', 'data': {'axis': 'y', 'value': 1000}},
+                    {'type': 'abs', 'data': {'axis': 'x', 'value': args.click_x}},
+                    {'type': 'abs', 'data': {'axis': 'y', 'value': args.click_y}},
                 ]})
-            # The first window opens at (40, 40) in the logical 640x400
-            # desktop. Each client control uses a fixed bounded local target.
-            command_qmp('input-send-event', {'events': [
-                {'type': 'rel', 'data': {'axis': 'x', 'value': control['move'][0]}},
-                {'type': 'rel', 'data': {'axis': 'y', 'value': control['move'][1]}},
-            ]})
+            else:
+                if not args.exercise_client_pointer:
+                    command_qmp('input-send-event', {'events': [
+                        {'type': 'rel', 'data': {'axis': 'x', 'value': 1000}},
+                        {'type': 'rel', 'data': {'axis': 'y', 'value': 1000}},
+                    ]})
+                # The first window opens at (40, 40) in the logical 640x400
+                # desktop. Each client control uses a fixed bounded local target.
+                command_qmp('input-send-event', {'events': [
+                    {'type': 'rel', 'data': {'axis': 'x', 'value': control['move'][0]}},
+                    {'type': 'rel', 'data': {'axis': 'y', 'value': control['move'][1]}},
+                ]})
             time.sleep(0.5)
             command_qmp('input-send-event', {'events': [
                 {'type': 'btn', 'data': {'down': True, 'button': 'left'}},
