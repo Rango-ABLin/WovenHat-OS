@@ -3,7 +3,7 @@ use libwoven::ui::{Button, Label, TextField, Theme};
 use libwoven::{rgb, Canvas, GraphicsSurface, InputEvent, Key};
 
 const WIDTH: u32 = 360;
-const HEIGHT: u32 = 250;
+const HEIGHT: u32 = 220;
 const BACKGROUND: u32 = rgb(14, 18, 30);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
 const THEME: Theme = Theme::DARK;
@@ -17,13 +17,13 @@ const MAX_TEXT: usize = 256;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
-const PANEL_HEIGHT: usize = 226;
+const PANEL_HEIGHT: usize = 198;
 const OPEN_X: i32 = 22;
-const SAVE_AS_X: i32 = 110;
-const DISCARD_X: i32 = 220;
-const ACTION_Y: i32 = 216;
+const SAVE_AS_X: i32 = 128;
+const DISCARD_X: i32 = 234;
+const ACTION_Y: i32 = 190;
 const ACTION_WIDTH: usize = 96;
-const PATH_Y: i32 = 192;
+const PATH_Y: i32 = 170;
 const MAX_ENTRIES: usize = 32;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -122,43 +122,22 @@ fn draw_editor(
             ..THEME
         },
     );
+    let _ = entry_count();
     canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 84, "Files available", THEME.accent);
-    let count = entry_count();
-    let mut digits = [0u8; 20];
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 102, "Entries ", THEME.text);
-    let count_text = libwoven::format_u64(count as u64, &mut digits);
-    if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
-    }
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 124,
-        "Note (saved to /mnt/woven-note.txt)",
-        THEME.accent,
-    );
     view.editor.draw(canvas, THEME);
     canvas.draw_text_system(
         PANEL_X + 10,
-        PANEL_Y + 154,
-        "Type text, Backspace, Enter to save",
-        THEME.text,
-    );
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 168,
-        view.status,
+        PANEL_Y + 133,
+        if view.confirm_unsaved {
+            "Unsaved changes - Discard to close"
+        } else {
+            view.status
+        },
         if view.saved { THEME.accent } else { THEME.text },
     );
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 180, "Path", THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 148, "Path", THEME.text);
     view.path.draw(canvas, THEME);
     if view.confirm_unsaved {
-        canvas.draw_text_system(
-            PANEL_X + 10,
-            PANEL_Y + 204,
-            "Unsaved changes - Discard to close",
-            THEME.accent,
-        );
         view.discard.draw(canvas, THEME);
     }
     let _ = view.refresh_count;
@@ -239,9 +218,9 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         Frame::new(DISCARD_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
         "Discard",
     );
-    let mut editor = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PANEL_Y + 136, 316, 18));
+    let mut editor = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PANEL_Y + 108, 316, 18));
     editor.focused = true;
-    let mut path = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PATH_Y, 316, 18));
+    let mut path = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PATH_Y, 130, 20));
     if !path.set_text(wovenhat_editor::DEFAULT_NOTE) {
         fail(9)
     }
