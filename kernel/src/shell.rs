@@ -204,6 +204,8 @@ impl Shell {
             }
             "caps" => cmd_caps(console),
             "devices" | "dev" => cmd_devices(console),
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "usblog" => cmd_usblog(console),
             "blockio" | "iostat" => {
                 if authorize(Capability::TaskInspect, console) {
                     cmd_block_io(console);
@@ -570,6 +572,27 @@ fn cmd_devices(console: &mut Console) {
             console.newline();
         }
     }
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn cmd_usblog(console: &mut Console) {
+    match crate::xhci::usb_disk_info() {
+        Some(info) => {
+            console.print("usb-log-disk: port=");
+            print_u64(console, u64::from(info.port));
+            console.print(" blocks=");
+            print_u64(console, info.blocks);
+            console.newline();
+        }
+        None => console.println("usb-log-disk: no enumerated USB mass-storage disk"),
+    }
+    console.println(if crate::livelog::active() {
+        "livelog: active"
+    } else if crate::livelog::discovery_queued() {
+        "livelog: discovery queued, WOVENLOG not initialized"
+    } else {
+        "livelog: inactive"
+    });
 }
 
 fn cmd_net(console: &mut Console) {
