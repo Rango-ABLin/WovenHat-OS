@@ -398,7 +398,20 @@ fn create_dir(raw_path: &[u8]) -> u64 {
             0
         }
         Err(_) => {
-            let _ = libwoven::print("WovenFiles: mutation denied: mkdir\n");
+            let _ = libwoven::print("WovenFiles: mutation denied: mkdir raw=");
+            let raw = unsafe {
+                libwoven::syscall::invoke(
+                    libwoven::syscall::MKDIR,
+                    path.as_ptr() as u64,
+                    path.len() as u64,
+                    0,
+                )
+            };
+            let mut digits = [0u8; 20];
+            if let Ok(text) = core::str::from_utf8(libwoven::format_u64(raw, &mut digits)) {
+                let _ = libwoven::print(text);
+            }
+            let _ = libwoven::print("\n");
             3
         }
     }
