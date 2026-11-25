@@ -93,48 +93,55 @@ Details, gap matrix, limits and remaining work:
 `audit-artifacts/phase-c-e1000-network-20261123/` and
 `audit-artifacts/stage13.2-{1,2,4}cpu-*/`.
 
-## Phase B bottom taskbar core - 2026-11-23 - IN PROGRESS (HOST/CLIPPY ONLY, NO QEMU YET)
+## Phase B bottom taskbar core - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
-Phase B is **not accepted**. This is the first increment toward M2 (bottom
-taskbar) and M7 (honest desktop controls), on branch
-`phase-b/bottom-taskbar-core`. The taskbar is anchored to the bottom edge: that
-is the default shell layout and it has been since the shell's bottom-taskbar
-polish. The former top-bar concept is retired; stale "flush at the top" wording
-in `apps/woven-shell/src/main.rs` was corrected.
+Phase B is **accepted as a bounded increment** toward M2 (bottom taskbar) and
+M7 (honest desktop controls) on branch `phase-b/bottom-taskbar-core`. The
+taskbar is anchored to the bottom edge; the retired top-bar layout is not
+reintroduced. Earlier documentation saying "NO QEMU YET" was stale relative to
+retained `phaseb-desktop-qual-*` evidence and is superseded by the fresh matrix
+below.
 
-Implemented in this increment:
+Implemented across the increment:
 
-- `apps/woven-shell/src/taskbar_prefs.rs`: a pure, bounded model for taskbar
-  alignment (`center` default, `left`) and icon size (`small`/`medium`/`large`,
-  40/48/56 px entries; `medium` is the already accepted 48 px). Unknown or
-  malformed values fall back per field. Read from the installed settings record
-  through the existing `--settings` loader, alongside locale and accessibility.
-- Quick Settings Wi-Fi, Bluetooth and Airplane mode no longer invent state. The
-  shell had defaulted Wi-Fi to "Connected" with no wireless driver. They now read
-  "Unavailable" and show a toast when pressed. The summary line reports only the
-  real `NetworkStatus` from the tray model.
+- `apps/woven-shell/src/taskbar_prefs.rs`: bounded alignment (`center` default,
+  `left`) and icon size (`small`/`medium`/`large`, 40/48/56 px) read per field
+  from the installed settings record through `--settings`, with safe fallback.
+- Quick Settings Wi-Fi, Bluetooth and Airplane mode no longer invent state.
+  Battery saver and Night light are now honest the same way: there is no ACPI
+  battery driver and no display colour-policy backend, so they read
+  "Unavailable" and toast instead of flipping state that changed nothing.
+- `apps/woven-shell/src/pinned_apps.rs` is now compiled into the shell and
+  wired: `pinned_apps` from the installed settings record feeds the Overview
+  Dash through a bounded exact-name catalog lookup. Absent restores the three
+  curated pins, an empty value pins nothing, and a pin whose package is absent
+  is skipped rather than fabricated. This is read-only persistence supplied by
+  the installed record; the shell session has `FileRead` but no `FileWrite`.
+- Removed the stale crate-wide `#![allow(dead_code)]` and the seven dead QS
+  grid/symbol leftovers it hid. Two `PinnedApps` mutation methods kept for host
+  tests carry narrow `#[cfg_attr(not(test), expect(dead_code, ...))]`.
 
-- `apps/woven-shell/src/pinned_apps.rs`: a bounded pinned-application model
-  (8 pins, 32-byte ASCII names, duplicate and invalid names dropped, pin/unpin
-  with stable order). Absent setting restores the three curated shortcuts; an
-  empty value means nothing pinned. Host-tested 6/6 with
-  `apps/woven-shell/tests/pinned_apps.rs`. It is NOT yet wired into the taskbar
-  or persisted from the UI, so no pinning behavior is claimed.
+Validation on exact source: freestanding `woven-shell` target Clippy with
+warnings denied; `cargo fmt --all -- --check`, `cargo clippy --all-targets`,
+kernel target Clippy and `cargo test --workspace` all pass; the three isolated
+shell host suites pass via `rustc --test` (pinned 6/6, taskbar prefs 6/6,
+status model 6/6). The mandated serialized `RUN-STAGE10.7.ps1` chain exited 0
+(log `C:\Users\banda\AppData\Local\Temp\opencode\phaseb-acceptance-stage10.7-20261125.log`).
+Fresh baseline-enforced desktop qualification passed at 1, 2 and 4 CPUs
+(`audit-artifacts/phaseb-final-{1,2,4}cpu-20261125`): every `result.json`
+reports `pass: true`, `status: PASS`, `failures: []` and 0 changed sign-in
+baseline pixels.
 
-Validation so far: `apps/woven-shell/tests/taskbar_prefs.rs` 6/6 pass, compiled
-with `rustc --test` because the shell's `[unstable] build-std` config makes host
-`cargo test` fail with a duplicate `core` (pre-existing; the same config breaks
-`status_model`'s host build). Freestanding `cargo clippy --target
-x86_64-unknown-none -- -D warnings` passes for the shell.
-
-Not done, and therefore not claimed: a QEMU desktop boot and visual check of
-the changed taskbar, auto-hide, pinned-app persistence, minimize/restore,
-maximize/fullscreen geometry, Alt+Tab, an in-shell taskbar settings editor,
-the `keyboard_refresh` root-cause fix, Quick Settings Battery saver and Night
-light (still local toggles with no effect), and the stale `#![allow(dead_code)]`
-at the top of `main.rs`. The Desktop QEMU run is blocked on a concurrent
-acceptance chain that uses `target/` and `.cargo-build/`; those directories
-are to be redirected to D: once it finishes.
+Not claimed, and explicitly deferred to separate bounded increments: taskbar
+auto-hide (needs pointer-edge hit-testing and geometry/baseline work); an
+in-shell pin/settings editor (needs a `FileWrite` capability or a service
+proxy, deliberately not broadened here); minimize/restore, maximize/fullscreen
+and Alt+Tab (no window-management syscall or IPC tag exists, so adding them is
+a new ABI stage rather than a gate-time change); and a `keyboard_refresh`
+root-cause fix (the client's serial refresh marker is observed; the harness
+oracle was mitigated with a semantic region predicate after the identical
+failure reproduced on the pre-shell baseline). Physical hardware, native
+qualification and the external release gates are unchanged.
 
 ## Volume read-back for the status indicator - 2026-11-23 - ACCEPTED (BOUNDED)
 

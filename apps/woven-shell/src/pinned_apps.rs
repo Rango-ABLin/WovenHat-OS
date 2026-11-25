@@ -38,12 +38,28 @@ impl PinnedApps {
         }
     }
 
-    pub fn defaults() -> Self {
+    /// Compile-time curated defaults for the shell's static initializer.
+    /// This fills the bounded arrays directly so it stays `const`; `pin()`
+    /// performs runtime validation and is used for ordinary mutation.
+    pub const fn curated() -> Self {
         let mut pins = Self::empty();
-        for name in DEFAULT_PINS {
-            let _ = pins.pin(name);
+        let mut index = 0;
+        while index < DEFAULT_PINS.len() {
+            let name = DEFAULT_PINS[index].as_bytes();
+            let mut byte = 0;
+            while byte < name.len() {
+                pins.names[index][byte] = name[byte];
+                byte += 1;
+            }
+            pins.lens[index] = name.len() as u8;
+            index += 1;
         }
+        pins.count = DEFAULT_PINS.len();
         pins
+    }
+
+    pub fn defaults() -> Self {
+        Self::curated()
     }
 
     /// Parse a settings value. `None` means the setting is absent and yields the
@@ -66,6 +82,13 @@ impl PinnedApps {
         self.count
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "covered by host tests; in-shell pin editing needs a settings writer"
+        )
+    )]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
@@ -99,6 +122,13 @@ impl PinnedApps {
     }
 
     /// Remove a pin, keeping the remaining order. Returns whether it was present.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "covered by host tests; in-shell pin editing needs a settings writer"
+        )
+    )]
     pub fn unpin(&mut self, name: &str) -> bool {
         let Some(index) = (0..self.count).find(|&index| self.get(index) == Some(name)) else {
             return false;

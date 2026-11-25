@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! WovenShell: the WovenHat desktop.
 //!
 //! A userspace program that takes the compositor lease and runs the desktop:
@@ -180,6 +179,8 @@ mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
 use taskbar_prefs::{Alignment, TaskbarPrefs};
+mod pinned_apps;
+use pinned_apps::PinnedApps;
 
 /// Bounded system-status indicators in the taskbar tray. The module only
 /// reads existing status calls and never adds a capability; see `status.rs`.
@@ -200,7 +201,6 @@ const QS_GRID_COLS: usize = 3;
 const QS_GRID_GAP: i32 = 8;
 const QS_BUTTON_HEIGHT: i32 = 48;
 const QS_BUTTON_RADIUS: usize = 10;
-const QS_ICON_SIZE: i32 = 16;
 const QS_SLIDER_HEIGHT: i32 = 34;
 const QS_SLIDER_GAP: i32 = 10;
 const QS_SECTION_GAP: i32 = 8;
@@ -208,8 +208,6 @@ const QS_FOOTER_HEIGHT: i32 = 40;
 /// Grid rows shown in the quick-action panel.
 const QS_GRID_ROWS: usize = 4;
 const QS_ACTIONS: usize = QS_GRID_COLS * QS_GRID_ROWS;
-/// Legacy row count kept for texture sizing; actual layout is grid-driven.
-const QS_ROWS: usize = 10;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum QsAction {
@@ -684,9 +682,11 @@ struct Desktop {
     dnd: bool,
     /// Bottom taskbar placement and entry size, from the installed settings.
     taskbar: TaskbarPrefs,
-    /// Local quick-action preference state.
-    battery_saver: bool,
-    night_light: bool,
+    /// Bounded pinned catalog names for the overview Dash, from the installed
+    /// settings. Absent restores the curated defaults; an empty value pins
+    /// nothing. The model is read-only here: there is no in-shell settings
+    /// writer, so persistence is supplied by the installed record.
+    pinned: PinnedApps,
     /// Brightness percentage for the quick-settings slider (0-100).
     brightness: u8,
     /// The display scale the shell set.
@@ -780,8 +780,7 @@ impl Desktop {
         qs_open: false,
         dnd: false,
         taskbar: TaskbarPrefs::DEFAULT,
-        battery_saver: false,
-        night_light: false,
+        pinned: PinnedApps::curated(),
         brightness: 80,
         scale: 1,
         status: StatusSnapshot {
@@ -1029,20 +1028,22 @@ impl Desktop {
         )
     }
 
-    /// Favorites (the same curated set as the desktop shortcuts,
-    /// `DESKTOP_ICON_NAMES`) first, then any other app with a running
-    /// instance ([`Self::children`]) not already a favorite, deduplicated,
-    /// bounded to `DASH_MAX`.
+    /// Pinned catalog names from the installed settings record first, then
+    /// any other app with a running instance ([`Self::children`]) not already
+    /// pinned, deduplicated and bounded to `DASH_MAX`. A pin whose package is
+    /// absent is skipped rather than fabricated.
     fn dash_apps(&self) -> ([usize; DASH_MAX], usize) {
         let mut apps = [0usize; DASH_MAX];
         let mut count = 0;
-        for index in 0..DESKTOP_ICON_NAMES.len() {
+        for index in 0..self.pinned.len() {
             if count >= DASH_MAX {
                 break;
             }
-            if let Some(app_index) = self.desktop_icon_app(index) {
-                apps[count] = app_index;
-                count += 1;
+            if let Some(name) = self.pinned.get(index) {
+                if let Some(app_index) = self.app_by_name(name.as_bytes()) {
+                    apps[count] = app_index;
+                    count += 1;
+                }
             }
         }
         for child in self.children.iter().flatten() {
@@ -1385,6 +1386,13 @@ impl Desktop {
 
     fn desktop_icon_app(&self, index: usize) -> Option<usize> {
         let name = DESKTOP_ICON_NAMES.get(index)?.as_bytes();
+        self.app_by_name(name)
+    }
+
+    /// Resolve a catalog entry by exact name. Pinned names come from the
+    /// installed settings record, so an unknown or removed package simply has
+    /// no Dash entry instead of being fabricated.
+    fn app_by_name(&self, name: &[u8]) -> Option<usize> {
         self.apps[..self.app_count]
             .iter()
             .position(|app| app.is_some_and(|app| app.name() == name))
@@ -1911,10 +1919,12 @@ impl Desktop {
     /// taskbar's right end; empty while closed.
     fn qs_action_active(&self, action: QsAction) -> bool {
         match action {
-            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => false,
-            QsAction::BatterySaver => self.battery_saver,
+            QsAction::Wifi
+            | QsAction::Bluetooth
+            | QsAction::Airplane
+            | QsAction::BatterySaver
+            | QsAction::NightLight => false,
             QsAction::FocusAssist => self.dnd,
-            QsAction::NightLight => self.night_light,
             QsAction::Accessibility => self.reduced_motion,
             QsAction::DisplayScale => self.scale == 2,
             QsAction::Tiling => self.tiled,
@@ -1943,23 +1953,13 @@ impl Desktop {
 
     fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
         match action {
-            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => "Unavailable",
-            QsAction::BatterySaver => {
-                if self.battery_saver {
-                    "On"
-                } else {
-                    "Off"
-                }
-            }
+            QsAction::Wifi
+            | QsAction::Bluetooth
+            | QsAction::Airplane
+            | QsAction::BatterySaver
+            | QsAction::NightLight => "Unavailable",
             QsAction::FocusAssist => {
                 if self.dnd {
-                    "On"
-                } else {
-                    "Off"
-                }
-            }
-            QsAction::NightLight => {
-                if self.night_light {
                     "On"
                 } else {
                     "Off"
@@ -2024,95 +2024,6 @@ impl Desktop {
         let height = self.qs_panel_height().min(460);
         let y = (self.taskbar_top() - height - 8).max(0);
         Area::new(self.width - QS_WIDTH - 8, y, QS_WIDTH, height)
-    }
-
-    fn qs_grid_area(&self) -> Area {
-        let panel = self.qs_area();
-        let top = panel.y + 16 + 24 + QS_PADDING;
-        let grid_h =
-            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
-        Area::new(
-            panel.x + QS_PADDING,
-            top,
-            panel.width - QS_PADDING * 2,
-            grid_h,
-        )
-    }
-
-    fn qs_action_area(&self, index: usize) -> Area {
-        let grid = self.qs_grid_area();
-        let col = (index % QS_GRID_COLS) as i32;
-        let row = (index / QS_GRID_COLS) as i32;
-        let cell_w = (grid.width - QS_GRID_GAP * (QS_GRID_COLS as i32 - 1)) / QS_GRID_COLS as i32;
-        Area::new(
-            grid.x + col * (cell_w + QS_GRID_GAP),
-            grid.y + row * (QS_BUTTON_HEIGHT + QS_GRID_GAP),
-            cell_w,
-            QS_BUTTON_HEIGHT,
-        )
-    }
-
-    fn qs_slider_area(&self, which: i32) -> Area {
-        let panel = self.qs_area();
-        let grid = self.qs_grid_area();
-        let top =
-            grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
-        Area::new(
-            panel.x + QS_PADDING,
-            top,
-            panel.width - QS_PADDING * 2,
-            QS_SLIDER_HEIGHT,
-        )
-    }
-
-    fn qs_footer_area(&self) -> Area {
-        let panel = self.qs_area();
-        Area::new(
-            panel.x,
-            panel.y + panel.height - QS_FOOTER_HEIGHT - QS_PADDING,
-            panel.width,
-            QS_FOOTER_HEIGHT + QS_PADDING,
-        )
-    }
-
-    /// The toggles as they currently read.
-    fn qs_rows(&self) -> [&'static str; QS_ROWS] {
-        [
-            "Power off",
-            "Restart",
-            if self.scale == 2 {
-                "Display scale: 2x"
-            } else {
-                "Display scale: 1x"
-            },
-            if self.dnd {
-                "Do not disturb: On"
-            } else {
-                "Do not disturb: Off"
-            },
-            if self.tiled {
-                "Tiling: On"
-            } else {
-                "Tiling: Off"
-            },
-            "Lock screen",
-            "Change PIN",
-            match self.language {
-                libwoven::i18n::Language::English => "Language: English",
-                libwoven::i18n::Language::Chichewa => "Language: Chichewa",
-                libwoven::i18n::Language::Arabic => "Language: Arabic",
-            },
-            if self.three_d {
-                "3D Desktop: On"
-            } else {
-                "3D Desktop: Off"
-            },
-            if self.reduced_motion {
-                "Reduced Motion: On"
-            } else {
-                "Reduced Motion: Off"
-            },
-        ]
     }
 
     /// The lock screen: the wallpaper dimmed, "Locked", the time, the
@@ -2616,8 +2527,10 @@ impl Desktop {
                 panel.union(self.toast_message("No wireless hardware is available"))
             }
             QsAction::BatterySaver => {
-                self.battery_saver = !self.battery_saver;
-                panel
+                // There is no ACPI battery driver and no power policy backend,
+                // so this control cannot change anything. Say so honestly.
+                log(&[b"woven-shell: battery saver unavailable"]);
+                panel.union(self.toast_message("No battery or power policy is available"))
             }
             QsAction::FocusAssist => {
                 self.dnd = !self.dnd;
@@ -2629,8 +2542,10 @@ impl Desktop {
                 panel
             }
             QsAction::NightLight => {
-                self.night_light = !self.night_light;
-                panel
+                // No display colour-temperature backend exists; do not toggle
+                // a state that changes no pixels.
+                log(&[b"woven-shell: night light unavailable"]);
+                panel.union(self.toast_message("Night light needs a display colour policy backend"))
             }
             QsAction::Accessibility => {
                 self.reduced_motion = !self.reduced_motion;
@@ -4939,6 +4854,7 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
         json_string(data, b"taskbar_alignment"),
         json_string(data, b"taskbar_icon_size"),
     );
+    desktop.pinned = PinnedApps::from_setting(json_string(data, b"pinned_apps"));
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
     if settings.high_contrast {

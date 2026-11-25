@@ -1,3 +1,27 @@
+## OpenCode - Phase B bounded increment accepted (2026-11-25)
+
+User asked to finish Phase B before release hygiene. I closed it as a bounded
+increment with no new syscall, capability or ABI. Changes in the shell only:
+pinned apps are now compiled in and feed the Overview Dash from the installed
+settings record (read-only; the shell has no `FileWrite`); battery saver and
+night light report "Unavailable" and toast because there is no battery driver
+or colour-policy backend; the stale crate-wide `#![allow(dead_code)]` and seven
+dead QS symbols were removed, with two narrow `#[cfg_attr(not(test), expect)]`
+annotations on `PinnedApps` methods still used by host tests. I did NOT add
+auto-hide, minimize/restore, maximize/fullscreen, Alt+Tab or an in-shell
+settings writer: those need window-management ABI or a new capability and are
+explicitly deferred rather than smuggled into an acceptance gate. The
+`keyboard_refresh` failure was previously shown to reproduce on the pre-shell
+baseline and its harness oracle was already mitigated; no assertion was changed
+here.
+
+Validation: shell target Clippy `-D warnings`, fmt, all-targets Clippy, kernel
+target Clippy, workspace tests, and three isolated host suites (6/6 each) all
+pass; `RUN-STAGE10.7.ps1` exited 0; baseline-enforced desktop qualification
+passed at 1/2/4 CPUs with 0 changed pixels and `failures: []`
+(`audit-artifacts/phaseb-final-{1,2,4}cpu-20261125`). No physical device or
+firmware setting touched.
+
 ## OpenCode - phase-b branch reconciled with origin/master (2026-11-25)
 
 User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
