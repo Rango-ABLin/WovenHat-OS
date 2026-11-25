@@ -20,6 +20,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -358,6 +359,16 @@ def _copy_vars(template: Path, destination: Path) -> Path:
     return destination
 
 
+def replace_esp_boot_artifact(installed: Path, recovery_source: Path) -> None:
+    module_path = ROOT / "scripts" / "extract-uefi-boot-artifact.py"
+    spec = importlib.util.spec_from_file_location("wovenhat_uefi_extract", module_path)
+    if spec is None or spec.loader is None:
+        raise InstalledDiskGateError("unable to load the UEFI artifact extractor")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.replace(installed, recovery_source)
+
+
 def resolve_qemu_and_firmware(qemu: Path | None, firmware: Path | None) -> tuple[Path, Path]:
     resolved_qemu = qemu or (Path(shutil.which("qemu-system-x86_64")) if shutil.which("qemu-system-x86_64") else None)
     if resolved_qemu is None:
@@ -406,6 +417,7 @@ def build_kernel_image(
 
 def run_profile(
     source: Path,
+    recovery_source: Path | None,
     qemu: Path,
     firmware: Path,
     firmware_vars: Path | None,
@@ -429,13 +441,22 @@ def run_profile(
         if interrupt_point is not None or interrupt_after_commit
         else "[INSTALLED WOVENFS] reboot phase write: PASSED"
     )
-    markers = (
-        first_marker,
+    recovery_markers = (
+        "[INSTALLED WOVENFS] reboot phase write: PASSED",
         "[INSTALLED WOVENFS] reboot phase verify-overwrite: PASSED",
         "[INSTALLED WOVENFS] reboot phase cleanup: PASSED",
-    ) if filesystem == "wovenfs" else (None,)
+    )
+    if filesystem == "wovenfs":
+        if interrupt_point in ("descriptor", "staged"):
+            markers = (first_marker, *recovery_markers)
+        else:
+            markers = (first_marker, *recovery_markers[1:])
+    else:
+        markers = (None,)
     boots = []
     for index, marker in enumerate(markers, start=1):
+        if index > 1 and recovery_source is not None:
+            replace_esp_boot_artifact(installed, recovery_source)
         serial = profile / f"serial-boot{index}.log"
         qemu_log = profile / f"qemu-boot{index}.log"
         qmp = profile / f"qmp-boot{index}.sock"
@@ -528,6 +549,7 @@ def run_profile(
 def run_gate(
     *,
     source: Path,
+    recovery_source: Path | None = None,
     qemu: Path,
     firmware: Path,
     firmware_vars: Path | None,
@@ -547,7 +569,7 @@ def run_gate(
     results = []
     for profile in cpus:
         results.append(run_profile(
-            source_info_path(source_info), qemu, firmware, firmware_vars,
+            source_info_path(source_info), recovery_source, qemu, firmware, firmware_vars,
             output_root, profile, timeout, filesystem, interrupt_after_commit,
             interrupt_point,
         ))
@@ -603,6 +625,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.interrupt_point = "commit"
         validate_qualification_mode(args.filesystem, args.interrupt_point)
         qemu, firmware = resolve_qemu_and_firmware(args.qemu, args.firmware)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         feature = args.feature
         if args.filesystem == "wovenfs" and feature == "stage28-installer-test":
             feature = (
@@ -610,16 +633,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.interrupt_point
                 else "installed-wovenfs-test"
             )
+        recovery_source = None
+        if args.interrupt_point is not None:
+            recovery_built = build_kernel_image(
+                ROOT, "installed-wovenfs-test", args.timeout
+            )
+            recovery_source = ROOT / "target" / (
+                "installed-wovenfs-recovery-" + timestamp + ".img"
+            )
+            shutil.copyfile(recovery_built, recovery_source)
         source = args.kernel_image or build_kernel_image(
             ROOT, feature, args.timeout, args.interrupt_point
         )
         source = validate_source_image(source)["path"]
         source_path = Path(source)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         output = (args.output_dir or ROOT / "target" / f"installed-disk-release-{timestamp}").absolute()
         profiles = (1, 2, 4) if args.all_cpus else (args.cpus,)
         result = run_gate(
             source=source_path,
+            recovery_source=recovery_source,
             qemu=qemu,
             firmware=firmware,
             firmware_vars=args.firmware_vars,

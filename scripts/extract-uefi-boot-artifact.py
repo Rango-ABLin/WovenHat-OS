@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -107,18 +108,21 @@ class FatView:
         return self.esp[offset : offset + size]
 
     def _chain(self, first: int) -> bytes:
-        chunks = []
+        return b"".join(self._cluster(cluster) for cluster in self._chain_clusters(first))
+
+    def _chain_clusters(self, first: int) -> list[int]:
+        clusters = []
         cluster = first
         seen: set[int] = set()
         while cluster < (0x0FFFFFF8 if self.fat32 else 0xFFF8):
             if cluster in seen:
                 raise ExtractError("FAT cluster chain loops")
             seen.add(cluster)
-            chunks.append(self._cluster(cluster))
+            clusters.append(cluster)
             cluster = self._next(cluster)
             if len(seen) > self.cluster_count:
                 raise ExtractError("FAT cluster chain is too long")
-        return b"".join(chunks)
+        return clusters
 
     def _root(self) -> bytes:
         if self.fat32:
@@ -155,7 +159,9 @@ class FatView:
             cluster = struct.unpack_from("<H", entry, 26)[0] | (struct.unpack_from("<H", entry, 20)[0] << 16)
             yield name, bool(attributes & 0x10), cluster, struct.unpack_from("<I", entry, 28)[0]
 
-    def find(self, components: tuple[str, ...]) -> bytes:
+    def find_entry(
+        self, components: tuple[str, ...]
+    ) -> tuple[bytes, list[int]]:
         directory = self._root()
         for index, component in enumerate(components):
             wanted = component.casefold()
@@ -170,8 +176,56 @@ class FatView:
             else:
                 if is_dir or size <= 0 or size > MAX_ARTIFACT_BYTES:
                     raise ExtractError("EFI artifact size is outside the bounded range")
-                return self._chain(cluster)[:size]
+                return self._chain(cluster)[:size], self._chain_clusters(cluster)
         raise ExtractError("EFI artifact path is empty")
+
+    def find(self, components: tuple[str, ...]) -> bytes:
+        payload, _ = self.find_entry(components)
+        return payload
+
+
+def replace(image: Path, source: Path) -> dict[str, object]:
+    target = _regular(image, "target image")
+    source_path = _regular(source, "source image")
+    target_data = target.read_bytes()
+    source_data = source_path.read_bytes()
+    target_offset, target_length = _esp_bounds(target_data)
+    source_offset, source_length = _esp_bounds(source_data)
+    target_fat = FatView(target_data[target_offset : target_offset + target_length])
+    source_fat = FatView(source_data[source_offset : source_offset + source_length])
+    source_payload = source_fat.find(("EFI", "BOOT", "BOOTX64.EFI"))
+    _, clusters = target_fat.find_entry(("EFI", "BOOT", "BOOTX64.EFI"))
+    cluster_size = target_fat.sectors_per_cluster * target_fat.bytes_per_sector
+    if len(source_payload) > len(clusters) * cluster_size:
+        raise ExtractError("recovery artifact exceeds the installed EFI cluster chain")
+    replacement = bytearray()
+    for cluster in clusters:
+        offset = (
+            target_fat.data_start
+            + (cluster - 2) * target_fat.sectors_per_cluster * SECTOR
+        )
+        chunk = target_data[
+            target_offset + offset : target_offset + offset + cluster_size
+        ]
+        replacement.extend(chunk)
+    replacement[: len(source_payload)] = source_payload
+    replacement[len(source_payload) :] = b"\0" * (len(replacement) - len(source_payload))
+    with target.open("r+b") as output:
+        for index, cluster in enumerate(clusters):
+            offset = (
+                target_fat.data_start
+                + (cluster - 2) * target_fat.sectors_per_cluster * SECTOR
+            )
+            output.seek(target_offset + offset)
+            output.write(replacement[index * cluster_size : (index + 1) * cluster_size])
+        output.flush()
+        os.fsync(output.fileno())
+    return {
+        "valid": True,
+        "artifact_bytes": len(source_payload),
+        "artifact_sha256": hashlib.sha256(source_payload).hexdigest(),
+        "physical_access": "none",
+    }
 
 
 def extract(image: Path, output: Path) -> dict[str, object]:
