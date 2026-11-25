@@ -2126,15 +2126,26 @@ fn sys_net_listen(socket: u64, port: u64) -> u64 {
     let Ok(port) = u16::try_from(port) else {
         return SYSCALL_ERROR;
     };
-    crate::network::socket_listen(crate::task::current_process_id(), socket, port)
-        .map_or(SYSCALL_ERROR, |()| 0)
+    let result = crate::network::socket_listen(crate::task::current_process_id(), socket, port);
+    #[cfg(feature = "remote-admin-test")]
+    crate::serial::write_line(format_args!(
+        "[LISTEN] listen(socket={socket}, port={port}): {:?}",
+        result
+    ));
+    result.map_or(SYSCALL_ERROR, |()| 0)
 }
 
 fn sys_async_net_accept(socket: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
     }
-    crate::async_network::submit_accept(socket)
+    let result = crate::async_network::submit_accept(socket);
+    #[cfg(feature = "remote-admin-test")]
+    crate::serial::write_line(format_args!(
+        "[LISTEN] accept submitted(socket={socket}): {}",
+        result.is_ok()
+    ));
+    result
         .map(|handle| handle.to_raw())
         .unwrap_or(SYSCALL_ERROR)
 }

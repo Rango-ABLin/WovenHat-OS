@@ -108,8 +108,7 @@ pub fn accept(socket: u64) -> Result<Endpoint, Error> {
             0,
         )
     })?;
-    let status =
-        i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
+    let status = i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
     if status != 0 {
         return Err(Error::Failed);
     }

@@ -444,7 +444,12 @@ fn process_one(next_slot: &mut usize) -> bool {
             network::socket_recv_pinned(work.request.socket, &mut data[..work.request.length])
         }
         Operation::Accept => {
-            network::socket_accept_pinned(work.request.socket).map(|peer| (peer, None))
+            let accepted = network::socket_accept_pinned(work.request.socket);
+            #[cfg(feature = "remote-admin-test")]
+            if accepted.is_ok() {
+                crate::serial::write_line(format_args!("[LISTEN] accept complete"));
+            }
+            accepted.map(|peer| (peer, None))
         }
     };
     match result {

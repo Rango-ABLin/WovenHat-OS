@@ -28,7 +28,8 @@ Locked dependency prefetch completed successfully and all 211 tests pass on reru
 The bounded command-construction regression passes. The signed image builds
 and the strict desktop journey passes on WHPX at 1/2/4 CPUs. Build,
 warning-denying Clippy, Rust tests and inherited stage gates pass.
-TCG at one CPU fails waiting for WovenFiles launch and remains open.
+TCG desktop/application qualification passes at 1/2/4 CPUs with the strict
+WovenFiles client-open, visual and interaction oracles unchanged.
 
 ## Blocked
 

@@ -1,5 +1,33 @@
 # Stage status
 
+## Reproducible build, freestanding remote admin, and TCG desktop closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The exact-commit isolated rebuild is now a maintained release-boundary test:
+it archives `HEAD`, performs locked/offline libwoven tests in a separate
+workspace, and records source commit, archive hash, compiler version and the
+truthful `independent_organization_attestation: false`. This closes
+independent-workspace reproducibility without fabricating organizational
+independence.
+
+Remote administration now has a signed freestanding Ring-3 service with only
+`NetworkIo`. A bounded asynchronous TCP listen/accept ABI waits event-driven
+for one peer, and the service handles replay-checked WADM query/apply/rollback
+frames. The host mTLS boundary pins the client certificate and forwards only
+bounded WADM frames into QEMU. The complete mTLS→guest journey passes 1/2/4
+CPUs under `audit-artifacts/remote-admin-freestanding-*`.
+
+Strict TCG desktop/application qualification passes unchanged on 1/2/4 CPUs:
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`; every report has
+`pass: true`, `failures: []`. WovenFiles launch and client window-open,
+sign-in, focus, interaction and teardown all pass with existing time and pixel
+oracles.
+
+Validation: fmt check, warning-denying workspace Clippy, 260 workspace tests
+(one ignored), 25 focused Python tests, app/proxy Clippy, async-network host
+test and all three remote-admin/TCG matrices pass. An independently operated
+build host with detached attestation, and independent production security
+review, remain external evidence.
+
 ## S-slice virtual-model closures - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The missing virtual inputs identified in the S00 inventory were implemented as

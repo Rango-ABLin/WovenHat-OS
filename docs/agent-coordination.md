@@ -18,6 +18,23 @@ kernel, shell and tool Clippy plus workspace tests pass. A concurrent WIP fmt
 failure in the other owner's `kernel/src/main.rs` / `test-remote-admin-freestanding.py`
 was left untouched.
 
+## OpenCode - reproducible build, remote admin, and TCG closure (2026-11-25)
+
+Added the maintained exact-commit clean-room rebuild test and CI invocation.
+Reports now carry the source commit and explicit
+`independent_organization_attestation: false`, so local reproducibility is
+closed without claiming a separate organization. Added bounded TCP
+listen/accept to the asynchronous Ring-3 network ABI and deployed the signed
+remote-admin service in QEMU. A pinned-client mTLS proxy forwards WADM query/
+apply/rollback/replay-rejection operations; the full journey passes 1/2/4 CPUs.
+
+Strict TCG desktop/application qualification passes 1/2/4 CPUs on current
+source with unchanged limits and pixel/client markers. Evidence:
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`. Host/target Clippy, 260
+workspace tests (one ignored), 25 focused Python tests and the remote-admin
+matrix pass. Only external independent-organization attestation and
+independent production security review remain.
+
 ## OpenCode - persistent config migration and WovenFS crash boundaries (2026-11-25)
 
 Closed the two requested bounded software gaps. Installed v1 settings migrate
