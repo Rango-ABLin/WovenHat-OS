@@ -62,6 +62,20 @@ impl PinnedApps {
         Self::curated()
     }
 
+    /// The curated defaults, as a constant. `curated()` already fills the
+    /// bounded arrays from the compile-time trusted literals; the host tests
+    /// check this equals `pin`-ing each default name in order.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "host-test alias; the shell initializer uses curated()"
+        )
+    )]
+    pub const fn defaults_const() -> Self {
+        Self::curated()
+    }
+
     /// Parse a settings value. `None` means the setting is absent and yields the
     /// defaults. An empty string means the user unpinned everything.
     pub fn from_setting(value: Option<&str>) -> Self {
@@ -122,13 +136,6 @@ impl PinnedApps {
     }
 
     /// Remove a pin, keeping the remaining order. Returns whether it was present.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "covered by host tests; in-shell pin editing needs a settings writer"
-        )
-    )]
     pub fn unpin(&mut self, name: &str) -> bool {
         let Some(index) = (0..self.count).find(|&index| self.get(index) == Some(name)) else {
             return false;
