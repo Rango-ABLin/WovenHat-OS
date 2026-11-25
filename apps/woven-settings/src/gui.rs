@@ -365,6 +365,10 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
         fail(7)
     };
     mode = persisted_mode(mode);
+    // Canonicalize a legacy installed record before the settings service
+    // accepts requests; subsequent restarts then observe v2 values even if the
+    // user closes the window without changing a setting.
+    let _ = persist_high_contrast(mode == ThemeMode::HighContrast);
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
     let mut refresh = Button::new(
         Frame::new(

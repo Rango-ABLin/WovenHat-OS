@@ -23,11 +23,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
     feature = "installed-wovenfs-interruption-test"
 ))]
 static INTERRUPT_AFTER_JOURNAL_COMMIT: AtomicBool = AtomicBool::new(false);
-#[cfg(any(
-    feature = "installed-wovenfs-interruption-qualification",
-    feature = "installed-wovenfs-interruption-test"
-))]
-static SUPPRESS_INTERRUPTION: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(
     feature = "installed-wovenfs-interruption-qualification",
@@ -64,9 +59,6 @@ fn maybe_interrupt(point: u8) {
     {
         return;
     }
-    if SUPPRESS_INTERRUPTION.load(Ordering::Acquire) {
-        return;
-    }
     let name = match point {
         0 => "descriptor",
         1 => "staged",
@@ -91,11 +83,6 @@ use std::string::String;
 pub const SUPER_MAGIC: &[u8; 8] = b"WOVENFS1";
 pub const JOURNAL_DESC_MAGIC: &[u8; 8] = b"WFSJDESC";
 pub const JOURNAL_COMMIT_MAGIC: &[u8; 8] = b"WFSJCOMM";
-#[cfg(any(
-    feature = "installed-wovenfs-interruption-qualification",
-    feature = "installed-wovenfs-interruption-test"
-))]
-const JOURNAL_INTERRUPT_MARKER: &[u8; 8] = b"WFSJCUT!";
 pub const FORMAT_VERSION: u16 = 1;
 
 /// Blocks one transaction may stage. The descriptor holds one 8-byte target
@@ -894,17 +881,6 @@ impl<D: BlockDevice> Volume<D> {
         let sb = self.super_block;
         let mut descriptor = [0u8; SECTOR_SIZE];
         self.device.read_sector(sb.journal_start, &mut descriptor)?;
-        #[cfg(any(
-            feature = "installed-wovenfs-interruption-qualification",
-            feature = "installed-wovenfs-interruption-test"
-        ))]
-        if &descriptor[..8] == JOURNAL_INTERRUPT_MARKER {
-            SUPPRESS_INTERRUPTION.store(true, Ordering::Release);
-            crate::serial::write_line(format_args!(
-                "[INSTALLED WOVENFS] pre-commit interruption consumed"
-            ));
-            return Ok(());
-        }
         if &descriptor[..8] != JOURNAL_DESC_MAGIC {
             return Ok(());
         }
@@ -919,21 +895,6 @@ impl<D: BlockDevice> Volume<D> {
         let mut commit = [0u8; SECTOR_SIZE];
         self.device.read_sector(commit_lba, &mut commit)?;
         if &commit[..8] != JOURNAL_COMMIT_MAGIC || read_u64(&commit, 8) != txn {
-            #[cfg(any(
-                feature = "installed-wovenfs-interruption-qualification",
-                feature = "installed-wovenfs-interruption-test"
-            ))]
-            if interruption_point() <= 1 {
-                let mut marker = [0u8; SECTOR_SIZE];
-                marker[..8].copy_from_slice(JOURNAL_INTERRUPT_MARKER);
-                self.device
-                    .write_sector(sb.journal_start, &marker)?;
-                self.device.flush()?;
-                SUPPRESS_INTERRUPTION.store(true, Ordering::Release);
-                crate::serial::write_line(format_args!(
-                    "[INSTALLED WOVENFS] pre-commit interruption recorded"
-                ));
-            }
             return Ok(());
         }
 

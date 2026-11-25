@@ -228,6 +228,29 @@ def replace(image: Path, source: Path) -> dict[str, object]:
     }
 
 
+def replace_esp(image: Path, source: Path) -> dict[str, object]:
+    target = _regular(image, "target image")
+    source_path = _regular(source, "source image")
+    target_data = target.read_bytes()
+    source_data = source_path.read_bytes()
+    target_offset, target_length = _esp_bounds(target_data)
+    source_offset, source_length = _esp_bounds(source_data)
+    if target_length != source_length:
+        raise ExtractError("recovery and installed EFI partitions differ in size")
+    replacement = source_data[source_offset : source_offset + source_length]
+    with target.open("r+b") as output:
+        output.seek(target_offset)
+        output.write(replacement)
+        output.flush()
+        os.fsync(output.fileno())
+    return {
+        "valid": True,
+        "esp_bytes": source_length,
+        "esp_sha256": hashlib.sha256(replacement).hexdigest(),
+        "physical_access": "none",
+    }
+
+
 def extract(image: Path, output: Path) -> dict[str, object]:
     source = _regular(image, "source image")
     if output.exists() and output.is_symlink():

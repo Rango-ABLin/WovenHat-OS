@@ -65,10 +65,8 @@ pub fn migrate(data: &[u8], output: &mut [u8]) -> Result<Migration, MigrationErr
     let keyboard = bounded_string_field(data, b"keyboard", "us", 16)?;
     let locale = bounded_string_field(data, b"locale", "en-US", 32)?;
     let network = bounded_string_field(data, b"network", "automatic", 32)?;
-    let taskbar_alignment =
-        bounded_string_field(data, b"taskbar_alignment", "center", 16)?;
-    let taskbar_icon_size =
-        bounded_string_field(data, b"taskbar_icon_size", "medium", 16)?;
+    let taskbar_alignment = bounded_string_field(data, b"taskbar_alignment", "center", 16)?;
+    let taskbar_icon_size = bounded_string_field(data, b"taskbar_icon_size", "medium", 16)?;
     let pinned_apps = bounded_string_field(
         data,
         b"pinned_apps",
@@ -170,7 +168,10 @@ struct Writer<'a> {
 
 impl<'a> Writer<'a> {
     fn new(output: &'a mut [u8]) -> Self {
-        Self { output, position: 0 }
+        Self {
+            output,
+            position: 0,
+        }
     }
 
     fn bytes(&mut self, bytes: &[u8]) -> Result<(), MigrationError> {
@@ -197,9 +198,7 @@ impl<'a> Writer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        migrate, patch_high_contrast, MigrationError, CURRENT_SCHEMA, MAX_SETTINGS_BYTES,
-    };
+    use super::{CURRENT_SCHEMA, MAX_SETTINGS_BYTES, MigrationError, migrate, patch_high_contrast};
 
     #[test]
     fn patch_is_bounded_and_fixed_width() {
@@ -231,9 +230,12 @@ mod tests {
         assert!(text.contains("\"user\":\"Lin\""));
         assert!(text.contains("\"high_contrast\":true"));
         assert!(text.contains("\"taskbar_alignment\":\"center\""));
-        assert!(migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
-            .unwrap()
-            .changed == false);
+        assert!(
+            migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
+                .unwrap()
+                .changed
+                == false
+        );
     }
 
     #[test]

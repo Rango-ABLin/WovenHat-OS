@@ -366,7 +366,7 @@ def replace_esp_boot_artifact(installed: Path, recovery_source: Path) -> None:
         raise InstalledDiskGateError("unable to load the UEFI artifact extractor")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.replace(installed, recovery_source)
+    module.replace_esp(installed, recovery_source)
 
 
 def resolve_qemu_and_firmware(qemu: Path | None, firmware: Path | None) -> tuple[Path, Path]:
