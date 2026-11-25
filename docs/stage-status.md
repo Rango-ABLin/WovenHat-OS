@@ -119,6 +119,11 @@ layout/pins harnesses at 1/2/4 CPUs all pass. Final evidence is under
 single fmt-only repair was applied to the incoming remote-admin line; no
 assertion, timeout or baseline changed.
 
+A final two-commit advance (TCP listen/accept plus its `PORT` fix) was merged in
+with one fmt-only repair to `libwoven/src/net.rs`; the full gate set was rerun
+on that exact source with evidence under
+`D:\WovenHat-OS-output-phaseb-push2\audit-artifacts\`.
+
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The 1/2/4-only choke points were removed without changing any assertion:

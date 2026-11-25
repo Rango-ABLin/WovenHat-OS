@@ -93,6 +93,12 @@ is under `D:\WovenHat-OS-output-phaseb-final\audit-artifacts\` (`acceptance-*`,
 `phaseb-final-desktop-*`, `phaseb-final-layout-*`, `phaseb-final-pins-*`). No
 external release gate was changed.
 
+The branch advanced once more with TCP listen/accept support and a follow-up
+`PORT` fix; those two commits were merged in, one further fmt-only repair was
+applied to `libwoven/src/net.rs`, and the full gate set was rerun on that exact
+source under `D:\WovenHat-OS-output-phaseb-push2\audit-artifacts\`. No assertion
+or limit changed.
+
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
 Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,
