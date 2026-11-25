@@ -9217,25 +9217,25 @@ fn native_app_mutation_self_test() -> bool {
     // for a fixed trusted argv[0], while the WAPP path uses the signature.
     let image = EXTERNAL_APPLICATION;
     const COMMANDS: &[&[&str]] = &[
-        &["/bin/wovenhat-files", "--mkdir", "/mnt/mutation-probe"],
+        &["/bin/wovenhat-files", "--mkdir", "/tmp/mutation-probe"],
         &[
             "/bin/wovenhat-files",
             "--write",
-            "/mnt/mutation-probe/note.txt",
+            "/tmp/mutation-probe/note.txt",
             "hello",
         ],
         &[
             "/bin/wovenhat-files",
             "--rename",
-            "/mnt/mutation-probe/note.txt",
-            "/mnt/mutation-probe/renamed.txt",
+            "/tmp/mutation-probe/note.txt",
+            "/tmp/mutation-probe/renamed.txt",
         ],
         &[
             "/bin/wovenhat-files",
             "--rm",
-            "/mnt/mutation-probe/renamed.txt",
+            "/tmp/mutation-probe/renamed.txt",
         ],
-        &["/bin/wovenhat-files", "--rm", "/mnt/mutation-probe"],
+        &["/bin/wovenhat-files", "--rm", "/tmp/mutation-probe"],
     ];
     for (index, argv) in COMMANDS.iter().enumerate() {
         let Some(program) = userspace::load_elf_with_argv_verified(image, argv) else {

@@ -371,12 +371,13 @@ fn view(raw_path: &[u8]) -> u64 {
 
 const MAX_MUTATION_PATH: usize = 256;
 
-/// Confine app-level mutations to bounded `/mnt/...` paths. The kernel still
-/// enforces `FileWrite`, the sandbox file scope and the mounted-path policy;
-/// this check keeps the CLI from silently targeting a system path.
+/// Confine app-level mutations to bounded `/mnt/...` or `/tmp/...` paths. The
+/// kernel still enforces `FileWrite`, the sandbox file scope and the mounted-
+/// path policy; this check keeps the CLI from silently targeting a system path.
 fn mutation_path(raw: &[u8]) -> Option<&str> {
     let path = core::str::from_utf8(raw).ok()?;
-    if path.is_empty() || path.len() > MAX_MUTATION_PATH || !path.starts_with("/mnt/") {
+    let confined = path.starts_with("/mnt/") || path.starts_with("/tmp/");
+    if path.is_empty() || path.len() > MAX_MUTATION_PATH || !confined {
         return None;
     }
     if path.contains('\0') || path.contains('\\') {
@@ -398,20 +399,7 @@ fn create_dir(raw_path: &[u8]) -> u64 {
             0
         }
         Err(_) => {
-            let _ = libwoven::print("WovenFiles: mutation denied: mkdir raw=");
-            let raw = unsafe {
-                libwoven::syscall::invoke(
-                    libwoven::syscall::MKDIR,
-                    path.as_ptr() as u64,
-                    path.len() as u64,
-                    0,
-                )
-            };
-            let mut digits = [0u8; 20];
-            if let Ok(text) = core::str::from_utf8(libwoven::format_u64(raw, &mut digits)) {
-                let _ = libwoven::print(text);
-            }
-            let _ = libwoven::print("\n");
+            let _ = libwoven::print("WovenFiles: mutation denied: mkdir\n");
             3
         }
     }

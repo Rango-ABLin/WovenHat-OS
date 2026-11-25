@@ -1088,10 +1088,7 @@ fn sys_mkdir(user_path: u64, length: u64) -> u64 {
     };
     match crate::task::mkdir_path(path) {
         Ok(()) => 0,
-        Err(error) => {
-            crate::serial::write_line(format_args!("[MKDIR-DIAG] {:?}", error));
-            SYSCALL_ERROR
-        }
+        Err(_) => SYSCALL_ERROR,
     }
 }
 

@@ -88,6 +88,7 @@ def main():
 
     text = serial.read_text(errors="replace") if serial.exists() else ""
     expected = [
+        "[STORAGE MUTATION] live FAT32 rename/delete/growth/lifecycle: PASSED",
         "[NATIVE-APP] --mkdir PASS",
         "[NATIVE-APP] --write PASS",
         "[NATIVE-APP] --rename PASS",
