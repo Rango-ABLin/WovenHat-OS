@@ -1,5 +1,6 @@
 use std::{env, fs, path::PathBuf, process};
 
+#[cfg(test)]
 use ed25519_compact::{KeyPair, Seed};
 use sha2::{Digest, Sha256};
 use wovenhat_release_signing::SigningRequest;
@@ -24,6 +25,7 @@ fn usage() -> ! {
     process::exit(2)
 }
 
+#[cfg(test)]
 fn parse_hex(value: &str) -> Result<[u8; 32], &'static str> {
     if value.len() != 64 {
         return Err("key must contain 64 hexadecimal digits");
