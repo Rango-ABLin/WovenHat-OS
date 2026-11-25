@@ -1,5 +1,33 @@
 # Stage status
 
+## Ring-3 secure-randomness ABI - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Added a bounded HMAC-SHA256 DRBG (`kernel/src/secure_rng.rs`) and syscall 251
+(`SecureRandom`), plus the capability-free `libwoven::secure_random` wrapper.
+The generator is deterministic and is only meaningful when seeded: boot calls
+`seed_from_hardware()`, which requires a health-checked eight-sample RDRAND
+sequence mixed with boot timing. Constant, zero or repeated samples reject the
+seed and leave the pool unseeded, so the syscall fails closed for every caller
+instead of falling back to the documented non-cryptographic mixer. Output is
+bounded to 4096 bytes per call, keyed by domain-separated HMAC-SHA256 with a
+ratchet after every block, and zeroized in the syscall path.
+
+Validation: kernel Clippy for default and `secure-rng-test`, all-targets
+Clippy, workspace tests and the full `RUN-STAGE10.7.ps1` chain pass. The
+`[RNG] bounded DRBG self-test: PASSED` gate passes at 1/2/4 CPUs via
+`test-feature-qemu.py`, covering unseeded rejection, non-zero non-repeating
+output, oversized/zero-length rejection and post-clear fail-closed behaviour.
+Production boots under TCG log `[RNG] boot entropy: unavailable (fails closed)`:
+QEMU's default CPU does not expose a health-checked hardware source here, so
+this is the honest result, not a test failure.
+
+**Trust boundary:** this is a virtual/software-qualified entropy ABI, not a
+certified TRNG. Physical entropy-source review and independent validation
+remain release gates. A Ring-3 process that terminates TLS itself still needs a
+no_std TLS provider; a feasibility spike now shows `rustls` compiles for
+`x86_64-unknown-none` without `ring`, so that blocker is implementation effort
+for a custom crypto provider rather than a hard toolchain wall.
+
 ## Ring-3 TCP listen/accept ABI - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 A real guest listener primitive now exists. Syscalls `NetListen` (249) and

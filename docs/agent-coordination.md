@@ -1,3 +1,19 @@
+## OpenCode - Ring-3 secure-randomness ABI (2026-11-25)
+
+Added the second prerequisite for an eventual guest TLS service: an HMAC-SHA256
+DRBG behind syscall 251 (`SecureRandom`) and `libwoven::secure_random`. Boot
+seeding requires a health-checked RDRAND sequence; when that source is missing
+or fails the pool stays unseeded and the syscall fails closed. TCG boots report
+`[RNG] boot entropy: unavailable (fails closed)` — the honest virtual result.
+The DRBG self-test gate passes at 1/2/4 CPUs and the full Stage 10.7 chain
+passes. No production TRNG claim is made; physical entropy review stays open.
+
+Feasibility update: `rustls` itself compiles for `x86_64-unknown-none` without
+`ring`, so the remaining guest-TLS blocker is a custom `CryptoProvider` built
+from already-cached pure-Rust crates (`aes-gcm`, `sha2`, `hmac`, `p256`, `rsa`),
+not a hard toolchain wall. That is a substantial dedicated stage and was not
+started here.
+
 ## OpenCode - Ring-3 listen/accept ABI (2026-11-25)
 
 Implemented the listener stage requested after the guest-mTLS feasibility
