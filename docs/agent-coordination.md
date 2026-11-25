@@ -1,3 +1,20 @@
+## OpenCode - persistent config migration and WovenFS crash boundaries (2026-11-25)
+
+Closed the two requested bounded software gaps. Installed v1 settings migrate
+through `libwoven::settings_policy` to canonical v2; installer output is v2 and
+WovenSettings migrates installed and durable records at service startup. The
+WovenFS installed-image gate now covers descriptor, staged payload, commit,
+first target, target flush, checkpoint and retirement; recovery replaces only
+the ESP with an uninstrumented image.
+
+Validation: host/workspace and affected-feature Clippy, 259 host/workspace
+tests, focused Python contracts, signed WovenSettings QEMU 1/2/4 CPUs, and all
+seven WovenFS cuts at 1/2/4 CPUs pass with exit 33. Evidence is
+`audit-artifacts/installed-wovenfs-cuts-20261125-final-*` and
+`audit-artifacts/woven-settings-{1,2,4}cpu`. Physical power-loss, controller
+cache, torn-media and native-device qualification remain external. Unrelated
+Stage 31/virtual-input and desktop-harness dirty work was left untouched.
+
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
 Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,

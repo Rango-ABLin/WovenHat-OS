@@ -1,5 +1,17 @@
 # WovenFS-as-system-filesystem migration — tracker and resume map
 
+## Installed crash-boundary matrix expanded — 2026-11-25
+
+The installed-image gate now exercises descriptor staging, staged payload,
+commit, first target write, target flush, checkpoint and journal-retirement
+interruption. Later boots replace only the EFI partition with an
+uninstrumented image, preserving GPT and the WovenFS system partition.
+All seven cuts pass on 1/2/4 CPUs under
+`audit-artifacts/installed-wovenfs-cuts-20261125-final-*`.
+
+No physical controller-cache, torn-sector, native-media or physical
+power-loss result was produced.
+
 ## Current-source cold reboot and commit replay accepted — 2026-11-20
 
 The disposable installed-volume gate now passes three distinct cold boots on

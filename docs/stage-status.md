@@ -1,5 +1,32 @@
 # Stage status
 
+## Persistent configuration migration and native WovenFS boundary matrix - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+`libwoven::settings_policy` now has one bounded installed-settings migration
+boundary: valid `wovenhat-installed-v1` records become canonical
+`wovenhat-installed-v2` records, current v2 records remain byte-stable, and
+unknown schemas, unsafe strings, oversized fields and insufficient output fail
+closed. New installations emit v2 directly. WovenSettings canonicalizes both
+the installed `/etc` record and mounted durable `/mnt/etc` record during
+service startup, so later restarts do not depend on a user changing a control.
+
+The installed-WovenFS interruption gate now covers journal descriptor, staged
+payload, commit sector, first target write, target flush, checkpoint
+publication and journal retirement. Recovery changes only the EFI partition to
+an uninstrumented boot image, preserving GPT and the WovenFS system partition.
+All seven cuts pass on 1/2/4 CPUs with exit 33 for every boot:
+`audit-artifacts/installed-wovenfs-cuts-20261125-final-{descriptor,staged,commit,target,target-flush,checkpoint,retire}`.
+
+Focused evidence: warning-denying workspace, interruption-feature and
+WovenSettings target Clippy pass; workspace tests pass with 259 tests plus one
+predeclared ignored fixture; migration, installed-image and ESP-replacement
+contracts pass; signed WovenSettings execution passes 1/2/4 CPUs under
+`audit-artifacts/woven-settings-{1,2,4}cpu`.
+
+This closes the software/QEMU migration and virtual crash-boundary gaps only.
+Physical power loss, volatile-controller cache behavior, torn physical sectors
+and native-media qualification remain external.
+
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The 1/2/4-only choke points were removed without changing any assertion:
