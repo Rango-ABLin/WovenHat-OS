@@ -2327,7 +2327,6 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
 }
 
 /// A HID keyboard usage (page 7) as a WovenInput key.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
     const DIGITS: &[u8; 10] = b"1234567890";
     const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";
