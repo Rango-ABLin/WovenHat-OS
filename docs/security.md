@@ -67,17 +67,16 @@ base, user stack base and anonymous-mmap arena. The `qemu-test` feature keeps
 these offsets at zero so acceptance boots remain reproducible; kernel addresses
 are unaffected.
 
-Signed execution and boot handoff use separate trust roots. Production WAPP
-packaging now fails closed unless both `WOVENHAT_APP_SIGNING_SEED_HEX` and the
-matching `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are provisioned; the
-deterministic development seed is limited to test packaging. Release builds
-must also provision `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` for WAPP application
-packages and both `WOVENHAT_BOOT_SIGNING_SEED_HEX` and the matching
-`WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX` for the signed kernel handoff. The
-builders fail closed on missing or mismatched release values; test features
-use deterministic development roots only. Firmware UEFI Secure Boot variables,
-TPM PCR/event logs, key revocation, and rollback metadata remain platform
-integration work.
+Signed execution, boot handoff and SDK provenance use separate trust roots.
+Production packaging requires the pinned trusted public key and exactly one
+signing authority: either the legacy explicitly provisioned seed or a
+non-exportable hardware-backed external signer. A seed and external signer
+cannot be active together, and every hardware-produced signature is verified
+before its artifact is written. The deterministic development seeds are
+limited to test packaging. The controlled PKCS#11 ceremony and environment are
+defined in `release-qualification/KEY-CUSTODY.md`. Firmware UEFI Secure Boot
+variables, TPM PCR/event logs, key revocation and rollback metadata remain
+platform integration work.
 
 User-triggered `exec` and `spawn` now require a valid WAPP envelope for every
 path outside the finite kernel-owned system-image allowlist. Raw ELF remains

@@ -2696,24 +2696,29 @@ power-loss rollback, and key lifecycle policy remain open.
 
 `tools/wapp-packager` has two explicit modes. Test/development invocations may
 use the deterministic fixture seed; production invocations are marked with
-`WOVENHAT_APP_RELEASE_MODE=1` and fail closed unless both
-`WOVENHAT_APP_SIGNING_SEED_HEX` and `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are
-present. The packager derives the public key from the signing seed and rejects
-any mismatch. `package-system-apps.py`, `build-package-service.py`, and the
-release fallback propagate this mode. Seeds never enter WAPP metadata or
-catalog files. Secret custody, rotation/revocation, and physical qualification
-remain deployment responsibilities.
+`WOVENHAT_APP_RELEASE_MODE=1` and require a pinned trusted public key plus
+exactly one authority: a legacy explicitly provisioned seed or a hardware
+external signer. A seed and external signer cannot be enabled together.
+Hardware signatures must be exactly 64 bytes and are verified against the
+trusted key before package output is written. `package-system-apps.py`,
+`build-package-service.py`, and the release fallback propagate this mode.
+`tools/release-signing` implements the shared custody boundary, and
+`scripts/hardware-release-signer.py` adapts it to PKCS#11 without exporting
+private material. The witnessed ceremony is in
+`docs/release-qualification/KEY-CUSTODY.md`; a physical token remains an
+external deployment prerequisite.
 
 ## Stage 27.3 signed update-package producer (2026-10-21)
 
 `tools/wupd-packager` is the producer for the kernel's version-1 `WUPD`
 envelope. It keeps the generation and image length bounded, stores the exact
 SHA-256 image digest, and signs a domain-separated digest over the immutable
-header and image with Ed25519. Release mode requires both the signing seed and
-the matching provisioned trusted public key; development fallback is limited
-to the deterministic fixture key. The tool does not install or activate an
-image. Long-lived service ownership, slot storage, boot handoff, power-loss
-recovery, and physical qualification remain separate prerequisites.
+header and image with Ed25519. It uses the same application-key custody
+boundary as WAPP and WPKG: production mode requires a pinned trusted public
+key and exactly one seed or external hardware signer; development fallback is
+limited to the deterministic fixture key. The tool does not install or
+activate an image. Long-lived service ownership, slot storage, boot handoff,
+power-loss recovery, and physical qualification remain separate prerequisites.
 
 ## Stage 27.4 bounded update IPC contract (2026-10-21)
 

@@ -148,6 +148,9 @@ installed-wovenfs-interruption-qualification = ["installed-wovenfs-qualification
 installed-wovenfs-interruption-test = []
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
+# Stage 31 in-guest deterministic randomized fault injection. Self-test only:
+# no production allocation or scheduling path is altered by the feature.
+fault-injection-test = ["qemu-test"]
 # S03 bounded process lifecycle acceptance: fork/wait/reap and process-group
 # signal teardown. This gate is intentionally independent of later stages.
 s03-process-lifecycle-test = ["qemu-test"]

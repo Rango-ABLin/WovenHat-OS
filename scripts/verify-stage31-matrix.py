@@ -98,6 +98,7 @@ def main() -> int:
         "schema": "wovenhat.stage31.matrix-audit/v1",
         "valid": not errors,
         "cpus": list(args.cpus),
+        "seed": args.seed,
         "required_scenarios": sorted(REQUIRED_SCENARIOS),
         "audited": audited,
         "errors": errors,

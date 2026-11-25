@@ -123,6 +123,7 @@ mod bounded_capacity_analyzer;
 mod compiler_fuzzing;
 pub mod debug_dump;
 pub mod debug_serial;
+#[cfg(feature = "fault-injection-test")]
 mod deterministic_fault_injection;
 mod documentation_generator;
 pub mod gdb_binding;
@@ -4108,6 +4109,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S12.1] VFS boundary: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "fault-injection-test")]
+    {
+        if !deterministic_fault_injection::qemu_self_test() {
+            serial::write_line(format_args!(
+                "[S31] deterministic randomized fault injection: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S31] deterministic randomized fault injection: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage13-1-test")]

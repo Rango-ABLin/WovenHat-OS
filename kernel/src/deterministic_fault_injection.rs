@@ -1,6 +1,8 @@
 //! Deterministic Fault Injection Framework
-
-#![allow(dead_code, unused)]
+//!
+//! The framework is compiled only for the `fault-injection-test` gate. It is
+//! a self-test of the seeded decision logic: it never alters production
+//! allocation, scheduling or interrupt paths.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultKind {
@@ -249,6 +251,143 @@ impl FaultInjectionScenario {
             self.scenario_id, self.target_subsystem, self.timing
         ));
     }
+}
+
+/// Seed used by the retained Stage 31 campaigns and this self-test.
+pub const STAGE31_SEED: u64 = 0x0005_1A7E;
+
+fn kinds() -> [FaultKind; 8] {
+    [
+        FaultKind::AllocationFailure,
+        FaultKind::TimeoutExpired,
+        FaultKind::DataCorruption,
+        FaultKind::CpuNotReady,
+        FaultKind::LockContentionHigh,
+        FaultKind::MemoryPressure,
+        FaultKind::InterruptDropped,
+        FaultKind::DeadlineExceeded,
+    ]
+}
+
+fn register_all(injector: &mut DeterministicFaultInjector) -> Result<[u32; 8], ()> {
+    let mut ids = [0u32; 8];
+    for (index, id) in ids.iter_mut().enumerate() {
+        *id = injector.register_fault_point(kinds()[index])?;
+    }
+    if ids[0] != 0 || ids[7] != 7 {
+        return Err(());
+    }
+    Ok(ids)
+}
+
+/// Bounded, fail-closed self-test of the seeded injector. Every public decision
+/// path is exercised and checked against a second injector with the same seed
+/// and one with a different seed. Returns false on any deviation.
+pub fn qemu_self_test() -> bool {
+    let mut injector = DeterministicFaultInjector::new(STAGE31_SEED);
+    let Ok(ids) = register_all(&mut injector) else {
+        return false;
+    };
+
+    // Bounded pseudo-random trigger counts: 1..=7. The same seed must yield
+    // the identical sequence; a different seed must diverge somewhere.
+    let mut counts = [0u32; 8];
+    for (index, count) in counts.iter_mut().enumerate() {
+        let draw = injector.next_random();
+        *count = 1 + (draw % 7);
+        if injector.enable_fault(ids[index], *count).is_err() {
+            return false;
+        }
+    }
+    let mut same = DeterministicFaultInjector::new(STAGE31_SEED);
+    let mut other = DeterministicFaultInjector::new(STAGE31_SEED.wrapping_add(1));
+    let mut diverges = false;
+    for (index, expected) in counts.iter().enumerate() {
+        let a = same.next_random();
+        let b = other.next_random();
+        if *expected != 1 + (a % 7) {
+            return false;
+        }
+        if a != b {
+            diverges = true;
+        }
+    }
+    if !diverges {
+        return false;
+    }
+
+    // Each fault must fire exactly once at its trigger count and never again.
+    let mut fired = [0u32; 8];
+    let steps = 8u32 * 7;
+    for _ in 0..steps {
+        for index in 0..8 {
+            if injector.should_inject(ids[index]) {
+                fired[index] += 1;
+            }
+        }
+    }
+    if fired.iter().any(|count| *count != 1) || injector.total_injections() != 8 {
+        return false;
+    }
+    for _ in 0..8 {
+        for index in 0..8 {
+            if injector.should_inject(ids[index]) {
+                return false;
+            }
+        }
+    }
+
+    // Statistics, bounded test-case configuration and coverage accounting.
+    let stats = FaultInjectionStats::from_injector(&injector);
+    stats.print_summary();
+    if stats.total_faults_registered != 8
+        || stats.total_faults_triggered != 8
+        || stats.faults_by_kind.iter().sum::<u32>() != 8
+    {
+        return false;
+    }
+    let mut case = FaultInjectionTestCase::new("randomized-cross-subsystem", STAGE31_SEED);
+    for (index, id) in ids.iter().enumerate() {
+        if case.add_fault(*id, counts[index]).is_err() {
+            return false;
+        }
+    }
+    let mut case_injector = DeterministicFaultInjector::new(STAGE31_SEED);
+    let Ok(case_ids) = register_all(&mut case_injector) else {
+        return false;
+    };
+    if case_ids != ids || case.run(&mut case_injector).is_err() {
+        return false;
+    }
+    let mut coverage = FaultCoverage::new();
+    coverage.faults_triggered = 8;
+    coverage.record_recovery();
+    coverage.record_failure();
+    coverage.print_report();
+    if coverage.faults_recovered != 1 || coverage.faults_fatal != 1 || coverage.recovery_rate != 12
+    {
+        return false;
+    }
+    let scenario = FaultInjectionScenario::new(1, "scheduler", FaultKind::CpuNotReady, 42);
+    scenario.describe();
+    if scenario.scenario_id != 1 || scenario.timing != 42 {
+        return false;
+    }
+
+    // A disabled point must never fire, even with a remaining trigger count.
+    if injector.enable_fault(ids[0], 3).is_err() {
+        return false;
+    }
+    injector.disable_fault(ids[0]);
+    if injector.should_inject(ids[0]) {
+        return false;
+    }
+
+    crate::serial::write_line(format_args!(
+        "[FI] deterministic randomized injection({:#x}): PASSED",
+        STAGE31_SEED
+    ));
+    true
 }
 
 #[cfg(test)]

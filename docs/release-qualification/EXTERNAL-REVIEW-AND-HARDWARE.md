@@ -21,10 +21,13 @@ artifacts are provided and verified against an exact commit.
 
 ## Production signing custody
 
-**BLOCKED — production SDK/release signing inputs are not provisioned.** The
-repository verifier correctly requires separately managed production seed and
-trusted-public-key variables. Development signatures and test keys do not
-establish release custody.
+**BLOCKED PENDING HARDWARE CEREMONY — the repository now supports non-exportable
+PKCS#11 signing, but no production token or public-key evidence is provisioned.**
+The release tools require separate boot, application and SDK public keys plus
+exactly one external hardware signer; ambiguous seed-and-token authority fails
+closed. Development signatures and test keys do not establish release custody.
+See `KEY-CUSTODY.md` for the witnessed generation, verification and rotation
+procedure.
 
 ## Native hardware support
 
