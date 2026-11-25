@@ -162,12 +162,30 @@ fn main(args: Args) -> ! {
             None => 2,
         },
         Some(b"--help") => {
-            let _ = libwoven::print("WovenFiles: --path PATH or --view PATH\n");
+            let _ = libwoven::print(
+                "WovenFiles: --path PATH | --view PATH | --mkdir PATH | --rm PATH | --rename OLD NEW | --write PATH TEXT\n",
+            );
             0
         }
         Some(b"--path") => match args.get(2) {
             Some(path) => list(path),
             None => 2,
+        },
+        Some(b"--mkdir") => match args.get(2) {
+            Some(path) => create_dir(path),
+            None => 2,
+        },
+        Some(b"--rm") => match args.get(2) {
+            Some(path) => remove(path),
+            None => 2,
+        },
+        Some(b"--rename") => match (args.get(2), args.get(3)) {
+            (Some(old), Some(new)) => move_path(old, new),
+            _ => 2,
+        },
+        Some(b"--write") => match (args.get(2), args.get(3)) {
+            (Some(path), Some(text)) => write(path, text),
+            _ => 2,
         },
         None => list(b"/mnt"),
         Some(_) => 2,
@@ -349,6 +367,98 @@ fn view(raw_path: &[u8]) -> u64 {
     };
     let _ = libwoven::close(descriptor);
     result
+}
+
+const MAX_MUTATION_PATH: usize = 256;
+
+/// Confine app-level mutations to bounded `/mnt/...` paths. The kernel still
+/// enforces `FileWrite`, the sandbox file scope and the mounted-path policy;
+/// this check keeps the CLI from silently targeting a system path.
+fn mutation_path(raw: &[u8]) -> Option<&str> {
+    let path = core::str::from_utf8(raw).ok()?;
+    if path.is_empty() || path.len() > MAX_MUTATION_PATH || !path.starts_with("/mnt/") {
+        return None;
+    }
+    if path.contains('\0') || path.contains('\\') {
+        return None;
+    }
+    path.split('/').skip(1).all(|part| {
+        !part.is_empty() && part != "." && part != ".." && part.len() <= 64
+    }).then_some(path)
+}
+
+fn create_dir(raw_path: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::mkdir(path) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: directory created\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: mkdir\n");
+            3
+        }
+    }
+}
+
+fn remove(raw_path: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::unlink(path) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: entry removed\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: unlink\n");
+            3
+        }
+    }
+}
+
+fn move_path(raw_old: &[u8], raw_new: &[u8]) -> u64 {
+    let (Some(old), Some(new)) = (mutation_path(raw_old), mutation_path(raw_new)) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::rename(old, new) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: entry renamed\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: rename\n");
+            3
+        }
+    }
+}
+
+fn write(raw_path: &[u8], raw_text: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    let Ok(descriptor) = libwoven::open_access(path, 6) else {
+        let _ = libwoven::print("WovenFiles: mutation denied: open\n");
+        return 3;
+    };
+    let written = libwoven::write_file_all(descriptor, raw_text);
+    let _ = libwoven::close(descriptor);
+    if written != Ok(raw_text.len()) {
+        let _ = libwoven::print("WovenFiles: mutation denied: write\n");
+        return 3;
+    }
+    if libwoven::sync_all().is_err() {
+        let _ = libwoven::print("WovenFiles: mutation denied: sync\n");
+        return 4;
+    }
+    let _ = libwoven::print("WovenFiles: entry written\n");
+    0
 }
 
 #[panic_handler]

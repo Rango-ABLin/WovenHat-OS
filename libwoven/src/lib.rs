@@ -15623,6 +15623,68 @@ pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
     Ok(offset)
 }
 
+/// Create a bounded directory. The kernel still enforces `FileWrite`, the
+/// sandbox file scope and the mounted-path policy.
+pub fn mkdir(path: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if path.is_empty() || path.len() > MAX_PATH {
+        return Err(Error::Failed);
+    }
+    let result = unsafe {
+        syscall::invoke(syscall::MKDIR, path.as_ptr() as u64, path.len() as u64, 0)
+    };
+    check(result).map(|_| ())
+}
+
+/// Remove a bounded file or empty directory. Authority is unchanged; the
+/// kernel rechecks `FileWrite` and the path scope.
+pub fn unlink(path: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if path.is_empty() || path.len() > MAX_PATH {
+        return Err(Error::Failed);
+    }
+    let result = unsafe {
+        syscall::invoke(syscall::UNLINK, path.as_ptr() as u64, path.len() as u64, 0)
+    };
+    check(result).map(|_| ())
+}
+
+/// Rename/move within one mounted namespace, with both paths authorized by
+/// the kernel. The packed length argument follows the fixed syscall ABI.
+pub fn rename(old: &str, new: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if old.is_empty()
+        || new.is_empty()
+        || old.len() > MAX_PATH
+        || new.len() > MAX_PATH
+        || old.len() > u16::MAX as usize
+        || new.len() > u16::MAX as usize
+    {
+        return Err(Error::Failed);
+    }
+    let lengths = (old.len() as u64) | ((new.len() as u64) << 16);
+    let result = unsafe {
+        syscall::invoke(
+            syscall::RENAME,
+            old.as_ptr() as u64,
+            lengths,
+            new.as_ptr() as u64,
+        )
+    };
+    check(result).map(|_| ())
+}
+
+/// Flush mounted, writable filesystems. Returns `Ok` even when nothing is
+/// mounted (the kernel reports a zero flush count); only the syscall failure
+/// sentinel is an error.
+pub fn sync_all() -> Result<(), Error> {
+    if unsafe { syscall::sync() } == u64::MAX {
+        Err(Error::Failed)
+    } else {
+        Ok(())
+    }
+}
+
 /// Fill a caller-owned buffer from the kernel's bounded DRBG.
 ///
 /// This is capability-free but fails closed when boot entropy was unavailable.

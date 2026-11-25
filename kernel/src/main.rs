@@ -5034,6 +5034,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S16.1] out-of-kernel application: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "native-app-mutation-test")]
+    {
+        if !native_app_mutation_self_test() {
+            serial::write_line(format_args!("[NATIVE-APP] bounded file mutations: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[NATIVE-APP] bounded file mutations: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage19-app-catalog-test")]
     {
         if !stage19_app_catalog_self_test() {
@@ -6969,7 +6978,11 @@ fn preemption_probe_task() -> ! {
 /// The path arrives through the environment so the kernel does not hard-code a
 /// build layout; the Stage 16.1 harness builds the application first and sets
 /// it.
-#[cfg(any(feature = "stage07-webp-test", feature = "stage16-1-test"))]
+#[cfg(any(
+    feature = "stage07-webp-test",
+    feature = "stage16-1-test",
+    feature = "native-app-mutation-test"
+))]
 const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
 
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
@@ -9178,6 +9191,61 @@ fn stage16_1_self_test() -> bool {
         "application exits zero",
         task::wait_process(pid.as_u64()) == Ok(0),
     )
+}
+
+/// Exercise the bounded WovenFiles mutation CLI with the real signed WAPP.
+/// This reuses the existing `FileWrite` authority and mounted-path policy; it
+/// adds no syscall, capability or ABI change.
+#[cfg(feature = "native-app-mutation-test")]
+fn native_app_mutation_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[NATIVE-APP] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    let Some(package) = signed_app::verify_package(EXTERNAL_APPLICATION).ok() else {
+        return step("signed WAPP package verifies", false);
+    };
+    if !step("signed WAPP package verifies", true) {
+        return false;
+    }
+    let image = package.bytes();
+    const COMMANDS: &[&[&str]] = &[
+        &["/bin/wovenhat-files", "--mkdir", "/mnt/mutation-probe"],
+        &["/bin/wovenhat-files", "--write", "/mnt/mutation-probe/note.txt", "hello"],
+        &[
+            "/bin/wovenhat-files",
+            "--rename",
+            "/mnt/mutation-probe/note.txt",
+            "/mnt/mutation-probe/renamed.txt",
+        ],
+        &["/bin/wovenhat-files", "--rm", "/mnt/mutation-probe/renamed.txt"],
+        &["/bin/wovenhat-files", "--rm", "/mnt/mutation-probe"],
+    ];
+    for (index, argv) in COMMANDS.iter().enumerate() {
+        let Some(program) = userspace::load_elf_with_argv_verified(image, argv) else {
+            return step("load mutation command", false);
+        };
+        let Ok((pid, _)) = task::spawn_user_process("woven-files-mutation", program) else {
+            return step("spawn mutation command", false);
+        };
+        let start = timer::ticks();
+        while !task::process_exited(pid) {
+            if timer::ticks().wrapping_sub(start) > 500 {
+                return step("mutation command timed out", false);
+            }
+            task::yield_now();
+        }
+        if !step(argv[1], task::wait_process(pid.as_u64()) == Ok(0)) {
+            return false;
+        }
+        serial::write_line(format_args!("[NATIVE-APP] mutation step {}", index));
+    }
+    true
 }
 
 // ------------------------------- end-to-end client surface via a real app
