@@ -1,5 +1,39 @@
 # Stage status
 
+## Stage 1-18 bounded qualification refresh - 2026-11-25 - EVIDENCE REFRESHED / FORMAL CLOSURE STILL BLOCKED
+
+Refreshed current-source software/QEMU evidence for every Stage 1-18 bounded
+gate that previously had only historical artifacts. Fifty-two stage gates were
+run serially at 1/2/4 CPUs (Stage 6 hotplug at its supported 2/4 profiles),
+over 150 boots, all with exit 33 and the required markers:
+
+- `test-stage10-runtime.py`: 1-5, 7, 8, 9, 10.8, 10.9, 11.1, 11.2,
+  11.2-status, 11.2-aslr, 11.3, 11.4, 11.5, 11.5-compiler, 12.1-12.5,
+  13.1-13.11, 15.1, 15.3-15.9, 17.1, 18.1.
+- `test-stage6-hotplug.py`: 2/4 CPU cycles.
+- `test-network-qemu.py`: 14.1, 14.2, 14.3, 14.4, 14.5, 14.5b, 14.5c, 14.5d.
+- `test-application-qemu.py` (16.1) and `test-hello-gui-qemu.py` (18.2).
+
+Two real feature-gate defects were found and repaired while bringing the
+Stage 13 family up: `xhci::keyboard_presses`/`usage_key` and the `hda`
+audio-gate statics were gated to `not(qemu-test) or stage13-12-test`, so
+Stages 13.5/13.6/13.7/13.8/13.10/13.11 could not compile. They are now always
+compiled (the kernel already permits dead code under `qemu-test`); no behavior
+or assertion changed. Kernel default Clippy, all affected Stage 13 feature
+Clippy, all-targets Clippy, workspace tests and the full serialized
+`RUN-STAGE10.7.ps1` chain exit 0. Logs:
+`C:\Users\banda\AppData\Local\Temp\opencode\stage1-18-refresh-batch{1..6}.log`
+and `-stage10.7-20261125.log`.
+
+**This is not formal Stage 1-19 closure.** `docs/stage1-19-closure-gate.md:5,142`
+explicitly forbids marking a stage closed from markers, QEMU exit 33, old green
+runs or documentation alone. The remaining blockers are unchanged: native
+hardware/DMA/power-loss matrices, physical hotplug/NUMA, complete signals and
+userspace runtime breadth, general toolchain interoperability, persistent key
+custody, installer/recovery/update integration, independent review and the
+production support policy. What is closed here is the *bounded software/QEMU
+evidence gap*, on exact current source, with retained artifacts.
+
 ## Desktop taskbar, Start and Notification Center completion - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Completed the remaining WovenShell chrome acceptance on the current M3/M4

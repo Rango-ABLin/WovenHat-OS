@@ -13,6 +13,23 @@ all-target warning-denying Clippy, workspace tests and the full serialized
 Stage 10.7 preservation chain exit 0. Native hardware, physical power-loss
 qualification and restoration of the test USB remain separate open work.
 
+## OpenCode - Stage 1-18 bounded gate refresh (2026-11-25)
+
+Refreshed 52 stage gates at 1/2/4 CPUs (hotplug 2/4 only), over 150 boots,
+covering every Stage 1-18 gate that had only historical evidence. All passed
+with exit 33 and required markers. Fixed two real feature-gate compile defects
+in `kernel/src/xhci.rs` (`keyboard_presses`, `usage_key`) and `kernel/src/hda.rs`
+(audio gate statics), which were gated to `not(qemu-test) or stage13-12-test`
+and broke Stages 13.5/13.6/13.7/13.8/13.10/13.11. These helpers are now always
+compiled; the kernel's `qemu-test` already allows dead code, so no lint or
+behavior changed. Full Stage 10.7 chain and all-targets Clippy pass.
+
+Formal Stage 1-19 closure is explicitly NOT claimed: the authoritative closure
+gate forbids closure from markers/QEMU alone, and the native, power-loss,
+independent-review and production-trust gates remain open. Only bounded
+software/QEMU evidence was refreshed. The other owner's uncommitted
+`kernel/src/main.rs` Stage 20 visual WIP was left untouched.
+
 ## OpenCode - Ring-3 secure-randomness ABI (2026-11-25)
 
 Added the second prerequisite for an eventual guest TLS service: an HMAC-SHA256
