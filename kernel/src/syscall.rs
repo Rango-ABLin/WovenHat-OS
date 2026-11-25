@@ -4,6 +4,7 @@ use core::{
 };
 
 use crate::config::{MAX_IO_SIZE, MAX_PATH_SIZE};
+use zeroize::Zeroize;
 
 global_asm!(
     ".global wovenhat_syscall_entry",
@@ -193,6 +194,8 @@ pub enum Number {
     NetListen = 249,
     /// socket -> async handle; completes with the packed accepted endpoint
     AsyncNetAccept = 250,
+    /// user buffer, length -> 0; fails closed when no entropy source seeded
+    SecureRandom = 251,
     /// 0=static fallback, nonzero=enable DHCP
     Dhcp = 47,
     /// packed IPv4 in low 32 bits
@@ -2135,6 +2138,26 @@ fn sys_net_listen(socket: u64, port: u64) -> u64 {
     result.map_or(SYSCALL_ERROR, |()| 0)
 }
 
+/// Copy bounded kernel-DRBG bytes into a validated caller buffer. The call is
+/// capability-free (randomness grants no device authority) but fails closed
+/// whenever the boot entropy check did not seed the pool.
+fn sys_secure_random(user_buffer: u64, length: u64) -> u64 {
+    let Ok(length) = usize::try_from(length) else {
+        return SYSCALL_ERROR;
+    };
+    if length == 0 || length > crate::secure_rng::MAX_RNG_BYTES {
+        return SYSCALL_ERROR;
+    }
+    let mut bytes = [0u8; crate::secure_rng::MAX_RNG_BYTES];
+    if crate::secure_rng::fill(&mut bytes[..length]).is_err() {
+        bytes.zeroize();
+        return SYSCALL_ERROR;
+    }
+    let result = crate::paging::copy_to_current_user(user_buffer, &bytes[..length]);
+    bytes.zeroize();
+    result.map_or(SYSCALL_ERROR, |()| 0)
+}
+
 fn sys_async_net_accept(socket: u64) -> u64 {
     if !crate::task::authorize_current_device(crate::wovenguard::DeviceClass::Network) {
         return SYSCALL_ERROR;
@@ -3547,6 +3570,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::NetPeer as u64 => sys_net_peer(arg0),
         value if value == Number::NetListen as u64 => sys_net_listen(arg0, arg1),
         value if value == Number::AsyncNetAccept as u64 => sys_async_net_accept(arg0),
+        value if value == Number::SecureRandom as u64 => sys_secure_random(arg0, arg1),
         value if value == Number::Dhcp as u64 => sys_dhcp(arg0),
         value if value == Number::PingStart as u64 => sys_ping_start(arg0),
         value if value == Number::PingPoll as u64 => sys_ping_poll(),

@@ -152,6 +152,7 @@ mod rtc;
 mod secret_vault;
 #[cfg(feature = "secure-boot")]
 mod secure_boot;
+mod secure_rng;
 mod serial;
 #[cfg(feature = "system-apps")]
 mod service_supervisor;
@@ -1614,6 +1615,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         pic::init();
         timer::init();
+        serial::write_line(format_args!(
+            "[RNG] boot entropy: {}",
+            if secure_rng::seed_from_hardware() {
+                "seeded"
+            } else {
+                "unavailable (fails closed)"
+            }
+        ));
 
         let early_devices = [
             device::Device {
@@ -2396,6 +2405,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     console.println("PIC: INITIALIZED (ALL IRQS MASKED)");
 
     timer::init();
+    serial::write_line(format_args!(
+        "[RNG] boot entropy: {}",
+        if secure_rng::seed_from_hardware() {
+            "seeded"
+        } else {
+            "unavailable (fails closed)"
+        }
+    ));
     let ata_sectors = ata::init();
     if ata_sectors.is_some()
         && !ata::with_primary_master(|disk| {
@@ -4104,6 +4121,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         serial::write_line(format_args!("[S11.2] scheduler-backed thread: PASSED"));
         serial::write_line(format_args!("[S11.2] threads/TLS/join: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "secure-rng-test")]
+    {
+        if !secure_rng::self_test() {
+            serial::write_line(format_args!("[RNG] bounded DRBG self-test: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[RNG] bounded DRBG self-test: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage11-3-test")]

@@ -12619,6 +12619,8 @@ pub mod syscall {
     pub const ASYNC_NET_POLL: u64 = 79;
     /// async handle, completion buffer, data buffer -> 1 complete
     pub const ASYNC_NET_WAIT: u64 = 80;
+    /// user buffer, length -> 0; fails closed without a boot entropy source
+    pub const SECURE_RANDOM: u64 = 251;
     pub const DHCP: u64 = 47;
     pub const PING_START: u64 = 48;
     pub const PING_POLL: u64 = 49;
@@ -15619,6 +15621,26 @@ pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
         offset += written;
     }
     Ok(offset)
+}
+
+/// Fill a caller-owned buffer from the kernel's bounded DRBG.
+///
+/// This is capability-free but fails closed when boot entropy was unavailable.
+/// It grants no device or secret authority; callers must still treat the bytes
+/// as generator output whose trust depends on the boot entropy boundary.
+pub fn secure_random(output: &mut [u8]) -> Result<usize, Error> {
+    if output.is_empty() || output.len() > 4096 {
+        return Err(Error::Failed);
+    }
+    check(unsafe {
+        syscall::invoke(
+            syscall::SECURE_RANDOM,
+            output.as_mut_ptr() as u64,
+            output.len() as u64,
+            0,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Write a string to standard output.
