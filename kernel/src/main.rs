@@ -9207,13 +9207,15 @@ fn native_app_mutation_self_test() -> bool {
         ok
     }
 
-    let Some(package) = signed_app::verify_package(EXTERNAL_APPLICATION).ok() else {
+    if signed_app::verify_package(EXTERNAL_APPLICATION).is_err() {
         return step("signed WAPP package verifies", false);
-    };
+    }
     if !step("signed WAPP package verifies", true) {
         return false;
     }
-    let image = package.bytes();
+    // Pass the signed envelope itself: a raw extracted ELF is only admitted
+    // for a fixed trusted argv[0], while the WAPP path uses the signature.
+    let image = EXTERNAL_APPLICATION;
     const COMMANDS: &[&[&str]] = &[
         &["/bin/wovenhat-files", "--mkdir", "/mnt/mutation-probe"],
         &[
