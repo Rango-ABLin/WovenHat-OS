@@ -456,6 +456,16 @@ impl Shell {
     fn finish(&mut self, console: &mut Console) {
         self.length = 0;
         if !terminal::foreground_active() {
+            static AUTO_DIAG: core::sync::atomic::AtomicBool =
+                core::sync::atomic::AtomicBool::new(false);
+            if !AUTO_DIAG.swap(true, core::sync::atomic::Ordering::AcqRel) {
+                console.println("");
+                console.println("--- auto diagnostics (no keyboard required) ---");
+                cmd_devices(console);
+                cmd_net(console);
+                console.println("--- end auto diagnostics ---");
+                let _ = crate::livelog::flush_now();
+            }
             self.print_prompt(console);
         }
     }
