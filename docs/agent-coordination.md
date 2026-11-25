@@ -1,3 +1,21 @@
+## OpenCode - phase-b branch reconciled with origin/master (2026-11-25)
+
+User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
+(16 ahead / 5 behind `origin/master`). Local `master` and `origin/master` were
+identical at `b87d7a07`. Merged `origin/master` into this branch with `--no-ff`
+(note the earlier merge at `36e721e9` is already in this branch's history, so
+this is the second master reconciliation). The five incoming commits are the
+bounded Stage 11 runtime-TLS/TLSDESC feature (`bd3ec493`, `d17ec776`) and their
+closure/architecture documents (`fbee86a4`, `bedee571`, `b87d7a07`); they touch
+`kernel/src/{elf.rs,userspace/linker.rs}`, the loader fixtures/scripts and docs.
+They do not overlap the Phase B shell or the e1000 driver. One conflict in
+`docs/stage-status.md` (both sides prepended a section) was resolved by keeping
+both entries, newest first; the other doc files auto-merged cleanly. No source
+behavior was changed by the resolution, and no acceptance claim is upgraded.
+
+Post-merge validation and any QEMU matrix are recorded below / in stage-status.
+No physical device, firmware setting or production signing input was touched.
+
 ## OpenCode - Phase C merged-tree revalidation (2026-11-24)
 
 `194d2d5e` landed the e1000 driver; `9d1d8c36` then dropped the now-unused
@@ -10327,6 +10345,36 @@ warning-denying Clippy and `cargo test --workspace` pass. Compiler-generated
 live dependency execution and general-dynamic/TLSDESC remain open. Ownership
 is released; no Cargo or QEMU chain remains active.
 
+## Codex - compiler runtime global-dynamic TLS accepted (2026-11-24)
+
+The unmodified Rust/LLD root/dependency graph executes compiler-generated
+global-dynamic TLS in Ring 3 through the existing generation-safe ABI. Stage
+11.2 TLS passes on 1/2/4 CPUs under the `1795457354*`, `1795457404*`, and
+`1795457431*` evidence sets. Fixture-aware target and all-target Clippy, 20
+builder/harness contracts, and the workspace suite pass. TLSDESC remains open.
+Ownership is released; no Cargo or QEMU chain remains active.
+
+## Codex - bounded runtime TLSDESC accepted (2026-11-24)
+
+The remaining x86-64 TLSDESC software gap is closed for runtime graphs. Parser
+admission is RELA-only with an aligned writable 16-byte target; the descriptor
+uses the existing generation-safe syscall and bounded module/template limits.
+The signed live fixture executes global-dynamic and TLSDESC reads of the same
+value. Stage 11.2 TLS passes on 1/2/4 CPUs under the `1795496990*`,
+`1795497015*`, and `1795497041*` evidence sets. Target/all-target Clippy, 20
+contracts, ELF tests, and workspace tests pass. Ownership is released; no
+Cargo or QEMU chain remains active.
+
+## Codex - exact-source Stage 11 closure verification active (2026-11-24)
+
+The required production-userspace paths are now implemented, including live
+global-dynamic and TLSDESC runtime TLS. Codex owns serialized exact-current-
+source closure verification: the inherited full Windows gate followed by the
+Stage 11 feature matrix on 1/2/4 CPUs, with existing assertions unchanged.
+Runtime local/initial-exec remain deliberately rejected for post-start modules
+because they require static TLS reservation and are not dynamic-loader models.
+No competing Cargo/QEMU acceptance chain is active.
+
 ## Codex - compiler runtime TLS dependency fixture active (2026-11-23)
 
 Codex owns the next bounded Stage 11 increment: build an unmodified Rust/LLD
@@ -10336,3 +10384,17 @@ relocations and live generation-safe publication in focused acceptance. Scope
 is loader-fixture sources/builder, Stage 11 runtime harness, linker acceptance,
 and directly related documentation. General-dynamic/TLSDESC implementation is
 not included unless this fixture closes first. No Cargo/QEMU chain is active.
+
+## Codex - exact-source Stage 11 closure matrix passed (2026-11-24)
+
+At `bedee571`, the inherited full `RUN-STAGE10.7.ps1` Windows gate passed
+unchanged, including 60 memory boots, live networking, and isolated 10.4-10.7
+boots on 1/2/4 CPUs. The first attempt's 1-CPU DNS timeout remains preserved;
+the serialized rerun passed DNS plus host-verified UDP/TCP on every CPU count
+without changing a timeout or assertion. The exact-source Stage 11 matrix then
+passed 30/30: 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler on
+1/2/4 CPUs, all with exit 33. Evidence is
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261124-090013-971` and
+`audit-artifacts/stage11-closure-matrix-20261124.log` plus its per-case
+directories. No Cargo/QEMU chain remains active; verification ownership is
+released.

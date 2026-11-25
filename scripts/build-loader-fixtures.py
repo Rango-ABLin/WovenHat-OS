@@ -115,7 +115,9 @@ def build(output, rustc='rustc'):
     (output / 'elf-report.txt').write_text(report, encoding='utf-8')
     for required in ('R_X86_64_DTPMOD64 WOVEN_RUNTIME_DEPENDENCY_TLS',
                      'R_X86_64_DTPOFF64 WOVEN_RUNTIME_DEPENDENCY_TLS',
+                     'R_X86_64_TLSDESC WOVEN_RUNTIME_DEPENDENCY_TLS',
                      'R_X86_64_JUMP_SLOT __tls_get_addr',
+                     '__woven_tlsdesc_resolver',
                      'Shared library: [libwoven-runtime-tls-dependency.so]'):
         if required not in report:
             raise RuntimeError(f'compiler runtime TLS fixture missing {required!r}')

@@ -1,5 +1,28 @@
 # Stage status
 
+## Stage 11 exact-source software closure matrix - 2026-11-24 - VERIFIED
+
+At source `bedee571`, the complete inherited Windows gate passed unchanged:
+build, warning-denying host/kernel Clippy, workspace tests, 60 memory boots,
+live DHCP/DNS/ICMP and host-verified UDP/TCP, and isolated Stages 10.4-10.7 on
+1/2/4 CPUs. Evidence is
+`D:\WovenHat-OS-output\audit-artifacts\acceptance-20261124-090013-971`; the
+repository-side combined log is
+`audit-artifacts/stage11-closure-stage10-7-20261124.log`. A preceding 1-CPU DNS
+timeout is preserved under `acceptance-20261124-071649-886`; it did not recur
+in the serialized rerun and no limit or assertion changed.
+
+The exact-current-source Stage 11 matrix passed 30/30 with exit 33: stages
+11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, and 11.5-compiler, each on 1/2/4
+CPUs. The combined transcript is
+`audit-artifacts/stage11-closure-matrix-20261124.log`, with individual evidence
+under `audit-artifacts/stage11*-179551*`. This verifies the implemented bounded
+production-userspace software path, including compiler-built global-dynamic and
+TLSDESC runtime TLS. It does not claim arbitrary libc/dynamic-loader
+interoperability, physical qualification, or release closure; runtime
+local/initial-exec remains deliberately rejected for post-start modules because
+it requires static TLS reservation.
+
 ## Phase C native EtherNIC reconciliation - 2026-11-23 - ACCEPTED (BOUNDED SOFTWARE/QEMU ONLY)
 
 **Decision**: `PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`. Native (Tier 1)
@@ -312,6 +335,39 @@ strengthened Stage 11.6 gate exercises two TLS dependencies (offsets 0 and 16)
 and passes on 1/2/4 CPUs with exit 33 under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
 dependency execution and general-dynamic/TLSDESC remain open and fail closed.
+
+## Stage 11 compiler runtime global-dynamic TLS - 2026-11-24 - ACCEPTED (BOUNDED)
+
+An unmodified Rust/LLD runtime dependency now carries compiler-produced
+`DTPMOD64`, `DTPOFF64`, and `__tls_get_addr` PLT relocations, while its root
+retains the exact dependency through `DT_NEEDED`. Ring 3 maps the signed graph,
+executes the compiler TLS read (91), unloads it, and verifies stale symbol
+rejection through the existing generation-safe transaction and syscall ABI.
+
+Stage 11.2 TLS passes on 1/2/4 CPUs with exit 33 under
+`audit-artifacts/stage11.2-tls-1cpu-1795457354246639000`,
+`stage11.2-tls-2cpu-1795457404361778200`, and
+`stage11.2-tls-4cpu-1795457431699639200`. Fixture-aware target Clippy,
+all-target warning-denying Clippy, 20 builder/harness contracts, and the full
+workspace suite pass. TLSDESC remains open and fail-closed; this does not claim
+arbitrary libc dynamic loading or physical qualification.
+
+## Stage 11 bounded runtime TLSDESC - 2026-11-24 - ACCEPTED (BOUNDED)
+
+Runtime graphs now admit the x86-64 `R_X86_64_TLSDESC` RELA form with a
+validated aligned 16-byte writable target. The descriptor binds the exact
+graph resolver to a compact generation/slot/offset record bounded by the
+existing module table and 4 KiB TLS template. The resolver reuses syscall 141;
+there is no new ABI authority. REL/PLT, startup TLSDESC, missing resolver,
+invalid symbol, overflow, misalignment, and stale generation fail closed.
+
+The live signed dependency executes both global-dynamic and TLSDESC reads of
+the same per-thread value. Stage 11.2 TLS passes on 1/2/4 CPUs with exit 33 in
+`audit-artifacts/stage11.2-tls-1cpu-1795496990464907300`,
+`stage11.2-tls-2cpu-1795497015976006900`, and
+`stage11.2-tls-4cpu-1795497041682313400`. The required TLSDESC marker appears
+once per exercised CPU. Target/all-target warning-denying Clippy, 20
+builder/harness contracts, 33 ELF tests, and the workspace suite pass.
 
 ## Stage 11 live runtime ELF mapping and symbol scope - 2026-11-23 - ACCEPTED (BOUNDED)
 

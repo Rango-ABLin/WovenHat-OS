@@ -1,5 +1,18 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Stage 11 exact-source verification boundary (2026-11-24)
+
+The production-userspace closure matrix exercises ten independent boot
+configurations rather than chaining Stage 11 features: 11.1-11.6 plus the
+11.2 status, TLS, and ASLR variants and the 11.5 compiler variant. Each feature
+boots separately on 1/2/4 CPUs because these gates own their termination path
+and must not mask one another. The runtime-TLS variant rebuilds the unmodified
+compiler fixtures for every CPU count and exercises global-dynamic and TLSDESC
+access through the generation-safe graph lifecycle; unsupported post-start
+local/initial-exec models continue to fail closed. At `bedee571`, the inherited
+Stage 10.7 chain and all 30 Stage 11 boots pass without a feature-graph,
+timeout, assertion, ABI, capability, or runtime-ownership change.
+
 ## Desktop system-status indicator boundary (2026-11-23)
 
 `apps/woven-shell/src/status.rs` is the bounded presentation model behind the
@@ -5152,3 +5165,48 @@ gate passes on 1/2/4 CPUs under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`; affected and all-target
 warning-denying Clippy and the workspace suite pass. A compiler-generated live
 dependency fixture and general-dynamic/TLSDESC remain open.
+
+## Compiler-generated runtime global-dynamic TLS (2026-11-24)
+
+The loader fixture builder now produces an unpatched Rust/LLD root shared
+object and TLS-bearing `DT_NEEDED` dependency. The dependency is compiled with
+the x86-64 global-dynamic model; artifact publication requires compiler-emitted
+`R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, a PLT relocation for
+`__tls_get_addr`, and the exact dependency name. The root implements
+`__tls_get_addr` as a narrow adapter to the existing generation-checked dynamic
+TLS address syscall. No new syscall or capability is introduced.
+
+The Stage 11.2 TLS gate installs the dependency as a signed read-only `/lib`
+package, embeds the root in the ordinary Ring-3 fixture, and performs a complete
+transaction: acquire the runtime-module gate, map the graph, resolve and call
+the root probe, read value 91 through compiler-generated global-dynamic code,
+release the generation, verify stale symbol lookup, and end the transaction.
+The dependency file is removed even after a failed CPU iteration. The gate
+passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954573*` and `17954574*`.
+TLSDESC and unsupported runtime local/initial-exec models remain fail-closed.
+
+## Bounded x86-64 runtime TLSDESC (2026-11-24)
+
+The ELF parser admits `R_X86_64_TLSDESC` only in the main RELA table, requires
+a nonzero TLS symbol, and validates the complete aligned 16-byte writable
+descriptor target. Startup and REL/PLT encodings remain rejected. During a
+runtime transaction, the linker resolves the same checked TLS symbol and graph
+layout used by `DTPMOD64`/`DTPOFF64`, then writes the descriptor atomically.
+
+The descriptor's first word is the graph's exact exported
+`__woven_tlsdesc_resolver`. Its second word is a private bounded encoding:
+generation in bits 63:32, one-based module slot in bits 31:12, and the combined
+TLS offset in bits 11:0. The limits match the existing 4 KiB template and fixed
+module table. The x86-64 resolver decodes that record, calls existing syscall
+141 with the reconstructed generation-tagged handle and offset, and returns the
+resolved address relative to the current FS base as required by the TLSDESC
+call sequence. No descriptor retains a kernel pointer, and no new syscall or
+capability is added.
+
+The signed live dependency contains both compiler global-dynamic access and an
+architecture TLSDESC access to the same variable. Ring 3 requires both to read
+91 before unload. The clean Stage 11.2 TLS gate passes on 1/2/4 CPUs under
+`audit-artifacts/stage11.2-tls-{1,2,4}cpu-17954969*`, `17954970*`; malformed,
+unaligned, oversized, missing-resolver, startup, and stale-generation cases
+remain fail-closed at existing validation or syscall boundaries.

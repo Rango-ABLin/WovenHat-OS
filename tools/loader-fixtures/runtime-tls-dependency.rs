@@ -10,3 +10,15 @@ pub extern "C" fn woven_runtime_dependency_tls_value() -> u64 {
     // Keep a real compiler-generated TLS access in the shared object.
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(WOVEN_RUNTIME_DEPENDENCY_TLS)) }
 }
+
+core::arch::global_asm!(
+    ".text",
+    ".global woven_runtime_dependency_tlsdesc_value",
+    ".type woven_runtime_dependency_tlsdesc_value,@function",
+    "woven_runtime_dependency_tlsdesc_value:",
+    "    leaq WOVEN_RUNTIME_DEPENDENCY_TLS@TLSDESC(%rip), %rax",
+    "    call *WOVEN_RUNTIME_DEPENDENCY_TLS@TLSCALL(%rax)",
+    "    movq %fs:(%rax), %rax",
+    "    ret",
+    options(att_syntax),
+);

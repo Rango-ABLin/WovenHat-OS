@@ -4,6 +4,17 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 11 exact-source closure verification - 2026-11-24
+
+Source `bedee571` passes the unchanged full Windows Stage 10.7 gate and the
+30-case Stage 11 feature matrix. The matrix covers 11.1-11.6, 11.2-status,
+11.2-tls, 11.2-aslr, and 11.5-compiler on 1/2/4 CPUs; every boot exited 33.
+The inherited gate includes warning-denying Clippy, workspace tests, 60 memory
+boots, live network round trips, and isolated 10.4-10.7 boots. The earlier
+1-CPU DNS timeout is retained as failure evidence and cleared on an unchanged
+serialized rerun. This is exact-source bounded software verification, not
+physical, arbitrary-toolchain, libc-interoperability, or release acceptance.
+
 ## POSIX musl static-libc bootstrap - 2026-10-28
 
 Added the repeatable bounded bootstrap builder for pinned musl 1.2.6. It
@@ -16542,3 +16553,36 @@ returned by publication. The strengthened Stage 11.6 fixture proves offsets
 publication on 1/2/4 CPUs under
 `audit-artifacts/stage11.6-{1,2,4}cpu-17954548*`. Compiler-generated live
 dependency execution and general-dynamic/TLSDESC remain open.
+
+## Stage 11 compiler runtime global-dynamic TLS audit (2026-11-24)
+
+The evidence builder hashes the two new sources and refuses to publish a
+manifest unless LLVM inspection finds the exact `DTPMOD64`, `DTPOFF64`,
+`__tls_get_addr` PLT, and `DT_NEEDED` records. The QEMU gate signs only the
+dependency test package, installs it read-only, and removes it after the
+multi-CPU run. The root maps through the production runtime transaction, and
+the compiler code reaches the existing checked TLS-address syscall using the
+generation-tagged handle and relocated combined-template offset.
+
+The marker `[S11.RUNTIME] compiler dependency TLS execution: PASSED` is required
+for every Stage 11.2 TLS boot and appears once per tested CPU in the 1/2/4-CPU
+evidence at `audit-artifacts/stage11.2-tls-*cpu-1795457*`. Target/all-target
+Clippy, 20 harness contracts, and workspace tests pass. TLSDESC, unsupported
+runtime local/initial-exec models, and physical qualification remain open.
+
+## Stage 11 runtime TLSDESC audit (2026-11-24)
+
+Admission is deliberately narrower than generic ELF support: only
+`R_X86_64_TLSDESC` in RELA is accepted, the target must be aligned and wholly
+writable for 16 bytes, the TLS symbol and combined offset must validate, and
+the graph must export the exact resolver. The descriptor stores no address to
+kernel memory. Its packed generation/slot/offset limits are checked before one
+16-byte user-memory write, and runtime resolution still crosses the existing
+generation-safe syscall boundary.
+
+The artifact builder refuses publication without the TLSDESC relocation and
+resolver symbol. The harness requires `[S11.RUNTIME] TLSDESC execution: PASSED`;
+the 1/2/4-CPU evidence under `audit-artifacts/stage11.2-tls-*cpu-1795497*`
+contains it once per CPU. Warning-denying target/all-target Clippy, builder and
+harness contracts, ELF tests, and workspace tests pass. This is bounded x86-64
+software acceptance, not arbitrary TLS ABI or physical qualification.

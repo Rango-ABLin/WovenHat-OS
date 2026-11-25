@@ -62,6 +62,21 @@ enum TlsRelocationPlan<'a> {
     },
 }
 
+struct TlsDescRequest<'a> {
+    linked: &'a LinkImage<'a>,
+    image_index: usize,
+    symbol_index: usize,
+    addend: i64,
+    target: u64,
+}
+
+struct TlsDescContext<'a> {
+    scope: &'a SymbolScope<'a>,
+    plan: Option<TlsRelocationPlan<'a>>,
+    images: &'a [LinkImage<'a>],
+    page_table: paging::AddressSpace,
+}
+
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
     value
         .checked_add(alignment - 1)
@@ -898,26 +913,30 @@ fn validate_relocation_plan(images: &[LinkImage<'_>]) -> Option<()> {
         let Some(dynamic) = linked.image.dynamic() else {
             continue;
         };
-        for (offset, size, entry_size) in [
+        for (offset, size, entry_size, tlsdesc_allowed) in [
             (
                 dynamic.rela_file_offset,
                 dynamic.rela_size,
                 dynamic.rela_entry_size,
+                true,
             ),
             (
                 dynamic.plt_rela_file_offset,
                 dynamic.plt_rela_size,
                 elf::RELA_ENTRY_SIZE,
+                false,
             ),
             (
                 dynamic.rel_file_offset,
                 dynamic.rel_size,
                 dynamic.rel_entry_size,
+                false,
             ),
             (
                 dynamic.plt_rel_file_offset,
                 dynamic.plt_rel_size,
                 dynamic.plt_rel_entry_size,
+                false,
             ),
         ] {
             if size == 0 {
@@ -942,7 +961,8 @@ fn validate_relocation_plan(images: &[LinkImage<'_>]) -> Option<()> {
                         | elf::R_X86_64_TPOFF64
                         | elf::R_X86_64_GOTTPOFF
                         | elf::R_X86_64_TPOFF32
-                ) {
+                ) && !(tlsdesc_allowed && relocation == elf::R_X86_64_TLSDESC)
+                {
                     return None;
                 }
             }
@@ -1442,6 +1462,27 @@ fn relocate(
                 .checked_add(linked.image.load_bias())?;
             let info = u64::from_le_bytes(entry[8..16].try_into().ok()?);
             let addend = i64::from_le_bytes(entry[16..24].try_into().ok()?);
+            if info as u32 == elf::R_X86_64_TLSDESC {
+                if is_plt {
+                    return None;
+                }
+                relocate_tlsdesc(
+                    TlsDescRequest {
+                        linked,
+                        image_index,
+                        symbol_index: (info >> 32) as usize,
+                        addend,
+                        target,
+                    },
+                    TlsDescContext {
+                        scope,
+                        plan: tls_plan,
+                        images,
+                        page_table,
+                    },
+                )?;
+                continue;
+            }
             let value = match info as u32 {
                 elf::R_X86_64_RELATIVE if info >> 32 == 0 => linked.image.load_bias(),
                 elf::R_X86_64_64 | elf::R_X86_64_GLOB_DAT | elf::R_X86_64_JUMP_SLOT => linked
@@ -1611,6 +1652,50 @@ fn tls_relocation_value(
         }
         _ => None,
     }
+}
+
+fn relocate_tlsdesc(request: TlsDescRequest<'_>, context: TlsDescContext<'_>) -> Option<()> {
+    if request.target & 7 != 0 {
+        return None;
+    }
+    let plan @ TlsRelocationPlan::Runtime { .. } = context.plan? else {
+        return None;
+    };
+    let handle = tls_relocation_value(
+        request.linked,
+        request.image_index,
+        request.symbol_index,
+        elf::R_X86_64_DTPMOD64,
+        context.scope,
+        Some(plan),
+        context.images,
+    )?;
+    let offset = tls_relocation_value(
+        request.linked,
+        request.image_index,
+        request.symbol_index,
+        elf::R_X86_64_DTPOFF64,
+        context.scope,
+        Some(plan),
+        context.images,
+    )?;
+    let offset = if request.addend >= 0 {
+        offset.checked_add(request.addend as u64)?
+    } else {
+        offset.checked_sub(request.addend.unsigned_abs())?
+    };
+    let slot = handle as u32;
+    if slot == 0 || slot > 0x000f_ffff || offset > 0xfff {
+        return None;
+    }
+    let argument = (handle & 0xffff_ffff_0000_0000)
+        | (u64::from(slot) << 12)
+        | offset;
+    let resolver = context.scope.resolve(b"__woven_tlsdesc_resolver")?;
+    let mut descriptor = [0; 16];
+    descriptor[..8].copy_from_slice(&resolver.to_le_bytes());
+    descriptor[8..].copy_from_slice(&argument.to_le_bytes());
+    paging::write_user_bytes(context.page_table, request.target, &descriptor).ok()
 }
 
 fn write_relocation_value(
