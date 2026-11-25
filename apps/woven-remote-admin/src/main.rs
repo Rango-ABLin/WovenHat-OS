@@ -84,7 +84,7 @@ pub extern "C" fn _start() -> ! {
     let socket = invoke(syscall::SOCKET, 2, 0, 0);
     let _ = libwoven::print("[REMOTE ADMIN] socket opened\n");
     if socket == ERROR
-        || libwoven::network::listen(socket, wovenhat_remote_admin::PORT as u16).is_err()
+        || libwoven::network::listen(socket, wovenhat_remote_admin::PORT).is_err()
     {
         libwoven::exit(2)
     }

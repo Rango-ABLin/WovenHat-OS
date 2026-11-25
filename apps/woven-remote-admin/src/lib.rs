@@ -1,3 +1,3 @@
 #![no_std]
 
-pub const PORT: u64 = 7001;
+pub const PORT: u16 = 7001;
