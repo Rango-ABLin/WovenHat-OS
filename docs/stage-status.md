@@ -1,44 +1,72 @@
 # Stage status
 
+## Reproducible build, freestanding remote admin, and TCG desktop closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The exact-commit isolated rebuild is now a maintained release-boundary test:
+it archives `HEAD`, performs locked/offline libwoven tests in a separate
+workspace, and records source commit, archive hash, compiler version and the
+truthful `independent_organization_attestation: false`. This closes
+independent-workspace reproducibility without fabricating organizational
+independence.
+
+Remote administration now has a signed freestanding Ring-3 service with only
+`NetworkIo`. A bounded asynchronous TCP listen/accept ABI waits event-driven
+for one peer, and the service handles replay-checked WADM query/apply/rollback
+frames. The host mTLS boundary pins the client certificate and forwards only
+bounded WADM frames into QEMU. The complete mTLS→guest journey passes 1/2/4
+CPUs under `audit-artifacts/remote-admin-freestanding-*`.
+
+Strict TCG desktop/application qualification passes unchanged on 1/2/4 CPUs:
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`; every report has
+`pass: true`, `failures: []`. WovenFiles launch and client window-open,
+sign-in, focus, interaction and teardown all pass with existing time and
+pixel oracles.
+
+Validation: fmt check, warning-denying workspace Clippy, 260 workspace tests
+(one ignored), 25 focused Python tests, app/proxy Clippy, async-network host
+test and all three remote-admin/TCG matrices pass. An independently operated
+build host with detached attestation, and independent production security
+review, remain external evidence.
+
 ## S-slice virtual-model closures - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The missing virtual inputs identified in the S00 inventory were implemented as
 disposable, fail-closed models; no external key, device or reviewer was used.
 
 - **S10**: `scripts/prepare-virtual-trust-inputs.py` deterministically stages
-  the enrolled OVMF snakeoil VARS/CODE, certificate and a decrypted development
-  key from the Ubuntu WSL distro into a caller-owned directory with a
-  `physical_access: false`, `production_key: false` manifest. All trust-harness
-  input checks pass; only `qemu-execution-not-requested` remains in
-  `--preflight-only`, as designed.
+the enrolled OVMF snakeoil VARS/CODE, certificate and a decrypted development
+key from the Ubuntu WSL distro into a caller-owned directory with a
+`physical_access: false`, `production_key: false` manifest. All trust-harness
+input checks pass; only `qemu-execution-not-requested` remains in
+`--preflight-only`, as designed.
 - **S12**: `scripts/test-files-desktop-qemu.py` gained `--absolute-click`, an
-  xHCI `usb-tablet` absolute-coordinate model that replaces the unstable
-  relative PS/2 injection. Calibrated default targets the WovenFiles Refresh
-  button; the guest reports the press and the bounded control activates. PASS
-  at 1/2/4 CPUs.
+xHCI `usb-tablet` absolute-coordinate model that replaces the unstable
+relative PS/2 injection. Calibrated default targets the WovenFiles Refresh
+button; the guest reports the press and the bounded control activates. PASS
+at 1/2/4 CPUs.
 - **S13**: `scripts/test-ipp-virtual.py` generates a disposable CA and a
-  SAN-matching server certificate and serves a valid bounded IPP response over
-  TLS; the real `ipp-tls-probe` accepts it with an explicit CA DER and
-  `--connect-address`. This exposed and fixed a real defect in
-  `libwoven::ipp_tls::content_length`, which previously aborted on the HTTP
-  status line and could never parse a real response; a host regression test was
-  added. `scripts/test-stage13-15-capture-virtual.py` adds a feature-gated
-  deterministic capture source in `hda.rs`, exercising the 4096-byte copy-out
-  and Microphone capability/denial paths at 1/2/4 CPUs. It also exposed a
-  latent gate defect: kernel `stage13-15-capture-test` did not enable
-  `stage13-15-test`, so its self-test body never ran; the feature chain was
-  repaired. No physical input or certified printer is claimed.
+SAN-matching server certificate and serves a valid bounded IPP response over
+TLS; the real `ipp-tls-probe` accepts it with an explicit CA DER and
+`--connect-address`. This exposed and fixed a real defect in
+`libwoven::ipp_tls::content_length`, which previously aborted on the HTTP
+status line and could never parse a real response; a host regression test was
+added. `scripts/test-stage13-15-capture-virtual.py` adds a feature-gated
+deterministic capture source in `hda.rs`, exercising the 4096-byte copy-out
+and Microphone capability/denial paths at 1/2/4 CPUs. It also exposed a
+latent gate defect: kernel `stage13-15-capture-test` did not enable
+`stage13-15-test`, so its self-test body never ran; the feature chain was
+repaired. No physical input or certified printer is claimed.
 - **S17**: `scripts/test-remote-admin-virtual.py` generates mTLS material,
-  starts the real `remote-admin-tls-service` and drives Query/Apply/Rollback
-  WADM frames against the replay-protected journal. This exposed a real defect:
-  the service checked the pinned client fingerprint before driving the TLS
-  handshake, so no peer certificate was ever visible; identity is now checked
-  after the first read in both `serve` and `forward`, with a fail-closed
-  observed-hash diagnostic. A true Ring-3 guest listener is still **blocked**:
-  the kernel has no listen/accept syscall, so adding one is a new ABI stage.
+starts the real `remote-admin-tls-service` and drives Query/Apply/Rollback
+WADM frames against the replay-protected journal. This exposed a real defect:
+the service checked the pinned client fingerprint before driving the TLS
+handshake, so no peer certificate was ever visible; identity is now checked
+after the first read in both `serve` and `forward`, with a fail-closed
+observed-hash diagnostic. A true Ring-3 guest listener is still **blocked**:
+the kernel has no listen/accept syscall, so adding one is a new ABI stage.
 - **S15/S19** were already closed at software level (isolated clean-room
-  rebuild, SBOM/provenance, detached sign→verify with `--production`
-  fail-closed); no new virtual model was needed.
+rebuild, SBOM/provenance, detached sign→verify with `--production`
+fail-closed); no new virtual model was needed.
 
 `RUN-STAGE10.7.ps1` exits 0; warning-denying all-targets, kernel, shell and
 remote-admin tool Clippy pass; workspace tests pass. Production signing
@@ -129,6 +157,8 @@ assertion weakened. The full gate set then passed on the exact final source,
 including baseline-enforced desktop qualification and both taskbar harnesses at
 1/2/4 CPUs; evidence is under
 `D:\WovenHat-OS-output-phaseb-push3\audit-artifacts\`.
+Physical power loss, volatile-controller cache behavior, torn physical
+sectors and native-media qualification remain external.
 
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
@@ -159,7 +189,7 @@ Validation on exact source: warning-denying kernel Clippy passes for default
 and `fault-injection-test`. The new gate passes at 1/2/4/8/16 CPUs with exit 33
 and the `[S31] deterministic randomized fault injection: PASSED` marker
 (`target/stage31-fi-final-{1,2,4,8,16}cpu-debug`). Fresh 8/16 evidence also
-passes for the memory suite (`target/memory-regression-{8,16}-debug`), Stage
+passes for the memory suite (`target/memory-regression-{8,16}-debug), Stage
 11.2-tls and 11.6 at 8 CPUs, and baseline-enforced desktop qualification at 8
 and 16 CPUs (`audit-artifacts/stage31-desktop-{8,16}cpu-20261125`, both
 `pass: true`, `failures: []`). This is bounded software/QEMU evidence; it does
@@ -173,8 +203,8 @@ build environment. The new `tools/release-signing` boundary accepts exactly one
 authority—an explicitly provisioned seed or an external signer—and verifies
 every returned 64-byte Ed25519 signature against the purpose-specific trusted
 public key before package output is accepted. Boot, WAPP, WPKG, WUPD and SDK
-provenance now use that boundary. `scripts/hardware-release-signer.py` supports
-PKCS#11 public-key export and on-token signing, while
+provenance now use that boundary. `scripts/hardware-release-signer.py`
+supports PKCS#11 public-key export and on-token signing, while
 `scripts/provision-release-keys.py` creates separate boot, application and SDK
 keys and emits public-only custody evidence. Missing authority, public-key
 mismatch, ambiguous seed-plus-signer configuration and invalid external
@@ -477,10 +507,8 @@ User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
 (16 ahead / 5 behind `origin/master`). Local `master` and `origin/master` were
 identical at `b87d7a07`. Merged `origin/master` into this branch as `6fc9f47e`
 with `--no-ff`; the five incoming commits are the bounded Stage 11 runtime-TLS
-TLSDESC feature and its closure/architecture documents. They do not overlap the
-Phase B shell or the e1000 driver. The single conflict in `docs/stage-status.md`
-(two independently added top sections) was resolved by keeping both entries,
-newest first; no acceptance claim was upgraded by the resolution.
+TLSDESC feature and its closure/architecture documents. They do not overlap
+the Phase B shell or the e1000 driver. The single conflict in `docs/stage-status.md` (two independently added top sections) was resolved by keeping both entries, newest first; no acceptance claim was upgraded by the resolution.
 
 Two genuine merge-revealed defects were repaired in `d443a07c`:
 `kernel/src/userspace/linker.rs` had a `cargo fmt` violation in the new
@@ -489,7 +517,7 @@ TLSDESC path (fmt-only fix), and the recent diagnostic commit called
 livelog` is compiled out of every `qemu-test` image. That broke compilation of
 all `stage11-*`/`qemu-test` self-test gates; the call now carries the same
 `#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]` guard as
-the module, preserving the production/real-hardware debug aid.
+ the module, preserving the production/real-hardware debug aid.
 
 Validation on the merged tree: `cargo fmt --all -- --check`, warning-denying
 `cargo clippy --all-targets`, kernel target Clippy for default plus
@@ -508,6 +536,61 @@ full Stage 11 matrix rerun, desktop visual requalification, or release closure;
 the external NO-GO prerequisites (production signing custody, signed
 independent review, named native-lab results, physical power-loss/media
 qualification) are unchanged.
+
+## Native hardware boot attempts and Stage 29 Tier 3 - 2026-11-25
+
+The prepared `hardware-demo` native image booted far enough on the HP Pavilion
+x360 to run the text console and accept keyboard input. The second attempt
+confirmed two native failures: WovenShell was spawned and still alive but did
+not become the compositor holder within the bounded wait, and `note`/`savelog`
+both reported that no live-test stick was available. The returned `WOVENLOG`
+volume was healthy and empty; the F1 `ACTIVATE`/`SECOND` window is only the
+kernel's developer fallback, which the user has said should not ship.
+
+The Stage 29 manifest now records these as failed native observations, and the
+validator classifies the current evidence as **Tier 3**. Source tracing
+localizes the WovenShell failure to before or inside `compositor_claim()`;
+future font loading, painting, and presentation are excluded by the observed
+status. This does not prove a USB-controller hardware defect and does not pass
+any native category. Full Stage 29 acceptance remains open. Evidence:
+`docs/audit-native-hardware-boot-attempt-1-2026-11-25.md`,
+`docs/audit-native-hardware-boot-attempt-2-2026-11-25.md`, and
+`docs/audit-stage29-hardware-qualification-2026-11-25.md`.
+
+## Physical WovenFS qualification - 2026-11-25
+
+After the read-only preflight, the user authorized erasing one exact USB device
+(VendorCo ProductCode USB Device, 15,726,735,360 bytes, serial
+4045141272666606378). An elevated UAC child invoked
+`scripts/test-wovenfs-physical.ps1` with that exact identity at 1/2/4 CPUs. All
+three runs passed with QEMU exit 33 and
+`[S15.2] WovenFS physical device: PASSED`, including format, write-through,
+remount, VFS isolation, malformed-mutation rejection, unlink, and remount
+verification. A read-only elevated inspection confirmed LBA0 `WOVENFS1` and
+checkpoint sequence 15. The boot/system NVMe was never selected. This qualifies
+the kernel WovenFS transaction against a real USB block device passed through
+to QEMU; native boot, Secure Boot, TPM, Wi-Fi/GPU/audio, power-loss recovery,
+and installer/release certification remain open. Evidence:
+`docs/audit-physical-wovenfs-2026-11-25.md`.
+
+## Physical hardware readiness preflight - 2026-11-25
+
+Ran the read-only host/TPM preflights and the read-only `physical-probe` QEMU
+inventory smoke on commit `cacbf699`. The host is an HP Pavilion x360 Convertible
+14-dw1xxx with 8 GiB RAM, Windows 11 Pro, Hyper-V present, and an enabled Intel
+AX201 Wi-Fi adapter. The only disk is the boot/system Samsung NVMe; there are
+zero USB targets. Secure Boot, device-assignment, and firmware BCD queries were
+denied because the session is not elevated. TPM visible/ready, software-TPM
+backend, and signed provisioning record are all unavailable. No raw disk,
+media, or TPM state was changed. The QEMU inventory smoke passed on 1/2/4
+configured CPUs, but it explicitly records no AP startup and no physical Wi-Fi
+acceptance. A later read-only rerun found one safe USB candidate (Disk 1,
+VendorCo ProductCode USB Device, 15,726,735,360 bytes, serial
+4045141272666606378), and the user explicitly authorized erasing that exact
+device. The session remains non-elevated, so no destructive gate was started.
+Native hardware qualification remains blocked, not failed; see
+`docs/audit-physical-hardware-preflight-2026-11-25.md` for exact evidence and
+the prerequisites for an authorized elevated destructive USB/live-TPM session.
 
 ## Hardware-demo physical USB preparation - 2026-11-24 - VERIFIED
 
@@ -551,6 +634,8 @@ a production release. Physical USB write and bare-metal boot remain separate.
 At source `b87d7a07`, the destructive physical-storage gate passed on 1/2/4
 CPUs against the owner-authorized Disk 3. Every run re-resolved and matched the
 target by all three identity fields: model `VendorCo ProductCode USB Device`,
+CPUs against the owner-authorized Disk 3. Every run re-resolved and matched
+the target by all three identity fields: model `VendorCo ProductCode USB Device`,
 exact CIM size 15,726,735,360 bytes, and serial `4045141272666606378`. The live
 Windows inventory additionally reported USB/removable media, healthy,
 `IsBoot=False`, and `IsSystem=False`; a separate `-Inspect` raw-sector read

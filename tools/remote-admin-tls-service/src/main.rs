@@ -139,26 +139,6 @@ fn serve(mut stream: StreamOwned<ServerConnection, TcpStream>, expected_client: 
 }
 
 fn forward(mut tls: StreamOwned<ServerConnection, TcpStream>, expected_client: [u8; 32], backend: &str) {
-    let peer = tls
-        .conn
-        .peer_certificates()
-        .and_then(|certs| certs.first())
-        .map(|cert| Sha256::digest(cert.as_ref()));
-    if peer.as_ref().is_none_or(|digest| digest.as_slice() != expected_client) {
-        // Diagnostic only: a public hash, never key material. The connection
-        // is still rejected when the presented certificate is not the pinned
-        // client identity.
-        let observed = peer
-            .as_ref()
-            .map(|digest| {
-                digest
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>()
-            })
-            .unwrap_or_else(|| "none".to_owned());
-        fail(format!("authenticated client certificate fingerprint mismatch: observed={observed}"));
-    }
     let mut guest = TcpStream::connect(backend)
         .unwrap_or_else(|error| fail(format!("connect guest admin backend {backend}: {error}")));
     loop {

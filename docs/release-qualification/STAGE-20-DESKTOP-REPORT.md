@@ -11,10 +11,11 @@ PR 138/Phase J contain bottom-taskbar and launcher changes requiring review.
 
 ## Tested and accepted
 
-Current-branch strict desktop qualification passes on WHPX at 1/2/4 CPUs.
-The one-CPU TCG run fails waiting for WovenFiles launch. Formal whole-stage
-acceptance remains open under the prerequisite closure rule.
-Historical software desktop acceptance remains documented in stage-status.
+Current-branch strict desktop qualification passes on WHPX and TCG at 1/2/4
+CPUs. Fresh TCG evidence is at
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`; every run reports
+`pass: true` and `failures: []`. The bounded desktop/application path closes
+its software/QEMU gap; physical and external release gates remain separate.
 
 ## Blocked and remaining implementation
 

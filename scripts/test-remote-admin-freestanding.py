@@ -62,13 +62,22 @@ def generate_certificates(directory: Path, openssl: Path):
         run([str(openssl), *args], cwd=directory)
 
     openssl_run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=WovenHat Test CA",
+                "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
                 "-keyout", "ca-key.pem", "-out", "ca.pem", "-days", "1")
     for name, cn in (("server", "localhost"), ("client", "release-operator")):
+        extensions = "serverAuth" if name == "server" else "clientAuth"
+        extfile = directory / f"{name}.ext"
+        extfile.write_text(
+            f"basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\n"
+            f"extendedKeyUsage={extensions}\nsubjectAltName=DNS:localhost\n",
+            encoding="utf-8",
+        )
         openssl_run("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={cn}",
                     "-keyout", f"{name}-key.pem", "-out", f"{name}.csr")
         openssl_run("x509", "-req", "-in", f"{name}.csr", "-CA", "ca.pem",
                     "-CAkey", "ca-key.pem", "-CAcreateserial", "-out", f"{name}.pem",
-                    "-days", "1")
+                    "-days", "1", "-extfile", str(extfile.name))
         openssl_run("x509", "-in", f"{name}.pem", "-outform", "DER",
                     "-out", f"{name}.der")
     openssl_run("pkcs8", "-topk8", "-nocrypt", "-in", "server-key.pem",
@@ -101,7 +110,7 @@ def wait_for(path: Path, marker: str, process: subprocess.Popen, timeout: float)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--qemu", type=Path, default=Path(shutil.which("qemu-system-x86_64") or r"C:\Program Files\qemu\qemu-system-x86_64.exe"))
     parser.add_argument("--firmware", type=Path)
@@ -162,7 +171,8 @@ def main():
             qemu = subprocess.Popen(qemu_command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
         proxy_log = out / "proxy.log"
         try:
-            wait_for(serial, "[REMOTE ADMIN] freestanding listener ready port=7001", qemu, args.timeout)
+            wait_for(serial, "[REMOTE ADMIN] deployed freestanding service", qemu, args.timeout)
+            wait_for(serial, "[LISTEN] accept submitted", qemu, args.timeout)
             client_fingerprint = hashlib.sha256(certs["client_der"].read_bytes()).hexdigest()
             proxy_args = [
                 "cargo", "run", "--quiet", "--manifest-path",
@@ -173,20 +183,25 @@ def main():
             ]
             with proxy_log.open("w") as log:
                 proxy = subprocess.Popen(proxy_args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
-            time.sleep(1)
+            wait_for(proxy_log, "remote-admin TLS listener ready", proxy, 60)
             context = ssl.create_default_context(cafile=str(certs["ca_pem"]))
             context.load_cert_chain(certs["client_pem"], certs["client_key"])
-            with socket.create_connection(("127.0.0.1", tls_port), timeout=15) as raw:
+            # TCG emulation cost grows with the guest CPU count; keep the
+            # accepted small-profile budget and scale only wider profiles.
+            socket_timeout = 15 * max(1, args.cpus // 4)
+            with socket.create_connection(("127.0.0.1", tls_port), timeout=socket_timeout) as raw:
                 with context.wrap_socket(raw, server_hostname="localhost") as stream:
-                    assert exchange(stream, request(3, 1, 1)) == (0, 0, 1)
+                    assert exchange(stream, request(3, 1, 1)) == (0, 4, 1)
                     assert exchange(stream, request(1, 2, 1, b"locked")) == (0, 6, 2)
                     assert exchange(stream, request(3, 3, 2)) == (0, 6, 2)
                     assert exchange(stream, request(2, 4, 2)) == (0, 4, 3)
                     assert exchange(stream, request(1, 4, 3, b"replay"))[0] == 1
+            wait_for(serial, "[LISTEN] accept complete", qemu, 30)
             (out / "result.json").write_text(json.dumps({
                 "valid": True,
                 "cpus": args.cpus,
-                "transport": "mTLS host boundary -> QEMU TCP -> freestanding Ring-3 service",
+                "transport": "mTLS host boundary -> QEMU TCP -> Ring-3 listen/accept ABI service",
+                "listener_abi": True,
                 "operations": ["query", "apply", "query", "rollback", "replay-rejection"],
                 "physical_access": "none",
             }, indent=2) + "\n", encoding="utf-8")

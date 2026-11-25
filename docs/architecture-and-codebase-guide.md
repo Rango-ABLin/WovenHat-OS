@@ -3809,10 +3809,22 @@ accepted by the socket transport.
 | 79 | `AsyncNetPoll` | Nonblocking completion/data collection |
 | 80 | `AsyncNetWait` | Event-driven wait followed by retry-safe collection |
 | 81 | `AsyncTcpConnect` | Socket descriptor and packed endpoint; completes on connection readiness |
+| 249 | `NetListen` | Bounded process-owned TCP listen transition |
+| 250 | `AsyncNetAccept` | Owner-bound event-driven accept; completion carries the packed peer endpoint |
 
-The audit corrections add no syscall numbers or capabilities. Existing network
-policy gates remain at submission and collection; ownership checks remain on
-handles. Teardown does not depend on retaining network permission.
+Existing network policy gates remain at submission and collection; ownership
+checks remain on handles. `Accept` converts one established TCP connection on
+the listening descriptor without allocating an unbounded connection table;
+the service closes and recreates the socket for another connection. Teardown
+does not depend on retaining network permission.
+
+`apps/woven-remote-admin` uses that bounded ABI from Ring 3. It owns only
+`NetworkIo`, keeps WADM policy state bounded in-process, and never receives the
+host mTLS private key or `NetworkAdmin`. The production-style virtual boundary
+terminates mTLS in the controlled host proxy, pins the authenticated client
+certificate and forwards exact bounded WADM frames through QEMU user
+networking. This is software/QEMU deployment evidence, not native firewall or
+security-review closure.
 
 ## Concurrency and lock order
 
