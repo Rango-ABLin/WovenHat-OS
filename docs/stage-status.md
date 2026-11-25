@@ -1,5 +1,43 @@
 # Stage status
 
+## phase-b/master reconciliation on exact source - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
+(16 ahead / 5 behind `origin/master`). Local `master` and `origin/master` were
+identical at `b87d7a07`. Merged `origin/master` into this branch as `6fc9f47e`
+with `--no-ff`; the five incoming commits are the bounded Stage 11 runtime-TLS
+TLSDESC feature and its closure/architecture documents. They do not overlap the
+Phase B shell or the e1000 driver. The single conflict in `docs/stage-status.md`
+(two independently added top sections) was resolved by keeping both entries,
+newest first; no acceptance claim was upgraded by the resolution.
+
+Two genuine merge-revealed defects were repaired in `d443a07c`:
+`kernel/src/userspace/linker.rs` had a `cargo fmt` violation in the new
+TLSDESC path (fmt-only fix), and the recent diagnostic commit called
+`crate::livelog::flush_now()` unguarded in `kernel/src/shell.rs` while `mod
+livelog` is compiled out of every `qemu-test` image. That broke compilation of
+all `stage11-*`/`qemu-test` self-test gates; the call now carries the same
+`#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]` guard as
+the module, preserving the production/real-hardware debug aid.
+
+Validation on the merged tree: `cargo fmt --all -- --check`, warning-denying
+`cargo clippy --all-targets`, kernel target Clippy for default plus
+`stage11-2-test`/`5`/`6`/`aslr`, the freestanding `woven-shell` target Clippy,
+and `cargo test --workspace` all pass. The mandated serialized
+`RUN-STAGE10.7.ps1` chain exited 0 (host checks, warning-denying Clippy,
+workspace tests, 60 memory boots, live networking, isolated Stages 10.4-10.7
+on 1/2/4 CPUs; log `C:\Users\banda\AppData\Local\Temp\opencode\stage10.7-reconcile-20261125.log`,
+evidence under `D:\WovenHat-OS-output\audit-artifacts\acceptance-*`). Focused
+Stage 11.2-tls and Stage 11.6 gates pass on 1/2/4 CPUs with exit 33
+(`audit-artifacts/stage11.2-tls-{1,2,4}cpu-1795586*`,
+`stage11.6-{1,2,4}cpu-1795586*`), exercising the merged TLSDESC path.
+
+This restores one accepted software/QEMU baseline for the branch. It is not a
+full Stage 11 matrix rerun, desktop visual requalification, or release closure;
+the external NO-GO prerequisites (production signing custody, signed
+independent review, named native-lab results, physical power-loss/media
+qualification) are unchanged.
+
 ## Stage 11 exact-source software closure matrix - 2026-11-24 - VERIFIED
 
 At source `bedee571`, the complete inherited Windows gate passed unchanged:

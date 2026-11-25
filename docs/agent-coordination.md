@@ -13,8 +13,20 @@ They do not overlap the Phase B shell or the e1000 driver. One conflict in
 both entries, newest first; the other doc files auto-merged cleanly. No source
 behavior was changed by the resolution, and no acceptance claim is upgraded.
 
-Post-merge validation and any QEMU matrix are recorded below / in stage-status.
-No physical device, firmware setting or production signing input was touched.
+Validation completed (2026-11-25): the merge exposed two real defects, both
+fixed in `d443a07c` — a `cargo fmt` violation in the incoming TLSDESC code, and
+an unguarded `crate::livelog::flush_now()` call added by `7d02aeea` that broke
+every `qemu-test`/`stage11-*` feature build (`mod livelog` is gated out there);
+the call now carries the module's own `#[cfg]`. `cargo fmt --all --check`,
+all-targets Clippy, kernel target Clippy (default + stage11-2/5/6/aslr),
+freestanding shell Clippy and `cargo test --workspace` pass. The mandated
+`RUN-STAGE10.7.ps1` chain exited 0 (60 memory boots, live networking, Stages
+10.4-10.7 at 1/2/4 CPUs; log at
+`C:\Users\banda\AppData\Local\Temp\opencode\stage10.7-reconcile-20261125.log`).
+Focused Stage 11.2-tls and 11.6 gates pass 1/2/4 CPUs, exit 33. No physical
+device, firmware setting or production signing input was touched. The two
+real-hardware diagnostic commits remain intact apart from the cfg guard; per
+the user this reconciliation did not include gating those diagnostics.
 
 ## OpenCode - Phase C merged-tree revalidation (2026-11-24)
 
