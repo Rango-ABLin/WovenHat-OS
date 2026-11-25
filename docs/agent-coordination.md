@@ -1,3 +1,20 @@
+## OpenCode - release hygiene: diagnostics gated (2026-11-25)
+
+Per the user's follow-up, I gated the two unconditional real-hardware debug
+commits behind a new kernel `hardware-diagnostics` feature (default off): the
+kernel shell first-prompt auto device/net dump and live-log flush, and all
+terminal-visible `[DRIVERS]`/`[XHCI]`/`[USB]` lines in `drivers.rs`/`xhci.rs`
+via a local `hw_diag!` macro. Serial lines and the xHCI BIOS/OS handoff remain
+unchanged and unconditional. The earlier `livelog` `#[cfg]` repair is nested
+inside the new gate. This is a release-image hygiene change only — no ABI,
+capability, syscall or assertion changed.
+
+Kernel Clippy clean for default, `hardware-diagnostics`, and
+`hardware-diagnostics,qemu-test`; fmt/all-targets Clippy/workspace tests pass;
+full `RUN-STAGE10.7.ps1` exit 0; baseline-enforced desktop qual PASS at 1/2/4
+CPUs with 0 changed pixels. Evidence in stage-status. No physical hardware or
+signing input touched.
+
 ## OpenCode - Phase B bounded increment accepted (2026-11-25)
 
 User asked to finish Phase B before release hygiene. I closed it as a bounded

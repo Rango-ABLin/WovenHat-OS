@@ -1,5 +1,30 @@
 # Stage status
 
+## Release hygiene: opt-in hardware diagnostics - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The two real-hardware diagnostic commits (`2e579970`, `7d02aeea`) are now
+opt-in instead of unconditional. A new kernel feature
+`hardware-diagnostics = []` (default off) gates: the kernel shell's
+one-shot "auto diagnostics" block on the first prompt (device/net dump plus
+live-log flush), and every terminal-visible `[DRIVERS]`/`[XHCI]`/`[USB]`
+bring-up line in `kernel/src/{drivers,xhci}.rs` through a local `hw_diag!`
+macro. The matching **serial** lines remain unconditional, and the functional
+xHCI BIOS-to-OS handoff is untouched. Headless real-hardware bring-up keeps
+the aid via `--features hardware-diagnostics`; release/default images show a
+clean console. No syscall, capability, ABI or assertion changed.
+
+Validation: kernel target Clippy passes for default, `hardware-diagnostics`
+and `hardware-diagnostics,qemu-test`; `cargo fmt --all -- --check`,
+`cargo clippy --all-targets` and `cargo test --workspace` pass; the mandated
+`RUN-STAGE10.7.ps1` chain exited 0 (log
+`C:\Users\banda\AppData\Local\Temp\opencode\release-hygiene-stage10.7-20261125.log`).
+Baseline-enforced desktop qualification passes at 1/2/4 CPUs
+(`audit-artifacts/release-hygiene-desktop-{1,2,4}cpu-20261125`), each with
+`pass: true`, `failures: []` and 0 changed sign-in baseline pixels; the default
+boot serial log contains no diagnostic spam markers. No physical device or
+firmware setting was touched, and the external release NO-GO gates are
+unchanged.
+
 ## phase-b/master reconciliation on exact source - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
