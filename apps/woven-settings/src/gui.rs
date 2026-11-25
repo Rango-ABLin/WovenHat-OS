@@ -339,13 +339,9 @@ fn persisted_mode(fallback: ThemeMode) -> ThemeMode {
     let Ok(migration) = libwoven::settings_policy::migrate(&source[..length], &mut data) else {
         return fallback;
     };
-    if data[..migration.length]
-        .windows(b"\"high_contrast\":true".len())
-        .any(|window| window == b"\"high_contrast\":true")
-    {
-        ThemeMode::HighContrast
-    } else {
-        fallback
+    match libwoven::settings_policy::read_high_contrast(&data[..migration.length]) {
+        Some(true) => ThemeMode::HighContrast,
+        Some(false) | None => fallback,
     }
 }
 

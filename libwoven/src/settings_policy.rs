@@ -23,7 +23,7 @@ pub struct Migration {
 /// truncation.
 pub fn patch_high_contrast(data: &mut [u8], enabled: bool) -> bool {
     const KEY: &[u8] = b"\"high_contrast\":";
-    let Some(start) = data.windows(KEY.len()).position(|window| window == KEY) else {
+    let Some(start) = find_single_key(data) else {
         return false;
     };
     let value_start = start + KEY.len();
@@ -31,15 +31,42 @@ pub fn patch_high_contrast(data: &mut [u8], enabled: bool) -> bool {
     let Some(destination) = data.get_mut(value_start..value_start + value.len()) else {
         return false;
     };
-    if enabled {
-        if !destination.starts_with(b"false") && !destination.starts_with(b"true ") {
-            return false;
-        }
-    } else if !destination.starts_with(b"false") && !destination.starts_with(b"true ") {
+    if destination != b"false" && destination != b"true " {
         return false;
     }
     destination.copy_from_slice(value);
     true
+}
+
+/// Locate the sole `high_contrast` key, refusing ambiguous records with a
+/// duplicate key anywhere after the first match. This is deliberately shared
+/// by the writer and reader so an installed record is never patched or shown
+/// as High Contrast from an ambiguous value.
+fn find_single_key(data: &[u8]) -> Option<usize> {
+    const KEY: &[u8] = b"\"high_contrast\":";
+    let start = data.windows(KEY.len()).position(|window| window == KEY)?;
+    if data[start + KEY.len()..]
+        .windows(KEY.len())
+        .any(|window| window == KEY)
+    {
+        return None;
+    }
+    Some(start)
+}
+
+/// Read the effective high-contrast flag from a bounded v2 record. Returns
+/// `None` for absent, malformed or ambiguous values, so callers fail closed.
+pub fn read_high_contrast(data: &[u8]) -> Option<bool> {
+    const KEY: &[u8] = b"\"high_contrast\":";
+    let start = find_single_key(data)?;
+    let value = data.get(start + KEY.len()..start + KEY.len() + 5)?;
+    if value == b"true " {
+        Some(true)
+    } else if value == b"false" {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 pub fn migrate(data: &[u8], output: &mut [u8]) -> Result<Migration, MigrationError> {
@@ -198,7 +225,35 @@ impl<'a> Writer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CURRENT_SCHEMA, MAX_SETTINGS_BYTES, MigrationError, migrate, patch_high_contrast};
+    use super::{
+        CURRENT_SCHEMA, MAX_SETTINGS_BYTES, MigrationError, migrate, patch_high_contrast,
+        read_high_contrast,
+    };
+
+    #[test]
+    fn ambiguous_and_malformed_values_fail_closed_without_mutation() {
+        let duplicate = *br#"{"high_contrast":false,"high_contrast":true }"#;
+        let mut data = duplicate;
+        assert!(!patch_high_contrast(&mut data, true));
+        assert_eq!(data, duplicate);
+        assert_eq!(read_high_contrast(&duplicate), None);
+
+        let nested = *br#"{"high_contrast":false,"nested":{"high_contrast":false}}"#;
+        let mut data = nested;
+        assert!(!patch_high_contrast(&mut data, true));
+        assert_eq!(data, nested);
+        assert_eq!(read_high_contrast(&nested), None);
+
+        for bad in [
+            &br#"{"high_contrast":null }"#[..],
+            &br#"{"high_contrast":truex}"#[..],
+        ] {
+            let mut data = [0u8; MAX_SETTINGS_BYTES];
+            data[..bad.len()].copy_from_slice(bad);
+            assert!(!patch_high_contrast(&mut data[..bad.len()], true));
+            assert_eq!(read_high_contrast(bad), None);
+        }
+    }
 
     #[test]
     fn patch_is_bounded_and_fixed_width() {
