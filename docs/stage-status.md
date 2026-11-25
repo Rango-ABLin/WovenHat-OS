@@ -1,5 +1,24 @@
 # Stage status
 
+## Independent build-attestation protocol - 2026-11-25 - VERIFIER COMPLETE / EXTERNAL SUBMISSION OPEN
+
+Added a fail-closed independent-organization attestation boundary. The external
+builder can create an unsigned exact-commit record from its own clean-room
+report, sign it with an independently controlled Ed25519 key, and submit the
+attestation, detached signature and pinned public key for verification. The
+verifier binds legal identity, source commit, archive hash, toolchain, command,
+result and artifact hashes. It rejects owner/agent identities, non-independent
+declarations, WovenHat-checkout access, build mismatches and tampering.
+
+Host tests cover valid independent evidence plus prohibited identity and
+post-signature tampering. The SDK signer now correctly JSON-escapes Windows
+payload paths, a defect exposed by this gate.
+
+No separate organization, build host or signing key has been supplied. The
+external NO-GO gate remains open until a genuine independently controlled
+submission verifies under
+`docs/release-qualification/INDEPENDENT-BUILD-ATTESTATION.md`.
+
 ## Reproducible build, freestanding remote admin, and TCG desktop closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The exact-commit isolated rebuild is now a maintained release-boundary test:

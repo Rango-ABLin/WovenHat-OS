@@ -11,6 +11,16 @@ one already-declared source-fixture test remained ignored. Hardware-report and
 release-package policy contracts pass. This demonstrates reproducible in-tree
 source consumption, not an independent organization or release signature.
 
+## Independent build attestation
+
+**BLOCKED PENDING EXTERNAL SUBMISSION — the repository verifier is complete, but
+no genuinely independent organization has supplied evidence.** A local
+checkout, repository agent or project GitHub Actions run is explicitly
+ineligible. The required schema, signer custody and fail-closed verifier are
+documented in `INDEPENDENT-BUILD-ATTESTATION.md`; the release gate remains
+NO-GO until an organization-owned build host and signing key produce a verified
+attestation for the exact release commit and artifact hashes.
+
 ## Independent review
 
 **BLOCKED — no independent reviewer attestation is present.** Repository agents,

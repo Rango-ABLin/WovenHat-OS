@@ -37,6 +37,24 @@ fn sha256_hex(payload: &[u8]) -> String {
     hex(Sha256::digest(payload).as_ref())
 }
 
+fn json_string(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character < '\u{20}' => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => output.push(character),
+        }
+    }
+    output
+}
+
 fn field<'a>(document: &'a str, name: &str) -> Option<&'a str> {
     let marker = format!("\"{name}\": \"");
     let start = document.find(&marker)? + marker.len();
@@ -62,7 +80,7 @@ fn sign(input: PathBuf, output: PathBuf) {
     .unwrap_or_else(|error| fail(error));
     let document = format!(
         "{{\n  \"schema\": \"{SCHEMA}\",\n  \"algorithm\": \"Ed25519\",\n  \"payload\": \"{}\",\n  \"payload_sha256\": \"sha256:{}\",\n  \"public_key\": \"{}\",\n  \"signature\": \"{}\"\n}}\n",
-        input.display(),
+        json_string(&input.display().to_string()),
         sha256_hex(&payload),
         hex(&trusted),
         hex(&signature),

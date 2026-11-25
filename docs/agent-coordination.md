@@ -1,3 +1,13 @@
+## OpenCode - independent build attestation protocol (2026-11-25)
+
+Completed the external attestation ingestion boundary: generator plus a
+fail-closed verifier binding legal identity, host, exact source/archive/
+toolchain/command, artifact hashes and an independently pinned Ed25519 key.
+Tests cover valid evidence, prohibited owner/agent identity and
+post-signature tampering. The signer was repaired to emit valid JSON for
+Windows payload paths. No external organization or key has been supplied, so
+this is an open external submission—not a fabricated pass.
+
 ## OpenCode - S-slice virtual models (2026-11-25)
 
 Implemented every small virtual piece from the previous audit with disposable,
