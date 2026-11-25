@@ -95,6 +95,29 @@ seven WovenFS cuts at 1/2/4 CPUs pass with exit 33. Evidence is
 `audit-artifacts/woven-settings-{1,2,4}cpu`. Physical power-loss, controller
 cache, torn-media and native-device qualification remain external. Unrelated
 Stage 31/virtual-input and desktop-harness dirty work was left untouched.
+## OpenCode - native application integration closure (2026-11-25)
+
+Closed the three bounded items in `APPLICATION-INTEGRATION-REPORT.md` on
+`feature/native-app-integration`. Settings: reconciled PR 142 fail-closed
+duplicate-key handling additively in `libwoven/src/settings_policy.rs` and made
+the GUI's read path share it. Editor: added bounded Open/Save As, real
+write+sync error reporting, unsaved-close hold with Discard, and an additive
+`TextField::set_text`; kept the original window geometry so existing harness
+coordinates remain valid. Files: added a bounded mutation CLI plus safe
+libwoven mkdir/unlink/rename/sync wrappers and a gated kernel self-test/harness
+that creates, writes, renames and removes a note at 1/2/4 CPUs.
+
+No syscall, capability or ABI version changed. Two genuine gate defects were
+diagnosed and fixed during bring-up: the self-test initially passed a raw ELF
+with a non-trusted argv[0] (fixed by passing the signed WAPP), and the
+disposable FAT32 image has no provisioned `/mnt` directory, so the app-level
+mutation sequence uses `/tmp` while persistent-storage evidence comes from the
+kernel `[STORAGE MUTATION]` marker on the same boot. The editor relative-click
+desktop harness fails identically on the pre-change baseline, so it is
+recorded as a pre-existing limitation, not weakened or claimed as acceptance.
+Validation: fmt, warning-denying all-target/target Clippy, workspace tests,
+signed app gates at 1/2/4 CPUs and the new mutation gate at 1/2/4 CPUs.
+
 ## OpenCode - Phase B desktop reconciliation and full validation (2026-11-25)
 
 User requested reconciliation and validation of the Phase B desktop branch with

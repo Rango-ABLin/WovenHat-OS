@@ -1,5 +1,31 @@
 # Stage status
 
+## Native application integration closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Closed the remaining bounded items of
+`docs/release-qualification/APPLICATION-INTEGRATION-REPORT.md` on
+`feature/native-app-integration`. WovenEditor now has bounded Open/Save/Save As
+with real write+sync error reporting, distinct serial markers, an unsaved-close
+hold with explicit Discard, and no dirty flag on mere focus change. WovenSettings
+rejects duplicate high-contrast keys through an additive shared writer/reader,
+reconciling PR 142 without removing the migration API; persistence itself was
+already accepted. WovenFiles gained a bounded `/mnt` or `/tmp` mutation CLI
+(`--mkdir`, `--rm`, `--rename`, `--write`) on thin safe libwoven wrappers over
+the existing syscalls, plus a gated kernel self-test and QEMU harness that
+creates, writes, renames and removes a note at 1/2/4 CPUs.
+
+No new syscall, capability, ABI version or sandbox scope. Validation:
+`cargo fmt --all -- --check`, warning-denying all-target and freestanding
+Clippy, `cargo test --workspace`, editor host logic 5/5 and settings policy
+5/5, and signed WovenEditor/WovenSettings/WovenFiles harnesses at 1/2/4 CPUs.
+The new mutation harness passes at 1/2/4 CPUs with a disposable FAT32 disk and
+the kernel `[STORAGE MUTATION]` marker; app-level mutations use `/tmp` because
+the disposable image has no provisioned `/mnt` directory — this limit is
+recorded, not hidden. The editor relative-click desktop mode fails on the
+pre-change baseline too, so it is a pre-existing harness limitation and is not
+claimed as editor GUI acceptance. Full editor GUI pointer behavior, live theme
+propagation to an already-running shell, and native hardware remain open.
+
 ## Ring-3 secure-randomness ABI - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Added a bounded HMAC-SHA256 DRBG (`kernel/src/secure_rng.rs`) and syscall 251
@@ -1381,6 +1407,14 @@ interactive frame budget, so the final design keeps 64 points and falls back
 to the bounded bitmap glyph for any inkless real glyph. The final glyph/frame
 marker variant still needs a clean 1/2/4-CPU rerun; the PASS matrix above was
 measured before that glyph experiment.
+
+**2026-11-25 reconciliation:** this historical 64-point statement is superseded
+by current source: `MAX_PATH_POINTS = 96`, a 64-entry 32×32 glyph cache, and the
+inkless-miss fallback on both `draw_text_ttf` and `draw_text_proportional`.
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125` enforces the sign-in baseline on
+all three profiles with the font-parsed marker, closing the pending-rerun item.
+The large-asset window self-test is also restored under the existing
+`[FILE MMAP] regression tests` gate.
 
 ## Kernel audit fix plan - 2026-11-20 - FIXES COMPLETED / GATE RESULT
 
