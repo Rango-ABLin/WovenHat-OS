@@ -80,7 +80,9 @@ fn respond(socket: u64, journal: &PolicyJournal, status: u8) -> bool {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    let _ = libwoven::print("[REMOTE ADMIN] freestanding process entered\n");
     let socket = invoke(syscall::SOCKET, 2, 0, 0);
+    let _ = libwoven::print("[REMOTE ADMIN] socket opened\n");
     if socket == ERROR || invoke(syscall::BIND, socket, wovenhat_remote_admin::PORT, 0) == ERROR {
         libwoven::exit(2)
     }

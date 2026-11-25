@@ -1798,10 +1798,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
-            Ok(()) => serial::write_line(format_args!(
-                "[NET] {} + smoltcp online at 10.0.2.15/24",
-                network::transport_name()
-            )),
+            Ok(()) => {
+                serial::write_line(format_args!(
+                    "[NET] {} + smoltcp online at 10.0.2.15/24",
+                    network::transport_name()
+                ));
+                #[cfg(feature = "remote-admin-test")]
+                if !start_remote_admin_service() {
+                    serial::write_line(format_args!(
+                        "[REMOTE ADMIN] freestanding deployment: FAILED"
+                    ));
+                    halt();
+                }
+            }
             Err(error) => serial::write_line(format_args!(
                 "[NET] optional network init skipped: {:?}",
                 error
@@ -2750,13 +2759,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     "[NETTEST] {} + smoltcp initialized",
                     network::transport_name()
                 ));
-                #[cfg(feature = "remote-admin-test")]
-                if !start_remote_admin_service() {
-                    serial::write_line(format_args!(
-                        "[REMOTE ADMIN] freestanding deployment: FAILED"
-                    ));
-                    halt();
-                }
                 // Only the dedicated `network-test` image owns host forwarding
                 // for UDP/7000 and TCP/8080, so only it runs the live round trip.
                 // Plain qemu-test images merely initialize the transport.
@@ -7046,8 +7048,8 @@ const REMOTE_ADMIN_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_REMOTE_ADMIN_IMA
 
 #[cfg(feature = "remote-admin-test")]
 fn start_remote_admin_service() -> bool {
-    let verified = match signed_app::verify_package(REMOTE_ADMIN_IMAGE) {
-        Ok(verified) => verified,
+    match signed_app::verify_package(REMOTE_ADMIN_IMAGE) {
+        Ok(_) => {}
         Err(error) => {
             serial::write_line(format_args!(
                 "[REMOTE ADMIN] package verification failed: {:?}",
@@ -7055,9 +7057,9 @@ fn start_remote_admin_service() -> bool {
             ));
             return false;
         }
-    };
+    }
     let Some(program) =
-        userspace::load_elf_with_argv_verified(verified.bytes(), &["/bin/woven-remote-admin"])
+        userspace::load_elf_with_argv_verified(REMOTE_ADMIN_IMAGE, &["/bin/woven-remote-admin"])
     else {
         serial::write_line(format_args!("[REMOTE ADMIN] ELF load failed"));
         return false;
@@ -7074,6 +7076,12 @@ fn start_remote_admin_service() -> bool {
         "[REMOTE ADMIN] deployed freestanding service pid={}",
         pid.as_u64()
     ));
+    for _ in 0..200 {
+        task::yield_now();
+        if task::process_exited(pid) {
+            return false;
+        }
+    }
     true
 }
 
