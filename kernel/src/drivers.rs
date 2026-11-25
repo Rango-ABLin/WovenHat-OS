@@ -18,6 +18,19 @@ use crate::{
 #[cfg(feature = "stage31-driver-restart-test")]
 use core::sync::atomic::{AtomicU32, Ordering};
 
+/// On-screen bring-up diagnostics for headless real-hardware debugging. The
+/// serial lines are always present; only the terminal-visible copy is gated.
+#[cfg(feature = "hardware-diagnostics")]
+macro_rules! hw_diag {
+    ($bytes:expr) => {
+        crate::terminal::write_bytes($bytes)
+    };
+}
+#[cfg(not(feature = "hardware-diagnostics"))]
+macro_rules! hw_diag {
+    ($bytes:expr) => {};
+}
+
 /// Owner token for boot-bound drivers ("WD" for WovenDriver, then 13.12).
 const OWNER: u32 = 0x5744_0d0c;
 #[cfg(feature = "stage31-driver-restart-test")]
@@ -169,9 +182,9 @@ const SPECS: [Spec; COUNT] = [
 /// that it did, which on real hardware leaves nothing to act on.
 fn init_error(name: &str, error: impl core::fmt::Debug) {
     crate::serial::write_line(format_args!("[DRIVERS] {} init error: {:?}", name, error));
-    crate::terminal::write_bytes(b"[DRIVERS] init error: ");
-    crate::terminal::write_bytes(name.as_bytes());
-    crate::terminal::write_bytes(b"\n");
+    hw_diag!(b"[DRIVERS] init error: ");
+    hw_diag!(name.as_bytes());
+    hw_diag!(b"\n");
 }
 
 fn address_of(device: &pci::Device) -> pci::Address {
@@ -223,9 +236,9 @@ fn bring_up_one(spec: &Spec) -> Driver {
         return result;
     }
     crate::serial::write_line(format_args!("[DRIVERS] {} init begin", spec.name));
-    crate::terminal::write_bytes(b"[DRIVERS] init begin: ");
-    crate::terminal::write_bytes(spec.name.as_bytes());
-    crate::terminal::write_bytes(b"\n");
+    hw_diag!(b"[DRIVERS] init begin: ");
+    hw_diag!(spec.name.as_bytes());
+    hw_diag!(b"\n");
     result.outcome = match device_at(address).ok_or(()).and_then(spec.init) {
         Ok(value) => {
             // Listed with the other devices; a name already present (an
@@ -236,18 +249,18 @@ fn bring_up_one(spec: &Spec) -> Driver {
                 irq: None,
             });
             crate::serial::write_line(format_args!("[DRIVERS] {} init complete", spec.name));
-            crate::terminal::write_bytes(b"[DRIVERS] init complete: ");
-            crate::terminal::write_bytes(spec.name.as_bytes());
-            crate::terminal::write_bytes(b"\n");
+            hw_diag!(b"[DRIVERS] init complete: ");
+            hw_diag!(spec.name.as_bytes());
+            hw_diag!(b"\n");
             Outcome::Ready(value)
         }
         Err(()) => {
             // The controller is quiesced by its driver's own failure path;
             // give the function back.
             let _ = driver::unbind_pci_resources(spec.name);
-            crate::terminal::write_bytes(b"[DRIVERS] init failed: ");
-            crate::terminal::write_bytes(spec.name.as_bytes());
-            crate::terminal::write_bytes(b"\n");
+            hw_diag!(b"[DRIVERS] init failed: ");
+            hw_diag!(spec.name.as_bytes());
+            hw_diag!(b"\n");
             Outcome::InitFailed
         }
     };

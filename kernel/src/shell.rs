@@ -456,18 +456,23 @@ impl Shell {
     fn finish(&mut self, console: &mut Console) {
         self.length = 0;
         if !terminal::foreground_active() {
-            static AUTO_DIAG: core::sync::atomic::AtomicBool =
-                core::sync::atomic::AtomicBool::new(false);
-            if !AUTO_DIAG.swap(true, core::sync::atomic::Ordering::AcqRel) {
-                console.println("");
-                console.println("--- auto diagnostics (no keyboard required) ---");
-                cmd_devices(console);
-                cmd_net(console);
-                console.println("--- end auto diagnostics ---");
-                // `livelog` is compiled out of every `qemu-test` image; the
-                // live-log flush is a production/real-hardware debug aid only.
-                #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-                let _ = crate::livelog::flush_now();
+            // Headless real-hardware debug aid only. Off in every default
+            // image so release boots show a clean first prompt.
+            #[cfg(feature = "hardware-diagnostics")]
+            {
+                static AUTO_DIAG: core::sync::atomic::AtomicBool =
+                    core::sync::atomic::AtomicBool::new(false);
+                if !AUTO_DIAG.swap(true, core::sync::atomic::Ordering::AcqRel) {
+                    console.println("");
+                    console.println("--- auto diagnostics (no keyboard required) ---");
+                    cmd_devices(console);
+                    cmd_net(console);
+                    console.println("--- end auto diagnostics ---");
+                    // `livelog` is compiled out of every `qemu-test` image; the
+                    // live-log flush is a production/real-hardware debug aid.
+                    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+                    let _ = crate::livelog::flush_now();
+                }
             }
             self.print_prompt(console);
         }

@@ -17,6 +17,20 @@ use crate::{
     woven_input::{Event, Key},
 };
 
+/// On-screen controller diagnostics for headless real-hardware debugging. The
+/// matching serial lines are always emitted; only the terminal copy is gated
+/// behind the opt-in `hardware-diagnostics` feature.
+#[cfg(feature = "hardware-diagnostics")]
+macro_rules! hw_diag {
+    ($bytes:expr) => {
+        crate::terminal::write_bytes($bytes)
+    };
+}
+#[cfg(not(feature = "hardware-diagnostics"))]
+macro_rules! hw_diag {
+    ($bytes:expr) => {};
+}
+
 const USB_CLASS: u8 = 0x0c;
 const USB_SUBCLASS: u8 = 0x03;
 const XHCI_PROG_IF: u8 = 0x30;
@@ -339,7 +353,7 @@ pub struct XhciController {
 impl XhciController {
     fn initialize(device: pci::Device) -> Result<Self, InitError> {
         crate::serial::write_line(format_args!("[XHCI] controller initialization begin"));
-        crate::terminal::write_bytes(b"[XHCI] controller initialization begin\n");
+        hw_diag!(b"[XHCI] controller initialization begin\n");
         let bar = device
             .bars
             .iter()
@@ -355,7 +369,7 @@ impl XhciController {
             return Err(InitError::MissingController);
         }
         crate::serial::write_line(format_args!("[XHCI] PCI memory and bus mastering enabled"));
-        crate::terminal::write_bytes(b"[XHCI] PCI memory and bus mastering enabled\n");
+        hw_diag!(b"[XHCI] PCI memory and bus mastering enabled\n");
         let mmio = bar.address;
         let cap_length = mmio_read8(mmio)?;
         if cap_length < 0x20 {
@@ -377,14 +391,14 @@ impl XhciController {
         let command = mmio_read32(op_base)?;
         mmio_write32(op_base, command & !1)?;
         crate::serial::write_line(format_args!("[XHCI] controller halt requested"));
-        crate::terminal::write_bytes(b"[XHCI] controller halt requested\n");
+        hw_diag!(b"[XHCI] controller halt requested\n");
         wait_until(op_base + 0x04, 1, 1)?;
         mmio_write32(op_base, (command & !1) | (1 << 1))?;
         crate::serial::write_line(format_args!("[XHCI] controller reset requested"));
-        crate::terminal::write_bytes(b"[XHCI] controller reset requested\n");
+        hw_diag!(b"[XHCI] controller reset requested\n");
         wait_until(op_base, 1 << 1, 0)?;
         crate::serial::write_line(format_args!("[XHCI] controller reset complete"));
-        crate::terminal::write_bytes(b"[XHCI] controller reset complete\n");
+        hw_diag!(b"[XHCI] controller reset complete\n");
 
         let mut dcbaa = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         let command_page = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
@@ -413,7 +427,7 @@ impl XhciController {
 
         mmio_write32(op_base, 1)?;
         crate::serial::write_line(format_args!("[XHCI] controller start requested"));
-        crate::terminal::write_bytes(b"[XHCI] controller start requested\n");
+        hw_diag!(b"[XHCI] controller start requested\n");
         wait_until(op_base + 0x04, 1, 0)?;
 
         let connected_port = find_connected_port(op_base, max_ports)?;
@@ -421,7 +435,7 @@ impl XhciController {
             "[XHCI] connected port {} found",
             connected_port
         ));
-        crate::terminal::write_bytes(b"[XHCI] connected port found\n");
+        hw_diag!(b"[XHCI] connected port found\n");
         let mut controller = Self {
             address,
             original_command: device.command,
@@ -465,10 +479,10 @@ impl XhciController {
             "[XHCI] port {} reset complete",
             connected_port
         ));
-        crate::terminal::write_bytes(b"[XHCI] port reset complete\n");
+        hw_diag!(b"[XHCI] port reset complete\n");
         controller.slot_id = controller.enable_slot()?;
         crate::serial::write_line(format_args!("[XHCI] initial slot enabled"));
-        crate::terminal::write_bytes(b"[XHCI] initial slot enabled\n");
+        hw_diag!(b"[XHCI] initial slot enabled\n");
         Ok(controller)
     }
 
@@ -2029,14 +2043,14 @@ fn deferred_input_worker() -> ! {
                         "[USB] deferred enumeration complete: keyboards={} mice={} vector={:#x} attempt={}",
                         summary.keyboards, summary.mice, summary.vector, attempt
                     ));
-                    crate::terminal::write_bytes(b"[USB] input enumeration complete\n");
+                    hw_diag!(b"[USB] input enumeration complete\n");
                 }
                 Err(error) => {
                     crate::serial::write_line(format_args!(
                         "[USB] mass storage ready; input enumeration incomplete: {:?} attempt={}",
                         error, attempt
                     ));
-                    crate::terminal::write_bytes(b"[USB] input enumeration incomplete\n");
+                    hw_diag!(b"[USB] input enumeration incomplete\n");
                 }
             }
             break;
@@ -2047,14 +2061,14 @@ fn deferred_input_worker() -> ! {
                     "[USB] deferred enumeration found no storage: keyboards={} mice={} vector={:#x} attempt={}; retrying",
                     summary.keyboards, summary.mice, summary.vector, attempt
                 ));
-                crate::terminal::write_bytes(b"[USB] no storage; retrying\n");
+                hw_diag!(b"[USB] no storage; retrying\n");
             }
             Err(error) => {
                 crate::serial::write_line(format_args!(
                     "[USB] deferred enumeration failed: {:?} attempt={}; retrying",
                     error, attempt
                 ));
-                crate::terminal::write_bytes(b"[USB] enumeration failed; retrying\n");
+                hw_diag!(b"[USB] enumeration failed; retrying\n");
             }
         }
         crate::task::sleep_current(RETRY_TICKS);
@@ -3355,7 +3369,7 @@ fn bios_handoff(mmio: u64, hcc1: u32) -> Result<(), InitError> {
                 "[XHCI] BIOS/OS handoff complete (USBLEGSUP at +{:#x})",
                 offset
             ));
-            crate::terminal::write_bytes(b"[XHCI] BIOS/OS handoff complete\n");
+            hw_diag!(b"[XHCI] BIOS/OS handoff complete\n");
             return Ok(());
         }
         if next == 0 {
