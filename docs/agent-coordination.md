@@ -1,3 +1,21 @@
+## OpenCode - Ring-3 listen/accept ABI (2026-11-25)
+
+Implemented the listener stage requested after the guest-mTLS feasibility
+audit: `NetListen`/`AsyncNetAccept` syscalls with `NetworkIo` gating, a
+`listening` state bit on `UserSocket`, a pinned `socket_accept_pinned` primitive,
+and `Operation::Accept` in the existing async network worker (event-driven, no
+spin, no retained userspace pointer). smoltcp 0.14 lacks a public accept/backlog
+API, so this is deliberately a single-connection listener, not a fabricated
+backlog. Added safe `libwoven::network::{listen, accept}` and converted
+`apps/woven-remote-admin` from its `NET_PEER` spin to the new ABI. The WADM gate
+now requires kernel `[LISTEN]` serial markers and passes 1/2/4/8/16 CPUs.
+
+Still explicitly NOT implemented: guest-terminated mTLS. There is no no_std
+TLS provider that builds for `x86_64-unknown-none` with this host toolchain and
+no secure RNG syscall for Ring 3, so TLS remains at the host mTLS proxy. Two
+full-chain reruns were needed for C: `StorageFull` and a concurrent agent's
+memory gate; both were environmental and are recorded in stage-status.
+
 ## OpenCode - independent build attestation protocol (2026-11-25)
 
 Completed the external attestation ingestion boundary: generator plus a

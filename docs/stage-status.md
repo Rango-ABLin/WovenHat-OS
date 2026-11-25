@@ -1,5 +1,38 @@
 # Stage status
 
+## Ring-3 TCP listen/accept ABI - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+A real guest listener primitive now exists. Syscalls `NetListen` (249) and
+`AsyncNetAccept` (250) are gated by `NetworkIo` like every other socket call.
+`UserSocket` records a `listening` flag; `socket_listen` puts a TCP socket into
+bounded listen state and `socket_accept_pinned` reads the accepted 4-tuple from
+smoltcp. smoltcp 0.14 has no public `accept()`/backlog, so this is an honest
+**single-connection listener**: after acceptance the socket is connected and a
+new socket is required for another client — no backlog is fabricated.
+
+`async_network::Operation::Accept` reuses the existing generation-pinned token,
+queue, `WouldBlock` retry, `network_progress()` wakeup and event-driven
+`wait_ready()` path. No Ring-3 pointer is retained and no caller spins.
+`libwoven::network::{listen, accept}` expose the ABI safely, and
+`apps/woven-remote-admin` now calls them instead of its old `NET_PEER` busy loop
+(the host mTLS proxy remains the TLS boundary — see the limit below).
+
+Validation: the freestanding WADM gate passes at 1/2/4/8/16 CPUs with the
+`[LISTEN] listen(...)`, `[LISTEN] accept submitted` and `[LISTEN] accept complete`
+kernel serial markers, host mTLS Query/Apply/Query/Rollback/replay exchanges,
+and `listener_abi: true` in each result. A 16-CPU host socket timeout was fixed
+by scaling only the harness socket budget above four CPUs; the 1/2/4 budgets
+are unchanged. Kernel default Clippy, all-targets Clippy, workspace tests and
+the full serialized `RUN-STAGE10.7.ps1` chain exit 0. Two environmental reruns
+were required (C: `StorageFull` and a concurrent agent's memory gate); no
+assertion, timeout or kernel budget for 1/2/4 was weakened.
+
+**Limit:** this is the listener ABI stage only. A Ring-3 process that terminates
+TLS itself remains blocked by two independent prerequisites: no `no_std` TLS
+provider builds for `x86_64-unknown-none` here (`ring` has no C sysroot), and
+there is no production secure-RNG syscall for Ring 3. TLS is still terminated
+by the host proxy.
+
 ## Independent build-attestation protocol - 2026-11-25 - VERIFIER COMPLETE / EXTERNAL SUBMISSION OPEN
 
 Added a fail-closed independent-organization attestation boundary. The external
