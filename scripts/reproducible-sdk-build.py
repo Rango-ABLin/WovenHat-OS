@@ -36,9 +36,15 @@ def main() -> int:
         env = dict(os.environ, CARGO_NET_OFFLINE="true")
         command = ["cargo", "test", "-p", "libwoven", "--lib", "--locked", "--offline"]
         result = subprocess.run(command, cwd=isolated, env=env, check=False, text=True)
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True
+        ).strip()
         report = {
             "schema": "wovenhat.clean-room-build/v1",
+            "source_commit": commit,
             "archive_sha256": archive_hash,
+            "organization": "local-clean-room",
+            "independent_organization_attestation": False,
             "command": command,
             "offline_locked": True,
             "returncode": result.returncode,
