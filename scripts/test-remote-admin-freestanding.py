@@ -115,11 +115,11 @@ def main():
         temp = Path(temporary)
         certs = generate_certificates(temp, args.openssl)
         app = ROOT / "apps" / "woven-remote-admin"
-        app_env = dict(os.environ, CARGO_TARGET_DIR=str(app / "target"))
+        app_env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "target"))
         app_env.pop("CARGO_BUILD_BUILD_DIR", None)
         run(["cargo", "build", "--release", "--target", "x86_64-unknown-none"],
             cwd=app, env=app_env)
-        app_elf = app / "target" / "x86_64-unknown-none" / "release" / "wovenhat-remote-admin"
+        app_elf = ROOT / "target" / "x86_64-unknown-none" / "release" / "wovenhat-remote-admin"
         package = temp / "woven-remote-admin.wapp"
         package_env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "target" / "wapp-packager"))
         package_env.pop("CARGO_BUILD_BUILD_DIR", None)
@@ -144,7 +144,7 @@ def main():
         serial.write_text("")
         qemu_command = [
             str(args.qemu), "-accel", "tcg,tb-size=128", "-machine", "q35",
-            "-m", "5G", "-smp", str(args.cpus), "-display", "none",
+            "-m", "512M", "-smp", str(args.cpus), "-display", "none",
             "-serial", f"file:{serial}", "-no-reboot",
             "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
             "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",

@@ -7048,11 +7048,18 @@ const REMOTE_ADMIN_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_REMOTE_ADMIN_IMA
 fn start_remote_admin_service() -> bool {
     let verified = match signed_app::verify_package(REMOTE_ADMIN_IMAGE) {
         Ok(verified) => verified,
-        Err(_) => return false,
+        Err(error) => {
+            serial::write_line(format_args!(
+                "[REMOTE ADMIN] package verification failed: {:?}",
+                error
+            ));
+            return false;
+        }
     };
     let Some(program) =
         userspace::load_elf_with_argv_verified(verified.bytes(), &["/bin/woven-remote-admin"])
     else {
+        serial::write_line(format_args!("[REMOTE ADMIN] ELF load failed"));
         return false;
     };
     let capabilities =
@@ -7060,6 +7067,7 @@ fn start_remote_admin_service() -> bool {
     let Ok((pid, _, _)) =
         task::spawn_user_system_service("woven-remote-admin", program, capabilities)
     else {
+        serial::write_line(format_args!("[REMOTE ADMIN] process spawn failed"));
         return false;
     };
     serial::write_line(format_args!(
