@@ -57,6 +57,257 @@ and recovery evidence remains absent. The controlled ceremony and release
 configuration are in `docs/release-qualification/KEY-CUSTODY.md`; production
 signing custody remains externally blocked until that ceremony succeeds.
 
+## Phase B window-minimize branch record - 2026-11-23 - HISTORICAL (PRE-RECONCILIATION)
+
+The following is the retained record from the diverged sibling branch. Its
+claims are not upgraded by this merge; the accepted Phase B scope is the
+section elsewhere in this document.
+
+Minimize/restore from the taskbar (branch `phase-b/window-minimize`,
+commit `134e8cbd`, built in the `D:\WovenHat-build\desktop-wt` worktree so
+the concurrent kernel chain's uncommitted files were never touched): a
+taskbar click on the focused window minimizes it, a click on a minimized
+entry restores it, and any other click still focuses that window.
+Minimized entries render dimmed with a short muted indicator. Minimization
+reuses the existing focus/paint/hit-test skip by keeping the slot out of
+`stack[..stacked]`, so no new `Window` field was needed. Warning-denying
+freestanding shell clippy passes. Desktop qualification passed at 1, 2
+and 4 CPUs on this commit:
+`audit-artifacts/desktop-qualification-1795445644994223900` (1 CPU),
+`desktop-qualification-1795446056922824200` (2 CPU) and
+`desktop-qualification-1795446369997474500` (4 CPU); every `result.json`
+is `pass: true` with zero failures, and every serial log shows the
+desktop/overview frame markers with no panic.
+
+`keyboard_refresh` root cause closed (2026-11-23): the historical flake
+was a harness acceptance-oracle defect, not a guest input/rendering
+defect. Every documented failure is dated 2026-11-03/04, and all predate
+commit `73ea4d40` (2026-11-04 12:05, "Refresh desktop acceptance oracle
+after chrome modernization"). Until that commit the step's `expected`
+predicate was an exact-glyph bitmap oracle: a hard-coded 5x7 (2x scaled)
+raster of the digit `2` at exactly (236,492), demanding exact ink
+(100,220,180) and paper (35,43,66) bytes. That predicate is falsified by
+any legitimate variation -- the count not being exactly that digit,
+chrome shifting the client origin, font/AA raster differences -- while
+the serial marker `WovenFiles: keyboard refreshed` proves Enter was
+delivered, the client re-rendered and the surface was damaged;
+`capture_until_changed` then misreported the oracle mismatch as a
+framebuffer timeout. Verified on retained artifacts rather than argued
+from code alone: replaying the old predicate against the current PASSING
+frame (`desktop-qualification-1795445644994223900`'s
+`files-keyboard-refresh.ppm`, whose counter region measurably changed by
+116 px against the pre-Enter frame) returns False -- a demonstrated false
+negative on a known-good frame; and no failure has been recorded since
+the oracle was replaced -- the Nov 20 `progressive-{1cpu,2cpu-r2,4cpu}`
+runs, the Nov 23 `merged-final-{1,2,4}cpu` runs and the seven Phase B
+runs above across 1/2/4 CPUs all report zero failures, with the current
+20-byte region threshold comfortably cleared (measured delta ~116 px).
+Caveat stated plainly: no framebuffer from the historical failing runs
+was retained, so the exact mismatching digit/position of 2026-11-03
+cannot be replayed; what is proven is the oracle's false-negative
+behavior on a known-good frame, the replacement commit's own stated
+reason, and the unbroken pass record since. The separate intermittent
+"mouse click did not change the client framebuffer" pointer-step flake
+remains open and is NOT claimed fixed by this analysis.
+
+Pinned taskbar apps (commit `2d40b94b`): the bounded pinned-application
+model is wired into the shell. The taskbar group draws pins and windows
+from one combined list that painting, hit-testing and the group width
+all share -- a pinned app with a window on the workspace shows that
+window at the pin's position, a pin without one is a launchable entry,
+and a pin whose name is not in the catalog stays inert like the desktop
+shortcuts. Sharing one list also fixed group centering drifting when
+minimized windows were excluded from the width count. Left-clicking a
+pin launches its app through a `start_app` split of `launch`, so the
+Start panel never opens on a pin click; right-clicking any taskbar entry
+pins or unpins its app with an honest toast (Pinned/Unpinned `<name>`,
+"Pin list full", "No app for this window"). The PS/2 decoder and the HID
+ABI already delivered button 1, so this needed no kernel or input-ABI
+change. Pins are seeded from the installed settings record's
+`pinned_apps` value (absent: curated Files/Terminal/Store; empty: none).
+They are in-session state, recorded as such: the shell process holds
+`FileRead` only and no settings-write path exists, so nothing claims
+pins survive a reboot. Cross-boot persistence needs a writable settings
+record plus a deliberate `FileWrite` capability decision for the shell,
+and stays open.
+
+The stale blanket `#![allow(dead_code)]` at the top of `main.rs` is also
+gone (same commit): the freestanding shell now lints clean under
+`-D warnings` with the dead legacy Quick Settings layout helpers that
+the allow was hiding deleted, and the unused `PinnedApps::is_empty`
+replaced by `len` in its host test.
+
+Validation for the pinned-apps increment: freestanding clippy
+`-D warnings` and the release build clean; host suites pinned_apps 7/7
+and taskbar_prefs 6/6 (`rustc --test`; the pre-existing build-std config
+still breaks host cargo test). A new real-QEMU gate,
+`scripts/test-taskbar-pins.py`, drives the full pin lifecycle
+(launch-from-pin, unpin, re-pin, close-keeps-pin, unpin-again) with
+occurrence-counted serial markers -- a repeated "Unpinned WovenFiles"
+cannot pass on its earlier occurrence -- and taskbar-strip repaint
+assertions: **PASS at 1, 2 and 4 CPUs**
+(`audit-artifacts/taskbar-pins-1795451941851309600`,
+`-1795452801971620600`, `-1795453153842152100`; every `result.json`
+`pass: true` with zero failures, both "Unpinned WovenFiles"
+occurrences present in each serial log). A pixel audit of the retained
+frames confirms the repaints are real re-layouts, not
+threshold-scraping: 136 changed strip pixels for the launch indicator,
+1948 for the unpin tail move, 644 for the close (slot kept, indicator
+gone) and 9124 for the group shrinking 3 -> 2 entries, against the
+gate's 20-byte minimum. The full desktop qualification then **passed at
+1, 2 and 4 CPUs from this exact tree**
+(`desktop-qualification-1795452497487046700`,
+`-1795452948321374000`, `-1795453290969248000`; zero failures each).
+One earlier 1-CPU attempt
+(`desktop-qualification-1795452130105296700`) failed the 120000 ms
+startup budget at 121226 ms on a host still loaded by the preceding
+gate's teardown; the identical tree re-run on a quiet host booted in
+90406 ms and passed, and every other run this day booted in the
+50-91 s band, so that miss is recorded as host load, not a guest
+regression. No budget was widened.
+
+Taskbar auto-hide (commit `d511ded4`): a pure `AutoHide` model in
+`taskbar_prefs.rs` -- seeded from the installed settings record's
+`taskbar_auto_hide` value (only the exact string `true` enables it, and
+the bar starts hidden), flipped in-session by right-clicking an empty
+part of the strip, with a toast and serial marker each way. The screen's
+bottom row reveals a hidden bar; a one-second hold hides it again once
+the pointer leaves; open panels (Quick Settings, Notification Center,
+the overview) hold it up until they close. Hidden, the bar paints
+nothing, the usable band grows to the full screen so windows may extend
+under where it was, and its controls capture no clicks. Like pins, the
+preference is in-session state: the shell holds `FileRead` and no
+settings-write path exists, so nothing claims it survives a reboot.
+
+The same commit fixed a real placement defect the pins evidence
+exposed: with the three default pins the full-screen-centered group
+(logical 211..429) ran under the workspace boxes and the Quick Settings
+button, painting over the Store entry -- proven by the retained
+sign-in frame, whose Store-colored tile was absent while the Files tile
+was intact. `start_area` now centers the group inside the free band
+between the left margin and the right-side controls, clamping left when
+it cannot fit, so pins and windows never draw under the switcher, tray,
+status icons or clock. The pre-pins layout had the same latent flaw
+from two entries upward; the defaults made it visible at sign-in.
+
+Validation: freestanding clippy `-D warnings` and the release build
+clean; host suites taskbar_prefs 12/12 and pinned_apps 7/7. The
+extended `scripts/test-taskbar-pins.py` gate (pins lifecycle plus five
+auto-hide phases in the same boot: toggle-on, hidden-controls-
+capture-nothing, edge reveal, timer hide, toggle-off-stays-up-past-the-
+old-hold) **passed at 1, 2 and 4 CPUs**
+(`taskbar-pins-1795455150266353700`, `-1795455380078094100`,
+`-1795455916058784100`), with occurrence-counted markers and two
+pixel-equality negative checks (clock columns masked, comparison boxes
+inside the framebuffer, references captured only after the drawn
+cursor demonstrably settled). The full desktop qualification **passed
+at 1, 2 and 4 CPUs** from this exact tree
+(`desktop-qualification-1795455593064749300`,
+`-1795456116747088900`, `-1795456412952954800`; zero failures each,
+startup 95-98 s against the 120 s budget). Four earlier gate-side
+failures are preserved and were all defects in the new gate itself, not
+the guest -- a mismatched cursor position between compared frames
+(`taskbar-pins-1795454258433091200`), a stale-variable crash after the
+guest had passed the steps in question
+(`-1795454445640302000`), a fixed sleep racing the cursor's repaint lag
+(`-1795454634578127800`, pixel-diffed to prove the guest was correct),
+and an off-screen comparison box that `region_changed` correctly
+refuses (`-1795454904737521700`) -- the shell produced every expected
+marker and pixel state in all four. One audit note: the second of those
+directories (`-1795454445640302000`) has no `result.json` because that
+crash is exactly what motivated the gate's unexpected-error arm; its
+serial log, QMP trace, frames and build logs are the evidence.
+
+Window maximize/restore (frame-only increment, worktree
+`D:\WovenHat-build\desktop-wt`, branch `phase-b/window-minimize`):
+right-clicking a window title bar toggles maximize and restore. Maximize
+saves the exact pre-maximize client geometry in `Window.restore`, moves
+the frame to fill the usable band (title bar at the top, client body to
+the band bottom), and marks `Window.maximized`. Restore returns the
+saved geometry verbatim. Dragging a maximized title bar restores the
+window before the drag continues. Explicit re-placement/snap/tile and
+a client-driven WRSZ clear the maximized flag so it never describes a
+stale geometry. A client WRSZ that clamps to a smaller surface than the
+band-filling frame keeps the frame maximized and blits only the reported
+`surface_w/surface_h`, filling the uncovered body with `theme_panel()`
+so the desktop background never shows through.
+
+This increment is deliberately frame-only: toggle_maximize does not send
+WSIZ. Sending WSIZ during live maximize exposed a reproducible stall in
+the software compositor/present path on slow 1-CPU QEMU (a Terminal
+clamped resize caused the repaint to hang in shadow blending /
+`present_region_blended`). Until that compositor path is proven
+non-blocking, client reflow on maximize is deferred. For the same reason
+window shadows are temporarily disabled in `repaint_once` with an
+explicit TODO; this is a visual regression recorded here, not a hidden
+behavior change.
+
+Validation: freestanding shell `cargo clippy --target x86_64-unknown-none -- -D warnings` and release build clean. Host suites: `apps/woven-shell/tests/taskbar_prefs.rs` 12/12, `apps/woven-shell/tests/pinned_apps.rs` 7/7 (compiled with `rustc --test`; the pre-existing build-std config still breaks host cargo test). Extended `scripts/test-taskbar-pins.py` (pins + auto-hide + maximize/restore/drag-restore phases, occurrence-counted markers, clock-masked pixel checks, title-bar restore-position check) **PASS at 1, 2 and 4 CPUs**: `audit-artifacts/taskbar-pins-1795504655655003900` (1 CPU), `taskbar-pins-1795504803500124300` (2 CPU), `taskbar-pins-1795504942282416200` (4 CPU), all `pass: true`, zero failures. Desktop qualification **PASS at 1, 2 and 4 CPUs**: `desktop-qualification-1795505086591807900` (1 CPU, PASS), `desktop-qualification-1795505768460324700` (2 CPU rerun, PASS), `desktop-qualification-1795505531386805300` (4 CPU, PASS). Preserved 2-CPU failure: `desktop-qualification-1795505275169282000` failed with `timed out waiting for marker 'WovenFiles: pointer cancelled' for files_pointer_cancel_ms`; rerun on the same tree passed, and no budget or assertion was weakened.
+
+Not done, and therefore not claimed: WSIZ client reflow on maximize
+(deferred until compositor/present path is proven non-blocking), window
+shadows (temporarily disabled by the same workaround), a visual check
+of the changed taskbar alignment/icon-size settings values, cross-boot
+pin and auto-hide persistence (needs a writable settings record and a
+deliberate `FileWrite` capability decision for the shell),
+fullscreen/maximize visual polish, Alt+Tab (blocked on modifier state in
+the input ABI, which touches kernel files with another agent's
+uncommitted edits), an in-shell taskbar settings editor, and Quick
+Settings Battery saver and Night light (still local toggles with no
+effect). The separate intermittent "mouse click did not change the
+client framebuffer" pointer-step flake also remains open.
+
+Taskbar alignment/icon-size visual QEMU verification (worktree
+`D:\WovenHat-build\desktop-wt`, branch `phase-b/window-minimize`, 2026-11-24):
+the shell's effective taskbar layout is now logged once at startup
+(`woven-shell: taskbar layout alignment=<center|left> icon_size=<small|medium|large> auto_hide=<on|off>`).
+Shell CLI overrides `--taskbar-alignment`, `--taskbar-icon-size` and
+`--taskbar-auto-hide` are accepted (unknown values fail closed with the same
+`fail(1)` path as other bad args). For real QEMU acceptance, the kernel session
+argv gained compile-time overrides `WOVENHAT_SHELL_TASKBAR_ALIGNMENT`,
+`WOVENHAT_SHELL_TASKBAR_ICON_SIZE` and `WOVENHAT_SHELL_TASKBAR_AUTO_HIDE`
+(option_env, only when set); `kernel/src/userspace.rs` `MAX_ARGV` was raised
+from 8 to 16 / `MAX_ARGV_BYTES` from 512 to 1024 to accommodate the bounded
+session argv. These are small kernel changes in the isolated worktree; they
+are not reconciled into the main repo, which has other agents' uncommitted
+kernel work.
+
+Validation: freestanding shell `cargo clippy --release --target
+x86_64-unknown-none -- -D warnings` clean. New real-QEMU gate
+`scripts/test-taskbar-layout.py` boots a hardware-demo image with
+`alignment=left icon_size=large auto_hide=off`, waits for the startup layout
+marker, signs in, captures the desktop frame, and performs a pixel sanity check
+that the left-aligned Start area is present. PASS at 1/2/4 CPUs:
+`audit-artifacts/taskbar-layout-1795512950531598600` (1 CPU),
+`audit-artifacts/taskbar-layout-1795513102956382300` (2 CPU),
+`audit-artifacts/taskbar-layout-1795513257891825300` (4 CPU); each
+`result.json` is `pass: true` with zero failures, the layout marker matches,
+and screenshots are preserved. The first 1-CPU attempt
+`audit-artifacts/taskbar-layout-1795512583100247100` failed with
+`[SESSION] desktop not started: Image` because `MAX_ARGV=8` was too small for
+the extended session argv; preserved as evidence and fixed by the MAX_ARGV bump,
+no assertion weakened.
+
+In-shell taskbar Quick Settings controls (same worktree, 2026-11-24, shell-only):
+Quick Settings now exposes `Taskbar align` and `Icon size` actions (in-session
+only; toasts/logs include "(session)"; resets to startup/settings on next
+boot). They replaced the no-effect `Battery saver` and `Night light` local QS
+toggles to keep the 4x3 grid. Auto-hide remains the existing right-click
+taskbar-strip toggle with its established serial markers. Freestanding shell
+clippy `-D warnings` clean; host `taskbar_prefs` 12/12 and `pinned_apps` 7/7
+pass. 1-CPU desktop qualification smoke attempted twice
+(`desktop-qualification-1795516306643836000`,
+`desktop-qualification-1795516388939047300`) but both failed during
+hardware-demo kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN
+(environment issue, not a shell code regression); no QEMU runtime regression is
+asserted or denied by those build failures.
+
+Still not claimed: a dedicated in-shell taskbar settings editor beyond QS
+toggles, cross-boot persistence of taskbar layout preferences (shell remains
+FileRead-only; no settings-write path), alignment/icon-size visual verification
+under every theme/density combination beyond the tested left+large case, and
+Phase B §24 acceptance.
+
 Validation completed: warning-denying workspace Clippy and the 256-test
 libwoven/host suite pass; all five standalone signing-tool Clippy targets pass;
 the PKCS#11 adapter tests, release package-boundary tests, missing/mismatched/

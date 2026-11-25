@@ -16,7 +16,10 @@ fn absent_setting_restores_curated_defaults() {
 
 #[test]
 fn empty_setting_means_everything_unpinned() {
-    assert!(PinnedApps::from_setting(Some("")).is_empty());
+    // `is_empty` was dropped from the model once warning-denying freestanding
+    // Clippy flagged it: the shell reads `len()`, and host tests say the same
+    // thing explicitly here.
+    assert_eq!(PinnedApps::from_setting(Some("")).len(), 0);
 }
 
 #[test]
@@ -59,4 +62,10 @@ fn unpin_keeps_order_and_reports_absence() {
     assert_eq!(pins.get(1), Some("c"));
     assert_eq!(pins.get(2), None);
     assert!(!pins.unpin("b"));
+}
+
+#[test]
+fn const_defaults_match_validated_defaults() {
+    assert_eq!(PinnedApps::defaults_const(), PinnedApps::defaults());
+    assert_eq!(PinnedApps::defaults_const(), PinnedApps::from_setting(None));
 }
