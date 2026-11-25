@@ -1,7 +1,7 @@
 use std::{env, fs, path::PathBuf, process};
 
-use ed25519_compact::{KeyPair, Seed};
 use sha2::{Digest, Sha256};
+use wovenhat_release_signing::SigningRequest;
 
 const DOMAIN: &[u8] = b"WOVENHAT-WPKG-V1";
 const MAGIC: [u8; 4] = *b"WPKG";
@@ -23,23 +23,6 @@ fn usage() -> ! {
          [--capabilities BITS] [--dependency NAME]... [--resources FILE]"
     );
     process::exit(2);
-}
-
-fn parse_hex(value: &str) -> [u8; 32] {
-    if value.len() != 64 {
-        panic!("key must contain 64 hexadecimal digits");
-    }
-    let mut result = [0u8; 32];
-    for (index, byte) in result.iter_mut().enumerate() {
-        let nibble = |value: u8| match value {
-            b'0'..=b'9' => value - b'0',
-            b'a'..=b'f' => value - b'a' + 10,
-            b'A'..=b'F' => value - b'A' + 10,
-            _ => panic!("key contains a non-hexadecimal digit"),
-        };
-        *byte = nibble(value.as_bytes()[index * 2]) << 4 | nibble(value.as_bytes()[index * 2 + 1]);
-    }
-    result
 }
 
 fn valid_name(value: &str) -> bool {
@@ -98,9 +81,9 @@ fn valid_package(bytes: &[u8]) -> bool {
     };
     if name.is_empty()
         || name.len() > MAX_NAME_BYTES
-        || !name.iter().all(|byte| {
-            matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-')
-        })
+        || !name.iter().all(
+            |byte| matches!(*byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'),
+        )
     {
         return false;
     }
@@ -233,25 +216,32 @@ fn main() {
     package.extend_from_slice(&application);
     package.extend_from_slice(&resource_bytes);
 
-    let seed = env::var("WOVENHAT_APP_SIGNING_SEED_HEX")
-        .map(|value| parse_hex(&value))
-        .unwrap_or(TEST_SEED);
-    let key_pair = KeyPair::from_seed(Seed::new(seed));
-    if let Ok(value) = env::var("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX") {
-        assert_eq!(
-            key_pair.pk.as_ref(),
-            &parse_hex(&value),
-            "application signing key mismatch"
-        );
-    }
     let mut signed = Sha256::new();
     signed.update(DOMAIN);
     signed.update(&package[..28]);
     signed.update(&package[HEADER_LEN..]);
     let digest: [u8; 32] = signed.finalize().into();
-    let signature = key_pair.sk.sign(digest, None);
-    package[28..HEADER_LEN].copy_from_slice(signature.as_ref());
-    assert!(valid_package(&package), "packager emitted an invalid WPKG envelope");
+    let release_mode = env::var("WOVENHAT_APP_RELEASE_MODE")
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    let signature = SigningRequest {
+        purpose: "app",
+        seed_env: "WOVENHAT_APP_SIGNING_SEED_HEX",
+        trusted_public_env: "WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX",
+        external_signer_env: "WOVENHAT_APP_EXTERNAL_SIGNER",
+        production: release_mode,
+        development_seed: Some(TEST_SEED),
+    }
+    .sign(&digest)
+    .unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(2);
+    });
+    package[28..HEADER_LEN].copy_from_slice(&signature);
+    assert!(
+        valid_package(&package),
+        "packager emitted an invalid WPKG envelope"
+    );
     fs::write(&output, &package).expect("failed to write WPKG package");
     println!(
         "signed {} -> {} ({} bytes)",

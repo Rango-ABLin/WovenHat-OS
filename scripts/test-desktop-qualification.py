@@ -1056,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--qemu", type=Path, default=Path(DEFAULT_QEMU))
     parser.add_argument("--firmware", type=Path)
-    parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--cpus", type=int, choices=(1, 2, 4, 8, 16), default=1)
     parser.add_argument("--accelerator", choices=("tcg", "whpx"), default="tcg",
                         help="QEMU accelerator; assertions and timing limits are identical")
     parser.add_argument(

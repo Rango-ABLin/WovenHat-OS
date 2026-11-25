@@ -18,13 +18,22 @@ def main() -> int:
     environment = os.environ.copy()
     if args.production:
         seed = environment.get("WOVENHAT_SDK_PRODUCTION_SIGNING_SEED_HEX")
+        signer = environment.get("WOVENHAT_SDK_PRODUCTION_EXTERNAL_SIGNER")
         public = environment.get("WOVENHAT_SDK_PRODUCTION_TRUSTED_PUBLIC_KEY_HEX")
-        if not seed or not public:
+        if not public:
             raise SystemExit(
-                "--production requires WOVENHAT_SDK_PRODUCTION_SIGNING_SEED_HEX "
-                "and WOVENHAT_SDK_PRODUCTION_TRUSTED_PUBLIC_KEY_HEX"
+                "--production requires WOVENHAT_SDK_PRODUCTION_TRUSTED_PUBLIC_KEY_HEX"
             )
-        environment["WOVENHAT_SDK_SIGNING_SEED_HEX"] = seed
+        if bool(seed) == bool(signer):
+            raise SystemExit(
+                "--production requires exactly one of "
+                "WOVENHAT_SDK_PRODUCTION_SIGNING_SEED_HEX or "
+                "WOVENHAT_SDK_PRODUCTION_EXTERNAL_SIGNER"
+            )
+        if seed:
+            environment["WOVENHAT_SDK_SIGNING_SEED_HEX"] = seed
+        if signer:
+            environment["WOVENHAT_SDK_EXTERNAL_SIGNER"] = signer
         environment["WOVENHAT_SDK_TRUSTED_PUBLIC_KEY_HEX"] = public
     command = [
         "cargo", "run", "--quiet", "--locked", "--offline",

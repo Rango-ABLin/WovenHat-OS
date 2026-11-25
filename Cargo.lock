@@ -1509,6 +1509,14 @@ dependencies = [
  "sha2 0.10.9",
  "unicode-normalization",
  "wovenhat-kernel",
+ "wovenhat-release-signing",
+]
+
+[[package]]
+name = "wovenhat-release-signing"
+version = "0.1.0"
+dependencies = [
+ "ed25519-compact",
 ]
 
 [[package]]

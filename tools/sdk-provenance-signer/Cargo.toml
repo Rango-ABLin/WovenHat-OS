@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 ed25519-compact = { version = "2.6", default-features = false }
 sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+wovenhat-release-signing = { path = "../release-signing" }
 
 [lints.rust]
 warnings = "deny"
