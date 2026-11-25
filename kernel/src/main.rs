@@ -7062,8 +7062,7 @@ fn start_remote_admin_service() -> bool {
         serial::write_line(format_args!("[REMOTE ADMIN] ELF load failed"));
         return false;
     };
-    let capabilities =
-        capability::CapabilitySet::only(capability::Capability::NetworkIo);
+    let capabilities = capability::CapabilitySet::only(capability::Capability::NetworkIo);
     let Ok((pid, _, _)) =
         task::spawn_user_system_service("woven-remote-admin", program, capabilities)
     else {
