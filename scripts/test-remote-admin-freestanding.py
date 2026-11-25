@@ -140,7 +140,9 @@ def main():
         image = Path([line for line in build.stdout.splitlines() if line.endswith(".img")][-1])
         guest_forward = reserve_port()
         tls_port = reserve_port()
-        out = ROOT / "audit-artifacts" / f"remote-admin-freestanding-{args.cpus}cpu"
+        out = ROOT / "audit-artifacts" / (
+            f"remote-admin-freestanding-{args.cpus}cpu-{time.time_ns()}"
+        )
         out.mkdir(parents=True, exist_ok=True)
         serial = out / "serial.log"
         qemu_log = out / "qemu.log"
@@ -193,7 +195,7 @@ def main():
                 proxy.terminate()
                 proxy.wait(timeout=10)
             qemu.terminate()
-            qemu.wait(timeout=10)
+            qemu.wait(timeout=30)
     print(f"Remote admin freestanding deployment: PASS ({args.cpus} CPU). Evidence: {out}")
     return 0
 

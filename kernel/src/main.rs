@@ -1803,13 +1803,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     "[NET] {} + smoltcp online at 10.0.2.15/24",
                     network::transport_name()
                 ));
-                #[cfg(feature = "remote-admin-test")]
-                if !start_remote_admin_service() {
-                    serial::write_line(format_args!(
-                        "[REMOTE ADMIN] freestanding deployment: FAILED"
-                    ));
-                    halt();
-                }
             }
             Err(error) => serial::write_line(format_args!(
                 "[NET] optional network init skipped: {:?}",
@@ -2056,6 +2049,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 None => console.println("USERSPACE INIT+SH: IMAGE FAILED"),
             }
             console.println("");
+        }
+        #[cfg(feature = "remote-admin-test")]
+        if !start_remote_admin_service() {
+            serial::write_line(format_args!(
+                "[REMOTE ADMIN] freestanding deployment: FAILED"
+            ));
+            halt();
         }
         let mut shell = Shell::new();
 

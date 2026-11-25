@@ -2011,6 +2011,11 @@ struct UserSocket {
     handle: SocketHandle,
     kind: SocketKind,
     peer: Option<IpEndpoint>,
+    /// A TCP socket in listen state. smoltcp auto-accepts one connection on
+    /// the listening socket itself, so this is a single-connection listener:
+    /// after an accept the socket is connected and a new socket must be
+    /// created and listened for another client.
+    listening: bool,
     generation: u32,
     async_refs: u16,
     closing: bool,
@@ -2529,6 +2534,7 @@ pub fn socket_open(owner: u64, kind: SocketKind) -> Result<u64, SocketError> {
         handle,
         kind,
         peer: None,
+        listening: false,
         generation,
         async_refs: 0,
         closing: false,
@@ -2558,6 +2564,62 @@ pub fn socket_bind(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
             .listen(port)
             .map_err(|_| SocketError::Address),
     }
+}
+
+/// Put a TCP socket into bounded listen state. This is distinct from `bind`:
+/// a listening socket is owned by the accepting process and can yield exactly
+/// one accepted connection, after which a fresh socket is required.
+pub fn socket_listen(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
+    if port == 0 {
+        return Err(SocketError::Address);
+    }
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(SocketError::Offline);
+    };
+    let mut runtime = runtime.lock();
+    let entry = find_slot(&runtime, owner, id)?;
+    if entry.kind != SocketKind::Tcp || entry.listening || entry.peer.is_some() {
+        return Err(SocketError::WrongKind);
+    }
+    runtime
+        .sockets
+        .get_mut::<tcp::Socket>(entry.handle)
+        .listen(port)
+        .map_err(|_| SocketError::Address)?;
+    let socket = runtime.user[usize::try_from(id).map_err(|_| SocketError::Invalid)?]
+        .as_mut()
+        .ok_or(SocketError::Invalid)?;
+    socket.listening = true;
+    socket.peer = None;
+    Ok(())
+}
+
+/// Complete one pending connection on a pinned listening socket. Returns the
+/// packed accepted endpoint, or `WouldBlock` while the handshake is in progress
+/// so the async worker can retry on the next network progress event.
+pub fn socket_accept_pinned(token: SocketToken) -> Result<usize, SocketError> {
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(SocketError::Offline);
+    };
+    let mut runtime = runtime.lock();
+    let entry = find_token(&runtime, token)?;
+    if entry.kind != SocketKind::Tcp || !entry.listening || entry.closing {
+        return Err(SocketError::WrongKind);
+    }
+    let endpoint = runtime
+        .sockets
+        .get_mut::<tcp::Socket>(entry.handle)
+        .remote_endpoint();
+    let Some(endpoint) = endpoint else {
+        return Err(SocketError::WouldBlock);
+    };
+    let packed = endpoint_to_packed(endpoint) as usize;
+    let socket = runtime.user[token.slot as usize]
+        .as_mut()
+        .ok_or(SocketError::Invalid)?;
+    socket.listening = false;
+    socket.peer = Some(endpoint);
+    Ok(packed)
 }
 
 #[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
