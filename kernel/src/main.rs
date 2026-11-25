@@ -2750,6 +2750,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                     "[NETTEST] {} + smoltcp initialized",
                     network::transport_name()
                 ));
+                #[cfg(feature = "remote-admin-test")]
+                if !start_remote_admin_service() {
+                    serial::write_line(format_args!(
+                        "[REMOTE ADMIN] freestanding deployment: FAILED"
+                    ));
+                    halt();
+                }
                 // Only the dedicated `network-test` image owns host forwarding
                 // for UDP/7000 and TCP/8080, so only it runs the live round trip.
                 // Plain qemu-test images merely initialize the transport.
@@ -7034,6 +7041,33 @@ const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
 const SEARCH_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_IMAGE"));
 #[cfg(feature = "stage23-5-search-service-test")]
 const SEARCH_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_PROBE_IMAGE"));
+#[cfg(feature = "remote-admin-test")]
+const REMOTE_ADMIN_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_REMOTE_ADMIN_IMAGE"));
+
+#[cfg(feature = "remote-admin-test")]
+fn start_remote_admin_service() -> bool {
+    let verified = match signed_app::verify_package(REMOTE_ADMIN_IMAGE) {
+        Ok(verified) => verified,
+        Err(_) => return false,
+    };
+    let Some(program) =
+        userspace::load_elf_with_argv_verified(verified.bytes(), &["/bin/woven-remote-admin"])
+    else {
+        return false;
+    };
+    let capabilities =
+        capability::CapabilitySet::only(capability::Capability::NetworkIo);
+    let Ok((pid, _, _)) =
+        task::spawn_user_system_service("woven-remote-admin", program, capabilities)
+    else {
+        return false;
+    };
+    serial::write_line(format_args!(
+        "[REMOTE ADMIN] deployed freestanding service pid={}",
+        pid.as_u64()
+    ));
+    true
+}
 
 #[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
 fn stage22_3_package_service_self_test() -> bool {

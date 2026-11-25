@@ -115,6 +115,41 @@ fn serve(mut stream: StreamOwned<ServerConnection, TcpStream>, expected_client: 
     }
 }
 
+fn forward(mut tls: StreamOwned<ServerConnection, TcpStream>, expected_client: [u8; 32], backend: &str) {
+    let peer = tls
+        .conn
+        .peer_certificates()
+        .and_then(|certs| certs.first())
+        .map(|cert| Sha256::digest(cert.as_ref()));
+    if peer.as_ref().is_none_or(|digest| digest.as_slice() != expected_client) {
+        fail("authenticated client certificate fingerprint mismatch");
+    }
+    let mut guest = TcpStream::connect(backend)
+        .unwrap_or_else(|error| fail(format!("connect guest admin backend {backend}: {error}")));
+    loop {
+        let mut request = [0u8; MAX_FRAME];
+        tls.read_exact(&mut request[..HEADER])
+            .unwrap_or_else(|error| fail(format!("read forwarded WADM header: {error}")));
+        let length = u16::from_be_bytes([request[24], request[25]]) as usize;
+        if length > 256 {
+            fail("forwarded WADM payload exceeds bound");
+        }
+        tls.read_exact(&mut request[HEADER..HEADER + length])
+            .unwrap_or_else(|error| fail(format!("read forwarded WADM payload: {error}")));
+        guest
+            .write_all(&request[..HEADER + length])
+            .unwrap_or_else(|error| fail(format!("write guest WADM request: {error}")));
+        let mut response = [0u8; 16];
+        guest
+            .read_exact(&mut response)
+            .unwrap_or_else(|error| fail(format!("read guest WADM response: {error}")));
+        tls.write_all(&response)
+            .unwrap_or_else(|error| fail(format!("write forwarded WADM response: {error}")));
+        tls.flush()
+            .unwrap_or_else(|error| fail(format!("flush forwarded WADM response: {error}")));
+    }
+}
+
 fn main() {
     let mut args = env::args().skip(1);
     let address = args.next().unwrap_or_else(|| fail("usage: service LISTEN SERVER_CERT_DER SERVER_KEY_DER CLIENT_CA_DER CLIENT_CERT_SHA256"));
@@ -122,6 +157,7 @@ fn main() {
     let server_key = args.next().unwrap_or_else(|| fail("missing server private key"));
     let client_ca = args.next().unwrap_or_else(|| fail("missing client CA"));
     let client_fingerprint = args.next().unwrap_or_else(|| fail("missing client certificate fingerprint"));
+    let backend = args.next();
     if args.next().is_some() {
         fail("too many arguments");
     }
@@ -131,5 +167,10 @@ fn main() {
     let (stream, peer) = listener.accept().unwrap_or_else(|error| fail(format!("accept: {error}")));
     println!("accepted authenticated-admin connection from {peer}");
     let connection = ServerConnection::new(config).unwrap_or_else(|error| fail(format!("TLS setup: {error}")));
-    serve(StreamOwned::new(connection, stream), fingerprint(&client_fingerprint));
+    let stream = StreamOwned::new(connection, stream);
+    if let Some(backend) = backend {
+        forward(stream, fingerprint(&client_fingerprint), &backend);
+    } else {
+        serve(stream, fingerprint(&client_fingerprint));
+    }
 }

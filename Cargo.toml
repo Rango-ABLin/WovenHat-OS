@@ -101,6 +101,7 @@ installed-wovenfs-test = ["qemu-test", "kernel/installed-wovenfs-qualification"]
 installed-wovenfs-interruption-test = ["qemu-test", "kernel/installed-wovenfs-interruption-qualification"]
 # Known cfg alias for kernel sources included directly by host crash tests.
 installed-wovenfs-interruption-qualification = []
+remote-admin-test = ["qemu-test", "kernel/remote-admin-test"]
 stage31-process-crash-test = ["qemu-test", "kernel/stage31-process-crash-test"]
 fault-injection-test = ["qemu-test", "kernel/fault-injection-test"]
 s03-process-lifecycle-test = ["qemu-test", "kernel/s03-process-lifecycle-test"]

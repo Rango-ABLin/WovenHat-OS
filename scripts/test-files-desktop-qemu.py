@@ -59,8 +59,10 @@ def main():
     parser.add_argument('--memory', default='5G', help='guest RAM (default: 5G, matching desktop qualification)')
     parser.add_argument('--absolute-click', action='store_true',
                         help='use an absolute usb-tablet click model instead of relative PS/2 motion')
-    parser.add_argument('--click-x', type=int, default=310, help='absolute click X with --absolute-click')
-    parser.add_argument('--click-y', type=int, default=160, help='absolute click Y with --absolute-click')
+    parser.add_argument('--click-x', type=int, default=15360,
+                        help='abs tablet X (0..65535) with --absolute-click; default targets the WovenFiles Refresh button')
+    parser.add_argument('--click-y', type=int, default=20971,
+                        help='abs tablet Y (0..65535) with --absolute-click; default targets the WovenFiles Refresh button')
     parser.add_argument('--display', choices=('std', 'virtio-vga'), default='virtio-vga',
                         help='display path to exercise (default: live VirtIO-GPU surface)')
     parser.add_argument('--app', choices=('calculator', 'files', 'settings', 'monitor', 'security', 'editor', 'images', 'update', 'store', 'terminal'), default='files')
@@ -145,7 +147,7 @@ def main():
     display_args = (['-display', 'none', '-vga', 'none',
                      '-device', 'virtio-vga,id=gpu0,xres=1280,yres=800']
                     if args.display == 'virtio-vga' else ['-vga', 'std'])
-    tablet_args = ['-usb', '-device', 'usb-tablet'] if args.absolute_click else []
+    tablet_args = ['-device', 'qemu-xhci,id=xhci-tablet', '-device', 'usb-tablet,bus=xhci-tablet.0'] if args.absolute_click else []
     command = [str(qemu), '-accel', 'tcg,tb-size=128', '-machine', 'pc', '-m', args.memory,
                '-smp', str(args.cpus), '-serial', f'file:{serial}',
                '-no-reboot', '-qmp', f'tcp:127.0.0.1:{qmp_port},server=on,wait=off',

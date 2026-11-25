@@ -149,6 +149,7 @@ installed-wovenfs-qualification = ["qemu-test"]
 installed-wovenfs-interruption-qualification = ["installed-wovenfs-qualification"]
 # Known cfg alias for this source when included directly by root-package tests.
 installed-wovenfs-interruption-test = []
+remote-admin-test = []
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
 # Stage 31 in-guest deterministic randomized fault injection. Self-test only:
