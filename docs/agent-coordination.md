@@ -1,3 +1,23 @@
+## OpenCode - S-slice virtual models (2026-11-25)
+
+Implemented every small virtual piece from the previous audit with disposable,
+fail-closed models: WSL snakeoil VARS/cert staging (S10), xHCI usb-tablet
+absolute-click harness (S12, PASS 1/2/4), local TLS IPP server (S13, PASS),
+feature-gated deterministic HDA capture source (S13, PASS 1/2/4), and mTLS WADM
+service contract harness (S17 host/service boundary, PASS). Three real defects
+surfaced and were repaired: `libwoven::ipp_tls::content_length` aborted on the
+HTTP status line; kernel `stage13-15-capture-test` never enabled its self-test
+feature; and `remote-admin-tls-service` checked the client fingerprint before
+the handshake exposed a peer certificate. Each repair added or strengthened a
+test rather than weakening an assertion.
+
+S17's Ring-3 guest listener is explicitly NOT implemented: no listen/accept
+syscall exists, so it is a new ABI stage, not a virtual model. S15/S19 already
+had closed software paths. Full `RUN-STAGE10.7.ps1` chain exited 0; all-target,
+kernel, shell and tool Clippy plus workspace tests pass. A concurrent WIP fmt
+failure in the other owner's `kernel/src/main.rs` / `test-remote-admin-freestanding.py`
+was left untouched.
+
 ## OpenCode - persistent config migration and WovenFS crash boundaries (2026-11-25)
 
 Closed the two requested bounded software gaps. Installed v1 settings migrate

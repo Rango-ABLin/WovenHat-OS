@@ -1,5 +1,50 @@
 # Stage status
 
+## S-slice virtual-model closures - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The missing virtual inputs identified in the S00 inventory were implemented as
+disposable, fail-closed models; no external key, device or reviewer was used.
+
+- **S10**: `scripts/prepare-virtual-trust-inputs.py` deterministically stages
+  the enrolled OVMF snakeoil VARS/CODE, certificate and a decrypted development
+  key from the Ubuntu WSL distro into a caller-owned directory with a
+  `physical_access: false`, `production_key: false` manifest. All trust-harness
+  input checks pass; only `qemu-execution-not-requested` remains in
+  `--preflight-only`, as designed.
+- **S12**: `scripts/test-files-desktop-qemu.py` gained `--absolute-click`, an
+  xHCI `usb-tablet` absolute-coordinate model that replaces the unstable
+  relative PS/2 injection. Calibrated default targets the WovenFiles Refresh
+  button; the guest reports the press and the bounded control activates. PASS
+  at 1/2/4 CPUs.
+- **S13**: `scripts/test-ipp-virtual.py` generates a disposable CA and a
+  SAN-matching server certificate and serves a valid bounded IPP response over
+  TLS; the real `ipp-tls-probe` accepts it with an explicit CA DER and
+  `--connect-address`. This exposed and fixed a real defect in
+  `libwoven::ipp_tls::content_length`, which previously aborted on the HTTP
+  status line and could never parse a real response; a host regression test was
+  added. `scripts/test-stage13-15-capture-virtual.py` adds a feature-gated
+  deterministic capture source in `hda.rs`, exercising the 4096-byte copy-out
+  and Microphone capability/denial paths at 1/2/4 CPUs. It also exposed a
+  latent gate defect: kernel `stage13-15-capture-test` did not enable
+  `stage13-15-test`, so its self-test body never ran; the feature chain was
+  repaired. No physical input or certified printer is claimed.
+- **S17**: `scripts/test-remote-admin-virtual.py` generates mTLS material,
+  starts the real `remote-admin-tls-service` and drives Query/Apply/Rollback
+  WADM frames against the replay-protected journal. This exposed a real defect:
+  the service checked the pinned client fingerprint before driving the TLS
+  handshake, so no peer certificate was ever visible; identity is now checked
+  after the first read in both `serve` and `forward`, with a fail-closed
+  observed-hash diagnostic. A true Ring-3 guest listener is still **blocked**:
+  the kernel has no listen/accept syscall, so adding one is a new ABI stage.
+- **S15/S19** were already closed at software level (isolated clean-room
+  rebuild, SBOM/provenance, detached sign→verify with `--production`
+  fail-closed); no new virtual model was needed.
+
+`RUN-STAGE10.7.ps1` exits 0; warning-denying all-targets, kernel, shell and
+remote-admin tool Clippy pass; workspace tests pass. Production signing
+custody, independent review, native hardware and power-loss qualification
+remain external and unchanged.
+
 ## Persistent configuration migration and native WovenFS boundary matrix - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 `libwoven::settings_policy` now has one bounded installed-settings migration
