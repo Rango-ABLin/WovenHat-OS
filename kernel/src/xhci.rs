@@ -2304,7 +2304,6 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
         .unwrap_or_default()
 }
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 /// Keys newly pressed in a boot keyboard report, relative to the keys held
 /// in the previous one (updated). Held keys do not repeat; released keys
 /// produce nothing; usages WovenInput has no key for are ignored.

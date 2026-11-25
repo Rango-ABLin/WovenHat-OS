@@ -1182,15 +1182,11 @@ impl HdaController {
 }
 /// The playback interrupt vector (0 until output starts), and the plays and
 /// interrupts completed, for the gate.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_VECTOR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_BUSY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_PLAYS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 /// Plays whose completion was seen before the deadline: the caller was woken
 /// by the interrupt rather than by its timeout.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_ON_TIME: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// What WovenAudio can play.
