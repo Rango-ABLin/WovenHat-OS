@@ -63,6 +63,17 @@ weakened. This is bounded software/QEMU evidence only: native hardware,
 production signing custody, signed independent review and physical power-loss
 qualification remain externally blocked.
 
+The target branch advanced by nine other-owner commits while this work ran. The
+reconciled tree was merged onto that tip and the full gate set rerun on the
+exact final source: fmt, warning-denying host/all-target/kernel/shell Clippy,
+workspace tests, the serialized `RUN-STAGE10.7.ps1` chain (exit 0, all stages at
+1/2/4 CPUs), baseline-enforced desktop qualification and both taskbar
+layout/pins harnesses at 1/2/4 CPUs all pass. Final evidence is under
+`D:\WovenHat-OS-output-phaseb-final\audit-artifacts\` (`acceptance-*`,
+`phaseb-final-desktop-*`, `phaseb-final-layout-*`, `phaseb-final-pins-*`). A
+single fmt-only repair was applied to the incoming remote-admin line; no
+assertion, timeout or baseline changed.
+
 ## Stage 31 CPU matrix and in-guest fault injection - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The 1/2/4-only choke points were removed without changing any assertion:

@@ -60,6 +60,19 @@ was full; the worktree was moved to D: and the rerun passed. No limit or
 assertion was weakened, and no other agent's QEMU process or uncommitted file
 was touched.
 
+While this ran, another owner advanced `phase-b/bottom-taskbar-core` by nine
+commits (config migration, WovenFS crash cuts, virtual input, desktop QEMU
+options and remote admin). I merged the reconciled work onto that new tip in a
+second D: worktree, resolved the two doc-only conflicts by keeping both
+records, and repaired one fmt-only drift in the incoming remote-admin line.
+The entire gate set was then rerun on that exact final source: fmt, warning-
+denying host/all-target/kernel/shell Clippy, workspace tests, the full
+`RUN-STAGE10.7.ps1` chain (exit 0, 1/2/4 CPUs), baseline-enforced desktop
+qualification and both taskbar harnesses at 1/2/4 CPUs all pass. Final evidence
+is under `D:\WovenHat-OS-output-phaseb-final\audit-artifacts\` (`acceptance-*`,
+`phaseb-final-desktop-*`, `phaseb-final-layout-*`, `phaseb-final-pins-*`). No
+external release gate was changed.
+
 ## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
 
 Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,
