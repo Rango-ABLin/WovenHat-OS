@@ -1,3 +1,22 @@
+## OpenCode - production key custody boundary (2026-11-25)
+
+Implemented the repository-side PKCS#11 custody path after the user selected a
+hardware token with separate boot, application and SDK keys. The shared
+`tools/release-signing` crate permits exactly one signer authority, invokes an
+external signer without shell interpolation, requires a pinned public key and
+verifies every 64-byte signature before output. Boot signing, WAPP, WPKG, WUPD
+and SDK provenance use the new boundary; deterministic development signing
+remains test-only. Added the PKCS#11 adapter, witnessed public-only provisioning
+script and focused negative tests for missing, mismatched, ambiguous and invalid
+external signatures. No private key entered the repository or chat.
+
+No PKCS#11 module/token is currently connected, so this does not claim the
+external custody gate: physical key generation, non-exportability verification,
+backup/recovery evidence and production public-key provisioning remain for the
+token ceremony. See `docs/release-qualification/KEY-CUSTODY.md`. Unrelated
+Stage 31 fault-injection changes are left to their owner and are not part of
+this custody increment.
+
 ## OpenCode - release hygiene: diagnostics gated (2026-11-25)
 
 Per the user's follow-up, I gated the two unconditional real-hardware debug

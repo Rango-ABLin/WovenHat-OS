@@ -302,7 +302,7 @@ pub fn qemu_self_test() -> bool {
     let mut same = DeterministicFaultInjector::new(STAGE31_SEED);
     let mut other = DeterministicFaultInjector::new(STAGE31_SEED.wrapping_add(1));
     let mut diverges = false;
-    for (index, expected) in counts.iter().enumerate() {
+    for expected in counts.iter() {
         let a = same.next_random();
         let b = other.next_random();
         if *expected != 1 + (a % 7) {
@@ -330,8 +330,8 @@ pub fn qemu_self_test() -> bool {
         return false;
     }
     for _ in 0..8 {
-        for index in 0..8 {
-            if injector.should_inject(ids[index]) {
+        for &id in ids.iter() {
+            if injector.should_inject(id) {
                 return false;
             }
         }

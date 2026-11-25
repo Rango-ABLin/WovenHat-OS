@@ -1,5 +1,26 @@
 # Stage status
 
+## Production key-custody boundary - 2026-11-25 - TOOLING COMPLETE / TOKEN CEREMONY OPEN
+
+Release signing no longer requires production private seed material in the
+build environment. The new `tools/release-signing` boundary accepts exactly one
+authority—an explicitly provisioned seed or an external signer—and verifies
+every returned 64-byte Ed25519 signature against the purpose-specific trusted
+public key before package output is accepted. Boot, WAPP, WPKG, WUPD and SDK
+provenance now use that boundary. `scripts/hardware-release-signer.py` supports
+PKCS#11 public-key export and on-token signing, while
+`scripts/provision-release-keys.py` creates separate boot, application and SDK
+keys and emits public-only custody evidence. Missing authority, public-key
+mismatch, ambiguous seed-plus-signer configuration and invalid external
+signatures are covered by focused host tests.
+
+This closes the repository-side implementation, not the external production
+gate. No physical token is connected, so no production key has been generated,
+the public trust roots are not provisioned, and the witnessed non-exportability
+and recovery evidence remains absent. The controlled ceremony and release
+configuration are in `docs/release-qualification/KEY-CUSTODY.md`; production
+signing custody remains externally blocked until that ceremony succeeds.
+
 ## Release hygiene: opt-in hardware diagnostics - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The two real-hardware diagnostic commits (`2e579970`, `7d02aeea`) are now

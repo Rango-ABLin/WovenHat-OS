@@ -53,6 +53,8 @@ def key_id(purpose: str) -> str:
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    if Path(command[0]).suffix.lower() == ".py":
+        command = [sys.executable, *command]
     return subprocess.run(command, check=False)
 
 
