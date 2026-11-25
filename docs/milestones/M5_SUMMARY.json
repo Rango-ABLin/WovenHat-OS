@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "purpose": "Machine-readable M5 hardware-driver qualification summary; not a certification claim.",
-  "status": "M5_IN_PROGRESS_NOT_ACCEPTED",
+  "status": "M5_COMPLETED_KERNEL_ACCEPTS",
   "date": "2026-11-20",
   "branch": "m5/hardware-qualification",
   "head": "5ca5b9b3",

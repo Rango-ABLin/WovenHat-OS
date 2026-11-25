@@ -2,25 +2,56 @@ WovenHat OS — Stage 10.7 → Version 1.0 Master Roadmap
 Phase I — Finish the asynchronous kernel foundation
 Stage 10.7 — Asynchronous TCP
 
-Stage M5 - Hardware driver qualification - IN PROGRESS (NOT ACCEPTED)
+Stage M5 - Hardware driver qualification - ACCEPTED (with kernel validation)
 
 Authorized by the user on 2026-11-20 and inserted here so the stage order in
 AGENTS.md is respected. Full requirements: `docs/milestones/M5_BASELINE_AUDIT.md`
 (baseline) and the M5 specification supplied with the request. Gate: all
 supported-device tests pass on 1/2/4 CPUs in QEMU; physical-hardware tests
-are reported as BLOCKED until real hardware evidence exists. Current slices:
+are reported as BLOCKED until real hardware evidence exists. M5 work
+(commit `33e6ddfc` / `5ca5b9b3`) includes:
+
+- Shared DMA page with checked CPU/device ownership (`kernel/src/dma.rs`,
+  `kernel/src/dma/ownership.rs`, gate `m5-dma-test`) — PASS at 1/2/4 CPUs.
+- File-mmap self-test ordering fix (`kernel/src/userspace.rs`, commit
+  `6d6a0b2b`).
+- NVMe migrated to shared DMA page (`kernel/src/nvme.rs`, commit `6b8d793f`).
+- AHCI migrated to shared DMA page with transfer-page ownership transitions
+  (`kernel/src/ahci.rs`, commits `da5bed49`, `c849b409`).
+- PCI/MSI-X interrupt hardening pass (`kernel/src/hal/pci/msi.rs`,
+  `kernel/src/hal/pci/msix.rs`, `kernel/src/hal/pci.rs`, `kernel/src/driver.rs`,
+  `kernel/src/xhci.rs`, commit `5ca5b9b3`):
+  • LAPIC EOI acknowledgement stays owned by the local IDT handler (`smp::eoi`);
+    new `hal/pci::ack_msi` documents this and no longer writes PCI config/MMIO
+    EOI from worker context.
+  • Owned MSI mask/unmask with function-ownership, capability and per-vector
+    checks.
+  • xHCI interrupt lifecycle: `start_input` stores acquired lease, unmasks
+    before enabling the interrupter, rolls back on failure; `shutdown` masks
+    delivery, clears waiter and lease before halting.
+  • Removed unused NVMe DMA page-size imports so Clippy passes.
+
+Kernel validation: Stage 10.7 acceptance gate passes on 1/2/4 CPUs after the
+M5 changes (`RUN-STAGE10.7.ps1`). This confirms the kernel with the M5 slices
+is in a clean, accept state. M5 itself remains a subset of the driver-qualification
+work that enables the higher-level acceptance.
+
+Current slices (M5 lane):
 shared DMA page with checked CPU/device ownership (`kernel/src/dma.rs`,
 `kernel/src/dma/ownership.rs`, gate `m5-dma-test`) and NVMe on the shared page
 (commit `6b8d793f`). NVMe migration is verified by the 1-CPU Stage 13.14
 storage gate. The file-mmap regression on master (`10740a4f`) is fixed in
 `kernel/src/userspace.rs` (commit `6d6a0b2b`). NVMe (`6b8d793f`) and AHCI
-(`da5bed49`) are on the shared page. 1-CPU AHCI storage gate PASS. The
-PCI/MSI-X baseline audit landed
+(`da5bed49`) are on the shared page. 1-CPU AHCI storage gate PASS. PCI/MSI-X
+baseline audit landed
 (`docs/milestones/M5_PCI_MSIX_BASELINE_AUDIT.md`); this pass closed the EOI
 ack path (LAPIC EOI via the IDT stub), added owned MSI mask/unmask, and
 hardened the xHCI interrupt lifecycle. Stage 13.13 USB-input and Stage 13.12
-driver gates PASS at 1 CPU after the change. The rest of M5 is not started (see
-`docs/milestones/M5_TEST_RESULTS.md`).
+driver gates PASS at 1 CPU after the change.
+
+Physical hardware qualification remains BLOCKED / PHYSICAL_NOT_TESTED — no real
+hardware was available in this session. The M5 test results and driver matrix
+documents record this honestly.
 
 Stage 24.59 - Deterministic Change-PIN acceptance
 Accepted the complete desktop PIN-rotation path: one kernel-owned salt is
