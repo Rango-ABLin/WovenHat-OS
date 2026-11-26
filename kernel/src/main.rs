@@ -10918,24 +10918,25 @@ fn stage20_13_self_test() -> bool {
     // Switcher boxes, left of the Quick Settings button.
     let qs_x = width - (8 * crate::font::ADVANCE + 6) - 4 - 8 * (16 + 4);
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
-    let current = move |index: i32| {
-        compositor::pixel(box_x(index) + 1, top + 5) == Ok(WORKSPACE_ACTIVE)
-    };
+    let current =
+        move |index: i32| compositor::pixel(box_x(index) + 1, top + 5) == Ok(WORKSPACE_ACTIVE);
     let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
     // The first window entry's left edge: an entry, or bare taskbar.
     let entry_x = |count: i32, index: i32| {
-        let group_width = 58 + if count > 0 { 8 + count * 48 + (count - 1) * 4 } else { 0 };
+        let group_width = 58
+            + if count > 0 {
+                8 + count * 48 + (count - 1) * 4
+            } else {
+                0
+            };
         let free = (box_x(0) - 8 - 8).max(0);
-        let start = (8 + free / 2 - group_width / 2)
-            .clamp(8, (box_x(0) - 8 - group_width).max(8));
+        let start = (8 + free / 2 - group_width / 2).clamp(8, (box_x(0) - 8 - group_width).max(8));
         start + 58 + 8 + index * 52
     };
     let entry_is = |count: i32, index: i32, expected: u32| {
         compositor::pixel(entry_x(count, index) + 1, top + 5) == Ok(expected)
     };
-    let no_entry = move || {
-        !entry_is(1, 0, ENTRY_ACTIVE) && !entry_is(1, 0, ENTRY_INACTIVE)
-    };
+    let no_entry = move || !entry_is(1, 0, ENTRY_ACTIVE) && !entry_is(1, 0, ENTRY_INACTIVE);
     let one_entry = move || entry_is(1, 0, ENTRY_ACTIVE) || entry_is(1, 0, ENTRY_INACTIVE);
     // B lies inside A's shadowed footprint, so with A showing a hidden B is
     // judged by its colour being gone and by the taskbar listing one window.
@@ -10943,10 +10944,8 @@ fn stage20_13_self_test() -> bool {
     let b_hidden = move || compositor::pixel(b_x, b_y) != Ok(BLUE) && one_entry();
     // Both windows listed on the current workspace.
     let two_entries = move || {
-        entry_is(2, 0, ENTRY_ACTIVE)
-            && entry_is(2, 1, ENTRY_INACTIVE)
-            || entry_is(2, 0, ENTRY_INACTIVE)
-                && entry_is(2, 1, ENTRY_ACTIVE)
+        entry_is(2, 0, ENTRY_ACTIVE) && entry_is(2, 1, ENTRY_INACTIVE)
+            || entry_is(2, 0, ENTRY_INACTIVE) && entry_is(2, 1, ENTRY_ACTIVE)
     };
 
     if !step(
@@ -11467,10 +11466,13 @@ fn stage20_12_self_test() -> bool {
     );
     let panel_probe = compositor::pixel(panel_x + 180, panel_y + 100);
     let locked = click_at(shell.as_u64(), button.0 + 8, button.1 + 8, width, height)
-        && until(1000, || compositor::pixel(panel_x + 180, panel_y + 100) != panel_probe)
+        && until(1000, || {
+            compositor::pixel(panel_x + 180, panel_y + 100) != panel_probe
+        })
         && click_at(shell.as_u64(), lock_button.0, lock_button.1, width, height)
         && until(1000, || {
-            line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
+            line(middle - 34, "Locked")
+                && line(middle - 4, "Enter PIN")
                 && compositor::pixel(300, top + 12) == Ok(dim(300, top + 12))
         });
     let lock_checks = locked
@@ -11869,10 +11871,7 @@ fn stage20_11_self_test() -> bool {
     }
     // A key while locked reaches no application: A, waiting for x, must
     // still be running a second later.
-    let withheld = keys(&[0x2d])
-        && stays(100, || {
-            !task::process_exited(alpha) && locked()
-        });
+    let withheld = keys(&[0x2d]) && stays(100, || !task::process_exited(alpha) && locked());
     if !step("a key while locked reaches no application", withheld) {
         return false;
     }
@@ -11917,9 +11916,7 @@ fn stage20_11_self_test() -> bool {
         task::yield_now();
     }
     let after = keys(&[0x03, 0x05, 0x07, 0x09, 0x1c])
-        && until(1000, || {
-            compositor::pixel(45, 45) != Ok(RED)
-        });
+        && until(1000, || compositor::pixel(45, 45) != Ok(RED));
     if !step("after the lockout the right PIN unlocks", after) {
         return false;
     }
@@ -12351,16 +12348,17 @@ fn stage20_10_self_test() -> bool {
     let panel_geometry = |width: i32, height: i32| {
         let top = height - 24;
         let panel_height = 460.min(top - 8);
-        (width - 360 - 8, (top - panel_height - 8).max(0), panel_height)
+        (
+            width - 360 - 8,
+            (top - panel_height - 8).max(0),
+            panel_height,
+        )
     };
     let action = |width: i32, height: i32, index: i32| {
         let (panel_x, panel_y, _) = panel_geometry(width, height);
         let col = index % 3;
         let row = index / 3;
-        (
-            panel_x + 12 + col * 114 + 53,
-            panel_y + 52 + row * 56 + 24,
-        )
+        (panel_x + 12 + col * 114 + 53, panel_y + 52 + row * 56 + 24)
     };
     let button = (width - 54 - 4 - 8 * 20, top + 4);
     let (panel_x, panel_y, _) = panel_geometry(width, height);
@@ -12391,9 +12389,7 @@ fn stage20_10_self_test() -> bool {
 
     let (tx, ty) = action(width, height, 10);
     let tiled = click_at(shell.as_u64(), tx, ty, width, height)
-        && until(2000, || {
-            compositor::pixel(5, top - 40) == Ok(QUIET)
-        });
+        && until(2000, || compositor::pixel(5, top - 40) == Ok(QUIET));
     if !step("tiling turns on and the window fills the work area", tiled) {
         return false;
     }
@@ -13087,7 +13083,9 @@ fn stage20_9_self_test() -> bool {
 
     if !step(
         "the toast shows the latest notification",
-        until(1500, || compositor::pixel(toast_point.0, toast_point.1) != toast_before),
+        until(1500, || {
+            compositor::pixel(toast_point.0, toast_point.1) != toast_before
+        }),
     ) {
         return false;
     }
@@ -13110,9 +13108,13 @@ fn stage20_9_self_test() -> bool {
     let center_probe = compositor::pixel(x0 + 100, y0 + 30);
     let clock_clicked = move_by(cx - px, cy - py) && click();
     let center_rendered = clock_clicked
-        && until(1000, || compositor::pixel(x0 + 100, y0 + 30) != center_probe);
+        && until(1000, || {
+            compositor::pixel(x0 + 100, y0 + 30) != center_probe
+        });
     let badge_removed = center_rendered
-        && until(500, || compositor::pixel(badge_x + 1, badge_y + 5) != Ok(rgb(76, 190, 188)));
+        && until(500, || {
+            compositor::pixel(badge_x + 1, badge_y + 5) != Ok(rgb(76, 190, 188))
+        });
     let opened = badge_removed;
     if !step(
         "clicking the clock opens the center, newest first, and clears the badge",
@@ -13341,8 +13343,9 @@ fn stage20_8_self_test() -> bool {
     // resized, under the edge of A's shadow; A remains focused.
     let tiled = mouse::keyboard_loopback(0x3c)
         && until(2000, || {
-            region(half + 1, 15, width - half - 2, client_height - 2, |_, _| BLUE)
-                && title_bar(half, 0, width - half, "Beta", INACTIVE, plain)
+            region(half + 1, 15, width - half - 2, client_height - 2, |_, _| {
+                BLUE
+            }) && title_bar(half, 0, width - half, "Beta", INACTIVE, plain)
                 && region(1, 15, half - 2, client_height - 2, |_, _| RED)
                 && title_bar(0, 0, half, "Alpha", ACTIVE, plain)
         });
@@ -13358,14 +13361,10 @@ fn stage20_8_self_test() -> bool {
     let exited = mouse::keyboard_loopback(0x3c)
         && mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || {
-            compositor::pixel(5, 300) != Ok(RED)
-        })
+        && until(1000, || compositor::pixel(5, 300) != Ok(RED))
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || {
-            compositor::pixel(half + 10, 300) != Ok(BLUE)
-        });
+        && until(1000, || compositor::pixel(half + 10, 300) != Ok(BLUE));
     if !step("both applications take their keys and exit", exited) {
         return false;
     }
@@ -13958,10 +13957,7 @@ fn stage20_6_self_test() -> bool {
         && until(1000, || {
             compositor::pixel(panel_probe.0, panel_probe.1) != panel_before
         });
-    if !step(
-        "the launcher panel blends over a window",
-        panel,
-    ) {
+    if !step("the launcher panel blends over a window", panel) {
         return false;
     }
     // The pointer stays on top of the panel. The shell presents each layer
@@ -14341,9 +14337,11 @@ fn stage20_5_self_test() -> bool {
     };
     // B focused: its right and bottom strips carry the deep bands; A's
     // visible strips (above B and left of it) carry the shallow ones.
-    let b_focused = compositor::pixel(45, 45) == Ok(RED)
-        && compositor::pixel(150, 100) == Ok(BLUE);
-    if !step("focused window B occludes the lower window without shadows", b_focused) {
+    let b_focused = compositor::pixel(45, 45) == Ok(RED) && compositor::pixel(150, 100) == Ok(BLUE);
+    if !step(
+        "focused window B occludes the lower window without shadows",
+        b_focused,
+    ) {
         return false;
     }
     let occluded = compositor::pixel(150, 100) == Ok(BLUE);
@@ -14386,8 +14384,7 @@ fn stage20_5_self_test() -> bool {
         && mouse::keyboard_loopback(0x15)
         && wait_hello_gui(beta).map(|(_, status)| status) == Some(Ok(0))
         && until(1000, || {
-            compositor::pixel(150, 100) != Ok(BLUE)
-                && compositor::pixel(164, 54) != Ok(BLUE)
+            compositor::pixel(150, 100) != Ok(BLUE) && compositor::pixel(164, 54) != Ok(BLUE)
         });
     if !step(
         "windows and their shadows go with their applications",
@@ -14631,8 +14628,7 @@ fn stage20_4_self_test() -> bool {
                 }
             })
         });
-    let old = body
-        && until(500, || compositor::pixel(45, 45) != Ok(RED));
+    let old = body && until(500, || compositor::pixel(45, 45) != Ok(RED));
     let wide_pixel = old && until(500, || compositor::pixel(100, 100) == Ok(GREEN));
     let moved = red && frame && body && old && wide_pixel;
     if !step(
