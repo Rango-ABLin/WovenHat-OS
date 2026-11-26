@@ -9,6 +9,11 @@ behavior was changed; the gate and the desktop-userspace job remain failing.
 Further work must update and validate the complete acceptance path, without
 weakening checks. Historical evidence and other agents' work remain untouched.
 
+Follow-up confirmed by the user: repairing the affected Stage 20 acceptance
+oracles. Current work first updates Stage 20.2's flat title-bar gradient,
+rounded close control, and wallpaper reconstruction; run the focused gate
+before extending changes to subsequent stale checks.
+
 ## OpenCode - commit CI repair and short-screen Quick Settings (2026-11-26)
 
 Removed the checked-in absolute Windows Cargo `target-dir` that Linux CI

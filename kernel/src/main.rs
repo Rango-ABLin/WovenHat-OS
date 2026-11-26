@@ -14818,9 +14818,20 @@ fn stage20_4_self_test() -> bool {
         let close = crate::display::Rect::new(width - 12, 2, 10, 10);
         expected.fill_rect(close, CLOSE_FILL);
         expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| {
-            expected.pixel(px - x, py - y).unwrap_or(UNSET)
-        })
+        for py in y..y + 14 {
+            for px in x..x + width {
+                let expected = expected.pixel(px - x, py - y).unwrap_or(UNSET);
+                let actual = compositor::pixel(px, py).unwrap_or(UNSET);
+                if actual != expected {
+                    serial::write_line(format_args!(
+                        "[S20.2] title pixel ({},{}) expected={:#010x} actual={:#010x}",
+                        px, py, expected, actual
+                    ));
+                    return false;
+                }
+            }
+        }
+        true
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
@@ -15381,13 +15392,16 @@ fn stage20_3_self_test() -> bool {
 fn stage20_2_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
-    const ACTIVE: u32 = rgb(70, 120, 210);
-    const TITLE_INACTIVE: u32 = rgb(60, 66, 80);
+    const TITLE_ACTIVE: u32 = rgb(30, 94, 120);
+    const TITLE_INACTIVE: u32 = rgb(52, 60, 74);
+    const CLOSE_FILL: u32 = rgb(196, 72, 72);
+    const TEXT: u32 = rgb(243, 246, 251);
+    const BORDER_ACTIVE: u32 = rgb(192, 232, 231);
+    const BORDER_INACTIVE: u32 = rgb(95, 101, 112);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const GREEN: u32 = rgb(40, 200, 90);
@@ -15419,14 +15433,9 @@ fn stage20_2_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = (x + y) / 220 % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, 4)
     }
 
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
@@ -15452,22 +15461,108 @@ fn stage20_2_self_test() -> bool {
         (y0..y0 + height)
             .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
-    /// A title bar: fill, title text, and the close control at its right
-    /// (Stage 20.4).
-    fn title_bar(origin: (i32, i32), width: i32, text: &str, fill: u32) -> bool {
+    fn lighten(color: u32, amount: u8) -> u32 {
+        let channel = |shift: u32| {
+            let value = (color >> shift) & 0xff;
+            value + ((255 - value) * u32::from(amount) / 255)
+        };
+        (channel(16) << 16) | (channel(8) << 8) | channel(0)
+    }
+
+    /// Independently reconstruct the flat title-bar gradient, rounded
+    /// corners, title, and close control.
+    fn title_bar(
+        origin: (i32, i32),
+        width: i32,
+        text: &str,
+        fill: u32,
+        desktop_height: i32,
+    ) -> bool {
         let (x, y) = origin;
         let mut expected = Surface::new(width as usize, 14);
-        let bounds = expected.bounds();
-        expected.fill_rect(bounds, fill);
-        expected.draw_text(4, 4, text, WHITE);
-        expected.fill_rect(
-            crate::display::Rect::new(width - 12, 2, 10, 10),
-            rgb(170, 60, 60),
-        );
-        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| {
-            expected.pixel(px - x, py - y).unwrap_or(UNSET)
-        })
+        for row in 0i32..14 {
+            let amount = (row * 255 / 13) as u8;
+            let color = blend_pixel(fill, lighten(fill, 40), amount);
+            for column in 0..width {
+                let rounded_top = row >= 3
+                    || (3..=width - 3).contains(&column)
+                    || (column - 3).pow(2) + (row - 3).pow(2) <= 9
+                    || (column - (width - 3)).pow(2) + (row - 3).pow(2) <= 9;
+                expected.set_pixel(
+                    column,
+                    row,
+                    if rounded_top {
+                        color
+                    } else {
+                        wallpaper(x + column, y + row, desktop_height)
+                    },
+                );
+            }
+        }
+        let close_x = width - 12;
+        for row in 0i32..10 {
+            for column in 0i32..10 {
+                let corner_x = if column < 3 {
+                    3
+                } else if column > 6 {
+                    6
+                } else {
+                    column
+                };
+                let corner_y = if row < 3 {
+                    3
+                } else if row > 6 {
+                    6
+                } else {
+                    row
+                };
+                let dx = column - corner_x;
+                let dy = row - corner_y;
+                let rounded = dx * dx + dy * dy <= 9;
+                if rounded {
+                    expected.set_pixel(close_x + column, 2 + row, CLOSE_FILL);
+                }
+            }
+        }
+        let mut pixels = alloc::vec![0u32; width as usize * 14];
+        for row in 0i32..14 {
+            for column in 0..width {
+                let index = row as usize * width as usize + column as usize;
+                pixels[index] = expected.pixel(column, row).unwrap_or(UNSET);
+            }
+        }
+        let Some(mut canvas) = libwoven::Canvas::new(&mut pixels, 0, 0, width as usize, 14) else {
+            return false;
+        };
+        canvas.draw_text(close_x + 2, 1, "x", TEXT);
+        canvas.draw_text(8, 2, text, TEXT);
+        drop(canvas);
+        let border = if fill == TITLE_ACTIVE {
+            BORDER_ACTIVE
+        } else {
+            BORDER_INACTIVE
+        };
+        for column in 0..width {
+            pixels[column as usize] = border;
+        }
+        for row in 0..14 {
+            pixels[row as usize * width as usize] = border;
+            pixels[row as usize * width as usize + width as usize - 1] = border;
+        }
+        for py in y..y + 14 {
+            for px in x..x + width {
+                let expected = pixels[(py - y) as usize * width as usize + (px - x) as usize];
+                let actual = compositor::pixel(px, py).unwrap_or(UNSET);
+                if actual != expected {
+                    serial::write_line(format_args!(
+                        "[S20.2] title pixel ({},{}) expected={:#010x} actual={:#010x}",
+                        px, py, expected, actual
+                    ));
+                    return false;
+                }
+            }
+        }
+        true
     }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -15589,15 +15684,38 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let frame_a = until(500, || {
-        title_bar((40, 26), 120, "Alpha", ACTIVE)
+        title_bar((40, 26), 120, "Alpha", TITLE_ACTIVE, height)
             && region(40, 40, 120, 80, |x, y| {
                 if (50..70).contains(&x) && (50..60).contains(&y) {
                     compositor::pixel(x, y).unwrap_or(UNSET)
+                } else if x == 40 || x == 159 || y == 119 {
+                    BORDER_ACTIVE
                 } else {
                     RED
                 }
             })
     });
+    if !frame_a {
+        'rows: for y in 40..120 {
+            for x in 40..160 {
+                if !((50..70).contains(&x) && (50..60).contains(&y)) {
+                    let actual = compositor::pixel(x, y).unwrap_or(UNSET);
+                    let expected = if x == 40 || x == 159 || y == 119 {
+                        BORDER_ACTIVE
+                    } else {
+                        RED
+                    };
+                    if actual != expected {
+                        serial::write_line(format_args!(
+                            "[S20.2] body pixel ({},{}) expected={:#010x} actual={:#010x}",
+                            x, y, expected, actual
+                        ));
+                        break 'rows;
+                    }
+                }
+            }
+        }
+    }
     let entry_a = until(500, || {
         let alpha_active = [TaskbarEntryMask3D {
             mask: &alpha_mask,
@@ -15646,8 +15764,8 @@ fn stage20_2_self_test() -> bool {
     let stacked = until(2000, || compositor::pixel(150, 100) == Ok(BLUE))
         && until(500, || {
             compositor::pixel(45, 45) == Ok(RED)
-                && title_bar((64, 50), 100, "Beta", ACTIVE)
-                && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE)
+                && title_bar((64, 50), 100, "Beta", TITLE_ACTIVE, height)
+                && title_bar((40, 26), 120, "Alpha", TITLE_INACTIVE, height)
                 && {
                     let both = [
                         TaskbarEntryMask3D {
@@ -15718,7 +15836,7 @@ fn stage20_2_self_test() -> bool {
         entry_region(&beta_active, tray_x, tray_y, 16, 16)
             && entry_region(&beta_active, entry(0).0, entry(0).1, 80, 16)
             && entry_region(&beta_active, entry(1).0, entry(1).1, 80, 16)
-            && title_bar((64, 50), 100, "Beta", ACTIVE)
+            && title_bar((64, 50), 100, "Beta", TITLE_ACTIVE, height)
             && compositor::pixel(150, 100) == Ok(BLUE)
     });
     if !step(
