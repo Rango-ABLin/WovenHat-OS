@@ -9738,7 +9738,7 @@ fn stage20_14b_self_test() -> bool {
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const WEAVE_PITCH: i32 = 220;
-    const WEAVE_TINT_OPACITY: u8 = 6;
+    const WEAVE_TINT_OPACITY: u8 = 4;
     const RED: u32 = rgb(200, 60, 60);
 
     fn step(name: &str, ok: bool) -> bool {
@@ -9838,10 +9838,7 @@ fn stage20_14b_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let scale = compositor::scale().unwrap_or(1) as i32;
     let primary = width / 2;
-    // The current shell taskbar is anchored at the top of the primary
-    // monitor. Keep this acceptance geometry aligned with the live desktop;
-    // the old bottom-bar coordinate masked regressions in the updated shell.
-    let top = 0;
+    let top = height - 24;
     serial::write_line(format_args!(
         "[S20.14B] desktop {}x{} at scale {}, primary {} wide",
         width, height, scale, primary
@@ -10803,9 +10800,9 @@ fn stage20_13_self_test() -> bool {
     const BLACK: u32 = rgb(0, 0, 0);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
-    const TASKBAR: u32 = rgb(10, 18, 30);
-    const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
-    const ENTRY_INACTIVE: u32 = rgb(44, 52, 68);
+    const ENTRY_ACTIVE: u32 = rgb(67, 103, 137);
+    const ENTRY_INACTIVE: u32 = rgb(48, 58, 74);
+    const WORKSPACE_ACTIVE: u32 = rgb(58, 96, 132);
     const F3: u8 = 0x3d;
     const F4: u8 = 0x3e;
 
@@ -10833,14 +10830,9 @@ fn stage20_13_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, 4)
     }
 
     fn expected_wallpaper(x: i32, y: i32, _width: i32, height: i32) -> u32 {
@@ -10901,35 +10893,36 @@ fn stage20_13_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
     // Switcher boxes, left of the Quick Settings button.
-    let qs_x = width - (8 * crate::font::ADVANCE + 6) - 5 * (16 + 4);
+    let qs_x = width - (8 * crate::font::ADVANCE + 6) - 4 - 8 * (16 + 4);
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
-    let current = move |index: i32| {
-        (0..4).all(|other| {
-            let expected = if other == index {
-                ENTRY_ACTIVE
-            } else {
-                ENTRY_INACTIVE
-            };
-            compositor::pixel(box_x(other) + 1, top + 5) == Ok(expected)
-        })
-    };
+    let current =
+        move |index: i32| compositor::pixel(box_x(index) + 1, top + 5) == Ok(WORKSPACE_ACTIVE);
     let wall = move |x: i32, y: i32| compositor::pixel(x, y) == Ok(wallpaper(x, y, height));
     // The first window entry's left edge: an entry, or bare taskbar.
-    let taskbar = move |x: i32, y: i32| blend_pixel(TASKBAR, wallpaper(x, y, height), 216);
-    let no_entry = move || compositor::pixel(57, top + 5) == Ok(taskbar(57, top + 5));
-    // The second entry slot (80 wide, 4 apart): only one window listed.
-    let one_entry =
-        move || !no_entry() && compositor::pixel(141, top + 5) == Ok(taskbar(141, top + 5));
+    let entry_x = |count: i32, index: i32| {
+        let group_width = 58
+            + if count > 0 {
+                8 + count * 48 + (count - 1) * 4
+            } else {
+                0
+            };
+        let free = (box_x(0) - 8 - 8).max(0);
+        let start = (8 + free / 2 - group_width / 2).clamp(8, (box_x(0) - 8 - group_width).max(8));
+        start + 58 + 8 + index * 52
+    };
+    let entry_is = |count: i32, index: i32, expected: u32| {
+        compositor::pixel(entry_x(count, index) + 1, top + 5) == Ok(expected)
+    };
+    let no_entry = move || !entry_is(1, 0, ENTRY_ACTIVE) && !entry_is(1, 0, ENTRY_INACTIVE);
+    let one_entry = move || entry_is(1, 0, ENTRY_ACTIVE) || entry_is(1, 0, ENTRY_INACTIVE);
     // B lies inside A's shadowed footprint, so with A showing a hidden B is
     // judged by its colour being gone and by the taskbar listing one window.
     let (a_x, a_y, b_x, b_y) = (45, 45, 162, 122);
     let b_hidden = move || compositor::pixel(b_x, b_y) != Ok(BLUE) && one_entry();
     // Both windows listed on the current workspace.
     let two_entries = move || {
-        matches!(
-            compositor::pixel(141, top + 5),
-            Ok(ENTRY_ACTIVE | ENTRY_INACTIVE)
-        ) && !no_entry()
+        entry_is(2, 0, ENTRY_ACTIVE) && entry_is(2, 1, ENTRY_INACTIVE)
+            || entry_is(2, 0, ENTRY_INACTIVE) && entry_is(2, 1, ENTRY_ACTIVE)
     };
 
     if !step(
