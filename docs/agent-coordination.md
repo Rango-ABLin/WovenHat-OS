@@ -1,3 +1,14 @@
+## Copilot - desktop-userspace CI investigation (2026-11-26)
+
+The CI failure at the Stage 20.2 focused title-bar assertion reproduces on
+1 CPU with the current source (`target/woven-shell-apps-1cpu/serial.log` and
+`qemu.log`). The oracle expects a solid square title bar and old colors, but
+the shell renders rounded gradient chrome. Its taskbar, wallpaper and toast
+expectations also predate the current desktop. No assertion or production
+behavior was changed; the gate and the desktop-userspace job remain failing.
+Further work must update and validate the complete acceptance path, without
+weakening checks. Historical evidence and other agents' work remain untouched.
+
 ## OpenCode - commit CI repair and short-screen Quick Settings (2026-11-26)
 
 Removed the checked-in absolute Windows Cargo `target-dir` that Linux CI
