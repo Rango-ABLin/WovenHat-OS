@@ -2037,6 +2037,23 @@ fn deferred_input_worker() -> ! {
         attempt = attempt.saturating_add(1);
         let result = start_input("xhci0");
         if usb_disk_info().is_some() {
+            if !crate::storage::mnt_mounted()
+                && crate::block_io::root_device() == crate::block_io::RootDevice::Ata
+            {
+                crate::block_io::select_root(crate::block_io::RootDevice::Usb);
+                match crate::storage::mount_ata_root() {
+                    crate::storage::MountStatus::Mounted(count) => {
+                        crate::serial::write_line(format_args!(
+                            "[FS] FAT32/WovenFS mounted at /mnt from xhci0; imported {} entries",
+                            count
+                        ));
+                    }
+                    status => crate::serial::write_line(format_args!(
+                        "[FS] xhci0 has no mountable volume: {:?}",
+                        status
+                    )),
+                }
+            }
             match result {
                 Ok(summary) => {
                     crate::serial::write_line(format_args!(
@@ -2304,7 +2321,6 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
         .unwrap_or_default()
 }
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 /// Keys newly pressed in a boot keyboard report, relative to the keys held
 /// in the previous one (updated). Held keys do not repeat; released keys
 /// produce nothing; usages WovenInput has no key for are ignored.
@@ -2328,7 +2344,6 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
 }
 
 /// A HID keyboard usage (page 7) as a WovenInput key.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
     const DIGITS: &[u8; 10] = b"1234567890";
     const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";

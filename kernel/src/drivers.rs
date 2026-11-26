@@ -268,7 +268,7 @@ fn bring_up_one(spec: &Spec) -> Driver {
 }
 
 /// The first ready storage driver, as the primary block device to mount
-/// when the boot has no ATA disk (Stage 13.14).
+/// when the boot has no ATA disk (Stages 13.14 and 13.18).
 pub fn storage_root(report: &Report) -> Option<(crate::block_io::RootDevice, &'static str)> {
     report
         .drivers
@@ -277,6 +277,16 @@ pub fn storage_root(report: &Report) -> Option<(crate::block_io::RootDevice, &'s
             ("nvme0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Nvme, driver.name)),
             ("ahci0", Outcome::Ready(_)) => Some((crate::block_io::RootDevice::Ahci, driver.name)),
             _ => None,
+        })
+        .or_else(|| {
+            report
+                .drivers
+                .iter()
+                .find(|driver| {
+                    driver.name == "xhci0" && matches!(driver.outcome, Outcome::Ready(_))
+                })
+                .filter(|_| crate::xhci::usb_disk_info().is_some())
+                .map(|driver| (crate::block_io::RootDevice::Usb, driver.name))
         })
 }
 

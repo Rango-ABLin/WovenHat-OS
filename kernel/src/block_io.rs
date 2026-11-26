@@ -227,7 +227,7 @@ pub fn primary_ata_present() -> bool {
 }
 
 /// The block device behind the primary storage path. ATA by default; a boot
-/// without an ATA disk selects the NVMe or AHCI disk bring-up bound
+/// without an ATA disk selects the NVMe, AHCI, or xHCI USB disk bring-up bound
 /// (Stage 13.14). Every primary read, write and flush, and the FAT32 mount,
 /// go to the selected device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,6 +237,8 @@ pub enum RootDevice {
     Nvme,
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     Ahci,
+    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+    Usb,
 }
 
 static ROOT: AtomicU8 = AtomicU8::new(0);
@@ -249,6 +251,7 @@ pub fn select_root(device: RootDevice) {
         RootDevice::Ata => 0,
         RootDevice::Nvme => 1,
         RootDevice::Ahci => 2,
+        RootDevice::Usb => 3,
     };
     ROOT.store(code, Ordering::Release);
 }
@@ -259,6 +262,8 @@ pub fn root_device() -> RootDevice {
         1 => RootDevice::Nvme,
         #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
         2 => RootDevice::Ahci,
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        3 => RootDevice::Usb,
         _ => RootDevice::Ata,
     }
 }
@@ -336,6 +341,8 @@ pub fn with_root<R>(operation: impl FnOnce(&mut dyn BlockDevice) -> R) -> Option
         RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
         #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
         RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Usb => crate::xhci::with_usb_disk(|disk| guarded(disk)),
     }
 }
 
@@ -359,6 +366,8 @@ pub(crate) fn with_root_install_target<R>(
         RootDevice::Nvme => crate::nvme::with_controller(|disk| guarded(disk)),
         #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
         RootDevice::Ahci => crate::ahci::with_controller(|disk| guarded(disk)),
+        #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+        RootDevice::Usb => crate::xhci::with_usb_disk(|disk| guarded(disk)),
     }
 }
 

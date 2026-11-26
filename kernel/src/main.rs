@@ -1860,7 +1860,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             )),
         }
         boot_stage(&mut console, "BOOT LOADER [5/7]: devices ready");
-        // Without an ATA disk, mount the first ready NVMe or AHCI disk.
+        // Without an ATA disk, mount the first ready NVMe, AHCI or USB disk.
         if !storage::mnt_mounted() {
             if let Some((root, name)) = drivers::storage_root(&driver_report) {
                 block_io::select_root(root);

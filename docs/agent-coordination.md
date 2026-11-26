@@ -1,3 +1,14 @@
+## Copilot - USB/xHCI/WovenFS and wireless software closure (2026-11-26) - DONE
+
+USB mass storage now participates in primary root selection and deferred
+native enumeration can mount it through the normal FAT32/WovenFS ownership
+boundary. Fixed the Stage 13.10 feature-composition break by making the pure
+xHCI keyboard decoder available to the shared self-test. Default, Stage
+13.10, Stage 13.18 and all-target Clippy pass, as do workspace tests, USB MSC
+tests, WovenFS crash tests, and the 1/2/4-CPU USB/wireless QEMU matrices.
+Native controller, radio, firmware, hotplug, physical-device and RF
+qualification remain explicit external gates.
+
 ## Copilot - Stage 13.15 WovenAudio CI closure (2026-11-26) - DONE
 
 Playback and deterministic Ring-3 capture gates pass at 1/2/4 CPUs. I am

@@ -3063,8 +3063,12 @@ Neither stops the boot. Ready drivers are added to the device registry
   unbound.
 - The controllers still poll synchronously under their own locks during
   initialization.
-- Storage is not yet mounted from NVMe or AHCI.
-- USB devices are not yet read, and audio is not yet exposed to userspace.
+- NVMe, AHCI and xHCI mass-storage devices can become the primary block
+  device. Deferred physical USB enumeration selects the disk only when a
+  different root has not already been chosen; the normal ownership guard
+  still prevents writes to foreign volumes.
+- Native controller, radio, firmware and physical-interoperability
+  qualification remain separate from the bounded QEMU device gates.
 
 ## Stage 13.4â€“13.7 revalidation (2026-10-14)
 
@@ -3112,10 +3116,12 @@ FAT32 `inspect_device` path used for removable media. Production root mounting
 now probes WovenFS before FAT32 and checks validated GPT EFI/basic-data entries;
 the selected WovenFS volume can publish at `/mnt`, with native task write,
 rename, unlink, read, ensure, and teardown paths. The disposable installer has
-an exact WovenFS v1 formatter and deterministic verifier. FAT32-specific
-space/check reporting, all service persistence callers, and installed-image
-boot qualification remain open; no physical-device write is part of this
-increment.
+an exact WovenFS v1 formatter and deterministic verifier. The root selector
+dispatches ATA, NVMe, AHCI and xHCI USB mass storage through the same
+ownership-guarded block interface, so a disk discovered by the deferred USB
+worker can mount as `/mnt` without a separate filesystem implementation.
+FAT32-specific space/check reporting, all service persistence callers, and
+native bare-metal qualification remain outside this bounded integration.
 
 ## Stage 11.2 scheduler-backed thread ownership (2026-10-14)
 

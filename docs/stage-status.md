@@ -1,5 +1,27 @@
 # Stage status
 
+## USB/xHCI, WovenFS root, and wireless software closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The xHCI USB mass-storage device is now a first-class root candidate alongside
+ATA, NVMe and AHCI. The synchronous QEMU path selects an attached disk during
+driver bring-up; production deferred enumeration selects it later only while
+the root remains unset, then mounts FAT32 or native WovenFS through the same
+ownership guard. A feature-composition defect in the Wi-Fi/Bluetooth combined
+gate was repaired by keeping the pure xHCI keyboard decoder available to the
+shared self-test independent of production driver feature gates.
+
+Validation on this change: warning-denying default, Stage 13.10, Stage 13.18
+and all-target Clippy pass; workspace tests pass; the seven USB MSC and twenty
+WovenFS crash tests pass; USB mass storage and the complete wireless
+protocol/security matrix pass at 1/2/4 CPUs.
+
+Not upgraded to physical acceptance: native xHCI interoperability, surprise
+removal/hotplug and controller recovery; bare-metal USB/WovenFS mounting and
+power loss; production Wi-Fi firmware and AX200/AX201 MMIO/DMA/IRQ execution;
+physical Bluetooth USB transport, radio, pairing and interoperability. Those
+require selected hardware, authenticated firmware, and returned device
+evidence rather than additional QEMU markers.
+
 ## Stage 13.15 WovenAudio playback and capture - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The existing Ring-3 audio subsystem is now continuously covered at both
