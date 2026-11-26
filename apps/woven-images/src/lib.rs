@@ -28,6 +28,8 @@ pub fn kind(header: &[u8]) -> &'static str {
         "GIF"
     } else if header.starts_with(b"BM") {
         "BMP"
+    } else if header.len() >= 12 && header.starts_with(b"RIFF") && &header[8..12] == b"WEBP" {
+        "WEBP"
     } else {
         "unknown"
     }
@@ -48,6 +50,7 @@ mod tests {
         assert_eq!(kind(b"\xff\xd8\xff\x00"), "JPEG");
         assert_eq!(kind(b"GIF89a"), "GIF");
         assert_eq!(kind(b"BM"), "BMP");
+        assert_eq!(kind(b"RIFF\x00\x00\x00\x00WEBP"), "WEBP");
     }
 
     #[test]
