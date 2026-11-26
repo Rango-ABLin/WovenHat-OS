@@ -2903,7 +2903,7 @@ Positions are scaled to 0..=32767 and pressure to 0..=1023.
 and `GameController` are production events, encoded to userspace as input
 kinds 9â€“13 and decoded by libwoven's `InputEvent`.
 
-## Stage 13.15 WovenAudio playback for userspace (2026-10-14)
+## Stage 13.15 WovenAudio playback and capture for userspace (2026-10-14)
 
 When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
 1. **Output setup.** `prepare_output` finds the output route (converter,
@@ -2914,7 +2914,7 @@ When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
    driver manager.
 
 **Syscalls.**
-- **203 `AudioInfo`:** the output format, 48 kHz 16-bit stereo, and the
+- **203 `AudioInfo`:** the stream format, 48 kHz 16-bit stereo, and the
   largest buffer one play accepts.
 - **204 `AudioPlay`:** needs the new `AudioPlayback` capability.
   1. It copies the PCM into kernel memory, because user pages may fault and
@@ -2929,14 +2929,27 @@ When bring-up starts `hda0`, it calls `hda::start_output("hda0")`.
   5. Every attempt is recorded in the security ledger (`Action::AudioPlay`).
 - **205 `AudioSetVolume`:** needs `AudioPlayback`; sets the output
   amplifier gain, and 0 mutes.
+- **208 `AudioCapture`:** needs `Microphone`; validates the fixed 4096-byte
+  request, captures through the HDA driver and copies the completed PCM block
+  into the caller buffer. The bounded virtual-source gate verifies the
+  syscall, capability denial, and copy-out path when no physical microphone
+  is connected.
 
-libwoven exposes `audio_info`, `audio_play` and `audio_set_volume`.
+libwoven exposes `audio_info`, `audio_play`, `audio_capture` and
+`audio_set_volume`.
 
 **Capability.** `AudioPlayback` is capability 24 and permission 16
 (`Permission::Audio`). It is in the system-service ceiling and in the user
-ceiling, so the permission broker can grant it. Recording is not
-implemented yet; it will use the existing broker-gated `Microphone`
-capability.
+ceiling, so the permission broker can grant it. Recording uses the
+broker-gated `Microphone` capability and remains physical-input qualified
+only after a native capture run.
+
+CI keeps both bounded WovenAudio boundaries reproducible: the playback gate
+checks a QEMU-recorded waveform and interrupt completion, while the capture
+gate injects a deterministic PCM pattern into the driver-owned DMA page and
+checks Ring-3 copy-out plus permission denial at 1/2/4 CPUs. Neither
+substitutes for physical microphone, codec-routing, or native HDA
+qualification.
 
 ## Stage 13.14 storage on NVMe and AHCI (2026-10-14)
 

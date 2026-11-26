@@ -1,3 +1,12 @@
+## Copilot - Stage 13.15 WovenAudio CI closure (2026-11-26) - DONE
+
+Playback and deterministic Ring-3 capture gates pass at 1/2/4 CPUs. I am
+adding the virtual capture matrix and capture-feature warning-denying Clippy
+to the kernel workflow, plus status/architecture records that preserve the
+native physical-audio boundary. Playback and virtual capture pass at 1/2/4
+CPUs; capture-feature and all-target warning-denying Clippy pass. The global
+format check still reports unrelated pre-existing kernel formatting drift.
+
 ## OpenCode - shell self-test system font mapping (2026-11-26) - DONE
 
 Fixing the owner-reported `woven-shell: system font mapping unavailable` in

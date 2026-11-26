@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 13.15 WovenAudio playback and capture - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The existing Ring-3 audio subsystem is now continuously covered at both
+software boundaries. HDA playback passes at 1/2/4 CPUs with the exact
+500 Hz square wave recorded from QEMU and completion driven by the device
+interrupt. The deterministic virtual capture source passes at 1/2/4 CPUs
+through `AudioCapture`, verifying the fixed 4096-byte copy-out, successful
+`Microphone` access and capability denial. The kernel workflow now runs both
+matrices and warning-denying capture-feature Clippy.
+
+This closes the bounded software/QEMU audio gate without weakening the
+physical boundary. Native HDA codec routing, physical microphone input,
+speaker/headphone output and motherboard-specific audio qualification remain
+external release gates.
+
 ## Focused large read-only mapping gate restored - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Restored dedicated coverage for the bounded read-only asset window used by the
