@@ -152,30 +152,6 @@ fn load_wallpaper() -> Option<(&'static [u32], usize, usize)> {
     ))
 }
 
-struct SliceStream<'a> {
-    bytes: &'a [u8],
-}
-
-impl libwoven::codecs::ImageStream for SliceStream<'_> {
-    fn len(&self) -> u64 {
-        self.bytes.len() as u64
-    }
-
-    fn read_at(
-        &mut self,
-        offset: u64,
-        destination: &mut [u8],
-    ) -> Result<usize, libwoven::codecs::StreamError> {
-        let start = usize::try_from(offset).map_err(|_| libwoven::codecs::StreamError::OutOfRange)?;
-        let Some(source) = self.bytes.get(start..) else {
-            return Err(libwoven::codecs::StreamError::OutOfRange);
-        };
-        let count = source.len().min(destination.len());
-        destination[..count].copy_from_slice(&source[..count]);
-        Ok(count)
-    }
-}
-
 /// Decode a bounded VFS image into the GUI's static pixel buffer. Only images
 /// that fit the display budget are admitted; larger files are rejected rather
 /// than silently cropped. Returns a human-readable status string.
@@ -194,20 +170,14 @@ fn decode_image(path: &str) -> &'static str {
     }
     let pixels = unsafe { &mut *WALLPAPER_PIXELS.0.get() };
     let data = &bytes[..length];
-    let decoded = match wovenhat_images::kind(&data[..data.len().min(12)]) {
-        "PNG" => libwoven::codecs::decode_png_rgba(data, pixels),
-        "JPEG" => libwoven::codecs::decode_jpeg_rgba(data, pixels),
-        "BMP" => libwoven::media::decode_bmp_rgba(data, pixels),
-        "WEBP" => libwoven::codecs::decode_webp_rgba(data, pixels),
-        "GIF" => match libwoven::media::parse_image_header(data) {
-            Ok(header) => {
-                let mut stream = SliceStream { bytes: data };
-                libwoven::codecs::decode_gif_rgba_stream(&mut stream, header, pixels)
-            }
-            Err(_) => return "Image header invalid",
-        },
-        _ => return "Unsupported image format",
-    };
+    // Only BMP is admitted here: pulling the PNG/JPEG/GIF/WebP decoders into
+    // this binary exceeds the bounded WAPP/VFS node cap and breaks the signed
+    // system-app catalog install. Richer formats remain a staged app-size
+    // decision, not something to hide by widening the install boundary.
+    if wovenhat_images::kind(&data[..data.len().min(12)]) != "BMP" {
+        return "Only BMP is supported in this bounded image";
+    }
+    let decoded = libwoven::media::decode_bmp_rgba(data, pixels);
     match decoded {
         Ok(info) => {
             IMAGE_META.store(
