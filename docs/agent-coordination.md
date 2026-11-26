@@ -1,3 +1,12 @@
+## OpenCode - Stage 1-5 storage gap investigation (2026-11-26)
+
+Inspecting the current bounded storage transaction and recovery boundary as the
+earliest open software prerequisite for kernel-to-desktop production closure.
+No physical device or firmware changes are planned. The main worktree was clean
+at start. The Windows Stage 10.7 launcher incorrectly required D: even when an
+available output root was explicitly supplied; it now checks the chosen root.
+Preparing a single serialized acceptance run using a C: output root.
+
 ## OpenCode - production release-engineering hardening (2026-11-26)
 
 Bound the release archive to the exact commit recorded before the full

@@ -3906,6 +3906,10 @@ TCP exchanges, required serial markers and QEMU debug-exit status 33.
 logs under `audit-artifacts/`. Stage 7.6 stress logs are retained per invocation.
 `build.rs` tracks the actual kernel artifact so writing a log does not itself
 trigger image reconstruction. Kernel changes still invalidate the image.
+The launcher defaults to `D:\WovenHat-OS-output` but accepts
+`WOVENHAT_OUTPUT_ROOT` on another available absolute drive or share. Its Cargo
+build/target directories and the acceptance transcript remain under that root;
+it rejects relative or unavailable roots before starting the chain.
 
 ## Boundaries before later stages
 

@@ -1,15 +1,18 @@
 $ErrorActionPreference = "Stop"
 
-# Keep Cargo/bootloader intermediates on D: for disk space. Windows cleanup of
-# %TEMP% previously removed cargo-install* directories during the bootloader
-# build and falsely failed the entire preservation chain.
+# Keep Cargo/bootloader intermediates in persistent output directories.
+# Windows cleanup of %TEMP% previously removed cargo-install* directories
+# during the bootloader build and falsely failed the preservation chain.
 $outputRoot = if ($env:WOVENHAT_OUTPUT_ROOT) {
     $env:WOVENHAT_OUTPUT_ROOT
 } else {
     'D:\WovenHat-OS-output'
 }
-if (-not (Test-Path -LiteralPath 'D:\')) {
-    throw 'WovenHat test output drive D: is unavailable'
+$outputDrive = [System.IO.Path]::GetPathRoot($outputRoot)
+if ((-not $outputDrive) -or
+    (($outputDrive -notmatch '^[A-Za-z]:\\$') -and (-not $outputDrive.StartsWith('\\'))) -or
+    (-not (Test-Path -LiteralPath $outputDrive -PathType Container))) {
+    throw "WovenHat test output root must be on an available absolute drive or share: $outputRoot"
 }
 $env:WOVENHAT_OUTPUT_ROOT = $outputRoot
 $env:CARGO_BUILD_BUILD_DIR = Join-Path $outputRoot "cargo-build"
