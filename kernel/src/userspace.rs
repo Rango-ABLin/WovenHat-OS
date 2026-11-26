@@ -7803,6 +7803,76 @@ pub fn file_mmap_self_test() -> bool {
     passed
 }
 
+#[cfg(feature = "large-map-test")]
+/// Focused gate for the bounded read-only asset window used by the system
+/// font. It runs with a larger guest RAM budget so the 256 MiB stress matrix's
+/// frame pressure cannot make this gate flaky.
+pub fn large_mapping_self_test() -> bool {
+    const PATH: &str = "/tmp/large-window-test";
+    static DATA: [u8; USER_MMAP_MAX_SIZE + 7] = {
+        let mut data = [0x5a; USER_MMAP_MAX_SIZE + 7];
+        data[3] = 0xa5;
+        data
+    };
+    if crate::vfs::stat(PATH).is_ok() || crate::vfs::write_file(PATH, &DATA).is_err() {
+        return false;
+    }
+    let Ok(file) = crate::vfs::open(PATH) else {
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let Some(root) = paging::create_user_address_space(USER_MMAP_START) else {
+        let _ = crate::vfs::close_open_file(file);
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let mut space = AddressSpace {
+        paging: root,
+        stack_base: 0,
+        mmap_base: USER_MMAP_START,
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
+        mapping_count: 0,
+        relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
+        tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
+        large_mapping: None,
+    };
+    let Some(mapping) = map_file_large_readonly(space, file, 0, DATA.len()) else {
+        let _ = paging::discard_empty_user_address_space(root);
+        let _ = crate::vfs::close_open_file(file);
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let mut bytes = [0u8; 4];
+    let protection =
+        paging::user_range_has_protection_in(root, mapping.address, mapping.size, false, false);
+    let read = paging::read_user_bytes_in(root, mapping.address + 3, &mut bytes);
+    space.set_large_mapping(Some(mapping));
+    let second = map_file_large_readonly(space, file, 0, DATA.len());
+    let unaligned = map_file_large_readonly(space, file, 1, 4096);
+    let zero = map_file_large_readonly(space, file, 0, 0);
+    let unmapped = unmap_large(space, mapping);
+    let ok = protection
+        && read.is_ok()
+        && bytes == [0xa5, 0x5a, 0x5a, 0x5a]
+        && second.is_none()
+        && unaligned.is_none()
+        && zero.is_none()
+        && unmapped;
+    let _ = paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]);
+    let _ = crate::vfs::close_open_file(file);
+    let _ = crate::vfs::remove(PATH);
+    ok
+}
+
 global_asm!(
     r#"
 .section .rodata.wovenhat_file_mmap_stub, "a"

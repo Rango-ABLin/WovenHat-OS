@@ -4147,6 +4147,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[RNG] bounded DRBG self-test: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "large-map-test")]
+    {
+        if !userspace::large_mapping_self_test() {
+            serial::write_line(format_args!("[LARGE MAP] read-only window: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[LARGE MAP] read-only window: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage11-3-test")]
     {
         if !notifications::structural_self_test() {
