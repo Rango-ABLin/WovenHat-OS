@@ -14,6 +14,19 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - WovenImages bounded viewer (2026-11-26)
+
+Extended the app-surface plan with an image viewer: the GUI now has a path
+field and Load action that decodes a bounded BMP from the VFS into the existing
+160x90 pixel budget, with honest status for unsupported, missing or oversized
+files. Adding all PNG/JPEG/GIF/WebP decoders grew the signed WAPP from 185 KB
+to 425 KB, which broke the bounded catalog install; decoder breadth was
+deliberately reduced to BMP rather than widening the VFS node cap. Also fixed
+a pre-existing startup check that compared the 32x32 thumbnail to the 160x90
+source and made the Images window impossible to open. Validation: warning-
+denying Clippy, host tests 2/2, signed `test-images-qemu.py` 1/2/4 CPUs and
+1-CPU desktop visual acceptance all pass.
+
 ## OpenCode - WovenFiles GUI mutations (2026-11-26)
 
 Extended the app-surface plan with a bounded file-manager surface: the GUI now

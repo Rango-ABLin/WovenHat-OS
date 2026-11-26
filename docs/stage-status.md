@@ -1,5 +1,16 @@
 # Stage status
 
+## WovenImages bounded viewer - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The Images GUI gained a bounded path field and Load action that decodes a BMP
+from the VFS into the existing 160x90 pixel budget. PNG/JPEG/GIF/WebP decoding
+was deliberately not compiled in: doing so grew the signed WAPP to 425 KB and
+broke the bounded system-app catalog install, so decoder breadth was reduced
+instead of widening the VFS node cap. A pre-existing startup check comparing
+the 32x32 thumbnail to the 160x90 source was removed; the window now opens.
+No syscall, capability or ABI change. Validation: warning-denying Clippy, host
+tests 2/2, signed 1/2/4-CPU harness and 1-CPU desktop visual acceptance pass.
+
 ## WovenFiles GUI mutations - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The WovenFiles GUI gained row selection, a bounded path field and New/Delete/
