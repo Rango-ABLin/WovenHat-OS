@@ -67,7 +67,12 @@ static WALLPAPER_THUMBNAILS: WallpaperThumbnailCache =
     WallpaperThumbnailCache(core::cell::UnsafeCell::new(ThumbnailCache::new()));
 
 fn fail(code: u64) -> ! {
-    let _ = libwoven::print("WovenImages: failure\n");
+    let _ = libwoven::print("WovenImages: failure code=");
+    let mut digits = [0u8; 20];
+    if let Ok(text) = core::str::from_utf8(libwoven::format_u64(code, &mut digits)) {
+        let _ = libwoven::print(text);
+    }
+    let _ = libwoven::print("\n");
     libwoven::exit(code)
 }
 
