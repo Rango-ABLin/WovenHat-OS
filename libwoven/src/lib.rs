@@ -14030,12 +14030,11 @@ pub fn search(query: &str, request_id: u64) -> Result<search_ipc::Response, Erro
     ipc_message_send(service, &bytes[..length])?;
     let mut response = [0u8; search_ipc::RESPONSE_LEN];
     for _ in 0..64 {
-        if let Ok((length, _sender)) = message_receive(&mut response) {
-            if let Ok(reply) = search_ipc::Response::decode(&response[..length]) {
-                if reply.request_id == request_id {
-                    return Ok(reply);
-                }
-            }
+        if let Ok((length, _sender)) = message_receive(&mut response)
+            && let Ok(reply) = search_ipc::Response::decode(&response[..length])
+            && reply.request_id == request_id
+        {
+            return Ok(reply);
         }
         yield_now();
     }
