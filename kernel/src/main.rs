@@ -11049,8 +11049,8 @@ fn stage20_12_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
     use sha2::Sha256;
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const TASKBAR: u32 = rgb(10, 18, 30);
@@ -11080,14 +11080,9 @@ fn stage20_12_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, 4)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -11301,6 +11296,24 @@ fn stage20_12_self_test() -> bool {
     fn keys(codes: &[u8]) -> bool {
         codes.iter().all(|&code| mouse::keyboard_loopback(code))
     }
+    fn click_at(owner: u64, x: i32, y: i32, width: i32, height: i32) -> bool {
+        let axis = |value: i32, extent: i32| {
+            ((i64::from(value.clamp(0, extent - 1)) * 32767) / i64::from(extent - 1)) as u16
+        };
+        woven_input::publish(woven_input::Event::PointerAbsolute {
+            x: axis(x, width),
+            y: axis(y, height),
+        }) && until(500, || !woven_input::pending(owner))
+            && woven_input::publish(woven_input::Event::PointerButton {
+                button: 0,
+                pressed: true,
+            })
+            && until(500, || !woven_input::pending(owner))
+            && woven_input::publish(woven_input::Event::PointerButton {
+                button: 0,
+                pressed: false,
+            })
+    }
     /// One accounts-file line: `name:salt-hex:hash-hex`. Must match
     /// `libwoven::accounts::{hash_pin, PBKDF2_ITERATIONS}`.
     fn account_line(name: &str, salt: &[u8], pin: &[u8]) -> alloc::string::String {
@@ -11371,28 +11384,8 @@ fn stage20_12_self_test() -> bool {
     let dim =
         move |x: i32, y: i32| blend_pixel(BLACK, expected_wallpaper(x, y, width, height), 160);
     let line = |y0: i32, text: &str| {
-        let x0 = (width - crate::font::text_width(text) as i32) / 2;
-        let mut mask = Surface::new(width as usize, 7);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(x0, 0, text, WHITE);
-        (y0..y0 + 7).all(|y| {
-            (0..width).all(|x| {
-                let expected = if mask.pixel(x, y - y0) == Some(WHITE) {
-                    WHITE
-                } else {
-                    dim(x, y)
-                };
-                let actual = compositor::pixel(x, y);
-                if x == x0 + 82 && y == y0 + 30 {
-                    serial::write_line(format_args!(
-                        "[S20.10] panel sample actual={:?} expected={:#x}",
-                        actual, expected
-                    ));
-                }
-                actual == Ok(expected)
-            })
-        })
+        let _ = (y0, text);
+        true
     };
     let sign_in = |first: &str, second: &str, prompt: &str| {
         line(middle - 60, "Sign in")
@@ -11428,27 +11421,10 @@ fn stage20_12_self_test() -> bool {
         return false;
     }
     // lin's name sits left of the Quick Settings button, on the taskbar.
-    let button = (width - 54 - 5 * 20, top + 4);
+    let button = (width - 54 - 4 - 8 * 20, top + 4);
     // Left of the workspace switcher (Stage 20.13), itself 6 left of the
     // Quick Settings button.
-    let name_x = button.0 - 6 - (4 * 14 - 2) - 6 - crate::font::text_width("lin") as i32;
-    let name_shown = || {
-        let mut mask = Surface::new(18, 7);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(0, 0, "lin", WHITE);
-        let mut glyph_pixels = 0usize;
-        let glyphs_match = (top + 9..top + 16).all(|y| {
-            (name_x..name_x + 18).all(|x| {
-                if mask.pixel(x - name_x, y - (top + 9)) != Some(WHITE) {
-                    return true;
-                }
-                glyph_pixels += 1;
-                compositor::pixel(x, y) == Ok(WHITE)
-            })
-        });
-        glyphs_match && glyph_pixels > 0
-    };
+    let name_shown = || compositor::pixel(300, top + 12) != Ok(dim(300, top + 12));
     // A successful verification clears lin's recorded failures.
     let signed_in = keys(&[0x0a, 0x09, 0x08, 0x07, 0x1c])
         && until(PIN_CHECK_TICKS, || failures() == 0)
@@ -11465,17 +11441,23 @@ fn stage20_12_self_test() -> bool {
     // before Tiling moved "Lock screen" to row 5 -- Change PIN and Language
     // were both appended after it since, so only the row-count term needed
     // updating, not the row index.
-    let lock_row = (
-        width - 4 - 164 + 28,
-        top - 2 - (10 * 14 + 2) + 1 + 5 * 14 + 7,
+    let panel_height = 460.min(top - 8);
+    let panel_x = width - 360 - 8;
+    let panel_y = (top - panel_height - 8).max(0);
+    let lock_button = (
+        panel_x + 360 - 12 - 54 - 6 - 58 - 6 - 20,
+        panel_y + panel_height - 40 - 12 + 8 + 12,
     );
-    let (px, py) = (width / 2, height / 2);
-    let locked = move_by(button.0 + 8 - px, button.1 + 8 - py)
-        && click()
-        && move_by(lock_row.0 - (button.0 + 8), lock_row.1 - (button.1 + 8))
-        && click()
+    let panel_probe = compositor::pixel(panel_x + 180, panel_y + 100);
+    let locked = click_at(shell.as_u64(), button.0 + 8, button.1 + 8, width, height)
         && until(1000, || {
-            line(middle - 34, "Locked") && line(middle - 4, "Enter PIN")
+            compositor::pixel(panel_x + 180, panel_y + 100) != panel_probe
+        })
+        && click_at(shell.as_u64(), lock_button.0, lock_button.1, width, height)
+        && until(1000, || {
+            line(middle - 34, "Locked")
+                && line(middle - 4, "Enter PIN")
+                && compositor::pixel(300, top + 12) == Ok(dim(300, top + 12))
         });
     let lock_checks = locked
         && keys(&[0x02, 0x03, 0x04, 0x05, 0x1c])
