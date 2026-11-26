@@ -115,7 +115,9 @@ pub fn console_active() -> bool {
 /// F12: show the diagnostic console, or return to the session. Nothing
 /// happens without a session.
 pub fn toggle_console() {
-    let Some(pid) = active() else { return };
+    if active().is_none() {
+        return;
+    }
     let entering = !CONSOLE.load(Ordering::Acquire);
     CONSOLE.store(entering, Ordering::Release);
     if entering {
