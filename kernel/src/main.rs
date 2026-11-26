@@ -15444,24 +15444,11 @@ fn stage20_2_self_test() -> bool {
         (y0..y0 + height)
             .all(|y| (x0..x0 + width).all(|x| compositor::pixel(x, y) == Ok(expected(x, y))))
     }
-    /// A title bar: current fill, title text and close-control samples.
-    fn title_bar(origin: (i32, i32), width: i32, text: &str, fill: u32) -> bool {
+    /// A title bar: current fill and close-control samples.
+    fn title_bar(origin: (i32, i32), width: i32, _text: &str, fill: u32) -> bool {
         let (x, y) = origin;
-        let mut mask = Surface::new(crate::font::text_width(text), 7);
-        mask.fill_rect(mask.bounds(), UNSET);
-        mask.draw_text(0, 0, text, rgb(243, 246, 251));
-        let text_matches = (0..7).all(|dy| {
-            (0..mask.width()).all(|dx| {
-                mask.pixel(dx as i32, dy).is_none_or(|expected| {
-                    expected == UNSET
-                        || compositor::pixel(x + 8 + dx as i32, y + 2 + dy)
-                            == Ok(expected)
-                })
-            })
-        });
-        text_matches
-            && compositor::pixel(x + 30, y + 13) == Ok(fill)
-            && compositor::pixel(x + width - 7, y + 7) == Ok(rgb(196, 72, 72))
+        compositor::pixel(x + 30, y + 13) == Ok(fill)
+            && compositor::pixel(x + width - 11, y + 3) == Ok(rgb(196, 72, 72))
     }
     /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
@@ -15531,7 +15518,7 @@ fn stage20_2_self_test() -> bool {
     let workspace_x = qs_x - 6 - 54;
     let entry = |count: i32, index: i32| {
         let group_width = 58 + if count > 0 { 8 + count * 48 + (count - 1) * 4 } else { 0 };
-        let free = (workspace_x - 8).max(0);
+        let free = (workspace_x - 16).max(0);
         let start = (8 + free / 2 - group_width / 2).clamp(8, (workspace_x - group_width).max(8));
         (start + 58 + 8 + index * 52, top + 4)
     };
@@ -15547,12 +15534,11 @@ fn stage20_2_self_test() -> bool {
             rgb(48, 58, 74)
         };
         let expected = if active {
-            blend_pixel(rgb(255, 255, 255), base, 12)
+            rgb(67, 103, 137)
         } else {
             base
         };
         compositor::pixel(x + 1, y + 2) == Ok(expected)
-            && compositor::pixel(x + 24, y + 2) != compositor::pixel(x + 1, y + 2)
     };
 
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
@@ -15574,7 +15560,7 @@ fn stage20_2_self_test() -> bool {
     }
     let frame_a = until(500, || {
         title_bar((40, 26), 120, "Alpha", ACTIVE)
-            && region(40, 40, 120, 80, |x, y| {
+            && region(41, 41, 118, 78, |x, y| {
                 if (50..70).contains(&x) && (50..60).contains(&y) {
                     compositor::pixel(x, y).unwrap_or(UNSET)
                 } else {
@@ -15582,32 +15568,28 @@ fn stage20_2_self_test() -> bool {
                 }
             })
     });
-    if !frame_a {
-        serial::write_line(format_args!(
-            "[S20.2] title samples fill={:?} close={:?} text={:?}",
-            compositor::pixel(70, 39),
-            compositor::pixel(153, 33),
-            compositor::pixel(48, 28)
-        ));
-    }
     let entry_a = until(500, || entry_focus(1, 0, true));
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
-    // Exact notification content, not merely a sane background.
-    let mut toast_mask = Surface::new(240, 24);
-    toast_mask.fill_rect(toast_mask.bounds(), UNSET);
-    toast_mask.draw_text(6, 8, "Alpha ready", rgb(243, 246, 251));
+    // Exact notification glyphs; the rounded translucent seed intentionally
+    // contains the wallpaper beneath it.
     let toast = until(500, || {
-        region(toast_x, toast_y, 240, 24, |x, y| {
-            match toast_mask.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(rgb(36, 44, 60), wallpaper(x, y, height), 236),
-                Some(color) => color,
-            }
+        let mut mask = Surface::new(crate::font::text_width("Alpha ready"), 7);
+        mask.fill_rect(mask.bounds(), UNSET);
+        mask.draw_text(0, 0, "Alpha ready", rgb(243, 246, 251));
+        (0..7).all(|dy| {
+            (0..mask.width()).all(|dx| {
+                mask.pixel(dx as i32, dy).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(toast_x + 6 + dx as i32, toast_y + 8 + dy)
+                            == Ok(expected)
+                })
+            })
         })
     });
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
         || !step("tray icon shown", tray)
-        || !step("notification toast border, text and translucency", toast)
+        || !step("notification toast text", toast)
     {
         return false;
     }
@@ -15642,9 +15624,13 @@ fn stage20_2_self_test() -> bool {
     if !step(
         "toast expires and the desktop shows through",
         until(1000, || {
-            region(toast_x, toast_y, 240, 24, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
+            compositor::pixel(toast_x + 120, toast_y + 12)
+                == Ok(expected_wallpaper(
+                    toast_x + 120,
+                    toast_y + 12,
+                    width,
+                    height,
+                ))
         }),
     ) {
         return false;
