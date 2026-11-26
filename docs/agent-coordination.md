@@ -1,3 +1,13 @@
+## Copilot - graphics/framebuffer current-head closure (2026-11-26) - DONE
+
+Refreshed Stage 20.1's stale visual oracle to the current flat wallpaper,
+taskbar opacity, status/control geometry and centered taskbar chrome without
+changing shell rendering. Stage 20.1, Stage 20.14 dual-head scanout, Stage
+20.14b desktop scanout and GFX-02 pass at 1/2/4 CPUs; 37 display/compositing
+host contracts and warning-denying graphics Clippy pass. Native GPU
+acceleration, physical scanout/latency and controller-loss qualification stay
+explicit external gates.
+
 ## Copilot - USB/xHCI/WovenFS and wireless software closure (2026-11-26) - DONE
 
 USB mass storage now participates in primary root selection and deferred

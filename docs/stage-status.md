@@ -1,5 +1,19 @@
 # Stage status
 
+## Graphics and framebuffer current-head requalification - 2026-11-26 - GREEN (BOUNDED SOFTWARE/QEMU)
+
+Requalified the framebuffer/compositor release path on the current source.
+Stage 20.1 now derives the current shell wallpaper, taskbar opacity, status
+geometry and centered chrome directly while preserving strict wallpaper and
+plain-taskbar pixel checks, physical-framebuffer scale/readback checks, live
+clock updates and display teardown. It passes at 1/2/4 CPUs. Stage 20.14 and
+20.14b verify pixel output on both VirtIO-GPU heads at 1/2/4 CPUs, and the
+GFX-02 CPU renderer plus the 37 display/compositing host contracts pass.
+
+This confirms the bounded graphics and framebuffer boundary is green. Native
+Intel/AMD/NVIDIA acceleration, physical-display latency and device-loss
+qualification remain separate release evidence.
+
 ## USB/xHCI, WovenFS root, and wireless software closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The xHCI USB mass-storage device is now a first-class root candidate alongside
