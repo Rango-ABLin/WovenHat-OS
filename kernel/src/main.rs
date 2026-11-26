@@ -2754,6 +2754,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
         halt();
     }
+    // Shell-only QEMU images never run install_production_system_apps(), so
+    // stage the validated system font once here, before any self-test spawns
+    // WovenShell. Production boots keep their existing installation path.
+    #[cfg(all(feature = "qemu-test", not(feature = "system-apps")))]
+    {
+        if !stage_system_font_for_tests() {
+            serial::write_line(format_args!("[FONT] shell self-test font staging: FAILED"));
+        }
+    }
     #[cfg(feature = "stage9-test")]
     qemu_test_exit_success();
     // The root `network-test` mode always enables `qemu-test`.  Cargo artifact
@@ -7039,21 +7048,83 @@ const SYSTEM_WALLPAPER_SHA256: [u8; 32] = [
 // Phase 3 entry for why a dedicated bounded large-asset slot was added
 // instead of raising the general VFS node capacity). Ring-3 apps read it
 // like any other VFS file -- no new syscall, no new capability.
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../assets/fonts/NotoSans-Regular.ttf"
 ));
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT_MANIFEST: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../assets/fonts/manifest.toml"
 ));
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT_SHA256: [u8; 32] = [
     0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c, 0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
     0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50, 0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
 ];
+
+/// Stage the validated system font for shell-only QEMU images. Production
+/// boots install it in `install_production_system_apps()`; self-test images
+/// never run that path, so WovenShell would otherwise log "system font
+/// mapping unavailable" and fall back to the 5x7 bitmap face. This uses the
+/// same bounded read-only VFS asset path and the same hash/licence validation
+/// as production -- no new syscall, capability or ABI. It is idempotent: an
+/// image that already has the asset is left untouched.
+#[cfg(all(feature = "qemu-test", not(feature = "system-apps")))]
+fn stage_system_font_for_tests() -> bool {
+    const FONT: &str = "/share/fonts/NotoSans-Regular.ttf";
+    const MANIFEST: &str = "/share/fonts/manifest.toml";
+    if vfs::stat(FONT).is_ok() && vfs::stat(MANIFEST).is_ok() {
+        return true;
+    }
+    use sha2::{Digest, Sha256};
+    let digest: [u8; 32] = Sha256::digest(SYSTEM_FONT).into();
+    if SYSTEM_FONT.len() < 4
+        || &SYSTEM_FONT[..4] != b"\x00\x01\x00\x00"
+        || digest != SYSTEM_FONT_SHA256
+        || !SYSTEM_FONT_MANIFEST
+            .windows(7)
+            .any(|window| window == b"OFL-1.1")
+        || !SYSTEM_FONT_MANIFEST
+            .windows(16)
+            .any(|window| window == b"notosans-regular")
+    {
+        serial::write_line(format_args!("[FONT] test font validation failed"));
+        return false;
+    }
+    let directory = |path: &str| {
+        if vfs::stat(path).is_err() && vfs::mkdir(path).is_err() {
+            return false;
+        }
+        true
+    };
+    if !directory("/share") || !directory("/share/fonts") {
+        serial::write_line(format_args!("[FONT] test font directory setup failed"));
+        return false;
+    }
+    if vfs::stat(FONT).is_err() && vfs::create_read_only_large(FONT, SYSTEM_FONT).is_err() {
+        return false;
+    }
+    if vfs::stat(MANIFEST).is_err()
+        && vfs::create_read_only(MANIFEST, SYSTEM_FONT_MANIFEST).is_err()
+    {
+        let _ = vfs::remove(FONT);
+        return false;
+    }
+    let mut probe = alloc::vec![0u8; SYSTEM_FONT.len()];
+    if vfs::read_all(FONT, &mut probe) != Ok(SYSTEM_FONT.len()) {
+        let _ = vfs::remove(MANIFEST);
+        let _ = vfs::remove(FONT);
+        serial::write_line(format_args!("[FONT] test font VFS readback failed"));
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[FONT] system font staged for shell self-tests: {} bytes",
+        probe.len()
+    ));
+    true
+}
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -9754,7 +9825,8 @@ fn stage20_14b_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -10592,7 +10664,8 @@ fn stage20_19_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) = userspace::load_elf_with_argv(
         WOVEN_SHELL_IMAGE,
         &["/bin/woven-shell", "--no-3d", "--reduced-motion"],
@@ -10812,7 +10885,8 @@ fn stage20_13_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -11724,7 +11798,8 @@ fn stage20_11_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"])
     else {
@@ -12250,7 +12325,8 @@ fn stage20_10_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -13134,7 +13210,8 @@ fn stage20_9_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -13417,7 +13494,8 @@ fn stage20_8_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -13817,7 +13895,8 @@ fn stage20_7_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
     else {
         return step("shell image loads", false);
@@ -14061,7 +14140,8 @@ fn stage20_6_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -14543,7 +14623,8 @@ fn stage20_5_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -14852,7 +14933,8 @@ fn stage20_4_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -15492,7 +15574,8 @@ fn stage20_2_self_test() -> bool {
     let shell_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {

@@ -1,3 +1,17 @@
+## OpenCode - shell self-test system font mapping (2026-11-26) - ACTIVE
+
+Fixing the owner-reported `woven-shell: system font mapping unavailable` in
+shell-only/self-test boots. Root cause: those kernels never call
+`install_production_system_apps()`, so `/share/fonts/NotoSans-Regular.ttf` is
+never staged, and most shell self-tests deliberately spawn the shell without
+`FileRead`. Owner approved a test-only fix: stage the validated font asset in
+VFS for `qemu-test` images and add `FileRead` to the shell's self-test
+capability sets. I will touch the font constants/`create_read_only_large`
+cfg gates, a boot-time staging helper, the shell capability sets, and the two
+`mkdir("/share")` assertions that must tolerate the pre-created directory. I
+will not rewrite any pixel oracle or the S20.2 `gone`/`empty` blocks. Please
+avoid concurrent edits to `kernel/src/main.rs` while this is validated.
+
 ## OpenCode - S20.2 self-test stale wallpaper palette (2026-11-26) - ACTIVE
 
 I am fixing the two reported Stage 20.2 failures
