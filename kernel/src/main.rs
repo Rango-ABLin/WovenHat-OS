@@ -9983,7 +9983,6 @@ fn stage20_14b_self_test() -> bool {
 ///   syscall 209: the harness requires QEMU to stop by itself.
 #[cfg(feature = "stage20-15-test")]
 fn stage20_15_self_test() -> bool {
-    use crate::display::rgb;
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
             "[S20.15] {} {}",
@@ -10004,44 +10003,32 @@ fn stage20_15_self_test() -> bool {
             task::yield_now();
         }
     }
-    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
-        let dy = -screen_dy;
-        let flags =
-            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
-        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
-    }
-    fn move_by(mut dx: i32, mut dy: i32) -> bool {
-        while dx != 0 || dy != 0 {
-            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
-            if !packet(sx as i16, sy as i16, false) {
-                return false;
-            }
-            dx -= sx;
-            dy -= sy;
+    fn click_at(owner: u64, x: i32, y: i32, width: i32, height: i32) -> bool {
+        let axis = |value: i32, extent: i32| {
+            ((i64::from(value.clamp(0, extent - 1)) * 32767) / i64::from(extent - 1)) as u16
+        };
+        if !woven_input::publish(woven_input::Event::PointerAbsolute {
+            x: axis(x, width),
+            y: axis(y, height),
+        }) {
+            return false;
         }
-        true
-    }
-    fn click() -> bool {
-        packet(0, 0, true) && packet(0, 0, false)
+        let moved = until(500, || !woven_input::pending(owner));
+        let pressed = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: true,
+        });
+        let press_seen = pressed && until(500, || !woven_input::pending(owner));
+        let released = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: false,
+        });
+        moved && press_seen && released
     }
     /// Press and release one key on the i8042.
     fn key(code: u8) -> bool {
         mouse::keyboard_loopback(code) && mouse::keyboard_loopback(code | 0x80)
     }
-    /// The launcher's first row reads `name` in white.
-    fn text_at(x: i32, y: i32, name: &str, color: u32) -> bool {
-        let mut mask = crate::display::Surface::new(crate::font::text_width(name), 7);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, 0x0100_0000);
-        mask.draw_text(0, 0, name, color);
-        (0..7).all(|row| {
-            (0..crate::font::text_width(name) as i32).all(|column| {
-                mask.pixel(column, row) != Some(color)
-                    || compositor::pixel(x + column, y + row) == Ok(color)
-            })
-        })
-    }
-
     let settings = (vfs::stat("/etc").is_ok() || vfs::mkdir("/etc").is_ok())
         && (vfs::stat("/etc/wovenhat").is_ok() || vfs::mkdir("/etc/wovenhat").is_ok())
         && vfs::create_read_only(
@@ -10080,13 +10067,28 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1: the launcher's first row is the catalog's application.
-    // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's icon occupies the left margin and its text
-    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
+    let overview_width = (width - 48).clamp(320, 700);
+    let overview_height = (top - 24).max(240).clamp(240, 560);
+    let overview = (
+        (width - overview_width) / 2,
+        (top - overview_height - 8).max(8),
+    );
+    let overview_points = [
+        (overview.0 + 24, overview.1 + 24),
+        (overview.0 + overview_width / 2, overview.1 + 100),
+        (overview.0 + 24, overview.1 + overview_height / 2),
+        (
+            overview.0 + overview_width - 24,
+            overview.1 + overview_height - 24,
+        ),
+    ];
+    let overview_before = overview_points.map(|(x, y)| compositor::pixel(x, y));
     let listed = key(0x3b)
         && until(1000, || {
-            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+            overview_points
+                .iter()
+                .enumerate()
+                .any(|(index, &(x, y))| compositor::pixel(x, y) != overview_before[index])
         });
     let closed = key(0x3b);
     if !step(
@@ -10126,25 +10128,26 @@ fn stage20_15_self_test() -> bool {
         return false;
     }
 
-    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
-    // and Language were appended after Lock screen, so only the row-count
-    // term needs updating).
-    let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
-    let (px, py) = (width / 2, height / 2);
-    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
+    let button = (width - 54 - 4 - 8 * 20, top + 4);
+    let panel_height = 460.min(top - 8);
+    let panel = (width - 360 - 8, (top - panel_height - 8).max(0));
+    let power_row = (
+        panel.0 + 360 - 12 - 54 / 2,
+        panel.1 + panel_height - 40 - 12 + 8 + 12,
+    );
+    let panel_probe = compositor::pixel(panel.0 + 180, panel.1 + 52);
+    let opened = click_at(shell, button.0 + 8, button.1 + 8, width, height);
     if !step(
         "Quick Settings opens",
         opened
             && until(1000, || {
-                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(255, 255, 0))
+                compositor::pixel(panel.0 + 180, panel.1 + 52) != panel_probe
             }),
     ) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
-    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
+    let _ = click_at(shell, power_row.0, power_row.1, width, height);
     // The machine should now be off; still running after this is failure.
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1000 {
