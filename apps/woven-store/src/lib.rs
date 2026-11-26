@@ -25,7 +25,7 @@ pub enum Command {
 
 pub fn parse(args: &[&[u8]]) -> Command {
     match args {
-        [] | [b"--list"] | [b"list"] | [b"--all"] => Command::List,
+        [] | [b""] | [b"--list"] | [b"list"] | [b"--all"] => Command::List,
         [b"--help"] | [b"help"] => Command::Help,
         [b"--query", _] => Command::Query,
         [b"--install", _] => Command::Install,
@@ -42,6 +42,7 @@ mod tests {
     #[test]
     fn accepts_catalog_modes() {
         assert_eq!(parse(&[]), Command::List);
+        assert_eq!(parse(&[b""]), Command::List);
         assert_eq!(parse(&[b"--list"]), Command::List);
         assert_eq!(parse(&[b"help"]), Command::Help);
     }
