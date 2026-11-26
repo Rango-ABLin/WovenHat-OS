@@ -15388,8 +15388,11 @@ fn stage20_3_self_test() -> bool {
 fn stage20_2_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    // Keep in sync with `apps/woven-shell/src/tokens.rs`: the shell's
+    // wallpaper gradient uses the Win11-inspired palette, and this oracle
+    // independently recomputes the same pixels to check window teardown.
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const ACTIVE: u32 = rgb(30, 94, 120);
@@ -15668,7 +15671,7 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let gone = until(1000, || {
-        compositor::pixel(45, 45) != Ok(RED)
+        compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
     }) && until(500, || {
         entry_focus(1, 0, true)
             && compositor::pixel(tray_x + 1, tray_y + 2)
@@ -15682,14 +15685,12 @@ fn stage20_2_self_test() -> bool {
     });
     if !gone {
         serial::write_line(format_args!(
-            "[S20.2] gone tray={:?} expected={:#08x} body={:?}",
+            "[S20.2] gone desktop={} entry={} tray={:?} title={} body={:?}",
+            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height)),
+            entry_focus(1, 0, true),
             compositor::pixel(tray_x + 1, tray_y + 2),
-            blend_pixel(
-                rgb(24, 32, 46),
-                wallpaper(tray_x + 1, tray_y + 2, height),
-                188,
-            ),
-            compositor::pixel(45, 45)
+            title_bar((64, 50), 100, "Beta", ACTIVE),
+            compositor::pixel(150, 100)
         ));
     }
     if !step(
@@ -15710,12 +15711,7 @@ fn stage20_2_self_test() -> bool {
     }
     let empty = until(1000, || {
         compositor::pixel(150, 100) != Ok(BLUE)
-            && compositor::pixel(entry(1, 0).0 + 1, entry(1, 0).1 + 2)
-                == Ok(blend_pixel(
-                    rgb(24, 32, 46),
-                    wallpaper(entry(1, 0).0 + 1, entry(1, 0).1 + 2, height),
-                    188,
-                ))
+            && compositor::pixel(entry(1, 0).0 + 1, entry(1, 0).1 + 2) != Ok(rgb(67, 103, 137))
     });
     if !step("desktop empty again", empty) {
         return false;

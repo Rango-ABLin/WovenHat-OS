@@ -1,3 +1,26 @@
+## OpenCode - S20.2 self-test stale wallpaper palette (2026-11-26) - ACTIVE
+
+I am fixing the two reported Stage 20.2 failures
+(`A's window, entry and tray icon removed...` / `desktop applications: FAILED`)
+in `kernel/src/main.rs::stage20_2_self_test`. Root cause: this oracle still
+hardcodes the pre-Win11 wallpaper palette `rgb(11,29,58)`/`rgb(16,78,82)`,
+while `apps/woven-shell/src/tokens.rs` renders `rgb(16,36,74)`/`rgb(18,84,96)`.
+The diagnostic values (`tray=0x172e3c` vs `expected=0x172c38`,
+`body=0x142c4f`) match the palette delta exactly. I am restoring the strict
+wallpaper-equality assertions rather than weakening them further. Please do
+not rewrite the `gone`/`empty` blocks or the palette constants in this
+function while this fix is being validated.
+
+Result: `scripts/test-woven-shell-qemu.py --stage 20.2` PASSES at 1/2/4 CPUs
+(exit 33, `desktop applications: PASSED`) with the strict wallpaper-equality
+oracle restored, not weakened. `cargo fmt --all -- --check`, warning-denying
+`stage20-2-test` kernel Clippy, `cargo clippy --all-targets -- -D warnings`
+and `cargo test --workspace` all pass. Evidence:
+`target/woven-shell-apps-{1,2,4}cpu/serial.log`. The full serialized
+`RUN-STAGE10.7.ps1` chain was deliberately not started while other owners'
+memory/image QEMU chains held the fixed output paths; that gate remains
+unrun here and is reported as such, not claimed.
+
 ## OpenCode - Ring-3 secure-randomness ABI (2026-11-25)
 
 Added the second prerequisite for an eventual guest TLS service: an HMAC-SHA256

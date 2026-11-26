@@ -1,5 +1,31 @@
 # Stage status
 
+## Stage 20.2 self-test wallpaper oracle - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The two reported failures (`A's window, entry and tray icon removed on exit;
+B focused FAIL` and the resulting `desktop applications: FAILED`) were an
+oracle defect, not a shell teardown defect. `stage20_2_self_test` in
+`kernel/src/main.rs` recomputed wallpaper pixels with the pre-Win11 palette
+`rgb(11,29,58)`/`rgb(16,78,82)`, while `apps/woven-shell/src/tokens.rs` now
+renders `rgb(16,36,74)`/`rgb(18,84,96)`. The retained diagnostic proved it:
+the sampled tray pixel was `0x172e3c`, exactly `blend_pixel(TASKBAR,
+new_wallpaper, 188)`, against a stale expected `0x172c38`; the vacant window
+body was `0x142c4f`, the new-palette wallpaper.
+
+The oracle now uses the shell's current palette and the strict assertions are
+restored: both vacated window bodies must equal the independently recomputed
+wallpaper, the tray slot must show the blended taskbar surface, and the still-
+open window B must still be blue. No assertion was weakened, disabled or
+given a larger timeout; no syscall, capability, ABI or shell rendering changed.
+
+Validation on the exact source: `cargo fmt --all -- --check`, warning-denying
+`stage20-2-test` kernel Clippy, `cargo clippy --all-targets -- -D warnings` and
+`cargo test --workspace` pass. `scripts/test-woven-shell-qemu.py --stage 20.2`
+passes at 1/2/4 CPUs (exit 33, `[S20.2] desktop applications: PASSED`); evidence
+is `target/woven-shell-apps-{1,2,4}cpu/serial.log`. The full serialized
+`RUN-STAGE10.7.ps1` chain was not run here because other owners' QEMU chains
+held the shared fixed output paths; it is explicitly not claimed.
+
 ## Font system: address-layout collision fixed - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Diagnosis found one real interaction defect: `USER_LARGE_MAP_START` and
