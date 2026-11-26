@@ -366,7 +366,9 @@ pub fn wait_for(
 /// Current focus owner.
 #[cfg_attr(not(feature = "stage19-5-test"), allow(dead_code))]
 pub fn focus() -> Option<u64> {
-    (!crate::session::console_active()).then(|| FOCUS.lock().owner).flatten()
+    (!crate::session::console_active())
+        .then(|| FOCUS.lock().owner)
+        .flatten()
 }
 
 /// Take the next event for `owner`, which must hold focus.

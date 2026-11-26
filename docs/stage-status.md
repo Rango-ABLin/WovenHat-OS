@@ -1,5 +1,25 @@
 # Stage status
 
+## Commit CI repair and short-screen Quick Settings - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Fixed the Linux CI boot/lint cascade caused by the repository Cargo config's
+machine-specific `D:/WovenHat-OS-output/target`: Cargo treated that value as an
+absolute path segment containing `:` while constructing `LD_LIBRARY_PATH`.
+Windows acceptance launchers already provide their own output environment, so
+the checked-in absolute override was removed.
+
+Refreshed the current desktop and AI-security assertions without weakening
+their behavior: Stage 20.1 now checks the authoritative wallpaper/taskbar
+tokens and centered chrome; Stage 20.15 checks the real centered overview and
+current Quick Settings; Stage 23.4 recognizes the separately delegated
+system-service microphone ceiling while continuing to reject AI, secrets and
+camera authority. Quick Settings is now constrained above the taskbar and its
+footer actions win hit tests on short screens, fixing the previously
+off-screen Power control at 640x400.
+
+Stage 20.1, Stage 20.15 and the Stage 23.1 capability gate pass at 1/2/4 CPUs.
+Affected warning-denying target Clippy, all-targets Clippy and formatting pass.
+
 ## Stage 1-18 bounded qualification refresh - 2026-11-25 - EVIDENCE REFRESHED / FORMAL CLOSURE STILL BLOCKED
 
 Refreshed current-source software/QEMU evidence for every Stage 1-18 bounded

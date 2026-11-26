@@ -1,3 +1,19 @@
+## OpenCode - commit CI repair and short-screen Quick Settings (2026-11-26)
+
+Removed the checked-in absolute Windows Cargo `target-dir` that Linux CI
+joined into `LD_LIBRARY_PATH`. Acceptance launchers now own machine-local
+output overrides, while GitHub builds use Cargo's platform-neutral default.
+Refreshed stale Stage 20.1 and Stage 20.15 desktop oracles for the current
+tokens, centered Start overview and 14-action Quick Settings panel, and
+corrected the Stage 23.4 ceiling check so delegated system-service microphone
+authority remains distinct from forbidden AI/secrets/camera authority.
+
+Quick Settings now constrains its panel to the space above the taskbar and
+gives footer hit targets priority when compact layouts overlap lower sliders.
+This fixes a real 640x400 defect where Power, Restart and Lock were painted or
+hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
+CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
+
 ## OpenCode - desktop chrome acceptance completion (2026-11-25)
 
 Completed the current taskbar, Start overview and Notification Center gates

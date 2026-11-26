@@ -1,5 +1,14 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Short-screen Quick Settings boundary (2026-11-26)
+
+Quick Settings derives its visible height from the space above the taskbar,
+not a fixed 460-pixel assumption. Compact displays may place the footer over
+lower grid/slider space; because the footer is painted last, footer controls
+also receive hit-test priority over those lower controls. This keeps Power,
+Restart, Lock and Settings reachable without moving the taskbar, widening the
+display, or broadening power capabilities.
+
 ## Desktop chrome acceptance boundary (2026-11-25)
 
 WovenShell's bottom taskbar, centered Start overview and Notification Center

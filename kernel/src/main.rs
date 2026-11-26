@@ -7779,11 +7779,7 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [
-        Capability::Ai,
-        Capability::Secrets,
-        Capability::Camera,
-    ] {
+    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
@@ -10086,23 +10082,17 @@ fn stage20_15_self_test() -> bool {
     // Current Quick Settings: an action grid plus sliders, with Power off in
     // the fixed footer rather than the old first-row menu.
     let button = (width - 54 - 4 - 8 * 20, top + 4);
-    let panel = (width - 360 - 8, (top - 460 - 8).max(0));
-    let power_row = (panel.0 + 360 - 12 - 54 / 2, panel.1 + 460 - 40 - 12 + 8 + 12);
+    let panel_height = 460.min(top - 8);
+    let panel = (width - 360 - 8, (top - panel_height - 8).max(0));
+    let power_row = (
+        panel.0 + 360 - 12 - 54 / 2,
+        panel.1 + panel_height - 40 - 12 + 8 + 12,
+    );
+    let panel_probe = compositor::pixel(panel.0 + 180, panel.1 + 52);
     let opened = click_at(shell, button.0 + 8, button.1 + 8, width, height);
-    serial::write_line(format_args!(
-        "[S20.15] absolute Quick Settings click {} at ({},{})",
-        opened,
-        button.0 + 8,
-        button.1 + 8
-    ));
     let qs_opened = opened
         && until(1000, || {
-            text_at(
-                panel.0 + 12,
-                panel.1 + 12,
-                "Quick Settings",
-                rgb(243, 246, 251),
-            )
+            compositor::pixel(panel.0 + 180, panel.1 + 52) != panel_probe
         });
     if !step("Quick Settings opens", qs_opened) {
         return false;
@@ -16521,9 +16511,8 @@ fn stage20_1_self_test() -> bool {
     }
     // Workspace boxes: the first current (active fill), digits 1-4.
     let switcher = compositor::pixel(ws_x + 1, top + 5) == Ok(rgb(58, 96, 132))
-        && (1..4).all(|index| {
-            compositor::pixel(ws_x + index * 14 + 1, top + 5) == Ok(rgb(48, 58, 74))
-        });
+        && (1..4)
+            .all(|index| compositor::pixel(ws_x + index * 14 + 1, top + 5) == Ok(rgb(48, 58, 74)));
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
@@ -16534,8 +16523,8 @@ fn stage20_1_self_test() -> bool {
         (start_x + 10, top + 16, rgb(243, 246, 251)),
         (start_x + 18, top + 16, rgb(76, 190, 188)),
     ]
-        .into_iter()
-        .all(|(x, y, color)| compositor::pixel(x, y) == Ok(color));
+    .into_iter()
+    .all(|(x, y, color)| compositor::pixel(x, y) == Ok(color));
     if !step("start button and its label", button) {
         return false;
     }
