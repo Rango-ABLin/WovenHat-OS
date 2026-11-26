@@ -1480,20 +1480,11 @@ pub fn enable_io_bus_master(bus: u8, device: u8, function: u8) {
 
 /// Enable MMIO decoding and DMA bus mastering for a PCI/PCIe function.
 /// Returns false if the configuration transaction cannot be completed.
-#[cfg(any(
-    not(feature = "qemu-test"),
-    feature = "stage13-12-test",
-    feature = "stage13-3-test",
-    feature = "stage13-4-test",
-    feature = "stage13-5-test",
-    feature = "stage13-6-test",
-    feature = "stage13-7-test",
-    feature = "stage13-8-test",
-    feature = "stage13-9-test",
-    feature = "stage13-10-test",
-    feature = "stage20-14-test",
-    feature = "stage20-14b-test"
-))]
+///
+/// Unlike the native storage controllers, which are compiled out of the
+/// minimal `qemu-test` kernel, this helper is always compiled: the e1000
+/// network transport (always present, alongside virtio-net) needs it in every
+/// configuration.
 pub fn enable_memory_bus_master(address: Address) -> bool {
     let _guard = CONFIG_LOCK.lock();
     let Some(command) = read_command_unlocked(address) else {

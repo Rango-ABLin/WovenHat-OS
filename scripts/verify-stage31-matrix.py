@@ -73,14 +73,20 @@ def audit_report(path: Path, expected_cpu: int) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cpus", nargs="+", type=int, choices=(1, 2, 4, 8, 16), default=(1, 2, 4))
+    parser.add_argument("--cpus", nargs="+", type=int, choices=(1, 2, 4, 8, 16), default=(1, 2, 4, 8, 16))
+    parser.add_argument("--seed", default="51a7e", help="hex seed used by the retained randomized campaign")
     parser.add_argument("--root", type=Path, default=ROOT / "audit-artifacts")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     errors: list[str] = []
     audited: list[dict[str, object]] = []
     for cpu in args.cpus:
-        candidates = sorted(args.root.glob(f"stage31-randomized-51a7e-{cpu}cpu-9scenarios"))
+        # Canonical nine-scenario campaigns carry the suffix; a shorter
+        # full-scenario campaign at the same seed is also accepted so an
+        # 8/16-CPU partial run is not silently treated as missing evidence.
+        candidates = sorted(args.root.glob(f"stage31-randomized-{args.seed}-{cpu}cpu-9scenarios"))
+        if not candidates:
+            candidates = sorted(args.root.glob(f"stage31-randomized-{args.seed}-{cpu}cpu"))
         if len(candidates) != 1:
             fail(errors, f"cpu={cpu}: expected exactly one canonical evidence directory, found {len(candidates)}")
             continue
@@ -92,6 +98,7 @@ def main() -> int:
         "schema": "wovenhat.stage31.matrix-audit/v1",
         "valid": not errors,
         "cpus": list(args.cpus),
+        "seed": args.seed,
         "required_scenarios": sorted(REQUIRED_SCENARIOS),
         "audited": audited,
         "errors": errors,

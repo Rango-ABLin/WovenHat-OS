@@ -215,6 +215,9 @@ pub fn publish(event: Event) -> bool {
         crate::session::toggle_console();
         return true;
     }
+    if crate::session::console_active() {
+        return QUEUE.lock().push(event);
+    }
     if matches!(event, Event::PointerAbsolute { .. }) {
         ABSOLUTE_POINTER_ACTIVE.store(true, Ordering::Relaxed);
     } else if matches!(event, Event::PointerMove { .. })
@@ -363,7 +366,9 @@ pub fn wait_for(
 /// Current focus owner.
 #[cfg_attr(not(feature = "stage19-5-test"), allow(dead_code))]
 pub fn focus() -> Option<u64> {
-    FOCUS.lock().owner
+    (!crate::session::console_active())
+        .then(|| FOCUS.lock().owner)
+        .flatten()
 }
 
 /// Take the next event for `owner`, which must hold focus.

@@ -44,6 +44,16 @@ impl Socket {
         check(unsafe { syscall::invoke(syscall::BIND, self.raw, port as u64, 0) }).map(|_| ())
     }
 
+    /// Put this TCP socket into bounded single-connection listen state.
+    pub fn listen(&self, port: u16) -> Result<(), Error> {
+        listen(self.raw, port)
+    }
+
+    /// Wait for one inbound connection and return its endpoint.
+    pub fn accept(&self) -> Result<Endpoint, Error> {
+        accept(self.raw)
+    }
+
     pub fn connect(&self, endpoint: Endpoint) -> Result<(), Error> {
         check(unsafe { syscall::invoke(syscall::CONNECT, self.raw, endpoint.packed(), 0) })
             .map(|_| ())
@@ -76,6 +86,46 @@ impl Socket {
             check(result).map(|length| length as usize)
         }
     }
+}
+
+/// Put a process-owned TCP socket descriptor into bounded listen state.
+pub fn listen(socket: u64, port: u16) -> Result<(), Error> {
+    check(unsafe { syscall::invoke(syscall::NET_LISTEN, socket, port as u64, 0) }).map(|_| ())
+}
+
+/// Wait event-driven for one inbound connection on a listening descriptor and
+/// return the accepted peer. No Ring-3 pointer is retained and no spin loop is
+/// used. After a successful accept the descriptor is connected; another client
+/// requires a new socket in listen state.
+pub fn accept(socket: u64) -> Result<Endpoint, Error> {
+    let handle = check(unsafe { syscall::invoke(syscall::ASYNC_NET_ACCEPT, socket, 0, 0) })?;
+    let mut completion = [0u8; 16];
+    check(unsafe {
+        syscall::invoke(
+            syscall::ASYNC_NET_WAIT,
+            handle,
+            completion.as_mut_ptr() as u64,
+            0,
+        )
+    })?;
+    let status = i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
+    if status != 0 {
+        return Err(Error::Failed);
+    }
+    let value = u64::from_ne_bytes([
+        completion[8],
+        completion[9],
+        completion[10],
+        completion[11],
+        completion[12],
+        completion[13],
+        completion[14],
+        completion[15],
+    ]);
+    Ok(Endpoint {
+        address: (value as u32).to_be_bytes(),
+        port: (value >> 32) as u16,
+    })
 }
 
 impl Drop for Socket {

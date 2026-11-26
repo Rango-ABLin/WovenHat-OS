@@ -73,6 +73,16 @@ struct Log {
 static LOG: IrqMutex<Option<Log>> = IrqMutex::with_rank(None, 5);
 static START_QUEUED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn active() -> bool {
+    LOG.lock().is_some()
+}
+
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+pub fn discovery_queued() -> bool {
+    START_QUEUED.load(Ordering::Acquire)
+}
+
 /// Why the live log could not start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {

@@ -6,6 +6,7 @@ use core::panic::PanicInfo;
 use libwoven::Args;
 use wovenhat_update::{parse, Command};
 
+mod client;
 mod gui;
 mod service;
 
@@ -17,13 +18,43 @@ fn main(args: Args) -> ! {
     if args.get(1) == Some(b"--gui") {
         gui::run(args.get(2));
     }
-    let command = parse(args.get(1).unwrap_or(b"--check"));
+    let first = args.get(1).unwrap_or(b"--check");
+    let raw: [&[u8]; 2] = [first, args.get(2).unwrap_or(b"")];
+    let command = parse(&raw[..if args.get(2).is_some() { 2 } else { 1 }]);
     let status = match command {
         Command::Check => check_updates(),
         Command::Service => service::run(),
+        Command::Query => transaction(libwoven::update_ipc::Operation::Query, "", client::no_slot(), "queried"),
+        Command::Stage => {
+            if !wovenhat_update::valid_update_path(core::str::from_utf8(raw[1]).unwrap_or("")) {
+                let _ = libwoven::print("WovenUpdate: invalid candidate path\n");
+                2
+            } else {
+                transaction(
+                    libwoven::update_ipc::Operation::Stage,
+                    core::str::from_utf8(raw[1]).unwrap_or(""),
+                    client::no_slot(),
+                    "staged",
+                )
+            }
+        }
+        Command::Activate => {
+            match core::str::from_utf8(raw[1]).unwrap_or("").parse::<u8>() {
+                Ok(slot) if slot < 2 => transaction(
+                    libwoven::update_ipc::Operation::Activate,
+                    "",
+                    slot,
+                    "activated",
+                ),
+                _ => {
+                    let _ = libwoven::print("WovenUpdate: invalid slot\n");
+                    2
+                }
+            }
+        }
         Command::Help => {
             let _ = libwoven::print(
-                "WovenUpdate: --check (read-only), --service (privileged IPC daemon)\n",
+                "WovenUpdate: --check | --query | --stage PATH | --activate SLOT | --service\n",
             );
             0
         }
@@ -33,6 +64,28 @@ fn main(args: Args) -> ! {
         }
     };
     libwoven::exit(status)
+}
+
+fn transaction(operation: libwoven::update_ipc::Operation, source: &str, slot: u8, action: &str) -> u64 {
+    match client::call(operation, source, slot, 1) {
+        Ok(value) => {
+            let _ = libwoven::print("WovenUpdate: ");
+            let _ = libwoven::print(action);
+            let _ = libwoven::print(" value=");
+            let mut digits = [0u8; 20];
+            if let Ok(text) = core::str::from_utf8(libwoven::format_u64(value, &mut digits)) {
+                let _ = libwoven::print(text);
+            }
+            let _ = libwoven::print("\n");
+            0
+        }
+        Err(status) => {
+            let _ = libwoven::print("WovenUpdate: transaction failed: ");
+            let _ = libwoven::print(client::status_text(status));
+            let _ = libwoven::print("\n");
+            3
+        }
+    }
 }
 
 fn check_updates() -> u64 {

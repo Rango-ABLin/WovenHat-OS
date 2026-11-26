@@ -1,7 +1,9 @@
 use std::{env, fs, path::PathBuf, process};
 
+#[cfg(test)]
 use ed25519_compact::{KeyPair, Seed};
 use sha2::{Digest, Sha256};
+use wovenhat_release_signing::SigningRequest;
 
 const MAGIC: &[u8; 4] = b"WUPD";
 const VERSION: u16 = 1;
@@ -17,12 +19,13 @@ const TEST_SEED: [u8; 32] = [
 fn usage() -> ! {
     eprintln!(
         "usage: wovenhat-wupd-packager INPUT OUTPUT GENERATION\n\
-         production signing uses WOVENHAT_APP_SIGNING_SEED_HEX and requires\n\
-         WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"
+         production signing requires WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX and either\n\
+         WOVENHAT_APP_SIGNING_SEED_HEX or WOVENHAT_APP_EXTERNAL_SIGNER"
     );
     process::exit(2)
 }
 
+#[cfg(test)]
 fn parse_hex(value: &str) -> Result<[u8; 32], &'static str> {
     if value.len() != 64 {
         return Err("key must contain 64 hexadecimal digits");
@@ -54,40 +57,10 @@ fn parse_generation(value: &str) -> u64 {
     generation
 }
 
-fn signing_key() -> KeyPair {
+fn signature(input: &[u8], generation: u64) -> [u8; 64] {
     let release_mode = env::var(RELEASE_MODE)
         .map(|value| value == "1")
         .unwrap_or(false);
-    let seed = match env::var("WOVENHAT_APP_SIGNING_SEED_HEX") {
-        Ok(value) => parse_hex(&value).unwrap_or_else(|error| {
-            eprintln!("invalid WOVENHAT_APP_SIGNING_SEED_HEX: {error}");
-            process::exit(2)
-        }),
-        Err(_) if release_mode => {
-            eprintln!("production WUPD packaging requires WOVENHAT_APP_SIGNING_SEED_HEX");
-            process::exit(2);
-        }
-        Err(_) => TEST_SEED,
-    };
-    let key_pair = KeyPair::from_seed(Seed::new(seed));
-    if release_mode {
-        let trusted = env::var("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX").unwrap_or_else(|_| {
-            eprintln!("production WUPD packaging requires WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX");
-            process::exit(2)
-        });
-        let trusted = parse_hex(&trusted).unwrap_or_else(|error| {
-            eprintln!("invalid WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX: {error}");
-            process::exit(2)
-        });
-        if key_pair.pk.as_ref() != trusted {
-            eprintln!("application signing key mismatch");
-            process::exit(2);
-        }
-    }
-    key_pair
-}
-
-fn package(input: &[u8], generation: u64, key_pair: &KeyPair) -> Vec<u8> {
     let digest: [u8; 32] = Sha256::digest(input).into();
     let mut signed = Sha256::new();
     signed.update(DOMAIN);
@@ -98,7 +71,23 @@ fn package(input: &[u8], generation: u64, key_pair: &KeyPair) -> Vec<u8> {
     signed.update((input.len() as u64).to_le_bytes());
     signed.update(digest);
     signed.update(input);
-    let signature = key_pair.sk.sign(signed.finalize(), None);
+    SigningRequest {
+        purpose: "app",
+        seed_env: "WOVENHAT_APP_SIGNING_SEED_HEX",
+        trusted_public_env: "WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX",
+        external_signer_env: "WOVENHAT_APP_EXTERNAL_SIGNER",
+        production: release_mode,
+        development_seed: Some(TEST_SEED),
+    }
+    .sign(signed.finalize().as_ref())
+    .unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(2);
+    })
+}
+
+fn package(input: &[u8], generation: u64, signature: [u8; 64]) -> Vec<u8> {
+    let digest: [u8; 32] = Sha256::digest(input).into();
 
     let mut output = Vec::with_capacity(HEADER_LEN + input.len());
     output.extend_from_slice(MAGIC);
@@ -107,7 +96,7 @@ fn package(input: &[u8], generation: u64, key_pair: &KeyPair) -> Vec<u8> {
     output.extend_from_slice(&generation.to_le_bytes());
     output.extend_from_slice(&(input.len() as u64).to_le_bytes());
     output.extend_from_slice(&digest);
-    output.extend_from_slice(&*signature);
+    output.extend_from_slice(&signature);
     output.extend_from_slice(input);
     output
 }
@@ -144,7 +133,7 @@ fn main() {
         process::exit(2)
     });
     let generation = parse_generation(&generation);
-    let package = package(&image, generation, &signing_key());
+    let package = package(&image, generation, signature(&image, generation));
     fs::write(&output, &package).unwrap_or_else(|error| {
         eprintln!("failed to write output: {error}");
         process::exit(2)
@@ -170,8 +159,11 @@ mod tests {
 
     #[test]
     fn package_matches_kernel_layout_and_signature_input() {
-        let key_pair = KeyPair::from_seed(Seed::new(TEST_SEED));
-        let package = package(b"kernel-image", 7, &key_pair);
+        let package = package(
+            b"kernel-image",
+            7,
+            development_signature(b"kernel-image", 7),
+        );
         assert_eq!(&package[..4], MAGIC);
         assert_eq!(u16::from_le_bytes([package[4], package[5]]), VERSION);
         assert_eq!(
@@ -185,9 +177,8 @@ mod tests {
 
     #[test]
     fn package_digest_is_image_digest() {
-        let key_pair = KeyPair::from_seed(Seed::new(TEST_SEED));
         let image = b"kernel-image";
-        let package = package(image, 1, &key_pair);
+        let package = package(image, 1, [0; 64]);
         let expected: [u8; 32] = Sha256::digest(image).into();
         assert_eq!(&package[24..56], &expected);
     }
@@ -196,7 +187,7 @@ mod tests {
     fn package_signature_covers_manifest_and_image() {
         let key_pair = KeyPair::from_seed(Seed::new(TEST_SEED));
         let image = b"kernel-image";
-        let package = package(image, 3, &key_pair);
+        let package = package(image, 3, development_signature(image, 3));
         let mut signed = Sha256::new();
         signed.update(DOMAIN);
         signed.update(&package[..56]);
@@ -213,5 +204,24 @@ mod tests {
             .pk
             .verify(tampered_digest.finalize(), &signature)
             .is_err());
+    }
+
+    fn development_signature(input: &[u8], generation: u64) -> [u8; 64] {
+        let digest: [u8; 32] = Sha256::digest(input).into();
+        let mut signed = Sha256::new();
+        signed.update(DOMAIN);
+        signed.update(MAGIC);
+        signed.update(VERSION.to_le_bytes());
+        signed.update((HEADER_LEN as u16).to_le_bytes());
+        signed.update(generation.to_le_bytes());
+        signed.update((input.len() as u64).to_le_bytes());
+        signed.update(digest);
+        signed.update(input);
+        KeyPair::from_seed(Seed::new(TEST_SEED))
+            .sk
+            .sign(signed.finalize(), None)
+            .as_ref()
+            .try_into()
+            .unwrap()
     }
 }

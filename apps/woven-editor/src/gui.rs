@@ -17,7 +17,13 @@ const MAX_TEXT: usize = 256;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
-const PANEL_HEIGHT: usize = 196;
+const PANEL_HEIGHT: usize = 198;
+const OPEN_X: i32 = 22;
+const SAVE_AS_X: i32 = 128;
+const DISCARD_X: i32 = 234;
+const ACTION_Y: i32 = 190;
+const ACTION_WIDTH: usize = 96;
+const PATH_Y: i32 = 170;
 const MAX_ENTRIES: usize = 32;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -26,18 +32,30 @@ struct EditorView<'a, 'b> {
     refresh_count: u32,
     refresh: &'a Button<'b>,
     save: &'a Button<'b>,
+    open: &'a Button<'b>,
+    save_as: &'a Button<'b>,
+    discard: &'a Button<'b>,
     editor: &'a TextField<MAX_TEXT>,
+    path: &'a TextField<MAX_TEXT>,
+    status: &'a str,
     saved: bool,
+    confirm_unsaved: bool,
 }
 
 macro_rules! render_editor {
-    ($window:expr, $pointer:expr, $pressed:expr, $refresh_count:expr, $refresh:expr, $save:expr, $editor:expr, $saved:expr) => {{
+    ($window:expr, $pointer:expr, $pressed:expr, $refresh_count:expr, $refresh:expr, $save:expr, $open:expr, $save_as:expr, $discard:expr, $editor:expr, $path:expr, $status:expr, $saved:expr, $confirm:expr) => {{
         let view = EditorView {
             refresh_count: $refresh_count,
             refresh: $refresh,
             save: $save,
+            open: $open,
+            save_as: $save_as,
+            discard: $discard,
             editor: $editor,
+            path: $path,
+            status: $status,
             saved: $saved,
+            confirm_unsaved: $confirm,
         };
         render($window, $pointer, $pressed, &view)
     }};
@@ -104,46 +122,29 @@ fn draw_editor(
             ..THEME
         },
     );
+    let _ = entry_count();
     canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 54, "/mnt", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 84, "Files available", THEME.accent);
-    let count = entry_count();
-    let mut digits = [0u8; 20];
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 102, "Entries ", THEME.text);
-    let count_text = libwoven::format_u64(count as u64, &mut digits);
-    if let Ok(text) = core::str::from_utf8(count_text) {
-        canvas.draw_text_system(PANEL_X + 58, PANEL_Y + 102, text, THEME.accent);
-    }
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 124,
-        "Note (saved to /mnt/woven-note.txt)",
-        THEME.accent,
-    );
     view.editor.draw(canvas, THEME);
     canvas.draw_text_system(
         PANEL_X + 10,
-        PANEL_Y + 154,
-        "Type text, Backspace, Enter to save",
-        THEME.text,
-    );
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 172,
-        if view.saved {
-            "Saved"
+        PANEL_Y + 133,
+        if view.confirm_unsaved {
+            "Unsaved changes - Discard to close"
         } else {
-            "Unsaved changes"
+            view.status
         },
         if view.saved { THEME.accent } else { THEME.text },
     );
-    let mut refresh_digits = [0u8; 20];
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
-    let refresh_text = libwoven::format_u64(u64::from(view.refresh_count), &mut refresh_digits);
-    if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 148, "Path", THEME.text);
+    view.path.draw(canvas, THEME);
+    if view.confirm_unsaved {
+        view.discard.draw(canvas, THEME);
     }
+    let _ = view.refresh_count;
     view.refresh.draw(canvas, THEME);
     view.save.draw(canvas, THEME);
+    view.open.draw(canvas, THEME);
+    view.save_as.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
@@ -205,10 +206,43 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         Frame::new(SAVE_X, BUTTON_Y, SAVE_WIDTH as i32, BUTTON_HEIGHT as i32),
         "Save",
     );
-    let mut editor = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PANEL_Y + 136, 316, 18));
+    let mut open_button = Button::new(
+        Frame::new(OPEN_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Open",
+    );
+    let mut save_as = Button::new(
+        Frame::new(SAVE_AS_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Save As",
+    );
+    let mut discard = Button::new(
+        Frame::new(DISCARD_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Discard",
+    );
+    let mut editor = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PANEL_Y + 108, 316, 18));
     editor.focused = true;
+    let mut path = TextField::<MAX_TEXT>::new(Frame::new(PANEL_X + 10, PATH_Y, 130, 20));
+    if !path.set_text(wovenhat_editor::DEFAULT_NOTE) {
+        fail(9)
+    }
     let mut saved = false;
-    if !render_editor!(&window, None, false, 0, &refresh, &save, &editor, saved) {
+    let mut status = "Ready";
+    let mut confirm_unsaved = false;
+    if !render_editor!(
+        &window,
+        None,
+        false,
+        0,
+        &refresh,
+        &save,
+        &open_button,
+        &save_as,
+        &discard,
+        &editor,
+        &path,
+        status,
+        saved,
+        confirm_unsaved
+    ) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -240,7 +274,29 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 continue;
             }
             if message.get(..length.min(4)) == Some(&b"WCLS"[..]) {
-                break;
+                if saved || confirm_unsaved {
+                    break;
+                }
+                confirm_unsaved = true;
+                status = "Unsaved changes - Discard to close";
+                let _ = libwoven::print("WovenEditor: unsaved close held\n");
+                let _ = render_editor!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    refresh_count,
+                    &refresh,
+                    &save,
+                    &open_button,
+                    &save_as,
+                    &discard,
+                    &editor,
+                    &path,
+                    status,
+                    saved,
+                    confirm_unsaved
+                );
+                continue;
             }
             if message.get(..length) == Some(&b"WCAN"[..]) {
                 refresh.cancel_pointer();
@@ -252,8 +308,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count,
                     &refresh,
                     &save,
+                    &open_button,
+                    &save_as,
+                    &discard,
                     &editor,
-                    saved
+                    &path,
+                    status,
+                    saved,
+                    confirm_unsaved
                 ) {
                     fail(8)
                 }
@@ -273,8 +335,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                             refresh_count,
                             &refresh,
                             &save,
+                            &open_button,
+                            &save_as,
+                            &discard,
                             &editor,
-                            saved
+                            &path,
+                            status,
+                            saved,
+                            confirm_unsaved
                         ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
@@ -294,7 +362,11 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 if let Some((x, y)) = pointer {
                     refresh.pointer_move(i32::from(x), i32::from(y));
                     save.pointer_move(i32::from(x), i32::from(y));
+                    open_button.pointer_move(i32::from(x), i32::from(y));
+                    save_as.pointer_move(i32::from(x), i32::from(y));
+                    discard.pointer_move(i32::from(x), i32::from(y));
                     editor.pointer(i32::from(x), i32::from(y), false);
+                    path.pointer(i32::from(x), i32::from(y), false);
                 }
                 if !render_editor!(
                     &window,
@@ -303,8 +375,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count,
                     &refresh,
                     &save,
+                    &open_button,
+                    &save_as,
+                    &discard,
                     &editor,
-                    saved
+                    &path,
+                    status,
+                    saved,
+                    confirm_unsaved
                 ) {
                     fail(8)
                 }
@@ -314,18 +392,46 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
-                if editor.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
-                    saved = false;
-                }
+                // Focusing a field is not an edit; only character and
+                // backspace input marks the buffer dirty.
+                let _ = editor.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
+                let _ = path.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
                 if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenEditor: pointer refreshed\n");
                 }
-                if save.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed)
-                    && save_note(editor.as_str())
+                if save.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    match save_to(wovenhat_editor::DEFAULT_NOTE, editor.as_str()) {
+                        Ok(()) => {
+                            saved = true;
+                            status = "Saved";
+                        }
+                        Err(error) => status = error_status(error),
+                    }
+                }
+                if save_as.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    match save_to(path.as_str(), editor.as_str()) {
+                        Ok(()) => {
+                            saved = true;
+                            status = "Saved as path";
+                        }
+                        Err(error) => status = error_status(error),
+                    }
+                }
+                if open_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    match open_note(path.as_str(), &mut editor) {
+                        Ok(()) => {
+                            saved = true;
+                            status = "Opened";
+                        }
+                        Err(error) => status = error_status(error),
+                    }
+                }
+                if confirm_unsaved
+                    && discard.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed)
                 {
-                    saved = true;
-                    let _ = libwoven::print("WovenEditor: note saved\n");
+                    let _ = libwoven::print("WovenEditor: unsaved changes discarded\n");
+                    break;
                 }
                 if !render_editor!(
                     &window,
@@ -334,8 +440,14 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     refresh_count,
                     &refresh,
                     &save,
+                    &open_button,
+                    &save_as,
+                    &discard,
                     &editor,
-                    saved
+                    &path,
+                    status,
+                    saved,
+                    confirm_unsaved
                 ) {
                     fail(8)
                 }
@@ -348,10 +460,21 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 };
                 let changed = if let Some(event) = event {
                     if matches!(event, InputEvent::Key(Key::Enter)) {
-                        if save_note(editor.as_str()) {
-                            saved = true;
+                        let target = if path.focused {
+                            path.as_str()
+                        } else {
+                            wovenhat_editor::DEFAULT_NOTE
+                        };
+                        match save_to(target, editor.as_str()) {
+                            Ok(()) => {
+                                saved = true;
+                                status = if path.focused { "Saved as path" } else { "Saved" };
+                            }
+                            Err(error) => status = error_status(error),
                         }
                         true
+                    } else if path.focused {
+                        path.handle(event)
                     } else {
                         editor.handle(event)
                     }
@@ -359,7 +482,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     false
                 };
                 if changed {
-                    if !matches!(event, Some(InputEvent::Key(Key::Enter))) {
+                    if !matches!(event, Some(InputEvent::Key(Key::Enter))) && !path.focused {
                         saved = false;
                     }
                     let _ = render_editor!(
@@ -369,25 +492,44 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                         refresh_count,
                         &refresh,
                         &save,
+                        &open_button,
+                        &save_as,
+                        &discard,
                         &editor,
-                        saved
+                        &path,
+                        status,
+                        saved,
+                        confirm_unsaved
                     );
                 }
-            } else if length == 1
-                && message[0].is_ascii_graphic()
-                && editor.handle(InputEvent::Key(Key::Char(message[0] as char)))
-            {
-                saved = false;
-                let _ = render_editor!(
-                    &window,
-                    pointer,
-                    pointer_pressed,
-                    refresh_count,
-                    &refresh,
-                    &save,
-                    &editor,
-                    saved
-                );
+            } else if length == 1 && message[0].is_ascii_graphic() {
+                let event = InputEvent::Key(Key::Char(message[0] as char));
+                let changed = if path.focused {
+                    path.handle(event)
+                } else {
+                    editor.handle(event)
+                };
+                if changed {
+                    if !path.focused {
+                        saved = false;
+                    }
+                    let _ = render_editor!(
+                        &window,
+                        pointer,
+                        pointer_pressed,
+                        refresh_count,
+                        &refresh,
+                        &save,
+                        &open_button,
+                        &save_as,
+                        &discard,
+                        &editor,
+                        &path,
+                        status,
+                        saved,
+                        confirm_unsaved
+                    );
+                }
             }
         }
     }
@@ -395,18 +537,79 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     libwoven::exit(0)
 }
 
-fn save_note(text: &str) -> bool {
-    let Ok(descriptor) = libwoven::open_access("/mnt/woven-note.txt", 6) else {
-        return false;
-    };
-    let result = libwoven::write_file(descriptor, text.as_bytes()) == Ok(text.len());
-    let _ = libwoven::close(descriptor);
-    if result {
-        unsafe {
-            libwoven::syscall::sync();
-        }
+fn error_status(error: wovenhat_editor::SaveError) -> &'static str {
+    match error {
+        wovenhat_editor::SaveError::InvalidPath => "Error: invalid path",
+        wovenhat_editor::SaveError::OpenDenied => "Error: open denied",
+        wovenhat_editor::SaveError::ReadFailed => "Error: read failed",
+        wovenhat_editor::SaveError::WriteFailed => "Error: write failed",
+        wovenhat_editor::SaveError::SyncFailed => "Error: sync failed",
     }
-    result
+}
+
+fn log_failure(action: &str, error: wovenhat_editor::SaveError) {
+    let _ = libwoven::print("WovenEditor: ");
+    let _ = libwoven::print(action);
+    let _ = libwoven::print(" failed: ");
+    let _ = libwoven::print(error.as_str());
+    let _ = libwoven::print("\n");
+}
+
+/// Save through the existing capability-checked filesystem ABI. The kernel
+/// still enforces `FileWrite`, the mounted-path policy and the VFS bounds.
+fn save_to(path: &str, text: &str) -> Result<(), wovenhat_editor::SaveError> {
+    use wovenhat_editor::SaveError;
+    if !wovenhat_editor::valid_note_path(path) {
+        log_failure("save", SaveError::InvalidPath);
+        return Err(SaveError::InvalidPath);
+    }
+    let Ok(descriptor) = libwoven::open_access(path, 6) else {
+        log_failure("save", SaveError::OpenDenied);
+        return Err(SaveError::OpenDenied);
+    };
+    let written = libwoven::write_file(descriptor, text.as_bytes());
+    let _ = libwoven::close(descriptor);
+    if written != Ok(text.len()) {
+        log_failure("save", SaveError::WriteFailed);
+        return Err(SaveError::WriteFailed);
+    }
+    // The syscall sentinel for failure is u64::MAX; zero is a valid count.
+    if unsafe { libwoven::syscall::sync() } == u64::MAX {
+        log_failure("save", SaveError::SyncFailed);
+        return Err(SaveError::SyncFailed);
+    }
+    let _ = libwoven::print("WovenEditor: note saved\n");
+    Ok(())
+}
+
+/// Load a bounded note into the editor field, trimming at a UTF-8 boundary.
+fn open_note(
+    path: &str,
+    editor: &mut TextField<MAX_TEXT>,
+) -> Result<(), wovenhat_editor::SaveError> {
+    use wovenhat_editor::SaveError;
+    if !wovenhat_editor::valid_note_path(path) {
+        log_failure("open", SaveError::InvalidPath);
+        return Err(SaveError::InvalidPath);
+    }
+    let Ok(descriptor) = libwoven::open_access(path, 1) else {
+        log_failure("open", SaveError::OpenDenied);
+        return Err(SaveError::OpenDenied);
+    };
+    let mut bytes = [0u8; MAX_TEXT];
+    let result = libwoven::read(descriptor, &mut bytes);
+    let _ = libwoven::close(descriptor);
+    let Ok(length) = result else {
+        log_failure("open", SaveError::ReadFailed);
+        return Err(SaveError::ReadFailed);
+    };
+    let text = wovenhat_editor::trim_utf8(&bytes[..length.min(bytes.len())]);
+    if !editor.set_text(text) {
+        log_failure("open", SaveError::ReadFailed);
+        return Err(SaveError::ReadFailed);
+    }
+    let _ = libwoven::print("WovenEditor: note opened\n");
+    Ok(())
 }
 
 fn log_pointer(pointer: Option<(u16, u16)>) {

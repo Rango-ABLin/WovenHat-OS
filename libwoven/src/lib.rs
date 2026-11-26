@@ -12611,6 +12611,16 @@ pub mod syscall {
     pub const DNS_POLL: u64 = 45;
     pub const DNS_CANCEL: u64 = 97;
     pub const NET_PEER: u64 = 46;
+    /// socket, local port -> 0: put a TCP socket into bounded listen state
+    pub const NET_LISTEN: u64 = 249;
+    /// socket -> async handle for one event-driven accept
+    pub const ASYNC_NET_ACCEPT: u64 = 250;
+    /// async handle, completion buffer, data buffer -> 1 complete, 0 pending
+    pub const ASYNC_NET_POLL: u64 = 79;
+    /// async handle, completion buffer, data buffer -> 1 complete
+    pub const ASYNC_NET_WAIT: u64 = 80;
+    /// user buffer, length -> 0; fails closed without a boot entropy source
+    pub const SECURE_RANDOM: u64 = 251;
     pub const DHCP: u64 = 47;
     pub const PING_START: u64 = 48;
     pub const PING_POLL: u64 = 49;
@@ -14427,8 +14437,8 @@ impl<'a> Canvas<'a> {
                 // silently vanish. Draw a scaled bitmap fallback so missing
                 // glyphs stay legible and size-consistent with the TTF run.
                 let mut encoded = [0_u8; 4];
-                let bitmap_scale = ((usize::from(scale) + font::HEIGHT / 2) / font::HEIGHT)
-                    .clamp(1, 16);
+                let bitmap_scale =
+                    ((usize::from(scale) + font::HEIGHT / 2) / font::HEIGHT).clamp(1, 16);
                 let bitmap_y = cursor_y
                     .saturating_add(face.ascent_px(scale))
                     .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
@@ -14507,8 +14517,8 @@ impl<'a> Canvas<'a> {
                     // size so a rasterizer/cache miss does not mix tiny 5x7 text
                     // with real TTF glyphs. Keep the real advance when available.
                     let mut encoded = [0_u8; 4];
-                    let bitmap_scale = ((usize::from(size) + font::HEIGHT / 2) / font::HEIGHT)
-                        .clamp(1, 16);
+                    let bitmap_scale =
+                        ((usize::from(size) + font::HEIGHT / 2) / font::HEIGHT).clamp(1, 16);
                     let bitmap_y = pen_y
                         .saturating_add(face.ascent_px(size))
                         .saturating_sub(font::HEIGHT as i32 * bitmap_scale as i32);
@@ -14526,9 +14536,8 @@ impl<'a> Canvas<'a> {
                     if let Some(advance) = face.advance_px(character, size) {
                         pen_x = pen_x.saturating_add(advance);
                     } else {
-                        pen_x = pen_x.saturating_add(
-                            font::ADVANCE.saturating_mul(bitmap_scale as i32),
-                        );
+                        pen_x =
+                            pen_x.saturating_add(font::ADVANCE.saturating_mul(bitmap_scale as i32));
                     }
                 }
             }
@@ -15612,6 +15621,86 @@ pub fn write_file_all(descriptor: u64, bytes: &[u8]) -> Result<usize, Error> {
         offset += written;
     }
     Ok(offset)
+}
+
+/// Create a bounded directory. The kernel still enforces `FileWrite`, the
+/// sandbox file scope and the mounted-path policy.
+pub fn mkdir(path: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if path.is_empty() || path.len() > MAX_PATH {
+        return Err(Error::Failed);
+    }
+    let result =
+        unsafe { syscall::invoke(syscall::MKDIR, path.as_ptr() as u64, path.len() as u64, 0) };
+    check(result).map(|_| ())
+}
+
+/// Remove a bounded file or empty directory. Authority is unchanged; the
+/// kernel rechecks `FileWrite` and the path scope.
+pub fn unlink(path: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if path.is_empty() || path.len() > MAX_PATH {
+        return Err(Error::Failed);
+    }
+    let result =
+        unsafe { syscall::invoke(syscall::UNLINK, path.as_ptr() as u64, path.len() as u64, 0) };
+    check(result).map(|_| ())
+}
+
+/// Rename/move within one mounted namespace, with both paths authorized by
+/// the kernel. The packed length argument follows the fixed syscall ABI.
+pub fn rename(old: &str, new: &str) -> Result<(), Error> {
+    const MAX_PATH: usize = 512;
+    if old.is_empty()
+        || new.is_empty()
+        || old.len() > MAX_PATH
+        || new.len() > MAX_PATH
+        || old.len() > u16::MAX as usize
+        || new.len() > u16::MAX as usize
+    {
+        return Err(Error::Failed);
+    }
+    let lengths = (old.len() as u64) | ((new.len() as u64) << 16);
+    let result = unsafe {
+        syscall::invoke(
+            syscall::RENAME,
+            old.as_ptr() as u64,
+            lengths,
+            new.as_ptr() as u64,
+        )
+    };
+    check(result).map(|_| ())
+}
+
+/// Flush mounted, writable filesystems. Returns `Ok` even when nothing is
+/// mounted (the kernel reports a zero flush count); only the syscall failure
+/// sentinel is an error.
+pub fn sync_all() -> Result<(), Error> {
+    if unsafe { syscall::sync() } == u64::MAX {
+        Err(Error::Failed)
+    } else {
+        Ok(())
+    }
+}
+
+/// Fill a caller-owned buffer from the kernel's bounded DRBG.
+///
+/// This is capability-free but fails closed when boot entropy was unavailable.
+/// It grants no device or secret authority; callers must still treat the bytes
+/// as generator output whose trust depends on the boot entropy boundary.
+pub fn secure_random(output: &mut [u8]) -> Result<usize, Error> {
+    if output.is_empty() || output.len() > 4096 {
+        return Err(Error::Failed);
+    }
+    check(unsafe {
+        syscall::invoke(
+            syscall::SECURE_RANDOM,
+            output.as_mut_ptr() as u64,
+            output.len() as u64,
+            0,
+        )
+    })
+    .map(|length| length as usize)
 }
 
 /// Write a string to standard output.

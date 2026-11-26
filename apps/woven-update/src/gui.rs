@@ -1,9 +1,9 @@
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::ui::{Button, Label, TextField, Theme};
+use libwoven::{Canvas, GraphicsSurface, InputEvent, Key, rgb};
 
 const WIDTH: u32 = 360;
-const HEIGHT: u32 = 200;
+const HEIGHT: u32 = 240;
 const BACKGROUND: u32 = rgb(14, 18, 30);
 const POINTER_MARKER: u32 = rgb(255, 80, 80);
 const THEME: Theme = Theme::DARK;
@@ -14,7 +14,13 @@ const BUTTON_HEIGHT: usize = 20;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
-const PANEL_HEIGHT: usize = 176;
+const PANEL_HEIGHT: usize = 216;
+const PATH_X: i32 = 22;
+const PATH_Y: i32 = 170;
+const PATH_WIDTH: usize = 130;
+const ACTION_Y: i32 = 190;
+const ACTION_WIDTH: usize = 74;
+const MAX_PATH: usize = 240;
 const MAX_ENTRIES: usize = 64;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -53,12 +59,22 @@ fn update_count() -> usize {
     count
 }
 
+struct UpdateView<'a, 'b> {
+    refresh: &'a Button<'b>,
+    path: &'a TextField<MAX_PATH>,
+    query: &'a Button<'b>,
+    stage: &'a Button<'b>,
+    activate_a: &'a Button<'b>,
+    activate_b: &'a Button<'b>,
+    status: &'a str,
+}
+
 fn draw_update(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &UpdateView<'_, '_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
@@ -86,19 +102,15 @@ fn draw_update(
         canvas.draw_text_system(PANEL_X + 130, PANEL_Y + 58, text, THEME.accent);
     }
     canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 92, "/updates", THEME.text);
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 124,
-        "No installation performed",
-        THEME.text,
-    );
-    let mut refresh_digits = [0u8; 20];
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 148, "Refreshes ", THEME.text);
-    let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
-    if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 148, text, THEME.accent);
-    }
-    refresh.draw(canvas, THEME);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 124, view.status, THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 158, "Candidate path", THEME.text);
+    view.path.draw(canvas, THEME);
+    let _ = refresh_count;
+    view.refresh.draw(canvas, THEME);
+    view.query.draw(canvas, THEME);
+    view.stage.draw(canvas, THEME);
+    view.activate_a.draw(canvas, THEME);
+    view.activate_b.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
@@ -115,7 +127,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &UpdateView<'_, '_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -127,8 +139,23 @@ fn render(
     ) else {
         return false;
     };
-    draw_update(&mut canvas, pointer, pressed, refresh_count, refresh);
+    draw_update(&mut canvas, pointer, pressed, refresh_count, view);
     window.write_canvas(&canvas).is_ok()
+}
+
+macro_rules! render_update {
+    ($window:expr, $pointer:expr, $pressed:expr, $count:expr, $refresh:expr, $path:expr, $query:expr, $stage:expr, $a:expr, $b:expr, $status:expr) => {{
+        let view = UpdateView {
+            refresh: $refresh,
+            path: $path,
+            query: $query,
+            stage: $stage,
+            activate_a: $a,
+            activate_b: $b,
+            status: $status,
+        };
+        render($window, $pointer, $pressed, $count, &view)
+    }};
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -140,7 +167,9 @@ fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     libwoven::message_send(shell, &response).is_ok()
 }
 
-/// Open a read-only update preflight window through WovenShell.
+/// Open a bounded update console through WovenShell. Privileged work is
+/// delegated to the `woven.update` service; this window holds no storage
+/// authority.
 pub fn run(shell: Option<&[u8]>) -> ! {
     let Some(shell) = shell.and_then(parse_u64).map(libwoven::process::Id) else {
         fail(7)
@@ -155,7 +184,25 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         ),
         "Refresh",
     );
-    if !render(&window, None, false, 0, &refresh) {
+    let mut path = TextField::<MAX_PATH>::new(Frame::new(PATH_X, PATH_Y, PATH_WIDTH as i32, 20));
+    let mut query = Button::new(
+        Frame::new(PATH_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Query",
+    );
+    let mut stage = Button::new(
+        Frame::new(PATH_X + 82, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Stage",
+    );
+    let mut activate_a = Button::new(
+        Frame::new(PATH_X + 164, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Activate A",
+    );
+    let mut activate_b = Button::new(
+        Frame::new(PATH_X + 246, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Activate B",
+    );
+    let mut status = "Service status unknown";
+    if !render_update!(&window, None, false, 0, &refresh, &path, &query, &stage, &activate_a, &activate_b, status) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -192,7 +239,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..length) == Some(&b"WCAN"[..]) {
                 refresh.cancel_pointer();
                 pointer_pressed = false;
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_update!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status) {
                     fail(8)
                 }
                 continue;
@@ -204,7 +251,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, &refresh) {
+                        if render_update!(&resized, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenUpdate: window resized\n");
@@ -222,8 +269,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 ));
                 if let Some((x, y)) = pointer {
                     refresh.pointer_move(i32::from(x), i32::from(y));
+                    query.pointer_move(i32::from(x), i32::from(y));
+                    stage.pointer_move(i32::from(x), i32::from(y));
+                    activate_a.pointer_move(i32::from(x), i32::from(y));
+                    activate_b.pointer_move(i32::from(x), i32::from(y));
+                    path.pointer(i32::from(x), i32::from(y), false);
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_update!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenUpdate: pointer updated\n");
@@ -232,19 +284,66 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
+                let _ = path.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
                 if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenUpdate: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if query.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::update_ipc::Operation::Query, "", crate::client::no_slot());
+                }
+                if stage.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::update_ipc::Operation::Stage, path.as_str(), crate::client::no_slot());
+                }
+                if activate_a.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::update_ipc::Operation::Activate, "", 0);
+                }
+                if activate_b.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::update_ipc::Operation::Activate, "", 1);
+                }
+                if !render_update!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenUpdate: pointer updated\n");
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 && message[4] == 2 {
+                if path.handle(InputEvent::Key(Key::Backspace)) {
+                    let _ = render_update!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status);
+                }
+            } else if length == 1
+                && message[0].is_ascii_graphic()
+                && path.handle(InputEvent::Key(Key::Char(message[0] as char)))
+            {
+                let _ = render_update!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &stage, &activate_a, &activate_b, status);
             }
         }
     }
     drop(window);
     libwoven::exit(0)
+}
+
+fn apply(
+    status: &mut &str,
+    operation: libwoven::update_ipc::Operation,
+    source: &str,
+    slot: u8,
+) {
+    match crate::client::call(operation, source, slot, 1) {
+        Ok(value) => {
+            *status = "Transaction accepted";
+            let _ = libwoven::print("WovenUpdate: transaction accepted value=");
+            let mut digits = [0u8; 20];
+            if let Ok(text) = core::str::from_utf8(libwoven::format_u64(value, &mut digits)) {
+                let _ = libwoven::print(text);
+            }
+            let _ = libwoven::print("\n");
+        }
+        Err(code) => {
+            *status = crate::client::status_text(code);
+            let _ = libwoven::print("WovenUpdate: transaction failed: ");
+            let _ = libwoven::print(status);
+            let _ = libwoven::print("\n");
+        }
+    }
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! WovenShell: the WovenHat desktop.
 //!
 //! A userspace program that takes the compositor lease and runs the desktop:
@@ -143,10 +142,10 @@ use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
+use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
-use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::layout::{self, Frame};
 use libwoven::ui::DesignTokens;
 use libwoven::{
@@ -178,6 +177,21 @@ mod icons;
 use icons::{app_icon, draw_app_icon, draw_app_icon_light};
 mod status;
 use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
+mod taskbar_prefs;
+use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
+mod pinned_apps;
+use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
+
+/// One taskbar group entry: a window on the current workspace, or a pinned
+/// catalog app that is not running on it. A pinned app with a running window
+/// shows that window's entry at the pin's position.
+#[derive(Clone, Copy)]
+enum TaskbarEntry {
+    /// Window slot.
+    Window(usize),
+    /// Catalog app index.
+    PinnedApp(usize),
+}
 
 /// Bounded system-status indicators in the taskbar tray. The module only
 /// reads existing status calls and never adds a capability; see `status.rs`.
@@ -198,16 +212,16 @@ const QS_GRID_COLS: usize = 3;
 const QS_GRID_GAP: i32 = 8;
 const QS_BUTTON_HEIGHT: i32 = 48;
 const QS_BUTTON_RADIUS: usize = 10;
-const QS_ICON_SIZE: i32 = 16;
 const QS_SLIDER_HEIGHT: i32 = 34;
 const QS_SLIDER_GAP: i32 = 10;
 const QS_SECTION_GAP: i32 = 8;
 const QS_FOOTER_HEIGHT: i32 = 40;
-/// Grid rows shown in the quick-action panel.
-const QS_GRID_ROWS: usize = 4;
-const QS_ACTIONS: usize = QS_GRID_COLS * QS_GRID_ROWS;
-/// Legacy row count kept for texture sizing; actual layout is grid-driven.
-const QS_ROWS: usize = 10;
+/// Grid rows shown in the quick-action panel. Five rows hold the combined
+/// action set from both reconciled Phase B branches (one spare cell).
+const QS_GRID_ROWS: usize = 5;
+/// Both branches' controls are retained: honest radios/power/display plus the
+/// taskbar layout controls. The final grid cell is intentionally unused.
+const QS_ACTIONS: usize = 14;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum QsAction {
@@ -215,8 +229,10 @@ enum QsAction {
     Bluetooth,
     Airplane,
     BatterySaver,
+    TaskbarAlign,
     FocusAssist,
     NightLight,
+    TaskbarIconSize,
     Accessibility,
     DisplayScale,
     Tiling,
@@ -230,8 +246,10 @@ const QS_ACTION_ORDER: [QsAction; QS_ACTIONS] = [
     QsAction::Bluetooth,
     QsAction::Airplane,
     QsAction::BatterySaver,
+    QsAction::TaskbarAlign,
     QsAction::FocusAssist,
     QsAction::NightLight,
+    QsAction::TaskbarIconSize,
     QsAction::Accessibility,
     QsAction::DisplayScale,
     QsAction::Tiling,
@@ -505,6 +523,15 @@ fn label(bytes: &[u8], limit: usize, buffer: &mut [u8]) -> usize {
     length
 }
 
+/// `prefix + name` for a pin/unpin toast, truncated to the caller's buffer.
+/// Catalog names are bounded ASCII, so this never escapes the buffer.
+fn pin_text<'a>(prefix: &[u8], name: &[u8], buffer: &'a mut [u8; 48]) -> &'a str {
+    let length = (prefix.len() + name.len()).min(buffer.len());
+    buffer[..prefix.len()].copy_from_slice(prefix);
+    buffer[prefix.len()..length].copy_from_slice(&name[..length - prefix.len()]);
+    core::str::from_utf8(&buffer[..length]).unwrap_or("Pinned")
+}
+
 /// `bytes` as text, cut to the longest prefix that fits `max_width` at the
 /// body size, with the same printable-ASCII substitution as [`label`].
 fn truncate_to_width(bytes: &[u8], max_width: i32, buffer: &mut [u8; 64]) -> usize {
@@ -576,7 +603,13 @@ fn fill_rounded(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32) 
 
 /// A filled rounded rectangle with explicit opacity, for translucent chrome
 /// (the sign-in/lock card) rather than a fully opaque fill.
-fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, color: u32, opacity: u8) {
+fn fill_rounded_blended(
+    canvas: &mut Canvas<'_>,
+    area: Area,
+    radius: usize,
+    color: u32,
+    opacity: u8,
+) {
     Renderer::new(canvas).rounded_rect_blended(rect_of(area), radius, color_of(color), opacity);
 }
 
@@ -585,7 +618,12 @@ fn fill_rounded_blended(canvas: &mut Canvas<'_>, area: Area, radius: usize, colo
 /// reuses `rounded_rect` rather than adding a second corner-distance
 /// implementation.
 fn fill_circle(canvas: &mut Canvas<'_>, center_x: i32, center_y: i32, diameter: i32, color: u32) {
-    let area = Area::new(center_x - diameter / 2, center_y - diameter / 2, diameter, diameter);
+    let area = Area::new(
+        center_x - diameter / 2,
+        center_y - diameter / 2,
+        diameter,
+        diameter,
+    );
     fill_rounded(canvas, area, (diameter / 2).max(0) as usize, color);
 }
 
@@ -605,7 +643,7 @@ fn lighten(color: u32, amount: u8) -> u32 {
 }
 
 mod model;
-use model::{load_catalog, matches, App, Child, Note, TrayIcon, Toast, Window};
+use model::{load_catalog, matches, App, Child, Note, Toast, TrayIcon, Window};
 
 mod painter;
 use painter::Painter;
@@ -615,7 +653,6 @@ use painter::Painter;
 const START_LABEL: &str = "Start";
 const START_BUTTON_WIDTH: i32 = 58;
 const START_ICON_SIZE: i32 = 14;
-const TASKBAR_ENTRY_WIDTH: i32 = 48;
 const TASKBAR_ENTRY_GAP: i32 = 4;
 
 /// Launcher overview layout (M3). Reuses `launcher_open`/`query`/
@@ -670,12 +707,20 @@ struct Desktop {
     qs_open: bool,
     /// Do Not Disturb: notifications are remembered but raise no toast.
     dnd: bool,
-    /// Simulated quick-action connectivity/power states.
-    wifi: bool,
-    bluetooth: bool,
-    airplane: bool,
-    battery_saver: bool,
-    night_light: bool,
+    /// Bottom taskbar placement and entry size, from the installed settings.
+    taskbar: TaskbarPrefs,
+    /// Taskbar auto-hide state: the settings-seeded preference plus its
+    /// reveal/hide timing. In-session state like pins: the shell holds
+    /// `FileRead` and no settings-write path exists, so it resets to the
+    /// record's value on the next boot.
+    auto_hide: AutoHide,
+    /// Bounded pinned catalog names, in pin order. Seeded from the installed
+    /// settings record's `pinned_apps` value (absent: the curated defaults;
+    /// empty: nothing pinned) and changed in-session by right-clicking a
+    /// taskbar entry. The same list drives the Overview Dash. In-session state
+    /// only: the shell process holds `FileRead` and no settings-write path
+    /// exists, so pins honestly reset to the record's list on the next boot.
+    pinned: PinnedApps,
     /// Brightness percentage for the quick-settings slider (0-100).
     brightness: u8,
     /// The display scale the shell set.
@@ -684,6 +729,13 @@ struct Desktop {
     status: StatusSnapshot,
     /// Tick at which the next bounded status re-sample is due.
     status_next_sample: u64,
+    /// Installed settings path supplied by `--settings`, used for bounded
+    /// live re-reads. The shell has `FileRead` only and never writes it.
+    settings_path: [u8; 256],
+    settings_path_len: usize,
+    /// Last observed settings digest and the next bounded re-read tick.
+    settings_hash: u64,
+    settings_next_sample: u64,
     /// The lock screen's language. Defaults to English, which keeps the
     /// exact strings every already-accepted lock-screen gate expects;
     /// Quick Settings can switch it to Chichewa.
@@ -768,11 +820,9 @@ impl Desktop {
         center_open: false,
         qs_open: false,
         dnd: false,
-        wifi: true,
-        bluetooth: false,
-        airplane: false,
-        battery_saver: false,
-        night_light: false,
+        taskbar: TaskbarPrefs::DEFAULT,
+        auto_hide: AutoHide::off(),
+        pinned: PinnedApps::curated(),
         brightness: 80,
         scale: 1,
         status: StatusSnapshot {
@@ -781,6 +831,10 @@ impl Desktop {
             battery: BatteryStatus::Unavailable,
         },
         status_next_sample: 0,
+        settings_path: [0; 256],
+        settings_path_len: 0,
+        settings_hash: 0,
+        settings_next_sample: 0,
         language: libwoven::i18n::Language::English,
         // Production presentation is 3D by default. The 3D path still calls
         // the bounded 2D painters to populate textures before projecting
@@ -845,7 +899,7 @@ impl Desktop {
         self.lock_card_area()
     }
 
-    /// The taskbar sits flush at the top of the screen. Keep this as a
+    /// The taskbar sits flush at the bottom edge of the screen. Keep this as a
     /// function so every layout calculation shares one chrome origin.
     fn taskbar_top(&self) -> i32 {
         (self.height - TASKBAR_HEIGHT).max(0)
@@ -855,12 +909,18 @@ impl Desktop {
         Area::new(0, self.taskbar_top(), self.width, TASKBAR_HEIGHT)
     }
 
-    /// The screen's usable band, excluding the bottom taskbar: `(top, height)`.
-    /// Shared by every window-placement/clamp site that needs to keep
-    /// windows clear of the bar (`work_area`, `open`, `resized`,
-    /// `toggle_scale`, `drag_to_pointer`).
+    /// The screen's usable band for windows: everything when the bar is
+    /// hidden, everything above the bar when it is not. Shared by every
+    /// window-placement/clamp site (`work_area`, `open`, `resized`,
+    /// `toggle_scale`, `drag_to_pointer`); the revealed bar simply draws
+    /// over whatever a window placed in the freed strip.
     fn usable_band(&self) -> (i32, i32) {
-        (0, (self.height - TASKBAR_HEIGHT).max(0))
+        let height = if self.auto_hide.is_hidden() {
+            self.height
+        } else {
+            (self.height - TASKBAR_HEIGHT).max(0)
+        };
+        (0, height)
     }
 
     /// Row for taskbar text, centered vertically in the bar.
@@ -937,11 +997,19 @@ impl Desktop {
         ]);
     }
 
-    /// Win11-style centered taskbar group: Start + running/pinned entries.
+    fn taskbar_entry_width(&self) -> i32 {
+        self.taskbar.icon_size.entry_width()
+    }
+
+    /// Win11-style application group: Start + pinned/running entries. It is
+    /// centred by default, or pinned to the left edge when the preference says
+    /// so. The count is the same combined list the painter and hit tests use,
+    /// so centering cannot disagree with what is actually on screen.
     fn taskbar_group_width(&self) -> i32 {
-        let entries = self.stacked as i32;
+        let (_, count) = self.taskbar_entries();
+        let entries = count as i32;
         let entries_width = if entries > 0 {
-            8 + entries * TASKBAR_ENTRY_WIDTH + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
+            8 + entries * self.taskbar_entry_width() + (entries - 1).max(0) * TASKBAR_ENTRY_GAP
         } else {
             0
         };
@@ -949,9 +1017,23 @@ impl Desktop {
     }
 
     fn start_area(&self) -> Area {
-        let group_x = (self.width - self.taskbar_group_width()) / 2;
+        let width = self.taskbar_group_width();
+        // The group may not run under the right-side controls (workspace
+        // boxes, tray, status icons, clock). Centre it inside the free band
+        // between the left margin and those controls -- not the whole screen,
+        // which the pinned defaults already fill past their left edge. When
+        // the group cannot fit even there, clamp it to the left margin so
+        // only the excess, never the whole group, overlaps.
+        let controls_left = self.workspace_area(0).x - 8;
+        let left = match self.taskbar.alignment {
+            Alignment::Center => {
+                let free = (controls_left - 8).max(0);
+                (8 + free / 2 - width / 2).clamp(8, (controls_left - width).max(8))
+            }
+            Alignment::Left => 8,
+        };
         Area::new(
-            group_x.max(4),
+            left.max(4),
             self.taskbar_top() + 4,
             START_BUTTON_WIDTH,
             START_HEIGHT as i32,
@@ -960,8 +1042,9 @@ impl Desktop {
 
     fn taskbar_entry_area(&self, index: usize) -> Area {
         let start = self.start_area();
-        let x = start.x + start.width + 8 + index as i32 * (TASKBAR_ENTRY_WIDTH + TASKBAR_ENTRY_GAP);
-        Area::new(x, self.taskbar_top() + 4, TASKBAR_ENTRY_WIDTH, START_HEIGHT as i32)
+        let width = self.taskbar_entry_width();
+        let x = start.x + start.width + 8 + index as i32 * (width + TASKBAR_ENTRY_GAP);
+        Area::new(x, self.taskbar_top() + 4, width, START_HEIGHT as i32)
     }
 
     /// The full-screen launcher has no projected halo; its bounded overview
@@ -1011,20 +1094,22 @@ impl Desktop {
         )
     }
 
-    /// Favorites (the same curated set as the desktop shortcuts,
-    /// `DESKTOP_ICON_NAMES`) first, then any other app with a running
-    /// instance ([`Self::children`]) not already a favorite, deduplicated,
-    /// bounded to `DASH_MAX`.
+    /// Pinned catalog names from the installed settings record first, then
+    /// any other app with a running instance ([`Self::children`]) not already
+    /// pinned, deduplicated and bounded to `DASH_MAX`. A pin whose package is
+    /// absent is skipped rather than fabricated.
     fn dash_apps(&self) -> ([usize; DASH_MAX], usize) {
         let mut apps = [0usize; DASH_MAX];
         let mut count = 0;
-        for index in 0..DESKTOP_ICON_NAMES.len() {
+        for index in 0..self.pinned.len() {
             if count >= DASH_MAX {
                 break;
             }
-            if let Some(app_index) = self.desktop_icon_app(index) {
-                apps[count] = app_index;
-                count += 1;
+            if let Some(name) = self.pinned.get(index) {
+                if let Some(app_index) = self.app_by_name(name.as_bytes()) {
+                    apps[count] = app_index;
+                    count += 1;
+                }
             }
         }
         for child in self.children.iter().flatten() {
@@ -1051,7 +1136,9 @@ impl Desktop {
     fn overview_thumb_area(&self, index: usize) -> Area {
         let overview = self.overview_area();
         Area::new(
-            overview.x + OVERVIEW_MARGIN + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
+            overview.x
+                + OVERVIEW_MARGIN
+                + index as i32 * (OVERVIEW_THUMB_WIDTH + OVERVIEW_THUMB_GAP),
             self.overview_thumb_row_top(),
             OVERVIEW_THUMB_WIDTH,
             OVERVIEW_THUMB_HEIGHT,
@@ -1125,9 +1212,17 @@ impl Desktop {
     /// Launch catalog entry `index` and close the launcher. A failure is
     /// reported in a toast. Returns the area to repaint.
     fn launch(&mut self, index: usize) -> Area {
-        let mut dirty = self.toggle_launcher();
+        self.toggle_launcher().union(self.start_app(index))
+    }
+
+    /// Start catalog entry `index` without touching the launcher: the
+    /// taskbar's pinned entries call this directly, so clicking a pin does
+    /// not open the Start panel. A failure is reported in a toast.
+    /// Returns the area to repaint.
+    fn start_app(&mut self, index: usize) -> Area {
+        let empty = Area::new(0, 0, 0, 0);
         let Some(app) = self.apps[index] else {
-            return dirty;
+            return empty;
         };
         let slot = self.children.iter().position(Option::is_none);
         let mut buffer = [0u8; 128];
@@ -1156,9 +1251,9 @@ impl Desktop {
                 until: libwoven::ticks() + TOAST_TICKS,
             });
             log(&[b"woven-shell: could not start ", app.name()]);
-            dirty = dirty.union(self.toast_area());
+            return empty.union(self.toast_area());
         }
-        dirty
+        empty
     }
 
     /// Keys while the launcher is open edit the search and choose.
@@ -1229,6 +1324,64 @@ impl Desktop {
             .enumerate()
             .filter_map(|(slot, window)| window.as_ref().map(|window| (slot, window)))
             .filter(move |(_, window)| window.workspace == workspace)
+    }
+
+    /// Catalog index of the app named `name`, if the catalog lists it.
+    fn app_index(&self, name: &[u8]) -> Option<usize> {
+        self.apps[..self.app_count]
+            .iter()
+            .position(|app| app.is_some_and(|app| app.name() == name))
+    }
+
+    /// Catalog index of the app that owns window `slot`, when the shell
+    /// launched it. Windows whose owner the shell did not spawn have no
+    /// app, and are not pinnable.
+    fn window_app(&self, slot: usize) -> Option<usize> {
+        let owner = self.windows.get(slot)?.as_ref()?.owner;
+        self.children
+            .iter()
+            .flatten()
+            .find(|child| child.pid == owner)
+            .map(|child| child.app)
+    }
+
+    /// The taskbar's application group, in display order: pinned apps in
+    /// pin order first -- a pinned app with a window on this workspace
+    /// shows that window's entry at the pin's position -- then every other
+    /// window in slot order. A pin whose name is not in the catalog is
+    /// not shown: a missing package leaves the pin inert, the same
+    /// contract as the desktop shortcuts. Bounded by
+    /// `MAX_PINNED` + `MAX_WINDOWS` entries.
+    fn taskbar_entries(&self) -> ([TaskbarEntry; PIN_CAP + MAX_WINDOWS], usize) {
+        let mut entries = [TaskbarEntry::Window(0); PIN_CAP + MAX_WINDOWS];
+        let mut claimed = [false; MAX_WINDOWS];
+        let mut count = 0;
+        for pin in 0..self.pinned.len() {
+            let Some(name) = self.pinned.get(pin) else {
+                continue;
+            };
+            let Some(app) = self.app_index(name.as_bytes()) else {
+                continue;
+            };
+            let claimed_slot = self.entries().find_map(|(slot, _)| {
+                (!claimed[slot] && self.window_app(slot) == Some(app)).then_some(slot)
+            });
+            match claimed_slot {
+                Some(slot) => {
+                    claimed[slot] = true;
+                    entries[count] = TaskbarEntry::Window(slot);
+                }
+                None => entries[count] = TaskbarEntry::PinnedApp(app),
+            }
+            count += 1;
+        }
+        for (slot, _) in self.entries() {
+            if !claimed[slot] {
+                entries[count] = TaskbarEntry::Window(slot);
+                count += 1;
+            }
+        }
+        (entries, count)
     }
 
     /// The switcher box for workspace `index`, left of the Quick Settings
@@ -1365,6 +1518,13 @@ impl Desktop {
 
     fn desktop_icon_app(&self, index: usize) -> Option<usize> {
         let name = DESKTOP_ICON_NAMES.get(index)?.as_bytes();
+        self.app_by_name(name)
+    }
+
+    /// Resolve a catalog entry by exact name. Pinned names come from the
+    /// installed settings record, so an unknown or removed package simply has
+    /// no Dash entry instead of being fabricated.
+    fn app_by_name(&self, name: &[u8]) -> Option<usize> {
         self.apps[..self.app_count]
             .iter()
             .position(|app| app.is_some_and(|app| app.name() == name))
@@ -1403,7 +1563,9 @@ impl Desktop {
     fn render_desktop(&self, canvas: &mut Canvas<'_>) {
         self.render_desktop_background(canvas);
         self.paint_desktop_icons(canvas);
-        self.paint_taskbar_content(canvas);
+        if !self.auto_hide.is_hidden() {
+            self.paint_taskbar_content(canvas);
+        }
     }
 
     /// The taskbar content: its translucent fill and bottom accent line, the
@@ -1437,8 +1599,19 @@ impl Desktop {
 
         let start = self.start_area();
         let catalog = shell_catalog(self.language);
-        let fill = if self.launcher_open { theme_accent() } else { theme_start_fill() };
-        let fill_top = if self.launcher_open { lighten(fill, 18) } else { lighten(fill, 28) };
+        let start_hover = !self.launcher_open && start.contains(self.pointer.0, self.pointer.1);
+        let fill = if self.launcher_open {
+            theme_accent()
+        } else if start_hover {
+            lighten(theme_start_fill(), 10)
+        } else {
+            theme_start_fill()
+        };
+        let fill_top = if self.launcher_open {
+            lighten(fill, 18)
+        } else {
+            lighten(fill, 28)
+        };
         Renderer::new(canvas).rounded_rect_gradient(
             rect_of(start),
             CHROME_RADIUS,
@@ -1462,56 +1635,134 @@ impl Desktop {
             (0, 8, theme_text()),
             (8, 8, theme_accent()),
         ] {
-            fill_rounded(canvas, Area::new(icon_left + dx, icon_top + dy, 6, 6), 1, color);
+            fill_rounded(
+                canvas,
+                Area::new(icon_left + dx, icon_top + dy, 6, 6),
+                1,
+                color,
+            );
         }
 
-        for (index, (slot, window)) in self.entries().enumerate() {
+        let (taskbar_entries, entry_count) = self.taskbar_entries();
+        for (index, entry) in taskbar_entries[..entry_count].iter().enumerate() {
             let area = self.taskbar_entry_area(index);
-            let active = self.focused() == Some(slot);
-            fill_rounded(
-                canvas,
-                area,
-                CHROME_RADIUS_SMALL,
-                if active {
-                    lighten(theme_entry(true), 12)
-                } else {
-                    theme_entry(false)
-                },
-            );
-            // Win11-style running/active indicator.
-            let indicator_w = if active { 16 } else { 6 };
-            let indicator_x = area.x + (area.width - indicator_w) / 2;
-            let indicator_y = area.y + area.height - 3;
-            fill_rounded(
-                canvas,
-                Area::new(indicator_x, indicator_y, indicator_w, 3),
-                1,
-                if active { theme_accent() } else { theme_muted() },
-            );
-            draw_app_icon(
-                canvas,
-                area.x + 2,
-                area.y + 1,
-                app_icon(&window.title[..window.title_length]),
-                14,
-                false,
-            );
-            let mut title = [0u8; 32];
-            let length = label(&window.title[..window.title_length], 5, &mut title);
-            let text = core::str::from_utf8(&title[..length]).unwrap_or("");
-            canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+            match entry {
+                TaskbarEntry::Window(slot) => {
+                    let slot = *slot;
+                    let active = self.focused() == Some(slot);
+                    let minimized = self.is_minimized(slot);
+                    let hovered =
+                        !active && !minimized && area.contains(self.pointer.0, self.pointer.1);
+                    let fill = if active {
+                        lighten(theme_entry(true), 12)
+                    } else if minimized {
+                        blend(theme_entry(false), theme_taskbar(), 90)
+                    } else if hovered {
+                        lighten(theme_entry(false), 8)
+                    } else {
+                        theme_entry(false)
+                    };
+                    fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
+                    // Win11-style running/active indicator: a wide accent bar for the
+                    // focused window, a short muted bar for a running one, and a short
+                    // dim bar for a minimized one.
+                    let (indicator_w, indicator_color) = if active {
+                        (16, theme_accent())
+                    } else if minimized {
+                        (6, blend(theme_muted(), theme_taskbar(), 100))
+                    } else {
+                        (6, theme_muted())
+                    };
+                    let indicator_x = area.x + (area.width - indicator_w) / 2;
+                    let indicator_y = area.y + area.height - 3;
+                    fill_rounded(
+                        canvas,
+                        Area::new(indicator_x, indicator_y, indicator_w, 3),
+                        1,
+                        indicator_color,
+                    );
+                    let Some(window) = self.windows[slot].as_ref() else {
+                        continue;
+                    };
+                    draw_app_icon(
+                        canvas,
+                        area.x + 2,
+                        area.y + 1,
+                        app_icon(&window.title[..window.title_length]),
+                        14,
+                        minimized,
+                    );
+                    let mut title = [0u8; 32];
+                    let length = label(&window.title[..window.title_length], 5, &mut title);
+                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+                    let ink = if minimized {
+                        blend(theme_text(), theme_taskbar(), 110)
+                    } else {
+                        theme_text()
+                    };
+                    canvas.draw_text_system(area.x + 18, self.text_y(), text, ink);
+                }
+                TaskbarEntry::PinnedApp(app) => {
+                    // A pinned app with no window on this workspace. Same
+                    // tile treatment as a running entry, but no running
+                    // indicator: being in the group at all is the pin.
+                    let Some(app) = self.apps[*app] else {
+                        continue;
+                    };
+                    let hovered = area.contains(self.pointer.0, self.pointer.1);
+                    fill_rounded(
+                        canvas,
+                        area,
+                        CHROME_RADIUS_SMALL,
+                        if hovered {
+                            lighten(theme_entry(false), 8)
+                        } else {
+                            theme_entry(false)
+                        },
+                    );
+                    draw_app_icon(canvas, area.x + 2, area.y + 1, app_icon(app.name()), 14, false);
+                    let shown = app
+                        .name()
+                        .strip_prefix(b"Woven")
+                        .unwrap_or_else(|| app.name());
+                    let mut title = [0u8; 32];
+                    let length = label(shown, 5, &mut title);
+                    let text = core::str::from_utf8(&title[..length]).unwrap_or("");
+                    canvas.draw_text_system(area.x + 18, self.text_y(), text, theme_text());
+                }
+            }
         }
 
         let (bytes, length) = clock_text(self.time, self.seconds);
         let text = core::str::from_utf8(&bytes[..length]).unwrap_or("");
         let clock = self.clock_area();
+        let clock_active = self.center_open;
+        let clock_hover = !clock_active && clock.contains(self.pointer.0, self.pointer.1);
+        if clock_active || clock_hover {
+            fill_rounded(
+                canvas,
+                clock,
+                CHROME_RADIUS_SMALL,
+                if clock_hover {
+                    lighten(theme_entry(false), 8)
+                } else {
+                    theme_entry(true)
+                },
+            );
+        }
         let clock_x = clock.x + (clock.width - font::text_width(text) as i32).max(0) / 2;
         canvas.draw_text_system(clock_x, self.text_y(), text, theme_text());
 
         // The workspace switcher sits left of the system menu button.
         for index in 0..WORKSPACES {
             let area = self.workspace_area(index);
-            let fill = theme_entry(index == self.workspace);
+            let active = index == self.workspace;
+            let hovered = !active && area.contains(self.pointer.0, self.pointer.1);
+            let fill = if hovered {
+                lighten(theme_entry(false), 8)
+            } else {
+                theme_entry(active)
+            };
             fill_rounded(canvas, area, CHROME_RADIUS_SMALL, fill);
             let digit = [b'1' + index as u8];
             canvas.draw_text_system(
@@ -1524,10 +1775,39 @@ impl Desktop {
 
         // The system menu button opens the existing Quick Settings panel.
         let button = self.qs_button();
-        let fill = theme_entry(self.qs_open);
+        let qs_hover = !self.qs_open && button.contains(self.pointer.0, self.pointer.1);
+        let fill = if qs_hover {
+            lighten(theme_entry(false), 8)
+        } else {
+            theme_entry(self.qs_open)
+        };
         fill_rounded(canvas, button, CHROME_RADIUS_SMALL, fill);
         for row in 0..3 {
             canvas.fill_rect(button.x + 4, button.y + 4 + row * 3, 8, 1, theme_text());
+        }
+
+        for index in 0..MAX_TRAY {
+            if self.tray[index].is_some() {
+                let place = self.tray_area(index);
+                if place.contains(self.pointer.0, self.pointer.1) {
+                    fill_rounded(
+                        canvas,
+                        place,
+                        CHROME_RADIUS_SMALL,
+                        lighten(theme_entry(false), 8),
+                    );
+                }
+            }
+        }
+
+        let status = self.status_icons_area();
+        if !self.qs_open && status.contains(self.pointer.0, self.pointer.1) {
+            fill_rounded(
+                canvas,
+                status,
+                CHROME_RADIUS_SMALL,
+                lighten(theme_entry(false), 8),
+            );
         }
 
         // System status glyphs: network, volume, battery. Drawn in the same
@@ -1554,7 +1834,13 @@ impl Desktop {
 
         if self.unread > 0 {
             let badge = self.badge_area();
-            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, theme_accent());
+            let hovered = badge.contains(self.pointer.0, self.pointer.1);
+            let fill = if hovered {
+                lighten(theme_accent(), 14)
+            } else {
+                theme_accent()
+            };
+            fill_rounded(canvas, badge, CHROME_RADIUS_SMALL, fill);
             let digit = [b'0' + self.unread.min(9) as u8];
             canvas.draw_text_system(
                 badge.x + 3,
@@ -1619,10 +1905,20 @@ impl Desktop {
         );
         let (dash_apps, dash_count) = self.dash_apps();
         for (index, &app_index) in dash_apps[..dash_count].iter().enumerate() {
-            let Some(app) = self.apps[app_index] else { continue };
+            let Some(app) = self.apps[app_index] else {
+                continue;
+            };
             let area = self.overview_dash_area(index);
             if visible.intersect(area).is_empty() {
                 continue;
+            }
+            if area.contains(self.pointer.0, self.pointer.1) {
+                fill_rounded(
+                    canvas,
+                    Area::new(area.x - 2, area.y - 2, area.width + 4, area.height + 4),
+                    CHROME_RADIUS_SMALL,
+                    lighten(theme_taskbar(), 10),
+                );
             }
             draw_app_icon_light(
                 canvas,
@@ -1636,121 +1932,150 @@ impl Desktop {
         // The first frame only publishes the panel and search field. The
         // window cards and app grid are filled on the following frame.
         if self.overview_detail {
-        // This workspace's window cards: a title-card placeholder per
-        // window, not a live thumbnail -- the compositor ABI has no scaled
-        // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
-        let entries: [Option<&Window>; MAX_WINDOWS] = {
-            let mut cards = [None; MAX_WINDOWS];
-            for (slot, (_, window)) in self.entries().enumerate() {
-                if slot < MAX_WINDOWS {
-                    cards[slot] = Some(window);
+            // This workspace's window cards: a title-card placeholder per
+            // window, not a live thumbnail -- the compositor ABI has no scaled
+            // blit (see `docs/graphics/overview-desktop-2026-11-03.md`).
+            let entries: [Option<&Window>; MAX_WINDOWS] = {
+                let mut cards = [None; MAX_WINDOWS];
+                for (slot, (_, window)) in self.entries().enumerate() {
+                    if slot < MAX_WINDOWS {
+                        cards[slot] = Some(window);
+                    }
+                }
+                cards
+            };
+            if entries.iter().all(Option::is_none) {
+                canvas.draw_text_system(
+                    overview.x + OVERVIEW_MARGIN,
+                    self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
+                    catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                    theme_muted(),
+                );
+            } else {
+                for (index, window) in entries.iter().enumerate() {
+                    let Some(window) = window else { continue };
+                    let card = self.overview_thumb_area(index);
+                    if visible.intersect(card).is_empty() {
+                        continue;
+                    }
+                    let hovered = card.contains(self.pointer.0, self.pointer.1);
+                    fill_rounded(
+                        canvas,
+                        card,
+                        CHROME_RADIUS_SMALL,
+                        if hovered {
+                            lighten(theme_entry(false), 10)
+                        } else {
+                            theme_entry(false)
+                        },
+                    );
+                    outline(canvas, card, theme_accent());
+                    let mut buffer = [0u8; 32];
+                    let length = label(
+                        &window.title[..window.title_length],
+                        ((card.width - 8) / font::ADVANCE) as usize,
+                        &mut buffer,
+                    );
+                    let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
+                    canvas.draw_text_system(
+                        card.x + 4,
+                        card.y + card.height / 2 - 3,
+                        text,
+                        theme_text(),
+                    );
                 }
             }
-            cards
-        };
-        if entries.iter().all(Option::is_none) {
+
+            // All apps section.
             canvas.draw_text_system(
                 overview.x + OVERVIEW_MARGIN,
-                self.overview_thumb_row_top() + OVERVIEW_THUMB_HEIGHT / 2 - 3,
-                catalog.lookup("no_open_windows", "No open windows on this workspace"),
+                self.overview_grid_top() - 14,
+                catalog.lookup("all_apps", "All apps"),
                 theme_muted(),
             );
-        } else {
-            for (index, window) in entries.iter().enumerate() {
-                let Some(window) = window else { continue };
-                let card = self.overview_thumb_area(index);
-                if visible.intersect(card).is_empty() {
+            let (found, count) = self.filtered();
+            if count == 0 {
+                canvas.draw_text_system(
+                    overview.x + OVERVIEW_MARGIN,
+                    self.overview_grid_top() + 4,
+                    catalog.lookup("no_matches", "No matches"),
+                    theme_muted(),
+                );
+            }
+            for (index, &app_index) in found[..count].iter().enumerate() {
+                let Some(app) = self.apps[app_index] else {
+                    continue;
+                };
+                let cell = self.overview_cell_area(index);
+                if visible.intersect(cell).is_empty() {
                     continue;
                 }
-                fill_rounded(canvas, card, CHROME_RADIUS_SMALL, theme_entry(false));
-                outline(canvas, card, theme_accent());
+                let cell_bg = Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4);
+                if index == self.selected {
+                    fill_rounded(canvas, cell_bg, CHROME_RADIUS, lighten(theme_taskbar(), 18));
+                } else if cell.contains(self.pointer.0, self.pointer.1) {
+                    fill_rounded(canvas, cell_bg, CHROME_RADIUS, lighten(theme_taskbar(), 10));
+                }
+                draw_app_icon_light(
+                    canvas,
+                    cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
+                    cell.y + 2,
+                    app_icon(app.name()),
+                    OVERVIEW_APP_ICON_SIZE,
+                );
+                // Catalog names are "Woven<App>"; the grid already shows the
+                // WovenHat-branded icon beside each one, so the repeated
+                // prefix only costs width better spent on the rest of the
+                // name before truncation.
+                let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
                 let mut buffer = [0u8; 32];
                 let length = label(
-                    &window.title[..window.title_length],
-                    ((card.width - 8) / font::ADVANCE) as usize,
+                    display_name,
+                    (cell.width / font::ADVANCE) as usize,
                     &mut buffer,
                 );
                 let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-                canvas.draw_text_system(card.x + 4, card.y + card.height / 2 - 3, text, theme_text());
-            }
-        }
-
-        // All apps section.
-        canvas.draw_text_system(
-            overview.x + OVERVIEW_MARGIN,
-            self.overview_grid_top() - 14,
-            catalog.lookup("all_apps", "All apps"),
-            theme_muted(),
-        );
-        let (found, count) = self.filtered();
-        for (index, &app_index) in found[..count].iter().enumerate() {
-            let Some(app) = self.apps[app_index] else { continue };
-            let cell = self.overview_cell_area(index);
-            if visible.intersect(cell).is_empty() {
-                continue;
-            }
-            if index == self.selected {
-                fill_rounded(
-                    canvas,
-                    Area::new(cell.x + 2, cell.y, cell.width - 4, cell.height - 4),
-                    CHROME_RADIUS,
-                    lighten(theme_taskbar(), 18),
+                let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
+                canvas.draw_text_system(
+                    text_x.max(cell.x),
+                    cell.y + OVERVIEW_APP_ICON_SIZE + 12,
+                    text,
+                    theme_text(),
                 );
             }
-            draw_app_icon_light(
-                canvas,
-                cell.x + (cell.width - OVERVIEW_APP_ICON_SIZE) / 2,
-                cell.y + 2,
-                app_icon(app.name()),
-                OVERVIEW_APP_ICON_SIZE,
-            );
-            // Catalog names are "Woven<App>"; the grid already shows the
-            // WovenHat-branded icon beside each one, so the repeated
-            // prefix only costs width better spent on the rest of the
-            // name before truncation.
-            let display_name = app.name().strip_prefix(b"Woven").unwrap_or(app.name());
-            let mut buffer = [0u8; 32];
-            let length = label(
-                display_name,
-                (cell.width / font::ADVANCE) as usize,
-                &mut buffer,
-            );
-            let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
-            let text_x = cell.x + (cell.width - font::text_width(text) as i32) / 2;
-            canvas.draw_text_system(
-                text_x.max(cell.x),
-                cell.y + OVERVIEW_APP_ICON_SIZE + 12,
-                text,
-                theme_text(),
-            );
-        }
 
-        // Footer: user and power hint, Win11-style bottom bar.
-        let footer_h = 28;
-        let footer_y = overview.y + overview.height - footer_h;
-        let footer = Area::new(overview.x, footer_y, overview.width, footer_h);
-        canvas.fill_rect(footer.x, footer.y, footer.width as usize, 1, blend(theme_stroke(), theme_panel(), 28));
-        let mut user_buf = [0u8; 32];
-        let user_name = if let Some(account) = self
-            .session
-            .and_then(|index| self.accounts.get(index).copied().flatten())
-        {
-            let name = account.name();
-            let len = name.len().min(user_buf.len());
-            user_buf[..len].copy_from_slice(&name[..len]);
-            core::str::from_utf8(&user_buf[..len]).unwrap_or("User")
-        } else {
-            "User"
-        };
-        canvas.draw_text_system(footer.x + 12, footer.y + 9, user_name, theme_text());
-        let power = catalog.lookup("power", "Power");
-        let power_w = font::text_width(power) as i32;
-        canvas.draw_text_system(
-            footer.x + footer.width - power_w - 12,
-            footer.y + 9,
-            power,
-            theme_muted(),
-        );
+            // Footer: user and power hint, Win11-style bottom bar.
+            let footer_h = 28;
+            let footer_y = overview.y + overview.height - footer_h;
+            let footer = Area::new(overview.x, footer_y, overview.width, footer_h);
+            canvas.fill_rect(
+                footer.x,
+                footer.y,
+                footer.width as usize,
+                1,
+                blend(theme_stroke(), theme_panel(), 28),
+            );
+            let mut user_buf = [0u8; 32];
+            let user_name = if let Some(account) = self
+                .session
+                .and_then(|index| self.accounts.get(index).copied().flatten())
+            {
+                let name = account.name();
+                let len = name.len().min(user_buf.len());
+                user_buf[..len].copy_from_slice(&name[..len]);
+                core::str::from_utf8(&user_buf[..len]).unwrap_or("User")
+            } else {
+                "User"
+            };
+            canvas.draw_text_system(footer.x + 12, footer.y + 9, user_name, theme_text());
+            let power = catalog.lookup("power", "Power");
+            let power_w = font::text_width(power) as i32;
+            canvas.draw_text_system(
+                footer.x + footer.width - power_w - 12,
+                footer.y + 9,
+                power,
+                theme_muted(),
+            );
         }
     }
 
@@ -1759,8 +2084,7 @@ impl Desktop {
     /// right). Keeping them in their own slots leaves the existing `TRAY`
     /// protocol and its surface ownership untouched.
     fn status_area(&self, index: usize) -> Area {
-        let x = self.clock_area().x
-            - (MAX_TRAY + index + 1) as i32 * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x - (MAX_TRAY + index + 1) as i32 * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
@@ -1775,8 +2099,7 @@ impl Desktop {
 
     /// The Quick Settings button, left of the status icons.
     fn qs_button(&self) -> Area {
-        let x = self.clock_area().x
-            - (MAX_TRAY + STATUS_ICONS + 1) as i32 * (TRAY_ICON + TRAY_GAP);
+        let x = self.clock_area().x - (MAX_TRAY + STATUS_ICONS + 1) as i32 * (TRAY_ICON + TRAY_GAP);
         Area::new(x, self.taskbar_top() + 4, TRAY_ICON, TRAY_ICON)
     }
 
@@ -1784,12 +2107,14 @@ impl Desktop {
     /// taskbar's right end; empty while closed.
     fn qs_action_active(&self, action: QsAction) -> bool {
         match action {
-            QsAction::Wifi => self.wifi && !self.airplane,
-            QsAction::Bluetooth => self.bluetooth && !self.airplane,
-            QsAction::Airplane => self.airplane,
-            QsAction::BatterySaver => self.battery_saver,
+            QsAction::Wifi
+            | QsAction::Bluetooth
+            | QsAction::Airplane
+            | QsAction::BatterySaver
+            | QsAction::NightLight => false,
+            QsAction::TaskbarAlign => self.taskbar.alignment == taskbar_prefs::Alignment::Left,
             QsAction::FocusAssist => self.dnd,
-            QsAction::NightLight => self.night_light,
+            QsAction::TaskbarIconSize => self.taskbar.icon_size != taskbar_prefs::IconSize::Medium,
             QsAction::Accessibility => self.reduced_motion,
             QsAction::DisplayScale => self.scale == 2,
             QsAction::Tiling => self.tiled,
@@ -1805,8 +2130,10 @@ impl Desktop {
             QsAction::Bluetooth => "Bluetooth",
             QsAction::Airplane => "Airplane mode",
             QsAction::BatterySaver => "Battery saver",
+            QsAction::TaskbarAlign => "Taskbar align",
             QsAction::FocusAssist => "Focus assist",
             QsAction::NightLight => "Night light",
+            QsAction::TaskbarIconSize => "Icon size",
             QsAction::Accessibility => "Accessibility",
             QsAction::DisplayScale => "Scale",
             QsAction::Tiling => "Tiling",
@@ -1818,16 +2145,55 @@ impl Desktop {
 
     fn qs_action_subtitle(&self, action: QsAction) -> &'static str {
         match action {
-            QsAction::Wifi => if self.airplane { "Unavailable" } else if self.wifi { "Connected" } else { "Off" },
-            QsAction::Bluetooth => if self.airplane { "Unavailable" } else if self.bluetooth { "On" } else { "Off" },
-            QsAction::Airplane => if self.airplane { "On" } else { "Off" },
-            QsAction::BatterySaver => if self.battery_saver { "On" } else { "Off" },
-            QsAction::FocusAssist => if self.dnd { "On" } else { "Off" },
-            QsAction::NightLight => if self.night_light { "On" } else { "Off" },
-            QsAction::Accessibility => if self.reduced_motion { "On" } else { "Off" },
-            QsAction::DisplayScale => if self.scale == 2 { "200%" } else { "100%" },
-            QsAction::Tiling => if self.tiled { "On" } else { "Off" },
-            QsAction::ThreeD => if self.three_d { "On" } else { "Off" },
+            QsAction::Wifi
+            | QsAction::Bluetooth
+            | QsAction::Airplane
+            | QsAction::BatterySaver
+            | QsAction::NightLight => "Unavailable",
+            QsAction::TaskbarAlign => match self.taskbar.alignment {
+                taskbar_prefs::Alignment::Center => "Center",
+                taskbar_prefs::Alignment::Left => "Left",
+            },
+            QsAction::FocusAssist => {
+                if self.dnd {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::TaskbarIconSize => match self.taskbar.icon_size {
+                taskbar_prefs::IconSize::Small => "Small",
+                taskbar_prefs::IconSize::Medium => "Medium",
+                taskbar_prefs::IconSize::Large => "Large",
+            },
+            QsAction::Accessibility => {
+                if self.reduced_motion {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::DisplayScale => {
+                if self.scale == 2 {
+                    "200%"
+                } else {
+                    "100%"
+                }
+            }
+            QsAction::Tiling => {
+                if self.tiled {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
+            QsAction::ThreeD => {
+                if self.three_d {
+                    "On"
+                } else {
+                    "Off"
+                }
+            }
             QsAction::Language => match self.language {
                 libwoven::i18n::Language::English => "English",
                 libwoven::i18n::Language::Chichewa => "Chichewa",
@@ -1838,10 +2204,13 @@ impl Desktop {
     }
 
     fn qs_panel_height(&self) -> i32 {
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        let grid_h =
+            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
         // header + grid + sliders(2) + footer + paddings/gaps
-        16 + 24 + QS_PADDING + grid_h + QS_SECTION_GAP
+        16 + 24
+            + QS_PADDING
+            + grid_h
+            + QS_SECTION_GAP
             + QS_SLIDER_HEIGHT * 2
             + QS_SLIDER_GAP
             + QS_SECTION_GAP
@@ -1853,92 +2222,9 @@ impl Desktop {
         if !self.qs_open {
             return Area::new(0, 0, 0, 0);
         }
-        let height = self.qs_panel_height().min(460);
+        let height = self.qs_panel_height().min(self.taskbar_top() - 8).max(0);
         let y = (self.taskbar_top() - height - 8).max(0);
         Area::new(self.width - QS_WIDTH - 8, y, QS_WIDTH, height)
-    }
-
-    fn qs_grid_area(&self) -> Area {
-        let panel = self.qs_area();
-        let top = panel.y + 16 + 24 + QS_PADDING;
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
-        Area::new(
-            panel.x + QS_PADDING,
-            top,
-            panel.width - QS_PADDING * 2,
-            grid_h,
-        )
-    }
-
-    fn qs_action_area(&self, index: usize) -> Area {
-        let grid = self.qs_grid_area();
-        let col = (index % QS_GRID_COLS) as i32;
-        let row = (index / QS_GRID_COLS) as i32;
-        let cell_w = (grid.width - QS_GRID_GAP * (QS_GRID_COLS as i32 - 1)) / QS_GRID_COLS as i32;
-        Area::new(
-            grid.x + col * (cell_w + QS_GRID_GAP),
-            grid.y + row * (QS_BUTTON_HEIGHT + QS_GRID_GAP),
-            cell_w,
-            QS_BUTTON_HEIGHT,
-        )
-    }
-
-    fn qs_slider_area(&self, which: i32) -> Area {
-        let panel = self.qs_area();
-        let grid = self.qs_grid_area();
-        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
-    }
-
-    fn qs_footer_area(&self) -> Area {
-        let panel = self.qs_area();
-        Area::new(
-            panel.x,
-            panel.y + panel.height - QS_FOOTER_HEIGHT - QS_PADDING,
-            panel.width,
-            QS_FOOTER_HEIGHT + QS_PADDING,
-        )
-    }
-
-    /// The toggles as they currently read.
-    fn qs_rows(&self) -> [&'static str; QS_ROWS] {
-        [
-            "Power off",
-            "Restart",
-            if self.scale == 2 {
-                "Display scale: 2x"
-            } else {
-                "Display scale: 1x"
-            },
-            if self.dnd {
-                "Do not disturb: On"
-            } else {
-                "Do not disturb: Off"
-            },
-            if self.tiled {
-                "Tiling: On"
-            } else {
-                "Tiling: Off"
-            },
-            "Lock screen",
-            "Change PIN",
-            match self.language {
-                libwoven::i18n::Language::English => "Language: English",
-                libwoven::i18n::Language::Chichewa => "Language: Chichewa",
-                libwoven::i18n::Language::Arabic => "Language: Arabic",
-            },
-            if self.three_d {
-                "3D Desktop: On"
-            } else {
-                "3D Desktop: Off"
-            },
-            if self.reduced_motion {
-                "Reduced Motion: On"
-            } else {
-                "Reduced Motion: Off"
-            },
-        ]
     }
 
     /// The lock screen: the wallpaper dimmed, "Locked", the time, the
@@ -1969,7 +2255,13 @@ impl Desktop {
                 .unwrap_or(b'?')
                 .to_ascii_uppercase();
             let avatar_y = middle - 92;
-            fill_circle(canvas, self.width / 2, avatar_y, AVATAR_DIAMETER, palette.accent);
+            fill_circle(
+                canvas,
+                self.width / 2,
+                avatar_y,
+                AVATAR_DIAMETER,
+                palette.accent,
+            );
             let glyph = [initial];
             let glyph = core::str::from_utf8(&glyph).unwrap_or("?");
             let avatar_size = (AVATAR_DIAMETER as u16 / 2).max(BODY_TEXT);
@@ -2004,15 +2296,19 @@ impl Desktop {
                 let y = middle - 24 + (index as i32) * account_line;
                 let chosen = index == self.chosen;
                 if chosen {
-                    let pill = Area::new(
-                        x - 10,
-                        y - 3,
-                        width + 20,
-                        account_line + 6,
+                    let pill = Area::new(x - 10, y - 3, width + 20, account_line + 6);
+                    fill_rounded(
+                        canvas,
+                        pill,
+                        (pill.height / 2).max(0) as usize,
+                        palette.accent,
                     );
-                    fill_rounded(canvas, pill, (pill.height / 2).max(0) as usize, palette.accent);
                 }
-                let ink = if chosen { palette.on_accent } else { palette.text };
+                let ink = if chosen {
+                    palette.on_accent
+                } else {
+                    palette.text
+                };
                 canvas.draw_ui_text(x, y, name, ink, account_role.em_px());
             }
         } else if self.mode == LockMode::ChangePin {
@@ -2425,47 +2721,51 @@ impl Desktop {
     fn qs_activate_action(&mut self, action: QsAction) -> Area {
         let panel = self.qs_area();
         match action {
-            QsAction::Wifi => {
-                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
-                self.wifi = !self.wifi;
-                log(if self.wifi { &[b"woven-shell: wifi on"] } else { &[b"woven-shell: wifi off"] });
-                panel
-            }
-            QsAction::Bluetooth => {
-                if self.airplane { return panel.union(self.toast_message("Airplane mode is on")); }
-                self.bluetooth = !self.bluetooth;
-                log(if self.bluetooth { &[b"woven-shell: bluetooth on"] } else { &[b"woven-shell: bluetooth off"] });
-                panel
-            }
-            QsAction::Airplane => {
-                self.airplane = !self.airplane;
-                if self.airplane { self.wifi = false; self.bluetooth = false; }
-                log(if self.airplane { &[b"woven-shell: airplane on"] } else { &[b"woven-shell: airplane off"] });
-                panel
+            QsAction::Wifi | QsAction::Bluetooth | QsAction::Airplane => {
+                // No radio or airplane backend exists on this device. Say so
+                // instead of toggling a state that changes nothing.
+                log(&[b"woven-shell: radio unavailable"]);
+                panel.union(self.toast_message("No wireless hardware is available"))
             }
             QsAction::BatterySaver => {
-                self.battery_saver = !self.battery_saver;
-                panel
+                // There is no ACPI battery driver and no power policy backend,
+                // so this control cannot change anything. Say so honestly.
+                log(&[b"woven-shell: battery saver unavailable"]);
+                panel.union(self.toast_message("No battery or power policy is available"))
             }
             QsAction::FocusAssist => {
                 self.dnd = !self.dnd;
-                log(if self.dnd { &[b"woven-shell: do not disturb on"] } else { &[b"woven-shell: do not disturb off"] });
+                log(if self.dnd {
+                    &[b"woven-shell: do not disturb on"]
+                } else {
+                    &[b"woven-shell: do not disturb off"]
+                });
                 panel
             }
             QsAction::NightLight => {
-                self.night_light = !self.night_light;
-                panel
+                // No display colour-temperature backend exists; do not toggle
+                // a state that changes no pixels.
+                log(&[b"woven-shell: night light unavailable"]);
+                panel.union(self.toast_message("Night light needs a display colour policy backend"))
             }
             QsAction::Accessibility => {
                 self.reduced_motion = !self.reduced_motion;
-                log(if self.reduced_motion { &[b"woven-shell: reduced motion on"] } else { &[b"woven-shell: reduced motion off"] });
+                log(if self.reduced_motion {
+                    &[b"woven-shell: reduced motion on"]
+                } else {
+                    &[b"woven-shell: reduced motion off"]
+                });
                 panel
             }
             QsAction::DisplayScale => self.toggle_scale().union(self.qs_area()),
             QsAction::Tiling => self.toggle_tiling().union(self.qs_area()),
             QsAction::ThreeD => {
                 self.three_d = !self.three_d;
-                log(if self.three_d { &[b"woven-shell: 3D desktop on"] } else { &[b"woven-shell: 3D desktop off"] });
+                log(if self.three_d {
+                    &[b"woven-shell: 3D desktop on"]
+                } else {
+                    &[b"woven-shell: 3D desktop off"]
+                });
                 panel.union(self.screen())
             }
             QsAction::Language => {
@@ -2478,14 +2778,45 @@ impl Desktop {
                 panel
             }
             QsAction::ChangePin => self.start_change_pin(),
+            QsAction::TaskbarAlign => {
+                self.taskbar.alignment = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => taskbar_prefs::Alignment::Left,
+                    taskbar_prefs::Alignment::Left => taskbar_prefs::Alignment::Center,
+                };
+                let label = match self.taskbar.alignment {
+                    taskbar_prefs::Alignment::Center => "Taskbar alignment: Center (session)",
+                    taskbar_prefs::Alignment::Left => "Taskbar alignment: Left (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
+            QsAction::TaskbarIconSize => {
+                self.taskbar.icon_size = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => taskbar_prefs::IconSize::Medium,
+                    taskbar_prefs::IconSize::Medium => taskbar_prefs::IconSize::Large,
+                    taskbar_prefs::IconSize::Large => taskbar_prefs::IconSize::Small,
+                };
+                let label = match self.taskbar.icon_size {
+                    taskbar_prefs::IconSize::Small => "Taskbar icon size: Small (session)",
+                    taskbar_prefs::IconSize::Medium => "Taskbar icon size: Medium (session)",
+                    taskbar_prefs::IconSize::Large => "Taskbar icon size: Large (session)",
+                };
+                log(&[b"woven-shell: ", label.as_bytes()]);
+                panel.union(self.taskbar()).union(self.toast_message(label))
+            }
         }
     }
 
     fn qs_grid_area_at(&self, panel: Area) -> Area {
         let top = panel.y + 16 + 24 + QS_PADDING;
-        let grid_h = QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT
-            + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, grid_h)
+        let grid_h =
+            QS_GRID_ROWS as i32 * QS_BUTTON_HEIGHT + (QS_GRID_ROWS as i32 - 1) * QS_GRID_GAP;
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            grid_h,
+        )
     }
 
     fn qs_action_area_at(&self, panel: Area, index: usize) -> Area {
@@ -2503,8 +2834,14 @@ impl Desktop {
 
     fn qs_slider_area_at(&self, panel: Area, which: i32) -> Area {
         let grid = self.qs_grid_area_at(panel);
-        let top = grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
-        Area::new(panel.x + QS_PADDING, top, panel.width - QS_PADDING * 2, QS_SLIDER_HEIGHT)
+        let top =
+            grid.y + grid.height + QS_SECTION_GAP + which * (QS_SLIDER_HEIGHT + QS_SLIDER_GAP);
+        Area::new(
+            panel.x + QS_PADDING,
+            top,
+            panel.width - QS_PADDING * 2,
+            QS_SLIDER_HEIGHT,
+        )
     }
 
     fn qs_footer_area_at(&self, panel: Area) -> Area {
@@ -2519,33 +2856,61 @@ impl Desktop {
     fn qs_summary<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
         let mut len = 0usize;
         let net: &[u8] = match self.status.network {
-            NetworkStatus::Online { .. } if self.wifi && !self.airplane => b"Wi-Fi",
             NetworkStatus::Online { .. } => b"Online",
             NetworkStatus::Offline => b"Offline",
             NetworkStatus::Unavailable => b"No net",
         };
-        for b in net.iter().take(buf.len()) { buf[len] = *b; len += 1; }
-        if len < buf.len() { buf[len] = b' '; len += 1; }
+        for b in net.iter().take(buf.len()) {
+            buf[len] = *b;
+            len += 1;
+        }
+        if len < buf.len() {
+            buf[len] = b' ';
+            len += 1;
+        }
         let (pct, muted) = match self.status.volume {
             VolumeStatus::Level { percent, muted } => (percent, muted),
             VolumeStatus::Unavailable => (0, true),
         };
         let mut pbuf = [0u8; 3];
         let plen = status::format_percent(pct, &mut pbuf);
-        for b in pbuf[..plen].iter().take(buf.len().saturating_sub(len)) { buf[len] = *b; len += 1; }
-        if len < buf.len() { buf[len] = b'%'; len += 1; }
-        if muted && len < buf.len() { buf[len] = b' '; len += 1; if len < buf.len() { buf[len] = b'M'; len += 1; } }
+        for b in pbuf[..plen].iter().take(buf.len().saturating_sub(len)) {
+            buf[len] = *b;
+            len += 1;
+        }
+        if len < buf.len() {
+            buf[len] = b'%';
+            len += 1;
+        }
+        if muted && len < buf.len() {
+            buf[len] = b' ';
+            len += 1;
+            if len < buf.len() {
+                buf[len] = b'M';
+                len += 1;
+            }
+        }
         core::str::from_utf8(&buf[..len]).unwrap_or("")
     }
 
     fn qs_footer_status<'a>(&self, buf: &'a mut [u8; 32]) -> &'a str {
         let mut len = 0usize;
         let prefix: &[u8] = b"Battery: ";
-        for b in prefix { if len < buf.len() { buf[len] = *b; len += 1; } }
+        for b in prefix {
+            if len < buf.len() {
+                buf[len] = *b;
+                len += 1;
+            }
+        }
         let text: &[u8] = match self.status.battery {
             BatteryStatus::Unavailable => b"N/A",
         };
-        for b in text { if len < buf.len() { buf[len] = *b; len += 1; } }
+        for b in text {
+            if len < buf.len() {
+                buf[len] = *b;
+                len += 1;
+            }
+        }
         core::str::from_utf8(&buf[..len]).unwrap_or("Battery: N/A")
     }
 
@@ -2558,7 +2923,14 @@ impl Desktop {
         canvas.draw_text_system(tx, ty, label, theme_text());
     }
 
-    fn draw_qs_slider(&self, canvas: &mut Canvas<'_>, area: Area, label: &str, value: u8, active: bool) {
+    fn draw_qs_slider(
+        &self,
+        canvas: &mut Canvas<'_>,
+        area: Area,
+        label: &str,
+        value: u8,
+        active: bool,
+    ) {
         let value = value.min(100);
         fill_rounded(canvas, area, 8, blend(theme_stroke(), theme_panel(), 14));
         outline(canvas, area, blend(theme_stroke(), theme_panel(), 24));
@@ -2568,9 +2940,20 @@ impl Desktop {
         let icon_fg = if active { theme_text() } else { theme_muted() };
         if label.starts_with("Brightness") {
             // sun icon
-            fill_rounded(canvas, Area::new(icon_area.x + 6, icon_area.y + 6, 8, 8), 4, icon_fg);
-            for (dx, dy, w, h) in [(9,0,2,3),(9,17,2,3),(0,9,3,2),(17,9,3,2)] {
-                canvas.fill_rect(icon_area.x + dx, icon_area.y + dy, w as usize, h as usize, icon_fg);
+            fill_rounded(
+                canvas,
+                Area::new(icon_area.x + 6, icon_area.y + 6, 8, 8),
+                4,
+                icon_fg,
+            );
+            for (dx, dy, w, h) in [(9, 0, 2, 3), (9, 17, 2, 3), (0, 9, 3, 2), (17, 9, 3, 2)] {
+                canvas.fill_rect(
+                    icon_area.x + dx,
+                    icon_area.y + dy,
+                    w as usize,
+                    h as usize,
+                    icon_fg,
+                );
             }
         } else {
             // speaker icon
@@ -2594,21 +2977,48 @@ impl Desktop {
         let track_w = area.width - 44;
         let track_y = area.y + area.height / 2 - 2;
         let track_h = 4i32;
-        fill_rounded(canvas, Area::new(track_x, track_y, track_w, track_h), 2, blend(theme_stroke(), theme_panel(), 44));
+        fill_rounded(
+            canvas,
+            Area::new(track_x, track_y, track_w, track_h),
+            2,
+            blend(theme_stroke(), theme_panel(), 44),
+        );
         let fill_w = (track_w * value as i32) / 100;
         if fill_w > 0 {
-            let fill_color = if active { theme_accent() } else { theme_muted() };
-            fill_rounded(canvas, Area::new(track_x, track_y, fill_w.max(4), track_h), 2, fill_color);
+            let fill_color = if active {
+                theme_accent()
+            } else {
+                theme_muted()
+            };
+            fill_rounded(
+                canvas,
+                Area::new(track_x, track_y, fill_w.max(4), track_h),
+                2,
+                fill_color,
+            );
             let thumb_x = track_x + fill_w - 5;
             let thumb_y = area.y + area.height / 2 - 6;
             fill_rounded(canvas, Area::new(thumb_x, thumb_y, 10, 12), 5, theme_text());
-            outline(canvas, Area::new(thumb_x, thumb_y, 10, 12), blend(theme_panel(), theme_text(), 60));
+            outline(
+                canvas,
+                Area::new(thumb_x, thumb_y, 10, 12),
+                blend(theme_panel(), theme_text(), 60),
+            );
         }
         let _ = label;
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_qs_action_icon(&self, canvas: &mut Canvas<'_>, action: QsAction, x: i32, y: i32, fg: u32, bg: u32, active: bool) {
+    fn draw_qs_action_icon(
+        &self,
+        canvas: &mut Canvas<'_>,
+        action: QsAction,
+        x: i32,
+        y: i32,
+        fg: u32,
+        bg: u32,
+        active: bool,
+    ) {
         let a = Area::new(x, y, 20, 20);
         fill_rounded(canvas, a, 6, bg);
         let c = fg;
@@ -2642,7 +3052,11 @@ impl Desktop {
             QsAction::BatterySaver => {
                 canvas.fill_rect(x + 4, y + 5, 10, 10, c);
                 canvas.fill_rect(x + 14, y + 8, 2, 4, c);
-                let inner = if active { bg } else { blend(theme_panel(), theme_stroke(), 8) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_panel(), theme_stroke(), 8)
+                };
                 canvas.fill_rect(x + 5, y + 6, 8, 8, inner);
                 canvas.fill_rect(x + 8, y + 7, 2, 6, c);
                 canvas.fill_rect(x + 7, y + 9, 4, 2, c);
@@ -2650,12 +3064,16 @@ impl Desktop {
             QsAction::FocusAssist => {
                 // moon
                 fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, c);
-                let cut = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let cut = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 fill_rounded(canvas, Area::new(x + 8, y + 2, 10, 10), 5, cut);
             }
             QsAction::NightLight => {
                 fill_rounded(canvas, Area::new(x + 5, y + 5, 10, 10), 5, c);
-                for (dx, dy) in [(2,2),(16,2),(2,16),(16,16)] {
+                for (dx, dy) in [(2, 2), (16, 2), (2, 16), (16, 16)] {
                     canvas.fill_rect(x + dx, y + dy, 2, 2, c);
                 }
             }
@@ -2668,21 +3086,39 @@ impl Desktop {
             }
             QsAction::DisplayScale => {
                 canvas.fill_rect(x + 3, y + 4, 14, 10, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 4, y + 5, 12, 8, inner);
                 canvas.fill_rect(x + 8, y + 14, 4, 2, c);
                 canvas.fill_rect(x + 6, y + 16, 8, 1, c);
             }
             QsAction::Tiling => {
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
-                for (dx, dy, w, h) in [(3,3,6,6),(11,3,6,6),(3,11,6,6),(11,11,6,6)] {
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
+                for (dx, dy, w, h) in [(3, 3, 6, 6), (11, 3, 6, 6), (3, 11, 6, 6), (11, 11, 6, 6)] {
                     canvas.fill_rect(x + dx, y + dy, w as usize, h as usize, c);
-                    canvas.fill_rect(x + dx + 1, y + dy + 1, (w - 2) as usize, (h - 2) as usize, inner);
+                    canvas.fill_rect(
+                        x + dx + 1,
+                        y + dy + 1,
+                        (w - 2) as usize,
+                        (h - 2) as usize,
+                        inner,
+                    );
                 }
             }
             QsAction::ThreeD => {
                 canvas.fill_rect(x + 4, y + 6, 8, 8, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 5, y + 7, 6, 6, inner);
                 canvas.fill_rect(x + 7, y + 3, 8, 1, c);
                 canvas.fill_rect(x + 14, y + 4, 1, 8, c);
@@ -2691,18 +3127,51 @@ impl Desktop {
                 canvas.fill_rect(x + 3, y + 9, 14, 2, c);
                 canvas.fill_rect(x + 9, y + 3, 2, 14, c);
                 fill_rounded(canvas, Area::new(x + 3, y + 3, 14, 14), 7, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 fill_rounded(canvas, Area::new(x + 4, y + 4, 12, 12), 6, inner);
                 canvas.fill_rect(x + 4, y + 9, 12, 1, c);
                 canvas.fill_rect(x + 9, y + 4, 1, 12, c);
             }
             QsAction::ChangePin => {
                 fill_rounded(canvas, Area::new(x + 5, y + 9, 10, 8), 2, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 canvas.fill_rect(x + 7, y + 4, 6, 6, c);
                 canvas.fill_rect(x + 8, y + 5, 4, 4, inner);
                 canvas.fill_rect(x + 9, y + 12, 2, 3, inner);
             }
+            QsAction::TaskbarAlign => {
+                // bar with centered/left group indicator
+                canvas.fill_rect(x + 2, y + 14, 16, 3, c);
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                if self.taskbar.alignment == taskbar_prefs::Alignment::Left {
+                    canvas.fill_rect(x + 3, y + 15, 3, 1, inner);
+                    canvas.fill_rect(x + 7, y + 15, 3, 1, inner);
+                } else {
+                    canvas.fill_rect(x + 7, y + 15, 2, 1, inner);
+                    canvas.fill_rect(x + 10, y + 15, 2, 1, inner);
+                }
+                canvas.fill_rect(x + 4, y + 5, 12, 7, c);
+                canvas.fill_rect(x + 5, y + 6, 10, 5, inner);
+            }
+            QsAction::TaskbarIconSize => {
+                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                for (dx, size) in [(3i32, 3i32), (8, 4), (14, 5)] {
+                    let dy = y + 16 - size;
+                    canvas.fill_rect(x + dx, dy, size as usize, size as usize, c);
+                    if size > 2 {
+                        canvas.fill_rect(x + dx + 1, dy + 1, (size - 2) as usize, (size - 2) as usize, inner);
+                    }
+                }
+            }
+
         }
         let _ = (a, active);
     }
@@ -2743,8 +3212,16 @@ impl Desktop {
 
             let icon_x = cell.x + 10;
             let icon_y = cell.y + 8;
-            let icon_fg = if active { rgb(20, 28, 38) } else { theme_text() };
-            let icon_bg = if active { theme_accent() } else { blend(theme_stroke(), theme_panel(), 40) };
+            let icon_fg = if active {
+                rgb(20, 28, 38)
+            } else {
+                theme_text()
+            };
+            let icon_bg = if active {
+                theme_accent()
+            } else {
+                blend(theme_stroke(), theme_panel(), 40)
+            };
             self.draw_qs_action_icon(canvas, *action, icon_x, icon_y, icon_fg, icon_bg, active);
 
             let label = self.qs_action_label(*action);
@@ -2755,8 +3232,16 @@ impl Desktop {
             let mut lbuf = [0u8; 64];
             let llen = truncate_to_width(label.as_bytes(), max_w, &mut lbuf);
             let ltext = core::str::from_utf8(&lbuf[..llen]).unwrap_or(label);
-            let label_color = if active { rgb(20, 28, 38) } else { theme_text() };
-            let sub_color = if active { blend(rgb(20, 28, 38), theme_accent(), 140) } else { theme_muted() };
+            let label_color = if active {
+                rgb(20, 28, 38)
+            } else {
+                theme_text()
+            };
+            let sub_color = if active {
+                blend(rgb(20, 28, 38), theme_accent(), 140)
+            } else {
+                theme_muted()
+            };
             canvas.draw_text_system(text_x, label_y, ltext, label_color);
             let mut sbuf = [0u8; 64];
             let slen = truncate_to_width(sub.as_bytes(), max_w, &mut sbuf);
@@ -2799,9 +3284,17 @@ impl Desktop {
         let restart_x = power_x - gap - restart_w;
         let lock_x = restart_x - gap - lock_w;
         let settings_x = lock_x - gap - settings_w;
-        self.draw_qs_footer_button(canvas, Area::new(settings_x, btn_y, settings_w, btn_h), "Settings");
+        self.draw_qs_footer_button(
+            canvas,
+            Area::new(settings_x, btn_y, settings_w, btn_h),
+            "Settings",
+        );
         self.draw_qs_footer_button(canvas, Area::new(lock_x, btn_y, lock_w, btn_h), "Lock");
-        self.draw_qs_footer_button(canvas, Area::new(restart_x, btn_y, restart_w, btn_h), "Restart");
+        self.draw_qs_footer_button(
+            canvas,
+            Area::new(restart_x, btn_y, restart_w, btn_h),
+            "Restart",
+        );
         self.draw_qs_footer_button(canvas, Area::new(power_x, btn_y, power_w, btn_h), "Power");
     }
 
@@ -3291,7 +3784,11 @@ impl Desktop {
         }
         let close = window.close_area();
         if !close.is_empty() {
-            let close_fill = if close_hovered { lighten(CLOSE_FILL, 28) } else { CLOSE_FILL };
+            let close_fill = if close_hovered {
+                lighten(CLOSE_FILL, 28)
+            } else {
+                CLOSE_FILL
+            };
             fill_rounded(canvas, close, CHROME_RADIUS_SMALL, close_fill);
             canvas.draw_ui_text(close.x + 2, close.y - 1, "x", theme_text(), BODY_TEXT);
         }
@@ -3302,7 +3799,8 @@ impl Desktop {
         };
         let available = (window.width - reserved).max(0);
         let mut buffer = [0u8; 64];
-        let length = truncate_to_width(&window.title[..window.title_length], available, &mut buffer);
+        let length =
+            truncate_to_width(&window.title[..window.title_length], available, &mut buffer);
         let text = core::str::from_utf8(&buffer[..length]).unwrap_or("");
         canvas.draw_ui_text(area.x + 8, area.y + 2, text, theme_text(), BODY_TEXT);
     }
@@ -3536,6 +4034,9 @@ impl Desktop {
         if area.is_empty() {
             return None;
         }
+        // A single repaint can take many ticks in software; snapshot once so a
+        // slow compose does not burn through a resize grace window by itself.
+        let now = libwoven::ticks();
         // Locked, nothing but the lock screen is drawn: no window, no
         // notification, no pointer. Repaint the whole card, not just the
         // damaged sub-region: the sign-in content is re-laid-out on every
@@ -3590,34 +4091,42 @@ impl Desktop {
             if alpha == 0 {
                 continue;
             }
-            for (offset, opacity) in bands {
-                let band = Area::new(
-                    frame.x + offset,
-                    frame.y + offset,
-                    frame.width,
-                    frame.height,
-                );
-                let part = band.intersect(area).intersect(above_taskbar);
-                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
-                if !part.is_empty() && opacity != 0 {
-                    painter.blend(part, SHADOW, opacity);
-                }
-            }
+            // Window shadows are temporarily disabled: painter.blend's
+            // present_region_blended path can stall on the software compositor
+            // during heavy QEMU repaints, which hung the shell after maximize.
+            // TODO(phase-b): restore shadows once the compositor blend path is
+            // proven non-blocking in this environment.
+            let _ = (bands, frame, area, above_taskbar, SHADOW);
             let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
                 let close_hovered = window.close_area().contains(self.pointer.0, self.pointer.1);
                 if alpha == u8::MAX {
                     painter.draw(title, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
+                        Self::render_title(
+                            window,
+                            active,
+                            canvas,
+                            self.three_d,
+                            self.height,
+                            close_hovered,
+                        )
                     });
                 } else {
                     painter.draw_blended(title, alpha, |canvas| {
-                        Self::render_title(window, active, canvas, self.three_d, self.height, close_hovered)
+                        Self::render_title(
+                            window,
+                            active,
+                            canvas,
+                            self.three_d,
+                            self.height,
+                            close_hovered,
+                        )
                     });
                 }
             }
-            let body = window.body().intersect(area);
+            let surface = Area::new(window.x, window.y, window.surface_w, window.surface_h);
+            let body = window.body().intersect(surface).intersect(area);
             if !body.is_empty() {
                 let region = body.relative_to(window.x, window.y);
                 let result = if alpha == u8::MAX {
@@ -3633,8 +4142,23 @@ impl Desktop {
                 };
                 // A resize deliberately permits a bounded gap between the
                 // old surface's release and the replacement WRSZ message.
-                if result.is_err() && libwoven::ticks() >= window.resizing_until {
+                if result.is_err() && now >= window.resizing_until {
                     return Some(slot);
+                }
+            }
+            // A client may clamp a maximize WSIZ to a smaller surface; fill the
+            // uncovered body so desktop background never shows through the frame.
+            let full_body = window.body().intersect(above_taskbar).intersect(area);
+            if full_body.width > window.surface_w || full_body.height > window.surface_h {
+                let sw = window.surface_w.max(0);
+                let sh = window.surface_h.max(0);
+                let right = Area::new(window.x + sw, window.y, window.width - sw, window.height);
+                let bottom = Area::new(window.x, window.y + sh, sw, window.height - sh);
+                for gap in [right, bottom] {
+                    let part = gap.intersect(area).intersect(above_taskbar);
+                    if !part.is_empty() {
+                        painter.blend(part, theme_panel(), 255);
+                    }
                 }
             }
             // Subtle Win11-style window border: accent for focused, muted for inactive.
@@ -3655,7 +4179,13 @@ impl Desktop {
                     // Keyed overlay: only the border pixels land, so body blits
                     // already on screen are preserved.
                     painter.overlay(part, |canvas| {
-                        canvas.fill_rect(part.x, part.y, part.width as usize, part.height as usize, border_color);
+                        canvas.fill_rect(
+                            part.x,
+                            part.y,
+                            part.width as usize,
+                            part.height as usize,
+                            border_color,
+                        );
                     });
                 }
             }
@@ -3703,8 +4233,7 @@ impl Desktop {
             .iter()
             .filter_map(|&higher_slot| self.windows[higher_slot].as_ref())
             .any(|higher| {
-                higher.alpha() == u8::MAX
-                    && higher.frame().intersect(footprint) == footprint
+                higher.alpha() == u8::MAX && higher.frame().intersect(footprint) == footprint
             })
     }
 
@@ -3731,6 +4260,186 @@ impl Desktop {
         current
             .union(previous.unwrap_or(Area::new(0, 0, 0, 0)))
             .union(self.taskbar())
+    }
+
+    /// A window is minimized while its slot is outside the visual stack: it
+    /// is then never painted, focused or hit-tested, but it keeps its taskbar
+    /// entry so it can be restored.
+    fn is_minimized(&self, slot: usize) -> bool {
+        self.windows[slot].is_some() && !self.stack[..self.stacked].contains(&slot)
+    }
+
+    /// Minimize `slot`, handing focus to the next window down the stack.
+    fn minimize(&mut self, slot: usize) -> Area {
+        let Some(position) = self.stack[..self.stacked].iter().position(|&s| s == slot) else {
+            return Area::new(0, 0, 0, 0);
+        };
+        self.cancel_pointer_gesture();
+        let hidden = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[position..self.stacked].rotate_left(1);
+        self.stacked -= 1;
+        let next = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        log(&[b"woven-shell: window minimized"]);
+        hidden.union(next).union(self.taskbar())
+    }
+
+    /// Restore a minimized window to the top of the stack and focus it.
+    fn restore(&mut self, slot: usize) -> Area {
+        if !self.is_minimized(slot) || self.stacked >= self.stack.len() {
+            return Area::new(0, 0, 0, 0);
+        }
+        let previous = self
+            .focused()
+            .and_then(|top| self.windows[top])
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
+        self.stack[self.stacked] = slot;
+        self.stacked += 1;
+        log(&[b"woven-shell: window restored"]);
+        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        previous.union(current).union(self.taskbar())
+    }
+
+    /// Taskbar button policy: the focused window's button minimizes it, a
+    /// minimized window's button restores it, and any other focuses it.
+    fn taskbar_activate(&mut self, slot: usize) -> Area {
+        if self.focused() == Some(slot) {
+            self.minimize(slot)
+        } else if self.is_minimized(slot) {
+            self.restore(slot)
+        } else {
+            self.focus(slot)
+        }
+    }
+
+    /// Maximize or restore window `slot`, from a right-click on its title
+    /// bar. A maximized window's frame fills the usable band -- the title
+    /// bar at the very top, the client area below it to the band's bottom;
+    /// the exact pre-maximize geometry is remembered and returned verbatim
+    /// on restore. Returns the areas to repaint.
+    fn toggle_maximize(&mut self, slot: usize) -> Area {
+        let (_, band_height) = self.usable_band();
+        let Some(window) = self.windows[slot].as_mut() else {
+            return Area::new(0, 0, 0, 0);
+        };
+        let before = window.footprint();
+        let (next_x, next_y, next_w, next_h, next_maximized) = if window.maximized {
+            let [x, y, width, height] = window.restore;
+            (x, y, width, height, false)
+        } else {
+            (
+                0,
+                TITLE_HEIGHT,
+                self.width,
+                (band_height - TITLE_HEIGHT).max(0),
+                true,
+            )
+        };
+        if !window.maximized {
+            window.restore = [window.x, window.y, window.width, window.height];
+        }
+        window.x = next_x;
+        window.y = next_y;
+        window.width = next_w;
+        window.height = next_h;
+        window.maximized = next_maximized;
+        // Frame-only maximize: keep the client's current surface and blit it
+        // inside the band-filling frame. Asking the client to reflow via WSIZ
+        // can race with concurrent compositor work on slow 1-CPU QEMU runs;
+        // client reflow on maximize is a follow-up once that path is proven.
+        if next_maximized {
+            log(&[
+                b"woven-shell: window maximized: ",
+                &window.title[..window.title_length],
+            ]);
+        } else {
+            log(&[
+                b"woven-shell: window restored: ",
+                &window.title[..window.title_length],
+            ]);
+        }
+        let after = self
+            .windows
+            .get(slot)
+            .and_then(|window| window.as_ref())
+            .map(Window::footprint)
+            .unwrap_or(before);
+        before.union(after)
+    }
+
+    /// Pin or unpin the app behind a taskbar entry, and say which happened
+    /// in a toast. The whole strip repaints because the group re-flows
+    /// around its pins. In-session state only: the shell process holds
+    /// `FileRead` and no settings-write path exists, so pins reset to the
+    /// installed record's list on the next boot, and no message here
+    /// promises otherwise.
+    fn toggle_pin(&mut self, entry: TaskbarEntry) -> Area {
+        let Some((name, length)) = self.entry_app_name(entry) else {
+            return self.toast_message("No app for this window");
+        };
+        let Ok(name) = core::str::from_utf8(&name[..length]) else {
+            return self.toast_message("Cannot pin");
+        };
+        if self.pinned.contains(name) {
+            self.pinned.unpin(name);
+            let mut buffer = [0u8; 48];
+            let text = pin_text(b"Unpinned ", name.as_bytes(), &mut buffer);
+            log(&[b"woven-shell: ", text.as_bytes()]);
+            let toast = self.toast_message(text);
+            return self.taskbar().union(toast);
+        }
+        let mut buffer = [0u8; 48];
+        let text = pin_text(b"Pinned ", name.as_bytes(), &mut buffer);
+        log(&[b"woven-shell: ", text.as_bytes()]);
+        let toast = self.toast_message(text);
+        match self.pinned.pin(name) {
+            Ok(()) => self.taskbar().union(toast),
+            Err(PinError::Full) => self.taskbar().union(self.toast_message("Pin list full")),
+            Err(PinError::Invalid) => self.taskbar().union(self.toast_message("Cannot pin")),
+            // `contains` just said otherwise; report without changing.
+            Err(PinError::Duplicate) => {
+                self.taskbar().union(self.toast_message("Already pinned"))
+            }
+        }
+    }
+
+    /// The catalog name behind a taskbar entry, copied out so nothing
+    /// borrows the catalog. Windows whose owner the shell did not launch
+    /// have no app, so they have no name.
+    fn entry_app_name(&self, entry: TaskbarEntry) -> Option<([u8; MAX_APP_NAME], usize)> {
+        let app = match entry {
+            TaskbarEntry::PinnedApp(app) => self.apps[app],
+            TaskbarEntry::Window(slot) => self.window_app(slot).and_then(|app| self.apps[app]),
+        }?;
+        let name = app.name();
+        if name.is_empty() || name.len() > MAX_APP_NAME {
+            return None;
+        }
+        let mut buffer = [0u8; MAX_APP_NAME];
+        buffer[..name.len()].copy_from_slice(name);
+        Some((buffer, name.len()))
+    }
+
+    /// Right-click on an empty part of the strip: flip the auto-hide
+    /// preference in-session, with a toast saying which way it went.
+    /// Enabling hides the bar immediately; disabling reveals it. Like
+    /// pins, the preference resets on the next boot to whatever the
+    /// installed settings record says; no write path is pretended.
+    fn toggle_auto_hide(&mut self) -> Area {
+        let changed = self.auto_hide.toggle();
+        let text = if self.auto_hide.enabled() {
+            "Taskbar auto-hide on"
+        } else {
+            "Taskbar auto-hide off"
+        };
+        log(&[b"woven-shell: ", text.as_bytes()]);
+        let toast = self.toast_message(text);
+        let strip = if changed { self.taskbar() } else { Area::new(0, 0, 0, 0) };
+        strip.union(toast)
     }
 
     /// Open a window for `owner`. Returns the areas to repaint.
@@ -3785,6 +4494,10 @@ impl Desktop {
             workspace: self.workspace,
             resizing_until: 0,
             cancellation_protocol: false,
+            maximized: false,
+            restore: [0; 4],
+            surface_w: width,
+            surface_h: height,
         };
         self.windows[slot] = Some(window);
         let previous = self
@@ -3824,6 +4537,9 @@ impl Desktop {
         let client = frame.client(TITLE_HEIGHT);
         window.x = client.x;
         window.y = client.y;
+        // An explicit re-placement (snap, tiling) ends maximization: the
+        // window is where the user put it, not filling the band.
+        window.maximized = false;
         if (client.width, client.height) != (window.width, window.height) {
             let mut request = [0u8; 8];
             request[..4].copy_from_slice(b"WSIZ");
@@ -3884,9 +4600,30 @@ impl Desktop {
         };
         let before = window.footprint();
         window.token = token;
+        window.surface_w = width;
+        window.surface_h = height;
+        window.resizing_until = 0;
+        let size_changed = (width, height) != (window.width, window.height);
+        if window.maximized && size_changed {
+            // A maximized client may clamp to a smaller surface than the
+            // band-filling frame (e.g. a fixed max buffer). Keep the frame
+            // maximized and blit the smaller surface inside it; the client
+            // can still reflow later by sending another WRSZ.
+            log(&[
+                b"woven-shell: window resized (maximized, clamped): ",
+                &window.title[..window.title_length],
+            ]);
+            return before.union(window.footprint());
+        }
         window.width = width;
         window.height = height;
-        window.resizing_until = 0;
+        // A client-driven resize ends maximization: the client owns its new
+        // canvas, and the flag must never describe a stale band-filling
+        // frame. Ignore the echo of a maximize/restore WSIZ we just sent,
+        // where the client reports back the size the shell already asked for.
+        if size_changed {
+            window.maximized = false;
+        }
         log(&[
             b"woven-shell: window resized: ",
             &window.title[..window.title_length],
@@ -3938,7 +4675,10 @@ impl Desktop {
         let empty = Dirty::new();
         match message.get(..4) {
             Some(b"WCAP") if message == b"WCAP\x01" => {
-                if let Some(window) = self.windows.iter_mut().flatten()
+                if let Some(window) = self
+                    .windows
+                    .iter_mut()
+                    .flatten()
                     .find(|window| window.owner == sender)
                 {
                     window.cancellation_protocol = true;
@@ -4038,30 +4778,44 @@ impl Desktop {
                 pressed: true,
             } => {
                 let (x, y) = self.pointer;
-                if let Some(index) =
-                    (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
-                {
-                    return self.switch_workspace(index);
-                }
-                if self.start_area().contains(x, y) {
-                    return self.toggle_launcher();
-                }
-                let taskbar_slot = self.entries().enumerate().find_map(|(index, (slot, _))| {
-                    self.taskbar_entry_area(index).contains(x, y).then_some(slot)
-                });
-                if let Some(slot) = taskbar_slot {
-                    return self.focus(slot);
-                }
-                // The three status glyphs own their own slots; they are not
-                // client tray surfaces and cannot be hit-tested as one.
-                if let Some(index) =
-                    (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
-                {
-                    return self.status_click(index);
-                }
-                // The Quick Settings button, and its panel's rows.
-                if self.qs_button().contains(x, y) {
-                    return self.toggle_qs();
+                // The strip's controls exist only while the bar is painted.
+                // Hidden, none of them may capture: the reveal happens on
+                // pointer motion, not on a press.
+                if !self.auto_hide.is_hidden() {
+                    if let Some(index) =
+                        (0..WORKSPACES).find(|&index| self.workspace_area(index).contains(x, y))
+                    {
+                        return self.switch_workspace(index);
+                    }
+                    if self.start_area().contains(x, y) {
+                        return self.toggle_launcher();
+                    }
+                    let (taskbar_entries, entry_count) = self.taskbar_entries();
+                    let entry_hit = (0..entry_count)
+                        .find(|&index| self.taskbar_entry_area(index).contains(x, y))
+                        .map(|index| taskbar_entries[index]);
+                    if let Some(entry) = entry_hit {
+                        return match entry {
+                            // A window entry behaves as before: focus, minimize
+                            // when already focused, restore when minimized.
+                            TaskbarEntry::Window(slot) => self.taskbar_activate(slot),
+                            // A pinned app with no window on this workspace
+                            // starts one, like a Dash icon. This does not open
+                            // the launcher.
+                            TaskbarEntry::PinnedApp(app) => self.start_app(app),
+                        };
+                    }
+                    // The three status glyphs own their own slots; they are not
+                    // client tray surfaces and cannot be hit-tested as one.
+                    if let Some(index) =
+                        (0..STATUS_ICONS).find(|&index| self.status_area(index).contains(x, y))
+                    {
+                        return self.status_click(index);
+                    }
+                    // The Quick Settings button, and its panel's rows.
+                    if self.qs_button().contains(x, y) {
+                        return self.toggle_qs();
+                    }
                 }
                 if self.qs_open {
                     let panel = self.qs_area();
@@ -4075,25 +4829,8 @@ impl Desktop {
                             return self.qs_activate_action(action);
                         }
                     }
-                    // Brightness slider
-                    let bslider = self.qs_slider_area_at(panel, 0);
-                    if bslider.contains(x, y) {
-                        let track_x = bslider.x + 36;
-                        let track_w = (bslider.width - 44).max(1);
-                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        self.brightness = pct;
-                        return panel;
-                    }
-                    // Volume slider
-                    let vslider = self.qs_slider_area_at(panel, 1);
-                    if vslider.contains(x, y) {
-                        let track_x = vslider.x + 36;
-                        let track_w = (vslider.width - 44).max(1);
-                        let pct = ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        let _ = self.status.set_volume(pct);
-                        return panel.union(self.status_icons_area());
-                    }
-                    // Footer buttons
+                    // Footer buttons are painted over the lower rows on short
+                    // screens, so their hit targets must also win.
                     let footer = self.qs_footer_area_at(panel);
                     let btn_y = footer.y + 8;
                     let btn_h = 24;
@@ -4111,9 +4848,9 @@ impl Desktop {
                     let restart = Area::new(restart_x, btn_y, restart_w, btn_h);
                     let power = Area::new(power_x, btn_y, power_w, btn_h);
                     if settings.contains(x, y) {
-                        if let Some(index) = (0..self.app_count).find(|&i| {
-                            self.apps[i].is_some_and(|a| a.name() == b"WovenSettings")
-                        }) {
+                        if let Some(index) = (0..self.app_count)
+                            .find(|&i| self.apps[i].is_some_and(|a| a.name() == b"WovenSettings"))
+                        {
                             return panel.union(self.launch(index));
                         }
                         return panel.union(self.toast_message("Settings unavailable"));
@@ -4127,11 +4864,33 @@ impl Desktop {
                     if power.contains(x, y) {
                         return self.power(false);
                     }
+                    // Brightness slider
+                    let bslider = self.qs_slider_area_at(panel, 0);
+                    if bslider.contains(x, y) {
+                        let track_x = bslider.x + 36;
+                        let track_w = (bslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        self.brightness = pct;
+                        return panel;
+                    }
+                    // Volume slider
+                    let vslider = self.qs_slider_area_at(panel, 1);
+                    if vslider.contains(x, y) {
+                        let track_x = vslider.x + 36;
+                        let track_w = (vslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let _ = self.status.set_volume(pct);
+                        return panel.union(self.status_icons_area());
+                    }
                     return empty;
                 }
-                // The clock opens and closes the Notification Center.
-                if self.clock_area().contains(x, y)
-                    || (self.unread > 0 && self.badge_area().contains(x, y))
+                // The clock opens and closes the Notification Center; it is a
+                // strip control, so it exists only while the bar is painted.
+                if !self.auto_hide.is_hidden()
+                    && (self.clock_area().contains(x, y)
+                        || (self.unread > 0 && self.badge_area().contains(x, y)))
                 {
                     return self.toggle_center();
                 }
@@ -4242,12 +5001,64 @@ impl Desktop {
                     return empty;
                 }
                 if window.title_area().contains(x, y) {
-                    self.drag = Some((slot, x - window.x, y - window.y));
+                    // Dragging a maximized window restores it first, so the
+                    // drag moves a normally-shaped window rather than a
+                    // full-band frame under the pointer's original offset.
+                    let restored = if window.maximized {
+                        self.toggle_maximize(slot)
+                    } else {
+                        Area::new(0, 0, 0, 0)
+                    };
+                    if let Some(current) = self.windows[slot] {
+                        self.drag = Some((slot, x - current.x, y - current.y));
+                    }
+                    return restored.union(self.focus(slot));
                 } else if window.body().contains(x, y) {
                     self.pointer_capture = Some(slot);
                     self.forward_pointer_button(slot, true);
                 }
                 self.focus(slot)
+            }
+            // Right-click a taskbar entry to pin or unpin its app for this
+            // session. The PS/2 decoder and the HID ABI both deliver
+            // button 1; no other desktop control consumes it yet.
+            InputEvent::PointerButton {
+                button: 1,
+                pressed: true,
+            } => {
+                let (x, y) = self.pointer;
+                // A right-click on a window's title bar maximizes or
+                // restores that window, Win11-style. The title bar is
+                // shell-owned chrome (left-click drags it), so this never
+                // reaches the client.
+                let title_hit = self.stack[..self.stacked]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.frame().contains(x, y))
+                    })
+                    .filter(|&slot| {
+                        self.windows[slot]
+                            .is_some_and(|window| window.title_area().contains(x, y))
+                    });
+                if let Some(slot) = title_hit {
+                    return self.toggle_maximize(slot);
+                }
+                let (taskbar_entries, entry_count) = self.taskbar_entries();
+                let Some(entry) = (0..entry_count)
+                    .find(|&index| self.taskbar_entry_area(index).contains(x, y))
+                    .map(|index| taskbar_entries[index])
+                else {
+                    // An empty part of the strip flips the auto-hide
+                    // preference; the toast says which way it went.
+                    if self.taskbar().contains(x, y) && !self.auto_hide.is_hidden() {
+                        return self.toggle_auto_hide();
+                    }
+                    return empty;
+                };
+                self.toggle_pin(entry)
             }
             InputEvent::Key(key) if self.launcher_open => self.launcher_key(key),
             InputEvent::Key(Key::F1) => {
@@ -4256,8 +5067,12 @@ impl Desktop {
             }
             InputEvent::Key(Key::Escape) => {
                 self.cancel_pointer_gesture();
-                let Some(slot) = self.focused() else { return empty };
-                let Some(window) = self.windows[slot] else { return empty };
+                let Some(slot) = self.focused() else {
+                    return empty;
+                };
+                let Some(window) = self.windows[slot] else {
+                    return empty;
+                };
                 let _ = libwoven::message_send(window.owner, b"WCLS");
                 log(&[b"woven-shell: keyboard close requested"]);
                 empty
@@ -4314,9 +5129,22 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         }
         self.pointer_visible = true;
-        let moved = self.drag_to_pointer();
+        let mut moved = self.drag_to_pointer();
         if self.drag.is_none() {
             self.forward_pointer_move();
+        }
+        // Auto-hide: the screen's bottom row reveals a hidden bar, and any
+        // position inside the strip refreshes the hold on a revealed one.
+        let (_, pointer_y) = self.pointer;
+        if self.auto_hide.pointer(
+            pointer_y,
+            self.height - 1,
+            self.taskbar_top(),
+            libwoven::ticks(),
+            AUTO_HIDE_HOLD,
+        ) {
+            log(&[b"woven-shell: taskbar revealed"]);
+            moved = moved.union(self.taskbar());
         }
         moved
     }
@@ -4354,9 +5182,16 @@ impl Desktop {
         {
             None
         } else {
-            self.stack[..self.stacked].iter().rev().copied()
-                .find(|&slot| self.windows[slot].is_some_and(|window| window.frame().contains(x, y)))
-                .filter(|&slot| self.windows[slot].is_some_and(|window| window.body().contains(x, y)))
+            self.stack[..self.stacked]
+                .iter()
+                .rev()
+                .copied()
+                .find(|&slot| {
+                    self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
+                })
+                .filter(|&slot| {
+                    self.windows[slot].is_some_and(|window| window.body().contains(x, y))
+                })
         };
         let Some(slot) = slot else { return };
         let Some(window) = self.windows[slot] else {
@@ -4511,6 +5346,26 @@ impl Desktop {
                 dirty = dirty.union(self.status_icons_area()).union(self.qs_area());
             }
         }
+        // Live settings propagation: re-read the bounded installed record on
+        // the same slow cadence and apply it only when its digest changes.
+        // The shell has FileRead, never FileWrite, so this is observation
+        // only; the Settings app remains the sole writer.
+        if self.settings_path_len > 0 && now >= self.settings_next_sample {
+            self.settings_next_sample = now.saturating_add(STATUS_SAMPLE_PERIOD);
+            let mut path_buf = [0u8; 256];
+            let path_len = self.settings_path_len;
+            path_buf[..path_len].copy_from_slice(&self.settings_path[..path_len]);
+            if let Ok(path) = core::str::from_utf8(&path_buf[..path_len]) {
+                if let Some(hash) = current_settings_digest(path) {
+                    if hash != self.settings_hash {
+                        self.settings_hash = hash;
+                        load_accessibility_settings(path, self);
+                        let _ = libwoven::print("woven-shell: settings reloaded\n");
+                        dirty = dirty.union(self.screen());
+                    }
+                }
+            }
+        }
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
@@ -4528,6 +5383,17 @@ impl Desktop {
         {
             self.toast = None;
             dirty = dirty.union(self.toast_area());
+        }
+        // Auto-hide: past the hold, the bar goes back down. Panels that hang
+        // off the strip (Quick Settings, Notification Center, the overview)
+        // hold it up until they close.
+        if self.auto_hide.tick(now)
+            && !self.qs_open
+            && !self.center_open
+            && !self.launcher_open
+        {
+            log(&[b"woven-shell: taskbar hidden"]);
+            dirty = dirty.union(self.taskbar());
         }
         dirty
     }
@@ -4564,19 +5430,41 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     let _ = libwoven::close(descriptor);
     let Ok(length) = read else { return };
     let data = &bytes[..length.min(bytes.len())];
-    if let Some(locale) = json_string(data, b"locale")
-        .and_then(libwoven::i18n::Locale::parse_tag)
-    {
+    if let Some(locale) = json_string(data, b"locale").and_then(libwoven::i18n::Locale::parse_tag) {
         desktop.language = locale.language;
     }
+    desktop.taskbar = TaskbarPrefs::from_values(
+        json_string(data, b"taskbar_alignment"),
+        json_string(data, b"taskbar_icon_size"),
+    );
+    desktop.auto_hide = AutoHide::from_setting(json_string(data, b"taskbar_auto_hide"));
+    desktop.pinned = PinnedApps::from_setting(json_string(data, b"pinned_apps"));
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
-    if settings.high_contrast {
-        THEME_MODE.store(1, Ordering::Relaxed);
+    // Both fields are applied absolutely so a later record that turns them
+    // off takes effect immediately, not just on the next boot.
+    THEME_MODE.store(u8::from(settings.high_contrast), Ordering::Relaxed);
+    desktop.reduced_motion = settings.reduced_motion;
+}
+
+/// FNV-1a digest over a bounded settings record, used only to detect changes
+/// between the shell's periodic re-reads.
+fn settings_digest(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    if settings.reduced_motion {
-        desktop.reduced_motion = true;
-    }
+    hash
+}
+
+fn current_settings_digest(path: &str) -> Option<u64> {
+    let descriptor = libwoven::open(path).ok()?;
+    let mut bytes = [0u8; 512];
+    let read = libwoven::read(descriptor, &mut bytes);
+    let _ = libwoven::close(descriptor);
+    let length = read.ok()?;
+    Some(settings_digest(&bytes[..length.min(bytes.len())]))
 }
 
 /// Read one bounded JSON string field from the installed settings envelope.
@@ -4591,7 +5479,9 @@ fn json_string<'a>(data: &'a [u8], key: &[u8]) -> Option<&'a str> {
     needle[0] = b'\"';
     needle[1..1 + key.len()].copy_from_slice(key);
     needle[1 + key.len()] = b'\"';
-    let start = data.windows(length).position(|window| window == &needle[..length])?;
+    let start = data
+        .windows(length)
+        .position(|window| window == &needle[..length])?;
     let rest = &data[start + length..];
     let colon = rest.iter().position(|byte| *byte == b':')?;
     let quoted = &rest[colon + 1..];
@@ -4626,6 +5516,11 @@ fn main(args: Args) -> ! {
                     .and_then(|path| core::str::from_utf8(path).ok())
                 {
                     load_accessibility_settings(path, desktop);
+                    let length = path.len().min(desktop.settings_path.len());
+                    desktop.settings_path[..length].copy_from_slice(&path.as_bytes()[..length]);
+                    desktop.settings_path_len = length;
+                    desktop.settings_hash = current_settings_digest(path).unwrap_or(0);
+                    desktop.settings_next_sample = libwoven::ticks().saturating_add(STATUS_SAMPLE_PERIOD);
                 } else {
                     fail(1);
                 }
@@ -4658,6 +5553,38 @@ fn main(args: Args) -> ! {
                 if desktop.accounts.iter().all(Option::is_none) {
                     fail(9);
                 }
+            }
+            b"--taskbar-alignment" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(Alignment::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.alignment = value;
+            }
+            b"--taskbar-icon-size" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                    .and_then(IconSize::parse)
+                else {
+                    fail(1);
+                };
+                desktop.taskbar.icon_size = value;
+            }
+            b"--taskbar-auto-hide" => {
+                index += 1;
+                let Some(value) = args
+                    .get(index)
+                    .and_then(|value| core::str::from_utf8(value).ok())
+                else {
+                    fail(1);
+                };
+                desktop.auto_hide = AutoHide::from_setting(Some(value));
             }
             _ => fail(1),
         }
@@ -4762,10 +5689,7 @@ fn main(args: Args) -> ! {
     let recompose_ticks = libwoven::ticks().saturating_sub(recompose_start);
     let mut recompose_digits = [0u8; 20];
     let recompose_text = libwoven::format_u64(recompose_ticks, &mut recompose_digits);
-    log(&[
-        b"woven-shell: full recompose ticks=",
-        recompose_text,
-    ]);
+    log(&[b"woven-shell: full recompose ticks=", recompose_text]);
     // The first present takes the display from the text terminal.
     if libwoven::compositor_present().is_err() {
         fail(6);
@@ -4773,6 +5697,28 @@ fn main(args: Args) -> ! {
     let mut pid = [0u8; 20];
     let pid = libwoven::format_u64(libwoven::current_pid().0, &mut pid);
     log(&[b"woven-shell: desktop ready pid=", pid]);
+    let alignment = match desktop.taskbar.alignment {
+        taskbar_prefs::Alignment::Center => b"center" as &[u8],
+        taskbar_prefs::Alignment::Left => b"left",
+    };
+    let icon_size = match desktop.taskbar.icon_size {
+        taskbar_prefs::IconSize::Small => b"small" as &[u8],
+        taskbar_prefs::IconSize::Medium => b"medium",
+        taskbar_prefs::IconSize::Large => b"large",
+    };
+    let auto_hide = if desktop.auto_hide.enabled() {
+        b"on" as &[u8]
+    } else {
+        b"off"
+    };
+    log(&[
+        b"woven-shell: taskbar layout alignment=",
+        alignment,
+        b" icon_size=",
+        icon_size,
+        b" auto_hide=",
+        auto_hide,
+    ]);
 
     // The overview draws every app label on its first F1 paint. Warm the fixed
     // glyph cache with that bounded label set now so cold outline rasterisation
@@ -4848,6 +5794,16 @@ fn main(args: Args) -> ! {
             if pointer_before != (desktop.pointer, desktop.pointer_visible) && !desktop.locked {
                 dirty.add(cursor_before);
                 dirty.add(desktop.cursor_area());
+                let (px, py) = desktop.pointer;
+                let taskbar = desktop.taskbar();
+                if taskbar.contains(px, py)
+                    || taskbar.contains(pointer_before.0 .0, pointer_before.0 .1)
+                {
+                    dirty.add(taskbar);
+                }
+                if desktop.launcher_open {
+                    dirty.add(desktop.overview_area());
+                }
             }
         }
         for &area in desktop.check_clients().areas() {

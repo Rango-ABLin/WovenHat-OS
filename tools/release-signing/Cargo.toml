@@ -1,0 +1,10 @@
+[package]
+name = "wovenhat-release-signing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
+
+[lints.rust]
+warnings = "deny"

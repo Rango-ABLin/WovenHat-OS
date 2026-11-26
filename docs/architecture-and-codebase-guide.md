@@ -1,5 +1,30 @@
 # WovenHat OS Architecture & Codebase Guide
 
+## Short-screen Quick Settings boundary (2026-11-26)
+
+Quick Settings derives its visible height from the space above the taskbar,
+not a fixed 460-pixel assumption. Compact displays may place the footer over
+lower grid/slider space; because the footer is painted last, footer controls
+also receive hit-test priority over those lower controls. This keeps Power,
+Restart, Lock and Settings reachable without moving the taskbar, widening the
+display, or broadening power capabilities.
+
+## Desktop chrome acceptance boundary (2026-11-25)
+
+WovenShell's bottom taskbar, centered Start overview and Notification Center
+are validated as one presentation system but through separate bounded gates.
+The taskbar's authoritative geometry comes from `taskbar_prefs`, `tokens` and
+`Desktop::{start_area, taskbar_entry_area}`. The Start overview is a
+full-width bounded panel with search, pinned Dash entries, current-workspace
+cards and a responsive app grid; an empty filtered catalog is an explicit
+`No matches` state rather than an invisible empty grid. Notification
+presentation uses the current 240-by-24 toast and 220-pixel center geometry.
+
+Kernel QEMU acceptance intentionally reconstructs only stable semantic glyphs
+and state transitions while translucent surface backgrounds remain owned by
+the compositor. Retired 160-pixel launcher and 180-by-22 toast oracles are not
+compatible with the current UI and must not be reused.
+
 ## Hardware-demo catalog evidence contract (2026-11-24)
 
 `scripts/test-shell-qemu.py` derives the expected application count from the
@@ -2723,24 +2748,29 @@ power-loss rollback, and key lifecycle policy remain open.
 
 `tools/wapp-packager` has two explicit modes. Test/development invocations may
 use the deterministic fixture seed; production invocations are marked with
-`WOVENHAT_APP_RELEASE_MODE=1` and fail closed unless both
-`WOVENHAT_APP_SIGNING_SEED_HEX` and `WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX` are
-present. The packager derives the public key from the signing seed and rejects
-any mismatch. `package-system-apps.py`, `build-package-service.py`, and the
-release fallback propagate this mode. Seeds never enter WAPP metadata or
-catalog files. Secret custody, rotation/revocation, and physical qualification
-remain deployment responsibilities.
+`WOVENHAT_APP_RELEASE_MODE=1` and require a pinned trusted public key plus
+exactly one authority: a legacy explicitly provisioned seed or a hardware
+external signer. A seed and external signer cannot be enabled together.
+Hardware signatures must be exactly 64 bytes and are verified against the
+trusted key before package output is written. `package-system-apps.py`,
+`build-package-service.py`, and the release fallback propagate this mode.
+`tools/release-signing` implements the shared custody boundary, and
+`scripts/hardware-release-signer.py` adapts it to PKCS#11 without exporting
+private material. The witnessed ceremony is in
+`docs/release-qualification/KEY-CUSTODY.md`; a physical token remains an
+external deployment prerequisite.
 
 ## Stage 27.3 signed update-package producer (2026-10-21)
 
 `tools/wupd-packager` is the producer for the kernel's version-1 `WUPD`
 envelope. It keeps the generation and image length bounded, stores the exact
 SHA-256 image digest, and signs a domain-separated digest over the immutable
-header and image with Ed25519. Release mode requires both the signing seed and
-the matching provisioned trusted public key; development fallback is limited
-to the deterministic fixture key. The tool does not install or activate an
-image. Long-lived service ownership, slot storage, boot handoff, power-loss
-recovery, and physical qualification remain separate prerequisites.
+header and image with Ed25519. It uses the same application-key custody
+boundary as WAPP and WPKG: production mode requires a pinned trusted public
+key and exactly one seed or external hardware signer; development fallback is
+limited to the deterministic fixture key. The tool does not install or
+activate an image. Long-lived service ownership, slot storage, boot handoff,
+power-loss recovery, and physical qualification remain separate prerequisites.
 
 ## Stage 27.4 bounded update IPC contract (2026-10-21)
 
@@ -3660,7 +3690,7 @@ map wording that says 8 KiB is historical and is superseded by
 | `block.rs`, `block_cache.rs`, `block_io.rs`, `ata.rs`, `partition.rs`, `gpt.rs`, `storage.rs` | Block devices, request execution, caching, partitions and storage initialization |
 | `vfs.rs`, `fat32.rs`, `async_file.rs` | Filesystem operations and positional asynchronous file requests |
 | `async_op.rs`, `async_network.rs`, `irq_lock.rs` | Completion ownership, asynchronous sockets and interrupt-safe network/completion locks |
-| `network.rs`, `virtio_net.rs` | smoltcp IPv4 sockets and the transitional VirtIO-net transport |
+| `network.rs`, `virtio_net.rs`, `e1000.rs` | smoltcp IPv4 sockets, the transitional VirtIO-net transport and the native Intel e1000/e1000e transport |
 | `capability.rs`, `wovenguard.rs`, `audit.rs`, `permission.rs`, `secret_vault.rs`, `signed_app.rs`, `secure_boot.rs`, `boot_measurement.rs`, `entropy.rs` | Authority, domains, resource policy, runtime permission decisions, volatile WovenVault handles, signed applications, software signed-kernel handoff, boot measurement, security-ledger recording/read ABI, and entropy support |
 | `ipc.rs`, `pipe.rs` | IPC objects, endpoint/message operations and byte pipes |
 | `device.rs`, `keyboard.rs`, `mouse.rs`, `serial.rs`, `console.rs`, `terminal.rs`, `shell.rs` | Device registry, input (keyboard and PS/2 mouse both decode and publish at IRQ time), diagnostics and command interfaces |
@@ -3804,10 +3834,22 @@ accepted by the socket transport.
 | 79 | `AsyncNetPoll` | Nonblocking completion/data collection |
 | 80 | `AsyncNetWait` | Event-driven wait followed by retry-safe collection |
 | 81 | `AsyncTcpConnect` | Socket descriptor and packed endpoint; completes on connection readiness |
+| 249 | `NetListen` | Bounded process-owned TCP listen transition |
+| 250 | `AsyncNetAccept` | Owner-bound event-driven accept; completion carries the packed peer endpoint |
 
-The audit corrections add no syscall numbers or capabilities. Existing network
-policy gates remain at submission and collection; ownership checks remain on
-handles. Teardown does not depend on retaining network permission.
+Existing network policy gates remain at submission and collection; ownership
+checks remain on handles. `Accept` converts one established TCP connection on
+the listening descriptor without allocating an unbounded connection table;
+the service closes and recreates the socket for another connection. Teardown
+does not depend on retaining network permission.
+
+`apps/woven-remote-admin` uses that bounded ABI from Ring 3. It owns only
+`NetworkIo`, keeps WADM policy state bounded in-process, and never receives the
+host mTLS private key or `NetworkAdmin`. The production-style virtual boundary
+terminates mTLS in the controlled host proxy, pins the authenticated client
+certificate and forwards exact bounded WADM frames through QEMU user
+networking. This is software/QEMU deployment evidence, not native firewall or
+security-review closure.
 
 ## Concurrency and lock order
 
@@ -5100,6 +5142,45 @@ the current session and attempts the mounted source copy for reboot
 persistence. Malformed records and unavailable storage fail closed and leave
 the policy unchanged. Light/dark remain session previews because the shell's
 persisted policy surface currently distinguishes only high contrast.
+
+## Native Intel e1000/e1000e transport (2026-11-23)
+
+Phase C added `kernel/src/e1000.rs`, the first native (non-paravirtual) NIC
+transport, because every prior network acceptance marker was produced over
+virtio-net. It binds Intel `8086` functions `0x100E` (82540EM), `0x1000`,
+`0x1004`, `0x100F` and `0x10D3` (82574L, QEMU `-device e1000e`) only — never by
+class code alone — so unsupported Intel NICs stay unbound.
+
+`network::init()` prefers virtio-net and falls back to e1000; `SmolDevice`
+carries a `NicKind` and its RX/TX tokens dispatch accordingly. Exactly one
+transport initializes per boot.
+
+Three invariants keep it inside the existing locking and safety model:
+
+- **No paging under transport.** All six BAR0 pages (`0x0000`–`0x5FFF`) are
+  mapped once during init, so MMIO access never takes the rank-10 paging lock
+  while holding the rank-30 transport lock.
+- **Bounded, contiguous DMA.** One 9-frame reservation (33 024 B) holds an
+  8-entry RX ring, an 8-entry TX ring and eight 2048-byte buffers per direction,
+  reached through the direct physical mapping exactly like virtio_net.
+- **Ring indices are ring indices.** `RDT` and `TDT` are written modulo the ring
+  size. Writing absolute frame counters let the device replay stale descriptors
+  after the first wrap.
+
+Interrupts stay masked after reset (`IMC = 0xFFFF_FFFF`) and completion is
+reaped from descriptor `DD` bits, matching the legacy virtio-net dataplane; a
+single outstanding TX descriptor preserves smoltcp's serialized `transmit`
+contract. `qemu_runtime_self_test()` — which requires host-forwarded UDP/7000
+and TCP/8080 peers — now runs only in the dedicated `network-test` image, so a
+QEMU gate that attaches an unforwarded e1000 for PCIe topology reasons no longer
+halts on a host-dependent round trip it cannot receive.
+
+Acceptance is bounded software/QEMU: DHCP, DNS, ICMP and host-verified UDP and
+TCP round trips pass over both device models at 1/2/4 CPUs, plus the Stage
+14.1–14.5D chain over e1000. This is **not** native qualification — there was no
+physical device, PHY negotiation, EEPROM/MAC handling, MSI/MSI-X or real
+link-state handling involved. See
+`docs/PHASE-C-NATIVE-HARDWARE-RECONCILIATION.md`.
 
 ## Phase 7 process performance metrics (2026-11-06)
 

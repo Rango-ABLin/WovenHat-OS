@@ -1,4 +1,4 @@
-"""Verify production WAPP packaging rejects development-key fallback."""
+"""Verify production WAPP packaging enforces the custody boundary."""
 import os
 from pathlib import Path
 import subprocess
@@ -33,17 +33,56 @@ def main():
         if rejected.returncode == 0 or "requires WOVENHAT_APP_SIGNING_SEED_HEX" not in rejected.stderr:
             raise SystemExit("production packager accepted a missing signing seed")
 
-        accepted = dict(base)
-        accepted["WOVENHAT_APP_SIGNING_SEED_HEX"] = TEST_SEED
-        packaged = run(root, source, output, accepted)
+        seed_environment = dict(base)
+        seed_environment["WOVENHAT_APP_SIGNING_SEED_HEX"] = TEST_SEED
+        packaged = run(root, source, output, seed_environment)
         if packaged.returncode != 0 or not output.is_file():
             raise SystemExit(packaged.stderr or "production packager rejected matching release keys")
+        reference_signature = directory / "signature.bin"
+        reference_signature.write_bytes(output.read_bytes()[16:80])
 
-        mismatched = dict(accepted)
+        mismatched = dict(seed_environment)
         mismatched["WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"] = "00" * 32
+        output.unlink(missing_ok=True)
         rejected_mismatch = run(root, source, output, mismatched)
-        if rejected_mismatch.returncode == 0 or "application signing key mismatch" not in rejected_mismatch.stderr:
+        if (
+            rejected_mismatch.returncode == 0
+            or "does not match the trusted public key" not in rejected_mismatch.stderr
+        ):
             raise SystemExit("production packager accepted a mismatched trusted public key")
+
+        signer = directory / "external-signer.py"
+        signer.write_text(
+            "import os\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            "if sys.argv[1] != 'sign' or sys.argv[2] != 'app':\n"
+            "    raise SystemExit(2)\n"
+            "Path(sys.argv[4]).write_bytes(Path(os.environ['WOVENHAT_TEST_SIGNATURE']).read_bytes())\n",
+            encoding="utf-8",
+        )
+        external = dict(base)
+        external["WOVENHAT_APP_EXTERNAL_SIGNER"] = str(signer)
+        external["WOVENHAT_TEST_SIGNATURE"] = str(reference_signature)
+        output.unlink(missing_ok=True)
+        hardware_signed = run(root, source, output, external)
+        if hardware_signed.returncode != 0 or not output.is_file():
+            raise SystemExit(
+                hardware_signed.stderr or "production packager rejected an external signer"
+            )
+
+        source.write_bytes(b"different-release-key-fixture")
+        output.unlink(missing_ok=True)
+        invalid_signature = run(root, source, output, external)
+        if invalid_signature.returncode == 0 or "invalid signature" not in invalid_signature.stderr:
+            raise SystemExit("production packager accepted an invalid external signature")
+
+        ambiguous = dict(seed_environment)
+        ambiguous["WOVENHAT_APP_EXTERNAL_SIGNER"] = str(signer)
+        ambiguous["WOVENHAT_TEST_SIGNATURE"] = str(reference_signature)
+        rejected_ambiguous = run(root, source, output, ambiguous)
+        if rejected_ambiguous.returncode == 0 or "cannot both be set" not in rejected_ambiguous.stderr:
+            raise SystemExit("production packager accepted ambiguous signing authority")
     print("Release-key provisioning boundary: PASS")
 
 

@@ -163,7 +163,11 @@ fn parse_status(headers: &[u8]) -> Option<u16> {
 fn content_length(headers: &[u8]) -> Option<usize> {
     for line in headers.split(|byte| *byte == b'\n') {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let separator = line.iter().position(|byte| *byte == b':')?;
+        // The status line and the blank terminator carry no colon; they are
+        // not header fields and must not abort the search.
+        let Some(separator) = line.iter().position(|byte| *byte == b':') else {
+            continue;
+        };
         let (name, value) = line.split_at(separator);
         let value = &value[1..];
         if name.eq_ignore_ascii_case(b"content-length") {
@@ -190,5 +194,12 @@ mod tests {
         assert_eq!(content_length(b"Content-Length: 8\r\n"), Some(8));
         assert!(has_chunked_encoding(b"Transfer-Encoding: chunked\r\n"));
         assert!(!has_chunked_encoding(b"Content-Length: 8\r\n"));
+    }
+
+    #[test]
+    fn content_length_skips_the_status_line_and_blank_terminator() {
+        let headers = b"HTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nContent-Length: 8\r\nConnection: close\r\n\r\n";
+        assert_eq!(content_length(headers), Some(8));
+        assert!(!has_chunked_encoding(headers));
     }
 }

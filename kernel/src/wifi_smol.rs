@@ -232,6 +232,8 @@ pub fn transport_selector_self_test() -> bool {
     if n <= 64 {
         return false;
     }
-    transport = NetTransport::Virtio(crate::network::VirtioSmolDevice::new());
+    transport = NetTransport::Virtio(crate::network::SmolDevice::new(
+        crate::network::NicKind::Virtio,
+    ));
     matches!(transport, NetTransport::Virtio(_))
 }

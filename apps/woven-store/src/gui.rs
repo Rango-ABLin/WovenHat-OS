@@ -1,6 +1,6 @@
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
+use libwoven::ui::{Button, Label, TextField, Theme};
+use libwoven::{Canvas, GraphicsSurface, InputEvent, Key, rgb};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -14,7 +14,13 @@ const BUTTON_HEIGHT: usize = 20;
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 336;
-const PANEL_HEIGHT: usize = 196;
+const PANEL_HEIGHT: usize = 198;
+const PATH_X: i32 = 22;
+const PATH_Y: i32 = 170;
+const PATH_WIDTH: usize = 130;
+const ACTION_Y: i32 = 190;
+const ACTION_WIDTH: usize = 74;
+const MAX_PATH: usize = 240;
 const MAX_ENTRIES: usize = 128;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
@@ -53,12 +59,22 @@ fn descriptor_count() -> usize {
     count
 }
 
+struct StoreView<'a, 'b> {
+    refresh: &'a Button<'b>,
+    path: &'a TextField<MAX_PATH>,
+    query: &'a Button<'b>,
+    install: &'a Button<'b>,
+    remove: &'a Button<'b>,
+    rollback: &'a Button<'b>,
+    status: &'a str,
+}
+
 fn draw_store(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &StoreView<'_, '_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
@@ -82,20 +98,15 @@ fn draw_store(
     if let Ok(text) = core::str::from_utf8(count_text) {
         canvas.draw_text_system(PANEL_X + 82, PANEL_Y + 92, text, THEME.accent);
     }
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 126, "Signed catalog entries", THEME.text);
-    canvas.draw_text_system(
-        PANEL_X + 10,
-        PANEL_Y + 150,
-        "Read-only installed view",
-        THEME.text,
-    );
-    let mut refresh_digits = [0u8; 20];
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 178, "Refreshes ", THEME.text);
-    let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut refresh_digits);
-    if let Ok(text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text_system(PANEL_X + 70, PANEL_Y + 178, text, THEME.accent);
-    }
-    refresh.draw(canvas, THEME);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 126, view.status, THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 158, "Package path", THEME.text);
+    view.path.draw(canvas, THEME);
+    let _ = refresh_count;
+    view.refresh.draw(canvas, THEME);
+    view.query.draw(canvas, THEME);
+    view.install.draw(canvas, THEME);
+    view.remove.draw(canvas, THEME);
+    view.rollback.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         canvas.fill_rect(
             i32::from(x).saturating_sub(2),
@@ -112,7 +123,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh: &Button<'_>,
+    view: &StoreView<'_, '_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -124,8 +135,23 @@ fn render(
     ) else {
         return false;
     };
-    draw_store(&mut canvas, pointer, pressed, refresh_count, refresh);
+    draw_store(&mut canvas, pointer, pressed, refresh_count, view);
     window.write_canvas(&canvas).is_ok()
+}
+
+macro_rules! render_store {
+    ($window:expr, $pointer:expr, $pressed:expr, $count:expr, $refresh:expr, $path:expr, $query:expr, $install:expr, $remove:expr, $rollback:expr, $status:expr) => {{
+        let view = StoreView {
+            refresh: $refresh,
+            path: $path,
+            query: $query,
+            install: $install,
+            remove: $remove,
+            rollback: $rollback,
+            status: $status,
+        };
+        render($window, $pointer, $pressed, $count, &view)
+    }};
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -152,7 +178,25 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         ),
         "Refresh",
     );
-    if !render(&window, None, false, 0, &refresh) {
+    let mut path = TextField::<MAX_PATH>::new(Frame::new(PATH_X, PATH_Y, PATH_WIDTH as i32, 20));
+    let mut query = Button::new(
+        Frame::new(PATH_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Query",
+    );
+    let mut install = Button::new(
+        Frame::new(PATH_X + 82, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Install",
+    );
+    let mut remove = Button::new(
+        Frame::new(PATH_X + 164, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Remove",
+    );
+    let mut rollback = Button::new(
+        Frame::new(PATH_X + 246, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Rollback",
+    );
+    let mut status = "Service status unknown";
+    if !render_store!(&window, None, false, 0, &refresh, &path, &query, &install, &remove, &rollback, status) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -189,7 +233,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..length) == Some(&b"WCAN"[..]) {
                 refresh.cancel_pointer();
                 pointer_pressed = false;
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_store!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status) {
                     fail(8)
                 }
                 continue;
@@ -201,7 +245,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     .min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, &refresh) {
+                        if render_store!(&resized, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenStore: window resized\n");
@@ -219,8 +263,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 ));
                 if let Some((x, y)) = pointer {
                     refresh.pointer_move(i32::from(x), i32::from(y));
+                    query.pointer_move(i32::from(x), i32::from(y));
+                    install.pointer_move(i32::from(x), i32::from(y));
+                    remove.pointer_move(i32::from(x), i32::from(y));
+                    rollback.pointer_move(i32::from(x), i32::from(y));
+                    path.pointer(i32::from(x), i32::from(y), false);
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if !render_store!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenStore: pointer updated\n");
@@ -229,19 +278,61 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let local_x = u16::from_le_bytes([message[6], message[7]]);
                 let local_y = u16::from_le_bytes([message[8], message[9]]);
                 pointer = Some((local_x, local_y));
+                let _ = path.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
                 if refresh.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenStore: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh) {
+                if query.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::package_ipc::Operation::Query, path.as_str());
+                }
+                if install.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::package_ipc::Operation::Install, path.as_str());
+                }
+                if remove.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::package_ipc::Operation::Remove, path.as_str());
+                }
+                if rollback.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, libwoven::package_ipc::Operation::Rollback, path.as_str());
+                }
+                if !render_store!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenStore: pointer updated\n");
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 && message[4] == 2 {
+                if path.handle(InputEvent::Key(Key::Backspace)) {
+                    let _ = render_store!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status);
+                }
+            } else if length == 1
+                && message[0].is_ascii_graphic()
+                && path.handle(InputEvent::Key(Key::Char(message[0] as char)))
+            {
+                let _ = render_store!(&window, pointer, pointer_pressed, refresh_count, &refresh, &path, &query, &install, &remove, &rollback, status);
             }
         }
     }
     drop(window);
     libwoven::exit(0)
+}
+
+fn apply(status: &mut &str, operation: libwoven::package_ipc::Operation, path: &str) {
+    match crate::service::call(operation, path, 1) {
+        Ok(value) => {
+            *status = "Transaction accepted";
+            let _ = libwoven::print("WovenStore: transaction accepted value=");
+            let mut digits = [0u8; 20];
+            if let Ok(text) = core::str::from_utf8(libwoven::format_u64(value, &mut digits)) {
+                let _ = libwoven::print(text);
+            }
+            let _ = libwoven::print("\n");
+        }
+        Err(code) => {
+            *status = crate::service::status_text(code);
+            let _ = libwoven::print("WovenStore: transaction failed: ");
+            let _ = libwoven::print(status);
+            let _ = libwoven::print("\n");
+        }
+    }
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {

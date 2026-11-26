@@ -17,6 +17,20 @@ use crate::{
     woven_input::{Event, Key},
 };
 
+/// On-screen controller diagnostics for headless real-hardware debugging. The
+/// matching serial lines are always emitted; only the terminal copy is gated
+/// behind the opt-in `hardware-diagnostics` feature.
+#[cfg(feature = "hardware-diagnostics")]
+macro_rules! hw_diag {
+    ($bytes:expr) => {
+        crate::terminal::write_bytes($bytes)
+    };
+}
+#[cfg(not(feature = "hardware-diagnostics"))]
+macro_rules! hw_diag {
+    ($bytes:expr) => {};
+}
+
 const USB_CLASS: u8 = 0x0c;
 const USB_SUBCLASS: u8 = 0x03;
 const XHCI_PROG_IF: u8 = 0x30;
@@ -339,6 +353,7 @@ pub struct XhciController {
 impl XhciController {
     fn initialize(device: pci::Device) -> Result<Self, InitError> {
         crate::serial::write_line(format_args!("[XHCI] controller initialization begin"));
+        hw_diag!(b"[XHCI] controller initialization begin\n");
         let bar = device
             .bars
             .iter()
@@ -354,6 +369,7 @@ impl XhciController {
             return Err(InitError::MissingController);
         }
         crate::serial::write_line(format_args!("[XHCI] PCI memory and bus mastering enabled"));
+        hw_diag!(b"[XHCI] PCI memory and bus mastering enabled\n");
         let mmio = bar.address;
         let cap_length = mmio_read8(mmio)?;
         if cap_length < 0x20 {
@@ -367,6 +383,7 @@ impl XhciController {
             return Err(InitError::InvalidRegisters);
         }
         let context_size = if hcc1 & (1 << 2) != 0 { 64 } else { 32 };
+        bios_handoff(mmio, hcc1)?;
         let runtime_base = mmio + u64::from(mmio_read32(mmio + 0x18)? & !0x1f);
         let doorbell_base = mmio + u64::from(mmio_read32(mmio + 0x14)? & !0x3);
         let op_base = mmio + u64::from(cap_length);
@@ -374,11 +391,14 @@ impl XhciController {
         let command = mmio_read32(op_base)?;
         mmio_write32(op_base, command & !1)?;
         crate::serial::write_line(format_args!("[XHCI] controller halt requested"));
+        hw_diag!(b"[XHCI] controller halt requested\n");
         wait_until(op_base + 0x04, 1, 1)?;
         mmio_write32(op_base, (command & !1) | (1 << 1))?;
         crate::serial::write_line(format_args!("[XHCI] controller reset requested"));
+        hw_diag!(b"[XHCI] controller reset requested\n");
         wait_until(op_base, 1 << 1, 0)?;
         crate::serial::write_line(format_args!("[XHCI] controller reset complete"));
+        hw_diag!(b"[XHCI] controller reset complete\n");
 
         let mut dcbaa = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         let command_page = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
@@ -407,6 +427,7 @@ impl XhciController {
 
         mmio_write32(op_base, 1)?;
         crate::serial::write_line(format_args!("[XHCI] controller start requested"));
+        hw_diag!(b"[XHCI] controller start requested\n");
         wait_until(op_base + 0x04, 1, 0)?;
 
         let connected_port = find_connected_port(op_base, max_ports)?;
@@ -414,6 +435,7 @@ impl XhciController {
             "[XHCI] connected port {} found",
             connected_port
         ));
+        hw_diag!(b"[XHCI] connected port found\n");
         let mut controller = Self {
             address,
             original_command: device.command,
@@ -457,8 +479,10 @@ impl XhciController {
             "[XHCI] port {} reset complete",
             connected_port
         ));
+        hw_diag!(b"[XHCI] port reset complete\n");
         controller.slot_id = controller.enable_slot()?;
         crate::serial::write_line(format_args!("[XHCI] initial slot enabled"));
+        hw_diag!(b"[XHCI] initial slot enabled\n");
         Ok(controller)
     }
 
@@ -2014,26 +2038,38 @@ fn deferred_input_worker() -> ! {
         let result = start_input("xhci0");
         if usb_disk_info().is_some() {
             match result {
-                Ok(summary) => crate::serial::write_line(format_args!(
-                    "[USB] deferred enumeration complete: keyboards={} mice={} vector={:#x} attempt={}",
-                    summary.keyboards, summary.mice, summary.vector, attempt
-                )),
-                Err(error) => crate::serial::write_line(format_args!(
-                    "[USB] mass storage ready; input enumeration incomplete: {:?} attempt={}",
-                    error, attempt
-                )),
+                Ok(summary) => {
+                    crate::serial::write_line(format_args!(
+                        "[USB] deferred enumeration complete: keyboards={} mice={} vector={:#x} attempt={}",
+                        summary.keyboards, summary.mice, summary.vector, attempt
+                    ));
+                    hw_diag!(b"[USB] input enumeration complete\n");
+                }
+                Err(error) => {
+                    crate::serial::write_line(format_args!(
+                        "[USB] mass storage ready; input enumeration incomplete: {:?} attempt={}",
+                        error, attempt
+                    ));
+                    hw_diag!(b"[USB] input enumeration incomplete\n");
+                }
             }
             break;
         }
         match result {
-            Ok(summary) => crate::serial::write_line(format_args!(
-                "[USB] deferred enumeration found no storage: keyboards={} mice={} vector={:#x} attempt={}; retrying",
-                summary.keyboards, summary.mice, summary.vector, attempt
-            )),
-            Err(error) => crate::serial::write_line(format_args!(
-                "[USB] deferred enumeration failed: {:?} attempt={}; retrying",
-                error, attempt
-            )),
+            Ok(summary) => {
+                crate::serial::write_line(format_args!(
+                    "[USB] deferred enumeration found no storage: keyboards={} mice={} vector={:#x} attempt={}; retrying",
+                    summary.keyboards, summary.mice, summary.vector, attempt
+                ));
+                hw_diag!(b"[USB] no storage; retrying\n");
+            }
+            Err(error) => {
+                crate::serial::write_line(format_args!(
+                    "[USB] deferred enumeration failed: {:?} attempt={}; retrying",
+                    error, attempt
+                ));
+                hw_diag!(b"[USB] enumeration failed; retrying\n");
+            }
         }
         crate::task::sleep_current(RETRY_TICKS);
     }
@@ -2268,7 +2304,6 @@ pub fn input_layouts() -> alloc::vec::Vec<crate::hid::Application> {
         .unwrap_or_default()
 }
 
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 /// Keys newly pressed in a boot keyboard report, relative to the keys held
 /// in the previous one (updated). Held keys do not repeat; released keys
 /// produce nothing; usages WovenInput has no key for are ignored.
@@ -2292,7 +2327,6 @@ pub fn keyboard_presses(report: [u8; 8], held: &mut [u8; 6]) -> [Option<Key>; 6]
 }
 
 /// A HID keyboard usage (page 7) as a WovenInput key.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 fn usage_key(usage: u8, shift: bool, control: bool) -> Option<Key> {
     const DIGITS: &[u8; 10] = b"1234567890";
     const SHIFTED_DIGITS: &[u8; 10] = b"!@#$%^&*()";
@@ -3300,6 +3334,48 @@ fn trb_type(control: u32) -> u32 {
 }
 fn completion_code(status: u32) -> u8 {
     (status >> 24) as u8
+}
+
+fn bios_handoff(mmio: u64, hcc1: u32) -> Result<(), InitError> {
+    let xecp = ((hcc1 >> 16) & 0xffff) as u64;
+    if xecp == 0 {
+        return Ok(());
+    }
+    let mut offset = xecp * 4;
+    for _ in 0..64 {
+        let cap = mmio_read32(mmio + offset)?;
+        let id = (cap & 0xff) as u8;
+        let next = ((cap >> 8) & 0xff) as u64;
+        if id == 1 {
+            // USBLEGSUP: request OS ownership (bit 24), wait for BIOS to release (bit 16).
+            let legsup = mmio_read32(mmio + offset)?;
+            if legsup & (1 << 16) != 0 {
+                mmio_write32(mmio + offset, legsup | (1 << 24))?;
+                for _ in 0..POLL_LIMIT {
+                    let current = mmio_read32(mmio + offset)?;
+                    if current & (1 << 16) == 0 {
+                        break;
+                    }
+                    core::hint::spin_loop();
+                }
+            }
+            // USBLEGCTLSTS: clear SMI enables/status as best-effort; BIOS should have
+            // released ownership. Preserve reserved bits by writing only known RWC/enable
+            // clear pattern 0.
+            let _ = mmio_write32(mmio + offset + 4, 0);
+            crate::serial::write_line(format_args!(
+                "[XHCI] BIOS/OS handoff complete (USBLEGSUP at +{:#x})",
+                offset
+            ));
+            hw_diag!(b"[XHCI] BIOS/OS handoff complete\n");
+            return Ok(());
+        }
+        if next == 0 {
+            break;
+        }
+        offset += next * 4;
+    }
+    Ok(())
 }
 
 fn wait_until(address: u64, mask: u32, expected: u32) -> Result<(), InitError> {

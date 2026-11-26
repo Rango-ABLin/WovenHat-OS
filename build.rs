@@ -2,8 +2,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use ed25519_compact::{KeyPair, Seed};
 use sha2::{Digest, Sha256};
+use wovenhat_release_signing::SigningRequest;
 
 const BOOT_MANIFEST_MAGIC: &[u8; 4] = b"WBOT";
 const BOOT_MANIFEST_VERSION: u16 = 1;
@@ -14,31 +14,6 @@ const TEST_BOOT_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0x44,
     0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60, 0x0b,
 ];
-
-fn parse_seed_hex(value: &str) -> [u8; 32] {
-    let bytes = value.as_bytes();
-    assert!(
-        bytes.len() == 64,
-        "WOVENHAT_BOOT_SIGNING_SEED_HEX must be 64 hex digits"
-    );
-    let mut seed = [0u8; 32];
-    let nibble = |byte: u8| match byte {
-        b'0'..=b'9' => byte - b'0',
-        b'a'..=b'f' => byte - b'a' + 10,
-        b'A'..=b'F' => byte - b'A' + 10,
-        _ => panic!("invalid boot signing seed"),
-    };
-    for index in 0..32 {
-        let high = nibble(bytes[index * 2]);
-        let low = nibble(bytes[index * 2 + 1]);
-        seed[index] = (high << 4) | low;
-    }
-    seed
-}
-
-fn parse_public_key_hex(value: &str) -> [u8; 32] {
-    parse_seed_hex(value)
-}
 
 #[allow(dead_code, clippy::manual_is_multiple_of)]
 fn loaded_kernel_image(bytes: &[u8]) -> Vec<u8> {
@@ -242,33 +217,24 @@ fn create_boot_manifest(kernel: &PathBuf, out_dir: &PathBuf) -> PathBuf {
     let kernel_bytes = fs::read(kernel).expect("failed to read kernel for boot manifest");
     let loaded = canonical_kernel_image(&kernel_bytes);
     let digest: [u8; 32] = Sha256::digest(&loaded).into();
-    let seed = if env::var_os("CARGO_FEATURE_STAGE15_5_TEST").is_some() {
-        TEST_BOOT_SEED
-    } else {
-        let value = env::var("WOVENHAT_BOOT_SIGNING_SEED_HEX")
-            .expect("secure-boot requires WOVENHAT_BOOT_SIGNING_SEED_HEX");
-        parse_seed_hex(&value)
-    };
-    let key_pair = KeyPair::from_seed(Seed::new(seed));
-    if env::var_os("CARGO_FEATURE_STAGE15_5_TEST").is_none() {
-        let trusted_key = parse_public_key_hex(
-            &env::var("WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX")
-                .expect("secure-boot requires WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX"),
-        );
-        assert_eq!(
-            key_pair.pk.as_ref(),
-            &trusted_key,
-            "boot signing seed/public key mismatch"
-        );
+    let test_image = env::var_os("CARGO_FEATURE_STAGE15_5_TEST").is_some();
+    let signature = SigningRequest {
+        purpose: "boot",
+        seed_env: "WOVENHAT_BOOT_SIGNING_SEED_HEX",
+        trusted_public_env: "WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX",
+        external_signer_env: "WOVENHAT_BOOT_EXTERNAL_SIGNER",
+        production: !test_image,
+        development_seed: test_image.then_some(TEST_BOOT_SEED),
     }
-    let signature = key_pair.sk.sign(digest, None);
+    .sign(&digest)
+    .unwrap_or_else(|error| panic!("secure-boot signing failed: {error}"));
     let mut manifest = Vec::with_capacity(BOOT_MANIFEST_HEADER_LEN as usize);
     manifest.extend_from_slice(BOOT_MANIFEST_MAGIC);
     manifest.extend_from_slice(&BOOT_MANIFEST_VERSION.to_le_bytes());
     manifest.extend_from_slice(&BOOT_MANIFEST_HEADER_LEN.to_le_bytes());
     manifest.extend_from_slice(&(loaded.len() as u64).to_le_bytes());
     manifest.extend_from_slice(&digest);
-    manifest.extend_from_slice(&*signature);
+    manifest.extend_from_slice(&signature);
     let path = out_dir.join("wovenhat-boot-manifest.bin");
     fs::write(&path, manifest).expect("failed to write boot manifest");
     path
@@ -288,6 +254,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", kernel.display());
     println!("cargo:rerun-if-env-changed=WOVENHAT_BOOT_SIGNING_SEED_HEX");
     println!("cargo:rerun-if-env-changed=WOVENHAT_BOOT_TRUSTED_PUBLIC_KEY_HEX");
+    println!("cargo:rerun-if-env-changed=WOVENHAT_BOOT_EXTERNAL_SIGNER");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR missing"));
 

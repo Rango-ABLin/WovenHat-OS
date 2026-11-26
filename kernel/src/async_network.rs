@@ -25,6 +25,8 @@ pub enum Operation {
     Connect,
     Send,
     Recv,
+    /// Wait for one pending TCP connection on a listening socket.
+    Accept,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -323,6 +325,13 @@ pub fn submit_recv(descriptor: u64, capacity: usize) -> Result<async_op::Handle,
     )
 }
 
+/// Submit an event-driven accept on a socket already in listen state. The
+/// request stays pending until smoltcp publishes the accepted 4-tuple; no
+/// caller spins and no Ring-3 pointer is retained.
+pub fn submit_accept(descriptor: u64) -> Result<async_op::Handle, ()> {
+    submit(Operation::Accept, descriptor, None, [0u8; MAX_IO_SIZE], 0)
+}
+
 pub fn submit_connect(descriptor: u64, endpoint: IpEndpoint) -> Result<async_op::Handle, ()> {
     submit(
         Operation::Connect,
@@ -433,6 +442,14 @@ fn process_one(next_slot: &mut usize) -> bool {
         }
         Operation::Recv => {
             network::socket_recv_pinned(work.request.socket, &mut data[..work.request.length])
+        }
+        Operation::Accept => {
+            let accepted = network::socket_accept_pinned(work.request.socket);
+            #[cfg(feature = "remote-admin-test")]
+            if accepted.is_ok() {
+                crate::serial::write_line(format_args!("[LISTEN] accept complete"));
+            }
+            accepted.map(|peer| (peer, None))
         }
     };
     match result {

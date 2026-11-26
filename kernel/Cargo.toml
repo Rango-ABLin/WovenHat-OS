@@ -14,6 +14,10 @@ test = false
 bench = false
 
 [features]
+# Opt-in on-screen diagnostics for headless real-hardware bring-up. Off in
+# every default/release image so no debug lines reach the user console.
+# Serial logging of the same events is unconditional and unaffected.
+hardware-diagnostics = []
 physical-probe = []
 physical-wifi = ["physical-probe", "stage13-9-test"]
 qemu-test = []
@@ -78,7 +82,10 @@ stage13-14-test = ["qemu-test", "stage13-12-test"]
 # WovenAudio playback for userspace: AudioPlayback capability, syscalls
 # 203-205, interrupt-driven HDA completion.
 stage13-15-test = ["qemu-test", "stage13-12-test"]
-stage13-15-capture-test = ["qemu-test", "stage13-12-test"]
+stage13-15-capture-test = ["qemu-test", "stage13-12-test", "stage13-15-test"]
+# Virtual HDA capture source for the S13 software slice: feeds a deterministic
+# PCM pattern into the bounded capture ABI without starting a hardware stream.
+stage13-15-capture-virtual-test = ["stage13-15-capture-test"]
 # Report-protocol HID devices: tablets, digitizers, game controllers.
 stage13-16-test = ["qemu-test", "stage13-12-test"]
 # Disks WovenHat does not own (no WOVENHAT/WOVENLOG volume) are read-only.
@@ -142,8 +149,14 @@ installed-wovenfs-qualification = ["qemu-test"]
 installed-wovenfs-interruption-qualification = ["installed-wovenfs-qualification"]
 # Known cfg alias for this source when included directly by root-package tests.
 installed-wovenfs-interruption-test = []
+remote-admin-test = []
 # Stage 31 process-crash containment acceptance.
 stage31-process-crash-test = ["qemu-test"]
+# Stage 31 in-guest deterministic randomized fault injection. Self-test only:
+# no production allocation or scheduling path is altered by the feature.
+fault-injection-test = ["qemu-test"]
+# Bounded Ring-3 randomness ABI self-test (DRBG properties and fail-closed path).
+secure-rng-test = ["qemu-test"]
 # S03 bounded process lifecycle acceptance: fork/wait/reap and process-group
 # signal teardown. This gate is intentionally independent of later stages.
 s03-process-lifecycle-test = ["qemu-test"]
@@ -234,6 +247,7 @@ stage31-service-supervisor-test = ["system-apps"]
 stage31-driver-restart-test = []
 # An application built outside the kernel, loaded from the filesystem.
 stage16-1-test = ["qemu-test"]
+native-app-mutation-test = ["qemu-test"]
 # Three signed system applications installed through one bounded catalog plan.
 stage19-app-catalog-test = ["qemu-test"]
 # Production image build: install the signed system-app catalog during boot.

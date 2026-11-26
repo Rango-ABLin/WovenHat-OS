@@ -11,6 +11,16 @@ one already-declared source-fixture test remained ignored. Hardware-report and
 release-package policy contracts pass. This demonstrates reproducible in-tree
 source consumption, not an independent organization or release signature.
 
+## Independent build attestation
+
+**BLOCKED PENDING EXTERNAL SUBMISSION — the repository verifier is complete, but
+no genuinely independent organization has supplied evidence.** A local
+checkout, repository agent or project GitHub Actions run is explicitly
+ineligible. The required schema, signer custody and fail-closed verifier are
+documented in `INDEPENDENT-BUILD-ATTESTATION.md`; the release gate remains
+NO-GO until an organization-owned build host and signing key produce a verified
+attestation for the exact release commit and artifact hashes.
+
 ## Independent review
 
 **BLOCKED — no independent reviewer attestation is present.** Repository agents,
@@ -21,10 +31,13 @@ artifacts are provided and verified against an exact commit.
 
 ## Production signing custody
 
-**BLOCKED — production SDK/release signing inputs are not provisioned.** The
-repository verifier correctly requires separately managed production seed and
-trusted-public-key variables. Development signatures and test keys do not
-establish release custody.
+**BLOCKED PENDING HARDWARE CEREMONY — the repository now supports non-exportable
+PKCS#11 signing, but no production token or public-key evidence is provisioned.**
+The release tools require separate boot, application and SDK public keys plus
+exactly one external hardware signer; ambiguous seed-and-token authority fails
+closed. Development signatures and test keys do not establish release custody.
+See `KEY-CUSTODY.md` for the witnessed generation, verification and rotation
+procedure.
 
 ## Native hardware support
 

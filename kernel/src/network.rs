@@ -23,7 +23,7 @@ use smoltcp::iface::Route;
 use smoltcp::wire::Ipv6Address as SmolIpv6Address;
 
 use crate::{
-    timer,
+    e1000, timer,
     virtio_net::{self, MAX_FRAME},
 };
 
@@ -43,6 +43,62 @@ const TCP_CLOSE_GRACE_TICKS: u64 = timer::FREQUENCY_HZ as u64 * 30;
 
 pub fn default_cidr() -> IpCidr {
     IpCidr::new(IpAddress::Ipv4(DEFAULT_IPV4), DEFAULT_PREFIX)
+}
+
+/// Whether any supported NIC transport is initialized.
+fn transport_online() -> bool {
+    virtio_net::is_initialized() || e1000::is_initialized()
+}
+
+/// The MAC address of the active transport. Ordering matches `init()`, which
+/// prefers virtio-net and falls back to e1000; exactly one initializes.
+fn transport_mac() -> [u8; 6] {
+    if virtio_net::is_initialized() {
+        virtio_net::mac_address()
+    } else {
+        e1000::mac_address()
+    }
+}
+
+/// The active transport's display name, for boot diagnostics.
+pub fn transport_name() -> &'static str {
+    if virtio_net::is_initialized() {
+        "virtio-net"
+    } else if e1000::is_initialized() {
+        "e1000"
+    } else {
+        "none"
+    }
+}
+
+/// Dataplane counters for whichever transport is active, so the diagnostic
+/// shell reports one shape instead of privileging virtio-net.
+#[derive(Clone, Copy, Default)]
+pub struct TransportCounters {
+    pub rx_frames: u64,
+    pub tx_frames: u64,
+    pub rx_dropped: u64,
+    pub tx_busy: u64,
+}
+
+pub fn transport_counters() -> TransportCounters {
+    if virtio_net::is_initialized() {
+        let s = virtio_net::stats();
+        TransportCounters {
+            rx_frames: s.rx_frames,
+            tx_frames: s.tx_frames,
+            rx_dropped: s.rx_dropped,
+            tx_busy: s.tx_busy,
+        }
+    } else {
+        let c = e1000::counters();
+        TransportCounters {
+            rx_frames: c.rx_frames,
+            tx_frames: c.tx_frames,
+            rx_dropped: c.rx_dropped,
+            tx_busy: c.tx_busy,
+        }
+    }
 }
 
 #[cfg(feature = "stage14-2-test")]
@@ -1673,19 +1729,34 @@ pub fn stage14_2_dhcpv6_lease_self_test() -> bool {
         .is_none()
 }
 
-pub struct VirtioSmolDevice {
-    rx: [u8; MAX_FRAME],
+/// The native NIC transport driving the smoltcp dataplane. Exactly one is
+/// initialized per boot: virtio-net is preferred, then the e1000 fallback.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NicKind {
+    Virtio,
+    E1000,
 }
-impl VirtioSmolDevice {
-    pub const fn new() -> Self {
-        Self { rx: [0; MAX_FRAME] }
+
+pub struct SmolDevice {
+    rx: [u8; MAX_FRAME],
+    kind: NicKind,
+}
+impl SmolDevice {
+    pub const fn new(kind: NicKind) -> Self {
+        Self {
+            rx: [0; MAX_FRAME],
+            kind,
+        }
     }
 }
 
 pub struct WovenRxToken<'a> {
     data: &'a mut [u8],
 }
-pub struct WovenTxToken;
+#[derive(Clone, Copy)]
+pub struct WovenTxToken {
+    kind: NicKind,
+}
 
 impl RxToken for WovenRxToken<'_> {
     fn consume<R, F>(self, f: F) -> R
@@ -1711,12 +1782,19 @@ impl TxToken for WovenTxToken {
         {
             return result;
         }
-        let _ = virtio_net::transmit(&frame[..usable]);
+        match self.kind {
+            NicKind::Virtio => {
+                let _ = virtio_net::transmit(&frame[..usable]);
+            }
+            NicKind::E1000 => {
+                let _ = e1000::transmit(&frame[..usable]);
+            }
+        }
         result
     }
 }
 
-impl Device for VirtioSmolDevice {
+impl Device for SmolDevice {
     type RxToken<'a>
         = WovenRxToken<'a>
     where
@@ -1727,7 +1805,10 @@ impl Device for VirtioSmolDevice {
         Self: 'a;
 
     fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let len = virtio_net::receive_into(&mut self.rx)?;
+        let len = match self.kind {
+            NicKind::Virtio => virtio_net::receive_into(&mut self.rx)?,
+            NicKind::E1000 => e1000::receive_into(&mut self.rx)?,
+        };
         #[cfg(feature = "stage14-5b-test")]
         if crate::firewall_policy::evaluate_ethernet_frame(
             &self.rx[..len],
@@ -1740,21 +1821,25 @@ impl Device for VirtioSmolDevice {
             WovenRxToken {
                 data: &mut self.rx[..len],
             },
-            WovenTxToken,
+            WovenTxToken { kind: self.kind },
         ))
     }
     fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
         // Returning Some(token) is a contract that the token can actually
-        // submit a frame. The legacy virtio-net transport currently owns one
-        // polling-mode TX descriptor, so defer smoltcp transmission while that
-        // descriptor is still outstanding instead of handing out a token that
-        // would silently drop the frame in `consume()`.
-        virtio_net::tx_available().then_some(WovenTxToken)
+        // submit a frame. Both transports own a single polling-mode TX
+        // descriptor, so defer smoltcp transmission while that descriptor is
+        // still outstanding instead of handing out a token that would silently
+        // drop the frame in `consume()`.
+        let available = match self.kind {
+            NicKind::Virtio => virtio_net::tx_available(),
+            NicKind::E1000 => e1000::tx_available(),
+        };
+        available.then_some(WovenTxToken { kind: self.kind })
     }
     fn capabilities(&self) -> DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
         caps.medium = Medium::Ethernet;
-        // VirtioSmolDevice currently submits complete Ethernet frames and does
+        // Both transports submit complete Ethernet frames and do not request
         // not request or implement virtio-net checksum offload.  Therefore
         // smoltcp must compute/verify IPv4, ICMP, UDP and TCP checksums in
         // software.  `ChecksumCapabilities::ignored()` disables that work and
@@ -1771,7 +1856,7 @@ impl Device for VirtioSmolDevice {
 
 // The candidate Wi-Fi transport has the same feature boundary as its backend.
 #[cfg(not(feature = "stage13-9-test"))]
-type NetTransport = VirtioSmolDevice;
+type NetTransport = SmolDevice;
 #[cfg(feature = "stage13-9-test")]
 pub use wifi_transport::{NetTransport, WifiNetDevice};
 
@@ -1801,7 +1886,7 @@ mod wifi_transport {
 
     #[allow(clippy::large_enum_variant)]
     pub enum NetTransport {
-        Virtio(VirtioSmolDevice),
+        Virtio(SmolDevice),
         Wifi(WifiNetDevice),
     }
     pub enum NetRxToken<'a> {
@@ -1926,6 +2011,11 @@ struct UserSocket {
     handle: SocketHandle,
     kind: SocketKind,
     peer: Option<IpEndpoint>,
+    /// A TCP socket in listen state. smoltcp auto-accepts one connection on
+    /// the listening socket itself, so this is a single-connection listener:
+    /// after an accept the socket is connected and a new socket must be
+    /// created and listened for another client.
+    listening: bool,
     generation: u32,
     async_refs: u16,
     closing: bool,
@@ -2020,7 +2110,7 @@ pub struct NetInfo {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InitError {
-    Transport(virtio_net::InitError),
+    NoTransport,
     Route,
 }
 
@@ -2028,14 +2118,31 @@ pub fn init() -> Result<(), InitError> {
     if RUNTIME.get().is_some() {
         return Ok(());
     }
-    virtio_net::init().map_err(InitError::Transport)?;
+    // Prefer virtio-net (the QEMU default), then fall back to the native e1000
+    // transport. Exactly one initializes per boot; neither present leaves the
+    // stack offline without stopping the boot.
+    let kind = match virtio_net::init() {
+        Ok(()) => NicKind::Virtio,
+        Err(virtio_error) => match e1000::init() {
+            Ok(()) => NicKind::E1000,
+            Err(e1000_error) => {
+                crate::serial::write_line(format_args!(
+                    "[NET] no supported NIC: virtio={virtio_error:?} e1000={e1000_error:?}"
+                ));
+                return Err(InitError::NoTransport);
+            }
+        },
+    };
 
-    let mac_bytes = virtio_net::mac_address();
+    let mac_bytes = match kind {
+        NicKind::Virtio => virtio_net::mac_address(),
+        NicKind::E1000 => e1000::mac_address(),
+    };
     let mac = EthernetAddress(mac_bytes);
     #[cfg(feature = "stage13-9-test")]
-    let mut device = NetTransport::Virtio(VirtioSmolDevice::new());
+    let mut device = NetTransport::Virtio(SmolDevice::new(kind));
     #[cfg(not(feature = "stage13-9-test"))]
-    let mut device = VirtioSmolDevice::new();
+    let mut device = SmolDevice::new(kind);
     let mut config = Config::new(mac.into());
     // Previously a fixed constant (0x5748_4f53_4e45_5435), which made TCP
     // initial sequence numbers and smoltcp's internal randomized choices
@@ -2114,6 +2221,7 @@ pub fn init() -> Result<(), InitError> {
 
 pub fn poll() {
     virtio_net::poll();
+    e1000::poll();
     let Some(runtime) = RUNTIME.get() else {
         return;
     };
@@ -2426,6 +2534,7 @@ pub fn socket_open(owner: u64, kind: SocketKind) -> Result<u64, SocketError> {
         handle,
         kind,
         peer: None,
+        listening: false,
         generation,
         async_refs: 0,
         closing: false,
@@ -2455,6 +2564,62 @@ pub fn socket_bind(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
             .listen(port)
             .map_err(|_| SocketError::Address),
     }
+}
+
+/// Put a TCP socket into bounded listen state. This is distinct from `bind`:
+/// a listening socket is owned by the accepting process and can yield exactly
+/// one accepted connection, after which a fresh socket is required.
+pub fn socket_listen(owner: u64, id: u64, port: u16) -> Result<(), SocketError> {
+    if port == 0 {
+        return Err(SocketError::Address);
+    }
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(SocketError::Offline);
+    };
+    let mut runtime = runtime.lock();
+    let entry = find_slot(&runtime, owner, id)?;
+    if entry.kind != SocketKind::Tcp || entry.listening || entry.peer.is_some() {
+        return Err(SocketError::WrongKind);
+    }
+    runtime
+        .sockets
+        .get_mut::<tcp::Socket>(entry.handle)
+        .listen(port)
+        .map_err(|_| SocketError::Address)?;
+    let socket = runtime.user[usize::try_from(id).map_err(|_| SocketError::Invalid)?]
+        .as_mut()
+        .ok_or(SocketError::Invalid)?;
+    socket.listening = true;
+    socket.peer = None;
+    Ok(())
+}
+
+/// Complete one pending connection on a pinned listening socket. Returns the
+/// packed accepted endpoint, or `WouldBlock` while the handshake is in progress
+/// so the async worker can retry on the next network progress event.
+pub fn socket_accept_pinned(token: SocketToken) -> Result<usize, SocketError> {
+    let Some(runtime) = RUNTIME.get() else {
+        return Err(SocketError::Offline);
+    };
+    let mut runtime = runtime.lock();
+    let entry = find_token(&runtime, token)?;
+    if entry.kind != SocketKind::Tcp || !entry.listening || entry.closing {
+        return Err(SocketError::WrongKind);
+    }
+    let endpoint = runtime
+        .sockets
+        .get_mut::<tcp::Socket>(entry.handle)
+        .remote_endpoint();
+    let Some(endpoint) = endpoint else {
+        return Err(SocketError::WouldBlock);
+    };
+    let packed = endpoint_to_packed(endpoint) as usize;
+    let socket = runtime.user[token.slot as usize]
+        .as_mut()
+        .ok_or(SocketError::Invalid)?;
+    socket.listening = false;
+    socket.peer = Some(endpoint);
+    Ok(packed)
 }
 
 #[cfg(any(feature = "stage14-3-test", feature = "stage14-4-test"))]
@@ -2823,8 +2988,8 @@ pub fn net_info() -> NetInfo {
             prefix: runtime.prefix,
             dhcp_enabled: u8::from(runtime.dhcp_enabled),
             using_dhcp: u8::from(runtime.using_dhcp),
-            online: u8::from(virtio_net::is_initialized()),
-            mac: virtio_net::mac_address(),
+            online: u8::from(transport_online()),
+            mac: transport_mac(),
             _reserved: [0; 2],
         }
     } else {
@@ -3555,7 +3720,7 @@ pub fn stats() -> NetStats {
     };
     let runtime = runtime.lock();
     NetStats {
-        online: virtio_net::is_initialized(),
+        online: transport_online(),
         echo_active: runtime.echo_handle.is_some(),
         echo_port: runtime.echo_port,
         echo_packets: runtime.echo_packets,
@@ -3566,7 +3731,7 @@ pub fn stats() -> NetStats {
 }
 
 pub fn initialized() -> bool {
-    RUNTIME.get().is_some() && virtio_net::is_initialized()
+    RUNTIME.get().is_some() && transport_online()
 }
 
 pub fn self_test() -> bool {
@@ -3574,6 +3739,7 @@ pub fn self_test() -> bool {
         && DEFAULT_GATEWAY == Ipv4Address::new(10, 0, 2, 2)
         && DEFAULT_DNS == Ipv4Address::new(10, 0, 2, 3)
         && virtio_net::self_test()
+        && e1000::self_test()
 }
 
 #[cfg(feature = "stage14-1-test")]
@@ -3777,7 +3943,12 @@ fn now() -> Instant {
 /// test in the kernel means DHCP, DNS, ICMP, UDP and TCP are exercised through
 /// the same virtio-net/smoltcp runtime used by normal boots rather than through
 /// a host-side mock.
-#[cfg(any(feature = "qemu-test", feature = "network-test"))]
+// The live regression drives real host traffic through forwarded UDP/TCP
+// ports, so it belongs to the dedicated `network-test` image. Plain
+// `qemu-test` images that happen to expose a NIC (e.g. the Stage 13.2 PCIe
+// topology gate's unforwarded e1000) initialize the transport but must not
+// run a host-dependent round trip that their harness never supplies.
+#[cfg(feature = "network-test")]
 pub fn qemu_runtime_self_test() -> bool {
     const UDP_PORT: u16 = 7000;
     const TCP_PORT: u16 = 8080;

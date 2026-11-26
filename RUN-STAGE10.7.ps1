@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-# Keep Cargo/bootloader intermediates inside the project. Windows cleanup of
+# Keep Cargo/bootloader intermediates on D: for disk space. Windows cleanup of
 # %TEMP% previously removed cargo-install* directories during the bootloader
 # build and falsely failed the entire preservation chain.
 $outputRoot = if ($env:WOVENHAT_OUTPUT_ROOT) {

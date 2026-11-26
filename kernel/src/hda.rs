@@ -1044,6 +1044,42 @@ impl HdaController {
             ptr::write_volatile((bdl.virtual_address + 12) as *mut u32, 1);
         }
         compiler_fence(Ordering::Release);
+        // Virtual input source for the S13 software slice. A deterministic
+        // pattern is written into the owned DMA page and published through the
+        // same bounded copy-out and capability check as a hardware capture.
+        // This validates the kernel ABI only, not the codec or the device.
+        #[cfg(feature = "stage13-15-capture-virtual-test")]
+        let virtual_summary = {
+            unsafe {
+                for offset in 0..PCM_BYTES as usize {
+                    let value = if (offset / 4) % 2 == 0 { 0x20 } else { 0xE0 };
+                    ptr::write_volatile((pcm.virtual_address as *mut u8).add(offset), value);
+                }
+            }
+            compiler_fence(Ordering::Acquire);
+            if let Some(buffer) = output.as_mut() {
+                for (index, destination) in buffer[..PCM_BYTES as usize].iter_mut().enumerate() {
+                    *destination = unsafe {
+                        ptr::read_volatile((pcm.virtual_address as *const u8).add(index))
+                    };
+                }
+            }
+            Some(CaptureSummary {
+                stream_index: 0,
+                stream_tag: STREAM_TAG,
+                converter_node: converter,
+                format: PCM_FORMAT,
+                bytes: PCM_BYTES,
+                position_before: 0,
+                position_after: PCM_BYTES,
+                changed_bytes: PCM_BYTES,
+            })
+        };
+        #[cfg(not(feature = "stage13-15-capture-virtual-test"))]
+        let virtual_summary: Option<CaptureSummary> = None;
+        if let Some(summary) = virtual_summary {
+            return Ok(summary);
+        }
         let stream = self.mmio + SD_BASE;
         let ctl = mmio_read32(stream + SD_CTL)?;
         mmio_write32(stream + SD_CTL, ctl & !(1 << 1))?;
@@ -1146,15 +1182,11 @@ impl HdaController {
 }
 /// The playback interrupt vector (0 until output starts), and the plays and
 /// interrupts completed, for the gate.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_VECTOR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_BUSY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_PLAYS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 /// Plays whose completion was seen before the deadline: the caller was woken
 /// by the interrupt rather than by its timeout.
-#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 static AUDIO_ON_TIME: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// What WovenAudio can play.

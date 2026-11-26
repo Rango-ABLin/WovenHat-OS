@@ -6,9 +6,9 @@
 
 use crate::irq_lock::{IrqMutex, IrqMutexGuard};
 use crate::{
-    benchmark, block_io, capability::Capability, console::Console, device, heap, keyboard::Key,
-    memory, network, paging, storage, swap, syscall, task, terminal, timer, userspace, vfs,
-    virtio_net,
+    benchmark, block_io, capability::Capability, console::Console, device, e1000, heap,
+    keyboard::Key, memory, network, paging, storage, swap, syscall, task, terminal, timer,
+    userspace, vfs, virtio_net,
 };
 
 const PROMPT_PREFIX: &str = "wovenhat:";
@@ -204,6 +204,8 @@ impl Shell {
             }
             "caps" => cmd_caps(console),
             "devices" | "dev" => cmd_devices(console),
+            #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+            "usblog" => cmd_usblog(console),
             "blockio" | "iostat" => {
                 if authorize(Capability::TaskInspect, console) {
                     cmd_block_io(console);
@@ -456,6 +458,24 @@ impl Shell {
     fn finish(&mut self, console: &mut Console) {
         self.length = 0;
         if !terminal::foreground_active() {
+            // Headless real-hardware debug aid only. Off in every default
+            // image so release boots show a clean first prompt.
+            #[cfg(feature = "hardware-diagnostics")]
+            {
+                static AUTO_DIAG: core::sync::atomic::AtomicBool =
+                    core::sync::atomic::AtomicBool::new(false);
+                if !AUTO_DIAG.swap(true, core::sync::atomic::Ordering::AcqRel) {
+                    console.println("");
+                    console.println("--- auto diagnostics (no keyboard required) ---");
+                    cmd_devices(console);
+                    cmd_net(console);
+                    console.println("--- end auto diagnostics ---");
+                    // `livelog` is compiled out of every `qemu-test` image; the
+                    // live-log flush is a production/real-hardware debug aid.
+                    #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+                    let _ = crate::livelog::flush_now();
+                }
+            }
             self.print_prompt(console);
         }
     }
@@ -554,6 +574,27 @@ fn cmd_devices(console: &mut Console) {
     }
 }
 
+#[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
+fn cmd_usblog(console: &mut Console) {
+    match crate::xhci::usb_disk_info() {
+        Some(info) => {
+            console.print("usb-log-disk: port=");
+            print_u64(console, u64::from(info.port));
+            console.print(" blocks=");
+            print_u64(console, info.blocks);
+            console.newline();
+        }
+        None => console.println("usb-log-disk: no enumerated USB mass-storage disk"),
+    }
+    console.println(if crate::livelog::active() {
+        "livelog: active"
+    } else if crate::livelog::discovery_queued() {
+        "livelog: discovery queued, WOVENLOG not initialized"
+    } else {
+        "livelog: inactive"
+    });
+}
+
 fn cmd_net(console: &mut Console) {
     match virtio_net::probe() {
         virtio_net::ProbeStatus::Found(loc) => {
@@ -567,29 +608,37 @@ fn cmd_net(console: &mut Console) {
         }
         virtio_net::ProbeStatus::Missing => {
             console.println("virtio-net: not present");
-            console.println("QEMU requires transitional device: disable-modern=on");
-            return;
+        }
+    }
+    match e1000::probe() {
+        e1000::ProbeStatus::Found(loc) => {
+            console.print("e1000 pci: ");
+            print_u64(console, loc.bus as u64);
+            console.print(":");
+            print_u64(console, loc.device as u64);
+            console.print(".");
+            print_u64(console, loc.function as u64);
+            console.newline();
+        }
+        e1000::ProbeStatus::Missing => {
+            console.println("e1000: not present");
         }
     }
 
-    let stats = virtio_net::stats();
     console.print("transport: ");
-    console.println(if stats.initialized {
-        "legacy virtqueue DMA online"
-    } else {
-        "not initialized"
-    });
-    if !stats.initialized {
-        console.println("QEMU: -device virtio-net-pci,netdev=net0,disable-modern=on");
-        console.println("      -netdev user,id=net0");
-        return;
-    }
+    console.println(network::transport_name());
     console.print("smoltcp: ");
     console.println(if network::initialized() {
         "online"
     } else {
         "offline"
     });
+    if !network::initialized() {
+        console.println("QEMU: -device virtio-net-pci,netdev=net0,disable-modern=on");
+        console.println("      -netdev user,id=net0");
+        console.println("   or -device e1000,netdev=net0 -netdev user,id=net0");
+        return;
+    }
     let info = network::net_info();
     console.print("ipv4: ");
     print_ipv4(console, info.ipv4);
@@ -605,14 +654,15 @@ fn cmd_net(console: &mut Console) {
     } else {
         "static-fallback"
     });
+    let counters = network::transport_counters();
     console.print("rx=");
-    print_u64(console, stats.rx_frames);
+    print_u64(console, counters.rx_frames);
     console.print(" tx=");
-    print_u64(console, stats.tx_frames);
+    print_u64(console, counters.tx_frames);
     console.print(" rx_drop=");
-    print_u64(console, stats.rx_dropped);
+    print_u64(console, counters.rx_dropped);
     console.print(" tx_busy=");
-    print_u64(console, stats.tx_busy);
+    print_u64(console, counters.tx_busy);
     console.newline();
 }
 

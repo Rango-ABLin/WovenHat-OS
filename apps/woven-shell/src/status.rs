@@ -308,9 +308,21 @@ pub fn draw_volume(
         slash(canvas, x, y, ink);
         return;
     }
-    let bars = if percent >= 67 { 3 } else if percent >= 34 { 2 } else { 1 };
+    let bars = if percent >= 67 {
+        3
+    } else if percent >= 34 {
+        2
+    } else {
+        1
+    };
     for index in 0..bars {
-        canvas.fill_rect(x + 11 + index * 2, y + 7 - index, 1, (2 + index * 2) as usize, color);
+        canvas.fill_rect(
+            x + 11 + index * 2,
+            y + 7 - index,
+            1,
+            (2 + index * 2) as usize,
+            color,
+        );
     }
 }
 
@@ -364,7 +376,9 @@ mod tests {
         bytes[STATUS_ONLINE] = 1;
         assert_eq!(
             network_status(bytes),
-            NetworkStatus::Online { ipv4: [10, 0, 2, 15] }
+            NetworkStatus::Online {
+                ipv4: [10, 0, 2, 15]
+            }
         );
     }
 
@@ -377,12 +391,18 @@ mod tests {
         bytes[STATUS_VOLUME_PERCENT] = 42;
         assert_eq!(
             volume_from_record(&bytes, 75),
-            VolumeStatus::Level { percent: 42, muted: false }
+            VolumeStatus::Level {
+                percent: 42,
+                muted: false
+            }
         );
         bytes[STATUS_VOLUME_PERCENT] = 0;
         assert_eq!(
             volume_from_record(&bytes, 42),
-            VolumeStatus::Level { percent: 42, muted: true }
+            VolumeStatus::Level {
+                percent: 42,
+                muted: true
+            }
         );
     }
 
@@ -398,7 +418,14 @@ mod tests {
     #[test]
     fn formats_percent_boundaries() {
         let mut out = [0u8; 3];
-        for (value, expected) in [(0, "0"), (9, "9"), (10, "10"), (75, "75"), (100, "100"), (255, "100")] {
+        for (value, expected) in [
+            (0, "0"),
+            (9, "9"),
+            (10, "10"),
+            (75, "75"),
+            (100, "100"),
+            (255, "100"),
+        ] {
             let len = format_percent(value, &mut out);
             assert_eq!(&out[..len], expected.as_bytes());
         }

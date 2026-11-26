@@ -56,6 +56,7 @@ stage13-13-test = ["qemu-test", "stage13-12-test", "kernel/stage13-13-test"]
 stage13-14-test = ["qemu-test", "stage13-12-test", "kernel/stage13-14-test"]
 stage13-15-test = ["qemu-test", "stage13-12-test", "kernel/stage13-15-test"]
 stage13-15-capture-test = ["qemu-test", "stage13-12-test", "kernel/stage13-15-capture-test"]
+stage13-15-capture-virtual-test = ["stage13-15-capture-test", "kernel/stage13-15-capture-virtual-test"]
 stage13-16-test = ["qemu-test", "stage13-12-test", "kernel/stage13-16-test"]
 stage13-17-test = ["qemu-test", "stage13-12-test", "kernel/stage13-17-test"]
 stage13-18-test = ["qemu-test", "stage13-12-test", "kernel/stage13-18-test"]
@@ -100,7 +101,10 @@ installed-wovenfs-test = ["qemu-test", "kernel/installed-wovenfs-qualification"]
 installed-wovenfs-interruption-test = ["qemu-test", "kernel/installed-wovenfs-interruption-qualification"]
 # Known cfg alias for kernel sources included directly by host crash tests.
 installed-wovenfs-interruption-qualification = []
+remote-admin-test = ["kernel/remote-admin-test"]
 stage31-process-crash-test = ["qemu-test", "kernel/stage31-process-crash-test"]
+fault-injection-test = ["qemu-test", "kernel/fault-injection-test"]
+secure-rng-test = ["qemu-test", "kernel/secure-rng-test"]
 s03-process-lifecycle-test = ["qemu-test", "kernel/s03-process-lifecycle-test"]
 s03-keyboard-injection-test = ["qemu-test", "kernel/s03-keyboard-injection-test"]
 s04-scheduler-accounting-test = ["qemu-test", "kernel/s04-scheduler-accounting-test"]
@@ -150,6 +154,7 @@ stage32-21-test = ["qemu-test", "kernel/stage32-21-test"]
 stage32-22-test = ["qemu-test", "kernel/stage32-22-test"]
 stage12-2-xattr-test = ["qemu-test", "kernel/stage12-2-xattr-test"]
 stage16-1-test = ["qemu-test", "kernel/stage16-1-test"]
+native-app-mutation-test = ["qemu-test", "kernel/native-app-mutation-test"]
 stage07-webp-test = ["qemu-test", "kernel/stage07-webp-test"]
 stage19-app-catalog-test = ["qemu-test", "kernel/stage19-app-catalog-test"]
 system-apps = ["kernel/system-apps"]
@@ -252,8 +257,8 @@ edition = "2024"
 ovmf-prebuilt = "0.2.4"
 kernel = { package = "wovenhat-kernel", path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
-ed25519-compact = { version = "2.6", default-features = false }
 sha2 = { version = "0.10.9", default-features = false, features = ["force-soft"] }
+wovenhat-release-signing = { path = "tools/release-signing" }
 
 [dev-dependencies]
 unicode-normalization = { version = "0.1.25", default-features = false }

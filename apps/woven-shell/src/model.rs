@@ -5,7 +5,10 @@
 use libwoven::{process, Spring};
 
 use crate::geometry::Area;
-use crate::tokens::{CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT, TOAST_CHARS};
+use crate::tokens::{
+    CATALOG, CLOSE_SIZE, MAX_APPS, MAX_APP_NAME, MAX_EXEC, MAX_TITLE, SHADOW_REACH, TITLE_HEIGHT,
+    TOAST_CHARS,
+};
 
 #[derive(Clone, Copy)]
 pub struct Window {
@@ -28,6 +31,19 @@ pub struct Window {
     /// swapping surfaces: a failed blit of the old one does not mean it
     /// exited.
     pub resizing_until: libwoven::time::Ticks,
+    /// Whether the window is maximized: its frame fills the usable band and
+    /// its pre-maximize geometry is remembered in `restore`. Cleared by
+    /// anything that re-places the window (drag, snap, tile, client
+    /// resize), so the flag never describes a geometry the window no
+    /// longer has.
+    pub maximized: bool,
+    /// Saved `(x, y, width, height)` to return to on restore.
+    pub restore: [i32; 4],
+    /// Actual client surface size. Usually matches `width`/`height`, but a
+    /// client may answer a maximize WSIZ with a smaller clamped surface; the
+    /// shell keeps the maximized frame and blits only this surface area.
+    pub surface_w: i32,
+    pub surface_h: i32,
 }
 
 impl Window {

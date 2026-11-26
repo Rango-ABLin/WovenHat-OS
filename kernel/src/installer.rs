@@ -131,7 +131,7 @@ fn install_on_device(device: &mut dyn BlockDevice, plan_bytes: &[u8]) -> Result<
     push_hex(&mut digest_hex, &digest);
     let accounts = format!("{user}:{salt_hex}:{digest_hex}\n");
     let settings = format!(
-        "{{\"schema\":\"wovenhat-installed-v1\",\"user\":\"{user}\",\"timezone\":\"{timezone}\",\"keyboard\":\"{keyboard}\",\"locale\":\"{locale}\",\"network\":\"{network}\",\"high_contrast\":false,\"reduced_motion\":false}}\n"
+        "{{\"schema\":\"wovenhat-installed-v2\",\"user\":\"{user}\",\"timezone\":\"{timezone}\",\"keyboard\":\"{keyboard}\",\"locale\":\"{locale}\",\"network\":\"{network}\",\"high_contrast\":false,\"reduced_motion\":false,\"taskbar_alignment\":\"center\",\"taskbar_icon_size\":\"medium\",\"pinned_apps\":\"WovenFiles,WovenTerminal,WovenCalculator\"}}\n"
     );
     fat32::create_path_file(
         &mut data,

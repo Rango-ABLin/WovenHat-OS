@@ -182,6 +182,30 @@ fn unsupported_real_glyph_uses_bitmap_fallback() {
 }
 
 #[test]
+fn proportional_path_never_drops_complex_real_glyphs() {
+    // The historical regression was in draw_text_proportional, not
+    // draw_text_ttf: an inkless cached real mask was blended and advanced,
+    // silently dropping S/g/@ when their contours exceeded the path budget.
+    // Both paths must leave ink in the canvas for these characters.
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../assets/fonts/NotoSans-Regular.ttf"
+    );
+    let bytes = std::fs::read(path).expect("production font asset");
+    let face = TrueTypeFace::from_bytes(&bytes).expect("production font must validate");
+    for glyph in ["S", "g", "@"] {
+        let mut pixels = [0u32; 64 * 24];
+        let mut canvas = Canvas::new(&mut pixels, 0, 0, 64, 24).expect("text canvas");
+        let advance = canvas.draw_text_proportional(2, 2, glyph, 0x00ff_ffff, &face, 12);
+        assert!(advance > 0, "{glyph} produced no advance");
+        assert!(
+            pixels.iter().any(|pixel| *pixel != 0),
+            "proportional path dropped glyph {glyph}"
+        );
+    }
+}
+
+#[test]
 fn drawing_advances_by_real_glyph_width_not_a_fixed_cell() {
     let bytes = fixture();
     let face = TrueTypeFace::from_bytes(&bytes).expect("fixture face");

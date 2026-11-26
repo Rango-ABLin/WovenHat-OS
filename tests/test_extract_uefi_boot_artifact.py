@@ -3,6 +3,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+import zlib
 
 
 ROOT = Path(__file__).parents[1]
@@ -55,6 +56,30 @@ def make_fat16_esp(payload: bytes) -> bytes:
     return bytes(esp)
 
 
+def make_gpt_image(esp: bytes) -> bytes:
+    sectors = 8 + len(esp) // MODULE.SECTOR + 33
+    image = bytearray(sectors * MODULE.SECTOR)
+    image[510:512] = b"\x55\xaa"
+    header = bytearray(MODULE.SECTOR)
+    header[:8] = b"EFI PART"
+    struct.pack_into("<IIII", header, 8, 0x10000, 92, 0, 0)
+    struct.pack_into("<QQ", header, 24, 1, sectors - 1)
+    struct.pack_into("<QII", header, 72, 2, 4, 128)
+    entry = bytearray(4 * 128)
+    first = 34
+    last = first + len(esp) // MODULE.SECTOR - 1
+    entry[:16] = bytes.fromhex("28732ac11ff8d211ba4b00a0c93ec93b")
+    struct.pack_into("<QQ", entry, 32, first, last)
+    entry_crc = zlib.crc32(entry)
+    header[88:92] = entry_crc.to_bytes(4, "little")
+    header[16:20] = b"\0" * 4
+    header[16:20] = (zlib.crc32(header[:92]) & 0xFFFFFFFF).to_bytes(4, "little")
+    image[MODULE.SECTOR : 2 * MODULE.SECTOR] = header
+    image[2 * MODULE.SECTOR : 2 * MODULE.SECTOR + len(entry)] = entry
+    image[first * MODULE.SECTOR : (last + 1) * MODULE.SECTOR] = esp
+    return bytes(image)
+
+
 class ExtractUefiArtifactTests(unittest.TestCase):
     def test_reads_case_insensitive_fat16_fallback_path(self):
         payload = b"MZ" + bytes(range(64))
@@ -67,6 +92,27 @@ class ExtractUefiArtifactTests(unittest.TestCase):
         struct.pack_into("<H", esp, fat + 4 * 2, 4)
         with self.assertRaisesRegex(MODULE.ExtractError, "loops"):
             MODULE.FatView(bytes(esp)).find(("EFI", "BOOT", "BOOTX64.EFI"))
+
+    def test_replaces_only_the_efi_partition_for_recovery_boot(self):
+        installed_esp = make_fat16_esp(b"fault boot and kernel")
+        recovery_esp = make_fat16_esp(b"recovery boot and kernel")
+        installed = make_gpt_image(installed_esp)
+        recovery = make_gpt_image(recovery_esp)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "installed.img"
+            source = root / "recovery.img"
+            target.write_bytes(installed)
+            source.write_bytes(recovery)
+            result = MODULE.replace_esp(target, source)
+            self.assertTrue(result["valid"])
+            target_data = target.read_bytes()
+            target_offset, target_length = MODULE._esp_bounds(target_data)
+            self.assertEqual(
+                target_data[target_offset : target_offset + target_length],
+                recovery_esp,
+            )
+            self.assertEqual(target_data[:target_offset], installed[:target_offset])
 
 
 if __name__ == "__main__":

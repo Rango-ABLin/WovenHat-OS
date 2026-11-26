@@ -1688,9 +1688,7 @@ fn relocate_tlsdesc(request: TlsDescRequest<'_>, context: TlsDescContext<'_>) ->
     if slot == 0 || slot > 0x000f_ffff || offset > 0xfff {
         return None;
     }
-    let argument = (handle & 0xffff_ffff_0000_0000)
-        | (u64::from(slot) << 12)
-        | offset;
+    let argument = (handle & 0xffff_ffff_0000_0000) | (u64::from(slot) << 12) | offset;
     let resolver = context.scope.resolve(b"__woven_tlsdesc_resolver")?;
     let mut descriptor = [0; 16];
     descriptor[..8].copy_from_slice(&resolver.to_le_bytes());

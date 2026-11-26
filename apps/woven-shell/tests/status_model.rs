@@ -5,9 +5,7 @@
 mod status;
 
 use libwoven::graphics::Canvas;
-use status::{
-    draw_battery, draw_network, draw_volume, BatteryStatus, NetworkStatus, VolumeStatus,
-};
+use status::{draw_battery, draw_network, draw_volume, BatteryStatus, NetworkStatus, VolumeStatus};
 
 #[test]
 fn all_three_glyphs_draw_inside_their_16x16_slot() {
@@ -17,11 +15,20 @@ fn all_three_glyphs_draw_inside_their_16x16_slot() {
         &mut canvas,
         0,
         0,
-        NetworkStatus::Online { ipv4: [10, 0, 2, 15] },
+        NetworkStatus::Online {
+            ipv4: [10, 0, 2, 15],
+        },
         0xffffff,
         0x808080,
     );
-    draw_network(&mut canvas, 0, 0, NetworkStatus::Offline, 0xffffff, 0x808080);
+    draw_network(
+        &mut canvas,
+        0,
+        0,
+        NetworkStatus::Offline,
+        0xffffff,
+        0x808080,
+    );
     draw_volume(
         &mut canvas,
         0,
@@ -44,7 +51,14 @@ fn all_three_glyphs_draw_inside_their_16x16_slot() {
         0xffffff,
         0x808080,
     );
-    draw_volume(&mut canvas, 0, 0, VolumeStatus::Unavailable, 0xffffff, 0x808080);
+    draw_volume(
+        &mut canvas,
+        0,
+        0,
+        VolumeStatus::Unavailable,
+        0xffffff,
+        0x808080,
+    );
     draw_battery(
         &mut canvas,
         0,

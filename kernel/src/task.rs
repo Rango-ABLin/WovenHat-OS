@@ -884,7 +884,7 @@ pub enum WaitError {
     StillRunning,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileError {
     PermissionDenied,
     NoProcess,
@@ -3156,6 +3156,7 @@ pub fn exit_current_thread(exit_code: i32) -> ! {
     feature = "stage27-5-recovery-test",
     feature = "stage23-3-test",
     feature = "stage23-5-search-service-test",
+    feature = "remote-admin-test",
     feature = "system-apps"
 ))]
 pub fn spawn_user_system_service(

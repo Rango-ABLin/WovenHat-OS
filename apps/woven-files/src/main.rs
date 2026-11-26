@@ -4,8 +4,8 @@
 use core::panic::PanicInfo;
 
 use libwoven::layout::Frame;
-use libwoven::ui::{Button, Label, Theme};
-use libwoven::{rgb, Args, Canvas, GraphicsSurface};
+use libwoven::ui::{Button, Label, TextField, Theme};
+use libwoven::{rgb, Args, Canvas, GraphicsSurface, InputEvent, Key};
 
 libwoven::entry!(main);
 
@@ -25,13 +25,19 @@ const BUTTON_X: i32 = 220;
 const BUTTON_Y: i32 = 206;
 const BUTTON_WIDTH: usize = 80;
 const BUTTON_HEIGHT: usize = 20;
+const PATH_X: i32 = 18;
+const PATH_Y: i32 = 154;
+const PATH_WIDTH: usize = 270;
+const ACTION_Y: i32 = 180;
+const ACTION_WIDTH: usize = 68;
+const MAX_PATH: usize = 256;
+const MAX_ROWS: usize = 12;
 
 const PANEL_X: i32 = 12;
 const PANEL_Y: i32 = 12;
 const PANEL_WIDTH: usize = 296;
 const PANEL_HEIGHT: usize = 216;
 const LINE_HEIGHT: i32 = 10;
-const MAX_VISIBLE_LINES: usize = (PANEL_HEIGHT as i32 / LINE_HEIGHT) as usize;
 const MAX_SURFACE_WIDTH: usize = 480;
 const MAX_SURFACE_HEIGHT: usize = 320;
 
@@ -63,12 +69,22 @@ fn fail(code: u64) -> ! {
     libwoven::exit(code)
 }
 
+struct FilesView<'a, 'b> {
+    refresh: &'a Button<'b>,
+    path: &'a TextField<MAX_PATH>,
+    new: &'a Button<'b>,
+    delete: &'a Button<'b>,
+    rename: &'a Button<'b>,
+    status: &'a str,
+    selected: usize,
+}
+
 fn draw_files(
     canvas: &mut Canvas<'_>,
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh_button: &Button<'_>,
+    view: &FilesView<'_, '_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
@@ -77,7 +93,7 @@ fn draw_files(
     let mut name = [0u8; libwoven::MAX_NAME];
     let mut shown = 0usize;
     for index in 0..MAX_ENTRIES {
-        if shown >= MAX_VISIBLE_LINES.saturating_sub(2) {
+        if shown >= MAX_ROWS {
             break;
         }
         match libwoven::read_dir("/mnt", index, &mut name) {
@@ -90,12 +106,11 @@ fn draw_files(
                 }
                 let shown_length = text_length + usize::from(directory && text_length < line.len());
                 let text = core::str::from_utf8(&line[..shown_length]).unwrap_or("?");
-                canvas.draw_text_system(
-                    PANEL_X + 6,
-                    PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT,
-                    text,
-                    THEME.text,
-                );
+                let row_y = PANEL_Y + 6 + (shown as i32 + 1) * LINE_HEIGHT;
+                if shown == view.selected {
+                    canvas.fill_rect(PANEL_X + 4, row_y - 1, 180, LINE_HEIGHT as usize, THEME.accent);
+                }
+                canvas.draw_text_system(PANEL_X + 6, row_y, text, THEME.text);
                 shown += 1;
             }
             Err(_) => break,
@@ -109,13 +124,13 @@ fn draw_files(
             THEME.text,
         );
     }
-    let mut digits = [0u8; 20];
-    let refresh_text = libwoven::format_u64(u64::from(refresh_count), &mut digits);
-    if let Ok(refresh_text) = core::str::from_utf8(refresh_text) {
-        canvas.draw_text_system(PANEL_X + 6, PANEL_Y + 194, "Refreshes ", THEME.text);
-        canvas.draw_text_system(PANEL_X + 66, PANEL_Y + 194, refresh_text, THEME.accent);
-    }
-    refresh_button.draw(canvas, THEME);
+    canvas.draw_text_system(PANEL_X + 6, PANEL_Y + 130, view.status, THEME.accent);
+    view.path.draw(canvas, THEME);
+    view.new.draw(canvas, THEME);
+    view.delete.draw(canvas, THEME);
+    view.rename.draw(canvas, THEME);
+    let _ = refresh_count;
+    view.refresh.draw(canvas, THEME);
     if let Some((x, y)) = pointer {
         let color = if pressed { THEME.text } else { POINTER_MARKER };
         canvas.fill_rect(i32::from(x).saturating_sub(2), i32::from(y).saturating_sub(2), 5, 5, color);
@@ -127,7 +142,7 @@ fn render(
     pointer: Option<(u16, u16)>,
     pressed: bool,
     refresh_count: u32,
-    refresh_button: &Button<'_>,
+    view: &FilesView<'_, '_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -139,8 +154,23 @@ fn render(
     ) else {
         return false;
     };
-    draw_files(&mut canvas, pointer, pressed, refresh_count, refresh_button);
+    draw_files(&mut canvas, pointer, pressed, refresh_count, view);
     window.write_canvas(&canvas).is_ok()
+}
+
+macro_rules! render_files {
+    ($window:expr, $pointer:expr, $pressed:expr, $count:expr, $refresh:expr, $path:expr, $new:expr, $delete:expr, $rename:expr, $status:expr, $selected:expr) => {{
+        let view = FilesView {
+            refresh: $refresh,
+            path: $path,
+            new: $new,
+            delete: $delete,
+            rename: $rename,
+            status: $status,
+            selected: $selected,
+        };
+        render($window, $pointer, $pressed, $count, &view)
+    }};
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -162,12 +192,30 @@ fn main(args: Args) -> ! {
             None => 2,
         },
         Some(b"--help") => {
-            let _ = libwoven::print("WovenFiles: --path PATH or --view PATH\n");
+            let _ = libwoven::print(
+                "WovenFiles: --path PATH | --view PATH | --mkdir PATH | --rm PATH | --rename OLD NEW | --write PATH TEXT\n",
+            );
             0
         }
         Some(b"--path") => match args.get(2) {
             Some(path) => list(path),
             None => 2,
+        },
+        Some(b"--mkdir") => match args.get(2) {
+            Some(path) => create_dir(path),
+            None => 2,
+        },
+        Some(b"--rm") => match args.get(2) {
+            Some(path) => remove(path),
+            None => 2,
+        },
+        Some(b"--rename") => match (args.get(2), args.get(3)) {
+            (Some(old), Some(new)) => move_path(old, new),
+            _ => 2,
+        },
+        Some(b"--write") => match (args.get(2), args.get(3)) {
+            (Some(path), Some(text)) => write(path, text),
+            _ => 2,
         },
         None => list(b"/mnt"),
         Some(_) => 2,
@@ -191,8 +239,25 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
         Frame::new(BUTTON_X, BUTTON_Y, BUTTON_WIDTH as i32, BUTTON_HEIGHT as i32),
         "Refresh",
     );
+    let mut path = TextField::<MAX_PATH>::new(Frame::new(PATH_X, PATH_Y, PATH_WIDTH as i32, 18));
+    let mut new_button = Button::new(
+        Frame::new(PATH_X, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "New",
+    );
+    let mut delete_button = Button::new(
+        Frame::new(PATH_X + 76, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Delete",
+    );
+    let mut rename_button = Button::new(
+        Frame::new(PATH_X + 152, ACTION_Y, ACTION_WIDTH as i32, BUTTON_HEIGHT as i32),
+        "Rename",
+    );
+    let mut status = "Select a row, then edit the path";
+    let mut selected = usize::MAX;
+    let mut selected_path = [0u8; MAX_PATH];
+    let mut selected_len = 0usize;
 
-    if !render(&window, None, false, 0, &refresh_button) {
+    if !render_files!(&window, None, false, 0, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
         fail(4);
     }
 
@@ -233,7 +298,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 refresh_button.cancel_pointer();
                 pointer_pressed = false;
                 let _ = libwoven::print("WovenFiles: pointer cancelled\n");
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                if !render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
                     fail(8)
                 }
                 continue;
@@ -243,7 +308,7 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 let height = u32::from(u16::from_le_bytes([message[6], message[7]])).min(MAX_SURFACE_HEIGHT as u32);
                 if let Ok(resized) = GraphicsSurface::create(width, height) {
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(&resized, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                        if render_files!(&resized, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
                             let _ = libwoven::print("WovenFiles: window resized\n");
@@ -255,13 +320,14 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     }
                 }
             } else if (message.get(..length) == Some(&b"WKEY\x01"[..])
-                || message.get(..length) == Some(&b"r"[..])
-                || message.get(..length) == Some(&b" "[..]))
+                || (!path.focused
+                    && (message.get(..length) == Some(&b"r"[..])
+                        || message.get(..length) == Some(&b" "[..]))))
                 && refresh_button.activate()
             {
                 refresh_button.focused = true;
                 refresh_count = refresh_count.saturating_add(1);
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                if !render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenFiles: keyboard refreshed\n");
@@ -270,7 +336,11 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                 let local_y = u16::from_le_bytes([message[6], message[7]]);
                 pointer = Some((local_x, local_y));
                 refresh_button.pointer_move(i32::from(local_x), i32::from(local_y));
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                new_button.pointer_move(i32::from(local_x), i32::from(local_y));
+                delete_button.pointer_move(i32::from(local_x), i32::from(local_y));
+                rename_button.pointer_move(i32::from(local_x), i32::from(local_y));
+                path.pointer(i32::from(local_x), i32::from(local_y), false);
+                if !render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenFiles: pointer updated\n");
@@ -283,15 +353,104 @@ fn run_gui(shell: Option<&[u8]>) -> ! {
                     refresh_count = refresh_count.saturating_add(1);
                     let _ = libwoven::print("WovenFiles: pointer refreshed\n");
                 }
-                if !render(&window, pointer, pointer_pressed, refresh_count, &refresh_button) {
+                let _ = path.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed);
+                // Row hit test: selecting a row fills the path field with its
+                // `/mnt/<name>` path so Delete/Rename act on that entry.
+                if i32::from(local_x) < PANEL_X + 190 {
+                    let row = (i32::from(local_y) - (PANEL_Y + 6 + LINE_HEIGHT)) / LINE_HEIGHT;
+                    if row >= 0 && (row as usize) < MAX_ROWS {
+                        let index = row as usize;
+                        let mut name = [0u8; libwoven::MAX_NAME];
+                        if let Ok((length, _)) = libwoven::read_dir("/mnt", index, &mut name) {
+                            let mut full = [0u8; MAX_PATH];
+                            full[..5].copy_from_slice(b"/mnt/");
+                            let length = length.min(libwoven::MAX_NAME).min(MAX_PATH - 5);
+                            full[5..5 + length].copy_from_slice(&name[..length]);
+                            if let Ok(text) = core::str::from_utf8(&full[..5 + length]) {
+                                let _ = path.set_text(text);
+                                selected = index;
+                                selected_path[..5 + length].copy_from_slice(&full[..5 + length]);
+                                selected_len = 5 + length;
+                                status = "Entry selected";
+                            }
+                        }
+                    }
+                }
+                if new_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, path.as_str(), Operation::Mkdir);
+                }
+                if delete_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    apply(&mut status, path.as_str(), Operation::Unlink);
+                }
+                if rename_button.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
+                    let old = core::str::from_utf8(&selected_path[..selected_len]).unwrap_or("");
+                    apply_rename(&mut status, old, path.as_str());
+                }
+                if !render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenFiles: pointer updated\n");
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && length >= 5 && message[4] == 2 {
+                if path.focused && path.handle(InputEvent::Key(Key::Backspace)) {
+                    let _ = render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected);
+                }
+            } else if length == 1
+                && message[0].is_ascii_graphic()
+                && path.focused
+                && path.handle(InputEvent::Key(Key::Char(message[0] as char)))
+            {
+                let _ = render_files!(&window, pointer, pointer_pressed, refresh_count, &refresh_button, &path, &new_button, &delete_button, &rename_button, status, selected);
             }
         }
     }
     drop(window);
     libwoven::exit(0)
+}
+
+enum Operation {
+    Mkdir,
+    Unlink,
+}
+
+fn bounded_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= MAX_PATH
+        && path.starts_with("/mnt/")
+        && !path.as_bytes().contains(&0)
+        && !path.contains('\\')
+        && !path.split('/').skip(1).any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn apply(status: &mut &str, path: &str, operation: Operation) {
+    if !bounded_path(path) {
+        *status = "Invalid /mnt path";
+        return;
+    }
+    let result = match operation {
+        Operation::Mkdir => libwoven::mkdir(path),
+        Operation::Unlink => libwoven::unlink(path),
+    };
+    *status = match result {
+        Ok(()) => "Operation completed",
+        Err(_) => "Operation denied or unavailable",
+    };
+    let _ = libwoven::print("WovenFiles: gui operation ");
+    let _ = libwoven::print(status);
+    let _ = libwoven::print("\n");
+}
+
+fn apply_rename(status: &mut &str, old: &str, new: &str) {
+    if !bounded_path(old) || !bounded_path(new) {
+        *status = "Invalid /mnt path";
+        return;
+    }
+    *status = match libwoven::rename(old, new) {
+        Ok(()) => "Entry renamed",
+        Err(_) => "Rename denied or unavailable",
+    };
+    let _ = libwoven::print("WovenFiles: gui rename ");
+    let _ = libwoven::print(status);
+    let _ = libwoven::print("\n");
 }
 
 fn parse_u64(text: &[u8]) -> Option<u64> {
@@ -349,6 +508,99 @@ fn view(raw_path: &[u8]) -> u64 {
     };
     let _ = libwoven::close(descriptor);
     result
+}
+
+const MAX_MUTATION_PATH: usize = 256;
+
+/// Confine app-level mutations to bounded `/mnt/...` or `/tmp/...` paths. The
+/// kernel still enforces `FileWrite`, the sandbox file scope and the mounted-
+/// path policy; this check keeps the CLI from silently targeting a system path.
+fn mutation_path(raw: &[u8]) -> Option<&str> {
+    let path = core::str::from_utf8(raw).ok()?;
+    let confined = path.starts_with("/mnt/") || path.starts_with("/tmp/");
+    if path.is_empty() || path.len() > MAX_MUTATION_PATH || !confined {
+        return None;
+    }
+    if path.contains('\0') || path.contains('\\') {
+        return None;
+    }
+    path.split('/').skip(1).all(|part| {
+        !part.is_empty() && part != "." && part != ".." && part.len() <= 64
+    }).then_some(path)
+}
+
+fn create_dir(raw_path: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::mkdir(path) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: directory created\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: mkdir\n");
+            3
+        }
+    }
+}
+
+fn remove(raw_path: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::unlink(path) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: entry removed\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: unlink\n");
+            3
+        }
+    }
+}
+
+fn move_path(raw_old: &[u8], raw_new: &[u8]) -> u64 {
+    let (Some(old), Some(new)) = (mutation_path(raw_old), mutation_path(raw_new)) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    match libwoven::rename(old, new) {
+        Ok(()) => {
+            let _ = libwoven::print("WovenFiles: entry renamed\n");
+            0
+        }
+        Err(_) => {
+            let _ = libwoven::print("WovenFiles: mutation denied: rename\n");
+            3
+        }
+    }
+}
+
+fn write(raw_path: &[u8], raw_text: &[u8]) -> u64 {
+    let Some(path) = mutation_path(raw_path) else {
+        let _ = libwoven::print("WovenFiles: mutation rejected: invalid path\n");
+        return 2;
+    };
+    let Ok(descriptor) = libwoven::open_access(path, 6) else {
+        let _ = libwoven::print("WovenFiles: mutation denied: open\n");
+        return 3;
+    };
+    let written = libwoven::write_file_all(descriptor, raw_text);
+    let _ = libwoven::close(descriptor);
+    if written != Ok(raw_text.len()) {
+        let _ = libwoven::print("WovenFiles: mutation denied: write\n");
+        return 3;
+    }
+    if libwoven::sync_all().is_err() {
+        let _ = libwoven::print("WovenFiles: mutation denied: sync\n");
+        return 4;
+    }
+    let _ = libwoven::print("WovenFiles: entry written\n");
+    0
 }
 
 #[panic_handler]

@@ -145,7 +145,11 @@ pub fn high_contrast() -> bool {
 }
 
 pub fn theme_accent() -> u32 {
-    if high_contrast() { rgb(255, 255, 0) } else { ACCENT }
+    if high_contrast() {
+        rgb(255, 255, 0)
+    } else {
+        ACCENT
+    }
 }
 
 pub fn theme_text() -> u32 {
@@ -154,28 +158,52 @@ pub fn theme_text() -> u32 {
 
 /// Secondary/placeholder text. High-contrast keeps maximum legibility.
 pub fn theme_muted() -> u32 {
-    if high_contrast() { rgb(255, 255, 255) } else { TEXT_MUTED }
+    if high_contrast() {
+        rgb(255, 255, 255)
+    } else {
+        TEXT_MUTED
+    }
 }
 
 pub fn theme_panel() -> u32 {
-    if high_contrast() { rgb(0, 0, 0) } else { PANEL_FILL }
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        PANEL_FILL
+    }
 }
 
 pub fn theme_taskbar() -> u32 {
-    if high_contrast() { rgb(0, 0, 0) } else { TASKBAR }
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        TASKBAR
+    }
 }
 
 pub fn theme_toast() -> u32 {
-    if high_contrast() { rgb(0, 0, 0) } else { TOAST_FILL }
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        TOAST_FILL
+    }
 }
 
 pub fn theme_stroke() -> u32 {
-    if high_contrast() { rgb(255, 255, 255) } else { STROKE }
+    if high_contrast() {
+        rgb(255, 255, 255)
+    } else {
+        STROKE
+    }
 }
 
 pub fn theme_title(focused: bool) -> u32 {
     if high_contrast() {
-        if focused { theme_accent() } else { rgb(80, 80, 80) }
+        if focused {
+            theme_accent()
+        } else {
+            rgb(80, 80, 80)
+        }
     } else if focused {
         TITLE_ACTIVE
     } else {
@@ -184,12 +212,20 @@ pub fn theme_title(focused: bool) -> u32 {
 }
 
 pub fn theme_start_fill() -> u32 {
-    if high_contrast() { rgb(0, 0, 0) } else { START_FILL }
+    if high_contrast() {
+        rgb(0, 0, 0)
+    } else {
+        START_FILL
+    }
 }
 
 pub fn theme_entry(active: bool) -> u32 {
     if high_contrast() {
-        if active { theme_accent() } else { rgb(0, 0, 0) }
+        if active {
+            theme_accent()
+        } else {
+            rgb(0, 0, 0)
+        }
     } else if active {
         ENTRY_ACTIVE
     } else {

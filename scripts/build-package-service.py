@@ -13,9 +13,17 @@ def main() -> int:
                         help="require explicit release signing seed and trusted public key")
     args = parser.parse_args()
     if args.production:
-        for variable in ("WOVENHAT_APP_SIGNING_SEED_HEX", "WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"):
-            if not os.environ.get(variable):
-                raise SystemExit(f"--production requires {variable}")
+        if not os.environ.get("WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX"):
+            raise SystemExit("--production requires WOVENHAT_APP_TRUSTED_PUBLIC_KEY_HEX")
+        signing_inputs = (
+            "WOVENHAT_APP_SIGNING_SEED_HEX",
+            "WOVENHAT_APP_EXTERNAL_SIGNER",
+        )
+        if sum(bool(os.environ.get(variable)) for variable in signing_inputs) != 1:
+            raise SystemExit(
+                "--production requires exactly one of "
+                "WOVENHAT_APP_SIGNING_SEED_HEX or WOVENHAT_APP_EXTERNAL_SIGNER"
+            )
     root = Path(__file__).resolve().parents[1]
     app = root / "apps" / "woven-package"
     output = args.output or root / "target" / "system-apps" / "0.8.0" / "packages" / "woven-package.wapp"

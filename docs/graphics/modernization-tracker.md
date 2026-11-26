@@ -161,7 +161,7 @@ outline/raster caching to avoid repeating expensive TTF work per label.
 | 0 | Source audit | **DONE** (ongoing — re-verify facts below if stale) | Re-run the audit checklist below before each new phase of work, since other agents/auto-commits may have changed files. |
 | 1 | Display/DPI | PARTIAL, interactive GPU tab is now the default; bilinear texture filtering added | `RUN-DESKTOP.ps1` now defaults to the safe two-device mode: GTK exposes VGA and VirtIO-GPU graphical interfaces as tabs, with VGA retained for UEFI GOP boot; select the VirtIO-GPU tab to watch the live compositor frame. `libwoven::Renderer::textured_triangle_3d` now uses bounded bilinear filtering for projected surfaces, with endpoint and midpoint regression coverage. Remaining: a true GPU-only boot still requires a UEFI GOP-capable virtio display path. |
 | 2 | 2D engine | PARTIAL, shadow gap closed; only `rotate()` left | **2026-11-03 audit**: confirmed real, tested antialiased paths, gradients, clipping, and a 16.16 fixed-point affine `Transform` (`scale`/`translate`, no `rotate()` -- not added, no call site needs it). **Shared shadow primitive: added and migrated 2026-11-03** (commits `fc22e568`, `f7f3313a`). `Renderer::shadow(rect, offset_x, offset_y, radius, color, opacity)` -- a thin, unit-tested wrapper around the existing `rounded_rect_blended` -- closes the "no reusable drop-shadow primitive" gap found in the earlier audit. `apps/woven-shell/src/icons.rs`'s app-tile shadow migrated onto it (same visual result, verified via the real qualification journey: identical pass/fail to every prior run). Window-chrome's own multi-band `FOCUSED_SHADOW`/`UNFOCUSED_SHADOW` system (`apps/woven-shell/src/main.rs`) was deliberately *not* migrated onto this primitive -- it has different requirements (multiple bands, alpha tied to window fade state, clipped to the usable band) that don't reduce to a single `shadow()` call without real design work; left as a possible future unification, not urgent. **Bonus catch**: running the full `cargo test --lib` for `libwoven` (the first full host-test run this session, not just the kernel-target build/clippy commands used throughout) surfaced a pre-existing, unrelated broken test (`theme_widget_visual_regressions_are_distinct_and_stable`, stale golden hashes across all three Theme variants) -- fixed per AGENTS.md's "treat test failures as defects to diagnose," not weakened. |
-| 3 | Typography | **Font delivery and bounded glyph caching DONE; full visual migration remains open** | **2026-11-05 update:** the shared system-face path now uses a fixed 64-entry 24x24 alpha glyph raster cache and all 119 GUI canvas text call sites use the bounded system primitive, with the bitmap fallback retained for missing mappings. Real VirtIO-GPU desktop qualification passes on 1/2/4 CPUs after the cache change. Remaining: shared cross-process font mapping is not yet a release ABI, and complete OpenType shaping/fallback/visual-reference coverage remains separate from the bounded cache. |
+| 3 | Typography | **Font delivery and bounded glyph caching DONE; full visual migration remains open** | **2026-11-05 update:** the shared system-face path now uses a fixed 64-entry 32x32 alpha glyph raster cache and all 119 GUI canvas text call sites use the bounded system primitive, with the bitmap fallback retained for missing mappings. Real VirtIO-GPU desktop qualification passes on 1/2/4 CPUs after the cache change. Remaining: shared cross-process font mapping is not yet a release ABI, and complete OpenType shaping/fallback/visual-reference coverage remains separate from the bounded cache. |
 
 Wired `woven-shell`'s sign-in "Sign in" label as the first real call site (a static `UnsafeCell`-backed byte buffer loaded once via `load_system_font_bytes`, parsed into a `TrueTypeFace` on each access -- parsing is cheap, table-directory only, not full glyph decoding) -- **and hit a real, undocumented-until-now capacity wall**: a 768 KiB buffer (generous headroom past the font's actual 621,572 bytes) grew `woven-shell`'s own ELF data segment to ~1.06 MiB and the shell **failed to load at all** (`[SESSION] desktop not started: Image`) -- confirmed via real QEMU boot testing, not assumed. Bisected precisely: a 4 KiB placeholder buffer (memsz ~305 KiB) booted fine; the buffer sized to *exactly* the font's real size, 622,592 bytes (memsz ~923 KiB), booted and ran the full qualification journey cleanly on one real run (sign-in succeeded, meaning the TTF label rendered well enough for the automated click-through to work) -- **but then failed intermittently on a second interactive launch with the identical binary** (`[SESSION] desktop not started: Image` again), strongly suggesting the margin is too tight and layout-placement-sensitive (likely ASLR bias) to be safe at any size this close to whatever the real per-process memory ceiling is. **Reverted `apps/woven-shell/src/main.rs` immediately** (`git checkout --`) rather than ship something that boots only sometimes; confirmed clean via rebuild + a qualification rerun, back to the single known `keyboard_refresh` flake, nothing else.
 
@@ -1245,7 +1245,7 @@ here rather than re-litigated each session:
 ## Codex - Graphics modernization typography cache and Phase 7 qualification (2026-11-04)
 
 Completed the bounded typography migration. Canvas::draw_text_system now uses
-a process-lifetime parsed system-face cache, a fixed 64-entry 24x24-alpha
+a process-lifetime parsed system-face cache, a fixed 64-entry 32x32-alpha
 glyph raster cache, and a single clipped alpha-mask blend pass. All 119 GUI
 canvas.draw_text call sites now use the system primitive with the bitmap
 fallback retained for missing font mappings. The cache is kept at 64 entries
@@ -1329,12 +1329,17 @@ offsets dropped from the glyph path) and removed the temporary paint trace.
 Evidence: `audit-artifacts/font-map-1cpu` passed the full real QEMU desktop,
 keyboard, pointer and repaint journey on 1 CPU with default limits. 2/4-CPU evidence: `audit-artifacts/font-map-2cpu` and `audit-artifacts/font-map-4cpu`, both PASS with default timing limits.
 
-With a real face loaded, the 64-point bounded `Path` overflowed on complex
-contours ('S', 'g', '@') and silently omitted them. Raising it to 192 points
-was tried and reverted: the larger static path overflowed the short userspace
-stack on the first desktop repaint, and the extra rasterisation pushed the
-first overview paint past the gate's input budget. The accepted fix keeps the
-64-point budget and draws the bounded bitmap glyph whenever the real glyph's
-mask has no ink, with host coverage for that fallback. A shell marker now
-publishes the first unlocked frame so the harness can wait for the real state
-instead of a fixed sleep; a final 1/2/4-CPU rerun of that variant is pending.
+With a real face loaded, the original 64-point bounded `Path` overflowed on
+complex contours ('S', 'g', '@') and silently omitted them. Raising it to 192
+points was tried and reverted: the larger static path overflowed the short
+userspace stack on the first desktop repaint, and the extra rasterisation
+pushed the first overview paint past the gate's input budget. The accepted fix
+is a bounded bitmap glyph whenever the real glyph's mask has no ink, with host
+coverage for that fallback on both `draw_text_ttf` and
+`draw_text_proportional`. The static path budget is 96 points in current source
+(`b25a6d3e`, with a 32×32 glyph cache); 192 remains rejected. A shell marker
+publishes the first unlocked frame so the harness waits for the real state
+instead of a fixed sleep. The earlier "clean 1/2/4-CPU rerun pending" note is
+closed by the 2026-11-25 TCG matrix (`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`),
+which enforces the sign-in baseline and contains the
+`system font parsed bytes=621572 units_per_em=1000` marker on every profile.

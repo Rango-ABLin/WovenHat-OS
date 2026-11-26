@@ -15,7 +15,7 @@ Firmware: `C:\Program Files\qemu\share\edk2-x86_64-code.fd`
 | Release validation | 158/158 checks passed on the recorded release chain | `target/release-validation/results.json` | QEMU/host software only |
 | Installed disk boot | Exact installed-image boot passed on 1/2/4 CPUs; source and installed image digests were recorded | `target/installed-disk-release-*` | Pass for installed-image boot; supported installer transaction still open |
 | Desktop qualification | Strict harness exists; intermittent QEMU desktop journey remains unaccepted | `target/desktop-qualification-*` | Fail/not accepted |
-| Virtual trust chain | Fail-closed preflight is implemented | `target/virtual-trust-qualification/current-preflight.json` | Blocked: OVMF VARS, swtpm, development key/certificate |
+| Virtual trust chain | OVMF Secure Boot + software TPM + signed-guest handoff qualified in disposable WSL2; local Windows preflight still fails closed without `swtpm` | `scripts/test-virtual-trust-chain.py`, `target/virtual-trust-wsl-result-snakeoil-final.json`, `docs/stage-status.md` (2026-11-06) | Virtual PASS; production signing custody, host firmware/physical TPM and independent review remain external |
 | Physical qualification | Read-only inventory and 17-category plan exist | `scripts/physical-qualification-preflight.py`, `tests/hardware-matrix.json` | `PHYSICAL_NOT_TESTED` |
 | CI | Windows, kernel, runner, and hardware-qualification workflows are present | `.github/workflows/` | Requires current-head CI execution evidence |
 
@@ -33,8 +33,11 @@ Firmware: `C:\Program Files\qemu\share\edk2-x86_64-code.fd`
 
 1. M04/M11: qualify persistent storage mutation, remount, crash recovery,
    installer transaction, rollback, and backup/restore paths.
-2. M10/M14: provide disposable OVMF VARS, swtpm, development signing material,
-   SBOM/provenance and clean-room build evidence where tools are available.
+2. M10/M14: keep the qualified virtual OVMF/swtpm/signed-guest chain reproducible
+   (a scripted disposable VARS + test-certificate generator is still absent);
+   production signing custody, independent clean-room organization and signed
+   attestation remain external inputs. SBOM/provenance and clean-room rebuild
+   pass locally.
 3. M05/M06/M13: expand device matrices and obtain real-device evidence. These
    cannot be closed by QEMU-only runs.
 4. M15: final 1/2/4-CPU matrix, soak, security review, and GO/NO-GO audit.
@@ -155,8 +158,12 @@ This closes only the native ABI/SDK increment. libc/POSIX portability,
 physical hardware, production trust/signing, independent review and final
 release remain open.
 
-M10 is **BLOCKED** by unavailable OVMF VARS, `swtpm`, OpenSSL, and supplied
-development signing material. M11 recovery is software/QEMU-qualified through
+M10's virtual trust chain is **QUALIFIED** in disposable WSL2 with OVMF VARS,
+`swtpm`, a snakeoil development key/certificate and the exact
+`[S15.5] secure boot handoff: PASSED` marker; the Windows host preflight still
+fails closed because `swtpm` is not natively installable there. This is a
+virtual-model result, not production signing custody, firmware or physical TPM
+qualification. M11 recovery is software/QEMU-qualified through
 the evidence already recorded. M12 has bounded benchmark, repeatability, and
 release-matrix evidence but no native production soak. M13 physical/native
 qualification is **PHYSICAL_NOT_TESTED**. M14 production trust, signing

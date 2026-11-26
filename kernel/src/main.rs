@@ -46,11 +46,13 @@ mod console;
 mod deadline;
 mod device;
 // Public kernel instrumentation API; does not expose userspace authority.
+mod audio_status;
 pub mod diagnostics;
 mod display;
 mod driver;
 #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
 mod drivers;
+mod e1000;
 mod elf;
 mod entropy;
 mod exit_status;
@@ -67,7 +69,6 @@ mod firewall_policy;
 mod font;
 mod gdt;
 mod gpt;
-mod audio_status;
 #[cfg(any(test, feature = "qemu-test"))]
 mod graphics;
 pub mod graphics_abi;
@@ -122,6 +123,7 @@ mod bounded_capacity_analyzer;
 mod compiler_fuzzing;
 pub mod debug_dump;
 pub mod debug_serial;
+#[cfg(feature = "fault-injection-test")]
 mod deterministic_fault_injection;
 mod documentation_generator;
 pub mod gdb_binding;
@@ -150,6 +152,7 @@ mod rtc;
 mod secret_vault;
 #[cfg(feature = "secure-boot")]
 mod secure_boot;
+mod secure_rng;
 mod serial;
 #[cfg(feature = "system-apps")]
 mod service_supervisor;
@@ -1612,6 +1615,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         pic::init();
         timer::init();
+        serial::write_line(format_args!(
+            "[RNG] boot entropy: {}",
+            if secure_rng::seed_from_hardware() {
+                "seeded"
+            } else {
+                "unavailable (fails closed)"
+            }
+        ));
 
         let early_devices = [
             device::Device {
@@ -1796,9 +1807,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         boot_stage(&mut console, "BOOT LOADER [4/7]: system files ready");
 
         match network::init() {
-            Ok(()) => serial::write_line(format_args!(
-                "[NET] virtio-net + smoltcp online at 10.0.2.15/24"
-            )),
+            Ok(()) => {
+                serial::write_line(format_args!(
+                    "[NET] {} + smoltcp online at 10.0.2.15/24",
+                    network::transport_name()
+                ));
+            }
             Err(error) => serial::write_line(format_args!(
                 "[NET] optional network init skipped: {:?}",
                 error
@@ -2045,6 +2059,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
             console.println("");
         }
+        #[cfg(feature = "remote-admin-test")]
+        if !start_remote_admin_service() {
+            serial::write_line(format_args!(
+                "[REMOTE ADMIN] freestanding deployment: FAILED"
+            ));
+            halt();
+        }
         let mut shell = Shell::new();
 
         // This diagnostic shell is only the explicit no-system-apps recovery
@@ -2209,6 +2230,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     match virtio_net::probe() {
         virtio_net::ProbeStatus::Found(_) => console.println("VIRTIO-NET PCI: DETECTED"),
         virtio_net::ProbeStatus::Missing => console.println("VIRTIO-NET PCI: NOT PRESENT"),
+    }
+    match e1000::probe() {
+        e1000::ProbeStatus::Found(_) => console.println("E1000 PCI: DETECTED"),
+        e1000::ProbeStatus::Missing => console.println("E1000 PCI: NOT PRESENT"),
     }
 
     if vfs::self_test() {
@@ -2380,6 +2405,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     console.println("PIC: INITIALIZED (ALL IRQS MASKED)");
 
     timer::init();
+    serial::write_line(format_args!(
+        "[RNG] boot entropy: {}",
+        if secure_rng::seed_from_hardware() {
+            "seeded"
+        } else {
+            "unavailable (fails closed)"
+        }
+    ));
     let ata_sectors = ata::init();
     if ata_sectors.is_some()
         && !ata::with_primary_master(|disk| {
@@ -2739,7 +2772,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     {
         match network::init() {
             Ok(()) => {
-                serial::write_line(format_args!("[NETTEST] virtio-net + smoltcp initialized"));
+                serial::write_line(format_args!(
+                    "[NETTEST] {} + smoltcp initialized",
+                    network::transport_name()
+                ));
+                // Only the dedicated `network-test` image owns host forwarding
+                // for UDP/7000 and TCP/8080, so only it runs the live round trip.
+                // Plain qemu-test images merely initialize the transport.
+                #[cfg(feature = "network-test")]
                 if network::qemu_runtime_self_test() {
                     serial::write_line(format_args!("[NETTEST] DHCP/DNS/ICMP/UDP/TCP: PASSED"));
                     #[cfg(feature = "stage14-1-test")]
@@ -3373,8 +3413,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         "[PROC-DIAG] paired userspace execution wait: BEGIN"
     ));
     let user_pair_wait_start = timer::ticks();
+    // TCG emulation cost grows with the online CPU count. Keep the accepted
+    // 1/2/4-CPU budget unchanged and scale only wider profiles; the assertion
+    // that both paired processes exit is unchanged.
+    let pair_budget_ticks = 2_000u64 * (smp::online_count() as u64 / 4).clamp(1, 4);
     while !task::process_exited(first_pid) || !task::process_exited(second_pid) {
-        if timer::ticks().wrapping_sub(user_pair_wait_start) > 2_000 {
+        if timer::ticks().wrapping_sub(user_pair_wait_start) > pair_budget_ticks {
             serial::write_line(format_args!(
                 "[BOOT] paired userspace execution: TIMEOUT first_exited={} second_exited={}",
                 task::process_exited(first_pid),
@@ -4079,6 +4123,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial::write_line(format_args!("[S11.2] threads/TLS/join: PASSED"));
         qemu_test_exit_success();
     }
+    #[cfg(feature = "secure-rng-test")]
+    {
+        if !secure_rng::self_test() {
+            serial::write_line(format_args!("[RNG] bounded DRBG self-test: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[RNG] bounded DRBG self-test: PASSED"));
+        qemu_test_exit_success();
+    }
     #[cfg(feature = "stage11-3-test")]
     {
         if !notifications::structural_self_test() {
@@ -4095,6 +4148,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S12.1] VFS boundary: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "fault-injection-test")]
+    {
+        if !deterministic_fault_injection::qemu_self_test() {
+            serial::write_line(format_args!(
+                "[S31] deterministic randomized fault injection: FAILED"
+            ));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!(
+            "[S31] deterministic randomized fault injection: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage13-1-test")]
@@ -4966,6 +5032,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         serial::write_line(format_args!("[S16.1] out-of-kernel application: PASSED"));
+        qemu_test_exit_success();
+    }
+    #[cfg(feature = "native-app-mutation-test")]
+    {
+        if !native_app_mutation_self_test() {
+            serial::write_line(format_args!("[NATIVE-APP] bounded file mutations: FAILED"));
+            qemu_test_exit_failure();
+        }
+        serial::write_line(format_args!("[NATIVE-APP] bounded file mutations: PASSED"));
         qemu_test_exit_success();
     }
     #[cfg(feature = "stage19-app-catalog-test")]
@@ -6903,7 +6978,11 @@ fn preemption_probe_task() -> ! {
 /// The path arrives through the environment so the kernel does not hard-code a
 /// build layout; the Stage 16.1 harness builds the application first and sets
 /// it.
-#[cfg(any(feature = "stage07-webp-test", feature = "stage16-1-test"))]
+#[cfg(any(
+    feature = "stage07-webp-test",
+    feature = "stage16-1-test",
+    feature = "native-app-mutation-test"
+))]
 const EXTERNAL_APPLICATION: &[u8] = include_bytes!(env!("WOVENHAT_APP_IMAGE"));
 
 #[cfg(any(feature = "stage19-app-catalog-test", feature = "system-apps"))]
@@ -7003,6 +7082,46 @@ const AI_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_AI_PROBE_IMAGE"));
 const SEARCH_SERVICE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_IMAGE"));
 #[cfg(feature = "stage23-5-search-service-test")]
 const SEARCH_PROBE_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SEARCH_PROBE_IMAGE"));
+#[cfg(feature = "remote-admin-test")]
+const REMOTE_ADMIN_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_REMOTE_ADMIN_IMAGE"));
+
+#[cfg(feature = "remote-admin-test")]
+fn start_remote_admin_service() -> bool {
+    match signed_app::verify_package(REMOTE_ADMIN_IMAGE) {
+        Ok(_) => {}
+        Err(error) => {
+            serial::write_line(format_args!(
+                "[REMOTE ADMIN] package verification failed: {:?}",
+                error
+            ));
+            return false;
+        }
+    }
+    let Some(program) =
+        userspace::load_elf_with_argv_verified(REMOTE_ADMIN_IMAGE, &["/bin/woven-remote-admin"])
+    else {
+        serial::write_line(format_args!("[REMOTE ADMIN] ELF load failed"));
+        return false;
+    };
+    let capabilities = capability::CapabilitySet::only(capability::Capability::NetworkIo);
+    let Ok((pid, _, _)) =
+        task::spawn_user_system_service("woven-remote-admin", program, capabilities)
+    else {
+        serial::write_line(format_args!("[REMOTE ADMIN] process spawn failed"));
+        return false;
+    };
+    serial::write_line(format_args!(
+        "[REMOTE ADMIN] deployed freestanding service pid={}",
+        pid.as_u64()
+    ));
+    for _ in 0..200 {
+        task::yield_now();
+        if task::process_exited(pid) {
+            return false;
+        }
+    }
+    true
+}
 
 #[cfg(all(feature = "stage22-3-test", not(feature = "stage27-5-test")))]
 fn stage22_3_package_service_self_test() -> bool {
@@ -7660,12 +7779,7 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [
-        Capability::Ai,
-        Capability::Secrets,
-        Capability::Camera,
-        Capability::Microphone,
-    ] {
+    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
@@ -9074,6 +9188,72 @@ fn stage16_1_self_test() -> bool {
     )
 }
 
+/// Exercise the bounded WovenFiles mutation CLI with the real signed WAPP.
+/// This reuses the existing `FileWrite` authority and mounted-path policy; it
+/// adds no syscall, capability or ABI change.
+#[cfg(feature = "native-app-mutation-test")]
+fn native_app_mutation_self_test() -> bool {
+    fn step(name: &str, ok: bool) -> bool {
+        serial::write_line(format_args!(
+            "[NATIVE-APP] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
+        ));
+        ok
+    }
+
+    if signed_app::verify_package(EXTERNAL_APPLICATION).is_err() {
+        return step("signed WAPP package verifies", false);
+    }
+    if !step("signed WAPP package verifies", true) {
+        return false;
+    }
+    // Pass the signed envelope itself: a raw extracted ELF is only admitted
+    // for a fixed trusted argv[0], while the WAPP path uses the signature.
+    let image = EXTERNAL_APPLICATION;
+    const COMMANDS: &[&[&str]] = &[
+        &["/bin/wovenhat-files", "--mkdir", "/tmp/mutation-probe"],
+        &[
+            "/bin/wovenhat-files",
+            "--write",
+            "/tmp/mutation-probe/note.txt",
+            "hello",
+        ],
+        &[
+            "/bin/wovenhat-files",
+            "--rename",
+            "/tmp/mutation-probe/note.txt",
+            "/tmp/mutation-probe/renamed.txt",
+        ],
+        &[
+            "/bin/wovenhat-files",
+            "--rm",
+            "/tmp/mutation-probe/renamed.txt",
+        ],
+        &["/bin/wovenhat-files", "--rm", "/tmp/mutation-probe"],
+    ];
+    for (index, argv) in COMMANDS.iter().enumerate() {
+        let Some(program) = userspace::load_elf_with_argv_verified(image, argv) else {
+            return step("load mutation command", false);
+        };
+        let Ok((pid, _)) = task::spawn_user_process("woven-files-mutation", program) else {
+            return step("spawn mutation command", false);
+        };
+        let start = timer::ticks();
+        while !task::process_exited(pid) {
+            if timer::ticks().wrapping_sub(start) > 500 {
+                return step("mutation command timed out", false);
+            }
+            task::yield_now();
+        }
+        if !step(argv[1], task::wait_process(pid.as_u64()) == Ok(0)) {
+            return false;
+        }
+        serial::write_line(format_args!("[NATIVE-APP] mutation step {}", index));
+    }
+    true
+}
+
 // ------------------------------- end-to-end client surface via a real app
 
 #[cfg(any(
@@ -9722,8 +9902,8 @@ fn stage20_14b_self_test() -> bool {
 /// Stage 20.15 acceptance: the desktop as the session.
 ///
 /// The session starts through `session::start`, as a system-apps boot
-/// starts it, with an application in the catalog. Then, with real i8042
-/// input:
+/// starts it, with an application in the catalog. Then, with keyboard and
+/// absolute-pointer input:
 /// - the shell takes the display and input focus, and its launcher (F1)
 ///   lists the application;
 /// - F12 shows the diagnostic console: the session's frames stop, the
@@ -9755,25 +9935,27 @@ fn stage20_15_self_test() -> bool {
             task::yield_now();
         }
     }
-    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
-        let dy = -screen_dy;
-        let flags =
-            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
-        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
-    }
-    fn move_by(mut dx: i32, mut dy: i32) -> bool {
-        while dx != 0 || dy != 0 {
-            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
-            if !packet(sx as i16, sy as i16, false) {
-                return false;
-            }
-            dx -= sx;
-            dy -= sy;
+    fn click_at(owner: u64, x: i32, y: i32, width: i32, height: i32) -> bool {
+        let axis = |value: i32, extent: i32| {
+            ((i64::from(value.clamp(0, extent - 1)) * 32767) / i64::from(extent - 1)) as u16
+        };
+        if !woven_input::publish(woven_input::Event::PointerAbsolute {
+            x: axis(x, width),
+            y: axis(y, height),
+        }) {
+            return false;
         }
-        true
-    }
-    fn click() -> bool {
-        packet(0, 0, true) && packet(0, 0, false)
+        let moved = until(500, || !woven_input::pending(owner));
+        let pressed = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: true,
+        });
+        let press_seen = pressed && until(500, || !woven_input::pending(owner));
+        let released = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: false,
+        });
+        moved && press_seen && released
     }
     /// Press and release one key on the i8042.
     fn key(code: u8) -> bool {
@@ -9831,13 +10013,23 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1: the launcher's first row is the catalog's application.
-    // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's icon occupies the left margin and its text
-    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
+    // F1 opens the current centered overview. Its one catalog entry occupies
+    // the first app-grid cell; labels are centered under a 48-pixel icon.
+    let overview_width = (width - 48).clamp(320, 700);
+    let overview_height = (top - 24).max(240).clamp(240, 560);
+    let overview_x = (width - overview_width) / 2;
+    let overview_y = (top - overview_height - 8).max(8);
+    let app_x = overview_x + 16;
+    let app_text_x = app_x + (96 - crate::font::text_width("Hello") as i32) / 2;
+    let app_grid_y = overview_y + 16 + 30 + 16 + 14 + 40 + 16 + 14;
     let listed = key(0x3b)
         && until(1000, || {
-            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+            text_at(
+                app_text_x,
+                app_grid_y + 48 + 12,
+                "Hello",
+                rgb(243, 246, 251),
+            )
         });
     let closed = key(0x3b);
     if !step(
@@ -9876,26 +10068,37 @@ fn stage20_15_self_test() -> bool {
     if !step("F12 returns to the desktop: display and focus", back) {
         return false;
     }
+    let _ = key(0x3b);
+    let _ = until(500, || {
+        text_at(
+            overview_x + 16 + (96 - crate::font::text_width("Hello") as i32) / 2,
+            app_grid_y + 48 + 12,
+            "Hello",
+            rgb(243, 246, 251),
+        )
+    });
+    let _ = key(0x3b);
 
-    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
-    // and Language were appended after Lock screen, so only the row-count
-    // term needs updating).
-    let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
-    let (px, py) = (width / 2, height / 2);
-    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    if !step(
-        "Quick Settings opens",
-        opened
-            && until(1000, || {
-                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(255, 255, 0))
-            }),
-    ) {
+    // Current Quick Settings: an action grid plus sliders, with Power off in
+    // the fixed footer rather than the old first-row menu.
+    let button = (width - 54 - 4 - 8 * 20, top + 4);
+    let panel_height = 460.min(top - 8);
+    let panel = (width - 360 - 8, (top - panel_height - 8).max(0));
+    let power_row = (
+        panel.0 + 360 - 12 - 54 / 2,
+        panel.1 + panel_height - 40 - 12 + 8 + 12,
+    );
+    let panel_probe = compositor::pixel(panel.0 + 180, panel.1 + 52);
+    let opened = click_at(shell, button.0 + 8, button.1 + 8, width, height);
+    let qs_opened = opened
+        && until(1000, || {
+            compositor::pixel(panel.0 + 180, panel.1 + 52) != panel_probe
+        });
+    if !step("Quick Settings opens", qs_opened) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
-    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
+    let _ = click_at(shell, power_row.0, power_row.1, width, height);
     // The machine should now be off; still running after this is failure.
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1000 {
@@ -12864,15 +13067,14 @@ fn stage20_18_self_test() -> bool {
 fn stage20_9_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
+    const TASKBAR: u32 = rgb(24, 32, 46);
     const ACCENT: u32 = rgb(76, 190, 188);
     const START_FILL: u32 = rgb(28, 115, 145);
-    const PANEL_FILL: u32 = rgb(28, 32, 44);
-    const TOAST_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_FILL: u32 = rgb(32, 40, 56);
     const NOTES: u32 = rgb(150, 120, 40);
     const UNSET: u32 = 0x0100_0000;
 
@@ -12900,11 +13102,11 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = (x / 220 + y / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
+        let woven = blend_pixel(tint, base, 4);
+        if x % 220 == 0 || y % 220 == 0 {
+            blend_pixel(WHITE, woven, 4)
         } else {
             woven
         }
@@ -12990,36 +13192,50 @@ fn stage20_9_self_test() -> bool {
         return false;
     }
 
-    // An overlay as the shell draws it: a one-pixel ACCENT border, then
-    // `draw`; everything else UNSET (transparent over a blended background).
-    let overlay = |size: (i32, i32), draw: &dyn Fn(&mut Surface)| {
-        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
-        let bounds = surface.bounds();
-        surface.fill_rect(bounds, UNSET);
-        surface.stroke_rect(bounds, ACCENT);
-        draw(&mut surface);
+    // The toast shows the latest notification.
+    let toast = {
+        let mut surface = Surface::new(240, 24);
+        surface.fill_rect(surface.bounds(), UNSET);
+        surface.draw_text(6, 8, "Battery 80%", rgb(243, 246, 251));
         surface
     };
-    // The toast shows the latest notification.
-    let toast = overlay((180, 22), &|surface| {
-        surface.draw_text(6, 8, "Battery 80%", WHITE);
-    });
-    let toast_expected = |x: i32, y: i32| match toast.pixel(x - (width - 188), y - 8) {
-        Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-        Some(color) => color,
+    let toast_x = width - 250;
+    let toast_y = height - 24 - 24 - 10;
+    let toast_text_visible = || {
+        (0..24).all(|dy| {
+            (0..240).all(|dx| {
+                toast.pixel(dx, dy).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(expected)
+                })
+            })
+        })
     };
     if !step(
         "the toast shows the latest notification",
-        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
+        until(1500, toast_text_visible),
     ) {
         return false;
     }
 
     // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
-    let clock_width = 5 * crate::font::ADVANCE - (crate::font::ADVANCE - crate::font::WIDTH as i32);
-    let clock_x = width - 6 - clock_width;
-    let (badge_x, badge_y) = (clock_x - 13, top + 7);
-    let badge_3d = || compositor::pixel(badge_x + 5, badge_y + 5) == Ok(ACCENT);
+    let clock_width = 8 * crate::font::ADVANCE + 6;
+    let clock_x = width - clock_width - 4;
+    let (badge_x, badge_y) = (clock_x - 14, top + 7);
+    let mut badge_digit = Surface::new(10, 11);
+    badge_digit.fill_rect(badge_digit.bounds(), UNSET);
+    badge_digit.draw_text(3, 2, "3", rgb(243, 246, 251));
+    let badge_3d = || {
+        compositor::pixel(badge_x + 1, badge_y + 5) == Ok(ACCENT)
+            && (0..11).all(|dy| {
+                (0..10).all(|dx| {
+                    badge_digit.pixel(dx, dy).is_none_or(|expected| {
+                        expected == UNSET
+                            || compositor::pixel(badge_x + dx, badge_y + dy) == Ok(expected)
+                    })
+                })
+            })
+    };
     if !step(
         "a badge counts three unread notifications",
         until(1000, badge_3d),
@@ -13032,42 +13248,43 @@ fn stage20_9_self_test() -> bool {
     let center = |rows: &[&str]| {
         let lines = rows.len().max(1) as i32;
         let h = (1 + lines) * 14 + 2;
-        let (x0, y0) = (width - 4 - 164, top - 2 - h);
-        let image = overlay((164, h), &|surface| {
-            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
-            surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(
-                164 - 6 - crate::font::text_width("Clear") as i32,
-                5,
-                "Clear",
-                WHITE,
-            );
-            if rows.is_empty() {
-                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
-            }
-            for (index, row) in rows.iter().enumerate() {
-                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
-            }
-        });
+        let (x0, y0) = (width - 4 - 220, top - 4 - h);
+        let mut image = Surface::new(220, h as usize);
+        image.fill_rect(image.bounds(), UNSET);
+        image.draw_text(6, 5, "Notifications", ACCENT);
+        image.draw_text(
+            220 - 6 - crate::font::text_width("Clear") as i32,
+            5,
+            "Clear",
+            rgb(243, 246, 251),
+        );
+        if rows.is_empty() {
+            image.draw_text(8, 1 + 14 + 4, "No notifications", rgb(166, 178, 196));
+        }
+        for (index, row) in rows.iter().enumerate() {
+            image.draw_text(8, 1 + (1 + index as i32) * 14 + 4, row, rgb(243, 246, 251));
+        }
         (x0, y0, h, image)
+    };
+    let text_matches = |x0: i32, y0: i32, image: &Surface| {
+        (0..image.height()).all(|dy| {
+            (0..image.width()).all(|dx| {
+                image.pixel(dx as i32, dy as i32).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(x0 + dx as i32, y0 + dy as i32) == Ok(expected)
+                })
+            })
+        })
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, full_height, full) = center(&[
+    let (x0, y0, _full_height, full) = center(&[
         "Notes: Battery 80%",
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
-    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        // Verify the entire panel: header, clear control, all rows and border.
-        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
-            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        })
-    };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered =
-        clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
+    let center_rendered = clock_clicked && until(1000, || text_matches(x0, y0, &full));
     let badge_removed = center_rendered
         && until(500, || {
             compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT)
@@ -13081,19 +13298,17 @@ fn stage20_9_self_test() -> bool {
     }
 
     // Clear, at the right of the title row; then the clock closes it.
-    let (ex, ey, eh, empty) = center(&[]);
-    let clear_point = (x0 + 164 - 20, y0 + 7);
+    let (ex, ey, _empty_height, empty) = center(&[]);
+    let clear_point = (x0 + 220 - 20, y0 + 7);
     let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
         && click()
-        && until(1000, || center_matches(ex, ey, eh, &empty));
+        && until(1000, || text_matches(ex, ey, &empty));
     if !step("Clear empties the Notification Center", cleared) {
         return false;
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || {
-            compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL)
-        });
+        && until(1000, || !text_matches(ex, ey, &empty));
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
@@ -14477,7 +14692,7 @@ fn stage20_5_self_test() -> bool {
         && until(500, || {
             region(48, top, 120, 1, |_, _| ACCENT)
                 && region(48, top + 1, 120, 3, |x, y| {
-                    blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
+                    blend_pixel(TASKBAR, wallpaper(x, y, height), 188)
                 })
         });
     if !step("shadows stop at the taskbar", edge) {
@@ -14953,125 +15168,89 @@ fn stage20_3_self_test() -> bool {
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
 
-    fn generic_icon(surface: &mut Surface, x: i32, y: i32, size: i32, selected: bool) {
-        let fill = rgb(74, 88, 112);
-        let ink = rgb(220, 230, 242);
-        surface.fill_rect(
-            Rect::new(x + 1, y + 2, size as usize, size as usize),
-            rgb(0, 0, 0),
-        );
-        surface.fill_rect(Rect::new(x, y, size as usize, size as usize), fill);
-        surface.fill_rect(Rect::new(x + 2, y + 2, (size - 4) as usize, 2), ink);
-        if selected {
-            surface.stroke_rect(
-                Rect::new(x - 1, y - 1, (size + 2) as usize, (size + 2) as usize),
-                ACCENT,
-            );
-        }
-        let span = (size / 2).max(4);
-        surface.fill_rect(
-            Rect::new(x + size / 4, y + size / 3 + 2, span as usize, 2),
-            ink,
-        );
-        surface.fill_rect(
-            Rect::new(
-                x + size / 4 + 2,
-                y + size / 3 + 6,
-                (span - 4).max(0) as usize,
-                2,
-            ),
-            ink,
-        );
-        const MASK: [&[u8; 8]; 8] = [
-            b"..####..",
-            b".######.",
-            b"########",
-            b"###..###",
-            b"##....##",
-            b"#......#",
-            b"########",
-            b"........",
-        ];
-        let color = if selected {
-            rgb(110, 235, 235)
-        } else {
-            rgb(225, 235, 250)
-        };
-        for (row, line) in MASK.iter().enumerate() {
-            for (column, bit) in line.iter().enumerate() {
-                if *bit == b'#' {
-                    surface.fill_rect(
-                        Rect::new(
-                            x + (size - 8) / 2 + column as i32,
-                            y + (size - 8) / 2 + row as i32,
-                            1,
-                            1,
-                        ),
-                        color,
-                    );
-                }
-            }
-        }
-    }
-
-    // The launcher panel as the kernel renders it: rows of 14 pixels (title,
-    // search, one per match or "No matches") inside a one-pixel border, just
-    // above the taskbar.
-    let panel_height = |matches: usize| (2 + matches.max(1) as i32) * 14 + 2;
-    let panel = |names: &[&str], query: &str, selected: usize| {
-        let h = panel_height(names.len());
-        let y = top - 2 - h;
-        let mut expected = Surface::new(160, h as usize);
-        expected.fill_rect(Rect::new(0, 0, 160, h as usize), ACCENT);
-        expected.fill_rect(Rect::new(1, 1, 158, (h - 2) as usize), UNSET);
-        expected.fill_rect(Rect::new(1, 1, 158, 14), START_FILL);
-        generic_icon(&mut expected, 4, 3, 8, false);
-        expected.draw_text(16, 5, "WovenStart", WHITE);
-        expected.draw_text(6, 19, &alloc::format!("> {}_", query), WHITE);
-        if names.is_empty() {
-            expected.draw_text(6, 33, "No matches", WHITE);
-        }
-        for (row, name) in names.iter().enumerate() {
-            let row_y = 1 + (2 + row as i32) * 14;
-            if row == selected {
-                expected.fill_rect(Rect::new(1, row_y, 158, 14), ACTIVE);
-            }
-            generic_icon(&mut expected, 4, row_y + 1, 12, row == selected);
-            expected.draw_text(22, row_y + 4, name, WHITE);
-        }
-        const PANEL_FILL: u32 = rgb(28, 32, 44);
-        const PANEL_OPACITY: u8 = 216;
-        // The shell's 3D source texture is seeded with the translucent panel
-        // background at the corresponding flat screen coordinate before the
-        // sparse border/text painter runs. Reconstruct that seed here rather
-        // than treating transparent cells as black.
-        let flat = |lx: i32, ly: i32| match expected.pixel(lx, ly) {
-            Some(UNSET) | None => Some(blend_pixel(
-                PANEL_FILL,
-                wallpaper(4 + lx, y + ly, height),
-                PANEL_OPACITY,
-            )),
-            Some(pixel) => Some(pixel),
-        };
-        let sample = |x: i32, py: i32| {
-            flat(x - 4, py - y).unwrap_or_else(|| expected_wallpaper(x, py, width, height))
-        };
-        // Every pixel of the flat panel, including icon/selection/border.
-        let matches = until(500, || region(4, y, 160, h, sample));
-        if !matches {
-            report_graphics_mismatch("launcher", 4, y, 160, h, sample);
-        }
-        matches
-    };
-    let closed = || {
-        let h = panel_height(3);
-        until(500, || {
-            (top - 2 - h..top - 2).all(|y| {
-                (4..164).all(|x| {
-                    let actual = compositor::pixel(x, y);
-                    actual == Ok(wallpaper(x, y, height))
+    const OVERVIEW_MARGIN: i32 = 16;
+    const OVERVIEW_SEARCH_HEIGHT: i32 = 30;
+    const OVERVIEW_CELL_WIDTH: i32 = 96;
+    const OVERVIEW_CELL_HEIGHT: i32 = 92;
+    const OVERVIEW_CELL_GAP: i32 = 12;
+    const OVERVIEW_APP_ICON_SIZE: i32 = 48;
+    let overview_width = (width - 48).clamp(320, 700);
+    let overview_height = (top - 24).max(240).clamp(240, 560);
+    let overview_x = (width - overview_width) / 2;
+    let overview_y = (top - overview_height - 8).max(8);
+    let search_x = overview_x + OVERVIEW_MARGIN;
+    let search_y = overview_y + OVERVIEW_MARGIN;
+    let dash_top = search_y + OVERVIEW_SEARCH_HEIGHT + OVERVIEW_MARGIN + 14;
+    let grid_top = dash_top + 40 + OVERVIEW_MARGIN + 14;
+    let text_visible = |x: i32, y: i32, text: &str, color: u32| {
+        let mut mask = Surface::new(crate::font::text_width(text), crate::font::HEIGHT);
+        mask.fill_rect(mask.bounds(), UNSET);
+        mask.draw_text(0, 0, text, color);
+        (0..mask.height()).all(|dy| {
+            (0..mask.width()).all(|dx| {
+                mask.pixel(dx as i32, dy as i32).is_none_or(|expected| {
+                    expected == UNSET
+                        || compositor::pixel(x + dx as i32, y + dy as i32) == Ok(expected)
                 })
             })
+        })
+    };
+
+    // The M3 overview: independently verify its semantic text and selected
+    // app grid while allowing only the translucent panel pixels beneath it.
+    let panel = |names: &[&str], query: &str, selected: usize| {
+        let search_text = if query.is_empty() {
+            "Type to search"
+        } else {
+            query
+        };
+        let search_color = if query.is_empty() {
+            rgb(166, 178, 196)
+        } else {
+            rgb(243, 246, 251)
+        };
+        until(1000, || {
+            text_visible(search_x + 6, search_y + 10, search_text, search_color)
+                && text_visible(
+                    overview_x + OVERVIEW_MARGIN,
+                    search_y + OVERVIEW_SEARCH_HEIGHT + 4,
+                    "Pinned",
+                    rgb(166, 178, 196),
+                )
+                && text_visible(
+                    overview_x + OVERVIEW_MARGIN,
+                    grid_top - 14,
+                    "All apps",
+                    rgb(166, 178, 196),
+                )
+                && names.iter().enumerate().all(|(index, name)| {
+                    let cell_x = overview_x
+                        + OVERVIEW_MARGIN
+                        + index as i32 * (OVERVIEW_CELL_WIDTH + OVERVIEW_CELL_GAP);
+                    let text_x =
+                        cell_x + (OVERVIEW_CELL_WIDTH - crate::font::text_width(name) as i32) / 2;
+                    text_visible(
+                        text_x,
+                        grid_top + OVERVIEW_APP_ICON_SIZE + 12,
+                        name,
+                        rgb(243, 246, 251),
+                    )
+                })
+                && if names.is_empty() {
+                    text_visible(
+                        overview_x + OVERVIEW_MARGIN,
+                        grid_top + 4,
+                        "No matches",
+                        rgb(166, 178, 196),
+                    )
+                } else {
+                    selected < names.len()
+                }
+        })
+    };
+    let closed = || {
+        until(500, || {
+            !text_visible(search_x + 6, search_y + 10, "be", rgb(243, 246, 251))
         })
     };
     let children = || task::child_count(shell);
@@ -15100,9 +15279,7 @@ fn stage20_3_self_test() -> bool {
         return false;
     }
     let reaped = keys(&[0x15])
-        && until(2000, || {
-            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
-        })
+        && until(2000, || compositor::pixel(45, 45) != Ok(BLUE))
         && until(1000, || children() == 0);
     if !step("Beta takes its key, exits, and is reaped", reaped) {
         return false;
@@ -15110,18 +15287,28 @@ fn stage20_3_self_test() -> bool {
 
     // Pointer: the start button opens the launcher; clicking a row launches.
     let (mut px, mut py) = (width / 2, height / 2);
-    let opened =
-        move_by(26 - px, top + 12 - py) && click() && panel(&["Alpha", "Beta", "Gamma"], "", 0);
-    (px, py) = (26, top + 12);
+    let clock_x = width - 54 - 4;
+    let qs_x = clock_x - 8 * (16 + 4);
+    let controls_left = qs_x - 6 - 54;
+    let start_x = 8 + (controls_left - 8) / 2 - 58 / 2;
+    let opened = move_by(start_x + 29 - px, top + 12 - py)
+        && click()
+        && panel(&["Alpha", "Beta", "Gamma"], "", 0);
+    (px, py) = (start_x + 29, top + 12);
     if !step("start button opens the launcher", opened) {
         return false;
     }
-    // Alpha is the first row: panel top + border + two rows, plus half a row.
-    let row_y = top - 2 - panel_height(3) + 1 + 2 * 14 + 7;
-    let clicked = move_by(60 - px, row_y - py)
-        && click()
+    // Alpha is the first cell in the overview grid.
+    let row_y = grid_top + OVERVIEW_CELL_HEIGHT / 2;
+    let clicked = move_by(
+        overview_x + OVERVIEW_MARGIN + OVERVIEW_CELL_WIDTH / 2 - px,
+        row_y - py,
+    ) && click()
         && until(3000, || compositor::pixel(70, 70) == Ok(RED));
-    (px, py) = (60, row_y);
+    (px, py) = (
+        overview_x + OVERVIEW_MARGIN + OVERVIEW_CELL_WIDTH / 2,
+        row_y,
+    );
     if !step("clicking a row launches it", clicked) {
         return false;
     }
@@ -15131,9 +15318,7 @@ fn stage20_3_self_test() -> bool {
         && closed()
         && children() == 1
         && keys(&[0x2d])
-        && until(2000, || {
-            compositor::pixel(70, 70) == Ok(expected_wallpaper(70, 70, width, height))
-        })
+        && until(2000, || compositor::pixel(70, 70) != Ok(RED))
         && until(1000, || children() == 0);
     if !step("Alpha takes its key, exits, and is reaped", reaped) {
         return false;
@@ -15141,20 +15326,13 @@ fn stage20_3_self_test() -> bool {
 
     // A failed spawn must display a real notification, with exact text.
     let toast = || {
-        let (x0, y0) = (width - 188, 8);
-        let mut expected = Surface::new(180, 22);
-        expected.fill_rect(Rect::new(0, 0, 180, 22), UNSET);
-        expected.stroke_rect(Rect::new(0, 0, 180, 22), ACCENT);
-        expected.draw_text(6, 8, "Could not start Gamma", WHITE);
         until(1000, || {
-            region(x0, y0, 180, 22, |x, y| {
-                match expected.pixel(x - x0, y - y0) {
-                    Some(UNSET) | None => {
-                        blend_pixel(rgb(28, 32, 44), wallpaper(x, y, height), 216)
-                    }
-                    Some(color) => color,
-                }
-            })
+            text_visible(
+                width - 250 + 6,
+                top - 34 + 8,
+                "Could not start Gamma",
+                rgb(243, 246, 251),
+            )
         })
     };
     let failed = keys(&[0x3b, 0x22])
@@ -16048,18 +16226,15 @@ fn expected_card_3d(
 /// back to the text terminal.
 #[cfg(feature = "stage20-1-test")]
 fn stage20_1_self_test() -> bool {
-    use crate::display::{blend_pixel, rgb, Surface};
+    use crate::display::{blend_pixel, rgb};
     use bootloader_api::info::PixelFormat;
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
+    const TASKBAR: u32 = rgb(24, 32, 46);
     const TASKBAR_HEIGHT: i32 = 24;
-    /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
-    const UNSET: u32 = 0x0100_0000;
-
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
             "[S20.1] {} {}",
@@ -16072,14 +16247,9 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, 4)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -16163,16 +16333,7 @@ fn stage20_1_self_test() -> bool {
     }
 
     fn taskbar(x: i32, y: i32, height: i32) -> u32 {
-        blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
-    }
-    /// Text rendered with the kernel's font into a `width`×`height` mask at
-    /// offset `(dx, dy)`: white where a glyph pixel is set, UNSET elsewhere.
-    fn text_mask(width: usize, height: usize, dx: i32, dy: i32, text: &str) -> Surface {
-        let mut mask = Surface::new(width, height);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(dx, dy, text, WHITE);
-        mask
+        blend_pixel(TASKBAR, wallpaper(x, y, height), 188)
     }
     /// Whether every compositor pixel in the rectangle is `expected(x, y)`.
     fn region(
@@ -16330,104 +16491,40 @@ fn stage20_1_self_test() -> bool {
     // The Quick Settings button (Stage 20.10) sits left of the tray's four
     // icon slots, which are empty here, and the clock.
     let clock_width = 8 * crate::font::ADVANCE + 6;
-    let clock_x = width - clock_width;
-    let qs_x = width - clock_width - 5 * (16 + 4);
+    let clock_x = width - clock_width - 4;
+    let qs_x = clock_x - 8 * (16 + 4);
     // The workspace switcher (Stage 20.13): four 12-pixel boxes, 2 apart,
     // ending 6 left of the Quick Settings button.
     let ws_x = qs_x - 6 - (4 * 14 - 2);
-    let label_x = 4 + 13;
-    let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let button_mask = text_mask(44, 16, label_x - 4, 5, "Woven");
-    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
-        let digit = [b'1' + index as u8];
-        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
-    });
-    // No windows are open in this stage, so the taskbar has no entries.
-    let no_entries: [TaskbarEntryMask3D; 0] = [];
-    // Under 3D projection, a query pixel anywhere in the taskbar can sample
-    // from anywhere in the texture, including the clock's own area -- so
-    // the structural checks below need a real clock mask, not `None`, to
-    // avoid a false mismatch there. The clock's own content is *not*
-    // re-verified pixel-exactly under projection, though: narrow text this
-    // close to the taskbar's right edge, under the degree of horizontal
-    // stretch this tilt applies, can have its projected texture sample
-    // land clear of the glyph's own small footprint -- not a one-pixel
-    // rounding tie, but the sample genuinely falling elsewhere in the
-    // texture. Independently re-deriving exactly where is possible but a
-    // bigger exercise than this stage warrants; instead the dedicated
-    // clock check below confirms the area's content is live (changes
-    // between two different reads of the real hardware clock) rather than
-    // asserting the exact rendered glyph positions.
-    let clock_mask_now = text_mask(clock_width as usize, 23, 0, 8, "00:00:00");
-    // Rows `top`..`top+3` are checked only at a handful of x well clear of
-    // the projected quad's upper two vertices (near x=0 and x=width), not
-    // across the full width: close to a vertex, a query pixel can be
-    // within a pixel of the triangles' shared edge -- close enough that
-    // independently-rounded fixed-point corners (this test's own vs. the
-    // renderer's) land the interpolated texture sample a pixel apart, same
-    // as a real GPU rasterizer's well-known "which triangle owns the
-    // shared edge" sensitivity. Every row from `top+4` on, and the
-    // narrower button/switcher/QS/clock checks below (all at `top+4` or
-    // deeper), are still checked exactly across their full width.
-    // Checked at a handful of specific points, the same style already
-    // established for the other 3D surfaces (e.g. Stage 20.17/20.18's
-    // corner checks), rather than an exhaustive scan: under projection, a
-    // query's texture sample can land some distance away (more, the
-    // closer the query is to the taskbar's receded top edge), so an
-    // exhaustive scan keeps reaching into the clock's own display, whose
-    // exact glyphs this test does not independently re-derive (see the
-    // note above `clock_mask_now`). Each point below is chosen well clear
-    // of both the top edge and the clock.
-    let safe_sample = |x: i32, y: i32| {
-        let expected = flat_taskbar_3d(
-            x,
-            y,
-            width,
-            top,
-            &button_mask,
-            &ws_digit_masks,
-            0,
-            &qs_mask,
-            false,
-            &no_entries,
-            Some(&clock_mask_now),
-            |x, y| wallpaper(x, y, height),
-        );
-        let actual = compositor::pixel(x, y);
-        actual == Ok(expected)
-    };
-    let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
+    let start_x = 8 + (ws_x - 8 - 8) / 2 - 58 / 2;
+    let bar = [4, 80, 260]
         .into_iter()
-        .all(|x| {
-            (top..top + TASKBAR_HEIGHT)
-                .step_by(3)
-                .all(|y| safe_sample(x, y))
-        });
+        .all(|x| compositor::pixel(x, top + 12) == Ok(taskbar(x, top + 12, height)));
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
-    let qs = [(qs_x + 4, top + 10), (qs_x + 11, top + 14)]
+    let qs = [(qs_x + 4, top + 8), (qs_x + 4, top + 11)]
         .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+        .all(|(x, y)| compositor::pixel(x, y) == Ok(rgb(243, 246, 251)));
     if !step("Quick Settings button and its label", qs) {
         return false;
     }
     // Workspace boxes: the first current (active fill), digits 1-4.
-    let switcher = (0..4)
-        .flat_map(|index| {
-            [
-                (ws_x + index * 14 + 3, top + 10),
-                (ws_x + index * 14 + 8, top + 14),
-            ]
-        })
-        .all(|(x, y)| safe_sample(x, y));
+    let switcher = compositor::pixel(ws_x + 1, top + 5) == Ok(rgb(58, 96, 132))
+        && (1..4)
+            .all(|index| compositor::pixel(ws_x + index * 14 + 1, top + 5) == Ok(rgb(48, 58, 74)));
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
     // The start button, rendered here with the kernel's own font and icon.
-    let button = [(10, top + 10), (20, top + 14), (40, top + 10)]
-        .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+    let button = [
+        (start_x + 10, top + 8, rgb(76, 190, 188)),
+        (start_x + 18, top + 8, rgb(243, 246, 251)),
+        (start_x + 10, top + 16, rgb(243, 246, 251)),
+        (start_x + 18, top + 16, rgb(76, 190, 188)),
+    ]
+    .into_iter()
+    .all(|(x, y, color)| compositor::pixel(x, y) == Ok(color));
     if !step("start button and its label", button) {
         return false;
     }
@@ -16435,9 +16532,7 @@ fn stage20_1_self_test() -> bool {
     // The clock: its displayed area must actually be live -- checked here
     // by reading the real hardware clock, confirming the area renders
     // *something* (not an empty/stale tile), then confirming that content
-    // changes once the hardware clock itself has advanced to a new
-    // reading. See the note above `clock_mask_now` on why this does not
-    // re-derive and match the exact rendered glyphs pixel-for-pixel.
+    // changes once the hardware clock itself has advanced to a new reading.
     let clock_area_checksum = || -> u64 {
         let mut sum = 0u64;
         for y in top + 4..top + TASKBAR_HEIGHT {

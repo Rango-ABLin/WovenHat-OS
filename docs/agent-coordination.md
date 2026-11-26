@@ -1,3 +1,589 @@
+## OpenCode - commit CI repair and short-screen Quick Settings (2026-11-26)
+
+Removed the checked-in absolute Windows Cargo `target-dir` that Linux CI
+joined into `LD_LIBRARY_PATH`. Acceptance launchers now own machine-local
+output overrides, while GitHub builds use Cargo's platform-neutral default.
+Refreshed stale Stage 20.1 and Stage 20.15 desktop oracles for the current
+tokens, centered Start overview and 14-action Quick Settings panel, and
+corrected the Stage 23.4 ceiling check so delegated system-service microphone
+authority remains distinct from forbidden AI/secrets/camera authority.
+
+Quick Settings now constrains its panel to the space above the taskbar and
+gives footer hit targets priority when compact layouts overlap lower sliders.
+This fixes a real 640x400 defect where Power, Restart and Lock were painted or
+hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
+CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
+
+## OpenCode - live installed settings propagation (2026-11-26)
+
+The shell now re-reads the bounded installed settings record on its existing
+slow status cadence and applies it only when the record's digest changes. High
+contrast and reduced motion are applied absolutely, so a later record can turn
+them off as well as on; taskbar preferences, pins and locale continue to be
+seeded from the same record. This uses the shell's existing `FileRead` only —
+the Settings app remains the sole writer and no new IPC topic, capability or
+ABI was introduced. The change is recorded on both `phase-b/bottom-taskbar-core`
+and `feature/app-surfaces` (cherry-picked) because the main worktree was on the
+former when the edit landed.
+
+## OpenCode - WovenImages bounded viewer (2026-11-26)
+
+Extended the app-surface plan with an image viewer: the GUI now has a path
+field and Load action that decodes a bounded BMP from the VFS into the existing
+160x90 pixel budget, with honest status for unsupported, missing or oversized
+files. Adding all PNG/JPEG/GIF/WebP decoders grew the signed WAPP from 185 KB
+to 425 KB, which broke the bounded catalog install; decoder breadth was
+deliberately reduced to BMP rather than widening the VFS node cap. Also fixed
+a pre-existing startup check that compared the 32x32 thumbnail to the 160x90
+source and made the Images window impossible to open. Validation: warning-
+denying Clippy, host tests 2/2, signed `test-images-qemu.py` 1/2/4 CPUs and
+1-CPU desktop visual acceptance all pass.
+
+## OpenCode - WovenFiles GUI mutations (2026-11-26)
+
+Extended the app-surface plan with a bounded file-manager surface: the GUI now
+hit-tests `/mnt` rows, fills a path field on selection and exposes New, Delete
+and Rename buttons that reuse the existing `libwoven::mkdir/unlink/rename`
+wrappers. All mutations remain confined to `/mnt/...` and are still checked by
+the kernel's `FileWrite` capability and mounted-path policy; no new syscall,
+capability or ABI change. Validation: warning-denying freestanding Clippy,
+signed `test-files-qemu.py` at 1/2/4 CPUs and the 1-CPU desktop visual harness
+all pass. Full-directory navigation, copy/move and file dialog remain open.
+
+## OpenCode - usable Store and Update app surfaces (2026-11-26)
+
+Began the app-surface improvement plan from the 2026-11-26 analysis. WovenStore
+and WovenUpdate are no longer read-only counters: both now have a bounded IPC
+client for the privileged services that already own the durable transactions
+(`woven.package` Query/Install/Remove/Rollback and `woven.update`
+Query/Stage/Activate). Each GUI gained a bounded path field, action buttons and
+status reporting; each CLI gained the matching transaction modes. No new
+syscall, capability or ABI change: the apps hold no `StorageIo`, and the
+services still own signature verification and the durable A/B/package state.
+
+One real gate defect was found and fixed: the stage16-1 no-arg spawn passes an
+empty first argv, which the new store parser rejected; it now treats that as
+the catalog List mode. Validation: host logic tests 3/3 per app, fmt, warning-
+denying all-target Clippy, workspace tests, and signed 1/2/4-CPU harnesses for
+both apps all pass. Full preservation chain outcome is recorded separately.
+Remaining plan items (Files GUI mutations, Images viewer, Terminal output grid,
+Settings live propagation, Search wiring) are not part of this increment.
+
+## OpenCode - desktop chrome acceptance completion (2026-11-25)
+
+Completed the current taskbar, Start overview and Notification Center gates
+without changing the syscall, capability or ABI boundaries. The Start overview
+now shows a real `No matches` state. Kernel acceptance was updated from the
+retired legacy launcher/toast geometry to the current centered M3 overview,
+220-pixel notification panel and 240-by-24 toast, with semantic pixel checks
+for app names, search results, unread digits and notification actions.
+
+Taskbar layout and pin/auto-hide gates pass at 1/2/4 CPUs; Start and
+Notification Center pass at 1/2/4 CPUs. Formatting, affected-feature and
+all-target warning-denying Clippy, workspace tests and the full serialized
+Stage 10.7 preservation chain exit 0. Native hardware, physical power-loss
+qualification and restoration of the test USB remain separate open work.
+
+## OpenCode - Stage 1-18 bounded gate refresh (2026-11-25)
+
+Refreshed 52 stage gates at 1/2/4 CPUs (hotplug 2/4 only), over 150 boots,
+covering every Stage 1-18 gate that had only historical evidence. All passed
+with exit 33 and required markers. Fixed two real feature-gate compile defects
+in `kernel/src/xhci.rs` (`keyboard_presses`, `usage_key`) and `kernel/src/hda.rs`
+(audio gate statics), which were gated to `not(qemu-test) or stage13-12-test`
+and broke Stages 13.5/13.6/13.7/13.8/13.10/13.11. These helpers are now always
+compiled; the kernel's `qemu-test` already allows dead code, so no lint or
+behavior changed. Full Stage 10.7 chain and all-targets Clippy pass.
+
+Formal Stage 1-19 closure is explicitly NOT claimed: the authoritative closure
+gate forbids closure from markers/QEMU alone, and the native, power-loss,
+independent-review and production-trust gates remain open. Only bounded
+software/QEMU evidence was refreshed. The other owner's uncommitted
+`kernel/src/main.rs` Stage 20 visual WIP was left untouched.
+
+## OpenCode - Ring-3 secure-randomness ABI (2026-11-25)
+
+Added the second prerequisite for an eventual guest TLS service: an HMAC-SHA256
+DRBG behind syscall 251 (`SecureRandom`) and `libwoven::secure_random`. Boot
+seeding requires a health-checked RDRAND sequence; when that source is missing
+or fails the pool stays unseeded and the syscall fails closed. TCG boots report
+`[RNG] boot entropy: unavailable (fails closed)` — the honest virtual result.
+The DRBG self-test gate passes at 1/2/4 CPUs and the full Stage 10.7 chain
+passes. No production TRNG claim is made; physical entropy review stays open.
+
+Feasibility update: `rustls` itself compiles for `x86_64-unknown-none` without
+`ring`, so the remaining guest-TLS blocker is a custom `CryptoProvider` built
+from already-cached pure-Rust crates (`aes-gcm`, `sha2`, `hmac`, `p256`, `rsa`),
+not a hard toolchain wall. That is a substantial dedicated stage and was not
+started here.
+
+## OpenCode - Ring-3 listen/accept ABI (2026-11-25)
+
+Implemented the listener stage requested after the guest-mTLS feasibility
+audit: `NetListen`/`AsyncNetAccept` syscalls with `NetworkIo` gating, a
+`listening` state bit on `UserSocket`, a pinned `socket_accept_pinned` primitive,
+and `Operation::Accept` in the existing async network worker (event-driven, no
+spin, no retained userspace pointer). smoltcp 0.14 lacks a public accept/backlog
+API, so this is deliberately a single-connection listener, not a fabricated
+backlog. Added safe `libwoven::network::{listen, accept}` and converted
+`apps/woven-remote-admin` from its `NET_PEER` spin to the new ABI. The WADM gate
+now requires kernel `[LISTEN]` serial markers and passes 1/2/4/8/16 CPUs.
+
+Still explicitly NOT implemented: guest-terminated mTLS. There is no no_std
+TLS provider that builds for `x86_64-unknown-none` with this host toolchain and
+no secure RNG syscall for Ring 3, so TLS remains at the host mTLS proxy. Two
+full-chain reruns were needed for C: `StorageFull` and a concurrent agent's
+memory gate; both were environmental and are recorded in stage-status.
+
+## OpenCode - independent build attestation protocol (2026-11-25)
+
+Completed the external attestation ingestion boundary: generator plus a
+fail-closed verifier binding legal identity, host, exact source/archive/
+toolchain/command, artifact hashes and an independently pinned Ed25519 key.
+Tests cover valid evidence, prohibited owner/agent identity and
+post-signature tampering. The signer was repaired to emit valid JSON for
+Windows payload paths. No external organization or key has been supplied, so
+this is an open external submission—not a fabricated pass.
+
+## OpenCode - S-slice virtual models (2026-11-25)
+
+Implemented every small virtual piece from the previous audit with disposable,
+fail-closed models: WSL snakeoil VARS/cert staging (S10), xHCI usb-tablet
+absolute-click harness (S12, PASS 1/2/4), local TLS IPP server (S13, PASS),
+feature-gated deterministic HDA capture source (S13, PASS 1/2/4), and mTLS WADM
+service contract harness (S17 host/service boundary, PASS). Three real defects
+surfaced and were repaired: `libwoven::ipp_tls::content_length` aborted on the
+HTTP status line; kernel `stage13-15-capture-test` never enabled its self-test
+feature; and `remote-admin-tls-service` checked the client fingerprint before
+the handshake exposed a peer certificate. Each repair added or strengthened a
+test rather than weakening an assertion.
+
+S17's Ring-3 guest listener is explicitly NOT implemented: no listen/accept
+syscall exists, so it is a new ABI stage, not a virtual model. S15/S19 already
+had closed software paths. Full `RUN-STAGE10.7.ps1` chain exited 0; all-target,
+kernel, shell and tool Clippy plus workspace tests pass. A concurrent WIP fmt
+failure in the other owner's `kernel/src/main.rs` / `test-remote-admin-freestanding.py`
+was left untouched.
+
+## OpenCode - reproducible build, remote admin, and TCG closure (2026-11-25)
+
+Added the maintained exact-commit clean-room rebuild test and CI invocation.
+Reports now carry the source commit and explicit
+`independent_organization_attestation: false`, so local reproducibility is
+closed without claiming a separate organization. Added bounded TCP
+listen/accept to the asynchronous Ring-3 network ABI and deployed the signed
+remote-admin service in QEMU. A pinned-client mTLS proxy forwards WADM query/
+apply/rollback/replay-rejection operations; the full journey passes 1/2/4 CPUs.
+
+Strict TCG desktop/application qualification passes 1/2/4 CPUs on current
+source with unchanged limits and pixel/client markers. Evidence:
+`audit-artifacts/final-tcg-{1,2,4}cpu-20261125`. Host/target Clippy, 260
+workspace tests (one ignored), 25 focused Python tests and the remote-admin
+matrix pass. Only external independent-organization attestation and
+independent production security review remain.
+
+## OpenCode - persistent config migration and WovenFS crash boundaries (2026-11-25)
+
+Closed the two requested bounded software gaps. Installed v1 settings migrate
+through `libwoven::settings_policy` to canonical v2; installer output is v2 and
+WovenSettings migrates installed and durable records at service startup. The
+WovenFS installed-image gate now covers descriptor, staged payload, commit,
+first target, target flush, checkpoint and retirement; recovery replaces only
+the ESP with an uninstrumented image.
+
+Validation: host/workspace and affected-feature Clippy, 259 host/workspace
+tests, focused Python contracts, signed WovenSettings QEMU 1/2/4 CPUs, and all
+seven WovenFS cuts at 1/2/4 CPUs pass with exit 33. Evidence is
+`audit-artifacts/installed-wovenfs-cuts-20261125-final-*` and
+`audit-artifacts/woven-settings-{1,2,4}cpu`. Physical power-loss, controller
+cache, torn-media and native-device qualification remain external. Unrelated
+Stage 31/virtual-input and desktop-harness dirty work was left untouched.
+## OpenCode - native application integration closure (2026-11-25)
+
+Closed the three bounded items in `APPLICATION-INTEGRATION-REPORT.md` on
+`feature/native-app-integration`. Settings: reconciled PR 142 fail-closed
+duplicate-key handling additively in `libwoven/src/settings_policy.rs` and made
+the GUI's read path share it. Editor: added bounded Open/Save As, real
+write+sync error reporting, unsaved-close hold with Discard, and an additive
+`TextField::set_text`; kept the original window geometry so existing harness
+coordinates remain valid. Files: added a bounded mutation CLI plus safe
+libwoven mkdir/unlink/rename/sync wrappers and a gated kernel self-test/harness
+that creates, writes, renames and removes a note at 1/2/4 CPUs.
+
+No syscall, capability or ABI version changed. Two genuine gate defects were
+diagnosed and fixed during bring-up: the self-test initially passed a raw ELF
+with a non-trusted argv[0] (fixed by passing the signed WAPP), and the
+disposable FAT32 image has no provisioned `/mnt` directory, so the app-level
+mutation sequence uses `/tmp` while persistent-storage evidence comes from the
+kernel `[STORAGE MUTATION]` marker on the same boot. The editor relative-click
+desktop harness fails identically on the pre-change baseline, so it is
+recorded as a pre-existing limitation, not weakened or claimed as acceptance.
+Validation: fmt, warning-denying all-target/target Clippy, workspace tests,
+signed app gates at 1/2/4 CPUs and the new mutation gate at 1/2/4 CPUs.
+
+## OpenCode - Phase B desktop reconciliation and full validation (2026-11-25)
+
+User requested reconciliation and validation of the Phase B desktop branch with
+full gates and a push. In an isolated worktree I merged `origin/master` (the
+three hardware-demo evidence commits), the docs-only `phase-b/desktop-evidence`
+branch, and `phase-b/window-minimize` into `phase-b/bottom-taskbar-core` with
+`--no-ff`. No acceptance claim was upgraded by conflict resolution.
+
+Conflict resolutions kept accepted behavior:
+- docs: both sides retained, newest first. The sibling branch's "IN PROGRESS"
+  record is explicitly labelled historical and does not supersede the accepted
+  Phase B section.
+- shell: the accepted bottom-taskbar core's hover feedback and honest Quick
+  Settings rows were preserved while integrating auto-hide, right-click
+  pin/unpin, frame-only maximize/restore and the taskbar-layout controls. The
+  QS grid now carries both branches' 14 actions over five rows (one spare
+  cell); the variants and labels dropped by the auto-merge were restored.
+- `pinned_apps`: both default constructors kept as aliases; `unpin` is live
+  in-session so its dead-code expectation was removed, and the host-test alias
+  gained a narrow one.
+- kernel: `session.rs` argv 7->13 and `userspace.rs` MAX_ARGV 8->16 /
+  MAX_ARGV_BYTES 512->1024 carry compile-time taskbar layout flags. No new
+  syscall, capability or ABI version was introduced.
+- fmt-only repair of pre-existing `libwoven/src/settings_policy.rs` drift from
+  commit `483647ec`, so the warning-denying chain can run.
+
+Validation on the exact merged source: `cargo fmt --all -- --check`, warning-
+denying `cargo clippy --all-targets`, freestanding `woven-shell` and kernel
+target Clippy (default and `qemu-test`), and `cargo test --workspace` pass;
+isolated shell host suites pass 12/12 taskbar-prefs and 7/7 pinned-apps;
+`python -m unittest discover -s tests` passes 222/222. The full serialized
+`RUN-STAGE10.7.ps1` chain exited 0 with every stage passing at 1/2/4 CPUs (60
+memory boots, live networking, isolated Stages 10.4-10.7; transcript
+`D:\WovenHat-OS-output-phaseb\audit-artifacts\acceptance-20261125-113758-475`).
+Baseline-enforced desktop qualification passes at 1/2/4 CPUs
+(`phaseb-reconciled-desktop-{1,2,4}cpu-d`: all `pass: true`, `status: PASS`,
+`failures: []`). The merged layout and pins/auto-hide harnesses pass at 1/2/4
+CPUs (`phaseb-reconciled-layout-*`, `phaseb-reconciled-pins-*`). Two early pins
+runs failed before boot with QEMU `cannot set up guest memory 'pc.ram'` while
+the host commit limit was exhausted by other owners' concurrent gates; they
+were rerun with the unchanged harness after memory released. The first desktop
+run failed only because the per-app packager's app-local C: `target/` directory
+was full; the worktree was moved to D: and the rerun passed. No limit or
+assertion was weakened, and no other agent's QEMU process or uncommitted file
+was touched.
+
+While this ran, another owner advanced `phase-b/bottom-taskbar-core` by nine
+commits (config migration, WovenFS crash cuts, virtual input, desktop QEMU
+options and remote admin). I merged the reconciled work onto that new tip in a
+second D: worktree, resolved the two doc-only conflicts by keeping both
+records, and repaired one fmt-only drift in the incoming remote-admin line.
+The entire gate set was then rerun on that exact final source: fmt, warning-
+denying host/all-target/kernel/shell Clippy, workspace tests, the full
+`RUN-STAGE10.7.ps1` chain (exit 0, 1/2/4 CPUs), baseline-enforced desktop
+qualification and both taskbar harnesses at 1/2/4 CPUs all pass. Final evidence
+is under `D:\WovenHat-OS-output-phaseb-final\audit-artifacts\` (`acceptance-*`,
+`phaseb-final-desktop-*`, `phaseb-final-layout-*`, `phaseb-final-pins-*`). No
+external release gate was changed.
+
+The branch advanced once more with TCP listen/accept support and a follow-up
+`PORT` fix; those two commits were merged in, one further fmt-only repair was
+applied to `libwoven/src/net.rs`. Its first full gate then exposed a genuine
+defect in the incoming TCP work: `kernel/src/async_network.rs` gained an
+`Operation::Accept` arm calling `network::socket_accept_pinned`, but the host
+test's mock `network` module in `tests/async_network.rs` never gained the
+matching stub, so warning-denying all-targets Clippy failed to compile. I added
+the minimal stub with the same `WouldBlock` behaviour as the neighbouring
+connect/recv stubs; no test was weakened or disabled. The full gate set then
+passed on the exact final source under
+`D:\WovenHat-OS-output-phaseb-push3\audit-artifacts\` (exit 0, all stages at
+1/2/4 CPUs, plus baseline-enforced desktop qualification and both taskbar
+harnesses at 1/2/4 CPUs). No assertion, timeout or baseline changed.
+
+## OpenCode - Stage 31 CPU matrix and fault-injection gate (2026-11-25)
+
+Extended the remaining 1/2/4-only harnesses (`test-stage10-runtime.py`,
+`test-desktop-qualification.py`, matrix verifier) to 8/16 and wired the
+previously unused in-guest `deterministic_fault_injection.rs` behind a new
+`fault-injection-test` feature with a single cfg-guarded self-test call site in
+`main.rs`. During 16-CPU bring-up a reproducible pre-self-test boot timeout was
+traced to the fixed paired-userspace wait; it now scales above four online CPUs
+with 1/2/4 budgets unchanged (a control feature passed at 16 CPUs, isolating
+the cause). New gate passes 1/2/4/8/16 with exit 33; memory 8/16, Stage 11 TLS
+and 11.6 at 8, and baseline-enforced desktop qualification at 8/16 also pass.
+
+Also corrected stale S-slice records (`software-gap-inventory.md`,
+`m00-baseline-ledger.md`): the OVMF/swtpm/signed-guest virtual trust chain is
+already QUALIFIED in WSL2, and S15/S17/S19 software paths are local-pass, so
+the remaining blockers are the explicitly external custody/review/native items
+plus small missing virtual models (VARS/cert generator, absolute-click or WAX1
+click path, HDA capture input source, local IPP TLS server, guest mTLS
+listener). No new S-slice virtual model was fabricated in this increment.
+
+Note: `cargo fmt --all -- --check` currently fails only in
+`libwoven/src/settings_policy.rs` from the other owner's concurrent
+`483647ec` WovenFS settings-migration commit; I did not touch that file or the
+owner's uncommitted `kernel/src/storage.rs` /
+`scripts/test-installed-disk-qemu.py`. My changed files are fmt-clean.
+
+## OpenCode - production key custody boundary (2026-11-25)
+
+Implemented the repository-side PKCS#11 custody path after the user selected a
+hardware token with separate boot, application and SDK keys. The shared
+`tools/release-signing` crate permits exactly one signer authority, invokes an
+external signer without shell interpolation, requires a pinned public key and
+verifies every 64-byte signature before output. Boot signing, WAPP, WPKG, WUPD
+and SDK provenance use the new boundary; deterministic development signing
+remains test-only. Added the PKCS#11 adapter, witnessed public-only provisioning
+script and focused negative tests for missing, mismatched, ambiguous and invalid
+external signatures. No private key entered the repository or chat.
+
+No PKCS#11 module/token is currently connected, so this does not claim the
+external custody gate: physical key generation, non-exportability verification,
+backup/recovery evidence and production public-key provisioning remain for the
+token ceremony. See `docs/release-qualification/KEY-CUSTODY.md`. Unrelated
+Stage 31 fault-injection changes are left to their owner and are not part of
+this custody increment. Host/workspace Clippy and tests, standalone signer
+Clippy, PKCS#11 adapter and release-boundary tests, plus Stage 15.5 signed
+handoff on 1/2/4 CPUs all pass using only deterministic test material.
+
+## OpenCode - release hygiene: diagnostics gated (2026-11-25)
+
+Per the user's follow-up, I gated the two unconditional real-hardware debug
+commits behind a new kernel `hardware-diagnostics` feature (default off): the
+kernel shell first-prompt auto device/net dump and live-log flush, and all
+terminal-visible `[DRIVERS]`/`[XHCI]`/`[USB]` lines in `drivers.rs`/`xhci.rs`
+via a local `hw_diag!` macro. Serial lines and the xHCI BIOS/OS handoff remain
+unchanged and unconditional. The earlier `livelog` `#[cfg]` repair is nested
+inside the new gate. This is a release-image hygiene change only — no ABI,
+capability, syscall or assertion changed.
+
+Kernel Clippy clean for default, `hardware-diagnostics`, and
+`hardware-diagnostics,qemu-test`; fmt/all-targets Clippy/workspace tests pass;
+full `RUN-STAGE10.7.ps1` exit 0; baseline-enforced desktop qual PASS at 1/2/4
+CPUs with 0 changed pixels. Evidence in stage-status. No physical hardware or
+signing input touched.
+
+## OpenCode - Phase B bounded increment accepted (2026-11-25)
+
+User asked to finish Phase B before release hygiene. I closed it as a bounded
+increment with no new syscall, capability or ABI. Changes in the shell only:
+pinned apps are now compiled in and feed the Overview Dash from the installed
+settings record (read-only; the shell has no `FileWrite`); battery saver and
+night light report "Unavailable" and toast because there is no battery driver
+or colour-policy backend; the stale crate-wide `#![allow(dead_code)]` and seven
+dead QS symbols were removed, with two narrow `#[cfg_attr(not(test), expect)]`
+annotations on `PinnedApps` methods still used by host tests. I did NOT add
+auto-hide, minimize/restore, maximize/fullscreen, Alt+Tab or an in-shell
+settings writer: those need window-management ABI or a new capability and are
+explicitly deferred rather than smuggled into an acceptance gate. The
+`keyboard_refresh` failure was previously shown to reproduce on the pre-shell
+baseline and its harness oracle was already mitigated; no assertion was changed
+here.
+
+Validation: shell target Clippy `-D warnings`, fmt, all-targets Clippy, kernel
+target Clippy, workspace tests, and three isolated host suites (6/6 each) all
+pass; `RUN-STAGE10.7.ps1` exited 0; baseline-enforced desktop qualification
+passed at 1/2/4 CPUs with 0 changed pixels and `failures: []`
+(`audit-artifacts/phaseb-final-{1,2,4}cpu-20261125`). No physical device or
+firmware setting touched.
+
+## OpenCode - phase-b branch reconciled with origin/master (2026-11-25)
+
+User requested reconciliation of the `phase-b/bottom-taskbar-core` divergence
+(16 ahead / 5 behind `origin/master`). Local `master` and `origin/master` were
+identical at `b87d7a07`. Merged `origin/master` into this branch with `--no-ff`
+(note the earlier merge at `36e721e9` is already in this branch's history, so
+this is the second master reconciliation). The five incoming commits are the
+bounded Stage 11 runtime-TLS/TLSDESC feature (`bd3ec493`, `d17ec776`) and their
+closure/architecture documents (`fbee86a4`, `bedee571`, `b87d7a07`); they touch
+`kernel/src/{elf.rs,userspace/linker.rs}`, the loader fixtures/scripts and docs.
+They do not overlap the Phase B shell or the e1000 driver. One conflict in
+`docs/stage-status.md` (both sides prepended a section) was resolved by keeping
+both entries, newest first; the other doc files auto-merged cleanly. No source
+behavior was changed by the resolution, and no acceptance claim is upgraded.
+
+Validation completed (2026-11-25): the merge exposed two real defects, both
+fixed in `d443a07c` — a `cargo fmt` violation in the incoming TLSDESC code, and
+an unguarded `crate::livelog::flush_now()` call added by `7d02aeea` that broke
+every `qemu-test`/`stage11-*` feature build (`mod livelog` is gated out there);
+the call now carries the module's own `#[cfg]`. `cargo fmt --all --check`,
+all-targets Clippy, kernel target Clippy (default + stage11-2/5/6/aslr),
+freestanding shell Clippy and `cargo test --workspace` pass. The mandated
+`RUN-STAGE10.7.ps1` chain exited 0 (60 memory boots, live networking, Stages
+10.4-10.7 at 1/2/4 CPUs; log at
+`C:\Users\banda\AppData\Local\Temp\opencode\stage10.7-reconcile-20261125.log`).
+Focused Stage 11.2-tls and 11.6 gates pass 1/2/4 CPUs, exit 33. No physical
+device, firmware setting or production signing input was touched. The two
+real-hardware diagnostic commits remain intact apart from the cfg guard; per
+the user this reconciliation did not include gating those diagnostics.
+
+## OpenCode - Phase C merged-tree revalidation (2026-11-24)
+
+`194d2d5e` landed the e1000 driver; `9d1d8c36` then dropped the now-unused
+`Counters::initialized` field (the shell reports counters through
+`network::transport_counters()`) and repaired two `cargo fmt` violations that
+`36e721e9` brought in (`mod audio_status;` ordering in `kernel/src/main.rs`,
+split argument lists in `kernel/src/userspace/linker/acceptance.rs`). The tree
+was Clippy-clean but had **no** QEMU run with the e1000 attached after that
+merge, so I re-ran it once your `phaseb-desktop-qual-*cpu-hover4` matrix
+released the host: `--nic e1000` at 1/2/4 CPU, `--nic e1000e` at 1,
+`--nic virtio` at 1, `stage14-5d-test` over e1000 at 1, and Stage 13.2 at 1 —
+all PASS, exit 33. `cargo clippy` for default/`qemu-test`/`network-test`/
+`stage13-2-test`/`stage14-5d-test` plus `--all-targets`, and
+`cargo fmt --all -- --check`, are clean. Evidence:
+`audit-artifacts/phase-c-e1000-network-20261124-merged/`. Decision unchanged:
+`PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`; native qualification still
+BLOCKED. I touched no Phase B shell file.
+
+## OpenCode - phase-b merge and e1000 WIP build fix (2026-11-24)
+
+Merged the pushed `master` (status indicators, volume read-back, runtime TLS)
+into `phase-b/bottom-taskbar-core` as `36e721e9`, after stashing the other
+owner's uncommitted work (including the untracked `e1000.rs`); the stash was
+restored cleanly. One follow-up (`14354164`) corrected an unused-import
+resolution in `kernel/src/block.rs`. The merged tree then still failed only on
+two dead-code errors in the restored WIP `kernel/src/e1000.rs`; per owner
+direction I added two narrow
+`#[expect(dead_code, reason = "diagnostic shell integration is follow-on work")]`
+attributes on `Counters` and `counters()` — no behavior change, no broad
+suppression. Those two lines remain part of the uncommitted e1000 WIP, so the
+driver owner still controls their commit. `cargo check` for the kernel target,
+warning-denying kernel Clippy, shell target Clippy and workspace all-targets
+Clippy now all pass on the merged tree with the WIP present.
+
+## OpenCode - Phase C native EtherNIC (COMPLETE, 2026-11-23)
+
+Scope owned and closed: new `kernel/src/e1000.rs` plus its integration in
+`kernel/src/network.rs`, `kernel/src/main.rs`, `kernel/src/shell.rs`,
+`kernel/src/wifi_smol.rs`, `kernel/src/hal/pci.rs` and
+`scripts/test-network-qemu.py`. This unblocks the entry below ("Stage 10.7 chain
+blocked by concurrent e1000 WIP"): the kernel compiles cleanly again and QEMU
+was available again after I deleted the regenerable `.cargo-build/` tree to
+recover ~12 GB on a full C: (the z1/z2 emulator build was failing with
+`StorageFull`). `audit-artifacts/` was preserved, not touched.
+
+Result: native Intel e1000/e1000e transport (`0x100E`, `0x1000`, `0x1004`,
+`0x100F`, `0x10D3`) as the second smoltcp transport after virtio-net. DHCP +
+DNS + ICMP + host-verified UDP-7000/TCP-8080 PASS over both models at 1/2/4
+CPUs, Stage 14.5D chain PASSes over e1000, virtio regression PASSes, Stage 13.2
+PASSes 1/2/4. Decision: `PHASE C ACCEPTED — BOUNDED SOFTWARE/QEMU ONLY`; native
+qualification stays BLOCKED. I did not edit another agent's Phase B files
+(`apps/woven-shell/*`), `kernel/src/block.rs` or `libwoven/src/lib.rs` beyond
+rustfmt applying no changes to them.
+
+NOTE for whoever runs the full `RUN-STAGE10.7.ps1` next: `qemu_runtime_self_test`
+now compiles and runs only under the `network-test` feature, because Stage 13.2
+attaches an unforwarded e1000 and cannot supply the host UDP/TCP peer. No
+required marker of any gate changed.
+## OpenCode - Phase B auto-hide + placement fix accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `d511ded4`: taskbar auto-hide (pure `AutoHide` model, seeded from
+settings `taskbar_auto_hide`, right-click an empty strip to toggle
+in-session; bottom-row reveal, one-second hold, panels hold the bar up;
+hidden controls capture nothing and the usable band grows). Plus a real
+placement fix the pins evidence exposed: the 3-pin centered group ran
+under the workspace boxes and QS button, painting over the Store entry
+(retained-frame proof); `start_area` now centers inside the free band
+left of the right-side controls. Freestanding clippy + release clean;
+host taskbar_prefs 12/12, pinned_apps 7/7.
+
+Extended gate (pins lifecycle + five auto-hide phases, same boot) PASS
+at 1/2/4: `taskbar-pins-1795455150266353700`,
+`-1795455380078094100`, `-1795455916058784100`. Desktop qualification
+from this tree PASS at 1/2/4:
+`desktop-qualification-1795455593064749300`,
+`-1795456116747088900`, `-1795456412952954800` (startup 95-98 s vs the
+120 s budget). Four earlier failures were all my gate's own defects
+(mismatched cursor frames, stale variable, sleep-vs-repaint race,
+off-screen comparison box), preserved at
+`taskbar-pins-1795454258433091200`/`-1795454445640302000`/`-1795454634578127800`/`-1795454904737521700`;
+the guest produced every marker and pixel state correctly in all four
+(`-...9445640302000` predates the gate's unexpected-error arm, so it is
+evidenced by serial/QMP/frames rather than result.json).
+
+Next: maximize/fullscreen geometry, then the taskbar settings visual
+verification. Alt+Tab still blocked on kernel input-ABI modifier state
+(another agent's uncommitted kernel work). Phase B remains NOT accepted
+as a whole.
+
+## OpenCode - Phase B pinned apps accepted at 1/2/4 CPUs (2026-11-23)
+
+Commit `2d40b94b` on `phase-b/window-minimize` (worktree
+`D:\WovenHat-build\desktop-wt`): the bounded pinned-application model is
+wired into the taskbar. One combined pins+windows list feeds painting,
+hit-testing and group width (this also fixed centering drift when
+minimized windows existed). Left-click a pin to launch; right-click any
+entry to pin/unpin with a toast -- the PS/2 decoder already delivered
+button 1, so no kernel or input-ABI change. Pins seed from the settings
+record's `pinned_apps` value and are IN-SESSION ONLY, recorded as such:
+the shell holds `FileRead` and no settings-write path exists, so
+nothing pretends pins survive a reboot (cross-boot persistence = a
+`FileWrite` capability decision, deliberately not taken unreviewed).
+Also removed the stale blanket `#![allow(dead_code)]`, deleting the
+dead legacy QS helpers it hid; freestanding clippy `-D warnings` and
+release build clean; host suites pinned_apps 7/7, taskbar_prefs 6/6.
+
+New gate `scripts/test-taskbar-pins.py` (reuses the qualification
+harness's QMP plumbing; must run serialized against it -- shared build
+paths): full pin lifecycle with occurrence-counted markers and
+strip-repaint assertions. PASS at 1/2/4 CPUs:
+`taskbar-pins-1795451941851309600`, `-1795452801971620600`,
+`-1795453153842152100`. Retained-frame pixel audit: 136/1948/644/9124
+changed strip pixels across the four re-layout steps (gate minimum 20
+bytes). Full desktop qualification from this tree PASS at 1/2/4:
+`desktop-qualification-1795452497487046700`,
+`-1795452948321374000`, `-1795453290969248000`. One 1-CPU attempt
+(`-1795452130105296700`) missed the 120 s startup budget at 121.2 s on
+a host loaded by the preceding gate's teardown; quiet-host re-run of the
+identical tree booted in 90.4 s and passed. Failure evidence preserved;
+no budget widened.
+
+Next: auto-hide, then maximize/fullscreen geometry. Alt+Tab stays
+blocked on input-ABI modifier state (kernel files carry another agent's
+uncommitted edits). Phase B remains NOT accepted as a whole.
+
+## OpenCode - Phase B minimize accepted + keyboard_refresh root cause closed (2026-11-23)
+
+Branch `phase-b/window-minimize` (worktree `D:\WovenHat-build\desktop-wt`,
+commit `134e8cbd`, stacked on `eb5020da`): taskbar minimize/restore is
+QEMU-accepted at 1/2/4 CPUs (`desktop-qualification-1795445644994223900`,
+`-1795446056922824200`, `-1795446369997474500`, all `pass: true`, zero
+failures, frame markers present, no panic). Click the focused window's
+button to minimize, a minimized button to restore, another to focus;
+minimized entries paint dimmed. No new `Window` field: minimized means
+absent from `stack[..stacked]`.
+
+`keyboard_refresh` root cause CLOSED (see the Phase B section of
+`docs/stage-status.md` for the full evidence): the historical flake was
+the harness's pre-`73ea4d40` exact-glyph oracle (hard-coded digit `2`
+raster at (236,492) with exact colors), which returned false negatives
+while the guest demonstrably delivered Enter and repainted (serial marker
+always present). Replaying that old predicate against today's retained
+PASSING frame returns False on a frame whose counter region changed by
+116 px -- direct proof the oracle, not the guest, was the failure. No
+failure recorded anywhere since the oracle was replaced (Nov 20
+progressive runs, Nov 23 merged-final runs, seven Phase B runs). The
+pointer-step "mouse click did not change the client framebuffer" flake is
+a separate, still-open issue; nothing is claimed for it.
+
+Next: wire the host-tested `pinned_apps.rs` model into the taskbar with
+persistence, then auto-hide. Alt+Tab stays blocked on input-ABI modifier
+state (kernel files carry another agent's uncommitted edits).
+
+## OpenCode - Phase B bottom-taskbar core (IN PROGRESS, 2026-11-23)
+
+Branch `phase-b/bottom-taskbar-core` from `master` (`fe56bef7`). Claimed scope:
+`apps/woven-shell/src/main.rs` (taskbar group/entry geometry, Quick Settings
+radio rows, settings loader), new `apps/woven-shell/src/taskbar_prefs.rs` and
+`apps/woven-shell/tests/taskbar_prefs.rs`, and the Phase B status records.
+Changes so far: Wi-Fi/Bluetooth/Airplane no longer invent state (they read
+"Unavailable" and say so when pressed); the Quick Settings summary is driven
+only by real network status; taskbar alignment (center/left) and icon size
+(small/medium/large) are read from the installed settings record with safe
+per-field fallback. Auto-hide, pinning persistence and Alt+Tab are NOT
+done (minimize is now done and QEMU-verified, and the keyboard_refresh
+root cause is closed -- see the entry above). Host: 6/6 taskbar-preference tests
+pass (run via `rustc --test`, because the shell's `build-std` config breaks
+host cargo builds). Freestanding `cargo clippy --target x86_64-unknown-none -- -D warnings`
+passes. No QEMU claim yet. I deferred moving the repo's `target/` and
+`.cargo-build/` to D: because another chain (memory-regression QEMU and a
+kernel `cargo run`) was active under them at 13:55.
+
 ## OpenCode - volume read-back on master (2026-11-23)
 
 Implemented and accepted on `master`: HDA publishes the last applied output
@@ -44,8 +630,22 @@ expectations were then aligned with the accepted palette/path budget in
 `a01e1781` (no runtime behavior or assertion strength changed). Warning-denying
 host/kernel/shell Clippy and the full `cargo test --workspace` suite pass on the
 merged tree. The serialized full Stage 10.7 gate followed by the baseline-
-enforced 1/2/4-CPU desktop matrix is running under
-`audit-artifacts/merged-final-{1,2,4}cpu`; push only after all of it passes.
+enforced 1/2/4-CPU desktop matrix then PASSED at every profile
+(`audit-artifacts/merged-final-{1,2,4}cpu`), as did the full serialized
+`RUN-STAGE10.7.ps1` gate on the merged tree. All merge validation is complete;
+the branch is being pushed to `origin/master`.
+
+## OpenCode - Phase B desktop qualification pass (2026-11-23)
+
+Desktop qual PASS 1/2/4 CPU on D: build root (`audit-artifacts/phaseb-desktop-qual-1cpu-d2`, `phaseb-desktop-qual-2cpu-d`, `phaseb-desktop-qual-4cpu-d`). Updated `RUN-STAGE10.7.ps1` to default build dirs to D: when unset; `scripts/test-desktop-qualification.py` to default to D: build root with ROOT system-app manifest fallback. Incremental shell polish: taskbar running-entry hover feedback in `apps/woven-shell/src/main.rs` (visual only); shell clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover,2cpu-hover,4cpu-hover`. Follow-up 2026-11-24: Start/workspace/QS hover feedback; shell fmt+clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover2c,phaseb-desktop-qual-2cpu-hover2,phaseb-desktop-qual-4cpu-hover2`. Follow-up 2026-11-24: tray/status-icon hover backgrounds; shell fmt+clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover3r,phaseb-desktop-qual-2cpu-hover3r,phaseb-desktop-qual-4cpu-hover3r3` (transient reruns). Follow-up 2026-11-24: clock active/hover + unread badge hover; shell fmt+clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover4,2cpu-hover4,4cpu-hover4`. Follow-up 2026-11-24: overview hover feedback + pointer-move taskbar/overview dirty repaint fix; shell fmt+clippy PASS; desktop qual PASS 1/2/4 CPU `audit-artifacts/phaseb-desktop-qual-1cpu-hover5,2cpu-hover5,4cpu-hover5`. Minimal lint-unblocker edits made in untracked `kernel/src/e1000.rs` left unstaged for owner. No ABI/behavior changes.
+
+## OpenCode - Stage 10.7 chain blocked by concurrent e1000 WIP (2026-11-23)
+
+Attempted `RUN-STAGE10.7.ps1` per user request. Failed during Stage 7.6 memory 2CPU run 9 due to kernel compile errors from concurrent WIP: `kernel/src/network.rs` (modified, M) imports `crate::e1000`, but `kernel/src/e1000.rs` is untracked/incomplete and has compile errors (E0599 `DmaReservation::commit` missing, unused unsafe, E0425). I added then reverted `mod e1000;` in `kernel/src/main.rs` (no net change). I did not modify `network.rs` or `e1000.rs`. Stage 10.7 cannot be run until the e1000/network WIP owner makes the kernel compile cleanly.
+
+## OpenCode - Phase A Stage 11 validation pass (2026-11-23)
+
+Ran bounded Phase A validation at HEAD `fe56bef7` base (dirty worktree). Minimal fmt-only changes: `kernel/src/block.rs` import order, `libwoven/src/lib.rs` rustfmt-only wrap (no logic). Stage 11.1-11.6, 11.2-status, 11.2-tls, 11.2-aslr, 11.5-compiler, and preservation Stage 8/9/10.8/10.9 PASS 1/2/4 CPUs (exit 33). `cargo clippy --all-targets -- -D warnings` PASS. `cargo test --workspace` PASS (no FAILED/error lines detected). Kernel clippy PASS for all Stage 11 test features. `cargo test -p libwoven --lib` PASS (256/0/1). `cargo fmt --all -- --check` PASS (`kernel/src/block.rs` edition 2021/2024 rustfmt conflict resolved with `#[rustfmt::skip]`). No 8/16 CPU/fuzz/new adversarial tests; existing Stage 11 markers mapped as bounded adversarial/lifecycle evidence. Decision: PHASE A ACCEPTED — BOUNDED SOFTWARE/QEMU.
 
 ## OpenCode - network/volume/battery indicators IN PROGRESS (2026-11-23)
 
@@ -10387,3 +10987,94 @@ at offset 36,700,160. Transcript:
 media preparation, not bare-metal boot or device-function qualification. The
 next evidence must come from booting the HP 290 G4 via its one-time UEFI boot
 menu with Secure Boot off and returning the WOVENLOG files.
+## Codex - Phase B frame-only maximize/restore (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`) owns
+this shell-only Phase B increment. No kernel/input ABI files were changed.
+Touched files: `apps/woven-shell/src/main.rs`, `apps/woven-shell/src/model.rs`,
+`scripts/test-taskbar-pins.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: right-click window title bar toggles frame-only maximize/restore
+(`Window.maximized`, `Window.restore`, `Window.surface_w/h`), band-filling frame
+with clamped-surface body fill, drag-on-maximized restores before drag, and
+resized/explicit-replace clears maximized. WSIZ client reflow is intentionally
+deferred: a live maximize WSIZ exposed a reproducible software-compositor
+present/blend stall on slow 1-CPU QEMU. Window shadows are temporarily disabled
+in `repaint_once` for the same compositor stall (explicit TODO). Gate hardened:
+chunked PS/2-safe `move_to`, restore title-bar position check, step-14 retry,
+and auto-hide hold refresh.
+
+Validation (this exact tree): freestanding shell clippy/release clean.
+Host `rustc --test`: `taskbar_prefs` 12/12, `pinned_apps` 7/7. Taskbar-pins
+extended gate PASS 1/2/4: `taskbar-pins-1795504655655003900`,
+`taskbar-pins-1795504803500124300`, `taskbar-pins-1795504942282416200`.
+Desktop qualification PASS 1/2/4: `desktop-qualification-1795505086591807900`
+(1 CPU), `desktop-qualification-1795505768460324700` (2 CPU rerun, PASS),
+`desktop-qualification-1795505531386805300` (4 CPU). Preserved 2-CPU failure:
+`desktop-qualification-1795505275169282000` (`files_pointer_cancel_ms` timeout),
+rerun passed; no budget/assertion weakened.
+
+Open/blocked: Phase B not accepted; no §24 report. Maximize WSIZ reflow and
+window shadows deferred pending compositor non-blocking proof. Cross-boot
+pin/auto-hide persistence still needs writable settings record + deliberate
+shell `FileWrite` capability decision. Alt+Tab blocked on input ABI/modifier
+state (overlaps other agent kernel work). Main repo
+`C:\Users\banda\Documents\GitHub\WovenHat-OS` remains dirty with other agent's
+uncommitted work; do not reconcile/overwrite from this worktree. No Cargo/QEMU
+chain active.
+
+## Codex - Phase B taskbar layout visual QEMU verification (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only increment plus small, isolated-kernel test-harness support; no
+input ABI/capability changes. Touched files: `apps/woven-shell/src/main.rs`,
+`kernel/src/session.rs`, `kernel/src/userspace.rs`,
+`scripts/test-taskbar-layout.py`, `docs/stage-status.md`,
+`docs/agent-coordination.md`.
+
+Implemented: shell CLI args `--taskbar-alignment`, `--taskbar-icon-size`,
+`--taskbar-auto-hide` (unknown values fail closed); one-time startup serial
+marker `woven-shell: taskbar layout alignment=... icon_size=... auto_hide=...`.
+Kernel session argv accepts compile-time `WOVENHAT_SHELL_TASKBAR_ALIGNMENT`,
+`WOVENHAT_SHELL_TASKBAR_ICON_SIZE`, `WOVENHAT_SHELL_TASKBAR_AUTO_HIDE`
+(option_env, only when set) for real-QEMU gates. `kernel/src/userspace.rs`
+`MAX_ARGV` raised 8->16 and `MAX_ARGV_BYTES` 512->1024 because the extended
+session argv exceeded the old limit; first 1-CPU layout attempt
+`audit-artifacts/taskbar-layout-1795512583100247100` failed with
+`[SESSION] desktop not started: Image`, preserved, then fixed.
+
+Validation: freestanding shell clippy/release clean (`-D warnings`).
+`python -m py_compile scripts/test-taskbar-layout.py` clean.
+Real-QEMU layout gate PASS 1/2/4 CPUs:
+`audit-artifacts/taskbar-layout-1795512950531598600` (1 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513102956382300` (2 CPU, pass),
+`audit-artifacts/taskbar-layout-1795513257891825300` (4 CPU, pass).
+Each result.json `pass: true`, zero failures, layout marker
+`alignment=left icon_size=large auto_hide=off`, screenshot preserved, pixel
+sanity check passed. No assertions/budgets weakened.
+
+Open: Phase B not accepted; no §24 report. In-shell taskbar settings editor
+not done. Cross-boot persistence of layout/pins/auto-hide remains blocked on
+writable settings record + deliberate shell `FileWrite` capability decision.
+Maximize WSIZ reflow and window shadows still deferred pending compositor
+non-blocking proof. Alt+Tab still blocked on input ABI/modifier state.
+Main repo remains dirty with other agent's uncommitted kernel/work; do not
+reconcile or overwrite. No Cargo/QEMU chain active.
+
+## Codex - Phase B in-shell taskbar QS controls (2026-11-24)
+
+Worktree `D:\WovenHat-build\desktop-wt` (branch `phase-b/window-minimize`).
+Shell-only: `apps/woven-shell/src/main.rs`. Added Quick Settings actions
+`TaskbarAlign` and `TaskbarIconSize` (in-session only; toasts/logs say
+"(session)"; resets to startup/settings on next boot). Replaced QS
+`BatterySaver` and `NightLight` no-effect local toggles to keep the 4x3 grid.
+Auto-hide remains the existing right-click strip toggle with its serial markers.
+
+Validation: freestanding shell clippy/release `-D warnings` clean; host tests
+`taskbar_prefs` 12/12 and `pinned_apps` 7/7 pass. 1-CPU desktop qualification
+smoke attempted twice (`desktop-qualification-1795516306643836000`,
+`desktop-qualification-1795516388939047300`); both failed during hardware-demo
+kernel build with rustc OOM/STATUS_STACK_BUFFER_OVERRUN (environment, not a
+code regression; shell-only change). No QEMU runtime regression asserted/denied
+by those build failures. No Cargo/QEMU chain active.

@@ -58,7 +58,9 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     // Build one bounded argv without allocating. The emulated demo uses the
     // existing flat renderer and reduced motion; other sessions retain their
     // established defaults and all profiles keep the 3D settings toggle.
-    let mut argv = [""; 7];
+    // Compile-time taskbar overrides let QEMU acceptance gates verify layout
+    // preferences without inventing a writable settings path.
+    let mut argv = [""; 13];
     let mut argc = 1;
     argv[0] = "/bin/woven-shell";
     if let Some(path) = accounts {
@@ -74,6 +76,21 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
     if cfg!(feature = "hardware-demo") {
         argv[argc] = "--no-3d";
         argv[argc + 1] = "--reduced-motion";
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_ALIGNMENT") {
+        argv[argc] = "--taskbar-alignment";
+        argv[argc + 1] = value;
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_ICON_SIZE") {
+        argv[argc] = "--taskbar-icon-size";
+        argv[argc + 1] = value;
+        argc += 2;
+    }
+    if let Some(value) = option_env!("WOVENHAT_SHELL_TASKBAR_AUTO_HIDE") {
+        argv[argc] = "--taskbar-auto-hide";
+        argv[argc + 1] = value;
         argc += 2;
     }
     let program = crate::userspace::load_elf_with_argv(image, &argv[..argc]).ok_or(Error::Image)?;
@@ -98,12 +115,13 @@ pub fn console_active() -> bool {
 /// F12: show the diagnostic console, or return to the session. Nothing
 /// happens without a session.
 pub fn toggle_console() {
-    let Some(pid) = active() else { return };
+    if active().is_none() {
+        return;
+    }
     let entering = !CONSOLE.load(Ordering::Acquire);
     CONSOLE.store(entering, Ordering::Release);
     if entering {
         crate::compositor::set_console(true);
-        crate::woven_input::set_focus(None);
         crate::terminal::clear();
         crate::terminal::write_bytes(
             b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ",
@@ -111,7 +129,6 @@ pub fn toggle_console() {
         crate::serial::write_line(format_args!("[SESSION] diagnostic console"));
     } else {
         crate::compositor::set_console(false);
-        crate::woven_input::set_focus(Some(pid));
         crate::serial::write_line(format_args!("[SESSION] back to the desktop"));
     }
 }

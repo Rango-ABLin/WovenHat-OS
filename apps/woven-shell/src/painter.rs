@@ -3,8 +3,8 @@
 
 use libwoven::{Canvas, GraphicsSurface, Region, TRANSPARENT};
 
-use crate::geometry::Area;
 use crate::fail;
+use crate::geometry::Area;
 use crate::{TILE_HEIGHT, TILE_WIDTH};
 
 /// The staging surface and the tile buffer the shell renders into.
