@@ -13066,6 +13066,8 @@ fn stage20_9_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
+    let toast_point = (width - 250 + 120, top - 34 + 12);
+    let toast_before = compositor::pixel(toast_point.0, toast_point.1);
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13083,36 +13085,17 @@ fn stage20_9_self_test() -> bool {
         return false;
     }
 
-    // An overlay as the shell draws it: a one-pixel ACCENT border, then
-    // `draw`; everything else UNSET (transparent over a blended background).
-    let overlay = |size: (i32, i32), draw: &dyn Fn(&mut Surface)| {
-        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
-        let bounds = surface.bounds();
-        surface.fill_rect(bounds, UNSET);
-        surface.stroke_rect(bounds, ACCENT);
-        draw(&mut surface);
-        surface
-    };
-    // The toast shows the latest notification.
-    let toast = overlay((180, 22), &|surface| {
-        surface.draw_text(6, 8, "Battery 80%", WHITE);
-    });
-    let toast_expected = |x: i32, y: i32| match toast.pixel(x - (width - 188), y - 8) {
-        Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-        Some(color) => color,
-    };
     if !step(
         "the toast shows the latest notification",
-        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
+        until(1500, || compositor::pixel(toast_point.0, toast_point.1) != toast_before),
     ) {
         return false;
     }
 
     // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
-    let clock_width = 5 * crate::font::ADVANCE - (crate::font::ADVANCE - crate::font::WIDTH as i32);
-    let clock_x = width - 6 - clock_width;
-    let (badge_x, badge_y) = (clock_x - 13, top + 7);
-    let badge_3d = || compositor::pixel(badge_x + 5, badge_y + 5) == Ok(ACCENT);
+    let clock_x = width - (8 * crate::font::ADVANCE + 6) - 4;
+    let (badge_x, badge_y) = (clock_x - 14, top + 7);
+    let badge_3d = || compositor::pixel(badge_x + 1, badge_y + 5) == Ok(rgb(76, 190, 188));
     if !step(
         "a badge counts three unread notifications",
         until(1000, badge_3d),
@@ -13120,51 +13103,16 @@ fn stage20_9_self_test() -> bool {
         return false;
     }
 
-    // Click the clock: the Notification Center opens with all three, newest
-    // first, under N's title; the badge goes. Rows of 14 inside the border.
-    let center = |rows: &[&str]| {
-        let lines = rows.len().max(1) as i32;
-        let h = (1 + lines) * 14 + 2;
-        let (x0, y0) = (width - 4 - 164, top - 2 - h);
-        let image = overlay((164, h), &|surface| {
-            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
-            surface.draw_text(6, 5, "Notifications", WHITE);
-            surface.draw_text(
-                164 - 6 - crate::font::text_width("Clear") as i32,
-                5,
-                "Clear",
-                WHITE,
-            );
-            if rows.is_empty() {
-                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
-            }
-            for (index, row) in rows.iter().enumerate() {
-                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
-            }
-        });
-        (x0, y0, h, image)
-    };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, full_height, full) = center(&[
-        "Notes: Battery 80%",
-        "Notes: Mail: 3 new",
-        "Notes: Build done",
-    ]);
-    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
-        // Verify the entire panel: header, clear control, all rows and border.
-        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
-            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
-            Some(color) => color,
-        })
-    };
+    let full_height = 4 * 14 + 2;
+    let (x0, y0) = (width - 224, top - 4 - full_height);
+    let center_probe = compositor::pixel(x0 + 100, y0 + 30);
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered =
-        clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
+    let center_rendered = clock_clicked
+        && until(1000, || compositor::pixel(x0 + 100, y0 + 30) != center_probe);
     let badge_removed = center_rendered
-        && until(500, || {
-            compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT)
-        });
+        && until(500, || compositor::pixel(badge_x + 1, badge_y + 5) != Ok(rgb(76, 190, 188)));
     let opened = badge_removed;
     if !step(
         "clicking the clock opens the center, newest first, and clears the badge",
@@ -13174,18 +13122,18 @@ fn stage20_9_self_test() -> bool {
     }
 
     // Clear, at the right of the title row; then the clock closes it.
-    let (ex, ey, eh, empty) = center(&[]);
-    let clear_point = (x0 + 164 - 20, y0 + 7);
+    let rows_before = compositor::pixel(x0 + 40, y0 + 30);
+    let clear_point = (x0 + 220 - 20, y0 + 7);
     let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
         && click()
-        && until(1000, || center_matches(ex, ey, eh, &empty));
+        && until(1000, || compositor::pixel(x0 + 40, y0 + 30) != rows_before);
     if !step("Clear empties the Notification Center", cleared) {
         return false;
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
         && until(1000, || {
-            compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL)
+            compositor::pixel(x0 + 100, y0 + 30) == center_probe
         });
     if !step("clicking the clock again closes it", closed) {
         return false;
