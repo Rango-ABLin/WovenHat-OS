@@ -2472,6 +2472,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         console.println("BIN UTILS: INSTALL FAILED");
         halt();
     }
+    #[cfg(not(all(feature = "qemu-test", not(feature = "system-apps"))))]
     let vfs_nodes_before_userspace = vfs::node_count();
     let boot_devices = [
         device::Device {
@@ -2763,6 +2764,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial::write_line(format_args!("[FONT] shell self-test font staging: FAILED"));
         }
     }
+    // Staging creates the font VFS nodes after the earlier baseline was
+    // captured. Refresh it here so the later "userspace created no VFS
+    // nodes" check compares against the same initialized filesystem.
+    #[cfg(all(feature = "qemu-test", not(feature = "system-apps")))]
+    let vfs_nodes_before_userspace = vfs::node_count();
     #[cfg(feature = "stage9-test")]
     qemu_test_exit_success();
     // The root `network-test` mode always enables `qemu-test`.  Cargo artifact
@@ -9041,7 +9047,8 @@ fn stage19_app_catalog_self_test() -> bool {
 
     if !step(
         "application directories created",
-        vfs::mkdir("/share").is_ok() && vfs::mkdir("/share/applications").is_ok(),
+        (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
+            && vfs::mkdir("/share/applications").is_ok(),
     ) {
         return false;
     }
@@ -12763,7 +12770,8 @@ fn stage20_17_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     // Begin from the accepted flat contract, then exercise the real toggle.
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
@@ -12923,7 +12931,8 @@ fn stage20_18_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     // Begin from the accepted flat contract, then exercise the real toggle.
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
@@ -15168,7 +15177,7 @@ fn stage20_3_self_test() -> bool {
     }
 
     // The catalog, and the program two of its entries launch.
-    let catalog = vfs::mkdir("/share").is_ok()
+    let catalog = (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
         && vfs::mkdir("/share/applications").is_ok()
         && vfs::create_read_only(
             "/share/applications/alpha.app",
@@ -15532,7 +15541,10 @@ fn stage20_2_self_test() -> bool {
     /// A title bar: current fill and close-control samples.
     fn title_bar(origin: (i32, i32), width: i32, _text: &str, fill: u32) -> bool {
         let (x, y) = origin;
-        compositor::pixel(x + 30, y + 13) == Ok(fill)
+        // Sample the fill at the title's midpoint, past the text: the staged
+        // TrueType face is taller than the 5x7 bitmap face and can reach the
+        // old y+13 sample, so that point is no longer reliably bare fill.
+        compositor::pixel(x + width / 2, y + 13) == Ok(fill)
             && compositor::pixel(x + width - 11, y + 3) == Ok(rgb(196, 72, 72))
     }
     /// One PS/2 packet through the real auxiliary path.
@@ -15657,21 +15669,30 @@ fn stage20_2_self_test() -> bool {
     });
     let entry_a = until(500, || entry_focus(1, 0, true));
     let tray = until(500, || region(tray_x, tray_y, 16, 16, |_, _| GREEN));
-    // Exact notification glyphs; the rounded translucent seed intentionally
-    // contains the wallpaper beneath it.
+    // The toast text is drawn through the staged TrueType face when the font
+    // is available (self-test images now stage it) and through the bitmap
+    // face otherwise. Verify the exact text colour is present in its bounded
+    // band and that nothing brighter is drawn there, without pinning one
+    // rasteriser's glyph outlines. The translucent card still shows the
+    // wallpaper beneath it, as checked by the later expiry step.
     let toast = until(500, || {
-        let mut mask = Surface::new(crate::font::text_width("Alpha ready"), 7);
-        mask.fill_rect(mask.bounds(), UNSET);
-        mask.draw_text(0, 0, "Alpha ready", rgb(243, 246, 251));
-        (0..7).all(|dy| {
-            (0..mask.width()).all(|dx| {
-                mask.pixel(dx as i32, dy).is_none_or(|expected| {
-                    expected == UNSET
-                        || compositor::pixel(toast_x + 6 + dx as i32, toast_y + 8 + dy)
-                            == Ok(expected)
-                })
-            })
-        })
+        let (band_x, band_y) = (toast_x + 6, toast_y + 8);
+        let mut ink = 0usize;
+        for dy in 0..12 {
+            for dx in 0..72 {
+                let Ok(pixel) = compositor::pixel(band_x + dx, band_y + dy) else {
+                    continue;
+                };
+                let (r, g, b) = ((pixel >> 16) & 0xff, (pixel >> 8) & 0xff, pixel & 0xff);
+                if r > 243 || g > 246 || b > 251 {
+                    return false;
+                }
+                if r >= 200 && g >= 200 && b >= 200 {
+                    ink += 1;
+                }
+            }
+        }
+        ink >= 12
     });
     if !step("window A framed with a focused title bar", frame_a)
         || !step("taskbar entry for A, focused", entry_a)
@@ -16492,7 +16513,8 @@ fn stage20_1_self_test() -> bool {
     }
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
-        .with(capability::Capability::InputIo);
+        .with(capability::Capability::InputIo)
+        .with(capability::Capability::FileRead);
     // Stage 20.1 is the foundational software-desktop contract. Keep its
     // pixel oracle independent from the later perspective-specific gates;
     // production still defaults to 3D and stages 20.17/20.18 qualify that

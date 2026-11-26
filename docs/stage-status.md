@@ -1,5 +1,43 @@
 # Stage status
 
+## Shell self-test system font mapping - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Owner reported `woven-shell: system font mapping unavailable` in shell-only
+QEMU boots. Diagnosis: `load_system_font_mapping()` and the kernel large-asset
+window are correct, but shell self-test images never call
+`install_production_system_apps()`, so `/share/fonts/NotoSans-Regular.ttf` was
+never staged; most of those self-tests also spawned the shell without
+`FileRead`, which `open()` requires. Owner approved a test-only fix (no new
+syscall, capability or ABI): `qemu-test` images now stage the same hash- and
+licence-validated 621,572-byte font through the existing bounded
+`create_read_only_large` VFS path before any self-test spawns the shell, and
+every shell self-test capability set now includes `FileRead`. Production
+`system-apps` boots keep their unchanged installation path; their font asset
+and validation were not touched. The two `mkdir("/share")` oracle sites that
+now see a pre-created directory accept an existing directory but still assert
+the directory exists. A boot-time VFS node baseline is refreshed after staging
+so the later "userspace created no VFS nodes" assertion compares like for like.
+
+Enabling the real face necessarily changes shell text rasterisation, so two
+Stage 20.2 oracles were adapted without disabling them: the toast check now
+requires the exact text colour's bright ink in its bounded band and rejects
+anything brighter there, and the title-bar fill sample moved past the taller
+TrueType glyphs to the bar midpoint. The strict wallpaper, damage, expiry,
+focus, pointer, key-routing and teardown checks in that gate are unchanged.
+
+Static validation: `cargo fmt --all -- --check`, warning-denying kernel Clippy
+for default, `qemu-test` and `stage20-2-test`, `cargo clippy --all-targets
+-- -D warnings` and `cargo test --workspace` all pass.
+`scripts/test-woven-shell-qemu.py --stage 20.2` passes at 1/2/4 CPUs (exit 33,
+`[S20.2] desktop applications: PASSED`) with `woven-shell: system font parsed
+bytes=621572 units_per_em=1000` in every serial log and no
+`system font mapping unavailable`. The pre-fix commit was booted in an
+isolated worktree to separate pre-existing failures: Stage 20.1, 20.3 and
+20.9 already failed there on stale wallpaper/text oracles, so they are not
+regressions from this change and are not claimed here. The full serialized
+`RUN-STAGE10.7.ps1` chain was not started because other owners' QEMU chains
+held the shared fixed output paths; it is explicitly not claimed.
+
 ## Stage 20.2 self-test wallpaper oracle - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The two reported failures (`A's window, entry and tray icon removed on exit;

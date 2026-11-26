@@ -1,4 +1,4 @@
-## OpenCode - shell self-test system font mapping (2026-11-26) - ACTIVE
+## OpenCode - shell self-test system font mapping (2026-11-26) - DONE
 
 Fixing the owner-reported `woven-shell: system font mapping unavailable` in
 shell-only/self-test boots. Root cause: those kernels never call
@@ -8,9 +8,15 @@ never staged, and most shell self-tests deliberately spawn the shell without
 VFS for `qemu-test` images and add `FileRead` to the shell's self-test
 capability sets. I will touch the font constants/`create_read_only_large`
 cfg gates, a boot-time staging helper, the shell capability sets, and the two
-`mkdir("/share")` assertions that must tolerate the pre-created directory. I
-will not rewrite any pixel oracle or the S20.2 `gone`/`empty` blocks. Please
-avoid concurrent edits to `kernel/src/main.rs` while this is validated.
+`mkdir("/share")` assertions that must tolerate the pre-created directory.
+Result: S20.2 passes at 1/2/4 CPUs with the font parsed in every serial log.
+Enabling the face changed text rasterisation, so only the S20.2 toast-text
+and title-bar fill-sample points were adapted; the `gone`/`empty` blocks and
+wallpaper oracles were not touched. Booting the pre-fix commit in an isolated
+worktree confirmed S20.1/20.3/20.9 already failed on stale oracles. Also
+includes the concurrent VFS-node baseline refresh needed because font staging
+adds VFS nodes after the earlier baseline was captured. Full RUN-STAGE10.7
+was not run while other QEMU chains held the fixed output paths.
 
 ## OpenCode - S20.2 self-test stale wallpaper palette (2026-11-26) - ACTIVE
 
