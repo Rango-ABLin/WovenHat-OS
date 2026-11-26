@@ -14,6 +14,18 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - live installed settings propagation (2026-11-26)
+
+The shell now re-reads the bounded installed settings record on its existing
+slow status cadence and applies it only when the record's digest changes. High
+contrast and reduced motion are applied absolutely, so a later record can turn
+them off as well as on; taskbar preferences, pins and locale continue to be
+seeded from the same record. This uses the shell's existing `FileRead` only —
+the Settings app remains the sole writer and no new IPC topic, capability or
+ABI was introduced. The change is recorded on both `phase-b/bottom-taskbar-core`
+and `feature/app-surfaces` (cherry-picked) because the main worktree was on the
+former when the edit landed.
+
 ## OpenCode - WovenImages bounded viewer (2026-11-26)
 
 Extended the app-surface plan with an image viewer: the GUI now has a path

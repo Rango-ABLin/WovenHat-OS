@@ -1,5 +1,17 @@
 # Stage status
 
+## Live installed settings propagation - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The shell re-reads the bounded installed settings record on the existing slow
+status cadence and applies it when its digest changes. High contrast and
+reduced motion are now applied absolutely, so turning them off in a later
+record takes effect immediately; taskbar preferences, pins and locale are
+seeded from the same record as before. The shell only reads the record, so no
+new capability, IPC topic or ABI change is involved and the Settings app stays
+the sole writer. Applied to both `phase-b/bottom-taskbar-core` and
+`feature/app-surfaces`. Full Stage 10.7 chain evidence is recorded with this
+increment; native hardware and external release gates are unchanged.
+
 ## WovenImages bounded viewer - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The Images GUI gained a bounded path field and Load action that decodes a BMP
