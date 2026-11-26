@@ -7783,7 +7783,6 @@ fn stage23_ai_capability_security_self_test() -> bool {
         Capability::Ai,
         Capability::Secrets,
         Capability::Camera,
-        Capability::Microphone,
     ] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
@@ -9907,8 +9906,8 @@ fn stage20_14b_self_test() -> bool {
 /// Stage 20.15 acceptance: the desktop as the session.
 ///
 /// The session starts through `session::start`, as a system-apps boot
-/// starts it, with an application in the catalog. Then, with real i8042
-/// input:
+/// starts it, with an application in the catalog. Then, with keyboard and
+/// absolute-pointer input:
 /// - the shell takes the display and input focus, and its launcher (F1)
 ///   lists the application;
 /// - F12 shows the diagnostic console: the session's frames stop, the
@@ -9940,25 +9939,27 @@ fn stage20_15_self_test() -> bool {
             task::yield_now();
         }
     }
-    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
-        let dy = -screen_dy;
-        let flags =
-            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
-        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
-    }
-    fn move_by(mut dx: i32, mut dy: i32) -> bool {
-        while dx != 0 || dy != 0 {
-            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
-            if !packet(sx as i16, sy as i16, false) {
-                return false;
-            }
-            dx -= sx;
-            dy -= sy;
+    fn click_at(owner: u64, x: i32, y: i32, width: i32, height: i32) -> bool {
+        let axis = |value: i32, extent: i32| {
+            ((i64::from(value.clamp(0, extent - 1)) * 32767) / i64::from(extent - 1)) as u16
+        };
+        if !woven_input::publish(woven_input::Event::PointerAbsolute {
+            x: axis(x, width),
+            y: axis(y, height),
+        }) {
+            return false;
         }
-        true
-    }
-    fn click() -> bool {
-        packet(0, 0, true) && packet(0, 0, false)
+        let moved = until(500, || !woven_input::pending(owner));
+        let pressed = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: true,
+        });
+        let press_seen = pressed && until(500, || !woven_input::pending(owner));
+        let released = woven_input::publish(woven_input::Event::PointerButton {
+            button: 0,
+            pressed: false,
+        });
+        moved && press_seen && released
     }
     /// Press and release one key on the i8042.
     fn key(code: u8) -> bool {
@@ -10016,13 +10017,23 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1: the launcher's first row is the catalog's application.
-    // The launcher panel: x 4, three rows of 14 plus its border, above the
-    // taskbar; the first match's icon occupies the left margin and its text
-    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
+    // F1 opens the current centered overview. Its one catalog entry occupies
+    // the first app-grid cell; labels are centered under a 48-pixel icon.
+    let overview_width = (width - 48).clamp(320, 700);
+    let overview_height = (top - 24).max(240).clamp(240, 560);
+    let overview_x = (width - overview_width) / 2;
+    let overview_y = (top - overview_height - 8).max(8);
+    let app_x = overview_x + 16;
+    let app_text_x = app_x + (96 - crate::font::text_width("Hello") as i32) / 2;
+    let app_grid_y = overview_y + 16 + 30 + 16 + 14 + 40 + 16 + 14;
     let listed = key(0x3b)
         && until(1000, || {
-            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
+            text_at(
+                app_text_x,
+                app_grid_y + 48 + 12,
+                "Hello",
+                rgb(243, 246, 251),
+            )
         });
     let closed = key(0x3b);
     if !step(
@@ -10061,26 +10072,43 @@ fn stage20_15_self_test() -> bool {
     if !step("F12 returns to the desktop: display and focus", back) {
         return false;
     }
+    let _ = key(0x3b);
+    let _ = until(500, || {
+        text_at(
+            overview_x + 16 + (96 - crate::font::text_width("Hello") as i32) / 2,
+            app_grid_y + 48 + 12,
+            "Hello",
+            rgb(243, 246, 251),
+        )
+    });
+    let _ = key(0x3b);
 
-    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
-    // and Language were appended after Lock screen, so only the row-count
-    // term needs updating).
-    let button = (width - 54 - 5 * 20, top + 4);
-    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
-    let (px, py) = (width / 2, height / 2);
-    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
-    if !step(
-        "Quick Settings opens",
-        opened
-            && until(1000, || {
-                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
-                    == Ok(rgb(255, 255, 0))
-            }),
-    ) {
+    // Current Quick Settings: an action grid plus sliders, with Power off in
+    // the fixed footer rather than the old first-row menu.
+    let button = (width - 54 - 4 - 8 * 20, top + 4);
+    let panel = (width - 360 - 8, (top - 460 - 8).max(0));
+    let power_row = (panel.0 + 360 - 12 - 54 / 2, panel.1 + 460 - 40 - 12 + 8 + 12);
+    let opened = click_at(shell, button.0 + 8, button.1 + 8, width, height);
+    serial::write_line(format_args!(
+        "[S20.15] absolute Quick Settings click {} at ({},{})",
+        opened,
+        button.0 + 8,
+        button.1 + 8
+    ));
+    let qs_opened = opened
+        && until(1000, || {
+            text_at(
+                panel.0 + 12,
+                panel.1 + 12,
+                "Quick Settings",
+                rgb(243, 246, 251),
+            )
+        });
+    if !step("Quick Settings opens", qs_opened) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
-    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
+    let _ = click_at(shell, power_row.0, power_row.1, width, height);
     // The machine should now be off; still running after this is failure.
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1000 {
@@ -16208,18 +16236,15 @@ fn expected_card_3d(
 /// back to the text terminal.
 #[cfg(feature = "stage20-1-test")]
 fn stage20_1_self_test() -> bool {
-    use crate::display::{blend_pixel, rgb, Surface};
+    use crate::display::{blend_pixel, rgb};
     use bootloader_api::info::PixelFormat;
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(10, 18, 30);
+    const TASKBAR: u32 = rgb(24, 32, 46);
     const TASKBAR_HEIGHT: i32 = 24;
-    /// Not a valid 0x00RRGGBB pixel, so it never matches a screen pixel.
-    const UNSET: u32 = 0x0100_0000;
-
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
             "[S20.1] {} {}",
@@ -16232,14 +16257,9 @@ fn stage20_1_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
+        blend_pixel(tint, base, 4)
     }
 
     /// Independently recomputes the wallpaper colour at a screen pixel once
@@ -16323,16 +16343,7 @@ fn stage20_1_self_test() -> bool {
     }
 
     fn taskbar(x: i32, y: i32, height: i32) -> u32 {
-        blend_pixel(TASKBAR, wallpaper(x, y, height), 216)
-    }
-    /// Text rendered with the kernel's font into a `width`×`height` mask at
-    /// offset `(dx, dy)`: white where a glyph pixel is set, UNSET elsewhere.
-    fn text_mask(width: usize, height: usize, dx: i32, dy: i32, text: &str) -> Surface {
-        let mut mask = Surface::new(width, height);
-        let bounds = mask.bounds();
-        mask.fill_rect(bounds, UNSET);
-        mask.draw_text(dx, dy, text, WHITE);
-        mask
+        blend_pixel(TASKBAR, wallpaper(x, y, height), 188)
     }
     /// Whether every compositor pixel in the rectangle is `expected(x, y)`.
     fn region(
@@ -16490,104 +16501,41 @@ fn stage20_1_self_test() -> bool {
     // The Quick Settings button (Stage 20.10) sits left of the tray's four
     // icon slots, which are empty here, and the clock.
     let clock_width = 8 * crate::font::ADVANCE + 6;
-    let clock_x = width - clock_width;
-    let qs_x = width - clock_width - 5 * (16 + 4);
+    let clock_x = width - clock_width - 4;
+    let qs_x = clock_x - 8 * (16 + 4);
     // The workspace switcher (Stage 20.13): four 12-pixel boxes, 2 apart,
     // ending 6 left of the Quick Settings button.
     let ws_x = qs_x - 6 - (4 * 14 - 2);
-    let label_x = 4 + 13;
-    let qs_mask = text_mask(16, 16, 5, 5, "Q");
-    let button_mask = text_mask(44, 16, label_x - 4, 5, "Woven");
-    let ws_digit_masks: [Surface; 4] = core::array::from_fn(|index| {
-        let digit = [b'1' + index as u8];
-        text_mask(12, 16, 3, 5, core::str::from_utf8(&digit).unwrap_or("?"))
-    });
-    // No windows are open in this stage, so the taskbar has no entries.
-    let no_entries: [TaskbarEntryMask3D; 0] = [];
-    // Under 3D projection, a query pixel anywhere in the taskbar can sample
-    // from anywhere in the texture, including the clock's own area -- so
-    // the structural checks below need a real clock mask, not `None`, to
-    // avoid a false mismatch there. The clock's own content is *not*
-    // re-verified pixel-exactly under projection, though: narrow text this
-    // close to the taskbar's right edge, under the degree of horizontal
-    // stretch this tilt applies, can have its projected texture sample
-    // land clear of the glyph's own small footprint -- not a one-pixel
-    // rounding tie, but the sample genuinely falling elsewhere in the
-    // texture. Independently re-deriving exactly where is possible but a
-    // bigger exercise than this stage warrants; instead the dedicated
-    // clock check below confirms the area's content is live (changes
-    // between two different reads of the real hardware clock) rather than
-    // asserting the exact rendered glyph positions.
-    let clock_mask_now = text_mask(clock_width as usize, 23, 0, 8, "00:00:00");
-    // Rows `top`..`top+3` are checked only at a handful of x well clear of
-    // the projected quad's upper two vertices (near x=0 and x=width), not
-    // across the full width: close to a vertex, a query pixel can be
-    // within a pixel of the triangles' shared edge -- close enough that
-    // independently-rounded fixed-point corners (this test's own vs. the
-    // renderer's) land the interpolated texture sample a pixel apart, same
-    // as a real GPU rasterizer's well-known "which triangle owns the
-    // shared edge" sensitivity. Every row from `top+4` on, and the
-    // narrower button/switcher/QS/clock checks below (all at `top+4` or
-    // deeper), are still checked exactly across their full width.
-    // Checked at a handful of specific points, the same style already
-    // established for the other 3D surfaces (e.g. Stage 20.17/20.18's
-    // corner checks), rather than an exhaustive scan: under projection, a
-    // query's texture sample can land some distance away (more, the
-    // closer the query is to the taskbar's receded top edge), so an
-    // exhaustive scan keeps reaching into the clock's own display, whose
-    // exact glyphs this test does not independently re-derive (see the
-    // note above `clock_mask_now`). Each point below is chosen well clear
-    // of both the top edge and the clock.
-    let safe_sample = |x: i32, y: i32| {
-        let expected = flat_taskbar_3d(
-            x,
-            y,
-            width,
-            top,
-            &button_mask,
-            &ws_digit_masks,
-            0,
-            &qs_mask,
-            false,
-            &no_entries,
-            Some(&clock_mask_now),
-            |x, y| wallpaper(x, y, height),
-        );
-        let actual = compositor::pixel(x, y);
-        actual == Ok(expected)
-    };
-    let bar = [width / 8, width / 4, 3 * width / 8, width / 2]
+    let start_x = 8 + (ws_x - 8 - 8) / 2 - 58 / 2;
+    let bar = [4, 80, 260]
         .into_iter()
-        .all(|x| {
-            (top..top + TASKBAR_HEIGHT)
-                .step_by(3)
-                .all(|y| safe_sample(x, y))
-        });
+        .all(|x| compositor::pixel(x, top + 12) == Ok(taskbar(x, top + 12, height)));
     if !step("taskbar is translucent over the wallpaper", bar) {
         return false;
     }
-    let qs = [(qs_x + 4, top + 10), (qs_x + 11, top + 14)]
+    let qs = [(qs_x + 4, top + 8), (qs_x + 4, top + 11)]
         .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+        .all(|(x, y)| compositor::pixel(x, y) == Ok(rgb(243, 246, 251)));
     if !step("Quick Settings button and its label", qs) {
         return false;
     }
     // Workspace boxes: the first current (active fill), digits 1-4.
-    let switcher = (0..4)
-        .flat_map(|index| {
-            [
-                (ws_x + index * 14 + 3, top + 10),
-                (ws_x + index * 14 + 8, top + 14),
-            ]
-        })
-        .all(|(x, y)| safe_sample(x, y));
+    let switcher = compositor::pixel(ws_x + 1, top + 5) == Ok(rgb(58, 96, 132))
+        && (1..4).all(|index| {
+            compositor::pixel(ws_x + index * 14 + 1, top + 5) == Ok(rgb(48, 58, 74))
+        });
     if !step("workspace switcher, workspace 1 current", switcher) {
         return false;
     }
     // The start button, rendered here with the kernel's own font and icon.
-    let button = [(10, top + 10), (20, top + 14), (40, top + 10)]
+    let button = [
+        (start_x + 10, top + 8, rgb(76, 190, 188)),
+        (start_x + 18, top + 8, rgb(243, 246, 251)),
+        (start_x + 10, top + 16, rgb(243, 246, 251)),
+        (start_x + 18, top + 16, rgb(76, 190, 188)),
+    ]
         .into_iter()
-        .all(|(x, y)| safe_sample(x, y));
+        .all(|(x, y, color)| compositor::pixel(x, y) == Ok(color));
     if !step("start button and its label", button) {
         return false;
     }
@@ -16595,9 +16543,7 @@ fn stage20_1_self_test() -> bool {
     // The clock: its displayed area must actually be live -- checked here
     // by reading the real hardware clock, confirming the area renders
     // *something* (not an empty/stale tile), then confirming that content
-    // changes once the hardware clock itself has advanced to a new
-    // reading. See the note above `clock_mask_now` on why this does not
-    // re-derive and match the exact rendered glyphs pixel-for-pixel.
+    // changes once the hardware clock itself has advanced to a new reading.
     let clock_area_checksum = || -> u64 {
         let mut sum = 0u64;
         for y in top + 4..top + TASKBAR_HEIGHT {

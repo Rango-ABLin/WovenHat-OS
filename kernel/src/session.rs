@@ -120,7 +120,6 @@ pub fn toggle_console() {
     CONSOLE.store(entering, Ordering::Release);
     if entering {
         crate::compositor::set_console(true);
-        crate::woven_input::set_focus(None);
         crate::terminal::clear();
         crate::terminal::write_bytes(
             b"WOVENHAT DIAGNOSTIC CONSOLE  (F12: BACK TO THE DESKTOP)\n> ",
@@ -128,7 +127,6 @@ pub fn toggle_console() {
         crate::serial::write_line(format_args!("[SESSION] diagnostic console"));
     } else {
         crate::compositor::set_console(false);
-        crate::woven_input::set_focus(Some(pid));
         crate::serial::write_line(format_args!("[SESSION] back to the desktop"));
     }
 }
