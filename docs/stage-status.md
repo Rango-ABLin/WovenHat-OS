@@ -1,5 +1,20 @@
 # Stage status
 
+## Desktop compositor current-head closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The compositor authority path is green on the current source. The complete
+Stage 19.2/19.4-19.9/19.11-19.14 matrix passes at 1/2/4 CPUs, covering surface
+ownership and foreign-handle refusal, display lease, input wait/focus,
+delegated surfaces, damage-only presentation, stacking/focus, PS/2 input,
+transparency, integer scaling and frame pacing with clean lease release.
+The Stage 20.19 shell input-isolation boundary is now continuously enforced in
+the desktop CI job at the same CPU matrix rather than relying only on retained
+historical evidence.
+
+This closes the bounded desktop compositor software/QEMU boundary. Native HID,
+physical display/device-loss, accelerated GPU and full native compositor
+performance qualification remain separate hardware gates.
+
 ## Graphics and framebuffer current-head requalification - 2026-11-26 - GREEN (BOUNDED SOFTWARE/QEMU)
 
 Requalified the framebuffer/compositor release path on the current source.

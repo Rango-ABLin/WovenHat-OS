@@ -1148,6 +1148,7 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-13-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-19-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -1164,6 +1165,7 @@ jobs:
             python3 scripts/test-woven-shell-qemu.py --stage 20.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14-monitors.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14b-desktop.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.19 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve desktop-userspace evidence
         if: always()

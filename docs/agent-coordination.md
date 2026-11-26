@@ -1,3 +1,10 @@
+## Copilot - desktop compositor current-head closure (2026-11-26) - DONE
+
+The full Stage 19.2/19.4-19.9/19.11-19.14 compositor matrix passes at
+1/2/4 CPUs. Added missing Stage 20.19 input-isolation Clippy/QEMU coverage to
+the desktop workflow and documented the remaining native HID/GPU/display
+boundary without changing runtime compositor behavior.
+
 ## Copilot - graphics/framebuffer current-head closure (2026-11-26) - DONE
 
 Refreshed Stage 20.1's stale visual oracle to the current flat wallpaper,
