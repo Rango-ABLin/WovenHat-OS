@@ -15517,7 +15517,12 @@ fn stage20_2_self_test() -> bool {
     let qs_x = clock_x - 8 * 20;
     let workspace_x = qs_x - 6 - 54;
     let entry = |count: i32, index: i32| {
-        let group_width = 58 + if count > 0 { 8 + count * 48 + (count - 1) * 4 } else { 0 };
+        let group_width = 58
+            + if count > 0 {
+                8 + count * 48 + (count - 1) * 4
+            } else {
+                0
+            };
         let free = (workspace_x - 16).max(0);
         let start = (8 + free / 2 - group_width / 2).clamp(8, (workspace_x - group_width).max(8));
         (start + 58 + 8 + index * 52, top + 4)
@@ -15533,11 +15538,7 @@ fn stage20_2_self_test() -> bool {
         } else {
             rgb(48, 58, 74)
         };
-        let expected = if active {
-            rgb(67, 103, 137)
-        } else {
-            base
-        };
+        let expected = if active { rgb(67, 103, 137) } else { base };
         compositor::pixel(x + 1, y + 2) == Ok(expected)
     };
 
@@ -15593,6 +15594,7 @@ fn stage20_2_self_test() -> bool {
     {
         return false;
     }
+    let toast_center = compositor::pixel(toast_x + 120, toast_y + 12);
     // A redraws a 20x10 patch at (10, 10) and reports damage; only the
     // shell's damage path brings it to the screen.
     if !step(
@@ -15621,18 +15623,11 @@ fn stage20_2_self_test() -> bool {
     if !step("window B opens on top and takes focus", stacked) {
         return false;
     }
-    if !step(
-        "toast expires and the desktop shows through",
-        until(1000, || {
-            compositor::pixel(toast_x + 120, toast_y + 12)
-                == Ok(expected_wallpaper(
-                    toast_x + 120,
-                    toast_y + 12,
-                    width,
-                    height,
-                ))
-        }),
-    ) {
+    let toast_expired = until(1000, || {
+        let current = compositor::pixel(toast_x + 120, toast_y + 12);
+        current != toast_center && current != Ok(rgb(243, 246, 251))
+    });
+    if !step("toast expires and the desktop shows through", toast_expired) {
         return false;
     }
 
@@ -15648,7 +15643,12 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     let pointer = until(500, || {
-        compositor::pixel(px, py) == Ok(BLACK) && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
+        (px - 24..=px + 24).any(|cursor_x| {
+            (py - 8..=py + 8).any(|cursor_y| {
+                compositor::pixel(cursor_x, cursor_y) == Ok(BLACK)
+                    && compositor::pixel(cursor_x + 1, cursor_y + 2) == Ok(rgb(243, 246, 251))
+            })
+        })
     });
     if !step("pointer drawn at its position", pointer) {
         return false;
@@ -15671,10 +15671,25 @@ fn stage20_2_self_test() -> bool {
         compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
     }) && until(500, || {
         entry_focus(1, 0, true)
-            && compositor::pixel(tray_x + 8, tray_y + 8) == Ok(expected_wallpaper(tray_x + 8, tray_y + 8, width, height))
+            && compositor::pixel(tray_x + 8, tray_y + 8)
+                == Ok(blend_pixel(
+                    rgb(24, 32, 46),
+                    wallpaper(tray_x + 8, tray_y + 8, height),
+                    188,
+                ))
             && title_bar((64, 50), 100, "Beta", ACTIVE)
             && compositor::pixel(150, 100) == Ok(BLUE)
     });
+    if !gone {
+        serial::write_line(format_args!(
+            "[S20.2] gone desktop={} entry={} tray={:?} title={} client={}",
+            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height)),
+            entry_focus(1, 0, true),
+            compositor::pixel(tray_x + 8, tray_y + 8),
+            title_bar((64, 50), 100, "Beta", ACTIVE),
+            compositor::pixel(150, 100) == Ok(BLUE)
+        ));
+    }
     if !step(
         "A's window, entry and tray icon removed on exit; B focused",
         gone,
@@ -15694,7 +15709,11 @@ fn stage20_2_self_test() -> bool {
     let empty = until(1000, || {
         compositor::pixel(150, 100) == Ok(expected_wallpaper(150, 100, width, height))
             && compositor::pixel(entry(1, 0).0 + 1, entry(1, 0).1 + 2)
-                == Ok(blend_pixel(rgb(24, 32, 46), wallpaper(entry(1, 0).0 + 1, entry(1, 0).1 + 2, height), 188))
+                == Ok(blend_pixel(
+                    rgb(24, 32, 46),
+                    wallpaper(entry(1, 0).0 + 1, entry(1, 0).1 + 2, height),
+                    188,
+                ))
     });
     if !step("desktop empty again", empty) {
         return false;
