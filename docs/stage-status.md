@@ -1,5 +1,26 @@
 # Stage status
 
+## Focused large read-only mapping gate restored - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Restored dedicated coverage for the bounded read-only asset window used by the
+system font. The original self-test was removed after reproducing TCG frame
+pressure in the 256 MiB memory-stress matrix; re-adding it there would make
+that matrix flaky. It now lives behind its own `large-map-test` feature and a
+focused gate that runs with a 1 GiB guest RAM budget, so it verifies exact
+bytes, read-only protection, second-map rejection, unaligned/zero-length
+rejection and clean unmap without disturbing the stress matrix. Its data is
+`USER_MMAP_MAX_SIZE + 7` bytes on a fresh address space — no large kernel
+stack buffer.
+
+Validation: `large-map-test` Clippy, all-targets Clippy, workspace tests, and
+`test-feature-qemu.py --feature large-map-test --memory 1G` at 1/2/4 CPUs
+(`target/stage-large-map-{1,2,4}cpu-debug`, exit 33, marker
+`[LARGE MAP] read-only window: PASSED`) all pass, as does the full serialized
+`RUN-STAGE10.7.ps1` chain.
+
+Still open: a shared cross-process read-only font mapping ABI with a written
+threat review. Per-process mappings remain the accepted design.
+
 ## Font face cache hardening and QEMU VFS baseline repair - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Two remaining font-cache findings were closed in safe Rust. `load_system_font_face`
