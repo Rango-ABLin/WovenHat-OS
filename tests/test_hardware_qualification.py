@@ -51,16 +51,30 @@ class HardwareQualificationTests(unittest.TestCase):
         self.assertIn("observations[0].tier1 requires passed native evidence", errors)
 
     def test_absolute_evidence_path_is_rejected(self):
+        for path in (
+            "C:/outside/report.json",
+            r"\\server\share\report.json",
+            r"\outside\report.json",
+        ):
+            with self.subTest(path=path):
+                item = observation("usb")
+                item["evidence"] = path
+                self.assertIn(
+                    "observations[0].evidence must be a repository-relative path",
+                    MODULE.validate(report([item])),
+                )
+
+    def test_evidence_path_traversal_is_rejected(self):
         item = observation("usb")
-        item["evidence"] = "C:/outside/report.json"
+        item["evidence"] = "audit-artifacts/../outside/report.json"
         self.assertIn(
             "observations[0].evidence must be a repository-relative path",
             MODULE.validate(report([item])),
         )
 
-    def test_evidence_path_traversal_is_rejected(self):
+    def test_windows_evidence_path_traversal_is_rejected(self):
         item = observation("usb")
-        item["evidence"] = "audit-artifacts/../outside/report.json"
+        item["evidence"] = r"audit-artifacts\..\outside\report.json"
         self.assertIn(
             "observations[0].evidence must be a repository-relative path",
             MODULE.validate(report([item])),
