@@ -1,5 +1,23 @@
 # Stage status
 
+## Usable Store and Update app surfaces - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+First increment of the app-surface improvement plan. WovenStore and WovenUpdate
+were read-only counters; both now talk to the privileged service that already
+owns the real work: `woven.package` (Query/Install/Remove/Rollback) and
+`woven.update` (Query/Stage/Activate). Both GUIs have a bounded candidate path
+field, action buttons and a status line; both CLIs expose the matching modes.
+The apps hold no `StorageIo`; signature policy and durable transactions remain
+in the services, so no capability, syscall or ABI version changed.
+
+Validation on exact source: host logic tests 3/3 per app, `cargo fmt --all
+-- --check`, warning-denying all-target Clippy, `cargo test --workspace`, and
+signed `test-store-qemu.py`/`test-update-qemu.py` at 1/2/4 CPUs all pass. A
+no-arg parser defect exposed by the stage16-1 harness was diagnosed and fixed
+rather than worked around. Full Stage 10.7 chain evidence is recorded with this
+increment. Files GUI mutations, the Images viewer, Terminal output grid,
+Settings live propagation and Search wiring remain separate planned increments.
+
 ## Commit CI repair and short-screen Quick Settings - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Fixed the Linux CI boot/lint cascade caused by the repository Cargo config's

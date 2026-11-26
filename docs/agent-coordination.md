@@ -14,6 +14,25 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - usable Store and Update app surfaces (2026-11-26)
+
+Began the app-surface improvement plan from the 2026-11-26 analysis. WovenStore
+and WovenUpdate are no longer read-only counters: both now have a bounded IPC
+client for the privileged services that already own the durable transactions
+(`woven.package` Query/Install/Remove/Rollback and `woven.update`
+Query/Stage/Activate). Each GUI gained a bounded path field, action buttons and
+status reporting; each CLI gained the matching transaction modes. No new
+syscall, capability or ABI change: the apps hold no `StorageIo`, and the
+services still own signature verification and the durable A/B/package state.
+
+One real gate defect was found and fixed: the stage16-1 no-arg spawn passes an
+empty first argv, which the new store parser rejected; it now treats that as
+the catalog List mode. Validation: host logic tests 3/3 per app, fmt, warning-
+denying all-target Clippy, workspace tests, and signed 1/2/4-CPU harnesses for
+both apps all pass. Full preservation chain outcome is recorded separately.
+Remaining plan items (Files GUI mutations, Images viewer, Terminal output grid,
+Settings live propagation, Search wiring) are not part of this increment.
+
 ## OpenCode - desktop chrome acceptance completion (2026-11-25)
 
 Completed the current taskbar, Start overview and Notification Center gates
