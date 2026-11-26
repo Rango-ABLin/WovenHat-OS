@@ -729,6 +729,13 @@ struct Desktop {
     status: StatusSnapshot,
     /// Tick at which the next bounded status re-sample is due.
     status_next_sample: u64,
+    /// Installed settings path supplied by `--settings`, used for bounded
+    /// live re-reads. The shell has `FileRead` only and never writes it.
+    settings_path: [u8; 256],
+    settings_path_len: usize,
+    /// Last observed settings digest and the next bounded re-read tick.
+    settings_hash: u64,
+    settings_next_sample: u64,
     /// The lock screen's language. Defaults to English, which keeps the
     /// exact strings every already-accepted lock-screen gate expects;
     /// Quick Settings can switch it to Chichewa.
@@ -824,6 +831,10 @@ impl Desktop {
             battery: BatteryStatus::Unavailable,
         },
         status_next_sample: 0,
+        settings_path: [0; 256],
+        settings_path_len: 0,
+        settings_hash: 0,
+        settings_next_sample: 0,
         language: libwoven::i18n::Language::English,
         // Production presentation is 3D by default. The 3D path still calls
         // the bounded 2D painters to populate textures before projecting
@@ -5326,6 +5337,26 @@ impl Desktop {
                 dirty = dirty.union(self.status_icons_area()).union(self.qs_area());
             }
         }
+        // Live settings propagation: re-read the bounded installed record on
+        // the same slow cadence and apply it only when its digest changes.
+        // The shell has FileRead, never FileWrite, so this is observation
+        // only; the Settings app remains the sole writer.
+        if self.settings_path_len > 0 && now >= self.settings_next_sample {
+            self.settings_next_sample = now.saturating_add(STATUS_SAMPLE_PERIOD);
+            let mut path_buf = [0u8; 256];
+            let path_len = self.settings_path_len;
+            path_buf[..path_len].copy_from_slice(&self.settings_path[..path_len]);
+            if let Ok(path) = core::str::from_utf8(&path_buf[..path_len]) {
+                if let Some(hash) = current_settings_digest(path) {
+                    if hash != self.settings_hash {
+                        self.settings_hash = hash;
+                        load_accessibility_settings(path, self);
+                        let _ = libwoven::print("woven-shell: settings reloaded\n");
+                        dirty = dirty.union(self.screen());
+                    }
+                }
+            }
+        }
         let time = libwoven::clock().ok();
         if clock_text(time, self.seconds) != clock_text(self.time, self.seconds) {
             self.time = time;
@@ -5401,12 +5432,30 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     desktop.pinned = PinnedApps::from_setting(json_string(data, b"pinned_apps"));
     let mut settings = libwoven::accessibility::Settings::new();
     settings.apply_json(data);
-    if settings.high_contrast {
-        THEME_MODE.store(1, Ordering::Relaxed);
+    // Both fields are applied absolutely so a later record that turns them
+    // off takes effect immediately, not just on the next boot.
+    THEME_MODE.store(u8::from(settings.high_contrast), Ordering::Relaxed);
+    desktop.reduced_motion = settings.reduced_motion;
+}
+
+/// FNV-1a digest over a bounded settings record, used only to detect changes
+/// between the shell's periodic re-reads.
+fn settings_digest(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    if settings.reduced_motion {
-        desktop.reduced_motion = true;
-    }
+    hash
+}
+
+fn current_settings_digest(path: &str) -> Option<u64> {
+    let descriptor = libwoven::open(path).ok()?;
+    let mut bytes = [0u8; 512];
+    let read = libwoven::read(descriptor, &mut bytes);
+    let _ = libwoven::close(descriptor);
+    let length = read.ok()?;
+    Some(settings_digest(&bytes[..length.min(bytes.len())]))
 }
 
 /// Read one bounded JSON string field from the installed settings envelope.
@@ -5458,6 +5507,11 @@ fn main(args: Args) -> ! {
                     .and_then(|path| core::str::from_utf8(path).ok())
                 {
                     load_accessibility_settings(path, desktop);
+                    let length = path.len().min(desktop.settings_path.len());
+                    desktop.settings_path[..length].copy_from_slice(&path.as_bytes()[..length]);
+                    desktop.settings_path_len = length;
+                    desktop.settings_hash = current_settings_digest(path).unwrap_or(0);
+                    desktop.settings_next_sample = libwoven::ticks().saturating_add(STATUS_SAMPLE_PERIOD);
                 } else {
                     fail(1);
                 }
