@@ -1,7 +1,8 @@
+use libwoven::gui_protocol;
 use libwoven::layout::Frame;
 use libwoven::ui::{Button, Label, Theme};
 use libwoven::{rgb, Canvas, GraphicsSurface};
-use wovenhat_terminal::{parse, Command};
+use wovenhat_terminal::{complete, parse, Command};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -162,6 +163,23 @@ macro_rules! render_terminal {
     }};
 }
 
+/// Ask the shell to show the last command's bounded result in the title bar.
+fn request_title(shell: libwoven::process::Id, result: u64, command: &[u8]) {
+    let mut payload = [0u8; gui_protocol::request::MAX_TITLE];
+    let prefix: &[u8] = if result == 0 { b"ok " } else { b"er " };
+    payload[..prefix.len()].copy_from_slice(prefix);
+    let used = command.len().min(payload.len() - prefix.len());
+    payload[prefix.len()..prefix.len() + used].copy_from_slice(&command[..used]);
+    let mut request = [0u8; 5 + gui_protocol::request::MAX_TITLE];
+    if let Some(length) = gui_protocol::encode_request(
+        gui_protocol::request::SET_TITLE,
+        &payload[..prefix.len() + used],
+        &mut request,
+    ) {
+        let _ = libwoven::message_send(shell, &request[..length]);
+    }
+}
+
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
     let mut response = [0u8; 16];
     response[..4].copy_from_slice(b"WRSZ");
@@ -219,6 +237,7 @@ pub fn run(shell: Option<&[u8]>) -> ! {
     open[16..].copy_from_slice(TITLE);
     if libwoven::message_send(shell, &open).is_err()
         || libwoven::message_send(shell, b"WCAP\x01").is_err()
+        || libwoven::message_send(shell, gui_protocol::OPT_IN).is_err()
     {
         fail(5)
     }
@@ -342,9 +361,21 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 let _ = libwoven::print("WovenTerminal: pointer updated\n");
                 continue;
             }
-            if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
-                match message[4] {
-                    1 => {
+            // Both key protocols normalize to the same bounded code set; v2
+            // adds Tab completion and a uniform key layout. Legacy messages
+            // remain accepted so an older shell still drives this client.
+            let key = if let Some(decoded) = gui_protocol::decode_key(&message[..message_length]) {
+                Some(decoded)
+            } else if message.get(..4) == Some(&b"WKEY"[..]) && message_length >= 5 {
+                Some((message[4], None))
+            } else if message_length == 1 && message[0].is_ascii_graphic() {
+                Some((gui_protocol::key::ASCII, Some(message[0])))
+            } else {
+                None
+            };
+            if let Some((code, ascii)) = key {
+                match code {
+                    gui_protocol::key::ENTER => {
                         let command = parse(&line[..length]);
                         if command == Command::Quit {
                             drop(window);
@@ -357,15 +388,33 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                         history[slot][used..].fill(0);
                         results[slot] = if result == 0 { 0 } else { 1 };
                         history_count += 1;
+                        request_title(shell, result, &line[..used]);
                         status = if result == 0 {
-                            b"Command executed; output is on QEMU serial"
+                            b"Command executed; result shown in window title"
                         } else {
-                            b"Command failed; output is on QEMU serial"
+                            b"Command failed; result shown in window title"
                         };
                         length = 0;
                     }
-                    2 => {
+                    gui_protocol::key::BACKSPACE => {
                         length = length.saturating_sub(1);
+                        status = b"Editing command preview";
+                    }
+                    gui_protocol::key::TAB => {
+                        let mut completed = [0u8; MAX_INPUT];
+                        if let Some(count) = complete(&line[..length], &mut completed) {
+                            line[..count].copy_from_slice(&completed[..count]);
+                            length = count;
+                        }
+                        status = b"Tab completed a builtin";
+                    }
+                    gui_protocol::key::ASCII => {
+                        if let Some(byte) = ascii {
+                            if byte.is_ascii_graphic() && length < MAX_INPUT {
+                                line[length] = byte;
+                                length += 1;
+                            }
+                        }
                         status = b"Editing command preview";
                     }
                     _ => {}
@@ -384,23 +433,6 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     history_count
                 ) {
                     fail(9)
-                }
-            } else if message_length == 1 && message[0].is_ascii_graphic() && length < MAX_INPUT {
-                line[length] = message[0];
-                length += 1;
-                status = b"Editing command preview";
-                if !render_terminal!(
-                    &window,
-                    pointer,
-                    pointer_pressed,
-                    &line[..length],
-                    status,
-                    &clear,
-                    &history,
-                    &results,
-                    history_count
-                ) {
-                    fail(11)
                 }
                 let _ = libwoven::print("WovenTerminal: input updated\n");
             }

@@ -1,5 +1,30 @@
 # Stage status
 
+## Versioned shell window protocol v2 - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Added an opt-in v2 layer to the shell's application window messages without
+changing the existing wire tags or ABI. `WKV2\x01` opts a window into `WKEY2`,
+a uniform key message carrying ASCII, Enter, Backspace or Tab; legacy clients
+keep the original `WKEY`/raw-ASCII path. `WREQ` carries bounded window-manager
+requests (`SET_TITLE` up to 24 bytes, `FOCUS`) authenticated against the
+sender's surface. The codec lives in a host-tested `libwoven::gui_protocol`
+module.
+
+WovenTerminal opts in, completes unambiguous builtins on Tab, and reports each
+command's bounded result in its title bar through `SET_TITLE`. Stable window
+identity from `WOPN` is now kept separately from the displayed title, so
+lifecycle log markers stay bound to the window rather than changing when a
+client updates its title. No syscall, capability, IPC topic or ABI change; the
+shell still authenticates every request as the surface owner.
+
+Validation on exact source: new protocol codec tests 4/4, terminal tests 5/5,
+workspace tests, warning-denying Clippy, signed `test-terminal-qemu.py` at
+1/2/4 CPUs, 1-CPU terminal desktop acceptance including the v2 opt-in and title
+markers, the resize handshake and a legacy Files desktop check all pass. The full
+serialized Stage 10.7 chain also passes; evidence is
+`D:\WovenHat-OS-output\protocol-v2-final-gate\audit-artifacts\acceptance-20261126-215854-475`.
+Native hardware and external release gates remain open.
+
 ## WovenTerminal output history and builtins - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 WovenTerminal now renders a bounded ten-row command history/status grid in its

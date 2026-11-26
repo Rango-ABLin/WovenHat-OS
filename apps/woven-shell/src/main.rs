@@ -30,6 +30,11 @@
 //! - `WPBT`, button (u8), pressed (u8), x (u16), y (u16): report a bounded
 //!   client button edge in client coordinates.
 //! - `WCAP`, version (u8 = 1): opt the sender's open window into cancellation.
+//! - `WKV2`, version (u8 = 1): opt into the versioned `WKEY2` key protocol.
+//!   Only opted-in windows receive `WKEY2`, key code and optional ASCII byte.
+//! - `WREQ`, action (u8), optional payload: a bounded window-manager request
+//!   from an opted-in owner. `SET_TITLE` carries up to 24 title bytes; `FOCUS`
+//!   raises the sender's window. Both are authenticated against its surface.
 //! - `WCAN`: cancel an opted-in client's pointer actions before a synthetic
 //!   `WPBT` release when locking or leaving a workspace. Legacy clients get
 //!   only the established release message.
@@ -146,6 +151,7 @@ use libwoven::design_system::{SemanticPalette, TypeRole};
 use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
+use libwoven::gui_protocol;
 use libwoven::layout::{self, Frame};
 use libwoven::semantic_search;
 use libwoven::ui::DesignTokens;
@@ -4591,6 +4597,7 @@ impl Desktop {
         let mut title = [0u8; MAX_TITLE];
         let title_length = (message.len() - 16).min(MAX_TITLE);
         title[..title_length].copy_from_slice(&message[16..16 + title_length]);
+        let identity = title;
         // Reduced motion: appear at full opacity immediately rather than
         // animate in, matching libwoven::accessibility::Settings's own
         // "duration 0" convention for this preference.
@@ -4607,12 +4614,15 @@ impl Desktop {
             y,
             width,
             height,
+            identity,
+            identity_length: title_length,
             title,
             title_length,
             fade,
             workspace: self.workspace,
             resizing_until: 0,
             cancellation_protocol: false,
+            keyboard_v2: false,
             maximized: false,
             restore: [0; 4],
             surface_w: width,
@@ -4730,7 +4740,7 @@ impl Desktop {
             // can still reflow later by sending another WRSZ.
             log(&[
                 b"woven-shell: window resized (maximized, clamped): ",
-                &window.title[..window.title_length],
+                &window.identity[..window.identity_length],
             ]);
             return before.union(window.footprint());
         }
@@ -4745,7 +4755,7 @@ impl Desktop {
         }
         log(&[
             b"woven-shell: window resized: ",
-            &window.title[..window.title_length],
+            &window.identity[..window.identity_length],
         ]);
         before.union(window.footprint())
     }
@@ -4776,7 +4786,7 @@ impl Desktop {
         }
         log(&[
             b"woven-shell: window closed: ",
-            &window.title[..window.title_length],
+            &window.identity[..window.identity_length],
         ]);
         // The newly focused window's title and shadow change too.
         let next = self
@@ -4803,6 +4813,43 @@ impl Desktop {
                     window.cancellation_protocol = true;
                 }
                 empty
+            }
+            Some(b"WKV2") if message == gui_protocol::OPT_IN => {
+                if let Some(window) = self
+                    .windows
+                    .iter_mut()
+                    .flatten()
+                    .find(|window| window.owner == sender)
+                {
+                    window.keyboard_v2 = true;
+                    log(&[b"woven-shell: keyboard protocol v2 enabled"]);
+                }
+                empty
+            }
+            Some(b"WREQ") => {
+                let Some((action, payload)) = gui_protocol::decode_request(message) else {
+                    return empty;
+                };
+                let Some(index) = self.windows.iter().position(|window| {
+                    window.is_some_and(|window| window.owner == sender && window.keyboard_v2)
+                }) else {
+                    return empty;
+                };
+                match action {
+                    gui_protocol::request::SET_TITLE => {
+                        let Some(window) = self.windows[index].as_mut() else {
+                            return empty;
+                        };
+                        let mut title = [0u8; MAX_TITLE];
+                        let length = label(payload, MAX_TITLE, &mut title);
+                        window.title = title;
+                        window.title_length = length;
+                        log(&[b"woven-shell: window titled: ", &title[..length]]);
+                        Dirty::of(window.title_area())
+                    }
+                    gui_protocol::request::FOCUS => Dirty::of(self.focus(index)),
+                    _ => empty,
+                }
             }
             Some(b"WOPN") => self.open(sender, message),
             Some(b"WRSZ") => Dirty::of(self.resized(sender, message)),
@@ -4839,6 +4886,14 @@ impl Desktop {
             }
             _ => empty,
         }
+    }
+
+    /// Send one versioned key event to a v2 client. The caller has already
+    /// checked that the focused window opted in.
+    fn send_v2_key(&self, owner: process::Id, code: u8, ascii: Option<u8>) {
+        let mut bytes = [0u8; 7];
+        let length = gui_protocol::encode_key(code, ascii, &mut bytes);
+        let _ = libwoven::message_send(owner, &bytes[..length]);
     }
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
@@ -5197,6 +5252,12 @@ impl Desktop {
             // Tab is shell-owned outside the sign-in/launcher paths. Cycle
             // the bounded workspace stack without requiring a pointer.
             InputEvent::Key(Key::Tab) => {
+                if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::TAB, None);
+                        return empty;
+                    }
+                }
                 self.cancel_pointer_gesture();
                 let panels = self.close_panels();
                 let focused = self.stack[..self.stacked]
@@ -5210,23 +5271,41 @@ impl Desktop {
             InputEvent::Key(Key::F4) => self.move_focused_to_next_workspace(),
             InputEvent::Key(Key::Enter) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ =
-                        libwoven::message_send(window.owner, &[b'W', b'K', b'E', b'Y', KEY_ENTER]);
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::ENTER, None);
+                    } else {
+                        let _ = libwoven::message_send(
+                            window.owner,
+                            &[b'W', b'K', b'E', b'Y', KEY_ENTER],
+                        );
+                    }
                 }
                 empty
             }
             InputEvent::Key(Key::Backspace) => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(
-                        window.owner,
-                        &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE],
-                    );
+                    if window.keyboard_v2 {
+                        self.send_v2_key(window.owner, gui_protocol::key::BACKSPACE, None);
+                    } else {
+                        let _ = libwoven::message_send(
+                            window.owner,
+                            &[b'W', b'K', b'E', b'Y', KEY_BACKSPACE],
+                        );
+                    }
                 }
                 empty
             }
             InputEvent::Key(Key::Char(character)) if character.is_ascii() => {
                 if let Some(window) = self.focused().and_then(|slot| self.windows[slot]) {
-                    let _ = libwoven::message_send(window.owner, &[character as u8]);
+                    if window.keyboard_v2 {
+                        self.send_v2_key(
+                            window.owner,
+                            gui_protocol::key::ASCII,
+                            Some(character as u8),
+                        );
+                    } else {
+                        let _ = libwoven::message_send(window.owner, &[character as u8]);
+                    }
                     log(&[b"woven-shell: key forwarded"]);
                 }
                 empty

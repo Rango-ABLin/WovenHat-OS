@@ -185,6 +185,7 @@ mod kernel_exit_status;
 #[allow(unexpected_cfgs)]
 #[path = "../../kernel/src/font.rs"]
 pub mod font;
+pub mod gui_protocol;
 
 /// Process arguments as the kernel lays them out on the initial stack: `argc`,
 /// then `argc` pointers to NUL-terminated strings, then a NULL.

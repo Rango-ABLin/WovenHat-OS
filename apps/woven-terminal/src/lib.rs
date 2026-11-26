@@ -106,6 +106,35 @@ pub fn parse(input: &[u8]) -> Command<'_> {
     }
 }
 
+/// Bounded command names offered by the Tab key.
+pub const BUILTINS: [&[u8]; 9] = [
+    b"help", b"ls", b"cat", b"calc", b"pwd", b"cd", b"export", b"jobs", b"exit",
+];
+
+/// Complete one unambiguous builtin prefix. The caller owns `output` so the
+/// parser stays allocation-free; an empty or ambiguous prefix is left alone.
+pub fn complete(input: &[u8], output: &mut [u8]) -> Option<usize> {
+    let input = trim(input);
+    if input.is_empty() || input.len() > MAX_COMMAND {
+        return None;
+    }
+    let mut found = None;
+    for name in BUILTINS {
+        if name.starts_with(input) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(name);
+        }
+    }
+    let name = found?;
+    if name.len() > output.len() {
+        return None;
+    }
+    output[..name.len()].copy_from_slice(name);
+    Some(name.len())
+}
+
 /// Parse a bounded shell line. Quotes and backslashes are retained in words;
 /// the executor removes them while performing environment expansion. This
 /// keeps single-quoted `$NAME` distinct from expandable unquoted text.
@@ -344,7 +373,7 @@ fn after<'a>(input: &'a [u8], command: &[u8]) -> Option<&'a [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_shell, Command};
+    use super::{complete, parse, parse_shell, Command};
 
     #[test]
     fn parses_bounded_commands() {
@@ -356,6 +385,19 @@ mod tests {
         assert_eq!(parse(b"cd /mnt"), Command::Cd(b"/mnt"));
         assert_eq!(parse(b"export NAME=value"), Command::Export(b"NAME=value"));
         assert_eq!(parse(b"exit"), Command::Quit);
+    }
+
+    #[test]
+    fn completes_unambiguous_builtin_prefixes() {
+        let mut output = [0u8; 16];
+        assert_eq!(complete(b"pw", &mut output), Some(3));
+        assert_eq!(&output[..3], b"pwd");
+        assert_eq!(complete(b"  he", &mut output), Some(4));
+        assert_eq!(&output[..4], b"help");
+        assert_eq!(complete(b"c", &mut output), None);
+        assert_eq!(complete(b"ex", &mut output), None);
+        assert_eq!(complete(b"", &mut output), None);
+        assert_eq!(complete(b"unknown", &mut output), None);
     }
 
     #[test]

@@ -43,6 +43,32 @@ ABI was introduced. The change is recorded on both `phase-b/bottom-taskbar-core`
 and `feature/app-surfaces` (cherry-picked) because the main worktree was on the
 former when the edit landed.
 
+## OpenCode - versioned shell window protocol v2 (2026-11-26)
+
+Continued `feature/app-surfaces` from `cf921cb6`. A protocol-mapping pass
+confirmed the shell's window messages are raw, bounded, sender-authenticated
+tags with `WCAP` as the established opt-in pattern, and that no shared codec
+existed. Added `libwoven::gui_protocol` with a host-tested codec for an opt-in
+`WKV2\x01`/`WKEY2` key path and `WREQ` window-manager requests (`SET_TITLE`,
+`FOCUS`). The shell sends v2 key events only to opted-in windows; legacy
+clients keep byte-for-byte behavior. Requests are accepted only from the
+window owner and are length-bounded to the existing title cap.
+
+WovenTerminal opts in, gains unambiguous Tab builtin completion, and shows each
+command's bounded result in the title bar. The first resize desktop run failed
+because shell lifecycle logs embedded the mutable title; the shell now keeps
+the opening identity separately so markers remain stable. The desktop harness
+gained positive markers for the v2 opt-in and the title request (the first
+oracle used the wrong typed command and was corrected to the actual bounded
+`hellp` sequence, not weakened).
+
+Validation on exact source: codec tests 4/4, terminal tests 5/5, fmt, workspace
+tests, warning-denying host/kernel Clippy and freestanding app Clippy, signed
+terminal QEMU at 1/2/4 CPUs, 1-CPU desktop acceptance (with v2/title markers),
+resize handshake and legacy Files desktop check all pass. The full serialized
+Stage 10.7 chain passes; evidence is
+`D:\WovenHat-OS-output\protocol-v2-final-gate\audit-artifacts\acceptance-20261126-215854-475`.
+
 ## OpenCode - WovenTerminal output history and builtins (2026-11-26)
 
 Continued the app-surface plan with `feature/app-surfaces` at `f49465ec` in an

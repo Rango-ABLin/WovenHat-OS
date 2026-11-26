@@ -15,12 +15,19 @@ pub struct Window {
     pub owner: process::Id,
     /// Opt-in avoids sending unknown tags to strict legacy clients.
     pub cancellation_protocol: bool,
+    /// Opt-in for the versioned `WKEY2` key protocol. Legacy clients keep the
+    /// original `WKEY`/raw-ASCII messages.
+    pub keyboard_v2: bool,
     pub token: u64,
     /// Top-left of the client area; the title bar sits above it.
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    /// Stable identity from the opening `WOPN`, used for lifecycle logs even
+    /// when a v2 client updates its displayed title with `WREQ`.
+    pub identity: [u8; MAX_TITLE],
+    pub identity_length: usize,
     pub title: [u8; MAX_TITLE],
     pub title_length: usize,
     /// Opacity, 0 to 255: animated from 0 as the window opens.
