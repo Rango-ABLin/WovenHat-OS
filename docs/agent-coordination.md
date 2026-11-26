@@ -2,10 +2,15 @@
 
 Inspecting the current bounded storage transaction and recovery boundary as the
 earliest open software prerequisite for kernel-to-desktop production closure.
-No physical device or firmware changes are planned. The main worktree was clean
+No physical device or firmware changes were made. The main worktree was clean
 at start. The Windows Stage 10.7 launcher incorrectly required D: even when an
 available output root was explicitly supplied; it now checks the chosen root.
-Preparing a single serialized acceptance run using a C: output root.
+The host launcher tests pass 3/3, and the serialized Stage 10.7 chain passes
+on C: (231 Python tests, 60 memory/SMP boots, and the 1/2/4 CPU async gates).
+Build and warning-denying default kernel and all-target host Clippy also pass.
+Evidence: `target/stage10-output/audit-artifacts/acceptance-20261126-181719-531/`.
+Source commit `679da82e` was created while the chain ran. WovenFS multi-file
+atomicity and the native login/display failure remain open, not accepted.
 
 ## OpenCode - production release-engineering hardening (2026-11-26)
 

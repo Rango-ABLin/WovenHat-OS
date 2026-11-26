@@ -1,5 +1,20 @@
 # Stage status
 
+## Stage 10.7 launcher alternate-root repair - 2026-11-26 - BOUNDED PASS
+
+The Windows preservation launcher previously rejected an explicitly supplied
+output root when D: was absent. It now validates the selected absolute drive
+or share and retains its persistent Cargo and audit directories there. Three
+Windows host tests cover alternate-root propagation, failed child exit and
+relative-path rejection. The full serialized Stage 10.7 chain passes using a
+C: root, including 231 Python tests, the 60-boot memory/SMP matrix, and the
+1/2/4-CPU async TCP gates. `cargo build`, default kernel Clippy and all-target
+host Clippy pass with warnings denied. Evidence:
+`target/stage10-output/audit-artifacts/acceptance-20261126-181719-531/`.
+Source commit: `679da82e`. This is a launcher and preservation pass, not
+kernel-to-desktop production closure; WovenFS multi-file atomicity and the
+native login/display failure remain open.
+
 ## Exact-source release archive boundary - 2026-11-26 - IMPLEMENTED / HOST-TESTED
 
 The release validation manifest now records the source commit captured before

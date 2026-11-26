@@ -4,6 +4,20 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Stage 10.7 launcher alternate-root repair - 2026-11-26
+
+With D: absent, the unmodified launcher rejected an explicitly chosen C:
+output directory before starting acceptance. It now validates the chosen
+absolute drive or share instead of unconditionally testing D:. Isolated
+Windows host tests cover output propagation, failed child exit, and relative
+path rejection (3/3). On source `679da82e`, the full serialized Stage 10.7
+chain passed at the C: output root; it included 231 Python tests, 60 memory/SMP
+boots, and 1/2/4-CPU async TCP gates. Build and default kernel/all-target host
+warning-denying Clippy passed. Evidence is retained in
+`target/stage10-output/audit-artifacts/acceptance-20261126-181719-531/`.
+No device or firmware was modified; this does not close the storage or native
+login/display gaps.
+
 ## Exact-source release archive boundary - 2026-11-26
 
 The release validation manifest records the Git commit captured before its
