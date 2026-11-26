@@ -1,5 +1,38 @@
 # Stage status
 
+## Font system: address-layout collision fixed - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Diagnosis found one real interaction defect: `USER_LARGE_MAP_START` and
+`DYNAMIC_TLS_START` were the same address (`USER_REGION_START + 0x2000_0000`).
+`map_dynamic_anonymous` mapped without an unmapped-range pre-check, so a
+process holding the system-font window could not allocate runtime-TLS slot 0;
+the failure was fail-closed but untested and would reject a legitimate
+font-using runtime module.
+
+The large-asset window now starts above the entire bounded dynamic-TLS arena
+(`MAX_TASKS * MAX_DYNAMIC_MODULES * 64 KiB + mmap ASLR span`), with compile-time
+assertions that the arenas are disjoint and the window stays under its ceiling.
+`map_dynamic_anonymous` also gained the same `user_range_is_unmapped_in`
+pre-check used by the large mapping, so any future layout regression fails
+closed instead of overwriting an owned range. No syscall, capability or font
+ABI changed; no visual baseline was touched.
+
+Also restored on this branch the proportional-path regression test
+(`libwoven/tests/typography.rs::proportional_path_never_drops_complex_real_glyphs`,
+asserting `S`/`g`/`@` leave ink through `draw_text_proportional`) and corrected
+the stale `607,572`-byte comment to the actual `621,572`-byte font size.
+
+Validation: kernel default Clippy, all-targets Clippy, typography tests (8/8),
+Stage 11.2-tls/11.6 and 5-font at 1/2/4 CPUs, baseline-enforced desktop
+qualification at 1/2/4 CPUs (`font-layout-fix-{1,2,4}cpu-20261126`, all
+`pass: true`, `failures: []`, sign-in 0 changed pixels, font-parsed marker in
+every serial log), and the full serialized `RUN-STAGE10.7.ps1` chain all pass.
+
+Still open (not addressed): per-process font copies with no shared cross-process
+mapping ABI, transient `busy`-flag fallback in the parsed-face cache, the
+`'static` lifetime established by `transmute`, and the absent focused
+large-mapping kernel self-test (reproducible frame pressure under TCG).
+
 ## Native application integration closure - 2026-11-25 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Closed the remaining bounded items of
