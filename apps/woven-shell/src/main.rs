@@ -4716,6 +4716,16 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
+        if matches!(event, InputEvent::PointerButton { pressed: true, .. }) {
+            let mut x = [0u8; 20];
+            let mut y = [0u8; 20];
+            log(&[
+                b"woven-shell: absolute press ",
+                libwoven::format_u64(self.pointer.0.max(0) as u64, &mut x),
+                b",",
+                libwoven::format_u64(self.pointer.1.max(0) as u64, &mut y),
+            ]);
+        }
         // Motion changes state immediately, but painting is deferred until the
         // bounded input batch completes. Absolute devices use the same hit tests
         // and pointer capture as the relative PS/2 path.
