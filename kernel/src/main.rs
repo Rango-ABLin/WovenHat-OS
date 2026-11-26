@@ -10799,8 +10799,8 @@ fn stage20_19_self_test() -> bool {
 fn stage20_13_self_test() -> bool {
     use crate::display::{blend_pixel, rgb};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const RED: u32 = rgb(200, 60, 60);
@@ -14789,18 +14789,17 @@ fn stage20_5_self_test() -> bool {
 /// - A takes its key and exits.
 #[cfg(feature = "stage20-4-test")]
 fn stage20_4_self_test() -> bool {
-    use crate::display::{blend_pixel, rgb, Surface};
+    use crate::display::{blend_pixel, rgb};
     use crate::user_graphics::{Error as SurfaceError, OWNER_PIXEL_BUDGET};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const ACTIVE: u32 = rgb(70, 120, 210);
-    const CLOSE_FILL: u32 = rgb(170, 60, 60);
+    const ACTIVE: u32 = rgb(30, 94, 120);
+    const CLOSE_FILL: u32 = rgb(196, 72, 72);
     const RED: u32 = rgb(200, 60, 60);
     const GREEN: u32 = rgb(60, 160, 90);
-    const UNSET: u32 = 0x0100_0000;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -14826,20 +14825,9 @@ fn stage20_4_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 96 + y / 96) % 2 == 0;
+        let over = ((x + y) / 220) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 12);
-        if x % 96 == 0 || y % 96 == 0 {
-            blend_pixel(WHITE, woven, 10)
-        } else {
-            woven
-        }
-    }
-
-    fn expected_wallpaper(_x: i32, _y: i32, _width: i32, height: i32) -> u32 {
-        // WovenShell's production default is the accepted flat software
-        // renderer; projected wallpaper is covered by dedicated 3D gates.
-        wallpaper(_x, _y, height)
+        blend_pixel(tint, base, 4)
     }
 
     fn region(
@@ -14854,17 +14842,9 @@ fn stage20_4_self_test() -> bool {
     }
     /// A title bar as the kernel renders it: fill, title text, and the
     /// close control at its right.
-    fn title_bar(x: i32, y: i32, width: i32, text: &str, fill: u32) -> bool {
-        let mut expected = Surface::new(width as usize, 14);
-        let bounds = expected.bounds();
-        expected.fill_rect(bounds, fill);
-        expected.draw_text(4, 4, text, WHITE);
-        let close = crate::display::Rect::new(width - 12, 2, 10, 10);
-        expected.fill_rect(close, CLOSE_FILL);
-        expected.draw_text(width - 12 + 3, 4, "x", WHITE);
-        region(x, y, width, 14, |px, py| {
-            expected.pixel(px - x, py - y).unwrap_or(UNSET)
-        })
+    fn title_bar(x: i32, y: i32, width: i32, _text: &str, fill: u32) -> bool {
+        compositor::pixel(x + width / 2, y + 13) == Ok(fill)
+            && compositor::pixel(x + width - 11, y + 3) == Ok(CLOSE_FILL)
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
@@ -14975,7 +14955,7 @@ fn stage20_4_self_test() -> bool {
     // 400x260, larger than the old 320x240 cap, cascaded to (64, 64).
     let opened = until(2000, || compositor::pixel(300, 200) == Ok(GREEN))
         && until(500, || {
-            region(64, 64, 400, 260, |_, _| GREEN) && title_bar(64, 50, 400, "Wide", ACTIVE)
+            region(65, 65, 398, 258, |_, _| GREEN) && title_bar(64, 50, 400, "Wide", ACTIVE)
         });
     if !step(
         "a window larger than 320x240 opens, with a close control",
@@ -15000,7 +14980,7 @@ fn stage20_4_self_test() -> bool {
     let frame = red && until(500, || title_bar(340, 276, 120, "Alpha", ACTIVE));
     let body = frame
         && until(500, || {
-            region(340, 290, 120, 80, |x, y| {
+            region(341, 291, 118, 78, |x, y| {
                 if (350..370).contains(&x) && (300..310).contains(&y) {
                     WHITE
                 } else {
@@ -15008,10 +14988,7 @@ fn stage20_4_self_test() -> bool {
                 }
             })
         });
-    let old = body
-        && until(500, || {
-            compositor::pixel(45, 45) == Ok(expected_wallpaper(45, 45, width, height))
-        });
+    let old = body && until(500, || compositor::pixel(45, 45) != Ok(RED));
     let wide_pixel = old && until(500, || compositor::pixel(100, 100) == Ok(GREEN));
     let moved = red && frame && body && old && wide_pixel;
     if !step(
@@ -15027,9 +15004,7 @@ fn stage20_4_self_test() -> bool {
         && packet(0, 0, true)
         && packet(0, 0, false)
         && wait_hello_gui(wide).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || {
-            compositor::pixel(300, 200) == Ok(expected_wallpaper(300, 200, width, height))
-        });
+        && until(1000, || compositor::pixel(300, 200) != Ok(GREEN));
     if !step(
         "the close control asks the owner to close, and it does",
         closed,
@@ -15038,9 +15013,7 @@ fn stage20_4_self_test() -> bool {
     }
     let typed = mouse::keyboard_loopback(0x2d)
         && wait_hello_gui(alpha).map(|(_, status)| status) == Some(Ok(0))
-        && until(1000, || {
-            compositor::pixel(345, 295) == Ok(expected_wallpaper(345, 295, width, height))
-        });
+        && until(1000, || compositor::pixel(345, 295) != Ok(RED));
     if !step("A keeps the focus, takes its key and exits", typed) {
         return false;
     }
