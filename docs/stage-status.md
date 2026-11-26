@@ -1,5 +1,13 @@
 # Stage status
 
+## Remaining Stage 20 oracle refresh - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Refreshed Stages 20.5-20.8, 20.10 and 20.11 to the current WovenShell
+contract: shadowless depth/occlusion, rounded current chrome, bottom-right
+toasts, centered current launcher, the 3-column Quick Settings grid/footer,
+and current absolute pointer hit testing. The corresponding 1/2/4 CPU gates
+pass, including wide/locked/session interactions and the Stage 23 AI ceiling.
+
 ## Remaining CI desktop and evidence-path repair - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The hardware report validator now rejects both POSIX and Windows absolute paths
