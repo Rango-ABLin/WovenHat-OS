@@ -182,6 +182,30 @@ fn run_with_jobs(command: Command<'_>, jobs: &mut Jobs) -> u64 {
                 2
             }
         },
+        Command::Pwd => {
+            let mut buffer = [0u8; 512];
+            match libwoven::getcwd(&mut buffer) {
+                Ok(length) => {
+                    let _ = libwoven::write(libwoven::syscall::STDOUT, &buffer[..length]);
+                    let _ = libwoven::print("\n");
+                    0
+                }
+                Err(_) => 2,
+            }
+        }
+        Command::Cd(path) => match core::str::from_utf8(path) {
+            Ok(path) if libwoven::chdir(path).is_ok() => 0,
+            _ => 2,
+        },
+        Command::Export(assignment) => {
+            let Some(split) = assignment.iter().position(|byte| *byte == b'=') else {
+                return 2;
+            };
+            match libwoven::env_set(&assignment[..split], &assignment[split + 1..]) {
+                Ok(()) => 0,
+                Err(_) => 2,
+            }
+        }
         Command::External(command) => {
             if command == b"jobs" {
                 jobs.print();

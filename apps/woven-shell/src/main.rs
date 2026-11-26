@@ -169,6 +169,23 @@ use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXT
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
+
+/// Application ids used by the bounded `woven.search` service, in that
+/// service's own order. The launcher sorts its catalog by name, so ids must
+/// never be used directly as grid indices.
+const SEARCH_APP_NAMES: [&[u8]; 11] = [
+    b"WovenCalculator",
+    b"WovenTerminal",
+    b"WovenFiles",
+    b"WovenMonitor",
+    b"WovenSettings",
+    b"WovenSecurity",
+    b"WovenEditor",
+    b"WovenImages",
+    b"WovenUpdate",
+    b"WovenStore",
+    b"WovenInstaller",
+];
 const DESKTOP_ICON_X: i32 = 24;
 const DESKTOP_ICON_Y: i32 = 52;
 const DESKTOP_ICON_STEP: i32 = 76;
@@ -181,7 +198,7 @@ use status::{BatteryStatus, NetworkStatus, StatusSnapshot, VolumeStatus};
 mod taskbar_prefs;
 use taskbar_prefs::{Alignment, AutoHide, IconSize, TaskbarPrefs, AUTO_HIDE_HOLD};
 mod pinned_apps;
-use pinned_apps::{PinnedApps, PinError, MAX_PINNED as PIN_CAP};
+use pinned_apps::{PinError, PinnedApps, MAX_PINNED as PIN_CAP};
 
 /// One taskbar group entry: a window on the current workspace, or a pinned
 /// catalog app that is not running on it. A pinned app with a running window
@@ -966,6 +983,8 @@ impl Desktop {
     /// Ask the bounded `woven.search` broker for application hits and cache
     /// them as catalog indices. A missing service or malformed reply simply
     /// leaves the semantic list empty so `filtered` keeps the local fallback.
+    /// Service ids are its own catalog order, not the launcher's alphabetical
+    /// grid order, so each hit is resolved by its application name.
     fn refresh_semantic_search(&mut self) {
         self.semantic_count = 0;
         if self.query_length == 0 {
@@ -977,15 +996,25 @@ impl Desktop {
         let Ok(reply) = libwoven::search(query, 1) else {
             return;
         };
-        for hit in reply.hits[..reply.hit_count.min(semantic_search::MAX_HITS as u8) as usize].iter()
+        for hit in
+            reply.hits[..reply.hit_count.min(semantic_search::MAX_HITS as u8) as usize].iter()
         {
-            if hit.kind != semantic_search::Kind::Application
-                || hit.id == 0
-                || hit.id as usize > self.app_count
-            {
+            if hit.kind != semantic_search::Kind::Application {
                 continue;
             }
-            let index = hit.id as usize - 1;
+            let Some(name) = hit
+                .id
+                .checked_sub(1)
+                .and_then(|id| SEARCH_APP_NAMES.get(id as usize))
+            else {
+                continue;
+            };
+            let Some(index) = self.apps[..self.app_count]
+                .iter()
+                .position(|app| app.is_some_and(|app| app.name() == *name))
+            else {
+                continue;
+            };
             if self.semantic_count < MAX_APPS
                 && !self.semantic_indices[..self.semantic_count].contains(&index)
             {
@@ -1784,7 +1813,14 @@ impl Desktop {
                             theme_entry(false)
                         },
                     );
-                    draw_app_icon(canvas, area.x + 2, area.y + 1, app_icon(app.name()), 14, false);
+                    draw_app_icon(
+                        canvas,
+                        area.x + 2,
+                        area.y + 1,
+                        app_icon(app.name()),
+                        14,
+                        false,
+                    );
                     let shown = app
                         .name()
                         .strip_prefix(b"Woven")
@@ -3214,7 +3250,11 @@ impl Desktop {
             QsAction::TaskbarAlign => {
                 // bar with centered/left group indicator
                 canvas.fill_rect(x + 2, y + 14, 16, 3, c);
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 if self.taskbar.alignment == taskbar_prefs::Alignment::Left {
                     canvas.fill_rect(x + 3, y + 15, 3, 1, inner);
                     canvas.fill_rect(x + 7, y + 15, 3, 1, inner);
@@ -3226,16 +3266,25 @@ impl Desktop {
                 canvas.fill_rect(x + 5, y + 6, 10, 5, inner);
             }
             QsAction::TaskbarIconSize => {
-                let inner = if active { bg } else { blend(theme_stroke(), theme_panel(), 18) };
+                let inner = if active {
+                    bg
+                } else {
+                    blend(theme_stroke(), theme_panel(), 18)
+                };
                 for (dx, size) in [(3i32, 3i32), (8, 4), (14, 5)] {
                     let dy = y + 16 - size;
                     canvas.fill_rect(x + dx, dy, size as usize, size as usize, c);
                     if size > 2 {
-                        canvas.fill_rect(x + dx + 1, dy + 1, (size - 2) as usize, (size - 2) as usize, inner);
+                        canvas.fill_rect(
+                            x + dx + 1,
+                            dy + 1,
+                            (size - 2) as usize,
+                            (size - 2) as usize,
+                            inner,
+                        );
                     }
                 }
             }
-
         }
         let _ = (a, active);
     }
@@ -4339,7 +4388,9 @@ impl Desktop {
             return Area::new(0, 0, 0, 0);
         };
         self.cancel_pointer_gesture();
-        let hidden = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        let hidden = self.windows[slot]
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
         self.stack[position..self.stacked].rotate_left(1);
         self.stacked -= 1;
         let next = self
@@ -4364,7 +4415,9 @@ impl Desktop {
         self.stack[self.stacked] = slot;
         self.stacked += 1;
         log(&[b"woven-shell: window restored"]);
-        let current = self.windows[slot].map(|w| w.footprint()).unwrap_or(Area::new(0, 0, 0, 0));
+        let current = self.windows[slot]
+            .map(|w| w.footprint())
+            .unwrap_or(Area::new(0, 0, 0, 0));
         previous.union(current).union(self.taskbar())
     }
 
@@ -4465,9 +4518,7 @@ impl Desktop {
             Err(PinError::Full) => self.taskbar().union(self.toast_message("Pin list full")),
             Err(PinError::Invalid) => self.taskbar().union(self.toast_message("Cannot pin")),
             // `contains` just said otherwise; report without changing.
-            Err(PinError::Duplicate) => {
-                self.taskbar().union(self.toast_message("Already pinned"))
-            }
+            Err(PinError::Duplicate) => self.taskbar().union(self.toast_message("Already pinned")),
         }
     }
 
@@ -4502,7 +4553,11 @@ impl Desktop {
         };
         log(&[b"woven-shell: ", text.as_bytes()]);
         let toast = self.toast_message(text);
-        let strip = if changed { self.taskbar() } else { Area::new(0, 0, 0, 0) };
+        let strip = if changed {
+            self.taskbar()
+        } else {
+            Area::new(0, 0, 0, 0)
+        };
         strip.union(toast)
     }
 
@@ -5100,12 +5155,10 @@ impl Desktop {
                     .rev()
                     .copied()
                     .find(|&slot| {
-                        self.windows[slot]
-                            .is_some_and(|window| window.frame().contains(x, y))
+                        self.windows[slot].is_some_and(|window| window.frame().contains(x, y))
                     })
                     .filter(|&slot| {
-                        self.windows[slot]
-                            .is_some_and(|window| window.title_area().contains(x, y))
+                        self.windows[slot].is_some_and(|window| window.title_area().contains(x, y))
                     });
                 if let Some(slot) = title_hit {
                     return self.toggle_maximize(slot);
@@ -5451,11 +5504,7 @@ impl Desktop {
         // Auto-hide: past the hold, the bar goes back down. Panels that hang
         // off the strip (Quick Settings, Notification Center, the overview)
         // hold it up until they close.
-        if self.auto_hide.tick(now)
-            && !self.qs_open
-            && !self.center_open
-            && !self.launcher_open
-        {
+        if self.auto_hide.tick(now) && !self.qs_open && !self.center_open && !self.launcher_open {
             log(&[b"woven-shell: taskbar hidden"]);
             dirty = dirty.union(self.taskbar());
         }
@@ -5584,7 +5633,8 @@ fn main(args: Args) -> ! {
                     desktop.settings_path[..length].copy_from_slice(&path.as_bytes()[..length]);
                     desktop.settings_path_len = length;
                     desktop.settings_hash = current_settings_digest(path).unwrap_or(0);
-                    desktop.settings_next_sample = libwoven::ticks().saturating_add(STATUS_SAMPLE_PERIOD);
+                    desktop.settings_next_sample =
+                        libwoven::ticks().saturating_add(STATUS_SAMPLE_PERIOD);
                 } else {
                     fail(1);
                 }

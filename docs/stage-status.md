@@ -1,5 +1,28 @@
 # Stage status
 
+## WovenTerminal output history and builtins - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+WovenTerminal now renders a bounded ten-row command history/status grid in its
+window instead of a static preview; Clear resets both input and history. `pwd`,
+`cd PATH` and `export NAME=VALUE` were added to the existing parser and
+executor using the already-present `CHDIR`, `GETCWD` and `ENV_SET` syscalls via
+new `libwoven` wrappers. No syscall, capability, IPC topic or ABI change is
+involved.
+
+The 1-CPU per-app desktop harness exposed a real pre-existing launcher defect
+from the semantic-search increment: `woven.search` application ids were used as
+indices into the shell's alphabetically sorted catalog, so querying "terminal"
+launched WovenEditor. Hits are now resolved by application name before being
+placed in the launcher grid; the search service and its probe are unchanged.
+
+Validation on exact source: terminal host tests 4/4, workspace tests,
+warning-denying all-target and kernel-target Clippy, freestanding Clippy for
+WovenTerminal and WovenShell, signed `test-terminal-qemu.py` at 1/2/4 CPUs and
+the 1-CPU terminal desktop visual acceptance all pass. The full serialized
+Stage 10.7 chain also passes; evidence is
+`D:\WovenHat-OS-output\terminal-final-gate\audit-artifacts\acceptance-20261126-165145-289`.
+Native hardware and external release gates remain open.
+
 ## Semantic launcher wiring - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The Start overview now prefers `woven.search` Application hits over its local

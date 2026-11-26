@@ -135,7 +135,14 @@ impl AutoHide {
     /// bar (the screen's bottom row); `strip_top` is the y below which a
     /// revealed bar refreshes its hold. Returns whether visibility
     /// changed, so the caller knows to repaint the strip.
-    pub fn pointer(&mut self, y: i32, reveal_edge: i32, strip_top: i32, now: u64, hold: u64) -> bool {
+    pub fn pointer(
+        &mut self,
+        y: i32,
+        reveal_edge: i32,
+        strip_top: i32,
+        now: u64,
+        hold: u64,
+    ) -> bool {
         if !self.enabled {
             return false;
         }

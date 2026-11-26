@@ -16070,6 +16070,32 @@ pub fn env_get(key: &[u8], out: &mut [u8]) -> Result<usize, Error> {
     .map(|length| length as usize)
 }
 
+/// Change the calling process's working directory. The kernel validates the
+/// path and the caller's file authority.
+pub fn chdir(path: &str) -> Result<(), Error> {
+    if path.is_empty() || path.len() > 512 {
+        return Err(Error::Failed);
+    }
+    check(unsafe { syscall::invoke(syscall::CHDIR, path.as_ptr() as u64, path.len() as u64, 0) })
+        .map(|_| ())
+}
+
+/// Read the calling process's working directory into a caller-owned buffer.
+pub fn getcwd(output: &mut [u8]) -> Result<usize, Error> {
+    if output.is_empty() || output.len() > u32::MAX as usize {
+        return Err(Error::Failed);
+    }
+    check(unsafe {
+        syscall::invoke(
+            syscall::GETCWD,
+            output.as_mut_ptr() as u64,
+            output.len() as u64,
+            0,
+        )
+    })
+    .map(|length| length as usize)
+}
+
 /// Set one bounded environment value.
 pub fn env_set(key: &[u8], value: &[u8]) -> Result<(), Error> {
     if key.is_empty() || key.len() >= 96 || value.len() >= 96 {

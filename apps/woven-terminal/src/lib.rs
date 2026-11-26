@@ -60,6 +60,9 @@ pub enum Command<'a> {
     List(&'a [u8]),
     Cat(&'a [u8]),
     Calc(&'a [u8]),
+    Cd(&'a [u8]),
+    Pwd,
+    Export(&'a [u8]),
     External(&'a [u8]),
     Quit,
     Invalid,
@@ -77,6 +80,15 @@ pub fn parse(input: &[u8]) -> Command<'_> {
     }
     if input == b"quit" || input == b"exit" {
         return Command::Quit;
+    }
+    if input == b"pwd" {
+        return Command::Pwd;
+    }
+    if let Some(argument) = after(input, b"cd") {
+        return Command::Cd(argument);
+    }
+    if let Some(argument) = after(input, b"export") {
+        return Command::Export(argument);
     }
     if let Some(argument) = after(input, b"ls") {
         return Command::List(argument);
@@ -340,6 +352,9 @@ mod tests {
         assert_eq!(parse(b"ls /mnt"), Command::List(b"/mnt"));
         assert_eq!(parse(b"cat /wfs/note"), Command::Cat(b"/wfs/note"));
         assert_eq!(parse(b"calc 2+2"), Command::Calc(b"2+2"));
+        assert_eq!(parse(b"pwd"), Command::Pwd);
+        assert_eq!(parse(b"cd /mnt"), Command::Cd(b"/mnt"));
+        assert_eq!(parse(b"export NAME=value"), Command::Export(b"NAME=value"));
         assert_eq!(parse(b"exit"), Command::Quit);
     }
 

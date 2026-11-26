@@ -1,7 +1,7 @@
 use libwoven::layout::Frame;
 use libwoven::ui::{Button, Label, Theme};
-use libwoven::{Canvas, GraphicsSurface, rgb};
-use wovenhat_terminal::{Command, parse};
+use libwoven::{rgb, Canvas, GraphicsSurface};
+use wovenhat_terminal::{parse, Command};
 
 const WIDTH: u32 = 360;
 const HEIGHT: u32 = 220;
@@ -45,40 +45,75 @@ fn stroke_rect(canvas: &mut Canvas<'_>, x: i32, y: i32, width: usize, height: us
 }
 
 const MAX_INPUT: usize = 48;
+const MAX_ROWS: usize = 10;
+const ROW_HEIGHT: i32 = 12;
+
+struct TerminalView<'a, 'b> {
+    line: &'a [u8],
+    status: &'a [u8],
+    clear: &'a Button<'b>,
+    history: &'a [[u8; MAX_INPUT]; MAX_ROWS],
+    results: &'a [u8; MAX_ROWS],
+    history_len: usize,
+}
 
 fn draw(
     canvas: &mut Canvas<'_>,
-    line: &[u8],
-    status: &[u8],
     pointer: Option<(u16, u16)>,
     pressed: bool,
-    clear: &Button<'_>,
+    view: &TerminalView<'_, '_>,
 ) {
     canvas.fill_rect(0, 0, canvas.width(), canvas.height(), BACKGROUND);
     canvas.fill_rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.surface);
-    stroke_rect(canvas, PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT, THEME.accent);
+    stroke_rect(
+        canvas,
+        PANEL_X,
+        PANEL_Y,
+        PANEL_WIDTH,
+        PANEL_HEIGHT,
+        THEME.accent,
+    );
     Label::new(
         Frame::new(PANEL_X + 10, PANEL_Y + 8, 180, 16),
         "WovenTerminal",
     )
     .draw(canvas, THEME);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 38, "> help", THEME.accent);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 58, "WovenTerminal commands:", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 78, "ls PATH", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 94, "cat PATH", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 110, "calc EXPR", THEME.text);
-    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 142, ">", THEME.accent);
-    if let Ok(text) = core::str::from_utf8(line) {
-        canvas.draw_text_system(PANEL_X + 20, PANEL_Y + 142, text, THEME.accent);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 32, "Command history", THEME.accent);
+    let start = view.history_len.saturating_sub(8);
+    for row in start..view.history_len {
+        let slot = row % MAX_ROWS;
+        let y = PANEL_Y + 46 + ((row - start) as i32) * ROW_HEIGHT;
+        let used = view.history[slot]
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(MAX_INPUT);
+        if let Ok(text) = core::str::from_utf8(&view.history[slot][..used]) {
+            canvas.draw_text_system(PANEL_X + 10, y, text, THEME.text);
+        }
+        let mark = if view.results[slot] == 0 {
+            b"ok"
+        } else {
+            b"er"
+        };
+        canvas.draw_text_system(
+            PANEL_X + 300,
+            y,
+            core::str::from_utf8(mark).unwrap_or(""),
+            THEME.accent,
+        );
     }
-    if let Ok(text) = core::str::from_utf8(status) {
-        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 158, text, THEME.text);
+    canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 150, ">", THEME.accent);
+    if let Ok(text) = core::str::from_utf8(view.line) {
+        canvas.draw_text_system(PANEL_X + 20, PANEL_Y + 150, text, THEME.accent);
     }
-    clear.draw(canvas, THEME);
+    if let Ok(text) = core::str::from_utf8(view.status) {
+        canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 164, text, THEME.text);
+    }
+    view.clear.draw(canvas, THEME);
     canvas.draw_text_system(
         PANEL_X + 10,
-        PANEL_Y + 174,
-        "Enter: submit  Backspace: edit",
+        PANEL_Y + 180,
+        "cd | pwd | export | ls | cat | calc | jobs | fg",
         MUTED,
     );
     if let Some((x, y)) = pointer {
@@ -95,11 +130,9 @@ fn draw(
 
 fn render(
     window: &GraphicsSurface,
-    line: &[u8],
-    status: &[u8],
     pointer: Option<(u16, u16)>,
     pressed: bool,
-    clear: &Button<'_>,
+    view: &TerminalView<'_, '_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
     let Some(mut canvas) = Canvas::new(
@@ -111,8 +144,22 @@ fn render(
     ) else {
         return false;
     };
-    draw(&mut canvas, line, status, pointer, pressed, clear);
+    draw(&mut canvas, pointer, pressed, view);
     window.write_canvas(&canvas).is_ok()
+}
+
+macro_rules! render_terminal {
+    ($window:expr, $pointer:expr, $pressed:expr, $line:expr, $status:expr, $clear:expr, $history:expr, $results:expr, $count:expr) => {{
+        let view = TerminalView {
+            line: $line,
+            status: $status,
+            clear: $clear,
+            history: $history,
+            results: $results,
+            history_len: $count,
+        };
+        render($window, $pointer, $pressed, &view)
+    }};
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -142,9 +189,22 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         ),
         "Clear",
     );
+    let mut history = [[0u8; MAX_INPUT]; MAX_ROWS];
+    let mut results = [0u8; MAX_ROWS];
+    let mut history_count = 0usize;
     let line = [0u8; MAX_INPUT];
     let status: &[u8] = b"Ready for a bounded command preview";
-    if !render(&window, &line, status, None, false, &clear) {
+    if !render_terminal!(
+        &window,
+        None,
+        false,
+        &line,
+        status,
+        &clear,
+        &history,
+        &results,
+        history_count
+    ) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -183,7 +243,17 @@ pub fn run(shell: Option<&[u8]>) -> ! {
             if message.get(..message_length) == Some(&b"WCAN"[..]) {
                 clear.cancel_pointer();
                 pointer_pressed = false;
-                if !render(&window, &line[..length], status, pointer, pointer_pressed, &clear) {
+                if !render_terminal!(
+                    &window,
+                    pointer,
+                    pointer_pressed,
+                    &line[..length],
+                    status,
+                    &clear,
+                    &history,
+                    &results,
+                    history_count
+                ) {
                     fail(9)
                 }
                 continue;
@@ -198,13 +268,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                     // expensive pixel upload, so the shell's bounded resize
                     // grace window cannot expire while copying the canvas.
                     if resized.share_with(shell).is_ok() && send_resize(&resized, shell) {
-                        if render(
+                        if render_terminal!(
                             &resized,
-                            &line[..length],
-                            status,
                             pointer,
                             pointer_pressed,
+                            &line[..length],
+                            status,
                             &clear,
+                            &history,
+                            &results,
+                            history_count
                         ) {
                             let previous = core::mem::replace(&mut window, resized);
                             drop(previous);
@@ -226,13 +299,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 if let Some((x, y)) = pointer {
                     clear.pointer_move(i32::from(x), i32::from(y));
                 }
-                if !render(
+                if !render_terminal!(
                     &window,
-                    &line[..length],
-                    status,
                     pointer,
                     pointer_pressed,
+                    &line[..length],
+                    status,
                     &clear,
+                    &history,
+                    &results,
+                    history_count
                 ) {
                     fail(9)
                 }
@@ -246,16 +322,20 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 pointer = Some((local_x, local_y));
                 if clear.pointer(i32::from(local_x), i32::from(local_y), pointer_pressed) {
                     length = 0;
-                    status = b"Input cleared by pointer control";
+                    history_count = 0;
+                    status = b"Input and history cleared by pointer control";
                     let _ = libwoven::print("WovenTerminal: pointer cleared\n");
                 }
-                if !render(
+                if !render_terminal!(
                     &window,
-                    &line[..length],
-                    status,
                     pointer,
                     pointer_pressed,
+                    &line[..length],
+                    status,
                     &clear,
+                    &history,
+                    &results,
+                    history_count
                 ) {
                     fail(9)
                 }
@@ -271,6 +351,12 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                             libwoven::exit(0)
                         }
                         let result = crate::run(command);
+                        let slot = history_count % MAX_ROWS;
+                        let used = length.min(MAX_INPUT);
+                        history[slot][..used].copy_from_slice(&line[..used]);
+                        history[slot][used..].fill(0);
+                        results[slot] = if result == 0 { 0 } else { 1 };
+                        history_count += 1;
                         status = if result == 0 {
                             b"Command executed; output is on QEMU serial"
                         } else {
@@ -286,13 +372,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 }
                 // Redraw after every bounded edit; the shared surface keeps
                 // the compositor's ownership and lifecycle unchanged.
-                if !render(
+                if !render_terminal!(
                     &window,
-                    &line[..length],
-                    status,
                     pointer,
                     pointer_pressed,
+                    &line[..length],
+                    status,
                     &clear,
+                    &history,
+                    &results,
+                    history_count
                 ) {
                     fail(9)
                 }
@@ -300,13 +389,16 @@ pub fn run(shell: Option<&[u8]>) -> ! {
                 line[length] = message[0];
                 length += 1;
                 status = b"Editing command preview";
-                if !render(
+                if !render_terminal!(
                     &window,
-                    &line[..length],
-                    status,
                     pointer,
                     pointer_pressed,
+                    &line[..length],
+                    status,
                     &clear,
+                    &history,
+                    &results,
+                    history_count
                 ) {
                     fail(11)
                 }
