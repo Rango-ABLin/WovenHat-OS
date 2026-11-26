@@ -1,5 +1,17 @@
 # Stage status
 
+## WovenFiles GUI mutations - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The WovenFiles GUI gained row selection, a bounded path field and New/Delete/
+Rename actions on top of the existing filesystem wrappers. Mutation paths are
+app-side confined to `/mnt/...`, and the kernel still enforces `FileWrite`, the
+sandbox scope and mounted-path policy. No syscall, capability or ABI change.
+
+Validation on exact source: warning-denying freestanding Clippy, signed
+`test-files-qemu.py` at 1/2/4 CPUs and the 1-CPU desktop visual acceptance all
+pass. Full directory navigation, copy/move and file-dialog integration remain
+separate increments.
+
 ## Usable Store and Update app surfaces - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 First increment of the app-surface improvement plan. WovenStore and WovenUpdate

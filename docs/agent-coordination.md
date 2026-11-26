@@ -14,6 +14,17 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - WovenFiles GUI mutations (2026-11-26)
+
+Extended the app-surface plan with a bounded file-manager surface: the GUI now
+hit-tests `/mnt` rows, fills a path field on selection and exposes New, Delete
+and Rename buttons that reuse the existing `libwoven::mkdir/unlink/rename`
+wrappers. All mutations remain confined to `/mnt/...` and are still checked by
+the kernel's `FileWrite` capability and mounted-path policy; no new syscall,
+capability or ABI change. Validation: warning-denying freestanding Clippy,
+signed `test-files-qemu.py` at 1/2/4 CPUs and the 1-CPU desktop visual harness
+all pass. Full-directory navigation, copy/move and file dialog remain open.
+
 ## OpenCode - usable Store and Update app surfaces (2026-11-26)
 
 Began the app-surface improvement plan from the 2026-11-26 analysis. WovenStore
