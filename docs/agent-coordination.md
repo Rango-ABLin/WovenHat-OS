@@ -14,6 +14,15 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - remaining CI desktop and evidence-path repairs (2026-11-26)
+
+Refreshed Stage 20.2's current-token oracle for the centered taskbar group,
+modern window chrome/toast geometry, live tray removal and projected desktop
+teardown. The gate now distinguishes semantic state changes from projected
+wallpaper samples and passes 1/2/4 CPUs. The hardware evidence validator also
+recognizes Windows absolute paths on Linux, so a `C:/...` submission cannot
+bypass repository-relative path policy in GitHub Actions.
+
 ## OpenCode - desktop chrome acceptance completion (2026-11-25)
 
 Completed the current taskbar, Start overview and Notification Center gates

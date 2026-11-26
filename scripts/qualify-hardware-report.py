@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -73,7 +73,12 @@ def validate(report: Any) -> list[str]:
         evidence = _text(item.get("evidence"))
         if not evidence:
             errors.append(f"{prefix}.evidence is required")
-        elif Path(evidence).is_absolute() or ".." in Path(evidence).parts:
+        elif (
+            Path(evidence).is_absolute()
+            or PurePosixPath(evidence).is_absolute()
+            or PureWindowsPath(evidence).is_absolute()
+            or ".." in PurePosixPath(evidence.replace("\\", "/")).parts
+        ):
             errors.append(f"{prefix}.evidence must be a repository-relative path")
         if item.get("tier") == "tier1" and not (
             item.get("environment") == "native" and item.get("result") == "passed"

@@ -1,5 +1,13 @@
 # Stage status
 
+## Remaining CI desktop and evidence-path repair - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The hardware report validator now rejects both POSIX and Windows absolute paths
+and backslash traversal consistently on every host. Stage 20.2 was refreshed
+to current WovenShell tokens, centered entry geometry, bottom-right toast,
+semantic tray/window teardown and cursor colors; it passes at 1/2/4 CPUs.
+Focused Python contracts, affected target Clippy and all-targets Clippy pass.
+
 ## Commit CI repair and short-screen Quick Settings - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Fixed the Linux CI boot/lint cascade caused by the repository Cargo config's
