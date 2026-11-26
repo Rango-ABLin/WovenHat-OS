@@ -1,3 +1,13 @@
+## OpenCode - production release-engineering hardening (2026-11-26)
+
+Bound the release archive to the exact commit recorded before the full
+acceptance chain and reject tracked or untracked working-tree changes both
+before packaging and immediately before archive creation. The focused host
+release-boundary and package suites pass 6/6 and the changed Python files
+compile. The full release/QEMU chain was not rerun and no production archive
+was emitted; production key material, physical hardware, firmware, and external
+attestations were not used. The external release gates remain blocked.
+
 ## OpenCode - commit CI repair and short-screen Quick Settings (2026-11-26)
 
 Removed the checked-in absolute Windows Cargo `target-dir` that Linux CI

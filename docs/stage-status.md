@@ -1,5 +1,19 @@
 # Stage status
 
+## Exact-source release archive boundary - 2026-11-26 - IMPLEMENTED / HOST-TESTED
+
+The release validation manifest now records the source commit captured before
+the acceptance chain. The release archiver refuses to proceed unless that
+commit is still `HEAD` and the tracked/untracked working tree is clean, in
+addition to its existing required-check, source-hash, and image-hash checks.
+This closes a repository-side provenance gap only; it does not create a
+production archive, provision signing keys, or change the overall NO-GO
+decision. Focused host validation: `python -m unittest tests.test_package_release`
+(3/3); combined with `tests.test_release_boundaries`, 6/6 pass. The workflow's
+reproducibility-boundary step now runs both suites;
+full release/QEMU acceptance was not rerun
+for this tooling-only change.
+
 ## Live installed settings propagation - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The shell re-reads the bounded installed settings record on the existing slow

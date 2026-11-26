@@ -101,10 +101,10 @@ jobs:
               raise SystemExit("::error::Storage mount slot declaration missing before acceptance")
           print("Storage mount source-integrity preflight passed")
           PY
-      - name: Independent-workspace reproducibility boundary
+      - name: Independent-build and release-archive provenance boundaries
         shell: bash
         run: |
-          python3 -m unittest tests.test_release_boundaries
+          python3 -m unittest tests.test_release_boundaries tests.test_package_release
       - name: Stage 1-5 production software gate 1/2/4-core acceptance
         shell: bash
         run: |

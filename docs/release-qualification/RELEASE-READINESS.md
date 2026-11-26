@@ -1,5 +1,14 @@
 # Release readiness
 
+## Release artifact source binding - 2026-11-26
+
+The release validator now records the source commit used for its acceptance
+run, and the archive packager fails closed if `HEAD` differs or the tracked or
+untracked working tree is dirty. This host-tested tooling change strengthens
+repository provenance but does not replace a fresh full acceptance run. The
+release decision remains NO-GO: production signing custody, independent
+attestation/review, and native hardware/power-loss evidence are still absent.
+
 Installed WovenFS now passes normal cold-reboot persistence and deterministic
 post-commit/pre-target journal recovery on 1/2/4-CPU disposable images. This is
 focused virtual-disk evidence; physical storage behavior and remaining

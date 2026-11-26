@@ -4,6 +4,16 @@ Generated from historical stage-audit records on 2026-10-25. Each source path is
 
 ---
 
+## Exact-source release archive boundary - 2026-11-26
+
+The release validation manifest records the Git commit captured before its
+acceptance chain. The archive packager now requires that exact commit to remain
+`HEAD` and rejects tracked or untracked working-tree changes before writing
+release artifacts, while retaining the existing acceptance-row and source/image
+digest checks. The release-boundary and packager host suites pass 6/6. This closes only a
+repository-side packaging boundary; the full release chain was not rerun, no
+production archive was emitted, and external trust/hardware gates remain open.
+
 ## Hardware-demo physical USB write - 2026-11-24
 
 The guarded writer resolved the authorized USB by model, exact byte size and

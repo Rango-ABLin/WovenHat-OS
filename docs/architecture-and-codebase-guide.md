@@ -2760,6 +2760,14 @@ private material. The witnessed ceremony is in
 `docs/release-qualification/KEY-CUSTODY.md`; a physical token remains an
 external deployment prerequisite.
 
+The full release validator records the exact Git commit in
+`target/release-validation/validated-image.json`. The release archiver requires
+that commit to remain `HEAD` and refuses both tracked and untracked working-tree
+changes before producing artifacts; source hashes and all required CPU-profile
+acceptance rows are still checked independently. This binds an archive to the
+tree that ran acceptance, but does not establish production-key custody or
+external release qualification.
+
 ## Stage 27.3 signed update-package producer (2026-10-21)
 
 `tools/wupd-packager` is the producer for the kernel's version-1 `WUPD`

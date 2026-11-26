@@ -65,6 +65,9 @@ def main():
     parser.add_argument('--firmware-vars')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    source_commit = subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=root, text=True
+    ).strip()
     fault_qemu, fault_firmware = resolve_fault_gate_firmware(args)
     out = root / 'target' / 'release-validation'
     out.mkdir(parents=True, exist_ok=True)
@@ -337,7 +340,8 @@ def main():
         app_root = root / 'apps' / app
         sources += sorted(path for path in app_root.rglob('*') if path.is_file() and path.suffix in {'.rs', '.toml', '.x', '.S'})
     sources += sorted((root / 'scripts').glob('*.py'))
-    manifest = dict(image=str(image), image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
+    manifest = dict(source_commit=source_commit, image=str(image),
+                    image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
                     checks_sha256=hashlib.sha256((out / 'results.json').read_bytes()).hexdigest(),
                     sources={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources})
     (out / 'validated-image.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
