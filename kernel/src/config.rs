@@ -105,7 +105,7 @@ pub const VFS_NODE_CAPACITY: usize = 256 * 1024;
 pub const LARGE_ASSET_SLOTS: usize = 2;
 
 /// Capacity of each large-asset slot (bytes). Sized for the bundled
-/// NotoSans TTF (607,572 bytes) with headroom, never put on a kernel stack.
+/// NotoSans TTF (621,572 bytes) with headroom, never put on a kernel stack.
 pub const LARGE_ASSET_CAPACITY: usize = 768 * 1024;
 
 /// Maximum ELF loadable segments accepted by the loader.
