@@ -147,6 +147,7 @@ use libwoven::graphics::{
     Camera, Color, DepthBuffer, Rect, Renderer, Vertex3, Vertex3Field, Vertex3Tex,
 };
 use libwoven::layout::{self, Frame};
+use libwoven::semantic_search;
 use libwoven::ui::DesignTokens;
 use libwoven::{
     blend, font, process, rgb, wait, Args, Canvas, DateTime, FrameEvent, GraphicsSurface,
@@ -795,6 +796,10 @@ struct Desktop {
     overview_detail: bool,
     query: [u8; MAX_QUERY],
     query_length: usize,
+    /// Bounded hit list from the semantic search service, mapped to catalog
+    /// indices. Empty means the service was unavailable or the query is empty.
+    semantic_indices: [usize; MAX_APPS],
+    semantic_count: usize,
     selected: usize,
     children: [Option<Child>; MAX_CHILDREN],
 }
@@ -869,6 +874,8 @@ impl Desktop {
         overview_detail: false,
         query: [0; MAX_QUERY],
         query_length: 0,
+        semantic_indices: [0; MAX_APPS],
+        semantic_count: 0,
         selected: 0,
         children: [None; MAX_CHILDREN],
     };
@@ -956,10 +963,54 @@ impl Desktop {
         Area::new(self.pointer.0, self.pointer.1, CURSOR_WIDTH, CURSOR_HEIGHT)
     }
 
+    /// Ask the bounded `woven.search` broker for application hits and cache
+    /// them as catalog indices. A missing service or malformed reply simply
+    /// leaves the semantic list empty so `filtered` keeps the local fallback.
+    fn refresh_semantic_search(&mut self) {
+        self.semantic_count = 0;
+        if self.query_length == 0 {
+            return;
+        }
+        let Ok(query) = core::str::from_utf8(&self.query[..self.query_length]) else {
+            return;
+        };
+        let Ok(reply) = libwoven::search(query, 1) else {
+            return;
+        };
+        for hit in reply.hits[..reply.hit_count.min(semantic_search::MAX_HITS as u8) as usize].iter()
+        {
+            if hit.kind != semantic_search::Kind::Application
+                || hit.id == 0
+                || hit.id as usize > self.app_count
+            {
+                continue;
+            }
+            let index = hit.id as usize - 1;
+            if self.semantic_count < MAX_APPS
+                && !self.semantic_indices[..self.semantic_count].contains(&index)
+            {
+                self.semantic_indices[self.semantic_count] = index;
+                self.semantic_count += 1;
+            }
+        }
+        if self.semantic_count > 0 {
+            log(&[b"woven-shell: semantic search hits"]);
+        }
+    }
+
     /// Catalog indices matching the query, in catalog order.
     fn filtered(&self) -> ([usize; MAX_APPS], usize) {
         let mut found = [0; MAX_APPS];
         let mut count = 0;
+        if self.semantic_count > 0 {
+            for &index in &self.semantic_indices[..self.semantic_count] {
+                if self.apps[index].is_some() && count < MAX_APPS {
+                    found[count] = index;
+                    count += 1;
+                }
+            }
+            return (found, count);
+        }
         let query = &self.query[..self.query_length];
         for (index, app) in self.apps[..self.app_count].iter().enumerate() {
             if app.is_some_and(|app| matches(app.name(), query)) {
@@ -1198,6 +1249,7 @@ impl Desktop {
         self.launcher_open = !self.launcher_open;
         self.overview_detail = !self.launcher_open;
         self.query_length = 0;
+        self.semantic_count = 0;
         self.selected = 0;
         // A close must restore every pixel under the projected card. The
         // launcher is a foreground mode switch, so a full recomposition is
@@ -1266,11 +1318,13 @@ impl Desktop {
                     self.query_length += 1;
                 }
                 self.selected = 0;
+                self.refresh_semantic_search();
                 self.log_search_latency();
             }
             Key::Backspace => {
                 self.query_length = self.query_length.saturating_sub(1);
                 self.selected = 0;
+                self.refresh_semantic_search();
                 self.log_search_latency();
             }
             Key::Tab => {

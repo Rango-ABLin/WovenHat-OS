@@ -14014,6 +14014,34 @@ pub fn ipc_message_receive(
     Ok((length - 8, process::Id(sender)))
 }
 
+/// Query the bounded `woven.search` service with a UTF-8 query. The protocol
+/// carries only the query and returns compact identifiers; no path or file
+/// content crosses IPC.
+pub fn search(query: &str, request_id: u64) -> Result<search_ipc::Response, Error> {
+    let mut bytes = [0u8; search_ipc::MAX_MESSAGE_BYTES];
+    let length = search_ipc::Request {
+        operation: search_ipc::Operation::Query,
+        request_id,
+        query: query.as_bytes(),
+    }
+    .encode(&mut bytes)
+    .map_err(|_| Error::Failed)?;
+    let service = ipc_service_discover(search_ipc::SERVICE_NAME)?;
+    ipc_message_send(service, &bytes[..length])?;
+    let mut response = [0u8; search_ipc::RESPONSE_LEN];
+    for _ in 0..64 {
+        if let Ok((length, _sender)) = message_receive(&mut response) {
+            if let Ok(reply) = search_ipc::Response::decode(&response[..length]) {
+                if reply.request_id == request_id {
+                    return Ok(reply);
+                }
+            }
+        }
+        yield_now();
+    }
+    Err(Error::Failed)
+}
+
 /// Run a package transaction through the authenticated WovenPackage authority.
 /// The path identifies a broker-visible source/name; package bytes remain out
 /// of the fixed-size IPC message.
