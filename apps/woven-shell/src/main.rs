@@ -993,6 +993,16 @@ impl Desktop {
                 self.semantic_count += 1;
             }
         }
+        // Preserve the launcher's established catalog order: the service
+        // ranks by score, but keyboard/pointer acceptance expects the same
+        // grid position a substring filter would have produced.
+        for outer in 1..self.semantic_count {
+            let mut cursor = outer;
+            while cursor > 0 && self.semantic_indices[cursor] < self.semantic_indices[cursor - 1] {
+                self.semantic_indices.swap(cursor, cursor - 1);
+                cursor -= 1;
+            }
+        }
         if self.semantic_count > 0 {
             log(&[b"woven-shell: semantic search hits"]);
         }
