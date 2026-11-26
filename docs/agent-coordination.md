@@ -14,6 +14,23 @@ This fixes a real 640x400 defect where Power, Restart and Lock were painted or
 hit-tested below the visible screen. Stage 20.1 and Stage 20.15 pass at 1/2/4
 CPUs, and Stage 23.1's capability gate passes at 1/2/4 CPUs.
 
+## OpenCode - semantic launcher wiring (2026-11-26)
+
+The shell's Start overview now prefers bounded `woven.search` Application hits
+over its local substring filter, with a fallback when the service is absent.
+A new `libwoven::search` client sends only a UTF-8 query and returns compact
+id/kind/score hits; no path, file content or index mutation crosses IPC, and
+no syscall, capability or ABI change was made. Hits are re-sorted into catalog
+order so the existing keyboard/pointer grid contract is unchanged.
+
+Validation: warning-denying shell target Clippy and workspace checks pass.
+The signed semantic search service and 1-CPU desktop journey reach overview,
+emit `woven-shell: semantic search hits`, and launch WovenFiles correctly.
+The final `keyboard_refresh` framebuffer oracle timed out, but the same timeout
+reproduces on the pre-change commit (`746efcb7`) under identical limits, so it
+is recorded as a pre-existing/environmental harness issue rather than treated
+as a regression or weakened.
+
 ## OpenCode - live installed settings propagation (2026-11-26)
 
 The shell now re-reads the bounded installed settings record on its existing

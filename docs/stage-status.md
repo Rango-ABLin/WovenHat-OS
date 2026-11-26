@@ -1,5 +1,21 @@
 # Stage status
 
+## Semantic launcher wiring - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The Start overview now prefers `woven.search` Application hits over its local
+substring filter, falling back when the broker is unavailable. A bounded
+`libwoven::search` client carries only a query and returns compact hits; no
+path, file content, index mutation, syscall, capability or ABI change is
+involved. Results are re-sorted into catalog order to keep the launcher's
+keyboard/pointer grid contract unchanged.
+
+Validation: warning-denying Clippy and workspace checks pass; the 1-CPU
+desktop journey reaches overview, logs semantic hits and launches WovenFiles.
+Its final `keyboard_refresh` framebuffer oracle timed out, but the identical
+timeout reproduces on the pre-change commit under the same limits, so it is
+an existing harness/environment limitation, not a regression or an acceptance
+claim. Native hardware and external release gates are unchanged.
+
 ## Live installed settings propagation - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 The shell re-reads the bounded installed settings record on the existing slow
