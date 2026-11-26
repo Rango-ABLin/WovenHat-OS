@@ -1,5 +1,33 @@
 # Stage status
 
+## Font face cache hardening and QEMU VFS baseline repair - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Two remaining font-cache findings were closed in safe Rust. `load_system_font_face`
+no longer uses `mem::transmute` to extend a lifetime: `load_system_font_mapping`
+returns `&'static [u8]`, so a face parsed from it is already `'static`. It also no
+longer returns `None` on transient contention with its initialization `busy`
+flag — it waits on a bounded spin-lock acquisition, so one SMP frame cannot
+silently switch to bitmap text while another thread initializes the face.
+
+A gate regression was then found and repaired: a concurrent change staged the
+validated system font in shell-only QEMU images *after* the
+`vfs_nodes_before_userspace` baseline was captured, so the later "userspace
+created no VFS nodes" integrity check halted every memory boot. The baseline
+is now captured after font staging in those images; production and
+`system-apps` images keep the original baseline. No assertion, capability or
+ABI changed.
+
+Validation: kernel Clippy for default and `qemu-test`, all-targets Clippy,
+libwoven target Clippy, typography tests 8/8, 5-font and desktop qualification
+at 1/2/4 CPUs (`font-face-cache-{1,2,4}cpu-20261126`, all `pass: true`,
+`failures: []`, sign-in 0 changed pixels, font marker present), memory gates
+at 1/2/4 CPUs after the repair, and the full serialized `RUN-STAGE10.7.ps1`
+chain all pass.
+
+Still open: per-process font copies with no shared cross-process mapping ABI,
+and the absent focused large-mapping kernel self-test (reproducible TCG frame
+pressure). Neither was claimed here.
+
 ## Shell self-test system font mapping - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
 
 Owner reported `woven-shell: system font mapping unavailable` in shell-only
