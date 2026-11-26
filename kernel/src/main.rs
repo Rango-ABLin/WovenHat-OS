@@ -7039,21 +7039,83 @@ const SYSTEM_WALLPAPER_SHA256: [u8; 32] = [
 // Phase 3 entry for why a dedicated bounded large-asset slot was added
 // instead of raising the general VFS node capacity). Ring-3 apps read it
 // like any other VFS file -- no new syscall, no new capability.
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../assets/fonts/NotoSans-Regular.ttf"
 ));
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT_MANIFEST: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../assets/fonts/manifest.toml"
 ));
-#[cfg(feature = "system-apps")]
+#[cfg(any(feature = "system-apps", feature = "qemu-test"))]
 const SYSTEM_FONT_SHA256: [u8; 32] = [
     0x47, 0x8c, 0x55, 0x8e, 0xa7, 0x16, 0x03, 0x3c, 0xd6, 0x0c, 0x03, 0x43, 0x8f, 0x62, 0x8d, 0xfa,
     0x75, 0x69, 0x4d, 0xcf, 0x6b, 0x5f, 0x6d, 0x50, 0x5a, 0x2f, 0x05, 0xfd, 0x2b, 0x4f, 0x38, 0x23,
 ];
+
+/// Stage the validated system font for shell-only QEMU images. Production
+/// boots install it in `install_production_system_apps()`; self-test images
+/// never run that path, so WovenShell would otherwise log "system font
+/// mapping unavailable" and fall back to the 5x7 bitmap face. This uses the
+/// same bounded read-only VFS asset path and the same hash/licence validation
+/// as production -- no new syscall, capability or ABI. It is idempotent: an
+/// image that already has the asset is left untouched.
+#[cfg(all(feature = "qemu-test", not(feature = "system-apps")))]
+fn stage_system_font_for_tests() -> bool {
+    const FONT: &str = "/share/fonts/NotoSans-Regular.ttf";
+    const MANIFEST: &str = "/share/fonts/manifest.toml";
+    if vfs::stat(FONT).is_ok() && vfs::stat(MANIFEST).is_ok() {
+        return true;
+    }
+    use sha2::{Digest, Sha256};
+    let digest: [u8; 32] = Sha256::digest(SYSTEM_FONT).into();
+    if SYSTEM_FONT.len() < 4
+        || &SYSTEM_FONT[..4] != b"\x00\x01\x00\x00"
+        || digest != SYSTEM_FONT_SHA256
+        || !SYSTEM_FONT_MANIFEST
+            .windows(7)
+            .any(|window| window == b"OFL-1.1")
+        || !SYSTEM_FONT_MANIFEST
+            .windows(16)
+            .any(|window| window == b"notosans-regular")
+    {
+        serial::write_line(format_args!("[FONT] test font validation failed"));
+        return false;
+    }
+    let directory = |path: &str| {
+        if vfs::stat(path).is_err() && vfs::mkdir(path).is_err() {
+            return false;
+        }
+        true
+    };
+    if !directory("/share") || !directory("/share/fonts") {
+        serial::write_line(format_args!("[FONT] test font directory setup failed"));
+        return false;
+    }
+    if vfs::stat(FONT).is_err() && vfs::create_read_only_large(FONT, SYSTEM_FONT).is_err() {
+        return false;
+    }
+    if vfs::stat(MANIFEST).is_err()
+        && vfs::create_read_only(MANIFEST, SYSTEM_FONT_MANIFEST).is_err()
+    {
+        let _ = vfs::remove(FONT);
+        return false;
+    }
+    let mut probe = alloc::vec![0u8; SYSTEM_FONT.len()];
+    if vfs::read_all(FONT, &mut probe) != Ok(SYSTEM_FONT.len()) {
+        let _ = vfs::remove(MANIFEST);
+        let _ = vfs::remove(FONT);
+        serial::write_line(format_args!("[FONT] test font VFS readback failed"));
+        return false;
+    }
+    serial::write_line(format_args!(
+        "[FONT] system font staged for shell self-tests: {} bytes",
+        probe.len()
+    ));
+    true
+}
 
 #[cfg(any(
     all(feature = "stage22-3-test", not(feature = "stage27-5-test")),
@@ -7779,7 +7841,12 @@ fn stage23_ai_capability_security_self_test() -> bool {
         }
     }
     let system = domain_ceiling(SecurityDomain::SystemService);
-    for capability in [Capability::Ai, Capability::Secrets, Capability::Camera] {
+    for capability in [
+        Capability::Ai,
+        Capability::Secrets,
+        Capability::Camera,
+        Capability::Microphone,
+    ] {
         if system.contains(capability) {
             return fail("system-service ceiling grants sensitive AI authority");
         }
@@ -8965,7 +9032,8 @@ fn stage19_app_catalog_self_test() -> bool {
 
     if !step(
         "application directories created",
-        vfs::mkdir("/share").is_ok() && vfs::mkdir("/share/applications").is_ok(),
+        (vfs::stat("/share").is_ok() || vfs::mkdir("/share").is_ok())
+            && vfs::mkdir("/share/applications").is_ok(),
     ) {
         return false;
     }
@@ -9670,8 +9738,8 @@ const WOVEN_SHELL_IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_SHELL_IMAGE"));
 fn stage20_14b_self_test() -> bool {
     use crate::display::{blend_pixel, rgb};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const WEAVE_PITCH: i32 = 220;
@@ -9749,7 +9817,8 @@ fn stage20_14b_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -9902,8 +9971,8 @@ fn stage20_14b_self_test() -> bool {
 /// Stage 20.15 acceptance: the desktop as the session.
 ///
 /// The session starts through `session::start`, as a system-apps boot
-/// starts it, with an application in the catalog. Then, with keyboard and
-/// absolute-pointer input:
+/// starts it, with an application in the catalog. Then, with real i8042
+/// input:
 /// - the shell takes the display and input focus, and its launcher (F1)
 ///   lists the application;
 /// - F12 shows the diagnostic console: the session's frames stop, the
@@ -9935,27 +10004,25 @@ fn stage20_15_self_test() -> bool {
             task::yield_now();
         }
     }
-    fn click_at(owner: u64, x: i32, y: i32, width: i32, height: i32) -> bool {
-        let axis = |value: i32, extent: i32| {
-            ((i64::from(value.clamp(0, extent - 1)) * 32767) / i64::from(extent - 1)) as u16
-        };
-        if !woven_input::publish(woven_input::Event::PointerAbsolute {
-            x: axis(x, width),
-            y: axis(y, height),
-        }) {
-            return false;
+    fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
+        let dy = -screen_dy;
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
+    }
+    fn move_by(mut dx: i32, mut dy: i32) -> bool {
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
+            if !packet(sx as i16, sy as i16, false) {
+                return false;
+            }
+            dx -= sx;
+            dy -= sy;
         }
-        let moved = until(500, || !woven_input::pending(owner));
-        let pressed = woven_input::publish(woven_input::Event::PointerButton {
-            button: 0,
-            pressed: true,
-        });
-        let press_seen = pressed && until(500, || !woven_input::pending(owner));
-        let released = woven_input::publish(woven_input::Event::PointerButton {
-            button: 0,
-            pressed: false,
-        });
-        moved && press_seen && released
+        true
+    }
+    fn click() -> bool {
+        packet(0, 0, true) && packet(0, 0, false)
     }
     /// Press and release one key on the i8042.
     fn key(code: u8) -> bool {
@@ -10013,23 +10080,13 @@ fn stage20_15_self_test() -> bool {
     };
     let (width, height) = (width as i32, height as i32);
     let top = height - 24;
-    // F1 opens the current centered overview. Its one catalog entry occupies
-    // the first app-grid cell; labels are centered under a 48-pixel icon.
-    let overview_width = (width - 48).clamp(320, 700);
-    let overview_height = (top - 24).max(240).clamp(240, 560);
-    let overview_x = (width - overview_width) / 2;
-    let overview_y = (top - overview_height - 8).max(8);
-    let app_x = overview_x + 16;
-    let app_text_x = app_x + (96 - crate::font::text_width("Hello") as i32) / 2;
-    let app_grid_y = overview_y + 16 + 30 + 16 + 14 + 40 + 16 + 14;
+    // F1: the launcher's first row is the catalog's application.
+    // The launcher panel: x 4, three rows of 14 plus its border, above the
+    // taskbar; the first match's icon occupies the left margin and its text
+    // starts at x=+22, with the row baseline at +1 + 2 * 14 + 4.
     let listed = key(0x3b)
         && until(1000, || {
-            text_at(
-                app_text_x,
-                app_grid_y + 48 + 12,
-                "Hello",
-                rgb(243, 246, 251),
-            )
+            text_at(4 + 22, top - 2 - 44 + 33, "Hello", rgb(255, 255, 255))
         });
     let closed = key(0x3b);
     if !step(
@@ -10068,37 +10125,26 @@ fn stage20_15_self_test() -> bool {
     if !step("F12 returns to the desktop: display and focus", back) {
         return false;
     }
-    let _ = key(0x3b);
-    let _ = until(500, || {
-        text_at(
-            overview_x + 16 + (96 - crate::font::text_width("Hello") as i32) / 2,
-            app_grid_y + 48 + 12,
-            "Hello",
-            rgb(243, 246, 251),
-        )
-    });
-    let _ = key(0x3b);
 
-    // Current Quick Settings: an action grid plus sliders, with Power off in
-    // the fixed footer rather than the old first-row menu.
-    let button = (width - 54 - 4 - 8 * 20, top + 4);
-    let panel_height = 460.min(top - 8);
-    let panel = (width - 360 - 8, (top - panel_height - 8).max(0));
-    let power_row = (
-        panel.0 + 360 - 12 - 54 / 2,
-        panel.1 + panel_height - 40 - 12 + 8 + 12,
-    );
-    let panel_probe = compositor::pixel(panel.0 + 180, panel.1 + 52);
-    let opened = click_at(shell, button.0 + 8, button.1 + 8, width, height);
-    let qs_opened = opened
-        && until(1000, || {
-            compositor::pixel(panel.0 + 180, panel.1 + 52) != panel_probe
-        });
-    if !step("Quick Settings opens", qs_opened) {
+    // Quick Settings, then its first row: Power off (8 rows now: Change PIN
+    // and Language were appended after Lock screen, so only the row-count
+    // term needs updating).
+    let button = (width - 54 - 5 * 20, top + 4);
+    let power_row = (width - 4 - 164 + 28, top - 2 - (11 * 14 + 2) + 1 + 14 + 7);
+    let (px, py) = (width / 2, height / 2);
+    let opened = move_by(button.0 + 8 - px, button.1 + 8 - py) && click();
+    if !step(
+        "Quick Settings opens",
+        opened
+            && until(1000, || {
+                compositor::pixel(width - 4 - 164, top - 2 - (11 * 14 + 2) + 11 * 14 + 1)
+                    == Ok(rgb(255, 255, 0))
+            }),
+    ) {
         return false;
     }
     serial::write_line(format_args!("[S20.15] clicking Power off"));
-    let _ = click_at(shell, power_row.0, power_row.1, width, height);
+    let _ = move_by(power_row.0 - (button.0 + 8), power_row.1 - (button.1 + 8)) && click();
     // The machine should now be off; still running after this is failure.
     let start = timer::ticks();
     while timer::ticks().wrapping_sub(start) < 1000 {
@@ -10610,7 +10656,8 @@ fn stage20_19_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) = userspace::load_elf_with_argv(
         WOVEN_SHELL_IMAGE,
         &["/bin/woven-shell", "--no-3d", "--reduced-motion"],
@@ -10830,7 +10877,8 @@ fn stage20_13_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -11475,8 +11523,8 @@ fn stage20_12_self_test() -> bool {
 fn stage20_11_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
-    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
+    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
+    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
     const RED: u32 = rgb(200, 60, 60);
@@ -11742,7 +11790,8 @@ fn stage20_11_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--pin", "2468"])
     else {
@@ -12268,7 +12317,8 @@ fn stage20_10_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -12705,7 +12755,8 @@ fn stage20_17_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     // Begin from the accepted flat contract, then exercise the real toggle.
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
@@ -12865,7 +12916,8 @@ fn stage20_18_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     // Begin from the accepted flat contract, then exercise the real toggle.
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
@@ -13067,14 +13119,15 @@ fn stage20_18_self_test() -> bool {
 fn stage20_9_self_test() -> bool {
     use crate::display::{blend_pixel, rgb, Rect, Surface};
 
-    const WALLPAPER_TOP: u32 = rgb(16, 36, 74);
-    const WALLPAPER_BOTTOM: u32 = rgb(18, 84, 96);
+    const WALLPAPER_TOP: u32 = rgb(11, 29, 58);
+    const WALLPAPER_BOTTOM: u32 = rgb(16, 78, 82);
     const WHITE: u32 = rgb(255, 255, 255);
     const BLACK: u32 = rgb(0, 0, 0);
-    const TASKBAR: u32 = rgb(24, 32, 46);
+    const TASKBAR: u32 = rgb(10, 18, 30);
     const ACCENT: u32 = rgb(76, 190, 188);
     const START_FILL: u32 = rgb(28, 115, 145);
-    const PANEL_FILL: u32 = rgb(32, 40, 56);
+    const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const TOAST_FILL: u32 = rgb(28, 32, 44);
     const NOTES: u32 = rgb(150, 120, 40);
     const UNSET: u32 = 0x0100_0000;
 
@@ -13102,11 +13155,11 @@ fn stage20_9_self_test() -> bool {
         let span = (height - 1).max(1);
         let t = (y.clamp(0, span) * 255 / span) as u8;
         let base = blend_pixel(WALLPAPER_BOTTOM, WALLPAPER_TOP, t);
-        let over = (x / 220 + y / 220) % 2 == 0;
+        let over = (x / 96 + y / 96) % 2 == 0;
         let tint = if over { WHITE } else { BLACK };
-        let woven = blend_pixel(tint, base, 4);
-        if x % 220 == 0 || y % 220 == 0 {
-            blend_pixel(WHITE, woven, 4)
+        let woven = blend_pixel(tint, base, 12);
+        if x % 96 == 0 || y % 96 == 0 {
+            blend_pixel(WHITE, woven, 10)
         } else {
             woven
         }
@@ -13151,7 +13204,8 @@ fn stage20_9_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -13192,50 +13246,36 @@ fn stage20_9_self_test() -> bool {
         return false;
     }
 
-    // The toast shows the latest notification.
-    let toast = {
-        let mut surface = Surface::new(240, 24);
-        surface.fill_rect(surface.bounds(), UNSET);
-        surface.draw_text(6, 8, "Battery 80%", rgb(243, 246, 251));
+    // An overlay as the shell draws it: a one-pixel ACCENT border, then
+    // `draw`; everything else UNSET (transparent over a blended background).
+    let overlay = |size: (i32, i32), draw: &dyn Fn(&mut Surface)| {
+        let mut surface = Surface::new(size.0 as usize, size.1 as usize);
+        let bounds = surface.bounds();
+        surface.fill_rect(bounds, UNSET);
+        surface.stroke_rect(bounds, ACCENT);
+        draw(&mut surface);
         surface
     };
-    let toast_x = width - 250;
-    let toast_y = height - 24 - 24 - 10;
-    let toast_text_visible = || {
-        (0..24).all(|dy| {
-            (0..240).all(|dx| {
-                toast.pixel(dx, dy).is_none_or(|expected| {
-                    expected == UNSET
-                        || compositor::pixel(toast_x + dx, toast_y + dy) == Ok(expected)
-                })
-            })
-        })
+    // The toast shows the latest notification.
+    let toast = overlay((180, 22), &|surface| {
+        surface.draw_text(6, 8, "Battery 80%", WHITE);
+    });
+    let toast_expected = |x: i32, y: i32| match toast.pixel(x - (width - 188), y - 8) {
+        Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
+        Some(color) => color,
     };
     if !step(
         "the toast shows the latest notification",
-        until(1500, toast_text_visible),
+        until(1500, || region(width - 188, 8, 180, 22, toast_expected)),
     ) {
         return false;
     }
 
     // The badge: "3" in a 10x11 accent box just left of the HH:MM clock.
-    let clock_width = 8 * crate::font::ADVANCE + 6;
-    let clock_x = width - clock_width - 4;
-    let (badge_x, badge_y) = (clock_x - 14, top + 7);
-    let mut badge_digit = Surface::new(10, 11);
-    badge_digit.fill_rect(badge_digit.bounds(), UNSET);
-    badge_digit.draw_text(3, 2, "3", rgb(243, 246, 251));
-    let badge_3d = || {
-        compositor::pixel(badge_x + 1, badge_y + 5) == Ok(ACCENT)
-            && (0..11).all(|dy| {
-                (0..10).all(|dx| {
-                    badge_digit.pixel(dx, dy).is_none_or(|expected| {
-                        expected == UNSET
-                            || compositor::pixel(badge_x + dx, badge_y + dy) == Ok(expected)
-                    })
-                })
-            })
-    };
+    let clock_width = 5 * crate::font::ADVANCE - (crate::font::ADVANCE - crate::font::WIDTH as i32);
+    let clock_x = width - 6 - clock_width;
+    let (badge_x, badge_y) = (clock_x - 13, top + 7);
+    let badge_3d = || compositor::pixel(badge_x + 5, badge_y + 5) == Ok(ACCENT);
     if !step(
         "a badge counts three unread notifications",
         until(1000, badge_3d),
@@ -13248,43 +13288,42 @@ fn stage20_9_self_test() -> bool {
     let center = |rows: &[&str]| {
         let lines = rows.len().max(1) as i32;
         let h = (1 + lines) * 14 + 2;
-        let (x0, y0) = (width - 4 - 220, top - 4 - h);
-        let mut image = Surface::new(220, h as usize);
-        image.fill_rect(image.bounds(), UNSET);
-        image.draw_text(6, 5, "Notifications", ACCENT);
-        image.draw_text(
-            220 - 6 - crate::font::text_width("Clear") as i32,
-            5,
-            "Clear",
-            rgb(243, 246, 251),
-        );
-        if rows.is_empty() {
-            image.draw_text(8, 1 + 14 + 4, "No notifications", rgb(166, 178, 196));
-        }
-        for (index, row) in rows.iter().enumerate() {
-            image.draw_text(8, 1 + (1 + index as i32) * 14 + 4, row, rgb(243, 246, 251));
-        }
+        let (x0, y0) = (width - 4 - 164, top - 2 - h);
+        let image = overlay((164, h), &|surface| {
+            surface.fill_rect(Rect::new(1, 1, 162, 14), START_FILL);
+            surface.draw_text(6, 5, "Notifications", WHITE);
+            surface.draw_text(
+                164 - 6 - crate::font::text_width("Clear") as i32,
+                5,
+                "Clear",
+                WHITE,
+            );
+            if rows.is_empty() {
+                surface.draw_text(6, 1 + 14 + 4, "No notifications", WHITE);
+            }
+            for (index, row) in rows.iter().enumerate() {
+                surface.draw_text(6, 1 + (1 + index as i32) * 14 + 4, row, WHITE);
+            }
+        });
         (x0, y0, h, image)
-    };
-    let text_matches = |x0: i32, y0: i32, image: &Surface| {
-        (0..image.height()).all(|dy| {
-            (0..image.width()).all(|dx| {
-                image.pixel(dx as i32, dy as i32).is_none_or(|expected| {
-                    expected == UNSET
-                        || compositor::pixel(x0 + dx as i32, y0 + dy as i32) == Ok(expected)
-                })
-            })
-        })
     };
     let (px, py) = (width / 2, height / 2);
     let (cx, cy) = (width - 20, top + 12);
-    let (x0, y0, _full_height, full) = center(&[
+    let (x0, y0, full_height, full) = center(&[
         "Notes: Battery 80%",
         "Notes: Mail: 3 new",
         "Notes: Build done",
     ]);
+    let center_matches = |x0: i32, y0: i32, h: i32, image: &Surface| {
+        // Verify the entire panel: header, clear control, all rows and border.
+        region(x0, y0, 164, h, |x, y| match image.pixel(x - x0, y - y0) {
+            Some(UNSET) | None => blend_pixel(PANEL_FILL, wallpaper(x, y, height), 216),
+            Some(color) => color,
+        })
+    };
     let clock_clicked = move_by(cx - px, cy - py) && click();
-    let center_rendered = clock_clicked && until(1000, || text_matches(x0, y0, &full));
+    let center_rendered =
+        clock_clicked && until(1000, || center_matches(x0, y0, full_height, &full));
     let badge_removed = center_rendered
         && until(500, || {
             compositor::pixel(badge_x + 5, badge_y + 5) != Ok(ACCENT)
@@ -13298,17 +13337,19 @@ fn stage20_9_self_test() -> bool {
     }
 
     // Clear, at the right of the title row; then the clock closes it.
-    let (ex, ey, _empty_height, empty) = center(&[]);
-    let clear_point = (x0 + 220 - 20, y0 + 7);
+    let (ex, ey, eh, empty) = center(&[]);
+    let clear_point = (x0 + 164 - 20, y0 + 7);
     let cleared = move_by(clear_point.0 - cx, clear_point.1 - cy)
         && click()
-        && until(1000, || text_matches(ex, ey, &empty));
+        && until(1000, || center_matches(ex, ey, eh, &empty));
     if !step("Clear empties the Notification Center", cleared) {
         return false;
     }
     let closed = move_by(cx - clear_point.0, cy - clear_point.1)
         && click()
-        && until(1000, || !text_matches(ex, ey, &empty));
+        && until(1000, || {
+            compositor::pixel(ex + 30, ey + 20) != Ok(PANEL_FILL)
+        });
     if !step("clicking the clock again closes it", closed) {
         return false;
     }
@@ -13447,7 +13488,8 @@ fn stage20_8_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
@@ -13847,7 +13889,8 @@ fn stage20_7_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) = userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell"])
     else {
         return step("shell image loads", false);
@@ -14091,7 +14134,8 @@ fn stage20_6_self_test() -> bool {
     let capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::DisplayIo)
         .with(capability::Capability::InputIo)
-        .with(capability::Capability::Ipc);
+        .with(capability::Capability::Ipc)
+        .with(capability::Capability::FileRead);
     let Some(program) =
         userspace::load_elf_with_argv(WOVEN_SHELL_IMAGE, &["/bin/woven-shell", "--no-3d"])
     else {
