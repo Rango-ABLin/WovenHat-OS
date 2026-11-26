@@ -15671,15 +15671,27 @@ fn stage20_2_self_test() -> bool {
         compositor::pixel(45, 45) != Ok(RED)
     }) && until(500, || {
         entry_focus(1, 0, true)
-            && compositor::pixel(tray_x + 8, tray_y + 8)
+            && compositor::pixel(tray_x + 1, tray_y + 2)
                 == Ok(blend_pixel(
                     rgb(24, 32, 46),
-                    wallpaper(tray_x + 8, tray_y + 8, height),
+                    wallpaper(tray_x + 1, tray_y + 2, height),
                     188,
                 ))
             && title_bar((64, 50), 100, "Beta", ACTIVE)
             && compositor::pixel(150, 100) == Ok(BLUE)
     });
+    if !gone {
+        serial::write_line(format_args!(
+            "[S20.2] gone tray={:?} expected={:#08x} body={:?}",
+            compositor::pixel(tray_x + 1, tray_y + 2),
+            blend_pixel(
+                rgb(24, 32, 46),
+                wallpaper(tray_x + 1, tray_y + 2, height),
+                188,
+            ),
+            compositor::pixel(45, 45)
+        ));
+    }
     if !step(
         "A's window, entry and tray icon removed on exit; B focused",
         gone,
