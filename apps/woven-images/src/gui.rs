@@ -357,16 +357,13 @@ pub fn run(shell: Option<&[u8]>) -> ! {
         "Load",
     );
     let mut status = "Enter an image path, then Load";
-    match load_wallpaper() {
-        Some((_, width, height)) => {
-            let _ = libwoven::print("WovenImages: wallpaper decoded 160x90\n");
-            if width != WALLPAPER_WIDTH || height != WALLPAPER_HEIGHT {
-                fail(9)
-            }
-        }
-        None => {
-            let _ = libwoven::print("WovenImages: wallpaper unavailable\n");
-        }
+    // `load_wallpaper` already validates the 160x90 source before producing
+    // the 32x32 thumbnail; comparing the thumbnail to the source geometry
+    // would reject every boot.
+    if load_wallpaper().is_some() {
+        let _ = libwoven::print("WovenImages: wallpaper thumbnail ready\n");
+    } else {
+        let _ = libwoven::print("WovenImages: wallpaper unavailable\n");
     }
     if !render_images!(&window, None, false, 0, &refresh, &path, &load_button, status) {
         fail(3)
