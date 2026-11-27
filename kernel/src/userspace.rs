@@ -5981,9 +5981,18 @@ pub fn elf_loader_self_test() -> bool {
     // the first failing acceptance gate can be diagnosed from QEMU serial.
     let checks = [
         ("valid segment", valid_segment),
-        ("bad ELF magic rejected", crate::elf::parse(&bad_magic).is_err()),
-        ("writable executable rejected", crate::elf::parse(&writable_executable).is_err()),
-        ("unsupported headers rejected", unsupported_program_header_rejected),
+        (
+            "bad ELF magic rejected",
+            crate::elf::parse(&bad_magic).is_err(),
+        ),
+        (
+            "writable executable rejected",
+            crate::elf::parse(&writable_executable).is_err(),
+        ),
+        (
+            "unsupported headers rejected",
+            unsupported_program_header_rejected,
+        ),
         ("invalid TLS rejected", invalid_tls_rejected),
         ("RELRO requires writable data", relro_requires_writable_data),
         ("valid RELRO accepted", valid_relro),
@@ -5992,9 +6001,7 @@ pub fn elf_loader_self_test() -> bool {
     ];
     for (name, passed) in checks {
         if !passed {
-            crate::serial::write_line(format_args!(
-                "[S11.5] ELF loader subcheck {name}: FAILED"
-            ));
+            crate::serial::write_line(format_args!("[S11.5] ELF loader subcheck {name}: FAILED"));
             return false;
         }
     }

@@ -1452,8 +1452,8 @@ pub fn stack_vertical(area: Frame, count: usize, gap: i32) -> ([Frame; 16], usiz
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, Checkbox, DesignTokens, Dialog, ImageView, Label, ListBox, Menu, Navigation, Table,
-        Tabs, TextField, Theme, Tree, VideoView, WebView, stack_vertical,
+        stack_vertical, Button, Checkbox, DesignTokens, Dialog, ImageView, Label, ListBox, Menu,
+        Navigation, Table, Tabs, TextField, Theme, Tree, VideoView, WebView,
     };
     use crate::{layout::Frame, Canvas, InputEvent, Key};
 

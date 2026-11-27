@@ -6,8 +6,8 @@
 //! makes the arithmetic exact (1000 units/em, 600-unit 'A') so a regression
 //! in the scaling or rounding rules fails here deterministically.
 
-use libwoven::Canvas;
 use libwoven::graphics::TrueTypeFace;
+use libwoven::Canvas;
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());

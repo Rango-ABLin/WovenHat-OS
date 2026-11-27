@@ -74,7 +74,11 @@ impl Weave {
     pub const fn phase(self, x: i32, y: i32) -> i32 {
         let sum = x.wrapping_add(y);
         let phase = sum % self.pitch;
-        if phase < 0 { phase + self.pitch } else { phase }
+        if phase < 0 {
+            phase + self.pitch
+        } else {
+            phase
+        }
     }
 
     /// Whether a pixel falls on the lit half of the weave.
@@ -316,7 +320,11 @@ impl TypeRole {
     pub const fn line_height_px(self) -> u16 {
         let em = self.em_px();
         let leading = ((em as u32 * self.leading_percent() as u32) / 100) as u16;
-        if leading > em { leading } else { em + 1 }
+        if leading > em {
+            leading
+        } else {
+            em + 1
+        }
     }
 }
 
@@ -937,11 +945,9 @@ mod tests {
                 manifest.windows(64).any(|window| window == hex),
                 "digest mismatch for {name}"
             );
-            assert!(
-                manifest
-                    .windows(b"CC0-1.0".len())
-                    .any(|window| window == b"CC0-1.0")
-            );
+            assert!(manifest
+                .windows(b"CC0-1.0".len())
+                .any(|window| window == b"CC0-1.0"));
         }
     }
 }

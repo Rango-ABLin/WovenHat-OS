@@ -201,7 +201,11 @@ impl Queue {
             .flatten()
             .any(|r| r.state != State::Complete)
     }
-    #[cfg(any(feature = "stage10-6-test", feature = "stage10-7-test", feature = "wovenweb-net-test"))]
+    #[cfg(any(
+        feature = "stage10-6-test",
+        feature = "stage10-7-test",
+        feature = "wovenweb-net-test"
+    ))]
     fn active(&self) -> usize {
         self.entries.iter().filter(|e| e.is_some()).count()
     }
@@ -222,7 +226,11 @@ pub struct UserResult {
     pub data: [u8; MAX_IO_SIZE],
 }
 
-#[cfg(any(feature = "stage10-6-test", feature = "stage10-7-test", feature = "wovenweb-net-test"))]
+#[cfg(any(
+    feature = "stage10-6-test",
+    feature = "stage10-7-test",
+    feature = "wovenweb-net-test"
+))]
 #[derive(Clone, Copy)]
 pub struct Stats {
     pub submitted: u64,

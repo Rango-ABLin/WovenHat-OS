@@ -35,8 +35,9 @@ mod userspace_allocator {
     #[cfg(any(test, feature = "reclaiming-allocator"))]
     #[path = "../heap.rs"]
     pub mod heap;
-#[cfg(any(test, all(feature = "reclaiming-allocator", target_os = "none")))]
-mod heap_allocator;
+    #[cfg(any(test, all(feature = "reclaiming-allocator", target_os = "none")))]
+    #[path = "../heap_allocator.rs"]
+    pub(crate) mod heap_allocator;
 
     struct Arena;
 
@@ -16375,7 +16376,7 @@ pub fn format_u64(mut value: u64, buffer: &mut [u8]) -> &[u8] {
 mod tests {
     #[test]
     fn object_wait_masks_reject_reserved_duplicate_and_non_single_bits() {
-        use crate::{Error, WaitObject, wait_any_objects};
+        use crate::{wait_any_objects, Error, WaitObject};
         for mask in [0, 1, 2, 4, 9] {
             assert_eq!(
                 wait_any_objects(
@@ -20261,3 +20262,16 @@ mod tests {
         assert_eq!(surface_owner(0xffff_ffff), process::Id(0));
     }
 }
+
+#[cfg(all(
+    feature = "userspace-allocator",
+    feature = "reclaiming-allocator",
+    target_os = "none"
+))]
+pub use userspace_allocator::heap;
+#[cfg(all(
+    feature = "userspace-allocator",
+    feature = "reclaiming-allocator",
+    target_os = "none"
+))]
+pub(crate) use userspace_allocator::heap_allocator::USER_HEAP;

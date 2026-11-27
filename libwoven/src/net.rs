@@ -4,8 +4,8 @@
 //! claim TLS: certificate validation and encrypted-channel ownership belong to
 //! the privileged TLS service used by IPP.
 
-use crate::{check, syscall};
 use crate::Error as CoreError;
+use crate::{check, syscall};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -27,10 +27,7 @@ impl Endpoint {
     /// `packed`, refusing an invalid endpoint (zero/broadcast address or zero
     /// port) before any socket work.
     pub fn packed_checked(self) -> Result<u64, Error> {
-        if self.port == 0
-            || self.address == [0, 0, 0, 0]
-            || self.address == [255, 255, 255, 255]
-        {
+        if self.port == 0 || self.address == [0, 0, 0, 0] || self.address == [255, 255, 255, 255] {
             Err(Error::InvalidEndpoint)
         } else {
             Ok(self.packed())
@@ -232,7 +229,6 @@ mod tests {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Owned native TCP (`net::TcpStream`) built on the existing bounded syscalls.
 // ---------------------------------------------------------------------------
@@ -324,8 +320,7 @@ impl TcpStream {
     /// for an unreachable/invalid target, `Rejected` without network authority.
     pub fn connect(&self, endpoint: Endpoint) -> Result<&Self, Error> {
         validate_endpoint(endpoint)?;
-        let handle =
-            unsafe { syscall::invoke(ASYNC_TCP_CONNECT, self.raw, endpoint.packed(), 0) };
+        let handle = unsafe { syscall::invoke(ASYNC_TCP_CONNECT, self.raw, endpoint.packed(), 0) };
         if handle >= syscall::WOULD_BLOCK {
             return Err(Error::Rejected);
         }
@@ -338,7 +333,8 @@ impl TcpStream {
                 0,
             )
         };
-        let status = i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
+        let status =
+            i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
         if status != 0 {
             Err(Error::InvalidEndpoint)
         } else {
@@ -384,8 +380,14 @@ impl TcpStream {
 
     fn send_once(&self, data: &[u8]) -> Result<usize, Error> {
         let chunk = data.len().min(MAX_IO);
-        let result =
-            unsafe { syscall::invoke(syscall::NET_SEND, self.raw, data.as_ptr() as u64, chunk as u64) };
+        let result = unsafe {
+            syscall::invoke(
+                syscall::NET_SEND,
+                self.raw,
+                data.as_ptr() as u64,
+                chunk as u64,
+            )
+        };
         if result == syscall::WOULD_BLOCK {
             Err(Error::WouldBlock)
         } else if result == syscall::ERROR {
@@ -440,8 +442,8 @@ impl TcpStream {
     }
 
     /// Submit an asynchronous receive of up to `len` bytes as a `Pending`.
-    pub fn receive(&self, len: usize) -> Pending {
-        Pending::submit_recv(self.raw, len)
+    pub fn receive(&self, len: usize) -> Result<Pending, Error> {
+        Ok(Pending::submit_recv(self.raw, len))
     }
 }
 
@@ -462,7 +464,11 @@ impl Pending {
     fn submit_recv(raw: u64, len: usize) -> Pending {
         let capacity = len.min(MAX_IO);
         let handle = unsafe { syscall::invoke(ASYNC_NET_RECV, raw, capacity as u64, 0) };
-        Pending { handle, len, done: handle >= syscall::WOULD_BLOCK }
+        Pending {
+            handle,
+            len,
+            done: handle >= syscall::WOULD_BLOCK,
+        }
     }
 
     /// Poll once. `OutputTooSmall` if `output` is shorter than `len`. `WouldBlock`
@@ -478,7 +484,11 @@ impl Pending {
             return Err(Error::Failed);
         }
         let mut completion = [0u8; 16];
-        let user_data = if output.is_empty() { 0 } else { output.as_mut_ptr() as u64 };
+        let user_data = if output.is_empty() {
+            0
+        } else {
+            output.as_mut_ptr() as u64
+        };
         let ready = unsafe {
             syscall::invoke(
                 syscall::ASYNC_NET_POLL,
@@ -491,11 +501,31 @@ impl Pending {
             return Err(Error::WouldBlock);
         }
         self.done = true;
-        let status = i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
+        let status =
+            i32::from_ne_bytes([completion[0], completion[1], completion[2], completion[3]]);
         if status != 0 {
             return Err(Error::Failed);
         }
         Ok(())
+    }
+
+    /// Wait up to `ticks` 100 Hz ticks for completion, copying received data
+    /// into `output`. `TimedOut` if it does not complete in time.
+    pub fn wait_timeout(&mut self, output: &mut [u8], ticks: u64) -> Result<(), Error> {
+        validate_timeout(ticks)?;
+        let start = crate::ticks();
+        loop {
+            match self.poll(output) {
+                Ok(()) => return Ok(()),
+                Err(Error::WouldBlock) => {
+                    if crate::ticks().wrapping_sub(start) >= ticks {
+                        return Err(Error::TimedOut);
+                    }
+                    crate::yield_now();
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// Cancel a still-pending operation and release its kernel reference.
@@ -507,7 +537,11 @@ impl Pending {
             return Err(Error::Failed);
         }
         let result = unsafe { syscall::invoke(ASYNC_CANCEL, handle, 0, 0) };
-        if result == syscall::ERROR { Err(Error::Failed) } else { Ok(()) }
+        if result == syscall::ERROR {
+            Err(Error::Failed)
+        } else {
+            Ok(())
+        }
     }
 }
 

@@ -27,7 +27,10 @@ pub fn patch_high_contrast(data: &mut [u8], enabled: bool) -> bool {
         return false;
     };
     // Reject duplicate keys rather than silently updating an ambiguous record.
-    if data[start + KEY.len()..].windows(KEY.len()).any(|window| window == KEY) {
+    if data[start + KEY.len()..]
+        .windows(KEY.len())
+        .any(|window| window == KEY)
+    {
         return false;
     }
     let value_start = start + KEY.len();
@@ -336,9 +339,8 @@ impl<'a> Writer<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CURRENT_SCHEMA, MAX_SETTINGS_BYTES, MigrationError, migrate, patch_high_contrast,
-        patch_reduced_motion, patch_theme, read_high_contrast, read_light_theme,
-        read_reduced_motion,
+        migrate, patch_high_contrast, patch_reduced_motion, patch_theme, read_high_contrast,
+        read_light_theme, read_reduced_motion, MigrationError, CURRENT_SCHEMA, MAX_SETTINGS_BYTES,
     };
 
     #[test]
@@ -384,17 +386,13 @@ mod tests {
     fn patch_is_bounded_and_fixed_width() {
         let mut data = *br#"{"high_contrast":false,"reduced_motion":false}"#;
         assert!(patch_high_contrast(&mut data, true));
-        assert!(
-            core::str::from_utf8(&data)
-                .unwrap()
-                .contains(r#""high_contrast":true "#)
-        );
+        assert!(core::str::from_utf8(&data)
+            .unwrap()
+            .contains(r#""high_contrast":true "#));
         assert!(patch_high_contrast(&mut data, false));
-        assert!(
-            core::str::from_utf8(&data)
-                .unwrap()
-                .contains(r#""high_contrast":false"#)
-        );
+        assert!(core::str::from_utf8(&data)
+            .unwrap()
+            .contains(r#""high_contrast":false"#));
         let mut malformed = *br#"{"schema":"wrong"}"#;
         assert!(!patch_high_contrast(&mut malformed, true));
     }

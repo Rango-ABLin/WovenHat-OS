@@ -1078,7 +1078,11 @@ pub fn start(topology: Option<crate::hal::acpi::Summary>, offset: u64) {
     serial::write_line(format_args!(
         "[TIMER] LAPIC timer: {} counts per 10 ms, calibrated against the {}",
         TIMER_COUNT.load(Ordering::Relaxed),
-        if power.pm_timer != 0 { "ACPI PM timer" } else { "8254 (no PM timer)" }
+        if power.pm_timer != 0 {
+            "ACPI PM timer"
+        } else {
+            "8254 (no PM timer)"
+        }
     ));
     // Route only keyboard input through IOAPIC; each CPU has its own LAPIC timer.
     //

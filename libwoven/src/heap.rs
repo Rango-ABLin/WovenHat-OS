@@ -358,10 +358,9 @@ mod tests {
             assert!(heap.deallocate(address, spec));
         }
         assert!(heap.allocate(layout(0, 16)).is_none());
-        assert!(
-            heap.allocate(layout(MAX_REGIONS * REGION_BYTES + 1, 16))
-                .is_none()
-        );
+        assert!(heap
+            .allocate(layout(MAX_REGIONS * REGION_BYTES + 1, 16))
+            .is_none());
     }
     #[test]
     fn rejects_bad_free_boundaries_without_mutating_live_payload_metadata() {
@@ -428,10 +427,9 @@ mod tests {
         }
         assert!(!heap.add_region(0x100000));
         assert!(!heap.add_region(0x900000));
-        assert!(
-            heap.allocate(layout(MAX_REGIONS * REGION_BYTES, 16))
-                .is_some()
-        );
+        assert!(heap
+            .allocate(layout(MAX_REGIONS * REGION_BYTES, 16))
+            .is_some());
         assert!(heap.allocate(layout(1, 1)).is_none());
     }
 }

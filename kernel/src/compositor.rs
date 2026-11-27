@@ -215,10 +215,19 @@ pub fn init_for_display() {
     if let Some(info) = crate::terminal::framebuffer_info() {
         crate::serial::write_line(format_args!(
             "[DISPLAY] framebuffer {}x{} stride {} {:?}, {} bytes/pixel; compositor {}x{}",
-            info.width, info.height, info.stride, info.pixel_format, info.bytes_per_pixel, width, height
+            info.width,
+            info.height,
+            info.stride,
+            info.pixel_format,
+            info.bytes_per_pixel,
+            width,
+            height
         ));
     } else {
-        crate::serial::write_line(format_args!("[DISPLAY] no framebuffer; compositor {}x{}", width, height));
+        crate::serial::write_line(format_args!(
+            "[DISPLAY] no framebuffer; compositor {}x{}",
+            width, height
+        ));
     }
     init(width, height);
 }
@@ -337,9 +346,11 @@ pub fn present() -> Result<usize, Error> {
     // Schedule the next permitted presentation. When pacing is disabled there
     // is no deadline and every present() is allowed immediately.
     if state.swap_interval > 0 {
-        state.next_present_tick = state
-            .last_present_tick
-            .saturating_add(state.min_present_interval_ticks.saturating_mul(state.swap_interval as u64));
+        state.next_present_tick = state.last_present_tick.saturating_add(
+            state
+                .min_present_interval_ticks
+                .saturating_mul(state.swap_interval as u64),
+        );
     } else {
         state.next_present_tick = 0;
     }
@@ -358,7 +369,10 @@ pub fn present() -> Result<usize, Error> {
 #[allow(dead_code)]
 pub fn last_present_tick() -> u64 {
     let guard = STATE.lock();
-    guard.as_ref().map(|state| state.last_present_tick).unwrap_or(0)
+    guard
+        .as_ref()
+        .map(|state| state.last_present_tick)
+        .unwrap_or(0)
 }
 
 /// How many refresh intervals to wait between presentations. 0 means no
@@ -390,9 +404,11 @@ pub fn set_swap_interval(interval: u32) {
         if interval == 0 {
             state.next_present_tick = 0;
         } else if state.last_present_tick > 0 {
-            state.next_present_tick = state
-                .last_present_tick
-                .saturating_add(state.min_present_interval_ticks.saturating_mul(interval as u64));
+            state.next_present_tick = state.last_present_tick.saturating_add(
+                state
+                    .min_present_interval_ticks
+                    .saturating_mul(interval as u64),
+            );
         }
     }
 }
@@ -402,7 +418,10 @@ pub fn set_swap_interval(interval: u32) {
 #[allow(dead_code)]
 pub fn skipped_frames() -> u64 {
     let guard = STATE.lock();
-    guard.as_ref().map(|state| state.skipped_frames).unwrap_or(0)
+    guard
+        .as_ref()
+        .map(|state| state.skipped_frames)
+        .unwrap_or(0)
 }
 
 /// Count of presentations that occurred after the deadline elapsed (a missed
@@ -410,7 +429,10 @@ pub fn skipped_frames() -> u64 {
 #[allow(dead_code)]
 pub fn missed_vblanks() -> u64 {
     let guard = STATE.lock();
-    guard.as_ref().map(|state| state.missed_vblanks).unwrap_or(0)
+    guard
+        .as_ref()
+        .map(|state| state.missed_vblanks)
+        .unwrap_or(0)
 }
 
 /// The tick at or after which the next presentation is allowed. Zero means
@@ -418,7 +440,10 @@ pub fn missed_vblanks() -> u64 {
 #[allow(dead_code)]
 pub fn next_present_tick() -> u64 {
     let guard = STATE.lock();
-    guard.as_ref().map(|state| state.next_present_tick).unwrap_or(0)
+    guard
+        .as_ref()
+        .map(|state| state.next_present_tick)
+        .unwrap_or(0)
 }
 
 /// Copy `state`'s damage to the display at its scale: each monitor of a

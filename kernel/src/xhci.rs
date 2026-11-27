@@ -640,7 +640,11 @@ impl XhciController {
     /// The speed of the device being addressed: behind a hub, the speed
     /// its hub port reported; otherwise its root port's.
     fn device_speed(&self) -> Result<u8, InitError> {
-        if self.dev_speed != 0 { Ok(self.dev_speed) } else { self.port_speed() }
+        if self.dev_speed != 0 {
+            Ok(self.dev_speed)
+        } else {
+            self.port_speed()
+        }
     }
 
     fn enable_slot(&mut self) -> Result<u8, InitError> {
@@ -1451,8 +1455,9 @@ impl XhciController {
     /// consumed either way.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     fn attach_current(&mut self, port: u8, depth: u8, count: &mut usize) {
-        let Ok((descriptor, total_length, configuration)) =
-            self.address_device().and_then(|()| self.read_configuration())
+        let Ok((descriptor, total_length, configuration)) = self
+            .address_device()
+            .and_then(|()| self.read_configuration())
         else {
             self.slot_id = 0;
             return;
@@ -1464,9 +1469,15 @@ impl XhciController {
             if self.device_speed().is_ok_and(|speed| speed < 4) && depth < MAX_HUB_DEPTH {
                 match self.enumerate_hub(port, depth, configuration, protocol, count) {
                     Ok(ports) => crate::serial::write_line(format_args!(
-                        "[USB] hub on port {} (tier {}): {} ports", port, depth + 1, ports
+                        "[USB] hub on port {} (tier {}): {} ports",
+                        port,
+                        depth + 1,
+                        ports
                     )),
-                    Err(error) => crate::serial::write_line(format_args!("[USB] hub on port {}: {:?}", port, error)),
+                    Err(error) => crate::serial::write_line(format_args!(
+                        "[USB] hub on port {}: {:?}",
+                        port, error
+                    )),
                 }
             }
             self.slot_id = 0;
@@ -1483,7 +1494,10 @@ impl XhciController {
                         self.storage = Some(device);
                     }
                     Err(error) => {
-                        crate::serial::write_line(format_args!("[USB] mass storage on port {}: {:?}", port, error));
+                        crate::serial::write_line(format_args!(
+                            "[USB] mass storage on port {}: {:?}",
+                            port, error
+                        ));
                     }
                 }
                 self.slot_id = 0;
@@ -1507,14 +1521,17 @@ impl XhciController {
             };
             // Report only on change: the enumeration's short idle period
             // exists for the Stage 13.6 probe, not for input devices.
-            self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface)).ok()?;
+            self.control_no_data(0x21, USB_REQUEST_SET_IDLE, 0, u16::from(hid.interface))
+                .ok()?;
             let limit = if layout.is_some() { MAX_REPORT } else { 8 };
             Some(InputDevice {
                 slot_id: self.slot_id,
                 port,
                 kind: summary.kind,
                 layout,
-                dci: (hid.endpoint_address & 0x0f).saturating_mul(2).saturating_add(1),
+                dci: (hid.endpoint_address & 0x0f)
+                    .saturating_mul(2)
+                    .saturating_add(1),
                 length: cmp::min(usize::from(hid.max_packet), limit),
                 ring: self.hid_ring.take()?,
                 buffer: self.hid_buffer.take()?,
@@ -1539,11 +1556,30 @@ impl XhciController {
     /// Configure the hub in the active slot and attach the device on each
     /// of its connected ports. Returns the hub's port count.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-    fn enumerate_hub(&mut self, root_port: u8, depth: u8, configuration: u8, protocol: u8, count: &mut usize) -> Result<u8, InitError> {
-        self.control_no_data(0x00, USB_REQUEST_SET_CONFIGURATION, u16::from(configuration), 0)?;
+    fn enumerate_hub(
+        &mut self,
+        root_port: u8,
+        depth: u8,
+        configuration: u8,
+        protocol: u8,
+        count: &mut usize,
+    ) -> Result<u8, InitError> {
+        self.control_no_data(
+            0x00,
+            USB_REQUEST_SET_CONFIGURATION,
+            u16::from(configuration),
+            0,
+        )?;
         let mut descriptor = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         // GET_DESCRIPTOR(Hub), class request to the device.
-        self.control_in(0xa0, USB_REQUEST_GET_DESCRIPTOR, u16::from(USB_DESCRIPTOR_HUB) << 8, 0, &mut descriptor, 9)?;
+        self.control_in(
+            0xa0,
+            USB_REQUEST_GET_DESCRIPTOR,
+            u16::from(USB_DESCRIPTOR_HUB) << 8,
+            0,
+            &mut descriptor,
+            9,
+        )?;
         let bytes = descriptor.bytes();
         if bytes[0] < 7 || bytes[1] != USB_DESCRIPTOR_HUB {
             return Err(InitError::DescriptorInvalid);
@@ -1563,17 +1599,31 @@ impl XhciController {
             output_context: self.output_context.take(),
         };
         for hub_port in 1..=ports {
-            let _ = self.hub_request(&mut hub, |c| c.control_no_data(0x23, USB_REQUEST_SET_FEATURE, HUB_PORT_POWER, u16::from(hub_port)));
+            let _ = self.hub_request(&mut hub, |c| {
+                c.control_no_data(
+                    0x23,
+                    USB_REQUEST_SET_FEATURE,
+                    HUB_PORT_POWER,
+                    u16::from(hub_port),
+                )
+            });
         }
         hold_ticks(power_good_ticks);
         for hub_port in 1..=ports {
-            let Ok(Some(port_speed)) = self.hub_request(&mut hub, |c| c.reset_hub_port(hub_port)) else { continue };
+            let Ok(Some(port_speed)) = self.hub_request(&mut hub, |c| c.reset_hub_port(hub_port))
+            else {
+                continue;
+            };
             // The device behind this port: its route adds the port at this
             // tier; behind a high-speed hub a slower device uses the hub's
             // transaction translator.
             self.dev_speed = port_speed;
             self.dev_route = hub.route | (u32::from(hub_port) << (4 * u32::from(depth)));
-            self.dev_tt = if hub.speed == 3 && port_speed < 3 { (hub.slot_id, hub_port) } else { hub.tt };
+            self.dev_tt = if hub.speed == 3 && port_speed < 3 {
+                (hub.slot_id, hub_port)
+            } else {
+                hub.tt
+            };
             self.output_context = None;
             self.ep0_ring = None;
             self.slot_id = match self.enable_slot() {
@@ -1596,13 +1646,18 @@ impl XhciController {
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
     fn mark_hub(&mut self, ports: u8, multi_tt: bool, think_time: u16) -> Result<(), InitError> {
         let mut input = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
-        let output = self.output_context.as_ref().ok_or(InitError::CommandFailed)?;
-        input.bytes_mut()[self.context_size..self.context_size * 2].copy_from_slice(&output.bytes()[..self.context_size]);
+        let output = self
+            .output_context
+            .as_ref()
+            .ok_or(InitError::CommandFailed)?;
+        input.bytes_mut()[self.context_size..self.context_size * 2]
+            .copy_from_slice(&output.bytes()[..self.context_size]);
         write_u32(input.bytes_mut(), 4, 1);
         let slot = self.context_size;
         let dword0 = read_u32(input.bytes(), slot) | (1 << 26) | (u32::from(multi_tt) << 25);
         let dword1 = (read_u32(input.bytes(), slot + 4) & !(0xff << 24)) | (u32::from(ports) << 24);
-        let dword2 = (read_u32(input.bytes(), slot + 8) & !(0x3 << 16)) | (u32::from(think_time) << 16);
+        let dword2 =
+            (read_u32(input.bytes(), slot + 8) & !(0x3 << 16)) | (u32::from(think_time) << 16);
         write_u32(input.bytes_mut(), slot, dword0);
         write_u32(input.bytes_mut(), slot + 4, dword1);
         write_u32(input.bytes_mut(), slot + 8, dword2);
@@ -1618,8 +1673,16 @@ impl XhciController {
 
     /// Run `request` on `hub`'s control pipe, then give the active slot back.
     #[cfg(any(not(feature = "qemu-test"), feature = "stage13-12-test"))]
-    fn hub_request<R>(&mut self, hub: &mut HubDevice, request: impl FnOnce(&mut Self) -> Result<R, InitError>) -> Result<R, InitError> {
-        let saved = (self.slot_id, self.ep0_ring.take(), self.output_context.take());
+    fn hub_request<R>(
+        &mut self,
+        hub: &mut HubDevice,
+        request: impl FnOnce(&mut Self) -> Result<R, InitError>,
+    ) -> Result<R, InitError> {
+        let saved = (
+            self.slot_id,
+            self.ep0_ring.take(),
+            self.output_context.take(),
+        );
         self.slot_id = hub.slot_id;
         self.ep0_ring = hub.ep0_ring.take();
         self.output_context = hub.output_context.take();
@@ -1636,15 +1699,30 @@ impl XhciController {
     fn reset_hub_port(&mut self, hub_port: u8) -> Result<Option<u8>, InitError> {
         let mut status = DmaPage::allocate_zeroed().ok_or(InitError::DmaUnavailable)?;
         let read = |c: &mut Self, status: &mut DmaPage| -> Result<(u16, u16), InitError> {
-            c.control_in(0xa3, USB_REQUEST_GET_STATUS, 0, u16::from(hub_port), status, 4)?;
+            c.control_in(
+                0xa3,
+                USB_REQUEST_GET_STATUS,
+                0,
+                u16::from(hub_port),
+                status,
+                4,
+            )?;
             let bytes = status.bytes();
-            Ok((u16::from_le_bytes([bytes[0], bytes[1]]), u16::from_le_bytes([bytes[2], bytes[3]])))
+            Ok((
+                u16::from_le_bytes([bytes[0], bytes[1]]),
+                u16::from_le_bytes([bytes[2], bytes[3]]),
+            ))
         };
         let (port_status, _) = read(self, &mut status)?;
         if port_status & HUB_PORT_STATUS_CONNECTION == 0 {
             return Ok(None);
         }
-        self.control_no_data(0x23, USB_REQUEST_SET_FEATURE, HUB_PORT_RESET, u16::from(hub_port))?;
+        self.control_no_data(
+            0x23,
+            USB_REQUEST_SET_FEATURE,
+            HUB_PORT_RESET,
+            u16::from(hub_port),
+        )?;
         let mut reset = None;
         for _ in 0..100 {
             hold_ticks(1);
@@ -1655,8 +1733,18 @@ impl XhciController {
             }
         }
         let port_status = reset.ok_or(InitError::ControllerTimeout)?;
-        let _ = self.control_no_data(0x23, USB_REQUEST_CLEAR_FEATURE, HUB_C_PORT_RESET, u16::from(hub_port));
-        let _ = self.control_no_data(0x23, USB_REQUEST_CLEAR_FEATURE, HUB_C_PORT_CONNECTION, u16::from(hub_port));
+        let _ = self.control_no_data(
+            0x23,
+            USB_REQUEST_CLEAR_FEATURE,
+            HUB_C_PORT_RESET,
+            u16::from(hub_port),
+        );
+        let _ = self.control_no_data(
+            0x23,
+            USB_REQUEST_CLEAR_FEATURE,
+            HUB_C_PORT_CONNECTION,
+            u16::from(hub_port),
+        );
         if port_status & HUB_PORT_STATUS_ENABLE == 0 {
             return Ok(None);
         }
@@ -3028,18 +3116,27 @@ fn take_from_firmware(mmio: u64, hcc1: u32) -> Result<(), InitError> {
                 let now = mmio_read32(capability)?;
                 if now & LEGACY_BIOS_OWNED != 0 {
                     // The firmware did not let go: take it anyway.
-                    crate::serial::write_line(format_args!("[USB] xHCI: firmware kept ownership; forcing the handoff"));
+                    crate::serial::write_line(format_args!(
+                        "[USB] xHCI: firmware kept ownership; forcing the handoff"
+                    ));
                     mmio_write32(capability, (now & !LEGACY_BIOS_OWNED) | LEGACY_OS_OWNED)?;
                 }
             }
             // USB Legacy Support Control/Status: SMI enables off, the
             // write-one-to-clear SMI status bits cleared.
             let control = mmio_read32(capability + 4)?;
-            mmio_write32(capability + 4, (control & !LEGACY_SMI_ENABLES) | LEGACY_SMI_STATUS)?;
+            mmio_write32(
+                capability + 4,
+                (control & !LEGACY_SMI_ENABLES) | LEGACY_SMI_STATUS,
+            )?;
             return Ok(());
         }
         let next = (header >> 8) & 0xff;
-        offset = if next == 0 { 0 } else { offset + u64::from(next) * 4 };
+        offset = if next == 0 {
+            0
+        } else {
+            offset + u64::from(next) * 4
+        };
     }
     Ok(())
 }

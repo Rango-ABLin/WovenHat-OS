@@ -809,7 +809,12 @@ pub fn discover_and_route() -> Summary {
             ADMISSION_READY.store(true, Ordering::Release);
         }
         #[cfg(feature = "qemu-test")]
-        Err(_) => return Summary { truncated: true, ..summary },
+        Err(_) => {
+            return Summary {
+                truncated: true,
+                ..summary
+            }
+        }
     }
     summary
 }

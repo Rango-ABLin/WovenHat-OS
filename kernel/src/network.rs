@@ -2889,10 +2889,7 @@ fn tcp_ingress_admitted(runtime: &mut Runtime, entry: &UserSocket) -> bool {
     ) {
         return true;
     }
-    runtime
-        .sockets
-        .get_mut::<tcp::Socket>(entry.handle)
-        .abort();
+    runtime.sockets.get_mut::<tcp::Socket>(entry.handle).abort();
     false
 }
 
@@ -3944,7 +3941,10 @@ pub struct WovenFirewall {
 }
 
 impl WovenFirewall {
-    #[expect(dead_code, reason = "deny-by-default standalone policy is used by protocol acceptance tests")]
+    #[expect(
+        dead_code,
+        reason = "deny-by-default standalone policy is used by protocol acceptance tests"
+    )]
     pub const fn new() -> Self {
         Self::with_default(FirewallAction::Deny)
     }
@@ -3957,10 +3957,12 @@ impl WovenFirewall {
         }
     }
 
-    #[expect(dead_code, reason = "kernel policy management consumes this bounded rule API")]
+    #[expect(
+        dead_code,
+        reason = "kernel policy management consumes this bounded rule API"
+    )]
     pub fn add(&mut self, mut rule: WovenFirewallRule) -> Result<WovenFirewallRule, FirewallError> {
-        if rule.remote_port == 0 && rule.local_port == 0 && rule.protocol != FirewallProtocol::Any
-        {
+        if rule.remote_port == 0 && rule.local_port == 0 && rule.protocol != FirewallProtocol::Any {
             // A zero port is the only wildcard representation. `Any` may use it
             // because it also covers port-less protocols, but a rule naming TCP
             // or UDP must name at least one endpoint port. A port-less protocol
@@ -3992,7 +3994,10 @@ impl WovenFirewall {
         Ok(rule)
     }
 
-    #[expect(dead_code, reason = "kernel policy management consumes this bounded revocation API")]
+    #[expect(
+        dead_code,
+        reason = "kernel policy management consumes this bounded revocation API"
+    )]
     pub fn remove(&mut self, rule: WovenFirewallRule) -> Result<(), FirewallError> {
         let Some(slot) = self.slots.iter_mut().find(|slot| slot.rule == Some(rule)) else {
             return Err(FirewallError::InvalidHandle);
@@ -4027,10 +4032,13 @@ impl WovenFirewall {
                     && (rule.remote_port == 0 || rule.remote_port == remote_port)
                     && (rule.local_port == 0 || rule.local_port == local_port)
             })
-            .map_or(self.default_action == FirewallAction::Allow, |rule| match rule.action {
-                FirewallAction::Allow => true,
-                FirewallAction::Deny => false,
-            })
+            .map_or(
+                self.default_action == FirewallAction::Allow,
+                |rule| match rule.action {
+                    FirewallAction::Allow => true,
+                    FirewallAction::Deny => false,
+                },
+            )
     }
 }
 
@@ -4182,7 +4190,10 @@ fn firewall_admit_socket(
 
 /// Install a kernel-managed policy rule. Callers must already hold the network
 /// management authority; user socket operations cannot add rules themselves.
-#[expect(dead_code, reason = "policy management syscall/service integration is a later stage")]
+#[expect(
+    dead_code,
+    reason = "policy management syscall/service integration is a later stage"
+)]
 pub fn firewall_add_rule(rule: WovenFirewallRule) -> Result<WovenFirewallRule, FirewallError> {
     let Some(runtime) = RUNTIME.get() else {
         return Err(FirewallError::Capacity);
@@ -4190,7 +4201,10 @@ pub fn firewall_add_rule(rule: WovenFirewallRule) -> Result<WovenFirewallRule, F
     runtime.lock().firewall.add(rule)
 }
 
-#[expect(dead_code, reason = "policy management syscall/service integration is a later stage")]
+#[expect(
+    dead_code,
+    reason = "policy management syscall/service integration is a later stage"
+)]
 pub fn firewall_remove_rule(rule: WovenFirewallRule) -> Result<(), FirewallError> {
     let Some(runtime) = RUNTIME.get() else {
         return Err(FirewallError::InvalidHandle);
@@ -4247,7 +4261,9 @@ pub fn stage14_5_firewall_self_test() -> bool {
             generation: 0,
         })
         .ok();
-    let Some(allow_dns) = allow_dns else { return false; };
+    let Some(allow_dns) = allow_dns else {
+        return false;
+    };
     let middle = firewall
         .add(WovenFirewallRule {
             direction: FirewallDirection::Egress,
@@ -4260,7 +4276,9 @@ pub fn stage14_5_firewall_self_test() -> bool {
             generation: 0,
         })
         .ok();
-    let Some(middle) = middle else { return false; };
+    let Some(middle) = middle else {
+        return false;
+    };
     let top = firewall
         .add(WovenFirewallRule {
             direction: FirewallDirection::Ingress,
@@ -4273,7 +4291,9 @@ pub fn stage14_5_firewall_self_test() -> bool {
             generation: 0,
         })
         .ok();
-    let Some(top) = top else { return false; };
+    let Some(top) = top else {
+        return false;
+    };
     if firewall.remove(middle).is_err()
         || firewall
             .add(WovenFirewallRule {
@@ -4320,10 +4340,7 @@ pub fn stage14_5_firewall_self_test() -> bool {
 #[cfg(feature = "stage14-6-test")]
 pub fn stage14_6_socket_firewall_self_test() -> bool {
     const OWNER: u64 = u64::MAX - 0x146;
-    let remote = IpEndpoint::new(
-        IpAddress::Ipv4(Ipv4Address::new(198, 51, 100, 7)),
-        5353,
-    );
+    let remote = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(198, 51, 100, 7)), 5353);
     let Ok(rule) = firewall_add_rule(WovenFirewallRule {
         direction: FirewallDirection::Egress,
         protocol: FirewallProtocol::Udp,

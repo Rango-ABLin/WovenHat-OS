@@ -4911,7 +4911,9 @@ fn sys_input_inject(kind: u64, value1: u64, value2: u64) -> u64 {
         INPUT_KIND_CHAR => Some(crate::woven_input::Event::Key(
             crate::woven_input::Key::Char((value1 as u32) as u8 as char),
         )),
-        INPUT_KIND_ENTER => Some(crate::woven_input::Event::Key(crate::woven_input::Key::Enter)),
+        INPUT_KIND_ENTER => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::Enter,
+        )),
         INPUT_KIND_BACKSPACE => Some(crate::woven_input::Event::Key(
             crate::woven_input::Key::Backspace,
         )),

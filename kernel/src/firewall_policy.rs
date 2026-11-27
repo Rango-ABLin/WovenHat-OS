@@ -422,7 +422,9 @@ fn packet_meta_from_ethernet(frame: &[u8], direction: FirewallDirection) -> Fram
                 return FrameClassification::Invalid;
             }
             let fragmentation = u16::from_be_bytes([ip[6], ip[7]]);
-            if fragmentation & 0xbfff != 0 { return FrameClassification::Invalid; }
+            if fragmentation & 0xbfff != 0 {
+                return FrameClassification::Invalid;
+            }
             let source = IpAddress::Ipv4(Ipv4Address::new(ip[12], ip[13], ip[14], ip[15]));
             let destination = IpAddress::Ipv4(Ipv4Address::new(ip[16], ip[17], ip[18], ip[19]));
             let Some((protocol, ports)) = transport_meta(ip[9], &ip[header_len..total_len], false)
@@ -543,10 +545,17 @@ fn transport_meta(
             ))
         }
         17 => {
-            if payload.len() < 8 { return None; }
+            if payload.len() < 8 {
+                return None;
+            }
             let udp_len = usize::from(u16::from_be_bytes([payload[4], payload[5]]));
-            if udp_len < 8 || udp_len > payload.len() { return None; }
-            let ports = (u16::from_be_bytes([payload[0],payload[1]]), u16::from_be_bytes([payload[2],payload[3]]));
+            if udp_len < 8 || udp_len > payload.len() {
+                return None;
+            }
+            let ports = (
+                u16::from_be_bytes([payload[0], payload[1]]),
+                u16::from_be_bytes([payload[2], payload[3]]),
+            );
             Some((FirewallProtocol::Udp, Some(ports)))
         }
         1 if !ipv6 && payload.len() >= 8 => Some((FirewallProtocol::Icmp, None)),
@@ -968,7 +977,8 @@ pub fn stage14_5d_self_test() -> bool {
     vlan[38..40].copy_from_slice(&50000u16.to_be_bytes());
     vlan[40..42].copy_from_slice(&7000u16.to_be_bytes());
     vlan[42..44].copy_from_slice(&8u16.to_be_bytes());
-    let vlan_allow = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
+    let vlan_allow =
+        evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Allow;
 
     let mut tcp = [0u8; 14 + 4 + 20 + 20];
     tcp[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
@@ -979,7 +989,8 @@ pub fn stage14_5d_self_test() -> bool {
     tcp[38..40].copy_from_slice(&50000u16.to_be_bytes());
     tcp[40..42].copy_from_slice(&7000u16.to_be_bytes());
     tcp[50] = 0x50;
-    let tcp_allow = evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Allow;
+    let tcp_allow =
+        evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Allow;
     tcp[50] = 0x40;
     let tcp_short_header_denied =
         evaluate_ethernet_frame(&tcp, FirewallDirection::Inbound) == FrameDecision::Deny;
@@ -990,7 +1001,8 @@ pub fn stage14_5d_self_test() -> bool {
 
     let mut icmp = vlan;
     icmp[27] = 1;
-    let icmp_allow = evaluate_ethernet_frame(&icmp, FirewallDirection::Inbound) == FrameDecision::Allow;
+    let icmp_allow =
+        evaluate_ethernet_frame(&icmp, FirewallDirection::Inbound) == FrameDecision::Allow;
     icmp[20..22].copy_from_slice(&24u16.to_be_bytes());
     let icmp_short_denied =
         evaluate_ethernet_frame(&icmp, FirewallDirection::Inbound) == FrameDecision::Deny;
@@ -1001,14 +1013,16 @@ pub fn stage14_5d_self_test() -> bool {
     icmpv6[14] = 0x60;
     icmpv6[18..20].copy_from_slice(&8u16.to_be_bytes());
     icmpv6[20] = 58;
-    let icmpv6_allow = evaluate_ethernet_frame(&icmpv6, FirewallDirection::Inbound) == FrameDecision::Allow;
+    let icmpv6_allow =
+        evaluate_ethernet_frame(&icmpv6, FirewallDirection::Inbound) == FrameDecision::Allow;
     icmpv6[18..20].copy_from_slice(&4u16.to_be_bytes());
     let icmpv6_short_denied =
         evaluate_ethernet_frame(&icmpv6, FirewallDirection::Inbound) == FrameDecision::Deny;
     let icmpv6_length_validation = icmpv6_allow && icmpv6_short_denied;
 
     vlan[40..42].copy_from_slice(&7001u16.to_be_bytes());
-    let vlan_deny = evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let vlan_deny =
+        evaluate_ethernet_frame(&vlan, FirewallDirection::Inbound) == FrameDecision::Deny;
 
     let mut stacked_vlan = [0u8; 14 + 8 + 20 + 8];
     stacked_vlan[12..14].copy_from_slice(&0x88a8u16.to_be_bytes());
@@ -1048,8 +1062,8 @@ pub fn stage14_5d_self_test() -> bool {
         FrameClassification::Valid(meta) => Some(meta),
         FrameClassification::NonIp | FrameClassification::Invalid => None,
     };
-    let other_protocol_allowed = evaluate_ethernet_frame(&gre, FirewallDirection::Inbound)
-        == FrameDecision::Allow;
+    let other_protocol_allowed =
+        evaluate_ethernet_frame(&gre, FirewallDirection::Inbound) == FrameDecision::Allow;
     let wildcard_policy = FirewallPolicy::new(FirewallAction::Deny);
     let mut wildcard_rule = base_rule(0x145d03, 1, FirewallAction::Allow);
     wildcard_rule.protocol = FirewallProtocol::Any;
@@ -1061,7 +1075,8 @@ pub fn stage14_5d_self_test() -> bool {
     let mut bad_udp = vlan;
     bad_udp[40..42].copy_from_slice(&7000u16.to_be_bytes());
     bad_udp[42..44].copy_from_slice(&0u16.to_be_bytes());
-    let malformed_udp = evaluate_ethernet_frame(&bad_udp, FirewallDirection::Inbound) == FrameDecision::Deny;
+    let malformed_udp =
+        evaluate_ethernet_frame(&bad_udp, FirewallDirection::Inbound) == FrameDecision::Deny;
 
     let mut fragmented = vlan;
     fragmented[24..26].copy_from_slice(&0x2000u16.to_be_bytes());
@@ -1071,7 +1086,8 @@ pub fn stage14_5d_self_test() -> bool {
     let non_ip = [0u8; 14];
     let non_ip_preserved =
         evaluate_ethernet_frame(&non_ip, FirewallDirection::Inbound) == FrameDecision::Allow;
-    let truncated = evaluate_ethernet_frame(&non_ip[..13], FirewallDirection::Inbound) == FrameDecision::Deny;
+    let truncated =
+        evaluate_ethernet_frame(&non_ip[..13], FirewallDirection::Inbound) == FrameDecision::Deny;
 
     crate::serial::write_line(format_args!(
         "[S14.5D] malformed IP fail-closed {}",
@@ -1087,19 +1103,31 @@ pub fn stage14_5d_self_test() -> bool {
     ));
     crate::serial::write_line(format_args!(
         "[S14.5D] VLAN policy enforcement {}",
-        if vlan_ok {"PASS"} else {"FAIL"}
+        if vlan_ok { "PASS" } else { "FAIL" }
     ));
     crate::serial::write_line(format_args!(
         "[S14.5D] transport and fragment validation {}",
-        if malformed_udp && fragment_denied && truncated {"PASS"} else {"FAIL"}
+        if malformed_udp && fragment_denied && truncated {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     ));
     crate::serial::write_line(format_args!(
         "[S14.5D] generic IP protocol policy {}",
-        if other_protocol_allowed && wildcard_matches_other {"PASS"} else {"FAIL"}
+        if other_protocol_allowed && wildcard_matches_other {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     ));
     crate::serial::write_line(format_args!(
         "[S14.5D] TCP/ICMP length validation {}",
-        if tcp_length_validation && icmp_length_validation && icmpv6_length_validation {"PASS"} else {"FAIL"}
+        if tcp_length_validation && icmp_length_validation && icmpv6_length_validation {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     ));
     crate::serial::write_line(format_args!(
         "[S14.5D] Forward datapath absent by design PASS"
@@ -1107,8 +1135,18 @@ pub fn stage14_5d_self_test() -> bool {
 
     LIVE_ENFORCEMENT.store(false, Ordering::Release);
     *global_policy().lock() = FirewallPolicy::new(FirewallAction::Deny);
-    installed && malformed_closed && extension_ok && vlan_ok && malformed_udp
-        && fragment_denied && non_ip_preserved && truncated && other_protocol_allowed
-        && wildcard_matches_other && fragment_v6_denied && tcp_length_validation
-        && icmp_length_validation && icmpv6_length_validation
+    installed
+        && malformed_closed
+        && extension_ok
+        && vlan_ok
+        && malformed_udp
+        && fragment_denied
+        && non_ip_preserved
+        && truncated
+        && other_protocol_allowed
+        && wildcard_matches_other
+        && fragment_v6_denied
+        && tcp_length_validation
+        && icmp_length_validation
+        && icmpv6_length_validation
 }

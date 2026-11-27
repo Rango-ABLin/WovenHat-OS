@@ -3667,7 +3667,6 @@ pub fn transaction_self_test() -> bool {
         && tx.ready()
 }
 
-
 // Stage 13.10N: BLE security authority derived from live ownership, persisted bond
 // material, and controller-confirmed encryption.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3679,7 +3678,11 @@ pub struct LeSecurityAuthority {
 
 impl LeSecurityAuthority {
     pub const fn new() -> Self {
-        Self { handle: None, material: None, encrypted: false }
+        Self {
+            handle: None,
+            material: None,
+            encrypted: false,
+        }
     }
 
     pub fn restore(
@@ -3695,11 +3698,7 @@ impl LeSecurityAuthority {
         Ok(())
     }
 
-    pub fn encryption_change(
-        &mut self,
-        links: &LeLinkState,
-        event: &[u8],
-    ) -> Result<(), HciError> {
+    pub fn encryption_change(&mut self, links: &LeLinkState, event: &[u8]) -> Result<(), HciError> {
         if event.len() != 6 || event[0] != EVT_ENCRYPTION_CHANGE || event[1] != 4 {
             return Err(HciError::MalformedEvent);
         }
@@ -3715,10 +3714,10 @@ impl LeSecurityAuthority {
     }
 
     pub fn trusted(&self, links: &LeLinkState) -> bool {
-        let Some(handle) = self.handle else { return false; };
-        self.encrypted
-            && self.material.is_some()
-            && LeBondStore::live_link(links, handle).is_some()
+        let Some(handle) = self.handle else {
+            return false;
+        };
+        self.encrypted && self.material.is_some() && LeBondStore::live_link(links, handle).is_some()
     }
 
     pub fn revoke(&mut self, handle: u16) {
@@ -3733,9 +3732,27 @@ impl LeSecurityAuthority {
 pub fn le_security_authority_self_test() -> bool {
     let mut links = LeLinkState::new();
     let connected = [
-        EVT_LE_META, 19, LE_SUBEVENT_CONNECTION_COMPLETE, 0,
-        0x42, 0x00, 0, 1, 1, 2, 3, 4, 5, 6,
-        0x18, 0x00, 0, 0, 0xf4, 0x01, 0,
+        EVT_LE_META,
+        19,
+        LE_SUBEVENT_CONNECTION_COMPLETE,
+        0,
+        0x42,
+        0x00,
+        0,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0x18,
+        0x00,
+        0,
+        0,
+        0xf4,
+        0x01,
+        0,
     ];
     if links.handle_connection_complete(&connected).is_err() {
         return false;
@@ -3757,16 +3774,17 @@ pub fn le_security_authority_self_test() -> bool {
     if authority.restore(&links, &bonds, 0x42).is_err() || authority.trusted(&links) {
         return false;
     }
-    if authority.encryption_change(
-        &links,
-        &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1],
-    ).is_err() || !authority.trusted(&links) {
+    if authority
+        .encryption_change(&links, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x42, 0, 1])
+        .is_err()
+        || !authority.trusted(&links)
+    {
         return false;
     }
-    if authority.encryption_change(
-        &links,
-        &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1],
-    ).is_ok() {
+    if authority
+        .encryption_change(&links, &[EVT_ENCRYPTION_CHANGE, 4, 0, 0x43, 0, 1])
+        .is_ok()
+    {
         return false;
     }
 

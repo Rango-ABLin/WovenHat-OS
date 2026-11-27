@@ -4,7 +4,7 @@
 //! This opt-in adapter qualifies coordinated process mappings only. Parallel raw
 //! mmap/munmap, fork/exec and thread-lifecycle VM transactions require the future
 //! kernel lease layer; this lock serializes heap calls, not those other syscalls.
-use crate::heap::{Heap, MAX_REGIONS, REGION_BYTES, Stats};
+use crate::userspace_allocator::heap::{Heap, Stats, MAX_REGIONS, REGION_BYTES};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cell::UnsafeCell,
@@ -236,11 +236,9 @@ mod tests {
             let base = self.base.load(Ordering::Relaxed);
             let offset = address.checked_sub(base.addr()).expect("host VM address");
             assert!(size != 0);
-            assert!(
-                offset
-                    .checked_add(size)
-                    .is_some_and(|end| end <= REGION_BYTES * MAX_REGIONS)
-            );
+            assert!(offset
+                .checked_add(size)
+                .is_some_and(|end| end <= REGION_BYTES * MAX_REGIONS));
             // SAFETY: this pointer derives from the original live System buffer,
             // not from an integer. The checked extent is inside that allocation.
             // Heap reserves disjoint payload ranges and the buffer outlives them.
@@ -266,18 +264,14 @@ mod tests {
             old.write_bytes(0xa5, 4096);
             let large = require_test_allocation(heap.realloc(old, spec, 180000));
             assert_eq!(large as usize % 256, 0);
-            assert!(
-                core::slice::from_raw_parts(large, 4096)
-                    .iter()
-                    .all(|b| *b == 0xa5)
-            );
+            assert!(core::slice::from_raw_parts(large, 4096)
+                .iter()
+                .all(|b| *b == 0xa5));
             heap.dealloc(large, Layout::from_size_align(180000, 256).unwrap());
             let zeroed = require_test_allocation(heap.alloc_zeroed(spec));
-            assert!(
-                core::slice::from_raw_parts(zeroed, 4096)
-                    .iter()
-                    .all(|b| *b == 0)
-            );
+            assert!(core::slice::from_raw_parts(zeroed, 4096)
+                .iter()
+                .all(|b| *b == 0));
             heap.dealloc(zeroed, spec);
         }
         assert_eq!(heap.stats().live_allocations, 0);
@@ -311,17 +305,14 @@ mod tests {
         unsafe {
             let kept = require_test_allocation(heap.alloc(small));
             kept.write_bytes(0x55, 32);
-            assert!(
-                heap.alloc(Layout::from_size_align(3 * REGION_BYTES, 16).unwrap())
-                    .is_null()
-            );
+            assert!(heap
+                .alloc(Layout::from_size_align(3 * REGION_BYTES, 16).unwrap())
+                .is_null());
             assert_eq!(heap.stats().regions, 1);
             assert_eq!(heap.vm.slots.load(Ordering::Relaxed), 1);
-            assert!(
-                core::slice::from_raw_parts(kept, 32)
-                    .iter()
-                    .all(|b| *b == 0x55)
-            );
+            assert!(core::slice::from_raw_parts(kept, 32)
+                .iter()
+                .all(|b| *b == 0x55));
             heap.dealloc(kept, small);
         }
     }
@@ -357,11 +348,9 @@ mod tests {
                         let pointer = require_test_allocation(heap.alloc(spec));
                         pointer.write_bytes(id as u8 + 1, spec.size());
                         thread::yield_now();
-                        assert!(
-                            core::slice::from_raw_parts(pointer, spec.size())
-                                .iter()
-                                .all(|b| *b == id as u8 + 1)
-                        );
+                        assert!(core::slice::from_raw_parts(pointer, spec.size())
+                            .iter()
+                            .all(|b| *b == id as u8 + 1));
                         heap.dealloc(pointer, spec);
                     }
                 }
@@ -376,3 +365,6 @@ mod tests {
         assert_eq!(heap.stats().regions, 1);
     }
 }
+
+#[cfg(all(feature = "reclaiming-allocator", target_os = "none"))]
+pub(crate) static USER_HEAP: RuntimeHeap<NativeVm> = RuntimeHeap::new(NativeVm);

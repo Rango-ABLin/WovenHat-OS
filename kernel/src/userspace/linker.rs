@@ -1252,7 +1252,14 @@ fn load_with_candidate_bias_env(
     let trampoline_base = image_end.checked_add(4095)? & !4095;
     let minimum_mmap_base = trampoline_base.checked_add(4096)?;
     let mmap_base = aslr_mmap_base()?.max(minimum_mmap_base);
-    load_with_geometry(bytes, args, env, candidate_bias, aslr_stack_base()?, mmap_base)
+    load_with_geometry(
+        bytes,
+        args,
+        env,
+        candidate_bias,
+        aslr_stack_base()?,
+        mmap_base,
+    )
 }
 
 // One graph-loader path for production draws and forced-draw CPU regressions.

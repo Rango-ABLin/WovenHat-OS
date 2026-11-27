@@ -18,9 +18,6 @@ extern crate alloc;
 #[cfg(any(feature = "physical-probe", feature = "physical-wifi"))]
 mod physical_probe;
 
-mod pager_queue;
-mod vm_handoff;
-mod vm_generation;
 mod accounts;
 #[cfg(any(
     not(feature = "qemu-test"),
@@ -48,6 +45,9 @@ mod config;
 mod console;
 mod deadline;
 mod device;
+mod pager_queue;
+mod vm_generation;
+mod vm_handoff;
 // Public kernel instrumentation API; does not expose userspace authority.
 mod audio_status;
 pub mod diagnostics;
@@ -6330,10 +6330,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "wovenweb-memory-test")]
     {
         if !wovenweb_memory_gate::run() {
-            serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: FAILED"));
+            serial::write_line(format_args!(
+                "[WOVENWEB-HEAP] native memory platform: FAILED"
+            ));
             qemu_test_exit_failure();
         }
-        serial::write_line(format_args!("[WOVENWEB-HEAP] native memory platform: PASSED"));
+        serial::write_line(format_args!(
+            "[WOVENWEB-HEAP] native memory platform: PASSED"
+        ));
         qemu_test_exit_success();
     }
     #[cfg(feature = "wovenweb-net-test")]
@@ -6746,7 +6750,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     {
         const IMAGE: &[u8] = include_bytes!(env!("WOVENHAT_WEB_NET_PROBE_IMAGE"));
         if !task::vm_handoff_reaping_self_test() {
-            serial::write_line(format_args!("[WOVENWEB-VM] physical handoff reaping guard: FAILED"));
+            serial::write_line(format_args!(
+                "[WOVENWEB-VM] physical handoff reaping guard: FAILED"
+            ));
             qemu_test_exit_failure();
         }
         if !task::pager_reap_lifetime_self_test(IMAGE) {
@@ -6754,7 +6760,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             qemu_test_exit_failure();
         }
         if !task::pager_thread_publication_self_test(IMAGE) {
-            serial::write_line(format_args!("[WOVENWEB-VM] sibling-thread publication: FAILED"));
+            serial::write_line(format_args!(
+                "[WOVENWEB-VM] sibling-thread publication: FAILED"
+            ));
             qemu_test_exit_failure();
         }
         if !task::pager_queued_publication_self_test(IMAGE) {
@@ -8784,7 +8792,10 @@ fn install_production_system_apps() -> bool {
     }
     let share_created = if vfs::stat("/share").is_err() {
         if let Err(error) = vfs::mkdir("/share") {
-            serial::write_line(format_args!("[APPS] /share mkdir failed; code={}", error as u8));
+            serial::write_line(format_args!(
+                "[APPS] /share mkdir failed; code={}",
+                error as u8
+            ));
             return false;
         }
         true
@@ -8793,7 +8804,10 @@ fn install_production_system_apps() -> bool {
     };
     let applications_created = if vfs::stat("/share/applications").is_err() {
         if let Err(error) = vfs::mkdir("/share/applications") {
-            serial::write_line(format_args!("[APPS] applications mkdir failed; code={}", error as u8));
+            serial::write_line(format_args!(
+                "[APPS] applications mkdir failed; code={}",
+                error as u8
+            ));
             if share_created {
                 let _ = vfs::remove("/share");
             }
@@ -8828,7 +8842,12 @@ fn install_production_system_apps() -> bool {
     let mut installed = 0usize;
     for app in apps {
         if let Err(error) = vfs::create_read_only(app.binary_path, app.image) {
-            serial::write_line(format_args!("[APPS] binary {} failed; code={} size={}", app.name, error as u8, app.image.len()));
+            serial::write_line(format_args!(
+                "[APPS] binary {} failed; code={} size={}",
+                app.name,
+                error as u8,
+                app.image.len()
+            ));
             for rollback in apps.into_iter().take(installed) {
                 let _ = vfs::remove(rollback.binary_path);
             }
@@ -8845,7 +8864,10 @@ fn install_production_system_apps() -> bool {
     let mut catalogs = 0usize;
     for app in apps {
         if let Err(error) = vfs::create_read_only(app.catalog_path, app.catalog) {
-            serial::write_line(format_args!("[APPS] catalog {} failed; code={}", app.name, error as u8));
+            serial::write_line(format_args!(
+                "[APPS] catalog {} failed; code={}",
+                app.name, error as u8
+            ));
             for rollback in apps {
                 if catalogs > 0 {
                     let _ = vfs::remove(rollback.catalog_path);
@@ -14586,7 +14608,11 @@ fn stage20_6_self_test() -> bool {
         serial::write_line(format_args!(
             "[S20.6] rounded toast interior actual={:?}, expected={:#08x}",
             compositor::pixel(toast_x + 160, toast_y + 11),
-            blend_pixel(TOAST_FILL, wallpaper(toast_x + 160, toast_y + 11, height), 235),
+            blend_pixel(
+                TOAST_FILL,
+                wallpaper(toast_x + 160, toast_y + 11, height),
+                235
+            ),
         ));
     }
     if !step("the toast is translucent over the wallpaper", toast) {
@@ -15838,7 +15864,9 @@ fn stage20_2_self_test() -> bool {
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
-            "[S20.2] {} {}", name, if ok { "PASS" } else { "FAIL" }
+            "[S20.2] {} {}",
+            name,
+            if ok { "PASS" } else { "FAIL" }
         ));
         ok
     }
@@ -15983,9 +16011,8 @@ fn stage20_2_self_test() -> bool {
     }
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags = 0x08 | u8::from(left)
-            | if dx < 0 { 0x10 } else { 0 }
-            | if dy < 0 { 0x20 } else { 0 };
+        let flags =
+            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
@@ -16266,16 +16293,14 @@ fn stage20_2_self_test() -> bool {
     let raised = move_by(target_x - px, target_y - py)
         && click()
         && until(1000, || {
-            compositor::pixel(150, 100) == Ok(RED)
-                && indicator(width, height, 3, 2)
+            compositor::pixel(150, 100) == Ok(RED) && indicator(width, height, 3, 2)
         });
     (px, py) = (target_x, target_y);
     if !step("taskbar icon click raises window A", raised) {
         return false;
     }
     let pointer = until(500, || {
-        compositor::pixel(px, py) == Ok(BLACK)
-            && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
+        compositor::pixel(px, py) == Ok(BLACK) && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
     });
     if !step("pointer drawn at its position", pointer) {
         return false;

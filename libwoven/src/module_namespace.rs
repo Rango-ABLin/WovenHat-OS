@@ -189,7 +189,7 @@ impl Default for Namespace {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, MAX_MODULES, Namespace};
+    use super::{Error, Namespace, MAX_MODULES};
 
     #[test]
     fn stale_handles_cannot_resolve_after_unload_and_reuse() {

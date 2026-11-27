@@ -2,7 +2,7 @@
 //! boundaries. A platform network service supplies sockets, DNS-SD and TLS;
 //! this crate never treats a plaintext or unverified endpoint as a printer.
 
-use crate::web::{Endpoint, parse_endpoint};
+use crate::web::{parse_endpoint, Endpoint};
 
 pub const MAX_REQUEST: usize = 4096;
 pub const MAX_ATTRIBUTES: usize = 32;

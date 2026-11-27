@@ -139,7 +139,9 @@ pub fn start(image: &[u8], accounts: Option<&str>) -> Result<u64, Error> {
 /// Whether a session was started and its process has exited.
 #[cfg(feature = "system-apps")]
 pub fn ended() -> bool {
-    SESSION_PROCESS.lock().is_some_and(crate::task::process_exited)
+    SESSION_PROCESS
+        .lock()
+        .is_some_and(crate::task::process_exited)
 }
 
 /// The running session's process id.

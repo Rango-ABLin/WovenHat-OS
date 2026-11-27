@@ -49,7 +49,11 @@ pub fn pm_read() -> Option<(u32, u32)> {
     if port == 0 {
         return None;
     }
-    let mask = if config & (1 << 16) != 0 { u32::MAX } else { 0x00ff_ffff };
+    let mask = if config & (1 << 16) != 0 {
+        u32::MAX
+    } else {
+        0x00ff_ffff
+    };
     // SAFETY: the FADT names this port as the read-only PM timer.
     let value = unsafe { x86_64::instructions::port::Port::<u32>::new(port).read() };
     Some((value & mask, mask))
@@ -68,7 +72,12 @@ pub struct Deadline {
 
 impl Deadline {
     pub fn after_ms(limit_ms: u64) -> Self {
-        Self { start: pm_read(), elapsed: 0, start_tick: ticks(), limit_ms }
+        Self {
+            start: pm_read(),
+            elapsed: 0,
+            start_tick: ticks(),
+            limit_ms,
+        }
     }
 
     pub fn passed(&mut self) -> bool {
@@ -78,7 +87,10 @@ impl Deadline {
                 self.start = Some((now, mask));
                 self.elapsed * 1000 >= self.limit_ms * PM_TIMER_HZ
             }
-            _ => ticks().wrapping_sub(self.start_tick) * 1000 / u64::from(FREQUENCY_HZ) >= self.limit_ms,
+            _ => {
+                ticks().wrapping_sub(self.start_tick) * 1000 / u64::from(FREQUENCY_HZ)
+                    >= self.limit_ms
+            }
         }
     }
 }
