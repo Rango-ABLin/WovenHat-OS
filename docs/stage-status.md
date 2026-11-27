@@ -1,5 +1,41 @@
 # Stage status
 
+## Window shadow compositor stall diagnosed and bounded - 2026-11-27 - ACCEPTED (BOUNDED 1-CPU SOFTWARE/QEMU)
+
+The stall that forced frame-only maximize in `32c14dbe` was diagnosed as a
+throughput cliff, not a lock deadlock. `PreemptMutex` already defers local
+preemption, and `blend_region_for` takes the compositor guard only around a
+bounded blend. The shell's shadow loop, however, blended **three full
+frame-sized rectangles** per window (offset 10/6/2 pixels down-right), even
+though the window's title, client surface and border immediately overwrite the
+overlapping pixels. For a maximized window that is millions of per-pixel
+blends per repaint under 1-CPU TCG, which presented as a hang.
+
+`apps/woven-shell/src/geometry.rs` gained a bounded `Area::subtract`, and
+`repaint_once` now clips each shadow band to the visible ring outside the
+frame (a right strip and a bottom strip) before calling `painter.blend`.
+Shadows are restored; the removed code and its TODO are gone. For opaque
+windows the final pixels are unchanged; a fading translucent window no longer
+shows shadow beneath it, which is recorded as a deliberate bounded change.
+The remaining `present_region_blended` work is proportional to shadow reach
+times window perimeter rather than window area.
+
+Validation: `cargo fmt --all -- --check` and warning-denying freestanding shell
+Clippy pass; two new host tests (`apps/woven-shell/tests/geometry_area.rs`,
+`rustc --test`) prove subtraction is exact, disjoint and reduces a band around
+a 100x60 frame to 316 pixels instead of 6000. The unchanged
+`scripts/test-taskbar-pins.py --cpus 1 --memory 3G` gate PASSES with zero
+failures and retained `woven-shell: window maximized: Terminal` plus bounded
+repaint tick counts (max 503) under
+`D:\WovenHat-OS-output\audit-artifacts\shadow-clip-pins-1cpu-3G`. The lower
+guest RAM setting was forced by host free virtual memory (~3.9 GiB) being
+below the harness default 5G QEMU reservation; no assertion, timeout or
+budget was changed. 2/4-CPU and desktop-qualification reruns were not
+completed: another owner's in-progress kernel edits
+(`vfs.rs`/`storage.rs`/`fat32.rs`) currently break the kernel build, and I did
+not touch them. WSIZ client reflow on maximize therefore remains deferred
+until those gates can run; no full `RUN-STAGE10.7.ps1` chain is claimed here.
+
 ## Stage 1-19 current-head software gate closure - 2026-11-27 - VERIFIED (EXTERNAL GATES OPEN)
 
 At source `685e9cbe`, all bounded Stage 1-19 software/QEMU acceptance is

@@ -13,6 +13,18 @@ validate with the unchanged taskbar-pins and desktop-qualification gates at
 compositor or syscall changes, so it does not overlap the Copilot native
 compositor work below.
 
+Result: shadows restored with the visible-ring clip; `Area::subtract` has two
+host tests (`rustc --test`, geometry_area 2/2). Shell Clippy and fmt pass.
+`test-taskbar-pins.py --cpus 1 --memory 3G` PASSES with `window maximized:
+Terminal` and bounded repaint ticks (max 503) and zero failures — the
+compositor blend path is non-blocking for this workload. `--memory 3G` was
+used because the host had only ~3.9 GiB free virtual memory and QEMU could not
+reserve the harness default 5G; no assertion, budget or timeout changed. 2/4
+CPU reruns are BLOCKED by another owner's in-progress kernel WIP
+(`vfs.rs`/`storage.rs`/`fat32.rs`), which currently does not compile; this is
+not a regression from this change. WSIZ reflow is deferred until those gates
+can run.
+
 ## Copilot - native compositor/USB 16-CPU closure (2026-11-27) - DONE
 
 Fail-closed xHCI BIOS handoff, bounded stalled-shell termination, compositor
