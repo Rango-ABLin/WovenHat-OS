@@ -1,3 +1,16 @@
+## OpenCode - Stage 29 Z3 Phase 1 physical USB storage (2026-11-27) - DONE (BOUNDED)
+
+With explicit owner authorization for the exact non-boot VendorCo USB
+(serial `4045141272666606378`, 15726735360 bytes), ran the identity-guarded
+`test-wovenfs-physical.ps1` in an elevated child: read-only inspect before,
+Stage 15.2 storage at 1/2/4 CPUs with QEMU exit 33 and
+`[S15.2] WovenFS physical device: PASSED`, then read-only inspect confirming
+`WOVENFS1` and checkpoint sequence 15. Recorded the observation as
+`environment: qemu` because the real device was driven through ATA passthrough;
+classifier remains Tier 2 with zero native passes. No boot entry, TPM, firmware
+or other device was touched; the spare disk still carries WovenFS. Evidence and
+limits: `docs/audit-z3-phase1-native-storage-2026-11-27.md`.
+
 ## OpenCode - Stage 29 hardware qualification Z1/Z2 (2026-11-27) - DONE (Z3 BLOCKED)
 
 Took the read-only hardware-qualification bit. Repaired the `physical-probe`

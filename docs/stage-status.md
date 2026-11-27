@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 29 Z3 Phase 1 physical USB storage - 2026-11-27 - ACCEPTED (BOUNDED)
+
+After explicit authorization and exact device identity verification, the
+guarded physical USB storage test passed at 1/2/4 CPUs: QEMU exit 33 and
+`[S15.2] WovenFS physical device: PASSED` on VendorCo serial
+`4045141272666606378`. A read-only re-inspect confirmed the `WOVENFS1`
+superblock and checkpoint sequence 15. The observation is recorded with
+`environment: qemu`, not `native`, because the device was driven through ATA
+passthrough; classification remains valid Tier 2 with 0 native passes. No boot
+entry, TPM, firmware or other disk was touched, and rollback of the WovenFS
+volume is not claimed. Phases 2-4 remain blocked by physical console/serial,
+power-control and TPM prerequisites. Record:
+`docs/audit-z3-phase1-native-storage-2026-11-27.md`.
+
 ## Stage 29 hardware qualification Z1/Z2 - 2026-11-27 - ACCEPTED (Z3 BLOCKED)
 
 The read-only Z1/Z2 hardware-qualification bit is complete. Two real defects
