@@ -26,6 +26,10 @@ pub fn patch_high_contrast(data: &mut [u8], enabled: bool) -> bool {
     let Some(start) = find_single_key(data) else {
         return false;
     };
+    // Reject duplicate keys rather than silently updating an ambiguous record.
+    if data[start + KEY.len()..].windows(KEY.len()).any(|window| window == KEY) {
+        return false;
+    }
     let value_start = start + KEY.len();
     let value: &[u8] = if enabled { b"true " } else { b"false" };
     let Some(destination) = data.get_mut(value_start..value_start + value.len()) else {
@@ -359,6 +363,20 @@ mod tests {
             data[..bad.len()].copy_from_slice(bad);
             assert!(!patch_high_contrast(&mut data[..bad.len()], true));
             assert_eq!(read_high_contrast(bad), None);
+        }
+    }
+
+    #[test]
+    fn malformed_and_duplicate_values_are_rejected_without_mutation() {
+        for original in [
+            br#"{"high_contrast":null }"#.as_slice(),
+            br#"{"high_contrast":truex}"#.as_slice(),
+            br#"{"high_contrast":false,"high_contrast":false}"#.as_slice(),
+            br#"{"high_contrast":false,"nested":{"high_contrast":false}}"#.as_slice(),
+        ] {
+            let mut data = original.to_vec();
+            assert!(!patch_high_contrast(&mut data, true));
+            assert_eq!(data, original);
         }
     }
 
