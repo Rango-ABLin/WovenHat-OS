@@ -1,3 +1,12 @@
+## OpenCode - read-only OS gap analysis (2026-11-27) - ACTIVE
+
+Analyzing current `master` at `b1035496` for a gap report only; no source edits
+and no acceptance-chain run. Not touching WovenFS-owned files or any reserved
+symbols above. A `cargo check -p wovenhat-kernel --target x86_64-unknown-none`
+passed on an isolated D: target; a full workspace check/test on the shared C:
+tree hit `StorageFull` because C: has 0 bytes free. Findings are not acceptance
+evidence and no gate is being claimed. This reservation does not block others.
+
 ## OpenCode - latest-image build repair (2026-11-27) - ACTIVE
 
 Restoring a coherent `cargo check`/image build on current master. Fixing a
