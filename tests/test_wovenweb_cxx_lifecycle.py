@@ -52,7 +52,9 @@ class CxxLifecycleContracts(unittest.TestCase):
 
     def test_standalone_c_fixture_uses_its_own_entry_and_is_required_by_qemu(self):
         self.assertIn("void _start", self.runtime_c_abi)
-        self.assertIn("int $0x80", self.runtime_c_abi)
+        self.assertIn('#include "syscall_arch.h"', self.runtime_c_abi)
+        self.assertIn("__syscall1(WH_LINUX_EXIT", self.runtime_c_abi)
+        self.assertNotIn("int $0x80", self.runtime_c_abi)
         self.assertIn("ENTRY(_start)", self.runtime_c_linker)
         self.assertIn("WOVENHAT_RUNTIME_C_ABI_ELF", self.harness)
         self.assertIn("rust_lld()", self.harness)
