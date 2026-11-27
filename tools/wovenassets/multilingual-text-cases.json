@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "purpose": "Host text shaping test cases; guest screenshots must be separately verified",
+  "cases": [
+    {
+      "id": "english",
+      "language": "en",
+      "direction": "ltr",
+      "text": "WovenHat OS — Weave Will into Honor"
+    },
+    {
+      "id": "chichewa",
+      "language": "ny",
+      "direction": "ltr",
+      "text": "Moni! Takulandirani ku WovenHat OS."
+    },
+    {
+      "id": "accents",
+      "language": "fr",
+      "direction": "ltr",
+      "text": "Élève naïve, café — déjà vu"
+    },
+    {
+      "id": "arabic",
+      "language": "ar",
+      "direction": "rtl",
+      "text": "مرحبا بالعالم"
+    },
+    {
+      "id": "hebrew",
+      "language": "he",
+      "direction": "rtl",
+      "text": "שלום עולם"
+    },
+    {
+      "id": "hindi",
+      "language": "hi",
+      "direction": "ltr",
+      "text": "नमस्ते दुनिया"
+    },
+    {
+      "id": "combining",
+      "language": "en",
+      "direction": "ltr",
+      "text": "Café vs Café"
+    },
+    {
+      "id": "emoji",
+      "language": "und",
+      "direction": "ltr",
+      "text": "👩‍💻 👨‍👩‍👧"
+    },
+    {
+      "id": "mixed",
+      "language": "und",
+      "direction": "auto",
+      "text": "WovenHat 2026 — مرحبا — ABC 123"
+    }
+  ]
+}
