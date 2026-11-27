@@ -35,6 +35,10 @@ pub enum Capability {
     /// Enter the kernel-authorized recovery environment. This is not granted
     /// to ordinary applications; the boot-mode admission check is separate.
     Recovery = 27,
+    /// Synthesize input events (pointer, key, touch) as if they came from
+    /// hardware. Confined to SystemService: ordinary Ring-3 applications
+    /// cannot forge clicks or keystrokes into another window.
+    InputInject = 28,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,7 +159,7 @@ impl CapabilitySet {
 }
 
 impl Capability {
-    pub const COUNT: usize = 28;
+    pub const COUNT: usize = 29;
     pub const ALL: [Capability; Self::COUNT] = [
         Capability::Console,
         Capability::TimerRead,
@@ -185,6 +189,7 @@ impl Capability {
         Capability::PowerControl,
         Capability::AccountManage,
         Capability::Recovery,
+        Capability::InputInject,
     ];
 
     pub const fn index(self) -> usize {

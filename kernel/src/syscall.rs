@@ -548,6 +548,10 @@ pub enum Number {
     /// session -> request one physical TPM credential decision
     #[cfg(feature = "system-apps")]
     IdentityRequestHardware = 234,
+    /// Synthesize (inject) an input event as if it arrived from hardware.
+    /// Requires the `InputInject` capability; confined to SystemService.
+    /// arg0 = kind, arg1 = primary value, arg2 = secondary value -> 0 or ERROR.
+    InputInject = 248,
 }
 
 pub fn entry_address() -> u64 {
@@ -3808,6 +3812,7 @@ pub extern "C" fn wovenhat_syscall_dispatch(
         value if value == Number::IdentityRequestHardware as u64 => {
             sys_identity_request_hardware(arg0)
         }
+        value if value == Number::InputInject as u64 => sys_input_inject(arg0, arg1, arg2),
         _ => u64::MAX,
     };
 
@@ -4889,6 +4894,78 @@ fn sys_input_wait(deadline: u64) -> u64 {
     }
 }
 
+/// Synthesize (inject) an input event as if it arrived from hardware, using
+/// the same packed-event convention as `InputPoll`. Requires the
+/// `InputInject` capability, which is confined to the SystemService domain:
+/// ordinary Ring-3 applications cannot forge keystrokes or pointer events
+/// into another window.
+///
+/// arg0 = event kind, arg1 = primary value, arg2 = secondary value.
+/// Returns 0 on success, or SYSCALL_ERROR on unknown kind or a full input
+/// queue.
+fn sys_input_inject(kind: u64, value1: u64, value2: u64) -> u64 {
+    if !crate::task::current_has(crate::capability::Capability::InputInject) {
+        return SYSCALL_ERROR;
+    }
+    let event = match kind {
+        INPUT_KIND_CHAR => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::Char((value1 as u32) as u8 as char),
+        )),
+        INPUT_KIND_ENTER => Some(crate::woven_input::Event::Key(crate::woven_input::Key::Enter)),
+        INPUT_KIND_BACKSPACE => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::Backspace,
+        )),
+        INPUT_KIND_TAB => Some(crate::woven_input::Event::Key(crate::woven_input::Key::Tab)),
+        INPUT_KIND_F1 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F1)),
+        INPUT_KIND_F2 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F2)),
+        INPUT_KIND_F3 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F3)),
+        INPUT_KIND_F4 => Some(crate::woven_input::Event::Key(crate::woven_input::Key::F4)),
+        INPUT_KIND_ESCAPE => Some(crate::woven_input::Event::Key(
+            crate::woven_input::Key::Escape,
+        )),
+        INPUT_KIND_POINTER_MOVE => Some(crate::woven_input::Event::PointerMove {
+            dx: (value1 & 0xffff) as i16,
+            dy: ((value1 >> 16) & 0xffff) as i16,
+        }),
+        INPUT_KIND_POINTER_BUTTON => Some(crate::woven_input::Event::PointerButton {
+            button: value1 as u8,
+            pressed: (value2 & 1) != 0,
+        }),
+        INPUT_KIND_SCROLL => Some(crate::woven_input::Event::Scroll {
+            vertical: value1 as i16,
+        }),
+        INPUT_KIND_POINTER_ABSOLUTE => Some(crate::woven_input::Event::PointerAbsolute {
+            x: value1 as u16,
+            y: value2 as u16,
+        }),
+        INPUT_KIND_TOUCH => Some(crate::woven_input::Event::Touch {
+            contact: value1 as u8,
+            active: (value2 >> 8) & 1 != 0,
+            x: ((value2 >> 16) & 0xffff) as u16,
+            y: (value2 >> 32) as u16,
+        }),
+        INPUT_KIND_PEN => Some(crate::woven_input::Event::Pen {
+            x: value1 as u16,
+            y: value2 as u16,
+            pressure: 0,
+            touching: false,
+        }),
+        INPUT_KIND_GAME_CONTROLLER => Some(crate::woven_input::Event::GameController {
+            control: value1 as u16,
+            value: value2 as i16,
+        }),
+        _ => None,
+    };
+    if let Some(event) = event {
+        if crate::woven_input::publish(event) {
+            0
+        } else {
+            SYSCALL_ERROR
+        }
+    } else {
+        SYSCALL_ERROR
+    }
+}
 const WAIT_INPUT: u64 = 1 << 0;
 const WAIT_MESSAGE: u64 = 1 << 1;
 const WAIT_DAMAGE: u64 = 1 << 2;
@@ -4908,7 +4985,6 @@ fn sys_graphics_damage(handle: u64, packed: u64) -> u64 {
     );
     crate::user_graphics::mark_damage(handle, rect).map_or(SYSCALL_ERROR, |()| 0)
 }
-
 /// Blit only the pending damage of a surface shared with the caller.
 /// Requires `DisplayIo` and the lease; authorised by the slot's grant.
 fn sys_compositor_blit_damage(handle: u64, packed: u64) -> u64 {
