@@ -30,6 +30,25 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _repository_relative_evidence_path(evidence: str) -> bool:
+    """Apply the same fail-closed path policy on Linux and Windows runners.
+
+    Native Path.is_absolute() on Linux does not recognize Windows drive or
+    UNC paths. Evidence uses repository-relative POSIX separators only.
+    This is syntactic validation; consumers must still prevent symlink escapes.
+    """
+    if not evidence or "\\" in evidence or "\x00" in evidence:
+        return False
+    posix = PurePosixPath(evidence)
+    windows = PureWindowsPath(evidence)
+    return (
+        not posix.is_absolute()
+        and not windows.anchor
+        and ".." not in posix.parts
+        and posix.parts != ()
+    )
+
+
 def validate(report: Any) -> list[str]:
     """Return all schema/policy errors without executing any test."""
     errors: list[str] = []
