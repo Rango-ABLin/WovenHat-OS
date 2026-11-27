@@ -343,6 +343,7 @@ def main():
     manifest = dict(source_commit=source_commit, image=str(image),
                     image_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
                     checks_sha256=hashlib.sha256((out / 'results.json').read_bytes()).hexdigest(),
+                    required_checks=[item['check'] for item in report],
                     sources={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources})
     (out / 'validated-image.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print('All release gates passed. Report:', out / 'results.json')

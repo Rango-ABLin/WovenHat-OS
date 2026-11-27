@@ -2037,6 +2037,23 @@ fn deferred_input_worker() -> ! {
         attempt = attempt.saturating_add(1);
         let result = start_input("xhci0");
         if usb_disk_info().is_some() {
+            if !crate::storage::mnt_mounted()
+                && crate::block_io::root_device() == crate::block_io::RootDevice::Ata
+            {
+                crate::block_io::select_root(crate::block_io::RootDevice::Usb);
+                match crate::storage::mount_ata_root() {
+                    crate::storage::MountStatus::Mounted(count) => {
+                        crate::serial::write_line(format_args!(
+                            "[FS] FAT32/WovenFS mounted at /mnt from xhci0; imported {} entries",
+                            count
+                        ));
+                    }
+                    status => crate::serial::write_line(format_args!(
+                        "[FS] xhci0 has no mountable volume: {:?}",
+                        status
+                    )),
+                }
+            }
             match result {
                 Ok(summary) => {
                     crate::serial::write_line(format_args!(
@@ -3351,12 +3368,21 @@ fn bios_handoff(mmio: u64, hcc1: u32) -> Result<(), InitError> {
             let legsup = mmio_read32(mmio + offset)?;
             if legsup & (1 << 16) != 0 {
                 mmio_write32(mmio + offset, legsup | (1 << 24))?;
+                let mut released = false;
                 for _ in 0..POLL_LIMIT {
                     let current = mmio_read32(mmio + offset)?;
                     if current & (1 << 16) == 0 {
+                        released = true;
                         break;
                     }
                     core::hint::spin_loop();
+                }
+                if !released {
+                    crate::serial::write_line(format_args!(
+                        "[XHCI] BIOS ownership handoff timed out at +{:#x}",
+                        offset
+                    ));
+                    return Err(InitError::ControllerTimeout);
                 }
             }
             // USBLEGCTLSTS: clear SMI enables/status as best-effort; BIOS should have

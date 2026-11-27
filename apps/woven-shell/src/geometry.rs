@@ -3,7 +3,7 @@
 
 use libwoven::Region;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Area {
     pub x: i32,
     pub y: i32,
@@ -49,6 +49,27 @@ impl Area {
         let right = (self.x + self.width).max(other.x + other.width);
         let bottom = (self.y + self.height).max(other.y + other.height);
         Self::new(x, y, right - x, bottom - y)
+    }
+
+    /// The part of `self` outside `inner`, as up to four disjoint rectangles
+    /// (empty ones omitted). Used to clip a window's shadow band to the ring
+    /// the window does not immediately overwrite, so a band-filling window
+    /// does not issue full-screen blends for pixels it then hides.
+    pub fn subtract(self, inner: Self) -> [Self; 4] {
+        let clipped = inner.intersect(self);
+        if clipped.is_empty() {
+            return [self, Self::new(0, 0, 0, 0), Self::new(0, 0, 0, 0), Self::new(0, 0, 0, 0)];
+        }
+        let right = (self.x + self.width).min(clipped.x + clipped.width);
+        let bottom = (self.y + self.height).min(clipped.y + clipped.height);
+        let empty = Self::new(0, 0, 0, 0);
+        [
+            Area::new(self.x, self.y, clipped.x - self.x, self.height),
+            Area::new(right, self.y, self.x + self.width - right, self.height),
+            Area::new(clipped.x, self.y, right - clipped.x, clipped.y - self.y),
+            Area::new(clipped.x, bottom, right - clipped.x, self.y + self.height - bottom),
+        ]
+        .map(|piece| if piece.is_empty() { empty } else { piece })
     }
 
     /// This area as a region of a layer whose top-left is `(x, y)`.
@@ -124,5 +145,78 @@ impl Dirty {
 
     pub fn areas(&self) -> &[Area] {
         &self.areas[..self.len]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec::Vec;
+
+    use super::Area;
+
+    /// The returned pieces must be disjoint and cover exactly `outer - inner`.
+    fn assert_subtraction(outer: Area, inner: Area) {
+        let pieces: Vec<Area> = outer
+            .subtract(inner)
+            .into_iter()
+            .filter(|piece| !piece.is_empty())
+            .collect();
+        let mut overlaps = 0;
+        let mut missing = 0;
+        let mut extra = 0;
+        for y in -4..16 {
+            for x in -4..16 {
+                let in_outer = outer.contains(x, y);
+                let in_inner = inner.contains(x, y);
+                let covered = pieces.iter().any(|piece| piece.contains(x, y));
+                if covered && in_inner {
+                    extra += 1;
+                }
+                if covered && !in_outer {
+                    extra += 1;
+                }
+                if in_outer && !in_inner && !covered {
+                    missing += 1;
+                }
+                if pieces.iter().filter(|piece| piece.contains(x, y)).count() > 1 {
+                    overlaps += 1;
+                }
+            }
+        }
+        assert_eq!(missing, 0, "subtract left holes: {outer:?} - {inner:?}");
+        assert_eq!(extra, 0, "subtract covered the inner rect: {outer:?}");
+        assert_eq!(overlaps, 0, "subtract pieces overlap: {outer:?}");
+    }
+
+    #[test]
+    fn subtract_removes_exactly_the_inner_rectangle() {
+        assert_subtraction(Area::new(0, 0, 10, 10), Area::new(3, 3, 4, 5));
+        assert_subtraction(Area::new(-2, 1, 7, 9), Area::new(0, 0, 4, 4));
+        assert_subtraction(Area::new(0, 0, 5, 5), Area::new(0, 0, 5, 5));
+        assert_subtraction(Area::new(0, 0, 5, 5), Area::new(20, 20, 2, 2));
+    }
+
+    #[test]
+    fn offset_shadow_band_subtracts_to_a_two_strip_ring() {
+        // Shadow bands start `offset` pixels down/right of the frame and keep
+        // its size, so clipping to what the frame does not cover must leave a
+        // right strip and a bottom strip, never a full-frame blend.
+        let frame = Area::new(40, 20, 100, 60);
+        let band = Area::new(42, 22, 100, 60);
+        let pieces: Vec<Area> = band
+            .subtract(frame)
+            .into_iter()
+            .filter(|piece| !piece.is_empty())
+            .collect();
+        assert_eq!(pieces.len(), 2);
+        let ring: i64 = pieces
+            .iter()
+            .map(|piece| piece.width as i64 * piece.height as i64)
+            .sum();
+        // Two strips two pixels wide around a 100x60 frame: 316 pixels, versus
+        // the 6000 the old full-frame blend paid per band.
+        assert_eq!(ring, 316);
+        assert!(ring * 10 < band.width as i64 * band.height as i64);
+        assert_subtraction(band, frame);
     }
 }

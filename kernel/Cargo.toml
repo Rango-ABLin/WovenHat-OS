@@ -157,6 +157,9 @@ stage31-process-crash-test = ["qemu-test"]
 fault-injection-test = ["qemu-test"]
 # Bounded Ring-3 randomness ABI self-test (DRBG properties and fail-closed path).
 secure-rng-test = ["qemu-test"]
+# Focused large read-only asset window gate. Runs with a larger guest RAM
+# budget so frame pressure in the 256 MiB stress matrix cannot mask it.
+large-map-test = ["qemu-test"]
 # S03 bounded process lifecycle acceptance: fork/wait/reap and process-group
 # signal teardown. This gate is intentionally independent of later stages.
 s03-process-lifecycle-test = ["qemu-test"]

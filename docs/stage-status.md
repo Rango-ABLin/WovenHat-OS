@@ -1,5 +1,337 @@
 # Stage status
 
+## Phase B/master reconciliation - 2026-11-27 - MERGE RESOLUTION
+
+Phase B desktop/taskbar, USB, release and installed-settings behavior was
+reconciled with master's newer exact-source validation and native WovenFS
+atomic transaction implementation. Conflicting records are retained newest
+first. Focused Python contracts, settings policy, standalone shell geometry,
+host warning-denying Clippy and the new large-map kernel feature lint pass.
+The full Stage 10.7/QEMU preservation chain was not rerun by this merge
+reconciliation and is not claimed as fresh evidence.
+
+## Audited filesystem, release and desktop gaps - 2026-11-27 - ACCEPTED (BOUNDED)
+
+Closed the actionable current-head gaps: FAT32 mounting now proves that its
+FAT can address every declared data cluster; WovenFS multi-path persistence
+rejects duplicate paths and rolls back earlier native writes after a later
+failure. Release packaging binds the exact complete validator gate set and
+boots the exact packaged ISO in QEMU before publication. Windows release
+acceptance runs on push/PR, and the local release launcher performs the real
+qualification/package path unless explicitly opted out. WovenShell reflows a
+client surface on maximize/restore after clipped shadow rendering; the taskbar
+layout harness covers all six alignment/icon-size combinations.
+
+FAT32/page-cache tests, affected feature Clippy, shell Clippy, all-target
+Clippy, release boundary tests, and the full serialized Stage 10.7 chain pass.
+Physical/hardware/trust prerequisites remain separate external gates.
+
+## Window shadow compositor stall diagnosed and bounded - 2026-11-27 - ACCEPTED (BOUNDED 1-CPU SOFTWARE/QEMU)
+
+The stall that forced frame-only maximize in `32c14dbe` was diagnosed as a
+throughput cliff, not a lock deadlock. `PreemptMutex` already defers local
+preemption, and `blend_region_for` takes the compositor guard only around a
+bounded blend. The shell's shadow loop, however, blended **three full
+frame-sized rectangles** per window (offset 10/6/2 pixels down-right), even
+though the window's title, client surface and border immediately overwrite the
+overlapping pixels. For a maximized window that is millions of per-pixel
+blends per repaint under 1-CPU TCG, which presented as a hang.
+
+`apps/woven-shell/src/geometry.rs` gained a bounded `Area::subtract`, and
+`repaint_once` now clips each shadow band to the visible ring outside the
+frame (a right strip and a bottom strip) before calling `painter.blend`.
+Shadows are restored; the removed code and its TODO are gone. For opaque
+windows the final pixels are unchanged; a fading translucent window no longer
+shows shadow beneath it, which is recorded as a deliberate bounded change.
+The remaining `present_region_blended` work is proportional to shadow reach
+times window perimeter rather than window area.
+
+Validation: `cargo fmt --all -- --check` and warning-denying freestanding shell
+Clippy pass; two new host tests (`apps/woven-shell/tests/geometry_area.rs`,
+`rustc --test`) prove subtraction is exact, disjoint and reduces a band around
+a 100x60 frame to 316 pixels instead of 6000. The unchanged
+`scripts/test-taskbar-pins.py --cpus 1 --memory 3G` gate PASSES with zero
+failures and retained `woven-shell: window maximized: Terminal` plus bounded
+repaint tick counts (max 503) under
+`D:\WovenHat-OS-output\audit-artifacts\shadow-clip-pins-1cpu-3G`. The lower
+guest RAM setting was forced by host free virtual memory (~3.9 GiB) being
+below the harness default 5G QEMU reservation; no assertion, timeout or
+budget was changed. The same gate then PASSED at 2 and 4 CPUs with zero
+failures and the maximize markers present
+(`D:\WovenHat-OS-output\audit-artifacts\shadow-clip-pins-{2,4}cpu-3G-r2`), after
+another owner's in-progress kernel edits (`vfs.rs`/`storage.rs`/`fat32.rs`)
+stopped breaking the build; I did not touch those files. Two earlier 2/4-CPU
+attempts during that WIP build break are preserved as
+`shadow-clip-pins-{2,4}cpu-3G`. This proves the compositor blend path is
+non-blocking for maximize with shadows on at 1/2/4 CPUs, but does not yet
+claim WSIZ client reflow on maximize: that client-resize path is a separate
+change and remains deferred. Desktop qualification and the full
+`RUN-STAGE10.7.ps1` chain were not rerun here and are not claimed.
+
+## Stage 1-19 current-head software gate closure - 2026-11-27 - VERIFIED (EXTERNAL GATES OPEN)
+
+At source `685e9cbe`, all bounded Stage 1-19 software/QEMU acceptance is
+verified: warning-denying host/target lint, workspace tests, the full
+serialized Stage 10.7 chain, inherited 1/2/4-CPU gates, and the added USB and
+compositor 8/16-CPU matrices pass. The native shell stall path is bounded,
+xHCI BIOS handoff fails closed, and enlarged GUI images use large-asset VFS
+storage.
+
+Collective production closure remains blocked by physical USB/compositor
+evidence, native-device/power-loss qualification, production signing custody,
+signed release artifacts, independent attestation/review and physical
+Secure Boot/TPM. No local QEMU result is promoted into those external gates.
+
+## Native compositor hang and 16-CPU input closure - 2026-11-27 - ACCEPTED (BOUNDED QEMU/SOFTWARE)
+
+The native compositor path no longer treats a live-but-stalled WovenShell as a
+successful session: after the bounded display wait it is terminated and the
+diagnostic fallback owns the rest of the boot. Claim begin/complete serial
+evidence now localizes any future hang, and enlarged shell binaries are
+staged through the bounded large-asset VFS path rather than the 64 KiB node
+insertor. The physical-path fix also makes xHCI BIOS ownership handoff
+fail closed when firmware never releases ownership.
+
+USB keyboard/mouse and the complete Stage 19.2/19.4-19.9/19.11-19.14 compositor
+matrix now pass at 8 and 16 CPUs in addition to the mandatory 1/2/4 profiles.
+WovenShell Stage 20.1 and 20.19 also pass at 8/16 CPUs. CI now retains these
+high-SMP desktop/input gates.
+
+This does not claim a fresh physical USB or bare-metal compositor result.
+Physical keyboard/mouse and native compositor qualification remain pending a
+new controlled boot with returned serial/log evidence.
+
+## Desktop settings/personalization and signing CI closure - 2026-11-27 - ACCEPTED (BOUNDED SOFTWARE)
+
+Completed the remaining bounded personalization path. WovenSettings now
+persists fixed-width Dark/Light/High Contrast theme state and reduced motion;
+legacy/current installed records gain the bounded `theme` field, and ambiguous
+or malformed values fail closed. WovenShell's periodic settings observer applies
+theme and reduced-motion changes live without acquiring write authority.
+
+The desktop compositor/window-management scope remains accepted at the
+software/QEMU boundary: lease and surface isolation, focus/input routing,
+damage-only presentation, window stacking/resize/tiling/workspaces and teardown
+are covered by the Stage 19/20 matrices. Release CI now also requires the
+PKCS#11 hardware-signer adapter, reproducibility boundary and package-boundary
+contracts.
+
+External release gates remain explicit: native input/GPU performance and
+device-loss qualification; production non-exportable keys, witnessed custody,
+signed exact-commit artifacts, independent build/review attestation, and
+physical Secure Boot/TPM evidence.
+
+## Desktop compositor current-head closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The compositor authority path is green on the current source. The complete
+Stage 19.2/19.4-19.9/19.11-19.14 matrix passes at 1/2/4 CPUs, covering surface
+ownership and foreign-handle refusal, display lease, input wait/focus,
+delegated surfaces, damage-only presentation, stacking/focus, PS/2 input,
+transparency, integer scaling and frame pacing with clean lease release.
+The Stage 20.19 shell input-isolation boundary is now continuously enforced in
+the desktop CI job at the same CPU matrix rather than relying only on retained
+historical evidence.
+
+This closes the bounded desktop compositor software/QEMU boundary. Native HID,
+physical display/device-loss, accelerated GPU and full native compositor
+performance qualification remain separate hardware gates.
+
+## Graphics and framebuffer current-head requalification - 2026-11-26 - GREEN (BOUNDED SOFTWARE/QEMU)
+
+Requalified the framebuffer/compositor release path on the current source.
+Stage 20.1 now derives the current shell wallpaper, taskbar opacity, status
+geometry and centered chrome directly while preserving strict wallpaper and
+plain-taskbar pixel checks, physical-framebuffer scale/readback checks, live
+clock updates and display teardown. It passes at 1/2/4 CPUs. Stage 20.14 and
+20.14b verify pixel output on both VirtIO-GPU heads at 1/2/4 CPUs, and the
+GFX-02 CPU renderer plus the 37 display/compositing host contracts pass.
+
+This confirms the bounded graphics and framebuffer boundary is green. Native
+Intel/AMD/NVIDIA acceleration, physical-display latency and device-loss
+qualification remain separate release evidence.
+
+## USB/xHCI, WovenFS root, and wireless software closure - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The xHCI USB mass-storage device is now a first-class root candidate alongside
+ATA, NVMe and AHCI. The synchronous QEMU path selects an attached disk during
+driver bring-up; production deferred enumeration selects it later only while
+the root remains unset, then mounts FAT32 or native WovenFS through the same
+ownership guard. A feature-composition defect in the Wi-Fi/Bluetooth combined
+gate was repaired by keeping the pure xHCI keyboard decoder available to the
+shared self-test independent of production driver feature gates.
+
+Validation on this change: warning-denying default, Stage 13.10, Stage 13.18
+and all-target Clippy pass; workspace tests pass; the seven USB MSC and twenty
+WovenFS crash tests pass; USB mass storage and the complete wireless
+protocol/security matrix pass at 1/2/4 CPUs.
+
+Not upgraded to physical acceptance: native xHCI interoperability, surprise
+removal/hotplug and controller recovery; bare-metal USB/WovenFS mounting and
+power loss; production Wi-Fi firmware and AX200/AX201 MMIO/DMA/IRQ execution;
+physical Bluetooth USB transport, radio, pairing and interoperability. Those
+require selected hardware, authenticated firmware, and returned device
+evidence rather than additional QEMU markers.
+
+## Stage 13.15 WovenAudio playback and capture - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The existing Ring-3 audio subsystem is now continuously covered at both
+software boundaries. HDA playback passes at 1/2/4 CPUs with the exact
+500 Hz square wave recorded from QEMU and completion driven by the device
+interrupt. The deterministic virtual capture source passes at 1/2/4 CPUs
+through `AudioCapture`, verifying the fixed 4096-byte copy-out, successful
+`Microphone` access and capability denial. The kernel workflow now runs both
+matrices and warning-denying capture-feature Clippy.
+
+This closes the bounded software/QEMU audio gate without weakening the
+physical boundary. Native HDA codec routing, physical microphone input,
+speaker/headphone output and motherboard-specific audio qualification remain
+external release gates.
+
+## Focused large read-only mapping gate restored - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Restored dedicated coverage for the bounded read-only asset window used by the
+system font. The original self-test was removed after reproducing TCG frame
+pressure in the 256 MiB memory-stress matrix; re-adding it there would make
+that matrix flaky. It now lives behind its own `large-map-test` feature and a
+focused gate that runs with a 1 GiB guest RAM budget, so it verifies exact
+bytes, read-only protection, second-map rejection, unaligned/zero-length
+rejection and clean unmap without disturbing the stress matrix. Its data is
+`USER_MMAP_MAX_SIZE + 7` bytes on a fresh address space — no large kernel
+stack buffer.
+
+Validation: `large-map-test` Clippy, all-targets Clippy, workspace tests, and
+`test-feature-qemu.py --feature large-map-test --memory 1G` at 1/2/4 CPUs
+(`target/stage-large-map-{1,2,4}cpu-debug`, exit 33, marker
+`[LARGE MAP] read-only window: PASSED`) all pass, as does the full serialized
+`RUN-STAGE10.7.ps1` chain.
+
+Still open: a shared cross-process read-only font mapping ABI with a written
+threat review. Per-process mappings remain the accepted design.
+
+## Font face cache hardening and QEMU VFS baseline repair - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Two remaining font-cache findings were closed in safe Rust. `load_system_font_face`
+no longer uses `mem::transmute` to extend a lifetime: `load_system_font_mapping`
+returns `&'static [u8]`, so a face parsed from it is already `'static`. It also no
+longer returns `None` on transient contention with its initialization `busy`
+flag — it waits on a bounded spin-lock acquisition, so one SMP frame cannot
+silently switch to bitmap text while another thread initializes the face.
+
+A gate regression was then found and repaired: a concurrent change staged the
+validated system font in shell-only QEMU images *after* the
+`vfs_nodes_before_userspace` baseline was captured, so the later "userspace
+created no VFS nodes" integrity check halted every memory boot. The baseline
+is now captured after font staging in those images; production and
+`system-apps` images keep the original baseline. No assertion, capability or
+ABI changed.
+
+Validation: kernel Clippy for default and `qemu-test`, all-targets Clippy,
+libwoven target Clippy, typography tests 8/8, 5-font and desktop qualification
+at 1/2/4 CPUs (`font-face-cache-{1,2,4}cpu-20261126`, all `pass: true`,
+`failures: []`, sign-in 0 changed pixels, font marker present), memory gates
+at 1/2/4 CPUs after the repair, and the full serialized `RUN-STAGE10.7.ps1`
+chain all pass.
+
+Still open: per-process font copies with no shared cross-process mapping ABI,
+and the absent focused large-mapping kernel self-test (reproducible TCG frame
+pressure). Neither was claimed here.
+
+## Shell self-test system font mapping - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Owner reported `woven-shell: system font mapping unavailable` in shell-only
+QEMU boots. Diagnosis: `load_system_font_mapping()` and the kernel large-asset
+window are correct, but shell self-test images never call
+`install_production_system_apps()`, so `/share/fonts/NotoSans-Regular.ttf` was
+never staged; most of those self-tests also spawned the shell without
+`FileRead`, which `open()` requires. Owner approved a test-only fix (no new
+syscall, capability or ABI): `qemu-test` images now stage the same hash- and
+licence-validated 621,572-byte font through the existing bounded
+`create_read_only_large` VFS path before any self-test spawns the shell, and
+every shell self-test capability set now includes `FileRead`. Production
+`system-apps` boots keep their unchanged installation path; their font asset
+and validation were not touched. The two `mkdir("/share")` oracle sites that
+now see a pre-created directory accept an existing directory but still assert
+the directory exists. A boot-time VFS node baseline is refreshed after staging
+so the later "userspace created no VFS nodes" assertion compares like for like.
+
+Enabling the real face necessarily changes shell text rasterisation, so two
+Stage 20.2 oracles were adapted without disabling them: the toast check now
+requires the exact text colour's bright ink in its bounded band and rejects
+anything brighter there, and the title-bar fill sample moved past the taller
+TrueType glyphs to the bar midpoint. The strict wallpaper, damage, expiry,
+focus, pointer, key-routing and teardown checks in that gate are unchanged.
+
+Static validation: `cargo fmt --all -- --check`, warning-denying kernel Clippy
+for default, `qemu-test` and `stage20-2-test`, `cargo clippy --all-targets
+-- -D warnings` and `cargo test --workspace` all pass.
+`scripts/test-woven-shell-qemu.py --stage 20.2` passes at 1/2/4 CPUs (exit 33,
+`[S20.2] desktop applications: PASSED`) with `woven-shell: system font parsed
+bytes=621572 units_per_em=1000` in every serial log and no
+`system font mapping unavailable`. The pre-fix commit was booted in an
+isolated worktree to separate pre-existing failures: Stage 20.1, 20.3 and
+20.9 already failed there on stale wallpaper/text oracles, so they are not
+regressions from this change and are not claimed here. The full serialized
+`RUN-STAGE10.7.ps1` chain was not started because other owners' QEMU chains
+held the shared fixed output paths; it is explicitly not claimed.
+
+## Stage 20.2 self-test wallpaper oracle - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+The two reported failures (`A's window, entry and tray icon removed on exit;
+B focused FAIL` and the resulting `desktop applications: FAILED`) were an
+oracle defect, not a shell teardown defect. `stage20_2_self_test` in
+`kernel/src/main.rs` recomputed wallpaper pixels with the pre-Win11 palette
+`rgb(11,29,58)`/`rgb(16,78,82)`, while `apps/woven-shell/src/tokens.rs` now
+renders `rgb(16,36,74)`/`rgb(18,84,96)`. The retained diagnostic proved it:
+the sampled tray pixel was `0x172e3c`, exactly `blend_pixel(TASKBAR,
+new_wallpaper, 188)`, against a stale expected `0x172c38`; the vacant window
+body was `0x142c4f`, the new-palette wallpaper.
+
+The oracle now uses the shell's current palette and the strict assertions are
+restored: both vacated window bodies must equal the independently recomputed
+wallpaper, the tray slot must show the blended taskbar surface, and the still-
+open window B must still be blue. No assertion was weakened, disabled or
+given a larger timeout; no syscall, capability, ABI or shell rendering changed.
+
+Validation on the exact source: `cargo fmt --all -- --check`, warning-denying
+`stage20-2-test` kernel Clippy, `cargo clippy --all-targets -- -D warnings` and
+`cargo test --workspace` pass. `scripts/test-woven-shell-qemu.py --stage 20.2`
+passes at 1/2/4 CPUs (exit 33, `[S20.2] desktop applications: PASSED`); evidence
+is `target/woven-shell-apps-{1,2,4}cpu/serial.log`. The full serialized
+`RUN-STAGE10.7.ps1` chain was not run here because other owners' QEMU chains
+held the shared fixed output paths; it is explicitly not claimed.
+
+## Font system: address-layout collision fixed - 2026-11-26 - ACCEPTED (BOUNDED SOFTWARE/QEMU)
+
+Diagnosis found one real interaction defect: `USER_LARGE_MAP_START` and
+`DYNAMIC_TLS_START` were the same address (`USER_REGION_START + 0x2000_0000`).
+`map_dynamic_anonymous` mapped without an unmapped-range pre-check, so a
+process holding the system-font window could not allocate runtime-TLS slot 0;
+the failure was fail-closed but untested and would reject a legitimate
+font-using runtime module.
+
+The large-asset window now starts above the entire bounded dynamic-TLS arena
+(`MAX_TASKS * MAX_DYNAMIC_MODULES * 64 KiB + mmap ASLR span`), with compile-time
+assertions that the arenas are disjoint and the window stays under its ceiling.
+`map_dynamic_anonymous` also gained the same `user_range_is_unmapped_in`
+pre-check used by the large mapping, so any future layout regression fails
+closed instead of overwriting an owned range. No syscall, capability or font
+ABI changed; no visual baseline was touched.
+
+Also restored on this branch the proportional-path regression test
+(`libwoven/tests/typography.rs::proportional_path_never_drops_complex_real_glyphs`,
+asserting `S`/`g`/`@` leave ink through `draw_text_proportional`) and corrected
+the stale `607,572`-byte comment to the actual `621,572`-byte font size.
+
+Validation: kernel default Clippy, all-targets Clippy, typography tests (8/8),
+Stage 11.2-tls/11.6 and 5-font at 1/2/4 CPUs, baseline-enforced desktop
+qualification at 1/2/4 CPUs (`font-layout-fix-{1,2,4}cpu-20261126`, all
+`pass: true`, `failures: []`, sign-in 0 changed pixels, font-parsed marker in
+every serial log), and the full serialized `RUN-STAGE10.7.ps1` chain all pass.
+
+Still open (not addressed): per-process font copies with no shared cross-process
+mapping ABI, transient `busy`-flag fallback in the parsed-face cache, the
+`'static` lifetime established by `transmute`, and the absent focused
+large-mapping kernel self-test (reproducible frame pressure under TCG).
 ## Stage 10.7 launcher alternate-root repair - 2026-11-26 - BOUNDED PASS
 
 The Windows preservation launcher previously rejected an explicitly supplied

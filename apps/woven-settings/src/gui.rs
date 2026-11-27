@@ -144,6 +144,7 @@ fn draw_settings(
     pressed: bool,
     refresh_count: u32,
     mode: ThemeMode,
+    reduced_motion: bool,
     refresh: &Button<'_>,
 ) {
     let shared = mode.shared();
@@ -238,6 +239,16 @@ fn draw_settings(
         ThemeMode::HighContrast => "Theme: Contrast (d=Dark l=Light)",
     };
     canvas.draw_text_system(PANEL_X + 10, PANEL_Y + 174, theme_name, accent);
+    canvas.draw_text_system(
+        PANEL_X + 10,
+        PANEL_Y + 194,
+        if reduced_motion {
+            "Motion: reduced (m=full)"
+        } else {
+            "Motion: full (m=reduced)"
+        },
+        text,
+    );
     let mut refresh_digits = [0u8; 20];
     draw_number(
         canvas,
@@ -266,6 +277,7 @@ fn render(
     pressed: bool,
     refresh_count: u32,
     mode: ThemeMode,
+    reduced_motion: bool,
     refresh: &Button<'_>,
 ) -> bool {
     let pixels = unsafe { &mut *CANVAS_PIXELS.0.get() };
@@ -278,7 +290,15 @@ fn render(
     ) else {
         return false;
     };
-    draw_settings(&mut canvas, pointer, pressed, refresh_count, mode, refresh);
+    draw_settings(
+        &mut canvas,
+        pointer,
+        pressed,
+        refresh_count,
+        mode,
+        reduced_motion,
+        refresh,
+    );
     window.write_canvas(&canvas).is_ok()
 }
 
@@ -289,7 +309,7 @@ fn read_settings(output: &mut [u8]) -> Option<usize> {
     result.ok()
 }
 
-fn persist_settings_file(path: &str, enabled: bool) -> bool {
+fn persist_settings_file(path: &str, mode: ThemeMode, reduced_motion: bool) -> bool {
     let mut source = [0u8; 512];
     let mut data = [0u8; 512];
     let length = if path == SETTINGS_PATH {
@@ -311,7 +331,16 @@ fn persist_settings_file(path: &str, enabled: bool) -> bool {
     };
     if !libwoven::settings_policy::patch_high_contrast(
         &mut data[..migration.length],
-        enabled,
+        mode == ThemeMode::HighContrast,
+    ) {
+        return false;
+    }
+    if !libwoven::settings_policy::patch_reduced_motion(
+        &mut data[..migration.length],
+        reduced_motion,
+    ) || !libwoven::settings_policy::patch_theme(
+        &mut data[..migration.length],
+        mode == ThemeMode::Light,
     ) {
         return false;
     }
@@ -324,9 +353,9 @@ fn persist_settings_file(path: &str, enabled: bool) -> bool {
     result
 }
 
-fn persist_high_contrast(enabled: bool) -> bool {
-    let installed = persist_settings_file(SETTINGS_PATH, enabled);
-    let durable = persist_settings_file(SETTINGS_SOURCE_PATH, enabled);
+fn persist_personalization(mode: ThemeMode, reduced_motion: bool) -> bool {
+    let installed = persist_settings_file(SETTINGS_PATH, mode, reduced_motion);
+    let durable = persist_settings_file(SETTINGS_SOURCE_PATH, mode, reduced_motion);
     installed || durable
 }
 
@@ -341,8 +370,19 @@ fn persisted_mode(fallback: ThemeMode) -> ThemeMode {
     };
     match libwoven::settings_policy::read_high_contrast(&data[..migration.length]) {
         Some(true) => ThemeMode::HighContrast,
-        Some(false) | None => fallback,
+        Some(false) => match libwoven::settings_policy::read_light_theme(&data[..migration.length]) {
+            Some(true) => ThemeMode::Light,
+            Some(false) | None => ThemeMode::Dark,
+        },
+        None => fallback,
     }
+}
+
+fn persisted_reduced_motion() -> bool {
+    let mut source = [0u8; 512];
+    read_settings(&mut source)
+        .and_then(|length| libwoven::settings_policy::read_reduced_motion(&source[..length]))
+        .unwrap_or(false)
 }
 
 fn send_resize(window: &GraphicsSurface, shell: libwoven::process::Id) -> bool {
@@ -361,10 +401,11 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
         fail(7)
     };
     mode = persisted_mode(mode);
+    let mut reduced_motion = persisted_reduced_motion();
     // Canonicalize a legacy installed record before the settings service
     // accepts requests; subsequent restarts then observe v2 values even if the
     // user closes the window without changing a setting.
-    let _ = persist_high_contrast(mode == ThemeMode::HighContrast);
+    let _ = persist_personalization(mode, reduced_motion);
     let mut window = GraphicsSurface::create(WIDTH, HEIGHT).unwrap_or_else(|_| fail(1));
     let mut refresh = Button::new(
         Frame::new(
@@ -375,7 +416,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
         ),
         "Refresh",
     );
-    if !render(&window, None, false, 0, mode, &refresh) {
+    if !render(&window, None, false, 0, mode, reduced_motion, &refresh) {
         fail(3)
     }
     if window.share_with(shell).is_err() {
@@ -418,6 +459,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                     pointer_pressed,
                     refresh_count,
                     mode,
+                    reduced_motion,
                     &refresh,
                 ) {
                     fail(8)
@@ -437,6 +479,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                             pointer_pressed,
                             refresh_count,
                             mode,
+                            reduced_motion,
                             &refresh,
                         ) {
                             let previous = core::mem::replace(&mut window, resized);
@@ -464,18 +507,23 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                     pointer_pressed,
                     refresh_count,
                     mode,
+                    reduced_motion,
                     &refresh,
                 ) {
                     fail(8)
                 }
                 let _ = libwoven::print("WovenSettings: keyboard refreshed\n");
-            } else if length == 1 && matches!(message[0], b'd' | b'l' | b'c') {
+            } else if length == 1 && matches!(message[0], b'd' | b'l' | b'c' | b'm') {
+                if message[0] == b'm' {
+                    reduced_motion = !reduced_motion;
+                } else {
                 mode = match message[0] {
                     b'l' => ThemeMode::Light,
                     b'c' => ThemeMode::HighContrast,
                     _ => ThemeMode::Dark,
                 };
-                if !persist_high_contrast(mode == ThemeMode::HighContrast) {
+                }
+                if !persist_personalization(mode, reduced_motion) {
                     let _ = libwoven::print("WovenSettings: theme persistence unavailable\n");
                 }
                 if !render(
@@ -484,6 +532,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                     pointer_pressed,
                     refresh_count,
                     mode,
+                    reduced_motion,
                     &refresh,
                 ) {
                     fail(8)
@@ -503,6 +552,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                     pointer_pressed,
                     refresh_count,
                     mode,
+                    reduced_motion,
                     &refresh,
                 ) {
                     fail(8)
@@ -523,6 +573,7 @@ pub fn run(shell: Option<&[u8]>, mut mode: ThemeMode) -> ! {
                     pointer_pressed,
                     refresh_count,
                     mode,
+                    reduced_motion,
                     &refresh,
                 ) {
                     fail(8)

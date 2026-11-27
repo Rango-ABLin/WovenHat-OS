@@ -7365,35 +7365,37 @@ pub mod graphics {
 
     pub(crate) fn load_system_font_face() -> Option<&'static TrueTypeFace<'static>> {
         let bytes = load_system_font_mapping().ok()?;
-        if SYSTEM_FACE_CACHE
+        // The mapping lives for the process lifetime, so a face parsed from it
+        // is already `'static`: no lifetime extension is required. Wait for
+        // the initialization lock rather than dropping to bitmap text on
+        // transient SMP contention, which would change a frame's text style.
+        while SYSTEM_FACE_CACHE
             .busy
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
         {
-            // SAFETY: busy is held exclusively for this access.
-            let cached = unsafe { &*SYSTEM_FACE_CACHE.face.get() };
-            if let Some(face) = cached.as_ref()
-                && face.bytes.as_ptr() == bytes.as_ptr()
-                && face.bytes.len() == bytes.len()
-            {
-                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
-                return Some(face);
-            }
-            let Some(face) = TrueTypeFace::from_bytes(bytes).ok() else {
-                SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
-                return None;
-            };
-            // SAFETY: the mapping remains valid until process teardown.
-            let face =
-                unsafe { core::mem::transmute::<TrueTypeFace<'_>, TrueTypeFace<'static>>(face) };
-            unsafe {
-                *SYSTEM_FACE_CACHE.face.get() = Some(face);
-            }
-            SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
-            // SAFETY: the cache remains initialized for process lifetime.
-            return unsafe { (&*SYSTEM_FACE_CACHE.face.get()).as_ref() };
+            core::hint::spin_loop();
         }
-        None
+        // SAFETY: `busy` is held exclusively for this access, and `bytes` is a
+        // `&'static` process-lifetime mapping borrowed by the parsed face.
+        let cached = unsafe { &*SYSTEM_FACE_CACHE.face.get() };
+        if let Some(face) = cached.as_ref()
+            && face.bytes.as_ptr() == bytes.as_ptr()
+            && face.bytes.len() == bytes.len()
+        {
+            SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+            return Some(face);
+        }
+        let Some(face) = TrueTypeFace::from_bytes(bytes).ok() else {
+            SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+            return None;
+        };
+        unsafe {
+            *SYSTEM_FACE_CACHE.face.get() = Some(face);
+        }
+        SYSTEM_FACE_CACHE.busy.store(false, Ordering::Release);
+        // SAFETY: the cache remains initialized for process lifetime.
+        unsafe { (&*SYSTEM_FACE_CACHE.face.get()).as_ref() }
     }
 
     fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {

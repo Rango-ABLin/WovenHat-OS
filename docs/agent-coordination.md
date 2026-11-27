@@ -1,3 +1,148 @@
+## Copilot - Phase B/master reconciliation (2026-11-27) - ACTIVE
+
+Reconciling `origin/phase-b/bottom-taskbar-core` into `origin/master` in the
+isolated `master-reconcile` worktree. The merge retains Phase B desktop, USB,
+release and settings behavior while preserving master's exact-source release
+provenance and native WovenFS atomic journal path. Validation is focused:
+formatting, Python release/hardware contracts, settings policy tests, geometry
+contracts, host all-target Clippy and the large-map kernel feature lint. Other
+acceptance chains are not claimed by this reconciliation.
+
+## Copilot - filesystem/release/desktop gap closure (2026-11-27) - DONE
+
+Patching audited gaps: FAT32 capacity proof, bounded WovenFS batch rollback and
+duplicate rejection, complete release-report gate-set binding, exact packaged
+ISO boot acceptance, automatic release workflow coverage, full taskbar
+alignment/icon-size matrix, and client reflow on maximize. Focused Clippy,
+FAT32 host tests, release tests, and desktop 20.10/20.19 matrices pass.
+The full `RUN-STAGE10.7.ps1` chain passes with temp output on D:. One local
+taskbar center/medium 5 GiB QEMU launch was host-memory blocked; all six
+combinations are now wired for the CI runner and the parser/build path passes.
+
+## OpenCode - compositor blend stall diagnosis (2026-11-27) - ACTIVE
+
+Starting Tier 2 with the `present_region_blended` stall that forced frame-only
+maximize and disabled window shadows in `32c14dbe`. Diagnosis: the shadow loop
+blends three full frame-sized rectangles per window, most of which the window
+immediately overwrites; on a band-filling window under 1-CPU TCG that is ~3M
+per-pixel blends per repaint, a throughput cliff rather than a lock deadlock
+(`PreemptMutex` already defers local preemption). I am clipping each shadow
+band to the visible ring outside the frame and restoring shadows, then will
+validate with the unchanged taskbar-pins and desktop-qualification gates at
+1/2/4 CPUs before touching WSIZ reflow. Scope:
+`apps/woven-shell/src/{geometry,main}.rs` and shell tests only — no kernel
+compositor or syscall changes, so it does not overlap the Copilot native
+compositor work below.
+
+Result: shadows restored with the visible-ring clip; `Area::subtract` has two
+host tests (`rustc --test`, geometry_area 2/2). Shell Clippy and fmt pass.
+`test-taskbar-pins.py --cpus 1 --memory 3G` PASSES with `window maximized:
+Terminal` and bounded repaint ticks (max 503) and zero failures — the
+compositor blend path is non-blocking for this workload. `--memory 3G` was
+used because the host had only ~3.9 GiB free virtual memory and QEMU could not
+reserve the harness default 5G; no assertion, budget or timeout changed. 2/4
+CPU reruns are BLOCKED by another owner's in-progress kernel WIP
+(`vfs.rs`/`storage.rs`/`fat32.rs`), which currently does not compile; this is
+not a regression from this change. Once that WIP compiled, the same gate
+PASSED at 2/4 CPUs too (`shadow-clip-pins-{2,4}cpu-3G-r2`, zero failures,
+maximize markers present), so the blend path is proven non-blocking at 1/2/4.
+WSIZ reflow remains a separate deferred change.
+
+## Copilot - native compositor/USB 16-CPU closure (2026-11-27) - DONE
+
+Fail-closed xHCI BIOS handoff, bounded stalled-shell termination, compositor
+claim diagnostics and large-VFS shell staging implemented. USB input, Stage
+19 compositor authority/input/damage/window/scale paths, and WovenShell 20.1
+plus 20.19 pass at 8/16 CPUs; CI expanded accordingly. Physical re-test with
+returned evidence remains required.
+
+## Copilot - desktop personalization and signing CI closure (2026-11-27) - DONE
+
+Added fail-closed persisted Dark/Light/High Contrast and reduced-motion
+settings, live WovenShell theme propagation, and required CI execution for the
+PKCS#11 signer/package/reproducibility contracts. Focused policy, signing,
+Settings 1/2/4-CPU and shell/app Clippy gates pass. Production key custody,
+independent attestation/review and physical TPM/Secure Boot remain external.
+
+## Copilot - desktop compositor current-head closure (2026-11-26) - DONE
+
+The full Stage 19.2/19.4-19.9/19.11-19.14 compositor matrix passes at
+1/2/4 CPUs. Added missing Stage 20.19 input-isolation Clippy/QEMU coverage to
+the desktop workflow and documented the remaining native HID/GPU/display
+boundary without changing runtime compositor behavior.
+
+## Copilot - graphics/framebuffer current-head closure (2026-11-26) - DONE
+
+Refreshed Stage 20.1's stale visual oracle to the current flat wallpaper,
+taskbar opacity, status/control geometry and centered taskbar chrome without
+changing shell rendering. Stage 20.1, Stage 20.14 dual-head scanout, Stage
+20.14b desktop scanout and GFX-02 pass at 1/2/4 CPUs; 37 display/compositing
+host contracts and warning-denying graphics Clippy pass. Native GPU
+acceleration, physical scanout/latency and controller-loss qualification stay
+explicit external gates.
+
+## Copilot - USB/xHCI/WovenFS and wireless software closure (2026-11-26) - DONE
+
+USB mass storage now participates in primary root selection and deferred
+native enumeration can mount it through the normal FAT32/WovenFS ownership
+boundary. Fixed the Stage 13.10 feature-composition break by making the pure
+xHCI keyboard decoder available to the shared self-test. Default, Stage
+13.10, Stage 13.18 and all-target Clippy pass, as do workspace tests, USB MSC
+tests, WovenFS crash tests, and the 1/2/4-CPU USB/wireless QEMU matrices.
+Native controller, radio, firmware, hotplug, physical-device and RF
+qualification remain explicit external gates.
+
+## Copilot - Stage 13.15 WovenAudio CI closure (2026-11-26) - DONE
+
+Playback and deterministic Ring-3 capture gates pass at 1/2/4 CPUs. I am
+adding the virtual capture matrix and capture-feature warning-denying Clippy
+to the kernel workflow, plus status/architecture records that preserve the
+native physical-audio boundary. Playback and virtual capture pass at 1/2/4
+CPUs; capture-feature and all-target warning-denying Clippy pass. The global
+format check still reports unrelated pre-existing kernel formatting drift.
+
+## OpenCode - shell self-test system font mapping (2026-11-26) - DONE
+
+Fixing the owner-reported `woven-shell: system font mapping unavailable` in
+shell-only/self-test boots. Root cause: those kernels never call
+`install_production_system_apps()`, so `/share/fonts/NotoSans-Regular.ttf` is
+never staged, and most shell self-tests deliberately spawn the shell without
+`FileRead`. Owner approved a test-only fix: stage the validated font asset in
+VFS for `qemu-test` images and add `FileRead` to the shell's self-test
+capability sets. I will touch the font constants/`create_read_only_large`
+cfg gates, a boot-time staging helper, the shell capability sets, and the two
+`mkdir("/share")` assertions that must tolerate the pre-created directory.
+Result: S20.2 passes at 1/2/4 CPUs with the font parsed in every serial log.
+Enabling the face changed text rasterisation, so only the S20.2 toast-text
+and title-bar fill-sample points were adapted; the `gone`/`empty` blocks and
+wallpaper oracles were not touched. Booting the pre-fix commit in an isolated
+worktree confirmed S20.1/20.3/20.9 already failed on stale oracles. Also
+includes the concurrent VFS-node baseline refresh needed because font staging
+adds VFS nodes after the earlier baseline was captured. Full RUN-STAGE10.7
+was not run while other QEMU chains held the fixed output paths.
+
+## OpenCode - S20.2 self-test stale wallpaper palette (2026-11-26) - ACTIVE
+
+I am fixing the two reported Stage 20.2 failures
+(`A's window, entry and tray icon removed...` / `desktop applications: FAILED`)
+in `kernel/src/main.rs::stage20_2_self_test`. Root cause: this oracle still
+hardcodes the pre-Win11 wallpaper palette `rgb(11,29,58)`/`rgb(16,78,82)`,
+while `apps/woven-shell/src/tokens.rs` renders `rgb(16,36,74)`/`rgb(18,84,96)`.
+The diagnostic values (`tray=0x172e3c` vs `expected=0x172c38`,
+`body=0x142c4f`) match the palette delta exactly. I am restoring the strict
+wallpaper-equality assertions rather than weakening them further. Please do
+not rewrite the `gone`/`empty` blocks or the palette constants in this
+function while this fix is being validated.
+
+Result: `scripts/test-woven-shell-qemu.py --stage 20.2` PASSES at 1/2/4 CPUs
+(exit 33, `desktop applications: PASSED`) with the strict wallpaper-equality
+oracle restored, not weakened. `cargo fmt --all -- --check`, warning-denying
+`stage20-2-test` kernel Clippy, `cargo clippy --all-targets -- -D warnings`
+and `cargo test --workspace` all pass. Evidence:
+`target/woven-shell-apps-{1,2,4}cpu/serial.log`. The full serialized
+`RUN-STAGE10.7.ps1` chain was deliberately not started while other owners'
+memory/image QEMU chains held the fixed output paths; that gate remains
+unrun here and is reported as such, not claimed.
 ## Copilot - Stage 1-5 storage recovery investigation (2026-11-27)
 
 Investigating the earliest open WovenFS multi-file transaction and recovery

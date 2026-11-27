@@ -141,19 +141,23 @@ pub const PANEL_ROW: i32 = 14;
 pub static THEME_MODE: AtomicU8 = AtomicU8::new(0);
 
 pub fn high_contrast() -> bool {
-    THEME_MODE.load(Ordering::Relaxed) != 0
+    THEME_MODE.load(Ordering::Relaxed) == 1
+}
+
+pub fn light_theme() -> bool {
+    THEME_MODE.load(Ordering::Relaxed) == 2
 }
 
 pub fn theme_accent() -> u32 {
     if high_contrast() {
         rgb(255, 255, 0)
     } else {
-        ACCENT
+        if light_theme() { rgb(0, 104, 132) } else { ACCENT }
     }
 }
 
 pub fn theme_text() -> u32 {
-    TEXT
+    if light_theme() { rgb(24, 30, 42) } else { TEXT }
 }
 
 /// Secondary/placeholder text. High-contrast keeps maximum legibility.
@@ -161,7 +165,7 @@ pub fn theme_muted() -> u32 {
     if high_contrast() {
         rgb(255, 255, 255)
     } else {
-        TEXT_MUTED
+        if light_theme() { rgb(82, 92, 108) } else { TEXT_MUTED }
     }
 }
 
@@ -169,7 +173,7 @@ pub fn theme_panel() -> u32 {
     if high_contrast() {
         rgb(0, 0, 0)
     } else {
-        PANEL_FILL
+        if light_theme() { rgb(244, 247, 251) } else { PANEL_FILL }
     }
 }
 
@@ -177,7 +181,7 @@ pub fn theme_taskbar() -> u32 {
     if high_contrast() {
         rgb(0, 0, 0)
     } else {
-        TASKBAR
+        if light_theme() { rgb(232, 238, 244) } else { TASKBAR }
     }
 }
 
@@ -185,7 +189,7 @@ pub fn theme_toast() -> u32 {
     if high_contrast() {
         rgb(0, 0, 0)
     } else {
-        TOAST_FILL
+        if light_theme() { rgb(255, 255, 255) } else { TOAST_FILL }
     }
 }
 
@@ -193,7 +197,7 @@ pub fn theme_stroke() -> u32 {
     if high_contrast() {
         rgb(255, 255, 255)
     } else {
-        STROKE
+        if light_theme() { rgb(18, 24, 34) } else { STROKE }
     }
 }
 
@@ -215,7 +219,7 @@ pub fn theme_start_fill() -> u32 {
     if high_contrast() {
         rgb(0, 0, 0)
     } else {
-        START_FILL
+        if light_theme() { rgb(44, 132, 154) } else { START_FILL }
     }
 }
 
@@ -227,8 +231,8 @@ pub fn theme_entry(active: bool) -> u32 {
             rgb(0, 0, 0)
         }
     } else if active {
-        ENTRY_ACTIVE
+        if light_theme() { rgb(190, 210, 226) } else { ENTRY_ACTIVE }
     } else {
-        ENTRY_INACTIVE
+        if light_theme() { rgb(220, 228, 236) } else { ENTRY_INACTIVE }
     }
 }

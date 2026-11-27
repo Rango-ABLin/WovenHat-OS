@@ -1,5 +1,35 @@
 # Stage 1-19 closure report
 
+## Current-head bounded software closure — 2026-11-27
+
+Source baseline: `685e9cbed05fd8f975f7cc14f4a6cf8eedcaeec9` on
+`phase-b/bottom-taskbar-core`.
+
+Decision for the in-repository acceptance boundary: **all Stage 1-19
+software/QEMU gates are verified on the current source**. Evidence includes the
+mandatory serialized `RUN-STAGE10.7.ps1` exit 0, warning-denying host/all-target
+Clippy and affected feature Clippy, workspace tests, the 1/2/4-CPU inherited
+matrix, and the expanded 8/16-CPU USB HID, compositor, window/input, damage,
+scale and WovenShell input-isolation matrix. The xHCI handoff now fails closed
+and a stalled WovenShell is terminated after its bounded compositor wait instead
+of being accepted as a live desktop session.
+
+This is not a collective production-ready declaration. The remaining acceptance
+predicates are external to software/QEMU and therefore cannot be closed from a
+local checkout:
+
+- fresh physical USB keyboard/mouse and bare-metal compositor evidence;
+- native storage/controller/radio/display qualification and physical power-loss
+  or torn-media behavior;
+- production non-exportable key custody, witnessed ceremony and actual signed
+  exact-commit release artifacts;
+- independent organization rebuild attestation and independent security review;
+- physical Secure Boot/TPM and named-device certification evidence.
+
+Until those submissions are received and verified, the repository-wide Stage
+1-19 production decision remains **BLOCKED**, while no bounded in-repository
+software acceptance gate remains unverified on this baseline.
+
 Recorded 2026-11-15 on `integration/master-reconciliation-20261115`.
 Source baseline `541dd70832b680e3fc4f248377c194611f71cc2d` plus the bootloader build repair described below.
 Current acceptance applies only to explicitly executed checks.

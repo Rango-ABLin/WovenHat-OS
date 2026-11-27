@@ -2222,7 +2222,7 @@ impl Desktop {
         if !self.qs_open {
             return Area::new(0, 0, 0, 0);
         }
-        let height = self.qs_panel_height().min(self.taskbar_top() - 8).max(0);
+        let height = self.qs_panel_height().min(460);
         let y = (self.taskbar_top() - height - 8).max(0);
         Area::new(self.width - QS_WIDTH - 8, y, QS_WIDTH, height)
     }
@@ -4091,12 +4091,31 @@ impl Desktop {
             if alpha == 0 {
                 continue;
             }
-            // Window shadows are temporarily disabled: painter.blend's
-            // present_region_blended path can stall on the software compositor
-            // during heavy QEMU repaints, which hung the shell after maximize.
-            // TODO(phase-b): restore shadows once the compositor blend path is
-            // proven non-blocking in this environment.
-            let _ = (bands, frame, area, above_taskbar, SHADOW);
+            // Shadow bands are offset down/right of the frame, so only the
+            // ring outside the frame is visible: the title, client surface
+            // and border below overwrite the interior. Blending the whole
+            // frame three times per window made a band-filling window issue
+            // millions of per-pixel blends on the software compositor. Clip
+            // to the visible ring first; the remaining present_region_blended
+            // work is bounded by the shadow reach times the window perimeter.
+            for (offset, opacity) in bands {
+                let band = Area::new(
+                    frame.x + offset,
+                    frame.y + offset,
+                    frame.width,
+                    frame.height,
+                );
+                let opacity = (u32::from(opacity) * u32::from(alpha) / 255) as u8;
+                if opacity == 0 {
+                    continue;
+                }
+                for piece in band.subtract(frame) {
+                    let part = piece.intersect(area).intersect(above_taskbar);
+                    if !part.is_empty() {
+                        painter.blend(part, SHADOW, opacity);
+                    }
+                }
+            }
             let active = Some(slot) == focused;
             let title = window.title_area().intersect(area);
             if !title.is_empty() {
@@ -4347,10 +4366,19 @@ impl Desktop {
         window.width = next_w;
         window.height = next_h;
         window.maximized = next_maximized;
-        // Frame-only maximize: keep the client's current surface and blit it
-        // inside the band-filling frame. Asking the client to reflow via WSIZ
-        // can race with concurrent compositor work on slow 1-CPU QEMU runs;
-        // client reflow on maximize is a follow-up once that path is proven.
+        if (window.surface_w, window.surface_h) != (next_w, next_h) {
+            let mut request = [0u8; 8];
+            request[..4].copy_from_slice(b"WSIZ");
+            request[4..6].copy_from_slice(&(next_w as u16).to_le_bytes());
+            request[6..].copy_from_slice(&(next_h as u16).to_le_bytes());
+            window.resizing_until = libwoven::ticks() + RESIZE_GRACE;
+            if libwoven::message_send(window.owner, &request).is_err() {
+                log(&[
+                    b"woven-shell: WSIZ send failed: ",
+                    &window.title[..window.title_length],
+                ]);
+            }
+        }
         if next_maximized {
             log(&[
                 b"woven-shell: window maximized: ",
@@ -4724,6 +4752,16 @@ impl Desktop {
 
     fn handle_input(&mut self, event: InputEvent) -> Area {
         let empty = Area::new(0, 0, 0, 0);
+        if matches!(event, InputEvent::PointerButton { pressed: true, .. }) {
+            let mut x = [0u8; 20];
+            let mut y = [0u8; 20];
+            log(&[
+                b"woven-shell: absolute press ",
+                libwoven::format_u64(self.pointer.0.max(0) as u64, &mut x),
+                b",",
+                libwoven::format_u64(self.pointer.1.max(0) as u64, &mut y),
+            ]);
+        }
         // Motion changes state immediately, but painting is deferred until the
         // bounded input batch completes. Absolute devices use the same hit tests
         // and pointer capture as the relative PS/2 path.
@@ -4829,8 +4867,27 @@ impl Desktop {
                             return self.qs_activate_action(action);
                         }
                     }
-                    // Footer buttons are painted over the lower rows on short
-                    // screens, so their hit targets must also win.
+                    // Brightness slider
+                    let bslider = self.qs_slider_area_at(panel, 0);
+                    if bslider.contains(x, y) {
+                        let track_x = bslider.x + 36;
+                        let track_w = (bslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        self.brightness = pct;
+                        return panel;
+                    }
+                    // Volume slider
+                    let vslider = self.qs_slider_area_at(panel, 1);
+                    if vslider.contains(x, y) {
+                        let track_x = vslider.x + 36;
+                        let track_w = (vslider.width - 44).max(1);
+                        let pct =
+                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
+                        let _ = self.status.set_volume(pct);
+                        return panel.union(self.status_icons_area());
+                    }
+                    // Footer buttons
                     let footer = self.qs_footer_area_at(panel);
                     let btn_y = footer.y + 8;
                     let btn_h = 24;
@@ -4863,26 +4920,6 @@ impl Desktop {
                     }
                     if power.contains(x, y) {
                         return self.power(false);
-                    }
-                    // Brightness slider
-                    let bslider = self.qs_slider_area_at(panel, 0);
-                    if bslider.contains(x, y) {
-                        let track_x = bslider.x + 36;
-                        let track_w = (bslider.width - 44).max(1);
-                        let pct =
-                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        self.brightness = pct;
-                        return panel;
-                    }
-                    // Volume slider
-                    let vslider = self.qs_slider_area_at(panel, 1);
-                    if vslider.contains(x, y) {
-                        let track_x = vslider.x + 36;
-                        let track_w = (vslider.width - 44).max(1);
-                        let pct =
-                            ((x - track_x).clamp(0, track_w) * 100 / track_w).clamp(0, 100) as u8;
-                        let _ = self.status.set_volume(pct);
-                        return panel.union(self.status_icons_area());
                     }
                     return empty;
                 }
@@ -5443,7 +5480,14 @@ fn load_accessibility_settings(path: &str, desktop: &mut Desktop) {
     settings.apply_json(data);
     // Both fields are applied absolutely so a later record that turns them
     // off takes effect immediately, not just on the next boot.
-    THEME_MODE.store(u8::from(settings.high_contrast), Ordering::Relaxed);
+    let theme_mode = if settings.high_contrast {
+        1
+    } else if libwoven::settings_policy::read_light_theme(data) == Some(true) {
+        2
+    } else {
+        0
+    };
+    THEME_MODE.store(theme_mode, Ordering::Relaxed);
     desktop.reduced_motion = settings.reduced_motion;
 }
 
@@ -5593,9 +5637,12 @@ fn main(args: Args) -> ! {
     // SAFETY: the only reference to the tile buffer, taken once.
     let tile = unsafe { &mut *TILE.0.get() };
 
+    log(&[b"woven-shell: compositor claim begin"]);
     if libwoven::compositor_claim().is_err() {
+        log(&[b"woven-shell: compositor claim failed"]);
         fail(2);
     }
+    log(&[b"woven-shell: compositor claim complete"]);
     let mut info = match libwoven::compositor_info() {
         Ok(info) => info,
         Err(_) => fail(3),

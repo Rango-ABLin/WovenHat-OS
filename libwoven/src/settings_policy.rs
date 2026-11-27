@@ -69,6 +69,91 @@ pub fn read_high_contrast(data: &[u8]) -> Option<bool> {
     }
 }
 
+pub fn patch_reduced_motion(data: &mut [u8], enabled: bool) -> bool {
+    patch_fixed_boolean(data, b"reduced_motion", enabled)
+}
+
+pub fn read_reduced_motion(data: &[u8]) -> Option<bool> {
+    read_boolean(data, b"reduced_motion")
+}
+
+/// Themes use fixed-width values (`dark ` and `light`) so an installed record
+/// can be updated in place without changing its offsets.
+pub fn patch_theme(data: &mut [u8], light: bool) -> bool {
+    patch_fixed_string(data, b"theme", if light { b"light" } else { b"dark " })
+}
+
+pub fn read_light_theme(data: &[u8]) -> Option<bool> {
+    let value = string_field(data, b"theme")?;
+    match value.trim_ascii_end() {
+        "dark" => Some(false),
+        "light" => Some(true),
+        _ => None,
+    }
+}
+
+fn patch_fixed_boolean(data: &mut [u8], name: &[u8], enabled: bool) -> bool {
+    let Some(start) = find_single_named_key(data, name) else {
+        return false;
+    };
+    let value_start = start + name.len() + 3;
+    let value: &[u8] = if enabled { b"true " } else { b"false" };
+    let Some(destination) = data.get_mut(value_start..value_start + value.len()) else {
+        return false;
+    };
+    if destination != b"false" && destination != b"true " {
+        return false;
+    }
+    destination.copy_from_slice(value);
+    true
+}
+
+fn patch_fixed_string(data: &mut [u8], name: &[u8], value: &[u8]) -> bool {
+    let Some(start) = find_single_named_key(data, name) else {
+        return false;
+    };
+    let value_start = start + name.len() + 4;
+    let Some(destination) = data.get_mut(value_start..value_start + value.len()) else {
+        return false;
+    };
+    if &*destination != b"dark " && &*destination != b"light" {
+        return false;
+    }
+    destination.copy_from_slice(value);
+    true
+}
+
+fn find_single_named_key(data: &[u8], name: &[u8]) -> Option<usize> {
+    let mut key = [0u8; 32];
+    let len = name.len().checked_add(2)?;
+    if len > key.len() {
+        return None;
+    }
+    key[0] = b'"';
+    key[1..1 + name.len()].copy_from_slice(name);
+    key[1 + name.len()] = b'"';
+    let start = data.windows(len).position(|window| window == &key[..len])?;
+    if data[start + len..]
+        .windows(len)
+        .any(|window| window == &key[..len])
+    {
+        return None;
+    }
+    Some(start)
+}
+
+fn read_boolean(data: &[u8], name: &[u8]) -> Option<bool> {
+    let start = find_single_named_key(data, name)?;
+    let value = data.get(start + name.len() + 3..start + name.len() + 8)?;
+    if value == b"true " {
+        Some(true)
+    } else if value == b"false" {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 pub fn migrate(data: &[u8], output: &mut [u8]) -> Result<Migration, MigrationError> {
     if data.is_empty() || data.len() > MAX_SETTINGS_BYTES || output.len() < MAX_SETTINGS_BYTES {
         return Err(MigrationError::Malformed);
@@ -79,11 +164,29 @@ pub fn migrate(data: &[u8], output: &mut [u8]) -> Result<Migration, MigrationErr
         LEGACY_SCHEMA => true,
         _ => return Err(MigrationError::UnsupportedSchema),
     };
-    if !changed {
+    if !changed && string_field(data, b"theme").is_some() {
         output[..data.len()].copy_from_slice(data);
         return Ok(Migration {
             length: data.len(),
             changed: false,
+        });
+    }
+    if !changed {
+        let end = data
+            .iter()
+            .rposition(|byte| *byte == b'}')
+            .ok_or(MigrationError::Malformed)?;
+        if end + 22 > output.len() {
+            return Err(MigrationError::OutputTooSmall);
+        }
+        output[..end].copy_from_slice(&data[..end]);
+        let mut writer = Writer::new(output);
+        writer.position = end;
+        writer.bytes(br#","theme":"dark "}"#)?;
+        writer.bytes(b"\n")?;
+        return Ok(Migration {
+            length: writer.position,
+            changed: true,
         });
     }
 
@@ -118,6 +221,9 @@ pub fn migrate(data: &[u8], output: &mut [u8]) -> Result<Migration, MigrationErr
     writer.boolean(bool_field(data, b"high_contrast").unwrap_or(false))?;
     writer.bytes(br#","reduced_motion":"#)?;
     writer.boolean(bool_field(data, b"reduced_motion").unwrap_or(false))?;
+    writer.bytes(br#","theme":""#)?;
+    writer.string("dark ")?;
+    writer.bytes(b"\"")?;
     writer.bytes(br#","taskbar_alignment":""#)?;
     writer.string(taskbar_alignment)?;
     writer.bytes(br#"","taskbar_icon_size":""#)?;
@@ -227,7 +333,8 @@ impl<'a> Writer<'a> {
 mod tests {
     use super::{
         CURRENT_SCHEMA, MAX_SETTINGS_BYTES, MigrationError, migrate, patch_high_contrast,
-        read_high_contrast,
+        patch_reduced_motion, patch_theme, read_high_contrast, read_light_theme,
+        read_reduced_motion,
     };
 
     #[test]
@@ -286,9 +393,10 @@ mod tests {
         assert!(text.contains("\"high_contrast\":true"));
         assert!(text.contains("\"taskbar_alignment\":\"center\""));
         assert!(
-            !migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
+            migrate(&output[..migration.length], &mut [0u8; MAX_SETTINGS_BYTES])
                 .unwrap()
                 .changed
+                == false
         );
     }
 
@@ -317,11 +425,24 @@ mod tests {
 
     #[test]
     fn current_schema_is_byte_stable() {
-        let input = br#"{"schema":"wovenhat-installed-v2","user":"Ada"}"#;
+        let input = br#"{"schema":"wovenhat-installed-v2","user":"Ada","theme":"dark "}"#;
         let mut output = [0u8; MAX_SETTINGS_BYTES];
         let migration = migrate(input, &mut output).unwrap();
         assert!(!migration.changed);
         assert_eq!(&output[..migration.length], input);
         assert_eq!(CURRENT_SCHEMA, b"wovenhat-installed-v2");
+    }
+
+    #[test]
+    fn patches_personalization_fields_in_place() {
+        let mut data = *br#"{"reduced_motion":false,"theme":"dark "}"#;
+        assert!(patch_reduced_motion(&mut data, true));
+        assert!(patch_theme(&mut data, true));
+        assert_eq!(read_reduced_motion(&data), Some(true));
+        assert_eq!(read_light_theme(&data), Some(true));
+        assert!(patch_reduced_motion(&mut data, false));
+        assert!(patch_theme(&mut data, false));
+        assert_eq!(read_reduced_motion(&data), Some(false));
+        assert_eq!(read_light_theme(&data), Some(false));
     }
 }

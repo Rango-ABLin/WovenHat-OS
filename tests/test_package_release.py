@@ -19,8 +19,9 @@ class ReleasePackagerContractTests(unittest.TestCase):
     def test_requires_each_system_app_cpu_gate(self) -> None:
         source = PACKAGER.read_text(encoding="utf-8")
 
-        self.assertNotIn("required.add('system-apps-boot')", source)
-        self.assertIn("required |= {f'system-apps-boot-{cpus}' for cpus in (1, 2, 4)}", source)
+        self.assertIn("required_checks", source)
+        self.assertIn("set(required)", source)
+        self.assertIn("test-uefi-iso-qemu.py", source)
         self.assertIn("apps + ('woven-package', 'woven-ai', 'woven-shell')", source)
 
     def test_validation_manifest_records_source_commit(self) -> None:

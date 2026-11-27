@@ -1,4 +1,5 @@
 """Package only the image and source state recorded by the successful release gate."""
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -25,27 +26,25 @@ def require_validated_source(root, manifest):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--qemu', default=shutil.which('qemu-system-x86_64')
+                        or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
+    parser.add_argument('--firmware', type=Path)
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     validation = root / 'target' / 'release-validation'
     manifest = json.loads((validation / 'validated-image.json').read_text())
     report = validation / 'results.json'
     checks = json.loads(report.read_text())
-    required = {'lint-kernel', 'lint-host', 'legacy-pic', 'build-release', 'shell-smoke',
-                'test-buffer_cache', 'test-file_mapping', 'test-page_cache'}
-    required |= {f'{suite}-{cpus}-debug' for suite in ('memory', 'storage') for cpus in (1, 2, 4)}
-    required |= {f'{suite}-4-release' for suite in ('memory', 'storage')}
     apps = ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-monitor',
             'woven-settings', 'woven-security', 'woven-editor', 'woven-images',
             'woven-update', 'woven-store', 'woven-installer')
-    required |= {f'lint-app-{app}' for app in apps}
-    required |= {f'{app.removeprefix("woven-")}-{cpus}'
-                 for app in apps if app not in ('woven-calculator', 'woven-terminal', 'woven-files', 'woven-installer')
-                 for cpus in (1, 2, 4)}
-    required |= {f'system-app-catalog-{cpus}' for cpus in (1, 2, 4)}
-    # The release validator emits one signed system-app boot result per CPU
-    # profile. Require those exact qualified rows; there is no aggregate marker.
-    required |= {f'system-apps-boot-{cpus}' for cpus in (1, 2, 4)}
-    if not required <= {item['check'] for item in checks} or not all(item['passed'] for item in checks):
+    required = manifest.get('required_checks')
+    if not isinstance(required, list) or not required or len(required) != len(set(required)):
+        raise SystemExit('Validation manifest has no complete required check list.')
+    if {item.get('check') for item in checks} != set(required) or len(checks) != len(required):
+        raise SystemExit('Release report does not match the validated gate set.')
+    if not all(item.get('passed') is True for item in checks):
         raise SystemExit('Release gates are incomplete or failed.')
     try:
         require_validated_source(root, manifest)
@@ -83,6 +82,17 @@ def main():
     iso_builder_spec.loader.exec_module(iso_builder)
     packaged_iso = out / 'wovenhat-os-0.8.0-uefi.iso'
     iso_builder.build_iso(packaged, packaged_iso, 'WOVENHAT')
+    qemu = Path(args.qemu)
+    firmware = args.firmware or qemu.parent / 'share' / 'edk2-x86_64-code.fd'
+    if not qemu.is_file() or not firmware.is_file():
+        raise SystemExit('Set --qemu and --firmware to regular QEMU/OVMF paths for ISO acceptance.')
+    subprocess.run([
+        sys.executable, str(root / 'scripts' / 'test-uefi-iso-qemu.py'),
+        '--iso', str(packaged_iso),
+        '--firmware', str(firmware),
+        '--qemu', str(qemu),
+        '--serial-log', str(out / 'iso-boot-serial.log'),
+    ], cwd=root, check=True)
     shutil.copyfile(root / 'docs' / 'release-0.8.0.md', out / 'RELEASE-NOTES.md')
     shutil.copyfile(report, out / 'results.json')
     system_apps = root / 'target' / 'system-apps' / '0.8.0'

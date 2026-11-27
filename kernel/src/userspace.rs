@@ -4754,14 +4754,31 @@ const USER_MMAP_STRIDE: u64 = 0x10_000;
 pub(crate) const USER_MMAP_MAX_SIZE: usize = USER_MMAP_STRIDE as usize;
 const USER_MMAP_ARENA_SIZE: u64 = MAX_ANONYMOUS_MAPPINGS as u64 * USER_MMAP_STRIDE;
 
+/// The dynamic-TLS arena starts at `DYNAMIC_TLS_START` and uses one 64 KiB
+/// cell per `(task slot, module slot)`, plus the mmap ASLR displacement. Keep
+/// the large-asset window strictly above its largest possible address; both
+/// may be live in the same process (a GUI app can load the font and adopt a
+/// runtime TLS module).
+const DYNAMIC_TLS_ARENA_SIZE: u64 = (crate::config::MAX_TASKS as u64 * MAX_DYNAMIC_MODULES as u64)
+    * USER_MMAP_STRIDE
+    + ASLR_MMAP_SPAN;
 /// A single read-only window for staged assets that are larger than one mmap
-/// slot (the bundled NotoSans TTF is ~607 KiB). It sits well above the stack's
-/// bounded `USER_REGION_START + 256 MiB` ceiling, so no ASLR draw can overlap
-/// it, and no other mapping path allocates from this range.
-const USER_LARGE_MAP_START: u64 = USER_REGION_START + 0x2000_0000;
+/// slot (the bundled NotoSans TTF is 621,572 bytes). It sits above both the
+/// stack ceiling and the whole dynamic-TLS arena, so no ASLR draw or runtime
+/// TLS module can overlap it.
+const USER_LARGE_MAP_START: u64 = DYNAMIC_TLS_START + DYNAMIC_TLS_ARENA_SIZE;
 /// Hard bound on the one large mapping a process may install. Chosen to cover
 /// the staged font with headroom while keeping the copy and teardown bounded.
 pub const LARGE_MAP_MAX_SIZE: usize = 1024 * 1024;
+const _: () = assert!(USER_LARGE_MAP_START > DYNAMIC_TLS_START);
+const _: () = assert!(
+    DYNAMIC_TLS_START
+        + ASLR_MMAP_SPAN
+        + (crate::config::MAX_TASKS as u64 * MAX_DYNAMIC_MODULES as u64) * USER_MMAP_STRIDE
+        <= USER_LARGE_MAP_START
+);
+const _: () =
+    assert!(USER_LARGE_MAP_START + LARGE_MAP_MAX_SIZE as u64 <= USER_REGION_START + 0x4000_0000);
 
 /// Keep the mmap arena, optional TLS reservation, guard page and stack
 /// disjoint. Independent ASLR draws must not be allowed to overlap.
@@ -5457,6 +5474,11 @@ pub fn map_dynamic_anonymous(
             .checked_add(module as u64)?
             .checked_mul(USER_MMAP_STRIDE)?,
     )?;
+    // Fail closed instead of mapping over an existing range (for example a
+    // large read-only asset window) if the layout invariant is ever broken.
+    if !paging::user_range_is_unmapped_in(address_space, address, size) {
+        return None;
+    }
     paging::map_user_range_in(address_space, address, size, true, false).ok()?;
     if paging::zero_user_range_in(address_space, address, size).is_err() {
         let _ = paging::unmap_user_range_in(address_space, address, size);
@@ -7779,6 +7801,76 @@ pub fn file_mmap_self_test() -> bool {
     passed &= crate::vfs::remove(PATH).is_ok();
 
     passed
+}
+
+#[cfg(feature = "large-map-test")]
+/// Focused gate for the bounded read-only asset window used by the system
+/// font. It runs with a larger guest RAM budget so the 256 MiB stress matrix's
+/// frame pressure cannot make this gate flaky.
+pub fn large_mapping_self_test() -> bool {
+    const PATH: &str = "/tmp/large-window-test";
+    static DATA: [u8; USER_MMAP_MAX_SIZE + 7] = {
+        let mut data = [0x5a; USER_MMAP_MAX_SIZE + 7];
+        data[3] = 0xa5;
+        data
+    };
+    if crate::vfs::stat(PATH).is_ok() || crate::vfs::write_file(PATH, &DATA).is_err() {
+        return false;
+    }
+    let Ok(file) = crate::vfs::open(PATH) else {
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let Some(root) = paging::create_user_address_space(USER_MMAP_START) else {
+        let _ = crate::vfs::close_open_file(file);
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let mut space = AddressSpace {
+        paging: root,
+        stack_base: 0,
+        mmap_base: USER_MMAP_START,
+        mappings: [UserMapping::EMPTY; MAX_IMAGE_MAPPINGS],
+        mapping_count: 0,
+        relro: None,
+        library_relro: [None; crate::elf::MAX_NEEDED_LIBRARIES],
+        tls: None,
+        dynamic_modules: [DynamicModule::EMPTY; MAX_DYNAMIC_MODULES],
+        runtime_symbols: [None; MAX_RUNTIME_SYMBOLS],
+        destructors: [0; crate::elf::MAX_SCOPE_IMAGES * crate::elf::MAX_LIFECYCLE_FUNCTIONS],
+        destructor_count: 0,
+        destructor_pending: false,
+        lifecycle_trampoline: 0,
+        lazy_bindings: [LazyBinding::EMPTY; MAX_LAZY_BINDINGS],
+        lazy_binding_count: 0,
+        large_mapping: None,
+    };
+    let Some(mapping) = map_file_large_readonly(space, file, 0, DATA.len()) else {
+        let _ = paging::discard_empty_user_address_space(root);
+        let _ = crate::vfs::close_open_file(file);
+        let _ = crate::vfs::remove(PATH);
+        return false;
+    };
+    let mut bytes = [0u8; 4];
+    let protection =
+        paging::user_range_has_protection_in(root, mapping.address, mapping.size, false, false);
+    let read = paging::read_user_bytes_in(root, mapping.address + 3, &mut bytes);
+    space.set_large_mapping(Some(mapping));
+    let second = map_file_large_readonly(space, file, 0, DATA.len());
+    let unaligned = map_file_large_readonly(space, file, 1, 4096);
+    let zero = map_file_large_readonly(space, file, 0, 0);
+    let unmapped = unmap_large(space, mapping);
+    let ok = protection
+        && read.is_ok()
+        && bytes == [0xa5, 0x5a, 0x5a, 0x5a]
+        && second.is_none()
+        && unaligned.is_none()
+        && zero.is_none()
+        && unmapped;
+    let _ = paging::destroy_user_address_space(root, &[(mapping.address, mapping.size)]);
+    let _ = crate::vfs::close_open_file(file);
+    let _ = crate::vfs::remove(PATH);
+    ok
 }
 
 global_asm!(

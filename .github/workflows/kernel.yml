@@ -101,10 +101,13 @@ jobs:
               raise SystemExit("::error::Storage mount slot declaration missing before acceptance")
           print("Storage mount source-integrity preflight passed")
           PY
-      - name: Independent-build and release-archive provenance boundaries
+      - name: Independent-workspace reproducibility and provenance boundaries
         shell: bash
         run: |
-          python3 -m unittest tests.test_release_boundaries tests.test_package_release
+          python3 -m unittest \
+            tests.test_release_boundaries \
+            tests.test_hardware_release_signer \
+            tests.test_package_release
       - name: Stage 1-5 production software gate 1/2/4-core acceptance
         shell: bash
         run: |
@@ -377,7 +380,7 @@ jobs:
               python3 scripts/test-stage13-14-storage.py --mode "$mode" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             done
           done
-      - name: Stage 13.15 WovenAudio playback 1/2/4-core acceptance
+      - name: Stage 13.15 WovenAudio playback/capture 1/2/4-core acceptance
         shell: bash
         run: |
           qemu=/usr/bin/qemu-system-x86_64
@@ -390,8 +393,10 @@ jobs:
             fi
           done
           test -n "$ovmf_code"
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage13-15-capture-virtual-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-stage13-15-audio.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-stage13-15-capture-virtual.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Stage 13.16 report-protocol HID input 1/2/4-core acceptance
         shell: bash
@@ -1113,6 +1118,12 @@ jobs:
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-hello-gui-compositor-qemu.py --stage 19.14 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
+          for cpu in 8 16; do
+            python3 scripts/test-stage13-13-usb-input.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            for stage in 19.2 19.4 19.5 19.6 19.7 19.8 19.9 19.11 19.12 19.13 19.14; do
+              python3 scripts/test-hello-gui-compositor-qemu.py --stage "$stage" --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            done
+          done
       - name: Stage 20 WovenShell desktop acceptance
         shell: bash
         run: |
@@ -1146,6 +1157,7 @@ jobs:
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-13-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14-test -- -D warnings
           cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-14b-test -- -D warnings
+          cargo clippy -p wovenhat-kernel --target x86_64-unknown-none --features stage20-19-test -- -D warnings
           for cpu in 1 2 4; do
             python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-woven-shell-qemu.py --stage 20.2 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
@@ -1162,6 +1174,11 @@ jobs:
             python3 scripts/test-woven-shell-qemu.py --stage 20.13 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14-monitors.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
             python3 scripts/test-stage20-14b-desktop.py --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.19 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+          done
+          for cpu in 8 16; do
+            python3 scripts/test-woven-shell-qemu.py --stage 20.1 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
+            python3 scripts/test-woven-shell-qemu.py --stage 20.19 --cpus "$cpu" --timeout 300 --qemu "$qemu" --firmware "$ovmf_code"
           done
       - name: Preserve desktop-userspace evidence
         if: always()

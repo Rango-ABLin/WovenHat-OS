@@ -4747,7 +4747,14 @@ fn sys_compositor_claim() -> u64 {
     if !display_authorized() {
         return SYSCALL_ERROR;
     }
-    crate::compositor::claim(crate::task::current_process_id()).map_or(SYSCALL_ERROR, |()| 0)
+    let pid = crate::task::current_process_id();
+    crate::serial::write_line(format_args!("[SESSION] compositor claim begin pid={}", pid));
+    let result = crate::compositor::claim(pid);
+    crate::serial::write_line(format_args!(
+        "[SESSION] compositor claim complete pid={} result={:?}",
+        pid, result
+    ));
+    result.map_or(SYSCALL_ERROR, |()| 0)
 }
 
 /// Event kinds in the top byte of an `InputPoll` result.

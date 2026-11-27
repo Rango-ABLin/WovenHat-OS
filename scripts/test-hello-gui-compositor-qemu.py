@@ -51,7 +51,7 @@ def main():
     p.add_argument('--qemu',default=shutil.which('qemu-system-x86_64') or r'C:\Program Files\qemu\qemu-system-x86_64.exe')
     p.add_argument('--firmware',type=Path)
     p.add_argument('--firmware-vars',type=Path)
-    p.add_argument('--cpus',type=int,choices=(1,2,4),default=1)
+    p.add_argument('--cpus',type=int,choices=(1,2,4,8,16),default=1)
     p.add_argument('--stage',choices=tuple(STAGES),default='19.2')
     p.add_argument('--timeout',type=float,default=300)
     a=p.parse_args()
