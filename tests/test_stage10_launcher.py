@@ -23,7 +23,10 @@ class Stage10LauncherTests(unittest.TestCase):
             encoding="utf-8",
         )
         env = os.environ.copy()
-        env["WOVENHAT_OUTPUT_ROOT"] = str(output_root)
+        if output_root is not None:
+            env["WOVENHAT_OUTPUT_ROOT"] = str(output_root)
+        else:
+            env.pop("WOVENHAT_OUTPUT_ROOT", None)
         return subprocess.run(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
              "-File", str(root / "RUN-STAGE10.7.ps1")],
@@ -59,3 +62,12 @@ class Stage10LauncherTests(unittest.TestCase):
             result = self.run_launcher(Path(directory), "relative-output", 0)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("available absolute drive or share", result.stderr)
+
+    def test_default_output_uses_project_target_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = self.run_launcher(root, None, 0)
+            expected = root / "target" / "stage10-output"
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(f"child output root: {expected}", result.stdout)
+            self.assertIn(f"child target: {expected / 'target'}", result.stdout)

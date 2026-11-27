@@ -1,3 +1,18 @@
+## Copilot - latest-image desktop progress test (2026-11-27) - DONE (GATE FAIL)
+
+Running the current-head desktop qualification without modifying source or
+boot artifacts. The automated real-QEMU gate will build the latest hardware-demo
+image and verify sign-in, input, application launch/close, framebuffer changes,
+performance markers and fatal serial evidence.
+
+Result: the image built and booted on 1-CPU TCG with VirtIO-GPU. Sign-in,
+desktop readiness, Files launch, pointer refresh, workspace cancellation, and
+the keyboard-refresh serial marker passed. The gate failed because no required
+client-region framebuffer change appeared after keyboard refresh; 628 pixels
+changed elsewhere and zero changed in the asserted region. Evidence is preserved
+at `audit-artifacts/desktop-qualification-1795774513882721800`; assertions and
+timeouts were not changed. No 2/4-CPU rerun was started after the 1-CPU failure.
+
 ## Copilot - WovenFS branch reconciliation (2026-11-27) - ACTIVE
 
 Resumed the journal destination guard and crash tests after fast-forwarding

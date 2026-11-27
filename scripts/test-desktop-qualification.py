@@ -362,7 +362,10 @@ def capture_until_changed(
 
 
 def build_hardware_demo(output: Path) -> Path:
-    build_root = Path(os.environ.get("WOVENHAT_BUILD_ROOT", r"D:\wovenhat-os-build"))
+    build_root = Path(os.environ.get(
+        "WOVENHAT_BUILD_ROOT",
+        os.environ.get("WOVENHAT_OUTPUT_ROOT", str(ROOT / "target" / "desktop-build")),
+    ))
     cargo_target = Path(os.environ.get("CARGO_TARGET_DIR", str(build_root / "target")))
     cargo_build_dir = Path(os.environ.get("CARGO_BUILD_BUILD_DIR", str(build_root / ".cargo-build")))
     cargo_target.mkdir(parents=True, exist_ok=True)
@@ -761,7 +764,7 @@ def run_guest(args: argparse.Namespace, output: Path, qemu: Path, firmware: Path
             _, _, after_keyboard = capture_until_changed(
                 qmp, keyboard_frame, after_pointer,
                 time.monotonic() + args.frame_timeout, timings, "keyboard_refresh", 20,
-                region_changed(after_pointer, 180, 470, 140, 70, 20)
+                region_changed(after_pointer, 520, 490, 160, 45, 20)
             )
             screenshots.append(keyboard_frame.name)
             if changed_pixels(after_pointer, after_keyboard) < 20:

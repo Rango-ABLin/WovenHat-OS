@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $outputRoot = if ($env:WOVENHAT_OUTPUT_ROOT) {
     $env:WOVENHAT_OUTPUT_ROOT
 } else {
-    'D:\WovenHat-OS-output'
+    Join-Path $PSScriptRoot 'target\stage10-output'
 }
 $outputDrive = [System.IO.Path]::GetPathRoot($outputRoot)
 if ((-not $outputDrive) -or
