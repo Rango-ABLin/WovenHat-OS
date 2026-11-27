@@ -151,11 +151,26 @@ memory/image QEMU chains held the fixed output paths; that gate remains
 unrun here and is reported as such, not claimed.
 ## Copilot - Stage 1-5 storage recovery investigation (2026-11-27)
 
-Investigating the earliest open WovenFS multi-file transaction and recovery
-prerequisite on master. This entry reserves the storage investigation; no
-physical device, firmware, remote branch, or acceptance output has been
-modified. Other agents should coordinate before editing the same storage
-transaction paths or running an acceptance chain.
+Resuming the earliest open WovenFS multi-file transaction and recovery
+prerequisite on master. Host crash tests and the normal installed-image
+1/2/4-CPU matrix pass; descriptor and staged-payload interruption matrices also
+pass. The commit-interruption run failed to start some 5-GiB guests because
+QEMU could not allocate host guest memory; evidence is preserved in
+`target/wfs-atomic-20261127-commit/`. The serialized Stage 10.7 preservation
+chain passed under
+`target/stage10-output/audit-artifacts/acceptance-20261127-081723-575/`.
+The source was independently committed and pushed as `73d2e026` while that
+chain was running; this commit does not imply full acceptance. Added host
+coverage for a second interruption during multi-file journal replay; workspace
+tests, warning-denying host/kernel Clippy and the complete Stage 10.7 chain pass under
+`target/stage10-output/audit-artifacts/acceptance-20261127-085637-330/`.
+After host commit headroom recovered, the commit, target, target-flush,
+checkpoint and retirement cuts passed at 1/2/4 CPUs under
+`target/wfs-atomic-rerun-20261127-{commit,target,target-flush,checkpoint,retire}/`.
+The disposable Stage 15.2 device gate also passes on 1/2/4 CPUs. These cuts
+interrupt a single-file installed operation; a multi-file installed crash gate,
+independent review and physical qualification remain open. The reservation is
+released. No physical device or firmware was modified by this work.
 
 ## OpenCode - Stage 1-5 storage gap investigation (2026-11-26)
 
