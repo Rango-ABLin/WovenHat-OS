@@ -1,5 +1,19 @@
 # Stage status
 
+## Stage 1-19 current-head software gate closure - 2026-11-27 - VERIFIED (EXTERNAL GATES OPEN)
+
+At source `685e9cbe`, all bounded Stage 1-19 software/QEMU acceptance is
+verified: warning-denying host/target lint, workspace tests, the full
+serialized Stage 10.7 chain, inherited 1/2/4-CPU gates, and the added USB and
+compositor 8/16-CPU matrices pass. The native shell stall path is bounded,
+xHCI BIOS handoff fails closed, and enlarged GUI images use large-asset VFS
+storage.
+
+Collective production closure remains blocked by physical USB/compositor
+evidence, native-device/power-loss qualification, production signing custody,
+signed release artifacts, independent attestation/review and physical
+Secure Boot/TPM. No local QEMU result is promoted into those external gates.
+
 ## Native compositor hang and 16-CPU input closure - 2026-11-27 - ACCEPTED (BOUNDED QEMU/SOFTWARE)
 
 The native compositor path no longer treats a live-but-stalled WovenShell as a
