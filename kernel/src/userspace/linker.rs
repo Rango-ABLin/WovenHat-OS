@@ -1192,6 +1192,28 @@ fn collect_lifecycle(images: &[LinkImage<'_>]) -> Option<(Vec<u64>, Vec<u64>)> {
     Some((init, fini))
 }
 
+fn lifecycle_trampoline_address(space: &AddressSpace, mmap_base: u64) -> Option<u64> {
+    let mut address = LIFECYCLE_TRAMPOLINE;
+    loop {
+        let end = address.checked_add(ASLR_PAGE)?;
+        if end > mmap_base {
+            return None;
+        }
+        let mut occupied = false;
+        for mapping in &space.mappings[..space.mapping_count] {
+            let mapping_end = mapping.start().checked_add(mapping.size() as u64)?;
+            if address < mapping_end && mapping.start() < end {
+                occupied = true;
+                break;
+            }
+        }
+        if !occupied {
+            return Some(address);
+        }
+        address = end;
+    }
+}
+
 fn build_scope<'a>(images: &'a [LinkImage<'a>]) -> Option<SymbolScope<'a>> {
     let main = images.first()?;
     let mut scope = SymbolScope::new(&main.image, &main.bytes);

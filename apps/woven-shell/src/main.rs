@@ -174,6 +174,8 @@ use textures::{CENTER_TEXTURE, QS_PANEL_TEXTURE, TILE, TILE_DEPTH_3D, TOAST_TEXT
 /// remains the source of truth: these names are resolved against it at click
 /// time, so a missing package simply leaves the shortcut inert.
 const DESKTOP_ICON_NAMES: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenStore"];
+/// Default pinned taskbar applications; resolved against the installed catalog.
+const TASKBAR_PINNED: [&str; 3] = ["WovenFiles", "WovenTerminal", "WovenSettings"];
 const DESKTOP_ICON_LABELS: [&str; 3] = ["Files", "Terminal", "Store"];
 
 /// Application ids used by the bounded `woven.search` service, in that
@@ -1540,7 +1542,7 @@ impl Desktop {
         let x = self.qs_button().x - 6 - span + index as i32 * (WORKSPACE_BOX + WORKSPACE_GAP);
         Area::new(
             x,
-            self.taskbar_top() + 4,
+            self.taskbar_top() + (TASKBAR_HEIGHT - START_HEIGHT as i32) / 2,
             WORKSPACE_BOX,
             START_HEIGHT as i32,
         )

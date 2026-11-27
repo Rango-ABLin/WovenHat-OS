@@ -4486,6 +4486,21 @@ Evidence: `audit-artifacts/stage11.5-1cpu-1792507060371452000`,
 The callback bound is four functions per image, with the existing four-image
 scope bound. Lazy binding and library TLS remain the next Stage 11
 implementation items.
+
+## 2026-11-02 shared-image trampoline regression correction
+
+The `runtime-storage-pcie` Actions run exposed that selecting the lifecycle
+trampoline after the highest mapped image placed it beyond `mmap_base` whenever
+the graph contained a shared library. The loader now selects the first
+unoccupied page in the reserved gap before the mmap arena, and the Stage 11.5
+fixture verifies the page is mapped, below that boundary, and disjoint from
+image mappings.
+
+The full Stage 10.8–11.5, 12.1–12.5, and 13.1–13.2 warning-denying Clippy and
+QEMU 1/2/4-CPU matrices pass. Stage 11.5 evidence:
+`audit-artifacts/stage11.5-1cpu-1793626110000921795`,
+`stage11.5-2cpu-1793626120670365708`, and
+`stage11.5-4cpu-1793626132209356746`.
 ---
 
 ## Source: docs/audit-stage11-loader-boundary-2026-10-05.md
@@ -10308,6 +10323,20 @@ Reruns after the fixes:
 20.15 1cpu: PASS (37s)
 DONE
 ```
+
+## Current-head Stage 20.15 regression repair (2026-11-02)
+
+The `drivers-radio` run failed at “Quick Settings opens.” The previous
+acceptance click landed above the current 16-pixel taskbar hit target, and the
+fixed-pixel check was at the rounded, transparent panel corner. The gate now
+clicks the hit-target center and searches for the high-contrast header accent
+in the projected panel band. No production desktop behavior changed.
+
+The repaired gate passes on 1/2/4 CPUs. Evidence:
+
+- `audit-artifacts/stage20.15-1cpu-1793629751713281078`
+- `audit-artifacts/stage20.15-2cpu-1793629786902467756`
+- `audit-artifacts/stage20.15-4cpu-1793629802665473870`
 
 **Negative controls**, each caught, on 1 CPU with the source restored byte
 for byte:

@@ -4044,6 +4044,15 @@ return, keyboard delivery, Quick Settings access, and desktop power-off on
 1/2/4 CPUs. Target Clippy is green; evidence is preserved under
 `audit-artifacts/stage20.15-{1,2,4}cpu-*`.
 
+**Current-head requalification (2026-11-02).** The `drivers-radio` run exposed
+a stale session-test click target and a single-pixel oracle that landed in the
+rounded panel corner. The gate now clicks the center of the Quick Settings hit
+target and checks for its high-contrast accent in the projected header band.
+QEMU passes on 1/2/4 CPUs; target and host warning-denying Clippy pass. Evidence:
+`audit-artifacts/stage20.15-1cpu-1793629751713281078`,
+`audit-artifacts/stage20.15-2cpu-1793629786902467756`, and
+`audit-artifacts/stage20.15-4cpu-1793629802665473870`.
+
 ## Stage 13.20 power-off matrix - 2026-10-25
 
 The ACPI PM1/_S5 power-off gate passes on 1/2/4 CPUs. Evidence is preserved
@@ -8326,6 +8335,18 @@ Evidence is preserved under:
 `audit-artifacts/stage22.5-1cpu-1792521732550569700`,
 `audit-artifacts/stage22.5-2cpu-1792521764182836500`, and
 `audit-artifacts/stage22.5-4cpu-1792521793861888600`.
+
+The 2026-11-02 core-foundation CI follow-up disabled `libwoven`'s
+WovenHat-specific default allocator in the host `wpkg-packager` dependency; on
+Linux that allocator otherwise issued the WovenHat `int 0x80` ABI and crashed
+the fixture-generation process. The QEMU gate now uses 512 MiB because the
+current kernel image's >208 MiB BSS plus its 44.7 MB boot payload cannot be
+loaded in the previous 256 MiB VM. The updated focused gate passed on 1/2/4
+CPUs (exit 33, `[S22.5] WovenPackage transactions: PASSED`); fresh evidence is
+under `audit-artifacts/stage22.5-1cpu-1793630185978710980`,
+`audit-artifacts/stage22.5-2cpu-1793630206999866114`, and
+`audit-artifacts/stage22.5-4cpu-1793630228824251418`. This is a gate
+configuration repair, not a new Stage 22.5 acceptance claim.
 
 The implementation remains deliberately bounded: source paths use the normal
 512-byte syscall limit, one source package is limited by the 64 KiB VFS node
@@ -12715,6 +12736,19 @@ Negative controls, with evidence in
   fails at "key x routed to focused window A".
 - With taskbar entries ignoring clicks, it fails at "taskbar click raises
   window A".
+
+## Stage 20.2 desktop-userspace toast oracle — 2026-11-02 — FIX INTEGRATED / QEMU PENDING
+
+Actions run `41455547962`, job `125311920358`, failed only at the toast
+interior pixel assertion. The flat renderer blended the 235-opacity rounded
+card into the keyed overlay's magenta clear color, then copied those pixels
+over the compositor; this did not blend against the toast's 216-opacity base
+or the wallpaper. It now applies rounded scanline spans through the
+compositor's blended-region path and draws the text as a keyed opaque overlay.
+The independent oracle checks both compositing layers. WovenShell and hello-gui
+release builds, Stage 20.2 target Clippy and boot-image build, and host
+all-target Clippy pass locally. QEMU is unavailable in this sandbox, so the
+1/2/4-CPU runtime gate remains pending CI.
 
 Open:
 - **Discovery.** Applications learn the shell's process id from their

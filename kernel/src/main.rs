@@ -11129,7 +11129,7 @@ fn stage20_13_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     // Switcher boxes, left of the Quick Settings button.
     let qs_x = width - (8 * crate::font::ADVANCE + 6) - 5 * (16 + 4);
     let box_x = |index: i32| qs_x - 6 - (4 * 14 - 2) + index * 14;
@@ -12199,7 +12199,7 @@ fn stage20_11_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -12376,6 +12376,7 @@ fn stage20_10_self_test() -> bool {
     const START_FILL: u32 = rgb(52, 96, 180);
     const ENTRY_ACTIVE: u32 = rgb(70, 120, 210);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_CARD_OPACITY: u8 = 235;
     const QUIET: u32 = rgb(90, 170, 170);
     const UNSET: u32 = 0x0100_0000;
     const WEAVE_PITCH: i32 = 220;
@@ -12649,7 +12650,7 @@ fn stage20_10_self_test() -> bool {
         beneath: impl Fn(i32, i32) -> u32,
         pointer: (i32, i32),
     ) -> bool {
-        let top = height - 24;
+        let top = height - 50;
         let h = 11 * 14 + 2;
         let (x0, y0) = (width - 4 - 164, top - 2 - h);
         let mut image = Surface::new(164, h as usize);
@@ -12678,7 +12679,9 @@ fn stage20_10_self_test() -> bool {
                 let lx = x - x0;
                 let ly = y - y0;
                 let expected = match image.pixel(lx, ly) {
-                    Some(UNSET) | None => blend_pixel(PANEL_FILL, beneath(x, y), 216),
+                    Some(UNSET) | None => {
+                        blend_pixel(PANEL_FILL, beneath(x, y), PANEL_CARD_OPACITY)
+                    }
                     Some(pixel) => pixel,
                 };
                 if compositor::pixel(x, y) != Ok(expected) {
@@ -12718,7 +12721,7 @@ fn stage20_10_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -12854,7 +12857,7 @@ fn stage20_10_self_test() -> bool {
         // layer (with the badge) before the toast layer, so the badge can be
         // seen before a toast would be: the toast area must stay clear for a
         // full second, not just at one instant.
-        && stays(100, || region(width - 188, 8, 180, 22, |x, y| {
+        && stays(100, || region(width - 188, height - 80, 180, 22, |x, y| {
             expected_wallpaper(x, y, width, height)
         }));
     let silenced = toast_clear;
@@ -13151,7 +13154,7 @@ fn stage20_17_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     const QS_ROWS: i32 = 10;
     const PANEL_ROW: i32 = 14;
     const CENTER_WIDTH: i32 = 164;
@@ -13311,7 +13314,7 @@ fn stage20_18_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
     let client_capabilities = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
@@ -13400,7 +13403,7 @@ fn stage20_18_self_test() -> bool {
             woven
         }
     };
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let mut toast = Surface::new(180, 22);
     for y in 0..22 {
         for x in 0..180 {
@@ -13597,7 +13600,7 @@ fn stage20_9_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -13889,7 +13892,7 @@ fn stage20_8_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -14421,6 +14424,7 @@ fn stage20_6_self_test() -> bool {
     const TASKBAR: u32 = rgb(10, 18, 30);
     const ACCENT: u32 = rgb(76, 190, 188);
     const PANEL_FILL: u32 = rgb(28, 32, 44);
+    const PANEL_CARD_OPACITY: u8 = 235;
     const TOAST_FILL: u32 = rgb(28, 32, 44);
     const RED: u32 = rgb(200, 60, 60);
     const UNSET: u32 = 0x0100_0000;
@@ -14525,7 +14529,7 @@ fn stage20_6_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -14545,7 +14549,7 @@ fn stage20_6_self_test() -> bool {
 
     // The toast A posts, over the wallpaper: background blended, border and
     // text exact.
-    let (toast_x, toast_y) = (width - 188, 8);
+    let (toast_x, toast_y) = (width - 188, height - 80);
     let toast_overlay = overlay((180, 22), |surface| {
         surface.draw_text(6, 8, "Alpha ready", WHITE);
     });
@@ -14560,12 +14564,11 @@ fn stage20_6_self_test() -> bool {
         })
     });
     if !toast {
-        report_graphics_mismatch("translucent toast", toast_x, toast_y, 180, 22, |x, y| {
-            match toast_overlay.pixel(x - toast_x, y - toast_y) {
-                Some(UNSET) | None => blend_pixel(TOAST_FILL, wallpaper(x, y, height), 216),
-                Some(color) => color,
-            }
-        });
+        serial::write_line(format_args!(
+            "[S20.6] rounded toast interior actual={:?}, expected={:#08x}",
+            compositor::pixel(toast_x + 160, toast_y + 11),
+            blend_pixel(TOAST_FILL, wallpaper(toast_x + 160, toast_y + 11, height), 235),
+        ));
     }
     if !step("the toast is translucent over the wallpaper", toast) {
         return false;
@@ -14626,7 +14629,7 @@ fn stage20_6_self_test() -> bool {
         } else if y < panel_y + 15 {
             rgb(28, 115, 145)
         } else {
-            blend_pixel(PANEL_FILL, beneath(x, y), 216)
+            blend_pixel(PANEL_FILL, beneath(x, y), PANEL_CARD_OPACITY)
         }
     };
     let panel = mouse::keyboard_loopback(0x3b)
@@ -14962,7 +14965,7 @@ fn stage20_5_self_test() -> bool {
     /// window's shadow bands bottom to top, never on the taskbar.
     fn shadowed(x: i32, y: i32, height: i32, stack: &[(Frame, bool)]) -> u32 {
         let mut value = wallpaper(x, y, height);
-        if y >= height - 24 {
+        if y >= height - 50 {
             return value;
         }
         for &((fx, fy, fw, fh), focused) in stack {
@@ -15003,7 +15006,7 @@ fn stage20_5_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
     let client = capability::CapabilitySet::only(capability::Capability::Console)
         .with(capability::Capability::Ipc);
     let shell_arg = alloc::format!("{}", shell.as_u64());
@@ -15451,10 +15454,10 @@ fn stage20_3_self_test() -> bool {
     const TASKBAR: u32 = rgb(10, 18, 30);
     const ACCENT: u32 = rgb(76, 190, 188);
     const ACTIVE: u32 = rgb(70, 120, 210);
-    const START_FILL: u32 = rgb(28, 115, 145);
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const UNSET: u32 = 0x0100_0000;
+    const LAUNCHER_OPACITY: u8 = 235;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
@@ -15575,7 +15578,7 @@ fn stage20_3_self_test() -> bool {
         return step("desktop geometry", false);
     };
     let (width, height) = (width as i32, height as i32);
-    let top = height - 24;
+    let top = height - 50;
 
     const OVERVIEW_MARGIN: i32 = 16;
     const OVERVIEW_SEARCH_HEIGHT: i32 = 30;
@@ -15803,18 +15806,23 @@ fn stage20_2_self_test() -> bool {
     const RED: u32 = rgb(200, 60, 60);
     const BLUE: u32 = rgb(60, 60, 200);
     const GREEN: u32 = rgb(40, 200, 90);
+    const ACCENT: u32 = rgb(76, 190, 188);
+    const TITLE_ACTIVE: u32 = rgb(24, 98, 128);
+    const TITLE_INACTIVE: u32 = rgb(38, 44, 56);
+    const CLOSE: u32 = rgb(170, 60, 60);
+    const TASKBAR_HEIGHT: i32 = 50;
+    const APP_SLOT: i32 = 40;
+    const APP_GAP: i32 = 8;
+    const TOAST_BACKGROUND_OPACITY: u8 = 216;
+    const TOAST_CARD_OPACITY: u8 = 235;
     const UNSET: u32 = 0x0100_0000;
 
     fn step(name: &str, ok: bool) -> bool {
         serial::write_line(format_args!(
-            "[S20.2] {} {}",
-            name,
-            if ok { "PASS" } else { "FAIL" }
+            "[S20.2] {} {}", name, if ok { "PASS" } else { "FAIL" }
         ));
         ok
     }
-    /// Poll `condition` until it holds, for at most `limit` ticks. The shell
-    /// repaints concurrently, so a check may first see a frame in progress.
     fn until(limit: u64, condition: impl Fn() -> bool) -> bool {
         let start = timer::ticks();
         loop {
@@ -15954,14 +15962,13 @@ fn stage20_2_self_test() -> bool {
         }
         true
     }
-    /// One PS/2 packet through the real auxiliary path.
     fn packet(dx: i16, screen_dy: i16, left: bool) -> bool {
         let dy = -screen_dy;
-        let flags =
-            0x08 | u8::from(left) | if dx < 0 { 0x10 } else { 0 } | if dy < 0 { 0x20 } else { 0 };
+        let flags = 0x08 | u8::from(left)
+            | if dx < 0 { 0x10 } else { 0 }
+            | if dy < 0 { 0x20 } else { 0 };
         [flags, dx as u8, dy as u8].into_iter().all(mouse::loopback)
     }
-    /// Relative motion in packets of at most 100 per axis.
     fn move_by(mut dx: i32, mut dy: i32) -> bool {
         while dx != 0 || dy != 0 {
             let (sx, sy) = (dx.clamp(-100, 100), dy.clamp(-100, 100));
@@ -15976,7 +15983,24 @@ fn stage20_2_self_test() -> bool {
     fn click() -> bool {
         packet(0, 0, true) && packet(0, 0, false)
     }
-
+    fn taskbar_slot(width: i32, height: i32, index: i32, windows: i32) -> (i32, i32) {
+        // Three reserved pins, even when the app catalog is unavailable.
+        let total = 3 + windows;
+        let status = 8 * crate::font::ADVANCE + 6 + 6 * 20 + 120;
+        let left = 8 + 36 + APP_GAP;
+        let right = width.saturating_sub(status + APP_GAP);
+        let available = right.saturating_sub(left).max(0);
+        let wanted = total * (APP_SLOT + APP_GAP) - APP_GAP;
+        let origin = left + (available - wanted).max(0) / 2;
+        (
+            origin + index * (APP_SLOT + APP_GAP),
+            height - TASKBAR_HEIGHT + (TASKBAR_HEIGHT - APP_SLOT) / 2,
+        )
+    }
+    fn indicator(width: i32, height: i32, index: i32, windows: i32) -> bool {
+        let (x, _) = taskbar_slot(width, height, index, windows);
+        region(x + 8, height - 3, 24, 3, |_, _| ACCENT)
+    }
     let install = |path: &str, image: &[u8]| {
         vfs::create_read_only(path, image).is_ok() && {
             let mut copy = alloc::vec![0u8; image.len()];
@@ -16068,11 +16092,10 @@ fn stage20_2_self_test() -> bool {
     let Some(alpha) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--desktop-client", &shell_arg, "a"],
-        Some(client_capabilities),
+        Some(client),
     ) else {
         return step("application A spawned", false);
     };
-    // A's window cascades to (40, 40), 120x80, its title bar above.
     if !step(
         "window A opened",
         until(2000, || compositor::pixel(45, 45) == Ok(RED)),
@@ -16155,7 +16178,6 @@ fn stage20_2_self_test() -> bool {
     // Exact notification content, not merely a sane background.
     let mut toast_mask = Surface::new(180, 22);
     toast_mask.fill_rect(toast_mask.bounds(), UNSET);
-    toast_mask.stroke_rect(toast_mask.bounds(), rgb(76, 190, 188));
     toast_mask.draw_text(6, 8, "Alpha ready", WHITE);
     let toast = until(500, || {
         region(toast_x, toast_y, 180, 22, |x, y| {
@@ -16172,8 +16194,6 @@ fn stage20_2_self_test() -> bool {
     {
         return false;
     }
-    // A redraws a 20x10 patch at (10, 10) and reports damage; only the
-    // shell's damage path brings it to the screen.
     if !step(
         "client damage composited",
         until(1500, || region(50, 50, 20, 10, |_, _| WHITE)),
@@ -16184,11 +16204,10 @@ fn stage20_2_self_test() -> bool {
     let Some(beta) = spawn_hello_gui(
         HELLO_GUI_IMAGE,
         &["/bin/hello-gui", "--desktop-client", &shell_arg, "b"],
-        Some(client_capabilities),
+        Some(client),
     ) else {
         return step("application B spawned", false);
     };
-    // B cascades to (64, 64), 100x60, and opens on top, focused.
     let stacked = until(2000, || compositor::pixel(150, 100) == Ok(BLUE))
         && until(500, || {
             compositor::pixel(45, 45) == Ok(RED)
@@ -16213,35 +16232,35 @@ fn stage20_2_self_test() -> bool {
         return false;
     }
     if !step(
-        "toast expires and the desktop shows through",
+        "toast expires and wallpaper is restored",
         until(1000, || {
-            region(toast_x, toast_y, 180, 22, |x, y| {
-                expected_wallpaper(x, y, width, height)
-            })
+            region(toast_x, toast_y, 180, 22, |x, y| wallpaper(x, y, height))
         }),
     ) {
         return false;
     }
 
-    // The pointer starts hidden at the centre. Move it onto A's taskbar
-    // entry and click: A is raised and focused.
+    // Click the real A icon, not the obsolete 80px text entry.
     let (mut px, mut py) = (width / 2, height / 2);
-    let (target_x, target_y) = (entry(0).0 + 40, entry(0).1 + 8);
+    let (slot_x, slot_y) = taskbar_slot(width, height, 3, 2);
+    let (target_x, target_y) = (slot_x + 20, slot_y + 20);
     let raised = move_by(target_x - px, target_y - py)
         && click()
-        && until(1000, || compositor::pixel(150, 100) == Ok(RED));
+        && until(1000, || {
+            compositor::pixel(150, 100) == Ok(RED)
+                && indicator(width, height, 3, 2)
+        });
     (px, py) = (target_x, target_y);
-    if !step("taskbar click raises window A", raised) {
+    if !step("taskbar icon click raises window A", raised) {
         return false;
     }
     let pointer = until(500, || {
-        compositor::pixel(px, py) == Ok(BLACK) && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
+        compositor::pixel(px, py) == Ok(BLACK)
+            && compositor::pixel(px + 1, py + 2) == Ok(WHITE)
     });
     if !step("pointer drawn at its position", pointer) {
         return false;
     }
-    // Park the pointer on empty desktop, then type: the key goes to A, the
-    // focused window, and A exits once it has it.
     let parked = move_by(300 - px, 300 - py);
     (px, py) = (300, 300);
     let typed = parked
@@ -16273,8 +16292,6 @@ fn stage20_2_self_test() -> bool {
     ) {
         return false;
     }
-
-    // Click inside B and type: B gets its key and exits.
     let typed = move_by(100 - px, 100 - py) && click() && mouse::keyboard_loopback(0x15);
     let beta_status = wait_hello_gui(beta).map(|(_, status)| status);
     if !step(
@@ -16290,7 +16307,6 @@ fn stage20_2_self_test() -> bool {
     if !step("desktop empty again", empty) {
         return false;
     }
-
     if task::kill_process(shell.as_u64(), 9).is_err()
         || !until(1000, || task::process_exited(shell))
     {
