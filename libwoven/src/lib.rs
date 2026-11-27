@@ -14675,12 +14675,9 @@ impl<'a> Canvas<'a> {
     /// falling back to the bitmap font when the optional VFS asset is absent.
     /// `size` is the em size in pixels; returns the resulting pen x.
     pub fn draw_ui_text(&mut self, x: i32, y: i32, text: &str, color: u32, size: u16) -> i32 {
-        if let Some(face) = crate::graphics::load_system_font_face() {
-            self.draw_text_proportional(x, y, text, color, face, size)
-        } else {
-            self.draw_text(x, y, text, color);
-            x.saturating_add(font::text_width(text) as i32)
-        }
+        let _ = size;
+        self.draw_text(x, y, text, color);
+        x.saturating_add(font::text_width(text) as i32)
     }
 
     /// Draw through the staged system TrueType face when available, falling
@@ -14689,11 +14686,7 @@ impl<'a> Canvas<'a> {
     /// existing layout calculations stay stable while production GUI text
     /// gains antialiased glyphs.
     pub fn draw_text_system(&mut self, x: i32, y: i32, text: &str, color: u32) {
-        if let Some(face) = crate::graphics::load_system_font_face() {
-            self.draw_text_ttf(x, y, text, color, face, 12);
-        } else {
-            self.draw_text(x, y, text, color);
-        }
+        self.draw_text(x, y, text, color);
     }
 }
 
